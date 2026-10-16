@@ -25,6 +25,7 @@ import {
 import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
 import LatencyMetric from "./LatencyMetric";
 import MonitorSummary from "./MonitorSummary";
+import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { PerformanceTabProps } from "../../types";
@@ -165,6 +166,11 @@ export default function PerformanceTab({
 					</div>
 				</CardContent>
 			</Card>
+
+			{/* Per-phase averages over the retained trace sample - the figure a run
+			    that stored traces but no phase histograms still has. Absent when
+			    the report carries no phase average. */}
+			<PhaseAveragesCard timingBreakdown={report.timingBreakdown} />
 
 			{/* Per-phase percentiles. Its own card rather than rows inside Latency
 			    Distribution: those are whole-request percentiles and these split

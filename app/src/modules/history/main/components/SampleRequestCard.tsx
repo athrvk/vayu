@@ -34,10 +34,12 @@ import {
 } from "@/components/shared/response-viewer";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
+import { Callout } from "@/components/shared";
 import { runSampleReference } from "@/lib/agent-reference";
 import { isSlowSample } from "../sample-filter";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
+import { SampleTraceDetails } from "./SampleTraceDetails";
 
 interface SampleRequestCardProps {
 	sample: SampleResult;
@@ -73,7 +75,9 @@ export default function SampleRequestCard({
 	// present - so a trace carrying only TTFB and download printed a "Timing
 	// Breakdown" heading with nothing under it. `SampledExchange` gates on the
 	// list, so the heading cannot outlive its content.
-	const phases = phasesFromTrace(sample.trace);
+	const trace = sample.trace;
+	const phases = phasesFromTrace(trace);
+	const isSlow = isSlowSample(sample);
 
 	return (
 		<SampledExchange
@@ -83,10 +87,11 @@ export default function SampleRequestCard({
 			latencyMs={sample.latencyMs}
 			timestamp={<TimeValue value={sample.timestamp} />}
 			error={sample.error}
-			isSlow={isSlowSample(sample)}
+			isSlow={isSlow}
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
+			details={<SampleTraceDetails trace={trace} />}
 			actions={
 				reference !== null && (
 					<CopyForAgentButton
@@ -104,6 +109,17 @@ export default function SampleRequestCard({
 			// `CardContent` declares (issue #1650).
 			className="border-b border-rule last:border-b-0"
 		>
+			{isSlow && (
+				<Callout severity="warning" title="Slow request">
+					{trace?.totalMs?.toFixed(1)}ms
+					{trace?.thresholdMs !== undefined && (
+						<span className="text-muted-foreground ml-1">
+							(threshold: {trace.thresholdMs}ms)
+						</span>
+					)}
+				</Callout>
+			)}
+
 			{/* The captured exchange, when this run stored one for this row.
 			    Rendering nothing (not an empty heading) when it did not is
 			    deliberate: most samples in a healthy run carry no body, and a

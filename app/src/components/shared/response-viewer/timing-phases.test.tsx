@@ -162,6 +162,15 @@ describe("every timing renderer reads TIMING_PHASES (#76)", () => {
 		expect(screen.getByText(PROBE.longLabel)).toBeInTheDocument();
 	});
 
+	it("the history performance-tab averages card (which reads longLabel)", async () => {
+		const { PhaseAveragesCard } =
+			await import("@/modules/history/main/components/PhaseAveragesCard");
+
+		withTooltips(<PhaseAveragesCard timingBreakdown={reportWithSample().timingBreakdown} />);
+
+		expect(screen.getByText(PROBE.longLabel)).toBeInTheDocument();
+	});
+
 	it("the dashboard per-sample tiles", async () => {
 		const RequestResponseView = (
 			await import("@/modules/dashboard/components/RequestResponseView")
