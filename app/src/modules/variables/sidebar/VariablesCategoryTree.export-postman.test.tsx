@@ -14,7 +14,7 @@
  * file left out.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
@@ -79,11 +79,8 @@ beforeEach(() => {
 	createObjectURL.mockClear();
 	revokeObjectURL.mockClear();
 	anchorClick.mockReset().mockImplementation(() => {});
-	vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL }));
-});
-
-afterEach(() => {
-	vi.unstubAllGlobals();
+	URL.createObjectURL = createObjectURL;
+	URL.revokeObjectURL = revokeObjectURL;
 });
 
 function openEnvironmentMenu() {

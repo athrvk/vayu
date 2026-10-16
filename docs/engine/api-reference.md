@@ -3879,8 +3879,8 @@ from `json` (below). **Reads only.**
 }
 ```
 
-`includeSecrets: false` writes the value of every variable marked secret as
-`""`, counted in `secretsOmitted`; the row stays, still typed `secret`, so the
+`includeSecrets: false` writes the string value of every variable marked secret
+as `""`, counted in `secretsOmitted`; the row stays, still typed `secret`, so the
 name is visible for the person importing it to fill in. A secret whose value is
 exactly one `{{variable}}` reference names a secret without being one and is
 kept, uncounted. `true` writes every value as stored.
