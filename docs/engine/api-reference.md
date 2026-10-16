@@ -6334,8 +6334,9 @@ load run.
 
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
-verdict says. A **completed** run whose config set `thresholds.failRun: true`
-and whose budgets it missed ends `failed` instead of `completed`; without the
+verdict says. The app says so on a stopped run, under the verdict's counts, with
+how long the run went against how long it was planned for. A **completed** run
+whose config set `thresholds.failRun: true` and whose budgets it missed ends `failed` instead of `completed`; without the
 flag, or on a run that met every budget, a failing budget is reported but
 never changes the terminal status.
 

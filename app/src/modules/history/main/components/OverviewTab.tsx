@@ -26,6 +26,7 @@ import {
 	TestValidationSummary,
 	ThresholdVerdict,
 	TransactionsSummary,
+	stoppedRunOf,
 	CancelledRequestsNote,
 } from "@/components/shared";
 import { formatErrorPercent } from "@/modules/dashboard/utils/format";
@@ -94,7 +95,11 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			{/* Directly under the numbers it judges - the verdict is the first
 			    question a stored run is opened to answer. Absent for a run that
 			    declared no budgets, which is every run recorded before them. */}
-			<ThresholdVerdict verdict={report.thresholdValidation} runId={report.metadata?.runId} />
+			<ThresholdVerdict
+				verdict={report.thresholdValidation}
+				runId={report.metadata?.runId}
+				stopped={stoppedRunOf(report)}
+			/>
 
 			{/* The run's own named trends, counters and rates (issue #1500),
 			    directly under the budgets they are not judged against - these

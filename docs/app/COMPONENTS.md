@@ -1560,6 +1560,18 @@ key - `latencyP99Ms`, or `custom.<name>.<stat>` for a custom budget, whose raw k
 the run, from the optional `runId` prop (both hosts pass `report.metadata.runId`). The limit and the measurement
 are never in the line, and without `runId` the buttons are absent.
 
+A run that was **stopped** is judged on what it measured before the stop, and
+the card says so (#2194): the optional `stopped` prop adds a line under the
+summary, "Run stopped after 3s of a planned 20s. Judged on what was measured up
+to that point." The counts and the Passed/Failed badge are the engine's and do
+not change. Both hosts pass `stoppedRunOf(report)` (`stopped-run.ts`), which is
+`undefined` unless `metadata.status` is `stopped`; it reads the planned span
+from `metadata.configuration.duration` (`durationSeconds`) and the elapsed one
+from `summary.totalDurationSeconds`, falling back to the start and end stamps.
+A run with no declared duration (iterations, ramp, scenarios) drops the "of a
+planned" clause, as does one that reached its plan, and a report with no usable
+elapsed time says only "Run stopped early."
+
 ## Capacity Summary (`components/shared/CapacitySummary.tsx`)
 
 What a `mode: "capacity"` run's adaptive search found (`RunReport.capacity`):
