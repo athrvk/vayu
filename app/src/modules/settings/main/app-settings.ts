@@ -300,7 +300,8 @@ export const APP_SETTINGS = [
 		anchor: "load-max-requests",
 		panel: "load-testing",
 		label: "Max requests",
-		searchText: "The largest Requests value the dialog will offer for Fixed Iterations runs.",
+		searchText:
+			"The largest Requests value the dialog will offer for Fixed request count runs.",
 		keywords: ["iterations", "ceiling", "limit"],
 	},
 

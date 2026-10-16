@@ -85,7 +85,7 @@ export type SummarySubject = "request" | "sequence";
  *                 that cannot start, so the estimate is withheld rather than
  *                 printed as a confident falsehood.
  * @param subject  `"sequence"` rewords the two modes that name a count of work
- *                 (Constant Virtual Users and Fixed Iterations); the ramp reads
+ *                 (Constant Virtual Users and Fixed request count); the ramp reads
  *                 the same either way.
  */
 export function summarise(

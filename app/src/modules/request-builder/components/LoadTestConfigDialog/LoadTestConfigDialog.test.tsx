@@ -205,12 +205,21 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/target rate/i)).not.toBeInTheDocument();
 	});
 
-	it("hides Duration entirely for Fixed Iterations", () => {
+	it("names the fixed-count card 'Fixed request count', not by iteration (#2228)", () => {
+		// k6 reads "iteration" as one VU loop; the field this mode sets is Requests.
+		open();
+		const card = screen.getByRole("radio", { name: /fixed request count/i });
+		expect(card.textContent).toContain("Fixed request count");
+		expect(card.textContent).toContain("Send an exact number of requests, then stop.");
+		expect(screen.queryByRole("radio", { name: /fixed iterations/i })).not.toBeInTheDocument();
+	});
+
+	it("hides Duration entirely for Fixed request count", () => {
 		// The defect this re-cut exists to fix. The engine stops on
 		// `requests_sent < iterations` and never reads duration, so offering the
 		// field invites tuning something inert - and it used to persist.
 		open();
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		expect(screen.getByLabelText(/^requests/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/^virtual users/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
@@ -238,9 +247,9 @@ describe("load profile → fields", () => {
 });
 
 describe("payload", () => {
-	it("omits duration_seconds for Fixed Iterations", () => {
+	it("omits duration_seconds for Fixed request count", () => {
 		const { onStart } = open();
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		const config = started(onStart);
 		expect(config.mode).toBe("iterations");
 		expect(config.iterations).toBeGreaterThan(0);
@@ -1650,7 +1659,7 @@ describe("the target (issue #2117)", () => {
 
 	it("counts the advisory from the profile on screen", () => {
 		open({ url: "https://api.example.com/" });
-		pickProfile("Fixed Iterations");
+		pickProfile("Fixed request count");
 		expect(screen.getByText(ADVISORY).parentElement).toHaveTextContent(
 			/about 1,000 requests to api\.example\.com/
 		);
