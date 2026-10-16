@@ -136,7 +136,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (x86_64 AppImage and .deb). No
 
 - :material-import: **Bring what you already have**
 
-    Drop in a Postman or Insomnia v4 export, a JMeter test plan, or an OpenAPI or
+    Drop in a Postman or Insomnia (v4 or v5) export, a JMeter test plan, or an OpenAPI or
     Swagger spec and keep your folders, variables, auth and scripts.
     [What carries over](#bring-your-existing-collections).
 
@@ -226,7 +226,7 @@ the tree, variables, auth and scripts.
 
 === "Insomnia"
 
-    **Insomnia v4 exports.** Vayu rebuilds the workspace, folder and request tree from
+    **Insomnia v4 and v5 exports.** Vayu rebuilds the workspace, folder and request tree from
     Insomnia's flat resource list, and workspace **environments do come across**.
 
     `{{var}}` templates are converted to Vayu's own. Nunjucks tags (`{% ... %}`)
@@ -398,7 +398,7 @@ persists.
     Yes - v2.0 and v2.1 exports, including folders, collection variables, auth,
     and pre/post-request scripts. Postman environments are a separate export;
     import that file too and it becomes a Vayu environment, and a globals export
-    merges into Vayu's globals scope. Insomnia v4, JMeter `.jmx` test plans,
+    merges into Vayu's globals scope. Insomnia v4 and v5, JMeter `.jmx` test plans,
     OpenAPI 3.1/3.0 and Swagger 2.0 import too; see
     [what carries over](#bring-your-existing-collections).
 

@@ -395,7 +395,7 @@ export class EngineClient {
 	 * export and unbind a spec, and could not *import* a document at all,
 	 * because `POST /import/apply` took a tree only the renderer could build.
 	 * Every format the app accepts comes through here - OpenAPI 2.0/3.x, Postman
-	 * v2.0/v2.1, a Postman environment or globals export, Insomnia v4 - read by
+	 * v2.0/v2.1, a Postman environment or globals export, Insomnia v4 or v5 - read by
 	 * the engine's one reader, so nothing on this side has an opinion about what
 	 * a document is.
 	 */

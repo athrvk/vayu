@@ -312,34 +312,38 @@ std::optional<vayu::db::Request>& linked_request) {
 }
 
 /**
- * A step's `script.post` element's script text, or null if it has none
- * (issue #1514's cut-over: `ScenarioStep::post_script` is gone, so the
- * deferred replay below reads the same `elements` list the sequential runner
- * does). The pointer is into `step.elements`' own storage, which outlives
- * this call - the plan owns it for the run's whole life - so a `const
- * std::string*` needs no copy.
+ * A step's un-inlined, enabled `script.post` scripts joined with a blank line,
+ * or empty if it has none (issue #1514's cut-over: `ScenarioStep::post_script`
+ * is gone, so the deferred replay below reads the same `elements` list the
+ * sequential runner does). Every such element joins, the way
+ * `RunContext::compile_step_elements` joins them for a single-request run, so
+ * the `deferred` tally and the replay count the same elements (#2167).
  */
-const std::string* find_step_post_script (const ScenarioStep& step,
+std::string find_step_post_script (const ScenarioStep& step,
 RunContext::ScriptsOverrideMode scripts_mode) {
+    std::string joined;
     if (!step.elements) {
-        return nullptr;
+        return joined;
     }
     for (const auto& element : *step.elements) {
-        if (element.kind != "script.post") {
+        if (element.kind != "script.post" || !element.enabled) {
             continue;
         }
         // Already ran inline this run (issue #1495) - the pipeline hook
         // already reported its outcome, so there is nothing left to replay.
         if (RunContext::script_element_runs_inline (element.config, scripts_mode)) {
-            return nullptr;
+            continue;
         }
         if (auto found = element.config.find ("script");
         found != element.config.end () && found->is_string () &&
         !vayu::core::is_blank_script_text (found->get_ref<const std::string&> ())) {
-            return &found->get_ref<const std::string&> ();
+            if (!joined.empty ()) {
+                joined += "\n\n";
+            }
+            joined += found->get_ref<const std::string&> ();
         }
     }
-    return nullptr;
+    return joined;
 }
 
 /**
@@ -367,12 +371,12 @@ std::vector<std::string>& failure_messages) {
     for (size_t i = 0; i < steps; ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
-        const std::string* post_script =
+        const std::string post_script =
         find_step_post_script (step, context->scripts_override);
         // A step with no script, or one whose script never got a sample to
         // run against, reports nothing rather than a row of zeros - the
         // same distinction the whole-run section has always kept.
-        if (post_script == nullptr || samples.empty ()) {
+        if (post_script.empty () || samples.empty ()) {
             continue;
         }
 
@@ -382,7 +386,7 @@ std::vector<std::string>& failure_messages) {
         { { "runId", context->run_id }, { "sampleCount", samples.size () } });
 
         ScriptReplay replay;
-        replay.script = post_script;
+        replay.script = &post_script;
         replay.cookie_read_refusal =
         "pm.cookies.%s is not available here: a replayed script runs after "
         "the run, against a recorded response; the user's cookies at that "
@@ -862,7 +866,7 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
         vayu::core::Phase::StepBefore) != kind->phases.end ()) {
             step_elements_have_step_before = true;
         }
-        if (element.kind != "script.post" ||
+        if (element.kind != "script.post" || !element.enabled ||
         RunContext::script_element_runs_inline (element.config, scripts_override)) {
             continue;
         }

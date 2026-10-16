@@ -21,6 +21,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RunConfigSection } from "./RunConfigSection";
+import { CONCURRENCY_LABEL, formatConcurrency } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 
 let run: Run | undefined;
@@ -61,8 +62,11 @@ describe("RunConfigSection", () => {
 		run = makeRun("load", { mode: "ramp_up", concurrency: 64, startConcurrency: 8 });
 		render(<RunConfigSection tab={TAB} />);
 
-		expect(screen.getByText("64 VUs")).toBeInTheDocument();
-		expect(screen.getByText("8 VUs")).toBeInTheDocument();
+		// The label carries the unit, so its row holds the bare number; the row
+		// whose label does not ("Starting at") spells the unit out.
+		expect(screen.getByText(CONCURRENCY_LABEL)).toBeInTheDocument();
+		expect(screen.getByText("64")).toBeInTheDocument();
+		expect(screen.getByText(formatConcurrency(8))).toBeInTheDocument();
 	});
 
 	it("calls a design run a single send instead of reporting no configuration", () => {
@@ -88,7 +92,7 @@ describe("RunConfigSection", () => {
 		render(<RunConfigSection tab={TAB} />);
 
 		expect(screen.queryByText("Target RPS")).not.toBeInTheDocument();
-		expect(screen.queryByText("Concurrency")).not.toBeInTheDocument();
+		expect(screen.queryByText(CONCURRENCY_LABEL)).not.toBeInTheDocument();
 		expect(screen.queryByText("Iterations")).not.toBeInTheDocument();
 	});
 

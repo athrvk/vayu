@@ -1839,6 +1839,8 @@ TEST_F (LoadStrategyTest, ADisabledScriptPostElementTalliesSkippedNotDeferred) {
     ASSERT_FALSE (entry.is_null ()) << summary.dump ();
     EXPECT_EQ (entry["skipped"], 3u) << summary.dump ();
     EXPECT_EQ (entry["deferred"], 0u) << summary.dump ();
+    EXPECT_FALSE (summary.contains ("tests"))
+    << "a disabled script.post must not be replayed (#2167): " << summary.dump ();
 }
 
 // `elements.scripts: "allInline"` (issue #1495's run-level override, read by

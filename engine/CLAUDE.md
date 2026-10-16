@@ -375,7 +375,7 @@ Key endpoints:
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding` and an opt-in correlation id, so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
 | GET | `/trash` | What deleting a collection or request left recoverable (#988): roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
-| POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4) into the tree `/import/apply` persists (#877); reads only |
+| POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan) into the tree `/import/apply` persists (#877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
@@ -713,10 +713,17 @@ logged as a warning: it means a client skipped composition.
   `core/import_document.hpp`): OpenAPI 2.0/3.x ride the same reader and draft
   builder (`core::import_drafts_of`, with the skip tally kept and operations
   under a malformed `paths` key included); Postman v2.0/v2.1, the Postman
-  environment and globals exports and Insomnia v4 are nlohmann. Detection order
-  is the renderer's old order. `tests/fixtures/import-conformance.json` records
-  what the renderer's retired parsers produced for a 15-document corpus and
-  `import_parse_test.cpp` asserts this side matches, two normalisations aside.
+  environment and globals exports and Insomnia v4 are nlohmann. Insomnia v5
+  (#2119, `type: collection.insomnia.rest/5.x` or `environment.`, YAML) has
+  no mapping of its own: `InsomniaV5Flattener` rewrites its nested tree into
+  v4's flat resource list and `parse_insomnia_resources` reads that, so a
+  rule fixed for one version is fixed for both; any other `*.insomnia.rest/`
+  type (a design document, a mock server) is refused by name, never as
+  unrecognised. Detection order is the renderer's old order, v5 after v4.
+  `tests/fixtures/import-conformance.json` records what the renderer's retired
+  parsers produced for its original corpus (cases added since are recorded
+  from the engine, see its `$comment`) and `import_parse_test.cpp` asserts
+  this side matches, two normalisations aside.
   A JMeter `.jmx` test plan (#1518, `core/jmeter_import.hpp`, pugixml - the
   one XML dependency in one translation unit) is the one format that cannot
   ride `core::read_document` at all: it is XML, checked on the raw text

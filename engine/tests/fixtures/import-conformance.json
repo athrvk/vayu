@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765).",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119).",
   "cases": [
     {
       "name": "postman-v21",
@@ -2007,6 +2007,651 @@
               },
               "b": {
                 "value": "3",
+                "enabled": true
+              }
+            }
+          }
+        ],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v5",
+      "document": "type: collection.insomnia.rest/5.0\nschema_version: \"5.1\"\nname: Acme\nmeta:\n  id: wrk_acme\n  created: 1735689600000\n  modified: 1735689600000\n  description: The Acme API\ncollection:\n  - name: Users\n    meta:\n      id: fld_users\n      created: 1735689600000\n      modified: 1735689600000\n      sortKey: -1735689600000\n      description: People and roles\n    children:\n      - name: Admin\n        meta:\n          id: fld_admin\n          created: 1735689600000\n          modified: 1735689600000\n          sortKey: -1735689600001\n        children:\n          - url: \"{{ _.baseUrl }}/admin/users/:userId\"\n            name: Get admin user\n            meta:\n              id: req_admin\n              created: 1735689600000\n              modified: 1735689600000\n              isPrivate: false\n              description: Reads one admin\n              sortKey: -1735689600002\n            method: GET\n            parameters:\n              - name: verbose\n                value: \"true\"\n              - name: trace\n                value: \"1\"\n                disabled: true\n            pathParameters:\n              - name: userId\n                value: \"42\"\n            headers:\n              - name: Accept\n                value: application/json\n            settings:\n              renderRequestBody: true\n              encodeUrl: true\n              followRedirects: \"off\"\n              cookies:\n                send: true\n                store: true\n              rebuildPath: true\n      - url: \"{{ _.baseUrl }}/users\"\n        name: Create user\n        meta:\n          id: req_create\n          created: 1735689600000\n          modified: 1735689600000\n          isPrivate: false\n          sortKey: -1735689600003\n        method: POST\n        body:\n          mimeType: application/json\n          text: '{\"name\": \"{{ _.name }}\"}'\n        headers:\n          - name: Content-Type\n            value: application/json\n        authentication:\n          type: basic\n          username: admin\n          password: \"{{ _.password }}\"\n        scripts:\n          preRequest: insomnia.environment.set(\"t\", Date.now());\n          afterResponse: insomnia.test(\"created\", () => {});\n        settings:\n          followRedirects: true\n    authentication:\n      type: bearer\n      token: \"{{ _.token }}\"\n    scripts:\n      preRequest: console.log(\"folder\");\n      afterResponse: \"\"\n  - url: https://api.acme.com/notes\n    name: Note\n    meta:\n      id: req_note\n    method: PUT\n    body:\n      mimeType: text/plain\n      text: hello\n    settings:\n      followRedirects: global\n  - url: https://api.acme.com/graphql\n    name: Graph\n    meta:\n      id: req_graph\n    method: POST\n    body:\n      mimeType: application/graphql\n      text: '{\"query\":\"{ me { id } }\"}'\n  - url: https://api.acme.com/soap\n    name: Soap\n    meta:\n      id: req_soap\n    method: POST\n    body:\n      mimeType: text/xml\n      text: <Envelope/>\n  - url: https://api.acme.com/login\n    name: Login\n    meta:\n      id: req_login\n    method: POST\n    body:\n      mimeType: application/x-www-form-urlencoded\n      params:\n        - name: user\n          value: \"{{ _.name }}\"\n        - name: remember\n          value: \"on\"\n          disabled: true\n  - url: https://api.acme.com/upload\n    name: Upload\n    meta:\n      id: req_upload\n    method: POST\n    body:\n      mimeType: multipart/form-data\n      params:\n        - name: file\n          type: file\n          fileName: /home/me/a.png\n        - name: note\n          value: hi\n  - url: wss://api.acme.com/live\n    name: Live feed\n    meta:\n      id: ws-req_live\n  - url: grpcb.in:9000\n    name: Greeter\n    meta:\n      id: greq_hello\n    protoFileId: pf_hello\n    protoMethodName: /hello.HelloService/SayHello\ncookieJar:\n  name: Default Jar\n  meta:\n    id: jar_acme\n  cookies:\n    - key: session\n      value: abc\n      domain: api.acme.com\nenvironments:\n  name: Base Environment\n  meta:\n    id: env_base\n  data:\n    baseUrl: https://api.acme.com\n    timeout: 30\n  subEnvironments:\n    - name: Production\n      meta:\n        id: env_prod\n      data:\n        baseUrl: https://prod.acme.com\n        token: prod-token\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "name": "Acme",
+            "description": "The Acme API",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "name": "Users",
+                "description": "People and roles",
+                "variables": {},
+                "auth": {
+                  "mode": "bearer",
+                  "token": "{{token}}"
+                },
+                "elements": [
+                  {
+                    "kind": "script.pre",
+                    "config": {
+                      "script": "console.log(\"folder\");"
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "name": "Admin",
+                    "description": "",
+                    "variables": {},
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [],
+                    "requests": [
+                      {
+                        "name": "Get admin user",
+                        "description": "Reads one admin",
+                        "method": "GET",
+                        "url": "{{baseUrl}}/admin/users/:userId?verbose=true",
+                        "params": [
+                          {
+                            "key": "verbose",
+                            "value": "true",
+                            "enabled": true
+                          },
+                          {
+                            "key": "trace",
+                            "value": "1",
+                            "enabled": false
+                          },
+                          {
+                            "key": "userId",
+                            "value": "42",
+                            "enabled": true,
+                            "in": "path"
+                          }
+                        ],
+                        "headers": [
+                          {
+                            "key": "Accept",
+                            "value": "application/json",
+                            "enabled": true
+                          }
+                        ],
+                        "body": {
+                          "mode": "none"
+                        },
+                        "auth": {
+                          "mode": "inherit"
+                        },
+                        "followRedirects": false
+                      }
+                    ]
+                  }
+                ],
+                "requests": [
+                  {
+                    "name": "Create user",
+                    "description": "",
+                    "method": "POST",
+                    "url": "{{baseUrl}}/users",
+                    "params": [],
+                    "headers": [
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "enabled": true
+                      }
+                    ],
+                    "body": {
+                      "mode": "json",
+                      "content": "{\"name\": \"{{name}}\"}"
+                    },
+                    "auth": {
+                      "mode": "basic",
+                      "username": "admin",
+                      "password": "{{password}}"
+                    },
+                    "elements": [
+                      {
+                        "kind": "script.pre",
+                        "config": {
+                          "script": "insomnia.environment.set(\"t\", Date.now());"
+                        }
+                      },
+                      {
+                        "kind": "script.post",
+                        "config": {
+                          "script": "insomnia.test(\"created\", () => {});"
+                        }
+                      }
+                    ],
+                    "followRedirects": true
+                  }
+                ]
+              }
+            ],
+            "requests": [
+              {
+                "name": "Note",
+                "description": "",
+                "method": "PUT",
+                "url": "https://api.acme.com/notes",
+                "params": [],
+                "headers": [],
+                "body": {
+                  "mode": "text",
+                  "content": "hello"
+                },
+                "auth": {
+                  "mode": "inherit"
+                }
+              },
+              {
+                "name": "Graph",
+                "description": "",
+                "method": "POST",
+                "url": "https://api.acme.com/graphql",
+                "params": [],
+                "headers": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "enabled": true,
+                    "source": "body-mode"
+                  }
+                ],
+                "body": {
+                  "mode": "graphql",
+                  "content": "{\"query\":\"{ me { id } }\"}"
+                },
+                "auth": {
+                  "mode": "inherit"
+                }
+              },
+              {
+                "name": "Soap",
+                "description": "",
+                "method": "POST",
+                "url": "https://api.acme.com/soap",
+                "params": [],
+                "headers": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/xml",
+                    "enabled": true,
+                    "source": "body-mode"
+                  }
+                ],
+                "body": {
+                  "mode": "xml",
+                  "content": "<Envelope/>"
+                },
+                "auth": {
+                  "mode": "inherit"
+                }
+              },
+              {
+                "name": "Login",
+                "description": "",
+                "method": "POST",
+                "url": "https://api.acme.com/login",
+                "params": [],
+                "headers": [],
+                "body": {
+                  "mode": "x-www-form-urlencoded",
+                  "fields": [
+                    {
+                      "key": "user",
+                      "value": "{{name}}",
+                      "enabled": true
+                    },
+                    {
+                      "key": "remember",
+                      "value": "on",
+                      "enabled": false
+                    }
+                  ]
+                },
+                "auth": {
+                  "mode": "inherit"
+                }
+              },
+              {
+                "name": "Upload",
+                "description": "",
+                "method": "POST",
+                "url": "https://api.acme.com/upload",
+                "params": [],
+                "headers": [],
+                "body": {
+                  "mode": "form-data",
+                  "fields": [
+                    {
+                      "key": "file",
+                      "value": "",
+                      "enabled": true,
+                      "type": "file",
+                      "src": "/home/me/a.png",
+                      "fileName": "a.png",
+                      "unresolved": true
+                    },
+                    {
+                      "key": "note",
+                      "value": "hi",
+                      "enabled": true
+                    }
+                  ]
+                },
+                "auth": {
+                  "mode": "inherit"
+                }
+              }
+            ]
+          }
+        ],
+        "environments": [
+          {
+            "name": "Production",
+            "description": "",
+            "variables": {
+              "baseUrl": {
+                "value": "https://prod.acme.com",
+                "enabled": true
+              },
+              "timeout": {
+                "value": "30",
+                "enabled": true
+              },
+              "token": {
+                "value": "prod-token",
+                "enabled": true
+              }
+            }
+          }
+        ],
+        "globals": {},
+        "meta": {
+          "format": "Insomnia Export v5",
+          "requestCount": 7,
+          "folderCount": 2,
+          "environmentCount": 1,
+          "globalCount": 0,
+          "exampleCount": 0,
+          "skipped": [
+            {
+              "kind": "websocket",
+              "count": 1,
+              "requests": [
+                "Live feed"
+              ]
+            },
+            {
+              "kind": "grpc",
+              "count": 1,
+              "requests": [
+                "Greeter"
+              ]
+            }
+          ],
+          "nonExecutableAuth": 0,
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "Acme",
+            "description": "The Acme API",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "Users",
+            "description": "People and roles",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "bearer",
+              "token": "{{token}}"
+            },
+            "elements": [
+              {
+                "kind": "script.pre",
+                "config": {
+                  "script": "console.log(\"folder\");"
+                }
+              }
+            ]
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c2",
+            "name": "Admin",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Note",
+            "description": "",
+            "method": "PUT",
+            "url": "https://api.acme.com/notes",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "text",
+              "content": "hello"
+            },
+            "bodyType": "text",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c1",
+            "name": "Graph",
+            "description": "",
+            "method": "POST",
+            "url": "https://api.acme.com/graphql",
+            "params": [],
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "enabled": true,
+                "source": "body-mode"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "content": "{\"query\":\"{ me { id } }\"}"
+            },
+            "bodyType": "graphql",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 1
+          },
+          {
+            "tempId": "r3",
+            "collectionTempId": "c1",
+            "name": "Soap",
+            "description": "",
+            "method": "POST",
+            "url": "https://api.acme.com/soap",
+            "params": [],
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "application/xml",
+                "enabled": true,
+                "source": "body-mode"
+              }
+            ],
+            "body": {
+              "mode": "xml",
+              "content": "<Envelope/>"
+            },
+            "bodyType": "xml",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 2
+          },
+          {
+            "tempId": "r4",
+            "collectionTempId": "c1",
+            "name": "Login",
+            "description": "",
+            "method": "POST",
+            "url": "https://api.acme.com/login",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "x-www-form-urlencoded",
+              "fields": [
+                {
+                  "key": "user",
+                  "value": "{{name}}",
+                  "enabled": true
+                },
+                {
+                  "key": "remember",
+                  "value": "on",
+                  "enabled": false
+                }
+              ]
+            },
+            "bodyType": "x-www-form-urlencoded",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 3
+          },
+          {
+            "tempId": "r5",
+            "collectionTempId": "c1",
+            "name": "Upload",
+            "description": "",
+            "method": "POST",
+            "url": "https://api.acme.com/upload",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "form-data",
+              "fields": [
+                {
+                  "key": "file",
+                  "value": "",
+                  "enabled": true,
+                  "type": "file",
+                  "src": "/home/me/a.png",
+                  "fileName": "a.png",
+                  "unresolved": true
+                },
+                {
+                  "key": "note",
+                  "value": "hi",
+                  "enabled": true
+                }
+              ]
+            },
+            "bodyType": "form-data",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 4
+          },
+          {
+            "tempId": "r6",
+            "collectionTempId": "c2",
+            "name": "Create user",
+            "description": "",
+            "method": "POST",
+            "url": "{{baseUrl}}/users",
+            "params": [],
+            "headers": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "enabled": true
+              }
+            ],
+            "body": {
+              "mode": "json",
+              "content": "{\"name\": \"{{name}}\"}"
+            },
+            "bodyType": "json",
+            "auth": {
+              "mode": "basic",
+              "username": "admin",
+              "password": "{{password}}"
+            },
+            "followRedirects": true,
+            "elements": [
+              {
+                "kind": "script.pre",
+                "config": {
+                  "script": "insomnia.environment.set(\"t\", Date.now());"
+                }
+              },
+              {
+                "kind": "script.post",
+                "config": {
+                  "script": "insomnia.test(\"created\", () => {});"
+                }
+              }
+            ],
+            "order": 0
+          },
+          {
+            "tempId": "r7",
+            "collectionTempId": "c3",
+            "name": "Get admin user",
+            "description": "Reads one admin",
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/users/:userId?verbose=true",
+            "params": [
+              {
+                "key": "verbose",
+                "value": "true",
+                "enabled": true
+              },
+              {
+                "key": "trace",
+                "value": "1",
+                "enabled": false
+              },
+              {
+                "key": "userId",
+                "value": "42",
+                "enabled": true,
+                "in": "path"
+              }
+            ],
+            "headers": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "enabled": true
+              }
+            ],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "followRedirects": false,
+            "order": 0
+          }
+        ],
+        "environments": [
+          {
+            "tempId": "e1",
+            "name": "Production",
+            "description": "",
+            "variables": {
+              "baseUrl": {
+                "value": "https://prod.acme.com",
+                "enabled": true
+              },
+              "timeout": {
+                "value": "30",
+                "enabled": true
+              },
+              "token": {
+                "value": "prod-token",
+                "enabled": true
+              }
+            }
+          }
+        ],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v5-environment",
+      "document": "type: environment.insomnia.rest/5.0\nname: Shared secrets\nmeta:\n  id: wrk_shared\n  created: 1735689600000\n  modified: 1735689600000\nenvironments:\n  name: Base Environment\n  meta:\n    id: env_shared\n  data:\n    apiKey: abc123\n    region: eu\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [],
+        "environments": [
+          {
+            "name": "Shared secrets",
+            "description": "",
+            "variables": {
+              "apiKey": {
+                "value": "abc123",
+                "enabled": true
+              },
+              "region": {
+                "value": "eu",
+                "enabled": true
+              }
+            }
+          }
+        ],
+        "globals": {},
+        "meta": {
+          "format": "Insomnia Export v5",
+          "requestCount": 0,
+          "folderCount": 0,
+          "environmentCount": 1,
+          "globalCount": 0,
+          "exampleCount": 0,
+          "skipped": [],
+          "nonExecutableAuth": 0,
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [],
+        "requests": [],
+        "environments": [
+          {
+            "tempId": "e1",
+            "name": "Shared secrets",
+            "description": "",
+            "variables": {
+              "apiKey": {
+                "value": "abc123",
+                "enabled": true
+              },
+              "region": {
+                "value": "eu",
                 "enabled": true
               }
             }

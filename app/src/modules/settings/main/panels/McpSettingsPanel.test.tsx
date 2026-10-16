@@ -245,7 +245,7 @@ describe("McpSettingsPanel connect failures", () => {
  * This is the one panel where wrong copy is a safety problem: a user lowering a
  * cap against an agent is entitled to text that matches the mechanism. Max RPS
  * read as covering "a load run" while `targetRps` exists only in Constant RPS,
- * and Max concurrency claimed to cap "in-flight requests", which is not what it
+ * and Max concurrency (now Max virtual users) claimed to cap "in-flight requests", which is not what it
  * bounds. Both are asserted by what they must *not* say as well, since the
  * defect was an over-broad sentence rather than a missing one.
  */
@@ -273,13 +273,13 @@ describe("McpSettingsPanel cap copy", () => {
 
 		const text = capDescription("Max RPS");
 		expect(text).toMatch(/only a constant rps run carries a rate/i);
-		expect(text).toMatch(/max concurrency/i);
+		expect(text).toMatch(/max virtual users/i);
 	});
 
-	it("says what Max concurrency bounds, and that in-flight is not it", async () => {
+	it("says what Max virtual users bounds, and that in-flight is not it", async () => {
 		await renderPanel();
 
-		const text = capDescription("Max concurrency");
+		const text = capDescription("Max virtual users");
 		expect(text).toMatch(/closed-loop/i);
 		// The old text said this cap ceilings "in-flight requests for a load
 		// run". It may only appear now as the thing the cap does *not* bound.
@@ -292,7 +292,7 @@ describe("McpSettingsPanel cap copy", () => {
 		// The main process holds each cap here on save, so an input that offered
 		// more would be an input whose value silently comes back lower.
 		expect(screen.getByLabelText("Max RPS")).toHaveAttribute("max", "1000000");
-		expect(screen.getByLabelText("Max concurrency")).toHaveAttribute("max", "10000");
+		expect(screen.getByLabelText("Max virtual users")).toHaveAttribute("max", "10000");
 		// The unit moved out of the label and into the input's suffix, so the
 		// label is now "Max duration" - one place per unit, per the settings
 		// voice conventions.

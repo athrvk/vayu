@@ -45,7 +45,7 @@ Both halves are required: `values` must be an array, since it is walked directly
 `PostmanEnvironmentParser` is registered **third** in the factory's `PARSERS`, after the two collection parsers and before Insomnia:
 
 ```
-PostmanV21 → PostmanV20 → PostmanEnvironment → InsomniaV4 → OpenApiV3 → OpenApiV2
+PostmanV21 → PostmanV20 → PostmanEnvironment → InsomniaV4 → InsomniaV5 → OpenApiV3 → OpenApiV2
 ```
 
 That position is not load-bearing. An environment export carries neither `info` nor `item[]`, so `PostmanV20Parser`'s permissive fallback branch (`info` present + `item[]` array + no schema) cannot claim it, and no other detector looks at `_postman_variable_scope`. The grouping is for readability.

@@ -8,7 +8,7 @@
 /**
  * ModeStatCards - the mode-specific Row 4 stats that exist for only one load
  * mode (constant_concurrency / iterations / ramp_up). The shared cards
- * (Duration, Total requests, Peak concurrency) and the universal p99 card live
+ * (Duration, Total requests, Peak virtual users / in-flight requests) and the universal p99 card live
  * in ModeStatsRow.tsx, which routes between these per d.mode. All cards are pure
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
@@ -22,7 +22,7 @@ import { StatCard } from "./StatCard";
 
 // ---- constant_concurrency ----
 
-/** Throughput / VU - achieved throughput divided by configured concurrency. */
+/** Throughput per virtual user - achieved throughput divided by configured concurrency. */
 export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 	const perVu =
 		d.throughput !== undefined && d.configuredConcurrency && d.configuredConcurrency > 0
@@ -30,7 +30,7 @@ export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 			: undefined;
 	return (
 		<StatCard
-			label="Throughput / VU"
+			label="Throughput per virtual user"
 			value={fmt(perVu, 2)}
 			unit="req/s"
 			infoTip={TOOLTIPS.throughputPerVu}

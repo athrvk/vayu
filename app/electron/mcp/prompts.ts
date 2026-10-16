@@ -166,10 +166,10 @@ export const PROMPTS: McpPromptDef[] = [
 					userText(
 						`Design a load test with Vayu's start_load_run tool for ${url}. Goal: ${goal}.\n\n` +
 							"Recommend a mode - constant_rps, constant_concurrency, ramp_up, iterations, or " +
-							"capacity, which searches for the highest concurrency that still holds a p99 " +
+							"capacity, which searches for the most virtual users that still hold a p99 " +
 							"budget (`sloMs`) and is the mode to reach for when the goal is a number for " +
 							"'how much can it take' rather than a verdict at one load level. Then a " +
-							"starting RPS/concurrency, a duration, and how to iterate (e.g. ramp until p99 " +
+							"starting RPS or virtual-user count, a duration, and how to iterate (e.g. ramp until p99 " +
 							"exceeds an SLO). Explain the reasoning, then propose the exact start_load_run " +
 							"arguments. Respect Vayu's configured caps and the host allowlist."
 					),

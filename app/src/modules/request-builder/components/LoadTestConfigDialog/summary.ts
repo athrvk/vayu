@@ -20,6 +20,7 @@
  * which depends on latency - guessing there would be worse than saying nothing.
  */
 
+import { CONCURRENCY_UNIT, CONCURRENCY_UNIT_SINGULAR } from "@/constants/load-test-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { LoadTestConfig } from "@/types";
 
@@ -46,6 +47,10 @@ function plural(n: number, one: string, many = `${one}s`): string {
 	return `${count(n)} ${pluralize(n, one, many)}`;
 }
 
+function virtualUsers(n: number): string {
+	return plural(n, CONCURRENCY_UNIT_SINGULAR, CONCURRENCY_UNIT);
+}
+
 /**
  * @param blocked  When a validation error is live the numbers describe a run
  *                 that cannot start, so the estimate is withheld rather than
@@ -68,19 +73,13 @@ export function summarise(input: SummaryInput, blocked = false): string {
 		// No count, for the same reason constant_concurrency has none - and one
 		// more: how many levels the search holds is decided by the target, not
 		// by anything on this form.
-		return `Steps up from ${count(startConcurrency)} connections, holding each level for ${count(
+		return `Steps up from ${virtualUsers(startConcurrency)}, holding each level for ${count(
 			stepDuration
-		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${plural(
-			concurrency,
-			"connection"
-		)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
+		)}s, until p99 passes ${count(sloMs)}ms or the run reaches ${virtualUsers(concurrency)}. Gives up after ${count(duration)}s and reports the highest level the target held.`;
 	}
 
 	if (mode === "iterations") {
-		return `Sends exactly ${plural(iterations, "request")} using ${plural(
-			concurrency,
-			"connection"
-		)}, then stops.`;
+		return `Sends exactly ${plural(iterations, "request")} using ${virtualUsers(concurrency)}, then stops.`;
 	}
 
 	if (mode === "constant_rps") {
@@ -91,7 +90,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 
 	if (mode === "constant_concurrency") {
 		// No count: throughput here is whatever the target can serve.
-		return `Keeps ${plural(concurrency, "connection")} busy for ${count(
+		return `Keeps ${virtualUsers(concurrency)} busy for ${count(
 			duration
 		)}s. Total requests depend on how fast the target responds.`;
 	}
@@ -99,10 +98,7 @@ export function summarise(input: SummaryInput, blocked = false): string {
 	// ramp_up - the one case where the old prose was earning its keep.
 	const atTarget = duration - rampDuration;
 	const tail = atTarget > 0 ? ` then holds it for the remaining ${count(atTarget)}s` : "";
-	return `Climbs from ${count(startConcurrency)} to ${plural(
-		concurrency,
-		"connection"
-	)} over ${count(rampDuration)}s${tail}, within a ${count(
+	return `Climbs from ${count(startConcurrency)} to ${virtualUsers(concurrency)} over ${count(rampDuration)}s${tail}, within a ${count(
 		duration
 	)}s run. The ramp counts towards the total.`;
 }

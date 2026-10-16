@@ -189,17 +189,17 @@ beforeEach(() => {
 });
 
 describe("load profile → fields", () => {
-	it("shows rate and duration for Constant RPS, and no connection count", () => {
+	it("shows rate and duration for Constant RPS, and no virtual-user count", () => {
 		open();
 		expect(screen.getByLabelText(/target rate/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/^duration/i)).toBeInTheDocument();
-		expect(screen.queryByLabelText(/^connections/i)).not.toBeInTheDocument();
+		expect(screen.queryByLabelText(/^virtual users/i)).not.toBeInTheDocument();
 	});
 
-	it("shows connections and duration for Constant Concurrency", () => {
+	it("shows virtual users and duration for Constant Virtual Users", () => {
 		open();
-		pickProfile("Constant Concurrency");
-		expect(screen.getByLabelText(/^connections/i)).toBeInTheDocument();
+		pickProfile("Constant Virtual Users");
+		expect(screen.getByLabelText(/^virtual users/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/^duration/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/target rate/i)).not.toBeInTheDocument();
 	});
@@ -211,7 +211,7 @@ describe("load profile → fields", () => {
 		open();
 		pickProfile("Fixed Iterations");
 		expect(screen.getByLabelText(/^requests/i)).toBeInTheDocument();
-		expect(screen.getByLabelText(/^connections/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/^virtual users/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
 	});
 
@@ -221,7 +221,7 @@ describe("load profile → fields", () => {
 		expect(screen.getByLabelText(/latency budget/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/hold each level for/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/start from/i)).toBeInTheDocument();
-		expect(screen.getByLabelText(/stop climbing at/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/maximum virtual users/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/give up after/i)).toBeInTheDocument();
 		// The ramp's own field belongs to the ramp; a search has no ramp curve.
 		expect(screen.queryByLabelText(/ramp duration/i)).not.toBeInTheDocument();
@@ -230,7 +230,7 @@ describe("load profile → fields", () => {
 	it("shows target, total and ramp for Ramp-Up", () => {
 		open();
 		pickProfile("Ramp-Up");
-		expect(screen.getByLabelText(/target connections/i)).toBeInTheDocument();
+		expect(screen.getByLabelText(/target virtual users/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/total duration/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/ramp duration/i)).toBeInTheDocument();
 	});
@@ -249,7 +249,7 @@ describe("payload", () => {
 	// `it.each`, not a loop with a manual teardown: the dialog renders through a
 	// Radix portal, so removing its node by hand throws and leaves the next
 	// iteration asserting against a half-torn-down DOM.
-	it.each(["Constant RPS", "Constant Concurrency", "Ramp-Up", "Capacity Discovery"])(
+	it.each(["Constant RPS", "Constant Virtual Users", "Ramp-Up", "Capacity Discovery"])(
 		"sends duration_seconds for %s",
 		(profile) => {
 			const { onStart } = open();
@@ -839,16 +839,16 @@ describe("ramp start concurrency", () => {
 	 * takes the value, and clearing it reads back as `Number("") === 0`. Until
 	 * the floor rule the only feedback was the engine's 400, after Start.
 	 */
-	it("blocks a start below one connection, in both profiles that climb from it", () => {
+	it("blocks a start below one virtual user, in both profiles that climb from it", () => {
 		open();
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "0" } });
-		expect(screen.getByText(/Start is below one connection/i)).toBeInTheDocument();
+		expect(screen.getByText(/Start is below one virtual user/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
 
 		pickProfile("Capacity Discovery");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "" } });
-		expect(screen.getByText(/Start is below one connection/i)).toBeInTheDocument();
+		expect(screen.getByText(/Start is below one virtual user/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
 	});
 
@@ -856,7 +856,7 @@ describe("ramp start concurrency", () => {
 		open();
 		pickProfile("Ramp-Up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
-		expect(screen.getByText(/Climbs from 3 to 10 connections/i)).toBeInTheDocument();
+		expect(screen.getByText(/Climbs from 3 to 10 virtual users/i)).toBeInTheDocument();
 	});
 });
 
@@ -912,16 +912,16 @@ describe("success sample rate reaches the engine in the engine's unit", () => {
  * codebase repeats most.
  */
 describe("ceilings from Settings", () => {
-	const connections = () => screen.getByLabelText(/^connections/i) as HTMLInputElement;
+	const virtualUsers = () => screen.getByLabelText(/^virtual users/i) as HTMLInputElement;
 
 	it("offers the raised ceiling on the field it governs", () => {
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
 		open();
-		pickProfile("Constant Concurrency");
-		expect(Number(connections().max)).toBe(5000);
+		pickProfile("Constant Virtual Users");
+		expect(Number(virtualUsers().max)).toBe(5000);
 	});
 
-	it("applies a connection ceiling to the ramp's start too, not just its target", () => {
+	it("applies a virtual-user ceiling to the ramp's start too, not just its target", () => {
 		// Same physical quantity. A ramp that may only start below 1000 cannot
 		// climb to a target of 5000 from anywhere sensible.
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
@@ -937,7 +937,7 @@ describe("ceilings from Settings", () => {
 		);
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 100 });
 		const { onStart } = open();
-		expect(connections().value).toBe("100");
+		expect(virtualUsers().value).toBe("100");
 		expect(started(onStart).concurrency).toBe(100);
 	});
 
@@ -946,8 +946,8 @@ describe("ceilings from Settings", () => {
 		// "no setting on that screen can compose a rejected run" true.
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 999_999 });
 		open();
-		pickProfile("Constant Concurrency");
-		expect(Number(connections().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
+		pickProfile("Constant Virtual Users");
+		expect(Number(virtualUsers().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
 });
 

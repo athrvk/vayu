@@ -22,10 +22,11 @@
  * is now `BulkEditor`; only the format differs, and that is what this passes.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useRequestBuilderContext } from "../../../context";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
+import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value";
 import { Eyebrow } from "@/components/ui";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
@@ -185,7 +186,16 @@ export default function ParamsPanel() {
 		undefined,
 		SECRET_UI_MASK
 	).apply(resolvedUrl);
-	const displayParams = queryRowsOf(request.params);
+	// The blank row to type into is derived where the rows are rendered, as the
+	// Headers tab does (`useHeadersManager`), because `request.params` does not
+	// carry it: a URL edit goes through `mergeParamsFromUrl`, which drops the
+	// enabled blank row (its key matches nothing in the URL), and the tab
+	// lost its spare row until the next table change (#2155). Memoised so the
+	// blank row keeps one id across renders, or focus would leave it per key.
+	const displayParams = useMemo(
+		() => withTrailingBlank(queryRowsOf(request.params)),
+		[request.params]
+	);
 
 	return (
 		<BulkEditor

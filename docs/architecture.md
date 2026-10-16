@@ -359,7 +359,11 @@ which case the app picks a fallback (below).
   an orphan left by a crashed session, or in development one started by hand -
   the app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
   data directory), reported as running, restarted for real when Settings asks,
-  and shut down on quit like any engine the app spawned itself. Adoption checks
+  and shut down on quit like any engine the app spawned itself. What identifies
+  an engine is its `/health` body (issue #2153): `status: "ok"` plus a string
+  `version` and a numeric `workers`. Another program answering only
+  `{"status":"ok"}` is a held port - never adopted, never sent `/shutdown`.
+  Adoption checks
   the running engine's `/health.version` against this app's own first (issue
   #1492): a mismatch is stopped rather than adopted, and this instance starts
   its own build instead - see `docs/lock-file-handling.md`. A lock PID that is

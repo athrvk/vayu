@@ -32,7 +32,11 @@ import {
 	ScrollArea,
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
-import { loadTestTypeToLabel } from "@/constants/load-test-modes";
+import {
+	CONCURRENCY_LABEL,
+	formatConcurrency,
+	loadTestTypeToLabel,
+} from "@/constants/load-test-modes";
 import {
 	MethodBadge,
 	RunOutcomeBanner,
@@ -91,14 +95,17 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	 */
 	const scenarioSteps = report.scenario?.steps;
 	const isScenarioLoad = !!scenarioSteps?.length;
+	// A selection the rendered tabs no longer include (Steps, when the report
+	// changes to a single-request run) would match no panel and leave the pane blank.
+	const availableTabs = new Set(["overview", "performance", "samples"]);
+	if (isScenarioLoad) availableTabs.add("steps");
+	const tab = availableTabs.has(activeTab) ? activeTab : "overview";
 	// `TruncatedText` measures one string, so the sentence is built rather than
 	// composed out of nodes it would have to flatten.
 	const virtualUsers = report.scenario?.virtualUsers;
 	const sequenceLabel = isScenarioLoad
 		? `${scenarioSteps.length} ${pluralize(scenarioSteps.length, "step")} per iteration` +
-			(virtualUsers === undefined
-				? ""
-				: ` - ${virtualUsers} ${pluralize(virtualUsers, "virtual user")}`)
+			(virtualUsers === undefined ? "" : ` - ${formatConcurrency(virtualUsers)}`)
 		: "";
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
@@ -346,7 +353,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						)}
 						{config.concurrency != null && config.concurrency > 0 && (
 							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Concurrency:</span>
+								<span className="text-muted-foreground">{CONCURRENCY_LABEL}:</span>
 								<span className="text-foreground font-mono">
 									{config.concurrency}
 								</span>
@@ -437,11 +444,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			</div>
 
 			{/* Tabbed Content */}
-			<Tabs
-				value={activeTab}
-				onValueChange={setActiveTab}
-				className="flex-1 flex flex-col min-h-0"
-			>
+			<Tabs value={tab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
 				<TabsList variant="inset" className="mx-4 mt-3">
 					<TabsTrigger value="overview">
 						<BarChart3 className="size-icon-sm" />

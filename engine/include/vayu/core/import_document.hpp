@@ -27,7 +27,10 @@
  *   them.
  * - **Postman Collection v2.0 / v2.1**, **Postman environment / globals** and
  *   **Insomnia Export v4**, ported from the renderer's parsers to nlohmann.
- *   All three are JSON-only formats, so no YAML question arrives with them.
+ * - **Insomnia v5** (#2119), the YAML document Insomnia 11 and later export,
+ *   flattened into v4's resource list so the one Insomnia mapping reads both.
+ *   Every format arrives through the same reader, so a JSON-encoded document of
+ *   a YAML format reads, and the other way round.
  *
  * **The output is `ImportResult` verbatim**, the same tree the renderer's
  * `parseImport` returned: collections with their requests, environments,
@@ -192,8 +195,11 @@ struct ImportParse {
  * @brief Parse @p text as whichever import format claims it.
  *
  * Detection runs in `factory.ts`'s order - Postman v2.1, v2.0, environment,
- * Insomnia v4, OpenAPI 3.x, OpenAPI 2.0 - so a document carrying two formats'
- * keys is claimed by the same one on both sides. The bytes are read once (JSON,
+ * Insomnia v4, then Insomnia v5, OpenAPI 3.x, OpenAPI 2.0 - so a document
+ * carrying two formats' keys is claimed by the same one on both sides. An
+ * Insomnia document of another kind (a design document, a mock server) or
+ * another format version is refused by name, never as unrecognised. A JMeter
+ * test plan is checked on the raw text first. The bytes are read once (JSON,
  * then YAML) through `core::read_document`, which is the *only* reader in the
  * engine and now the only one anywhere.
  *

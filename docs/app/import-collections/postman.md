@@ -448,5 +448,6 @@ export writes the edit.
 
 - [Import pipeline index](./README.md)
 - [Insomnia v4](./insomnia-v4.md)
+- [Insomnia v5](./insomnia-v5.md)
 - [OpenAPI v3](./openapi-v3.md)
 - [OpenAPI v2](./openapi-v2.md)

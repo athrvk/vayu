@@ -908,7 +908,7 @@ ScriptsOverrideMode scripts_mode) {
     }
     return std::any_of (step.elements->begin (), step.elements->end (),
     [&] (const CompiledElement& element) {
-        return element.kind == kind &&
+        return element.kind == kind && element.enabled &&
         !is_blank_script_element (element.kind, element.config) &&
         !RunContext::script_element_runs_inline (element.config, scripts_mode);
     });

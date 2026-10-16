@@ -69,7 +69,7 @@ export const LOAD_TOOLS: McpTool[] = [
 		category: "load",
 		invalidates: ["run"],
 		description:
-			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS/concurrency/duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
+			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS, `concurrency` (virtual users) and duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
 			agentScriptGateSentence("`postRequestScript` or `tests`") +
 			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
 			WITHHELD_PLANNED_RUN_SENTENCE +
@@ -125,7 +125,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				.int()
 				.positive()
 				.optional()
-				.describe("Target in-flight requests."),
+				.describe(
+					"Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by `targetRps`."
+				),
 			// Positive for the same reason `concurrency` is: the ramp is seeded
 			// with this count, so a negative casts to ~1.8e19 engine-side and a
 			// zero start is a ramp that begins with no traffic at all.
@@ -134,7 +136,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				.int()
 				.positive()
 				.optional()
-				.describe("Ramp start concurrency (ramp_up). Above `concurrency` ramps down."),
+				.describe(
+					"Virtual users at the start of the ramp (ramp_up), or the first level a capacity search measures. Above `concurrency` ramps down."
+				),
 			duration: z
 				.string()
 				.optional()
@@ -160,7 +164,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"How long each concurrency level is held before it is judged (capacity), same units as `duration`."
+					"How long each level of virtual users is held before it is judged (capacity), same units as `duration`."
 				),
 			// An iterations run stops on this count and reads no duration, so it
 			// is the only thing bounding the run; `-1` would cast to ~1.8e19.

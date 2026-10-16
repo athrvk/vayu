@@ -1349,6 +1349,39 @@ Simple modal state for the collection import dialog.
 const { isOpen, open, close } = useImportModalStore();
 ```
 
+#### `import-report-store.ts` - What An Import Left Undone
+
+The loss report of a successful import, kept after the dialog that showed it
+closes (issue #2109). The preview lists everything an import dropped or altered,
+one line each (`importNotices`); on success the dialog resets and that list used
+to go with it. `announceImport` (`modules/collections/import-report.ts`) records
+one `ImportReport` per applied file here, keyed by the **real** id of each root
+collection the file created, so a file that created several roots stores the
+same report under each.
+
+**State:**
+```typescript
+{
+  reports: Record<string, ImportReport>   // by root collection id
+}
+// ImportReport: { title, fileName, notices, fileNeeds, counts, rootIds }
+```
+
+`fileNeeds` is `fileReferenceNeeds`' answer computed at apply time, not the
+drafts it was read from: those hold every request body and the spec document,
+and `FileReferenceNeedsView` (`ImportFileFolders.tsx`) draws the same list from
+the answer. A report with nothing in it, or a file that created no collection,
+is not stored.
+
+**Key Methods:**
+```typescript
+const report = useImportReportStore(selectImportReport(collectionId));
+useImportReportStore.getState().dismiss(collectionId);  // drops the file's report from every root
+```
+
+**Non-persisted** (in memory, like `import-modal-store`): a report is about the
+import just made, and a reload has nothing to compare it with.
+
 #### `toast-store.ts` - Transient Notifications
 
 The queue behind the toasts. It holds *what* to show; the Radix primitive in
@@ -1732,7 +1765,10 @@ engine's `scenario_plan_test.cpp` (issue #431).
 - **`useReorderMutation()`** - Reposition collections and requests through
   `POST /reorder` in one transaction, optimistically (see below)
 - **`useImportMutation()`** (`queries/import.ts`) - Apply a parsed import through
-  `POST /import/apply` in one transaction
+  `POST /import/apply` in one transaction. Resolves with
+  `{ idMap, rootIds }`: the engine's temp-id map, plus each root
+  collection's temp id mapped to its real id, which is
+  what lets the caller expand and open what it created
 
 **Reordering (`useReorderMutation`)** is the one mutation that writes its caches
 three times, because a drag is only believable if the row is where the pointer

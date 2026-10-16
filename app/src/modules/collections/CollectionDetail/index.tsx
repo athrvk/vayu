@@ -64,6 +64,9 @@ const TABS: { id: CollectionTab; label: string }[] = [
  */
 const TABS_HOLDING_DRAFTS: ReadonlySet<CollectionTab> = new Set(["info", "auth", "elements"]);
 
+const withVisited = (visited: ReadonlySet<CollectionTab>, tab: CollectionTab) =>
+	visited.has(tab) ? visited : new Set(visited).add(tab);
+
 export default function CollectionDetail() {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -159,6 +162,9 @@ export default function CollectionDetail() {
 	 */
 	const getCollectionTab = useTabSelectionStore((s) => s.getCollectionTab);
 	const setCollectionTab = useTabSelectionStore((s) => s.setCollectionTab);
+	const storedTab = useTabSelectionStore((s) =>
+		selectedCollectionId ? (s.collectionTab.get(selectedCollectionId) ?? null) : null
+	);
 	const initialTab = (): CollectionTab =>
 		(selectedCollectionId ? getCollectionTab(selectedCollectionId) : null) ?? "info";
 	const [tab, setTabState] = useState<CollectionTab>(initialTab);
@@ -193,7 +199,14 @@ export default function CollectionDetail() {
 		setTabSyncedFor(selectedCollectionId);
 		const next = initialTab();
 		setTabState(next);
-		setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+		setVisited((prev) => withVisited(prev, next));
+	} else if (storedTab && storedTab !== tab) {
+		// A write from outside this screen (`setCollectionTab`) while it is
+		// already on this collection: the import toast's "Review import notes"
+		// is the one today. Every write of our own updates both, so a mismatch
+		// here is always someone else's.
+		setTabState(storedTab);
+		setVisited((prev) => withVisited(prev, storedTab));
 	}
 
 	/*
@@ -214,7 +227,7 @@ export default function CollectionDetail() {
 		if (!specTabTarget || specTabTarget !== selectedCollectionId) return;
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		setTab("spec");
-		setVisited((prev) => (prev.has("spec") ? prev : new Set(prev).add("spec")));
+		setVisited((prev) => withVisited(prev, "spec"));
 		clearSpecTabTarget();
 	}, [specTabTarget, selectedCollectionId, clearSpecTabTarget, setTab]);
 
@@ -279,7 +292,7 @@ export default function CollectionDetail() {
 				onValueChange={(v) => {
 					const next = v as CollectionTab;
 					setTab(next);
-					setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
+					setVisited((prev) => withVisited(prev, next));
 				}}
 				className="flex-1 flex flex-col overflow-hidden"
 			>

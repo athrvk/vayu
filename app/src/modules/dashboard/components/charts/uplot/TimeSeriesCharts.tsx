@@ -47,6 +47,7 @@ import {
 	fmtPct,
 	fmtVitals,
 } from "./formatters";
+import { concurrencyMeasureLabel } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
 
 interface BaseProps {
@@ -271,8 +272,13 @@ export function RequestRateChart({
 	);
 }
 
-/** Active connections (in-flight) over time. */
+/**
+ * The run's concurrency over time: virtual users in a closed-loop mode,
+ * requests in flight under Constant RPS, so the series is named for the `mode`
+ * it measures.
+ */
 export function ConnectionsChart({
+	mode,
 	history,
 	isCompleted,
 	syncKey,
@@ -280,7 +286,7 @@ export function ConnectionsChart({
 	breakpoint,
 	anomalies,
 	sleeps,
-}: BaseProps) {
+}: BaseProps & { mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
 	const data = useMemo<uPlot.AlignedData>(() => {
@@ -288,7 +294,7 @@ export function ConnectionsChart({
 		return [times, cols[0]];
 	}, [history, bucketSeconds]);
 	const series: UPlotSeriesSpec[] = [
-		{ label: "connections", role: "info", kind: "area", format: fmtCount },
+		{ label: concurrencyMeasureLabel(mode), role: "info", kind: "area", format: fmtCount },
 	];
 	if (data[0].length < 2) return null;
 	return (

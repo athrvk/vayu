@@ -35,6 +35,7 @@ not import one. It can now (`import_document`, see
 | Postman Collection v2.1 / v2.0 | `info.schema` contains `v2.1.0` / `v2.0.0` (or `info`+`item` with no schema) | [postman.md](./postman.md) |
 | Postman Environment / Globals | `_postman_variable_scope` is `"environment"` or `"globals"` && `values` is an array | [postman-environment.md](./postman-environment.md) |
 | Insomnia Export v4 | `_type === "export"` && `__export_format === 4` | [insomnia-v4.md](./insomnia-v4.md) |
+| Insomnia Export v5 | `type` is `collection.insomnia.rest/5.x` or `environment.insomnia.rest/5.x` (YAML); a design document, a mock server or another format version is refused by name | [insomnia-v5.md](./insomnia-v5.md) |
 | OpenAPI 3.0 | `openapi` starts with `3.` | [openapi-v3.md](./openapi-v3.md) |
 | OpenAPI 2.0 (Swagger) | `swagger` is `2.0` (string or number) | [openapi-v2.md](./openapi-v2.md) |
 | JMeter `.jmx` test plan | the raw text contains `<jmeterTestPlan` | [jmeter.md](./jmeter.md) |
@@ -143,7 +144,7 @@ Engine-side, in `core::parse_import`:
    one parser has an opinion about a document" true.
 2. Detection in a fixed **most-specific-first** order:
    `Postman v2.1 → Postman v2.0 → Postman environment/globals → Insomnia v4 →
-   OpenAPI 3.x → OpenAPI 2.0` - the order the renderer's `PARSERS` list ran in,
+   Insomnia v5 (or its named refusal) → OpenAPI 3.x → OpenAPI 2.0` - the order the renderer's `PARSERS` list ran in,
    so the same bytes are claimed by the same format they always were.
 3. No match → `400 Unrecognised format`, which `factory.ts` turns back into
    `UnrecognisedFormatError`. Kept apart from a document that *claimed* a format
@@ -236,9 +237,10 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 - The engine generates every real id and returns an `idMap` keyed by temp id. The
   orchestrator checks that map covers every item it sent and throws
   `Import incomplete: …` otherwise - a silently skipped item would otherwise read as a
-  clean import. Note this throw happens *after* the tree is committed. Nothing else
-  consumes the real ids: `useImportMutation` invalidates the collection / request /
-  environment / globals queries, which refetch.
+  clean import. Note this throw happens *after* the tree is committed. The real ids go
+  two places: `useImportMutation` invalidates the collection / request /
+  environment / globals queries, which refetch, and hands the root and environment
+  ids back to the dialog (see *After the apply* below).
 - **No rollback, and no retry.** The engine write is atomic (validation over the whole
   payload, then one transaction), so a *rejected* payload persisted nothing and the error
   the modal shows is the engine's, naming the item that broke. The engine names it by
@@ -272,6 +274,35 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   preview) is skipped rather than undoing a tree that does not reference it; nothing in the
   response says which. `proxy` has no equivalent - Vayu's proxy config is
   workspace/run-scoped, so it stays a permanent `meta.skipped` tally instead.
+
+### 4. After the apply - `import-report.ts`
+
+The dialog closes on a full success and `announceImport` takes over (issue
+[#2109](https://github.com/athrvk/vayu/issues/2109)). The preview's per-file
+ledger is the one place the loss report is drawn from, and the dialog discards
+it, so what the user would otherwise have to finish by hand is kept:
+
+- `useImportMutation` resolves with `{ idMap, rootIds }`: each root
+  collection's temp id mapped to the real id the engine minted. That is what the steps below address.
+- One `ImportReport` per applied file (the notice lines, the file-reference
+  needs, the counts) goes into `import-report-store`, keyed by each root
+  collection's real id. A file with nothing to report stores nothing.
+- Every new root is expanded in the sidebar and the first one opens as the
+  active tab.
+- One toast says what arrived: `Imported "Pet Store" - 60 requests, 4 folders`,
+  or `Imported 3 files` for a batch, with `; N things to finish` appended when
+  a report has action-tier lines or file references to relink. When there is a
+  report, the toast's one action opens the collection on its Info tab, even
+  when the user is already inside it on another sub-tab.
+- The Info tab of each new root carries an **Import notes** callout
+  (`CollectionDetail/ImportNotesCallout.tsx`): the same notice lines and
+  file-reference list the preview drew, under the file's name. It stays, past
+  the toast and the session's other tabs, until its dismiss button is pressed;
+  that drops the report for every root the file created. It is in memory only,
+  so a restart clears it.
+
+A failed apply is unchanged: the dialog stays open with a per-row outcome and
+none of the above happens, since part of the batch may not have landed.
 
 **The flattening exists twice, and the two are pinned to each other.**
 `POST /import` has no preview to show, so it flattens engine-side
@@ -484,6 +515,7 @@ the environment drafts). Honoring is **per-parser**:
 | Postman v2.1 / v2.0 | Honored - scripts emitted as `""` when false | Moot - collection files embed no environments |
 | Postman Environment / Globals | Moot - this shape carries no scripts | Honored - gates both `environments` and `globals` at parse time, so the Preview counts report 0 |
 | Insomnia v4 | Honored | Honored - `environment` resources become `EnvironmentDraft`s |
+| Insomnia v5 | Honored | Honored - the `environments` object becomes `EnvironmentDraft`s; an environment document carries nothing else |
 | OpenAPI 3.0 | Ignored - never generates scripts | Ignored - never generates environments |
 | OpenAPI 2.0 (Swagger) | Ignored | Ignored |
 
