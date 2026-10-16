@@ -32,14 +32,29 @@ export function formatNumber(num: number | undefined | null): string {
 	return num.toLocaleString();
 }
 
+/** Below this a latency is real but would round to "0" at two decimals. */
+const LATENCY_FLOOR_MS = 0.01;
+
 /**
  * A duration in milliseconds as digits, no unit: 2.2749 -> "2.27", 1234 ->
  * "1,234". The caller draws the unit, so a value reads the same in a stat card
- * (unit in its own slot), a table cell and a chart tooltip. How a value under
- * 0.01 prints is #2147's call; here it rounds like any other.
+ * (unit in its own slot), a table cell and a chart tooltip. A measured value
+ * under 0.01 prints as "<0.01" because "0" would claim the request took no
+ * time (#2243); only an exact 0 prints as "0".
  */
 export function formatMs(ms: number | undefined | null): string {
+	if (!isMissing(ms) && ms > 0 && ms < LATENCY_FLOOR_MS) return `<${LATENCY_FLOOR_MS}`;
 	return formatMagnitude(ms);
+}
+
+/**
+ * A duration in milliseconds with its unit: `formatMs` digits and "ms" up to
+ * 999, then seconds with two decimals from 1000 ms ("1.23s"). The rule behind
+ * every chart tooltip and any surface that has no slot of its own for a unit.
+ */
+export function formatLatency(ms: number | undefined | null): string {
+	if (!isMissing(ms) && Math.round(ms) >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+	return `${formatMs(ms)}ms`;
 }
 
 /** A per-second rate as digits, no unit, by the same digits rule as `formatMs`. */

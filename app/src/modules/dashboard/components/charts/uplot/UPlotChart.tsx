@@ -87,7 +87,8 @@ export interface UPlotChartProps {
 	 * the cursor), and defaults the tooltip to 0.5 s resolution.
 	 */
 	xTime?: boolean;
-	yFormat?: (v: number) => string;
+	/** Gets every tick of the axis as well, so a label can pick its decimals from the spacing. */
+	yFormat?: (v: number, splits: readonly number[]) => string;
 	y2Format?: (v: number) => string;
 	/** Reference markers: breakpoint (vertical), target/SLO (horizontal). */
 	markers?: Marker[];
@@ -266,7 +267,7 @@ export function UPlotChart({
 					...(xTime ? { incrs: TIME_INCRS } : {}),
 					values: (_u, sp) => sp.map((v) => xFormat(v)),
 				},
-				{ ...axisBase, scale: "y", values: (_u, sp) => sp.map((v) => yFormat(v)) },
+				{ ...axisBase, scale: "y", values: (_u, sp) => sp.map((v) => yFormat(v, sp)) },
 			];
 			if (hasY2) {
 				axes.push({
