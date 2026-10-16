@@ -34,7 +34,7 @@
  * cell reaches is the request it was substituted into, which the run stores
  * with the rest of that step's exchange (issue #731).
  * A **load** run binds the same rows differently - one per iteration, from a
- * cursor every virtual user shares, wrapping for as long as the duration lasts
+ * cursor every virtual user shares, wrapping for as long as the run lasts
  * (issue #449) - which is why the picker is told which run it is for rather
  * than describing one of the two and being wrong about the other.
  *
@@ -57,9 +57,14 @@
  * because it decides what "failed" means for *this* run's report, which is
  * where the report records it.
  *
- * Only the three closed-loop modes exist for a scenario. `constant_rps` is a
- * `400` engine-side - an open-loop arrival rate over a multi-step sequence is an
- * arrival-rate executor, which Vayu does not implement - so it is not offered.
+ * Only the three closed-loop modes exist for a scenario (`SCENARIO_LOAD_MODES`),
+ * so the load profile is the request dialog's own `ProfilePicker` and
+ * `ProfileFields` narrowed to them. `constant_rps` is a `400` engine-side - an
+ * open-loop arrival rate over a multi-step sequence is an arrival-rate executor,
+ * which Vayu does not implement - and Capacity Discovery judges one p99 where a
+ * sequence has one per step. The profile starts from the dialog's own numbers
+ * and is neither read from nor written to the request dialog's saved config:
+ * that memo describes one request, and a sequence multiplies its load.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -84,10 +89,10 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import { CONCURRENCY_LABEL } from "@/constants/load-test-modes";
+import { resolveLoadTestLimits } from "@/constants/load-test";
 import { Callout, NumberField } from "@/components/shared";
 import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
-import { useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
+import { useClientSettingsStore, useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
@@ -108,6 +113,21 @@ import {
 	CustomBudgetHint,
 	CustomBudgetRows,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/CustomBudgetRows";
+import { ProfileFields } from "@/modules/request-builder/components/LoadTestConfigDialog/ProfileFields";
+import {
+	ProfilePicker,
+	type ProfilePickerCopy,
+} from "@/modules/request-builder/components/LoadTestConfigDialog/ProfilePicker";
+import {
+	SCENARIO_LOAD_MODES,
+	SCENARIO_PROFILE_DEFAULTS,
+	isScenarioLoadMode,
+	scenarioLoadFields,
+	scenarioProfileError,
+	type ScenarioLoadProfile,
+} from "@/modules/request-builder/components/LoadTestConfigDialog/scenarioProfile";
+import { summarise } from "@/modules/request-builder/components/LoadTestConfigDialog/summary";
+import type { LoadTestProfile } from "@/modules/request-builder/components/LoadTestConfigDialog/useSavedLoadTestConfig";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 import { collectSubtreeIds } from "./tree-utils";
 
@@ -130,14 +150,16 @@ export interface RunCollectionDialogProps {
 const MIN_ITERATIONS = 1;
 
 /**
- * The virtual-user count a load run starts from, and the wall-clock length.
- *
- * Modest on purpose: a sequence multiplies its own step count by the VU count,
- * so a default borrowed from the single-request dialog would aim a folder's
- * worth of requests at a target the user has not yet decided to load.
+ * Fixed Iterations counts passes through the sequence here, not requests, and
+ * `LOAD_TEST_MODES` is not reworded for it: `loadTestModeLabel` names stored
+ * runs on every other screen.
  */
-const DEFAULT_VIRTUAL_USERS = "10";
-const DEFAULT_DURATION_SECONDS = "30";
+const SEQUENCE_PROFILE_COPY: ProfilePickerCopy = {
+	iterations: {
+		label: "Fixed passes",
+		description: "Walk the sequence an exact number of times in total, then stop.",
+	},
+};
 
 /**
  * The `elements` run override (issue #1495). `timers` applies to every
@@ -158,6 +180,22 @@ const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
 
 const NO_COLUMNS: string[] = [];
+
+/**
+ * The line under the title. Per mode when the switch is on: Fixed passes ends
+ * on a pass count, so "repeating for the duration" would be untrue of it.
+ */
+function describeRun(loadTest: boolean, mode: ScenarioLoadProfile["mode"]): string {
+	const carry = "Variables and cookies carry from one step to the next.";
+	if (!loadTest) {
+		return `Every request in this collection runs in order, once per iteration. ${carry}`;
+	}
+	const until =
+		mode === "iterations"
+			? "taking passes until the total is reached"
+			: "repeating for the duration";
+	return `Each virtual user walks every request in this collection in order, ${until}. ${carry}`;
+}
 
 export default function RunCollectionDialog({
 	collection,
@@ -192,8 +230,13 @@ export default function RunCollectionDialog({
 	 * would make every undocumented field look like a broken test.
 	 */
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
-	const [virtualUsers, setVirtualUsers] = useState(DEFAULT_VIRTUAL_USERS);
-	const [durationSeconds, setDurationSeconds] = useState(DEFAULT_DURATION_SECONDS);
+	const [profile, setProfile] = useState<ScenarioLoadProfile>(SCENARIO_PROFILE_DEFAULTS);
+	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
+	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
+	// The mode is kept out of the patch: `ProfileFields` edits numbers only, and
+	// the picker's handler below is the one place a mode is chosen (and narrowed).
+	const updateProfile = (patch: Partial<LoadTestProfile>) =>
+		setProfile((prev) => ({ ...prev, ...patch, mode: prev.mode }));
 	const [timersOverride, setTimersOverride] = useState<"asConfigured" | "off">(TIMERS_DEFAULT);
 	const [scriptsOverride, setScriptsOverride] = useState<
 		"asMarked" | "allInline" | "allDeferred"
@@ -293,21 +336,18 @@ export default function RunCollectionDialog({
 			: Number.isInteger(explicitIterations) && explicitIterations >= MIN_ITERATIONS;
 
 	/*
-	 * A load run is bounded by wall-clock, not by passes, so `iterations` above
-	 * stops applying to it - the sequence repeats until the duration is up.
-	 * Both of these are refused here rather than sent and refused engine-side:
-	 * the user can see what is wrong while the field still has focus.
+	 * A load run is shaped by its profile, not by the design-mode `iterations`
+	 * above (which stops applying to it - Fixed passes has a pass count of its
+	 * own). Refused here rather than sent and refused engine-side, and against
+	 * the Settings ceilings, which the engine does not know: the user can see
+	 * what is wrong while the field still has focus.
 	 */
-	const virtualUserCount = Number(virtualUsers);
-	const virtualUsersValid =
-		Number.isInteger(virtualUserCount) && virtualUserCount >= 1 && virtualUserCount <= 100000;
-	const durationValue = Number(durationSeconds);
-	const durationValid = Number.isFinite(durationValue) && durationValue > 0;
+	const profileError = scenarioProfileError(profile, limits);
 
 	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
 
 	const canRun = loadTest
-		? virtualUsersValid && durationValid && !dataFileError && !budgetsError
+		? !profileError && !dataFileError && !budgetsError
 		: iterationsValid && !dataFileError && !budgetsError;
 
 	/*
@@ -370,6 +410,7 @@ export default function RunCollectionDialog({
 				? { scripts: scriptsOverride }
 				: {}),
 		};
+		const loadFields = loadTest ? scenarioLoadFields(profile) : null;
 		startRun.mutate(
 			{
 				/*
@@ -378,18 +419,11 @@ export default function RunCollectionDialog({
 				 * meaning by carrying no mode at all rather than by carrying a
 				 * flag that says "not a load run".
 				 *
-				 * `constant_concurrency` and nothing else for now: a ramp is a
-				 * second pair of fields for a shape nobody has asked for yet,
-				 * and `iterations` mode is what the design-mode path already
-				 * expresses more directly.
+				 * `iterations` here is the top-level total of passes (Fixed passes);
+				 * the design-mode count rides inside `scenario` below, and only
+				 * when the switch is off.
 				 */
-				...(loadTest
-					? {
-							mode: "constant_concurrency" as const,
-							concurrency: virtualUserCount,
-							duration: `${durationSeconds.trim()}s`,
-						}
-					: {}),
+				...loadFields,
 				...(Object.keys(elementsOverride).length > 0 ? { elements: elementsOverride } : {}),
 				scenario: {
 					source: "collection",
@@ -398,8 +432,8 @@ export default function RunCollectionDialog({
 					// Omitted, not sent as the row count: the engine resolves the
 					// default, and a client that computed its own would be a
 					// second copy of a rule only one side can enforce.
-					// A load run repeats until its duration is up, so the pass
-					// count has nothing to say about it.
+					// A load run shapes itself from the profile (Fixed passes sends
+					// its own top-level total), so this count is design-mode only.
 					...(!loadTest && explicitIterations !== undefined
 						? { iterations: explicitIterations }
 						: {}),
@@ -448,11 +482,11 @@ export default function RunCollectionDialog({
 					// degraded view, it is a permanently empty one - so the live
 					// surface follows the executor: the dashboard for a load run,
 					// the runner tab for a sequence.
-					if (loadTest) {
+					if (loadFields) {
+						// The object the engine was sent, so the dashboard shows the
+						// mode and ramp the run was started with.
 						useDashboardStore.getState().startRun(runId, {
-							mode: "constant_concurrency",
-							concurrency: virtualUserCount,
-							duration: `${durationSeconds.trim()}s`,
+							...loadFields,
 							dataRowCount: dataFile?.parsed.rows.length,
 							dataFileName: dataFile?.fileName,
 							dataFileHash: dataFile?.hash,
@@ -476,10 +510,7 @@ export default function RunCollectionDialog({
 			<DialogContent className="sm:max-w-xl">
 				<DialogHeader>
 					<DialogTitle>Run {collection.name}</DialogTitle>
-					<DialogDescription>
-						Every request in this collection runs in order, once per iteration.
-						Variables and cookies carry from one step to the next.
-					</DialogDescription>
+					<DialogDescription>{describeRun(loadTest, profile.mode)}</DialogDescription>
 				</DialogHeader>
 
 				<DialogBody className="space-y-4 py-2">
@@ -503,8 +534,7 @@ export default function RunCollectionDialog({
 							Load test
 							<span className="block text-xs font-normal text-muted-foreground">
 								Run the sequence as a load test: each virtual user walks it
-								independently, with its own cookies and its own data row, for the
-								duration.
+								independently, with its own cookies and its own data row.
 							</span>
 						</Label>
 						<Switch
@@ -516,55 +546,36 @@ export default function RunCollectionDialog({
 
 					{loadTest && (
 						<>
-							<div className="flex items-center justify-between gap-4">
-								<Label htmlFor="run-collection-vus" className="leading-snug">
-									{CONCURRENCY_LABEL}
-									<span className="block text-xs font-normal text-muted-foreground">
-										How many walk the sequence at once. It is also the only
-										limit on in-flight requests.
-									</span>
-								</Label>
-								<Input
-									id="run-collection-vus"
-									type="number"
-									min={1}
-									step={1}
-									value={virtualUsers}
-									onChange={(e) => setVirtualUsers(e.target.value)}
-									// Fixed rem, not `w-24`: the field holds a virtual-user
-									// count, a text measure that should not narrow at the
-									// Default density the way `w-24`'s `--spacing` unit does.
-									className="w-[6rem] shrink-0"
-									aria-invalid={!virtualUsersValid}
+							<div className="space-y-1.5">
+								<Label className="text-xs">Load profile</Label>
+								<ProfilePicker
+									value={profile.mode}
+									onChange={(next) => {
+										if (isScenarioLoadMode(next)) {
+											setProfile((prev) => ({ ...prev, mode: next }));
+										}
+									}}
+									modes={SCENARIO_LOAD_MODES}
+									copy={SEQUENCE_PROFILE_COPY}
+									disabled={startRun.isPending}
 								/>
 							</div>
 
-							<div className="flex items-center justify-between gap-4">
-								<Label htmlFor="run-collection-duration" className="leading-snug">
-									Duration
-									<span className="block text-xs font-normal text-muted-foreground">
-										Seconds. The sequence repeats until the time is up.
-									</span>
-								</Label>
-								<Input
-									id="run-collection-duration"
-									type="number"
-									min={1}
-									step={1}
-									value={durationSeconds}
-									onChange={(e) => setDurationSeconds(e.target.value)}
-									// Fixed rem, not `w-24`: same text-measure reasoning as
-									// virtual users above.
-									className="w-[6rem] shrink-0"
-									aria-invalid={!durationValid}
-								/>
-							</div>
+							<ProfileFields
+								profile={profile}
+								onChange={updateProfile}
+								limits={limits}
+								isStreamingRequest={false}
+								iterationsLabel="Passes through the sequence"
+							/>
 
-							{(!virtualUsersValid || !durationValid) && (
+							<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
+								{summarise(profile, profileError !== null, "sequence")}
+							</p>
+
+							{profileError && (
 								<Callout severity="blocking" title="Load test">
-									{!virtualUsersValid
-										? `${CONCURRENCY_LABEL} must be a whole number of 1 or more.`
-										: "Duration must be greater than zero seconds."}
+									{profileError}
 								</Callout>
 							)}
 
@@ -726,8 +737,8 @@ export default function RunCollectionDialog({
 						</Callout>
 					)}
 
-					{/* A load run is bounded by its duration, so the pass count has
-					    nothing to say about it and is hidden rather than shown
+					{/* A load run takes its count from the profile above, so this
+					    design-mode pass count is hidden rather than shown
 					    disabled - a greyed field still reads as "this applies, but
 					    not now". */}
 					{!loadTest && (

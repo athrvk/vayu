@@ -21,7 +21,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
-import { useDashboardStore, useDataFileStore, useSessionStore, useTabsStore } from "@/stores";
+import {
+	useClientSettingsStore,
+	useDashboardStore,
+	useDataFileStore,
+	useSessionStore,
+	useTabsStore,
+} from "@/stores";
+import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
+import { STORAGE_KEYS } from "@/constants/storage-keys";
 import type { Collection, Request } from "@/types";
 
 const mutate = vi.fn();
@@ -117,6 +125,8 @@ beforeEach(() => {
 	startRunState.error = null;
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useSessionStore.setState({ activeEnvironmentId: null });
+	useClientSettingsStore.getState().setLoadTestCeilings({ ...DEFAULT_LOAD_TEST_CEILINGS });
+	localStorage.removeItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
 });
 
 describe("the payload", () => {
@@ -580,6 +590,9 @@ describe("running the sequence as a load test", () => {
 				target: { value: bad },
 			});
 			expect(run).toHaveProperty("disabled", true);
+			expect(
+				screen.getByText(/virtual users must be a whole number from 1 to/i)
+			).toBeTruthy();
 		}
 		fireEvent.change(screen.getByRole("spinbutton", { name: /virtual users/i }), {
 			target: { value: "5" },
@@ -588,10 +601,236 @@ describe("running the sequence as a load test", () => {
 			target: { value: "0" },
 		});
 		expect(run).toHaveProperty("disabled", true);
-		expect(screen.getByText(/greater than zero seconds/i)).toBeTruthy();
+		expect(screen.getByText(/duration must be a number from 1 to/i)).toBeTruthy();
 
 		fireEvent.click(run);
 		expect(mutate).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * The load profile of a collection run (issue #2137): the same picker and
+ * fields the request dialog uses, narrowed to the three modes a scenario
+ * accepts, and spelled the way `StartScenarioRunRequest` reads them - camelCase
+ * with `"Ns"` durations, not the snake_case of a single-request payload, which
+ * the engine would ignore here.
+ */
+describe("the load profile of a sequence", () => {
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+	const profile = () => screen.getByRole("radiogroup", { name: /load profile/i });
+	const pick = (name: RegExp) => fireEvent.click(within(profile()).getByRole("radio", { name }));
+	const setField = (name: RegExp, value: string) =>
+		fireEvent.change(screen.getByRole("spinbutton", { name }), { target: { value } });
+	const run = () => fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+	const openLoad = () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+	};
+
+	it("offers the three modes a scenario accepts and none the engine refuses", () => {
+		openLoad();
+		const names = within(profile())
+			.getAllByRole("radio")
+			.map((r) => r.textContent);
+		expect(names).toHaveLength(3);
+		expect(names.join(" ")).not.toMatch(/constant rps|capacity/i);
+		expect(
+			within(profile()).getByRole("radio", { name: /constant virtual users/i })
+		).toHaveAttribute("aria-checked", "true");
+	});
+
+	it("starts a plain run as 10 virtual users for 30s, whatever the request dialog saved", () => {
+		localStorage.setItem(
+			STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+			JSON.stringify({ mode: "ramp_up", concurrency: 7, duration: 99 })
+		);
+		openLoad();
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({
+			mode: "constant_concurrency",
+			concurrency: 10,
+			duration: "30s",
+		});
+		expect(payload).not.toHaveProperty("iterations");
+		expect(payload).not.toHaveProperty("startConcurrency");
+		expect(payload).not.toHaveProperty("rampUpDuration");
+	});
+
+	it("leaves the request dialog's saved config exactly as it was", () => {
+		const memo = JSON.stringify({ mode: "capacity", concurrency: 7 });
+		localStorage.setItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG, memo);
+		openLoad();
+		pick(/ramp-up/i);
+		run();
+
+		expect(localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG)).toBe(memo);
+	});
+
+	it("sends a ramp with its start, its ramp length and the total, camelCase", () => {
+		openLoad();
+		pick(/ramp-up/i);
+		setField(/^target virtual users/i, "20");
+		setField(/start from/i, "2");
+		setField(/ramp duration/i, "10");
+		setField(/total duration/i, "40");
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({
+			mode: "ramp_up",
+			concurrency: 20,
+			startConcurrency: 2,
+			rampUpDuration: "10s",
+			duration: "40s",
+		});
+		expect(payload).not.toHaveProperty("iterations");
+		expect(payload).not.toHaveProperty("ramp_duration_seconds");
+		expect(payload).not.toHaveProperty("start_concurrency");
+	});
+
+	it("sends fixed passes as the top-level total, with no duration", () => {
+		openLoad();
+		pick(/fixed passes/i);
+		setField(/passes through the sequence/i, "60");
+		setField(/^virtual users/i, "4");
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({ mode: "iterations", iterations: 60, concurrency: 4 });
+		expect(payload).not.toHaveProperty("duration");
+	});
+
+	it("keeps the design-mode pass count out of a load run's total, and the reverse", () => {
+		// `scenario.iterations` is the sequential runner's count and top-level
+		// `iterations` the load executor's; one state each, sent by switch.
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		setField(/iterations/i, "7");
+		enableLoadTest();
+		pick(/fixed passes/i);
+		setField(/passes through the sequence/i, "60");
+		run();
+
+		expect(mutate.mock.calls[0][0].iterations).toBe(60);
+		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
+
+		mutate.mockClear();
+		enableLoadTest();
+		run();
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("mode");
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("iterations");
+		expect(mutate.mock.calls[0][0].scenario.iterations).toBe(7);
+	});
+
+	it("seeds the dashboard from the same mode and ramp fields it sent", () => {
+		openLoad();
+		pick(/ramp-up/i);
+		setField(/^target virtual users/i, "20");
+		setField(/start from/i, "2");
+		setField(/total duration/i, "40");
+		run();
+		succeedWith("run_ramp_1");
+
+		const sent = mutate.mock.calls[0][0];
+		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
+			mode: "ramp_up",
+			concurrency: sent.concurrency,
+			startConcurrency: sent.startConcurrency,
+			rampUpDuration: sent.rampUpDuration,
+			duration: sent.duration,
+		});
+	});
+
+	it("seeds the dashboard with the pass total for fixed passes", () => {
+		openLoad();
+		pick(/fixed passes/i);
+		setField(/passes through the sequence/i, "60");
+		run();
+		succeedWith("run_passes_1");
+
+		const seed = useDashboardStore.getState().loadTestConfig;
+		expect(seed).toMatchObject({ mode: "iterations", iterations: 60 });
+		expect(seed?.duration).toBeUndefined();
+	});
+
+	it("describes the run per switch position and per mode", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		const description = () => document.querySelector('[data-slot="dialog-description"]');
+		expect(description()?.textContent).toBe(
+			"Every request in this collection runs in order, once per iteration. Variables and cookies carry from one step to the next."
+		);
+
+		enableLoadTest();
+		expect(description()?.textContent).toBe(
+			"Each virtual user walks every request in this collection in order, repeating for the duration. Variables and cookies carry from one step to the next."
+		);
+
+		pick(/fixed passes/i);
+		expect(description()?.textContent).toMatch(/until the total is reached/);
+		expect(description()?.textContent).not.toMatch(/for the duration/);
+	});
+
+	it("never calls a pass through the sequence a request", () => {
+		openLoad();
+		pick(/fixed passes/i);
+
+		expect(screen.queryByLabelText(/^requests$/i)).toBeNull();
+		expect(
+			screen.getByRole("spinbutton", { name: /passes through the sequence/i })
+		).toBeTruthy();
+		const summary = screen.getByText(/^Runs the sequence 100 times across 10 virtual users/);
+		expect(summary.textContent).not.toMatch(/request/i);
+	});
+
+	it("refuses a count above the Settings ceiling before sending anything", () => {
+		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 50 });
+		openLoad();
+		setField(/virtual users/i, "51");
+
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+		expect(screen.getByText(/virtual users must be a whole number from 1 to 50/i)).toBeTruthy();
+		run();
+		expect(mutate).not.toHaveBeenCalled();
+
+		setField(/virtual users/i, "50");
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", false);
+	});
+
+	it("refuses passes above the ceiling and a duration above it", () => {
+		useClientSettingsStore
+			.getState()
+			.setLoadTestCeilings({ iterations: 500, durationSeconds: 120 });
+		openLoad();
+		setField(/duration/i, "121");
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+
+		setField(/duration/i, "120");
+		pick(/fixed passes/i);
+		setField(/passes through the sequence/i, "501");
+		expect(screen.getByRole("button", { name: /^run$/i })).toHaveProperty("disabled", true);
+		expect(
+			screen.getByText(/passes through the sequence must be a whole number/i)
+		).toBeTruthy();
+	});
+
+	it("refuses a ramp that does not fit its duration or climbs down", () => {
+		openLoad();
+		pick(/ramp-up/i);
+		const runButton = screen.getByRole("button", { name: /^run$/i });
+
+		setField(/ramp duration/i, "60");
+		setField(/total duration/i, "30");
+		expect(runButton).toHaveProperty("disabled", true);
+		expect(screen.getByText(/must be at least the ramp duration/i)).toBeTruthy();
+
+		setField(/total duration/i, "90");
+		expect(runButton).toHaveProperty("disabled", false);
+
+		setField(/start from/i, "50");
+		expect(runButton).toHaveProperty("disabled", true);
+		expect(screen.getByText(/would ramp down/i)).toBeTruthy();
 	});
 });
 
