@@ -32,7 +32,7 @@ import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Badge, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { ElementTally, TruncatedText } from "@/components/shared";
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
 
@@ -42,11 +42,6 @@ export interface ScenarioStepsTabProps {
 	virtualUsers?: number;
 	iterationsCompleted?: number;
 	iterationsAbandoned?: number;
-}
-
-/** One latency cell; a loopback step's p50 is often a fraction of a millisecond. */
-function latency(ms: number) {
-	return `${formatMs(ms)}ms`;
 }
 
 /**
@@ -220,16 +215,16 @@ export default function ScenarioStepsTab({
 										)}
 									</td>
 									<td className="px-3 py-2 text-right font-mono">
-										{latency(step.latency.p50)}
+										{formatLatency(step.latency.p50)}
 									</td>
 									<td className="px-3 py-2 text-right font-mono">
-										{latency(step.latency.p95)}
+										{formatLatency(step.latency.p95)}
 									</td>
 									<td className="px-3 py-2 text-right font-mono">
-										{latency(step.latency.p99)}
+										{formatLatency(step.latency.p99)}
 									</td>
 									<td className="px-3 py-2 text-right font-mono">
-										{latency(step.latency.max)}
+										{formatLatency(step.latency.max)}
 									</td>
 								</tr>
 								{/* One row per non-script element this step compiled and

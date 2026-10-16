@@ -24,7 +24,7 @@ const restoreIntl = vi.hoisted(() => {
 
 afterAll(restoreIntl);
 
-import { formatMs, formatPercent, formatRate } from "./format-number";
+import { formatLatency, formatMs, formatPercent, formatRate } from "./format-number";
 
 describe("formatMs and formatRate: two decimals under 10, whole numbers above", () => {
 	const cases: Array<[string, number | null | undefined, string]> = [
@@ -48,6 +48,34 @@ describe("formatMs and formatRate: two decimals under 10, whole numbers above", 
 	it.each(cases)("%s", (_name, input, expected) => {
 		expect(formatMs(input)).toBe(expected);
 		expect(formatRate(input)).toBe(expected);
+	});
+});
+
+describe("formatMs and formatLatency: a measured sub-0.01 ms value is never 0", () => {
+	const cases: Array<[number | null | undefined, string, string]> = [
+		[0.0004, "<0.01", "<0.01ms"],
+		[0.0099, "<0.01", "<0.01ms"],
+		[0.01, "0.01", "0.01ms"],
+		[0.42, "0.42", "0.42ms"],
+		[2.8631, "2.86", "2.86ms"],
+		[9.99, "9.99", "9.99ms"],
+		[10, "10", "10ms"],
+		[999, "999", "999ms"],
+		[999.6, "1,000", "1.00s"],
+		[1000, "1,000", "1.00s"],
+		[12345.6, "12,346", "12.35s"],
+		[0, "0", "0ms"],
+		[null, "0", "0ms"],
+		[undefined, "0", "0ms"],
+	];
+
+	it.each(cases)("%s", (input, digits, withUnit) => {
+		expect(formatMs(input)).toBe(digits);
+		expect(formatLatency(input)).toBe(withUnit);
+	});
+
+	it("leaves a sub-0.01 rate to the plain digits rule", () => {
+		expect(formatRate(0.0004)).toBe("0");
 	});
 });
 

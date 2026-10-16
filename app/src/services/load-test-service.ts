@@ -22,7 +22,7 @@ import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber } from "@/lib/format-number";
 import { isRunInProgress } from "@/lib/run-status";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
@@ -59,7 +59,7 @@ function runSummaryLine(report: RunReport): string | null {
 	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
 		return null;
 	}
-	return `${formatNumber(requests)} requests, p95 ${Math.round(p95)} ms, ${errorRate.toFixed(1)}% errors`;
+	return `${formatNumber(requests)} requests, p95 ${formatMs(p95)} ms, ${errorRate.toFixed(1)}% errors`;
 }
 
 /**

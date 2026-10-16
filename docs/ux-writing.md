@@ -94,7 +94,13 @@ scattered strings land the same way.
   whole numbers above, thousands separators), `formatPercent` for percentages
   (one decimal). They return digits only; the caller adds the unit, so a p99
   reads `2.27ms` in the History tile, the step table, the stat card and a chart
-  tooltip. Do not `toFixed` a new latency, rate or percentage for display.
+  tooltip. A measured latency under 0.01 ms reads `<0.01`, never `0`: a
+  request that took 0.4 ms did not take no time, and only an exact 0 prints
+  as `0`. `formatLatency` carries the unit for a surface with no slot of its
+  own (`999ms`, then `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
+  with `axisMs` (`0.5ms`, `2ms`, `1.5s`), which takes its decimals from the tick
+  spacing so no two neighbouring ticks print alike. Do not `toFixed` a new
+  latency, rate or percentage for display.
 - **Truncation.**
   - URLs truncate in the middle, keeping the host and the last path segment.
   - Variable names and file paths truncate keeping the final segment (never

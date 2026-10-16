@@ -5,17 +5,47 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatMs, formatPercent, formatRate } from "@/lib/format-number";
+import { formatLatency, formatPercent, formatRate } from "@/lib/format-number";
 
 /** Shared value/axis formatters for the centralized charts. */
 
-export const fmtMs = (v: number | null | undefined): string => {
-	if (v == null) return "-";
-	return v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${formatMs(v)}ms`;
-};
+export const fmtMs = (v: number | null | undefined): string => (v == null ? "-" : formatLatency(v));
 
-export const axisMs = (v: number): string =>
-	v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
+/**
+ * Decimals needed to write `step` exactly, up to 4. A tick sequence printed
+ * with this many places cannot repeat a label, which a fixed round could: over
+ * 0 to 3 ms, `Math.round` read 0.5 / 1 / 1.5 / 2 as "1 1 2 2".
+ */
+function decimalsFor(step: number): number {
+	for (let digits = 0; digits < 4; digits++) {
+		const scaled = step * 10 ** digits;
+		if (Math.abs(scaled - Math.round(scaled)) < 1e-6) return digits;
+	}
+	return 4;
+}
+
+/** The smallest gap between neighbouring ticks, or the lone tick's own size. */
+function tickStep(splits: readonly number[]): number {
+	let step = Infinity;
+	for (let i = 1; i < splits.length; i++) {
+		const gap = Math.abs(splits[i] - splits[i - 1]);
+		if (gap > 0) step = Math.min(step, gap);
+	}
+	return Number.isFinite(step) ? step : Math.abs(splits[0]) || 1;
+}
+
+/**
+ * A latency axis tick with its unit. uPlot hands the formatter the whole tick
+ * array, so the decimals come from the tick spacing rather than each value
+ * alone, and the unit from the largest tick: an axis reads either all "ms" or
+ * all "s", never "0" beside "1s". Without `splits` the value stands alone.
+ */
+export const axisMs = (v: number, splits: readonly number[] = [v]): string => {
+	const inSeconds = Math.max(...splits.map(Math.abs)) >= 1000;
+	const scale = inSeconds ? 1000 : 1;
+	const digits = decimalsFor(tickStep(splits) / scale);
+	return `${Number((v / scale).toFixed(digits))}${inSeconds ? "s" : "ms"}`;
+};
 
 export const fmtRate = (v: number | null | undefined): string =>
 	v == null ? "-" : `${formatRate(v)}/s`;
