@@ -5,7 +5,7 @@ description: >-
 
 # State Management
 
-The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, client settings, toasts, import modal) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.
+The Vayu app uses a dual-state management approach: **Zustand** for UI state and **TanStack Query** for server state. **Cross-cutting stores** (tabs, layout, session, engine, save, response, dashboard, client settings, toasts, import modal, environment menu) live in `app/src/stores/` and are exported via the barrel `app/src/stores/index.ts`. **Module-local UI stores** co-locate in `app/src/modules/<feature>/<feature>-store.ts` (collections, history, variables, settings) to keep feature-specific UI state decoupled from global app state.
 
 ## Architecture Overview
 
@@ -1358,6 +1358,23 @@ Simple modal state for the collection import dialog.
 const { isOpen, open, close } = useImportModalStore();
 ```
 
+#### `env-switcher-store.ts` - Title Bar Environment Menu
+
+Whether the title bar's environment menu is open (issue #2115). The menu is a Radix
+`DropdownMenu`, which owns its open state unless handed one; `TitleBar`'s `EnvSwitcher`
+binds `open` / `onOpenChange` to this store so a toast action raised elsewhere (the
+import's **Choose environment**) can open it.
+
+**State:**
+```typescript
+{
+  isOpen: boolean
+  setOpen: (open: boolean) => void
+}
+```
+
+**Non-persisted.**
+
 #### `import-report-store.ts` - What An Import Left Undone
 
 The loss report of a successful import, kept after the dialog that showed it
@@ -1366,7 +1383,8 @@ one line each (`importNotices`); on success the dialog resets and that list used
 to go with it. `announceImport` (`modules/collections/import-report.ts`) records
 one `ImportReport` per applied file here, keyed by the **real** id of each root
 collection the file created, so a file that created several roots stores the
-same report under each.
+same report under each. `announceImport` also folds the outcome of the import's
+environment activation (`import-environment.ts`) into the toast it raises.
 
 **State:**
 ```typescript

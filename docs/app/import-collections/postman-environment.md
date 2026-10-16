@@ -120,6 +120,22 @@ For this format that is the whole result, which puts two states on screen no oth
 
 `ImportOrchestrator.run` gained `applyGlobals` (above); its collection loop simply does not execute, and environment creation was already gated on `opts.importEnvironments`. `useImportMutation` also invalidates `queryKeys.globals.all`, without which the imported variables would sit on the engine unread until the next reload.
 
+### Active environment after the apply
+
+An import that creates **exactly one** environment, counted across every file in the batch, and finds **no** active environment on the engine makes that environment active (#2115). Anything else changes nothing: a second environment would be a guess, and an active environment is the user's own choice to override. "None active" is read from a fresh `GET /environments` after the apply (`isActive`), never from the session store, which is a per-window cache of what the engine persists. The decision is `planEnvironmentActivation` in `modules/collections/import-environment.ts`; the activation goes through `useSetActiveEnvironmentMutation`, outside the import mutation, so a refused write is never an import failure.
+
+The result is folded into the import's one toast, joined to its sentence after a `;`:
+
+| Created | Engine has | Outcome |
+|---|---|---|
+| one | none active | activated: `"Staging" is now the active environment` |
+| one | another active | unchanged: `"Production" is still the active environment`, action **Use "Staging"** |
+| several | none active | unchanged: `no environment is active yet`, action **Choose environment** (opens the title bar's environment menu through `env-switcher-store`) |
+| one | none active, write refused | `couldn't make "Staging" the active environment`, action **Choose environment**; the import is still a success and the dialog still closes |
+| several | one active | nothing added |
+
+The toast has a single action slot. When the file also has an import report, **Review import notes** keeps the slot and the environment sentence rides in the message alone. If the engine cannot be asked, nothing is added and nothing is activated.
+
 ## Not covered
 
 - **Workspace dumps.** Postman's _Export Data_ produces a directory of collection *and* environment files. Import takes one file at a time; each file in such a dump imports individually.
@@ -128,6 +144,7 @@ For this format that is the whole result, which puts two states on screen no oth
 
 - `engine/tests/import_parse_test.cpp` - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced), the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
 - `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, that a failed apply never reaches the globals write, that a failed globals write surfaces with the tree already committed, and the globals-last ordering.
-- `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation and the globals cache invalidation.
+- `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation, the globals cache invalidation and `environmentIds` on the mutation's result.
+- `app/src/modules/collections/import-environment.test.ts` and `ImportModal.success.test.tsx` - the activation rule and each toast outcome above.
 - `app/src/modules/collections/ImportModal.environments.test.tsx` - the preview rows for both scopes, the merge notice, the blocked Import, and recovery via the toggle.
 - Fixtures: `app/src/services/importers/__fixtures__/postman-environment.json`, `postman-globals.json`.
