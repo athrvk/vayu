@@ -40,6 +40,7 @@ import {
 	ENGINE_COST_TIP,
 	formatDuration,
 	formatPhaseDuration,
+	isReportedMs,
 } from "@/components/shared/response-viewer/utils";
 import { phaseColor, phasesFromTrace } from "@/components/shared/response-viewer/timing-phases";
 import { Eyebrow, InfoChip } from "@/components/ui";
@@ -131,7 +132,7 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 						tip="Generator-side overhead (perceived − wire). Near-zero for a single request; grows under load."
 					/>
 				)}
-				{timing.engineMs !== undefined && (
+				{isReportedMs(timing.engineMs) && (
 					<TimingStat label="Vayu" value={timing.engineMs} tip={ENGINE_COST_TIP} />
 				)}
 				<TimingStat

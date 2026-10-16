@@ -26,7 +26,7 @@ import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { TimeRow } from "@/lib/time-value";
-import { ENGINE_COST_TIP, formatResponseTime, formatSize } from "./utils";
+import { ENGINE_COST_TIP, formatResponseTime, formatSize, isReportedMs } from "./utils";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
 
@@ -99,10 +99,6 @@ export interface ResponseStatusBarProps {
 	validation?: ResponseValidation;
 	className?: string;
 }
-
-/** A figure the engine reported: absent, NaN and negative all mean "nothing to show". */
-const isReportedMs = (ms: number | undefined): ms is number =>
-	typeof ms === "number" && Number.isFinite(ms) && ms >= 0;
 
 export function ResponseStatusBar({
 	status,

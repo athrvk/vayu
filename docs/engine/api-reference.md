@@ -6019,7 +6019,9 @@ the ninth key and the only one a buffered `/execute` alone carries. It is the
 time from the handler receiving the request to the answer being assembled,
 less the transfer (`wireMs`) and the pre- and post-request scripts
 (`pm.sendRequest` inside them included). What it counts is request
-composition, auth resolution, the cookie jar, residual `{{token}}` resolution,
+composition, auth resolution (an OAuth 2.0 token fetched on first use is
+counted: the engine waits on the identity provider there, and no clock
+separates that wait from the rest), the cookie jar, residual `{{token}}` resolution,
 the element pipeline other than the user's scripts (extractors, assertions,
 metrics) and building the response; `queueWaitMs`, the sliver between the
 engine's stopwatch and libcurl, is part of it. A design send blocks on no
