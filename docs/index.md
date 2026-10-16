@@ -281,7 +281,7 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**77 tools, 5 resources, 4 prompts.** Inspection (`list_collections`,
+**77 tools, 9 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections, saved requests and environments, plus globals and

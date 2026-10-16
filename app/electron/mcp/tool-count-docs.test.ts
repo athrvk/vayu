@@ -7,7 +7,7 @@
 
 /**
  * @file tool-count-docs.test.ts
- * @brief Holds every published tool count to `TOOLS.length`.
+ * @brief Holds every published tool, resource and prompt count to the registry.
  *
  * The registry has grown by tools, never by a page edit: `README.md` said "24
  * typed tools" until it held 68, and `docs/index.md` and the Bruno comparison
@@ -18,11 +18,17 @@
  * whole registry. A count of some *part* of it is written in words - as
  * "Eight tools carry it" already is in `docs/engine/mcp.md` - so a subset does
  * not need an exception here and cannot be mistaken for the total.
+ *
+ * Resources and prompts follow the same rule (#2108): `docs/index.md` said "5
+ * resources" after the registry held eight static ones and a templated run
+ * report. The resource total is the static list plus that one template.
  */
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOC_READING_GUARDS, ROOT_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { PROMPTS } from "./prompts.js";
+import { STATIC_RESOURCES } from "./resources.js";
 import { TOOLS } from "./tools.js";
 
 /** Every page that states how many tools the MCP server exposes. */
@@ -30,6 +36,13 @@ const PAGES = [...DOC_READING_GUARDS.mcpToolCount.paths, ...ROOT_READING_GUARDS.
 
 /** "68 tools", "68 typed tools" - the shape a page states the total in. */
 const COUNT = /(\d+)\s+(?:typed\s+)?tools\b/g;
+
+/** "9 resources", "4 prompts" - the same shape, for the other two registries. */
+const RESOURCE_COUNT = /(\d+)\s+resources\b/g;
+const PROMPT_COUNT = /(\d+)\s+prompts\b/g;
+
+/** The templated `vayu://run/{runId}/report` is listed beside the static ones. */
+const TEMPLATED_RESOURCES = 1;
 
 describe("published tool counts", () => {
 	/*
@@ -51,6 +64,29 @@ describe("published tool counts", () => {
 
 		for (const [, count] of text.matchAll(COUNT)) {
 			expect(Number(count)).toBe(TOOLS.length);
+		}
+	});
+});
+
+describe("published resource and prompt counts", () => {
+	const read = (page: string) => readFileSync(fromRepoRoot(page), "utf8");
+	const statements = (pattern: RegExp) =>
+		PAGES.flatMap((page) => [...read(page).matchAll(pattern)].map((m) => Number(m[1])));
+
+	it("reads pages that actually state a resource count and a prompt count", () => {
+		expect(statements(RESOURCE_COUNT).length).toBeGreaterThanOrEqual(1);
+		expect(statements(PROMPT_COUNT).length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("states the number of resources the server lists", () => {
+		for (const count of statements(RESOURCE_COUNT)) {
+			expect(count).toBe(STATIC_RESOURCES.length + TEMPLATED_RESOURCES);
+		}
+	});
+
+	it("states the number of prompts the server lists", () => {
+		for (const count of statements(PROMPT_COUNT)) {
+			expect(count).toBe(PROMPTS.length);
 		}
 	});
 });
