@@ -74,9 +74,8 @@ export default function RequestTabs() {
 			/*
 			 * First, deliberately. A description is the first thing you want to
 			 * read about a request and the last thing you find at the end of a
-			 * tab row. The badge is `1` for "there is something here" rather than
-			 * a count, which is exactly what Body, Auth, Pre-request, Tests and
-			 * Settings already do - so it needs no new primitive.
+			 * tab row. Its mark is the presence dot (`true`) rather than a count,
+			 * as on Body, Auth and Settings.
 			 */
 			id: "info",
 			label: "Info",
