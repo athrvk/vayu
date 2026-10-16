@@ -80,10 +80,15 @@ describe("PerformanceTab HDR percentile plot", () => {
 	});
 
 	it("hands the plot the user's SLO so its markers judge against it (#2263)", () => {
+		const before = useClientSettingsStore.getState().sloThresholdMs;
 		useClientSettingsStore.setState({ sloThresholdMs: 37 });
-		renderTab(makeReport({ min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 70 }));
+		try {
+			renderTab(makeReport({ min: 1, max: 90, avg: 10, p50: 8, p90: 30, p95: 40, p99: 70 }));
 
-		expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "37");
+			expect(screen.getByTestId("hdr-plot")).toHaveAttribute("data-slo-ms", "37");
+		} finally {
+			useClientSettingsStore.setState({ sloThresholdMs: before });
+		}
 	});
 
 	it("prints min, mean, p50, p95, p99 and max beneath it", () => {
