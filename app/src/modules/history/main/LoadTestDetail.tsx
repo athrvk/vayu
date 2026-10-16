@@ -59,6 +59,7 @@ import {
 	OverviewTab,
 	PerformanceTab,
 	RunComparisonView,
+	RunTrend,
 	SamplesTab,
 	ScenarioStepsTab,
 } from "./components";
@@ -544,6 +545,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									isFetchingMore={isFetchingNextPage}
 									progress={seriesProgress}
 								/>
+								{/* A sibling of the tab, not part of it: the tab is a view of
+								    this run's report, this reads the request's other runs. */}
+								<RunTrend requestId={compareRequestId} openRunId={runId} />
 							</TabsContent>
 
 							{isScenarioLoad && (

@@ -20,3 +20,4 @@ export { default as PerformanceTab } from "./PerformanceTab";
 export { default as SamplesTab } from "./SamplesTab";
 export { default as HistoricalChartsSection } from "./HistoricalChartsSection";
 export { RunEvents } from "./RunEvents";
+export { default as RunTrend } from "./RunTrend";
