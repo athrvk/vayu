@@ -750,6 +750,17 @@ ExchangeInputs inputs) {
     std::vector<vayu::http::CookieWrite> pre_cookie_writes;
     std::vector<vayu::http::CookieWrite> post_cookie_writes;
 
+    // Both script callbacks run through here so `script_ms` is one total, not
+    // a figure each caller would have to remember to add up.
+    const auto timed_script = [&outcome] (const auto& run_script) {
+        const auto started = std::chrono::steady_clock::now ();
+        auto result        = run_script ();
+        outcome.script_ms += std::chrono::duration<double, std::milli> (
+        std::chrono::steady_clock::now () - started)
+                             .count ();
+        return result;
+    };
+
     const auto bind = [&] (vayu::runtime::ScriptContext& ctx,
                       std::vector<vayu::http::CookieWrite>* writes) {
         bind_script_scopes (ctx, scopes, jar, cookie_scope, writes);
@@ -793,16 +804,21 @@ ExchangeInputs inputs) {
             // `for_prerequest` is what makes `pm.request` edits reach the
             // wire; everything below this line - the send, the stored
             // trace, the raw request the app shows - reads the write-back.
-            auto pre_ctx = vayu::runtime::ScriptContext::for_prerequest (outcome.request);
-            bind (pre_ctx, &pre_cookie_writes);
-            return execute_script (engine, script, pre_ctx, "Pre-request");
+            return timed_script ([&] {
+                auto pre_ctx =
+                vayu::runtime::ScriptContext::for_prerequest (outcome.request);
+                bind (pre_ctx, &pre_cookie_writes);
+                return execute_script (engine, script, pre_ctx, "Pre-request");
+            });
         },
         .run_post_script =
         [&] (const std::string& script) {
-            auto post_ctx =
-            vayu::runtime::ScriptContext::for_test (outcome.request, outcome.response);
-            bind (post_ctx, &post_cookie_writes);
-            return execute_script (engine, script, post_ctx, "Post-request");
+            return timed_script ([&] {
+                auto post_ctx = vayu::runtime::ScriptContext::for_test (
+                outcome.request, outcome.response);
+                bind (post_ctx, &post_cookie_writes);
+                return execute_script (engine, script, post_ctx, "Post-request");
+            });
         },
         .pre_script_result  = outcome.pre_script_result,
         .post_script_result = outcome.post_script_result,

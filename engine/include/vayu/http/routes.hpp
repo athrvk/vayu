@@ -1316,7 +1316,11 @@ const nlohmann::json& scripts = nlohmann::json::object (),
 /// This exchange's element outcomes (issue #1514), the same array
 /// `build_response_json` also returns - one object, two homes, on the
 /// `scripts` precedent above. An empty array writes no node.
-const nlohmann::json& elements = nlohmann::json::array ());
+const nlohmann::json& elements = nlohmann::json::array (),
+/// `timing.engineMs` of the live body (issue #2132), stored flat on the trace
+/// beside `totalMs` so a restored response shows the figure the live one did.
+/// Absent for a send that measured none: a stream, the auth-failure reply.
+std::optional<double> engine_ms = std::nullopt);
 
 /** Where one `GET /runs/:id/live` stream has got to between polls. */
 struct LiveMetricsCursor {

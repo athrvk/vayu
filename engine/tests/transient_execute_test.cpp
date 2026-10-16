@@ -256,6 +256,33 @@ TEST_F (RecordDesignResultTest, ARecordedExecutionStoresTheTraceAndCompletesTheR
     EXPECT_EQ (row->status, vayu::RunStatus::Completed);
 }
 
+// `engineMs` (#2132) rides the trace flat, beside `totalMs`, when the caller
+// measured one; absent otherwise, which is also what every row stored before
+// the key reads as.
+TEST_F (RecordDesignResultTest, AMeasuredEngineCostIsStoredFlatOnTheTrace) {
+    const auto id = seed_running_run ("run_engine_cost");
+
+    record_design_result (*db_, id, sent_request (), ok_response (), nullptr,
+    std::nullopt, nlohmann::json::object (), nlohmann::json::array (), 12.5);
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    const auto trace = json::parse (results[0].trace_data);
+    ASSERT_TRUE (trace.contains ("engineMs")) << trace.dump (2);
+    EXPECT_DOUBLE_EQ (trace["engineMs"].get<double> (), 12.5);
+    EXPECT_FALSE (trace["response"].contains ("engineMs")) << trace.dump (2);
+}
+
+TEST_F (RecordDesignResultTest, AnUnmeasuredRecordStoresNoEngineCost) {
+    const auto id = seed_running_run ("run_no_engine_cost");
+
+    record_design_result (*db_, id, sent_request (), ok_response ());
+
+    auto results = db_->get_results (id);
+    ASSERT_EQ (results.size (), 1u);
+    EXPECT_FALSE (json::parse (results[0].trace_data).contains ("engineMs"));
+}
+
 // The non-streaming path, unchanged by issue #573: no `events` node, and the
 // terminal status still comes from the response alone. This is the golden half
 // of the streaming work - a stream-shaped trace on an ordinary send would break

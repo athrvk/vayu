@@ -510,6 +510,11 @@ struct ExchangeOutcome {
     /// exchange with no elements at all, and for one the pre-request script
     /// skipped before `step.after` ran.
     std::vector<vayu::core::ElementOutcome> element_outcomes;
+    /// Wall time spent inside the pre- and post-request script runs together
+    /// (issue #2132), `pm.sendRequest` included. Read by `POST /execute`, which
+    /// subtracts it from the handler's elapsed time to report `timing.engineMs`
+    /// as Vayu's own cost; a collection run does not read it.
+    double script_ms = 0.0;
     /**
      * Whether the request was actually sent.
      *
