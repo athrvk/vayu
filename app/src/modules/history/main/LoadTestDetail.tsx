@@ -33,7 +33,7 @@ import {
 	TabLabel,
 	ScrollArea,
 } from "@/components/ui";
-import { formatMs, formatNumber, formatPercent } from "@/lib/format-number";
+import { formatMs, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import {
 	CONCURRENCY_LABEL,
 	formatConcurrency,
@@ -402,7 +402,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Target RPS:</span>
 								<span className="text-foreground font-mono">
-									{config.targetRps}
+									{formatRate(config.targetRps)}
 								</span>
 							</div>
 						)}
@@ -410,7 +410,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">{CONCURRENCY_LABEL}:</span>
 								<span className="text-foreground font-mono">
-									{config.concurrency}
+									{formatNumber(config.concurrency)}
 								</span>
 							</div>
 						)}
@@ -418,7 +418,8 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground">Data:</span>
 								<span className="text-foreground font-mono">
-									{config.dataRowCount} {pluralize(config.dataRowCount, "row")}
+									{formatNumber(config.dataRowCount)}{" "}
+									{pluralize(config.dataRowCount, "row")}
 									{config.dataFileName ? ` · ${config.dataFileName}` : ""}
 								</span>
 							</div>

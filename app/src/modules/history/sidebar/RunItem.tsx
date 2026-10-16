@@ -11,6 +11,7 @@ import type { Run } from "@/types";
 import { RUN_KIND_LABEL } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { formatNumber } from "@/lib/format-number";
 import { truncateUrl } from "@/lib/truncate-url";
 import { dataFileFromSummary } from "@/lib/run-data-file";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
@@ -500,7 +501,8 @@ export default function RunItem({
 						{scenario?.stepCount != null && (
 							<span className="flex shrink-0 items-center gap-1">
 								<ListOrdered className="size-icon-sm" />
-								{scenario.stepCount} step{scenario.stepCount === 1 ? "" : "s"}
+								{formatNumber(scenario.stepCount)} step
+								{scenario.stepCount === 1 ? "" : "s"}
 							</span>
 						)}
 						{/* One pass is the default and saying so on every row is noise;
@@ -508,7 +510,7 @@ export default function RunItem({
 						{scenario?.iterations != null && scenario.iterations > 1 && (
 							<span className="flex shrink-0 items-center gap-1">
 								<Repeat className="size-icon-sm" />
-								{scenario.iterations} iterations
+								{formatNumber(scenario.iterations)} iterations
 							</span>
 						)}
 						{scenario?.recursive && (

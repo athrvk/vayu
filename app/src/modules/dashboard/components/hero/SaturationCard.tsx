@@ -8,6 +8,7 @@
 import { concurrencyUnit } from "@/constants/load-test-modes";
 import { TOOLTIPS } from "../tooltips";
 import type { Breakpoint } from "../../utils/computeBreakpoint";
+import { formatNumber } from "@/lib/format-number";
 import { HeroCardShell } from "./HeroCardShell";
 
 /**
@@ -50,7 +51,9 @@ export function SaturationCard({
 				<p className="text-label text-muted-foreground font-mono mt-0.5">
 					p99 crossed{" "}
 					<span className="text-foreground font-semibold">{breakpoint.p99Ms}</span>ms at{" "}
-					<span className="text-foreground font-semibold">{breakpoint.concurrency}</span>{" "}
+					<span className="text-foreground font-semibold">
+						{formatNumber(breakpoint.concurrency)}
+					</span>{" "}
 					{concurrencyUnit(breakpoint.concurrency ?? 0)}
 				</p>
 			)}

@@ -19,6 +19,7 @@
 
 import { fmtVitals } from "@/modules/dashboard/components/charts/uplot";
 import type { RunReport } from "@/types";
+import { formatNumber } from "@/lib/format-number";
 import { Callout } from "@/components/shared";
 
 type MonitorSection = NonNullable<RunReport["monitor"]>;
@@ -48,7 +49,7 @@ function SeriesCard({
 				    sparse - the metric was missing from the other scrapes. */}
 				{stats.count !== samples && (
 					<p className="text-xs text-muted-foreground shrink-0">
-						{stats.count} of {samples}
+						{formatNumber(stats.count)} of {formatNumber(samples)}
 					</p>
 				)}
 			</div>

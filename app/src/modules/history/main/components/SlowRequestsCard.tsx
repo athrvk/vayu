@@ -14,6 +14,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatNumber } from "@/lib/format-number";
 import type { RunReport } from "@/types";
 
 export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["slowRequests"] }) {
@@ -28,7 +29,9 @@ export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["sl
 				<div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
 					<div>
 						<p className="text-sm text-muted-foreground">Slow requests</p>
-						<p className="font-bold text-status-stopped-text">{slowRequests.count}</p>
+						<p className="font-bold text-status-stopped-text">
+							{formatNumber(slowRequests.count)}
+						</p>
 					</div>
 					<div>
 						<p className="text-sm text-muted-foreground">Threshold</p>

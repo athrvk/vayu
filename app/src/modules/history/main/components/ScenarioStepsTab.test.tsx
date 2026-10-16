@@ -310,3 +310,21 @@ describe("the per-step element tallies", () => {
 		expect(rows).toHaveLength(2);
 	});
 });
+
+describe("the run summary line", () => {
+	it("groups thousands in the virtual-user and iteration counts", () => {
+		// Mutation check: put a raw `{virtualUsers}` / `{iterationsCompleted}` /
+		// `{iterationsAbandoned}` interpolation back and the matching case reddens.
+		render(
+			<ScenarioStepsTab
+				steps={STEPS}
+				virtualUsers={12345}
+				iterationsCompleted={23456}
+				iterationsAbandoned={34567}
+			/>
+		);
+		expect(screen.getByText("12,345")).toBeTruthy();
+		expect(screen.getByText("23,456")).toBeTruthy();
+		expect(screen.getByText("34,567")).toBeTruthy();
+	});
+});

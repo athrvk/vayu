@@ -83,13 +83,17 @@ export default function ScenarioStepsTab({
 				{virtualUsers !== undefined && (
 					<div className="flex items-center gap-2">
 						<span className="text-muted-foreground">Virtual users:</span>
-						<span className="text-foreground font-mono">{virtualUsers}</span>
+						<span className="text-foreground font-mono">
+							{formatNumber(virtualUsers)}
+						</span>
 					</div>
 				)}
 				{iterationsCompleted !== undefined && (
 					<div className="flex items-center gap-2">
 						<span className="text-muted-foreground">Iterations completed:</span>
-						<span className="text-foreground font-mono">{iterationsCompleted}</span>
+						<span className="text-foreground font-mono">
+							{formatNumber(iterationsCompleted)}
+						</span>
 					</div>
 				)}
 				{/* Only when non-zero: a run that lost nothing should not be made to
@@ -98,7 +102,9 @@ export default function ScenarioStepsTab({
 					<div className="flex items-center gap-2">
 						<AlertTriangle className="size-icon shrink-0 text-status-warning-text" />
 						<span className="text-muted-foreground">Iterations abandoned:</span>
-						<span className="text-foreground font-mono">{iterationsAbandoned}</span>
+						<span className="text-foreground font-mono">
+							{formatNumber(iterationsAbandoned)}
+						</span>
 					</div>
 				)}
 			</div>
