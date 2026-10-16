@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
-import { type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import { notCrossed, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { useClientSettingsStore } from "./client-settings-store";
 import {
 	DEFAULT_LIVE_WINDOW,
@@ -98,13 +98,6 @@ export interface LoadTestRequestInfo {
 	url: string;
 }
 
-const INITIAL_BREAKPOINT: Breakpoint = {
-	crossed: false,
-	concurrency: null,
-	timeSeconds: null,
-	p99Ms: null,
-};
-
 interface DashboardState {
 	currentRunId: string | null;
 	mode: DashboardMode;
@@ -191,7 +184,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	requestInfo: null,
 	sourceRequestId: null,
 	peakConcurrency: 0,
-	breakpoint: INITIAL_BREAKPOINT,
+	breakpoint: notCrossed(null),
 	liveWindowSeconds: initialLiveWindowSeconds(),
 	maxRetainedTicks: DEFAULT_MAX_RETAINED_TICKS,
 
@@ -210,7 +203,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			requestInfo: requestInfo ?? null,
 			sourceRequestId: sourceRequestId ?? null,
 			peakConcurrency: 0,
-			breakpoint: INITIAL_BREAKPOINT,
+			breakpoint: notCrossed(useClientSettingsStore.getState().sloThresholdMs),
 		}),
 
 	setRunConfig: (config, requestInfo) =>
@@ -265,7 +258,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			// so we walk each batch entry exactly once, never the full history.
 			const sloMs = useClientSettingsStore.getState().sloThresholdMs;
 			let peak = state.peakConcurrency;
-			let bp = state.breakpoint;
+			// An uncrossed breakpoint names the SLO it is being judged against, so a
+			// threshold changed mid-run is followed until the first crossing latches.
+			let bp =
+				state.breakpoint.crossed || state.breakpoint.sloMs === sloMs
+					? state.breakpoint
+					: notCrossed(sloMs);
 			for (const m of batch) {
 				if (m.current_concurrency > peak) peak = m.current_concurrency;
 				if (!bp.crossed) {
@@ -276,6 +274,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 							concurrency: m.current_concurrency,
 							timeSeconds: m.elapsed_seconds,
 							p99Ms: p99,
+							sloMs,
 						};
 					}
 				}

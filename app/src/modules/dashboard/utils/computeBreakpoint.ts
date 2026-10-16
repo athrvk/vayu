@@ -25,6 +25,17 @@ export interface Breakpoint {
 	timeSeconds: number | null;
 	/** p99 (ms) observed at the crossing tick; null if never crossed. */
 	p99Ms: number | null;
+	/**
+	 * The SLO (ms) the run was judged against, carried so "not crossed" can name
+	 * the line it never crossed even after the setting has changed. Null where no
+	 * threshold was in play (a report with no per-tick series).
+	 */
+	sloMs: number | null;
+}
+
+/** A breakpoint the SLO has not been crossed for (yet), judged against `sloMs`. */
+export function notCrossed(sloMs: number | null): Breakpoint {
+	return { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null, sloMs };
 }
 
 /**
@@ -43,8 +54,9 @@ export function computeBreakpoint(
 				concurrency: m.current_concurrency,
 				timeSeconds: m.elapsed_seconds,
 				p99Ms: p99,
+				sloMs: thresholdMs,
 			};
 		}
 	}
-	return { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null };
+	return notCrossed(thresholdMs);
 }

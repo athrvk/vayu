@@ -1157,7 +1157,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
   peakConcurrency: number                      // Running max (monotonic)
-  breakpoint: Breakpoint                       // SLO crossing (latched on first breach)
+  breakpoint: Breakpoint                       // SLO crossing (latched on first breach); carries the sloMs it was judged against
 }
 ```
 

@@ -11,6 +11,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useDashboardStore, deriveRunProgress } from "./dashboard-store";
 import type { LoadTestMetrics, RunReport } from "@/types";
+import { useClientSettingsStore } from "./client-settings-store";
+import { DEFAULT_SLO_THRESHOLD_MS } from "@/constants/client-settings";
 
 function tick(elapsed: number, p99 = 10): LoadTestMetrics {
 	return {
@@ -89,6 +91,40 @@ describe("dashboard-store live retention window", () => {
 		expect(state.breakpoint.crossed).toBe(true);
 		expect(state.breakpoint.timeSeconds).toBe(5);
 		expect(state.breakpoint.p99Ms).toBe(250);
+		expect(state.breakpoint.sloMs).toBe(200);
+	});
+});
+
+describe("dashboard-store breakpoint SLO", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+	});
+
+	it("a new run starts uncrossed against the SLO in force", () => {
+		useClientSettingsStore.setState({ sloThresholdMs: 350 });
+		useDashboardStore.getState().startRun("r");
+		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(350);
+	});
+
+	it("an uncrossed breakpoint follows the SLO as it changes mid-run", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		useClientSettingsStore.setState({ sloThresholdMs: 500 });
+		s.addMetricsBatch([tick(1, 300)]);
+		const { breakpoint } = useDashboardStore.getState();
+		expect(breakpoint.crossed).toBe(false);
+		expect(breakpoint.sloMs).toBe(500);
+	});
+
+	it("a crossing keeps the SLO it crossed, whatever the setting becomes after", () => {
+		const s = useDashboardStore.getState();
+		s.startRun("r");
+		s.addMetricsBatch([tick(1, 250)]);
+		useClientSettingsStore.setState({ sloThresholdMs: 900 });
+		s.addMetricsBatch([tick(2, 10)]);
+		const { breakpoint } = useDashboardStore.getState();
+		expect(breakpoint.crossed).toBe(true);
+		expect(breakpoint.sloMs).toBe(200);
 	});
 });
 

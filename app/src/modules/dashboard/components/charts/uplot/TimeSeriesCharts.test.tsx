@@ -164,7 +164,13 @@ describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 		render(
 			<ResponseTimeVsConcurrencyChart
 				history={historyOf(4)}
-				breakpoint={{ crossed: true, concurrency: 45, timeSeconds: 2, p99Ms: 227 }}
+				breakpoint={{
+					crossed: true,
+					concurrency: 45,
+					timeSeconds: 2,
+					p99Ms: 227,
+					sloMs: 200,
+				}}
 			/>
 		);
 		expect(mockState.markers.map((m) => m.label)).toContain("~45 virtual users");

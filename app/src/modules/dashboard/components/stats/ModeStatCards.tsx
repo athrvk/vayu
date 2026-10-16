@@ -83,13 +83,20 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 
 // ---- ramp_up ----
 
-/** Breakpoint - concurrency at which p99 first crossed the SLO threshold. */
+/**
+ * Breakpoint - concurrency at which p99 first crossed the SLO threshold. An
+ * uncrossed run says so and names the SLO (from the breakpoint, not the current
+ * setting), since "-" reads as "not measured". The SLO goes in the sub-line:
+ * "not crossed" alone fills most of a card's value row.
+ */
 export function BreakpointStat({ d }: { d: DashboardDerived }) {
-	const { crossed, concurrency } = d.breakpoint;
+	const { crossed, concurrency, sloMs } = d.breakpoint;
+	const reached = crossed && concurrency !== null;
 	return (
 		<StatCard
 			label="Breakpoint"
-			value={crossed && concurrency !== null ? formatNumber(concurrency) : "-"}
+			value={reached ? formatNumber(concurrency) : "not crossed"}
+			sub={!reached && sloMs ? `SLO ${formatMs(sloMs)} ms` : undefined}
 			infoTip={TOOLTIPS.breakpoint}
 		/>
 	);

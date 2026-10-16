@@ -82,7 +82,7 @@ export const TOOLTIPS = {
 	meanIterTime:
 		"Average wall-clock time per iteration. Closely tracks p50 latency in closed-loop tests; divergence indicates queueing or other generator overhead.",
 	breakpoint:
-		"The number of virtual users at which p99 latency first crossed the configured SLO threshold (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly.",
+		'The number of virtual users at which p99 latency first crossed the configured SLO threshold (default 200ms). Use this as your capacity ceiling - beyond this load, response time grows nonlinearly. "not crossed" means p99 stayed under the SLO for the whole run, so the ceiling is above the load tested.',
 	p99AtPeak:
 		"Tail latency observed during the held-target portion of the ramp (after the curve flattens). Captures the latency this many virtual users actually produce, not just how it ramped up.",
 
