@@ -12,7 +12,11 @@
  * shows one label at a time - so choosing meant opening a menu and reading
  * options you could not compare. As cards, all of them are visible with a line
  * of description each, which also retires most of the old "What will happen"
- * prose. The list comes from `LOAD_TEST_MODES`, so adding a mode adds a card.
+ * prose. The list comes from `LOAD_TEST_MODES`, so adding a mode adds a card -
+ * unless the caller narrows it with `modes`, as the collection run does for the
+ * three modes a scenario accepts. A caller whose target is not a single request
+ * may reword a card with `copy`; `LOAD_TEST_MODES` itself is not touched,
+ * because `loadTestModeLabel` names stored runs on every other screen.
  *
  * Keyboard follows the WAI-ARIA radio group pattern, which is stricter than it
  * looks: the whole group is **one** Tab stop, arrows move *and* select (wrapping
@@ -23,24 +27,36 @@
 
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
-import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
+import { LOAD_TEST_MODES, type LoadTestModeInfo } from "@/constants/load-test-modes";
 import type { LoadTestMode } from "@/types";
+
+export type ProfilePickerCopy = Partial<
+	Record<LoadTestMode, Partial<Pick<LoadTestModeInfo, "label" | "description">>>
+>;
 
 export function ProfilePicker({
 	value,
 	onChange,
 	disabled,
+	modes,
+	copy,
 }: {
 	value: LoadTestMode;
 	onChange: (mode: LoadTestMode) => void;
 	disabled?: boolean;
+	/** The modes to offer, in `LOAD_TEST_MODES` order. Every mode when omitted. */
+	modes?: readonly LoadTestMode[];
+	/** Per-mode label / description replacements for this caller's target. */
+	copy?: ProfilePickerCopy;
 }) {
 	const groupRef = useRef<HTMLDivElement>(null);
+	const options = (
+		modes ? LOAD_TEST_MODES.filter((m) => modes.includes(m.value)) : LOAD_TEST_MODES
+	).map((m) => ({ ...m, ...copy?.[m.value] }));
 
 	const move = (delta: number) => {
-		const index = LOAD_TEST_MODES.findIndex((p) => p.value === value);
-		const next =
-			LOAD_TEST_MODES[(index + delta + LOAD_TEST_MODES.length) % LOAD_TEST_MODES.length];
+		const index = options.findIndex((p) => p.value === value);
+		const next = options[(index + delta + options.length) % options.length];
 		onChange(next.value);
 		// Focus follows selection, which is the point of the pattern - the user
 		// is choosing as they arrow, not navigating then committing.
@@ -68,7 +84,7 @@ export function ProfilePicker({
 				move(delta);
 			}}
 		>
-			{LOAD_TEST_MODES.map((profile) => {
+			{options.map((profile) => {
 				const selected = profile.value === value;
 				return (
 					<button
