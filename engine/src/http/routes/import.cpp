@@ -1660,8 +1660,9 @@ void register_import_routes (RouteContext& ctx) {
     /**
      * POST /import/parse
      * Parses a raw import document - OpenAPI 2.0/3.x, Postman Collection
-     * v2.0/v2.1, a Postman environment or globals export, or an Insomnia v4
-     * export - into the tree `POST /import/apply` then persists (issue #877).
+     * v2.0/v2.1, a Postman environment or globals export, an Insomnia v4
+     * export, an Insomnia v5 collection or environment (#2119) or a JMeter
+     * test plan - into the tree `POST /import/apply` then persists (#877).
      * Reads only; nothing is stored, and detection order is the app's.
      * Body params: content (required - the document's text, verbatim),
      * importEnvironments / importScripts (optional booleans, both default true),
@@ -1669,8 +1670,9 @@ void register_import_routes (RouteContext& ctx) {
      * bytes came from), unresolvedRefs (optional non-negative integer - external
      * `$ref`s a bundling pass could not reach, counted into `meta.skipped`).
      * Returns: 200 `{collections, environments, globals, meta}`, 400 for bytes
-     * no format claims or a document that claimed one and is broken, 413 over
-     * `maxSpecDocumentBytes`.
+     * no format claims, an Insomnia document of a kind Vayu does not read (a
+     * design document, a mock server) or a document that claimed a format and
+     * is broken, 413 over `maxSpecDocumentBytes`.
      */
     ctx.server.Post ("/import/parse",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

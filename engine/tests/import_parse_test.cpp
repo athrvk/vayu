@@ -43,6 +43,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -415,6 +416,216 @@ TEST (InsomniaImport, ExplicitNoneAuthTerminatesInheritanceRatherThanFallingBack
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& folder = parsed.result.at ("collections")[0].at ("children")[0];
     EXPECT_EQ (folder.at ("requests")[0].at ("auth").at ("mode"), "none");
+}
+
+/**
+ * Insomnia v5 is read by flattening it into the v4 resource list (#2119), so
+ * the same workspace exported by either version imports as the same tree;
+ * only `meta.format` says which file it was. Mutation check: drop the
+ * `insomnia_type` branch from `parse_import`'s chain and the v5 half answers
+ * "Unrecognised format".
+ */
+TEST (InsomniaV5Import, ReadsTheSameWorkspaceItsV4ExportDoes) {
+    const ImportParse v4 = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"Acme","description":"ws"},
+        {"_id":"grp","_type":"request_group","parentId":"wrk","name":"Users",
+            "description":"people","authentication":{"type":"bearer","token":"{{ _.token }}"},
+            "preRequestScript":"console.log(1);"},
+        {"_id":"req","_type":"request","parentId":"grp","name":"List","method":"get",
+            "url":"{{ _.baseUrl }}/users","description":"all",
+            "parameters":[{"name":"page","value":"1"},{"name":"q","value":"a|b","disabled":true}],
+            "headers":[{"name":"Accept","value":"application/json"}],
+            "body":{"mimeType":"application/json","text":"{}"},
+            "authentication":{"type":"basic","username":"u","password":"p"},
+            "afterResponseScript":"insomnia.test('x', () => {});",
+            "settingFollowRedirects":"off"},
+        {"_id":"ws","_type":"websocket_request","parentId":"wrk","name":"Live"},
+        {"_id":"env","_type":"environment","parentId":"wrk","name":"Base Environment",
+            "data":{"baseUrl":"https://a","port":8080}},
+        {"_id":"sub","_type":"environment","parentId":"env","name":"Prod",
+            "data":{"baseUrl":"https://b"}}]})",
+    {}, {});
+    const ImportParse v5 = parse_import (R"(type: collection.insomnia.rest/5.0
+name: Acme
+meta:
+  id: wrk_acme
+  description: ws
+collection:
+  - name: Users
+    meta:
+      id: fld_users
+      description: people
+    authentication:
+      type: bearer
+      token: "{{ _.token }}"
+    scripts:
+      preRequest: console.log(1);
+    children:
+      - url: "{{ _.baseUrl }}/users"
+        name: List
+        meta:
+          id: req_list
+          description: all
+        method: get
+        parameters:
+          - name: page
+            value: "1"
+          - name: q
+            value: a|b
+            disabled: true
+        headers:
+          - name: Accept
+            value: application/json
+        body:
+          mimeType: application/json
+          text: "{}"
+        authentication:
+          type: basic
+          username: u
+          password: p
+        scripts:
+          afterResponse: insomnia.test('x', () => {});
+        settings:
+          followRedirects: "off"
+  - url: wss://a.example/live
+    name: Live
+environments:
+  name: Base Environment
+  data:
+    baseUrl: https://a
+    port: 8080
+  subEnvironments:
+    - name: Prod
+      data:
+        baseUrl: https://b
+)",
+    {}, {});
+    ASSERT_TRUE (v4.ok ()) << v4.error;
+    ASSERT_TRUE (v5.ok ()) << v5.error;
+    EXPECT_EQ (v4.result.at ("meta").at ("format"), "Insomnia Export v4");
+    EXPECT_EQ (v5.result.at ("meta").at ("format"), "Insomnia Export v5");
+
+    nlohmann::ordered_json from_v5 = v5.result;
+    from_v5["meta"]["format"]      = "Insomnia Export v4";
+    EXPECT_EQ (from_v5, v4.result);
+    // The comparison above would pass on two empty trees.
+    EXPECT_EQ (v5.result.at ("meta").at ("requestCount"), 1);
+    EXPECT_EQ (v5.result.at ("meta").at ("environmentCount"), 1);
+}
+
+/**
+ * A design document or a mock server export is refused by name rather than as
+ * "Unrecognised format" (#2119): the app shows a sentence that is not exactly
+ * that one verbatim, and "this is a design document" is the answer the user
+ * can act on. A collection in a format version Vayu was not written for is
+ * named the same way. Mutation check: return `std::nullopt` from
+ * `insomnia_type` and every case answers "Unrecognised format".
+ */
+TEST (InsomniaV5Import, RefusesWhatIsNotACollectionByName) {
+    const std::vector<std::pair<std::string, std::string>> cases{
+        { "spec.insomnia.rest/5.0",
+        "Could not read the document: this is an Insomnia design document "
+        "(spec) "
+        "export, which Vayu does not read. Export the collection instead." },
+        { "mock.insomnia.rest/5.0",
+        "Could not read the document: this is an Insomnia mock server export, "
+        "which Vayu does not read. Export the collection instead." },
+        { "mcpClient.insomnia.rest/5.0",
+        "Could not read the document: this is an Insomnia mcpClient export, "
+        "which "
+        "Vayu does not read. Export the collection instead." },
+        { "collection.insomnia.rest/6.0",
+        "Could not read the document: this is an Insomnia collection export in "
+        "format 6.0, which this version of Vayu does not read. It reads format "
+        "5." },
+    };
+    for (const auto& [type, sentence] : cases) {
+        const ImportParse parsed =
+        parse_import ("type: " + type + "\nname: Design\ncollection: []\n", {}, {});
+        EXPECT_FALSE (parsed.ok ()) << type;
+        EXPECT_FALSE (parsed.unrecognised) << type;
+        EXPECT_EQ (parsed.error, sentence) << type;
+    }
+}
+
+/// A minor revision of format 5 reads, and so does the same document written
+/// as JSON - the reader takes either, and nothing about v5 is YAML-only.
+TEST (InsomniaV5Import, ReadsAMinorRevisionAndAJsonEncodedExport) {
+    for (const std::string& document :
+    { std::string (
+      "type: collection.insomnia.rest/5.1\nname: W\ncollection:\n"
+      "  - name: R\n    url: https://x.example/a\n    method: POST\n"),
+    std::string (R"({"type":"collection.insomnia.rest/5.0","name":"W","collection":[
+            {"name":"R","url":"https://x.example/a","method":"POST"}]})") }) {
+        const ImportParse parsed = parse_import (document, {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (parsed.result.at ("meta").at ("format"), "Insomnia Export v5");
+        const auto& request =
+        parsed.result.at ("collections")[0].at ("requests")[0];
+        EXPECT_EQ (request.at ("method"), "POST");
+        EXPECT_EQ (request.at ("url"), "https://x.example/a");
+    }
+}
+
+/// A `type` that merely names something is not Insomnia's, and is still
+/// unrecognised rather than refused as an Insomnia document.
+TEST (InsomniaV5Import, LeavesAnUnrelatedTypeMemberUnrecognised) {
+    for (const char* document : { R"({"type":"collection","name":"x"})",
+         R"({"type":".insomnia.rest/5.0"})", R"({"type":"collection.insomnia.rest/"})" }) {
+        const ImportParse parsed = parse_import (document, {}, {});
+        EXPECT_TRUE (parsed.unrecognised) << document;
+        EXPECT_EQ (parsed.error, "Unrecognised format") << document;
+    }
+}
+
+/// v5 nests where v4 listed, so a broken export names the nested field.
+TEST (InsomniaV5Import, NamesTheFieldOfAMalformedExport) {
+    const std::vector<std::pair<std::string, std::string>> cases{
+        { "collection: nope", "Malformed Insomnia export: `collection` must be an array" },
+        { "collection:\n  - name: F\n    children: [1]", "Malformed Insomnia export: `collection[0].children[0]` must be an object" },
+        { "environments: [1]", "Malformed Insomnia export: `environments` must be an object" },
+        { "environments:\n  subEnvironments: {}", "Malformed Insomnia export: `environments.subEnvironments` must be an array" },
+    };
+    for (const auto& [body, sentence] : cases) {
+        const ImportParse parsed =
+        parse_import ("type: collection.insomnia.rest/5.0\n" + body + "\n", {}, {});
+        EXPECT_FALSE (parsed.unrecognised) << body;
+        EXPECT_EQ (parsed.error, sentence) << body;
+    }
+}
+
+/**
+ * An environment document holds environments only, gated by the same option
+ * as every other format's. With no sub-environment the one environment is
+ * named after the document - the name the user gave it - not Insomnia's fixed
+ * "Base Environment"; with sub-environments each is one environment, the base
+ * written under it.
+ */
+TEST (InsomniaV5Import, AnEnvironmentDocumentImportsItsEnvironmentsOnly) {
+    const std::string document = R"(type: environment.insomnia.rest/5.0
+name: Shared
+environments:
+  name: Base Environment
+  data:
+    region: eu
+    key: k
+  subEnvironments:
+    - name: Staging
+      data:
+        region: us
+)";
+    const ImportParse parsed   = parse_import (document, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_TRUE (parsed.result.at ("collections").empty ());
+    EXPECT_EQ (parsed.result.at ("environments").dump (),
+    R"([{"name":"Staging","description":"","variables":{"region":{"value":"us","enabled":true},"key":{"value":"k","enabled":true}}}])");
+
+    ImportOptions off;
+    off.import_environments = false;
+    const ImportParse gated = parse_import (document, off, {});
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_TRUE (gated.result.at ("environments").empty ());
+    EXPECT_EQ (gated.result.at ("meta").at ("environmentCount"), 0);
 }
 
 TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {
