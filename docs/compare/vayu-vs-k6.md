@@ -19,6 +19,7 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **Execution engine** | C++ (native) | Go |
 | **API client + load test** | Both, one app | Load test only |
 | **How a test is defined** | The request you built, in the UI | A JavaScript test script |
+| **Load shapes** | Constant rate, constant users, one ramp then hold, fixed request count, automatic capacity search | Arbitrary `stages` and arrival-rate executors |
 | **UI** | Native desktop app | CLI only |
 | **Live metrics** | Streamed over SSE into a live dashboard | Terminal output, or an external dashboard |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) |
@@ -104,8 +105,9 @@ are not close:
 - **You are load testing beyond HTTP** - gRPC, WebSockets, or a real browser.
   Vayu's engine is an HTTP engine.
 - **You need sophisticated arrival-rate modelling** (ramping executors, staged
-  profiles). Vayu runs closed-loop constant concurrency, which is the right model
-  for "does this endpoint hold" and not for reproducing a traffic shape.
+  profiles). Vayu has no multi-stage or staged ramp profile: a run is one climb
+  to the target, then a hold. That is the right model for "does this endpoint
+  hold" and not for reproducing a traffic shape.
 
 The honest summary: k6 is the better load tester, Vayu is the better place to
 build the request, and Vayu closes enough of the gap that most teams stop needing

@@ -27,6 +27,35 @@ const renderFields = (iterationsLabel?: string) =>
 		/>
 	);
 
+const renderMode = (mode: "ramp_up" | "capacity" | "constant_concurrency") =>
+	render(
+		<ProfileFields
+			profile={{ ...SCENARIO_PROFILE_DEFAULTS, mode }}
+			onChange={vi.fn()}
+			limits={LOAD_TEST_LIMITS}
+			isStreamingRequest={false}
+		/>
+	);
+
+describe("ProfileFields' ramp duration hint", () => {
+	const hint =
+		"One climb up, then hold. For a staircase or a limit search use Capacity Discovery.";
+
+	it("says the ramp is one climb and names the mode that steps", () => {
+		renderMode("ramp_up");
+		const field = screen.getByRole("spinbutton", { name: "Ramp duration" });
+		expect(screen.getByText(hint)).toBeTruthy();
+		expect(field.getAttribute("aria-describedby")).toBe(
+			screen.getByText(hint).getAttribute("id")
+		);
+	});
+
+	it.each(["constant_concurrency", "capacity"] as const)("is absent in %s mode", (mode) => {
+		renderMode(mode);
+		expect(screen.queryByText(hint)).toBeNull();
+	});
+});
+
 describe("ProfileFields' fixed-count label", () => {
 	it("counts requests by default", () => {
 		renderFields();

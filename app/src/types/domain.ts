@@ -2777,8 +2777,12 @@ export interface RunReport {
 	 * rather than the whole set - and past the cap a later record displaces a
 	 * uniformly chosen incumbent (reservoir retention), so what survives
 	 * describes the whole run rather than its opening. These counts are what
-	 * make that visible: all zeros means `results` and the tested responses are
-	 * complete, non-zero means they are a sample of a larger set.
+	 * make that visible: all zeros means the stored traces and the tested
+	 * responses are complete, non-zero means they are a sample of a larger set.
+	 *
+	 * They describe those stores, not the `results` array: the report route
+	 * picks its rows from the stored traces by a failures-first rule, and says
+	 * so through {@link RunReport.resultsStored} / {@link RunReport.resultsCap}.
 	 *
 	 * `undefined` is a run whose stored summary predates the counts (or an older
 	 * sidecar), which is *not* the same claim as "nothing was dropped" - so the
@@ -2883,6 +2887,25 @@ export interface RunReport {
 		 */
 		transactions?: RunTransactionSummary[];
 	};
+	/**
+	 * Rows the run stored, before the report's cap. Beside `results` rather
+	 * than inside `sampling` because that section is optional. Absent on a
+	 * report from an engine that predates it (#2210), which is not the same
+	 * claim as "nothing was cut" - the UI says nothing then.
+	 */
+	resultsStored?: number;
+	/**
+	 * The cap the report applied to `results`: 100 for a single-request run,
+	 * equal to {@link RunReport.resultsStored} for a scenario run.
+	 * `resultsStored > resultsCap` is the only signal that `results` is a
+	 * selection and not the whole stored set.
+	 *
+	 * That selection is failures first (every row outside 2xx/3xx, including
+	 * a status `0` transport failure, takes a slot before any success), the
+	 * successes filling the rest, and the chosen rows are listed by
+	 * `timestamp` - not a uniform sample of the run.
+	 */
+	resultsCap?: number;
 	results?: Array<{
 		/**
 		 * The `results` row id, and the join key against

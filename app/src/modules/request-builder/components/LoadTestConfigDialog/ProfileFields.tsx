@@ -6,7 +6,11 @@
  */
 
 import type { LoadTestLimits } from "@/constants/load-test";
-import { CONCURRENCY_LABEL, CONCURRENCY_UNIT } from "@/constants/load-test-modes";
+import {
+	CONCURRENCY_LABEL,
+	CONCURRENCY_UNIT,
+	loadTestModeLabel,
+} from "@/constants/load-test-modes";
 import { NumberField } from "@/components/shared";
 import { usesDuration } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
@@ -154,6 +158,7 @@ export function ProfileFields({
 					onChange={set("rampDuration")}
 					min={limits.RAMP_DURATION_S.MIN}
 					max={limits.RAMP_DURATION_S.MAX}
+					hint={`One climb up, then hold. For a staircase or a limit search use ${loadTestModeLabel("capacity")}.`}
 				/>
 			)}
 

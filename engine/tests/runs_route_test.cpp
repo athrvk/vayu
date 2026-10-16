@@ -16,9 +16,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -115,10 +117,13 @@ class RunsRouteTest : public ::testing::Test {
     // The 4 KB filler concatenation below is what GCC 13 reports as reading past
     // the small-string buffer. See utils/diagnostics.hpp.
     VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
-    void seed_result (const std::string& run_id, int status_code, double latency_ms) {
+    void seed_result (const std::string& run_id,
+    int status_code,
+    double latency_ms,
+    int64_t timestamp = 1000) {
         vayu::db::Result result;
         result.run_id      = run_id;
-        result.timestamp   = 1000;
+        result.timestamp   = timestamp;
         result.status_code = status_code;
         result.status_text = "OK";
         result.latency_ms  = latency_ms;
@@ -471,6 +476,8 @@ TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_scenario_big");
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["results"].size (), 150u);
+    EXPECT_EQ (body["resultsStored"], 150u);
+    EXPECT_EQ (body["resultsCap"], 150u);
 }
 
 // The sample cap stays for everything else - a design run has one row and a
@@ -486,6 +493,97 @@ TEST_F (RunsRouteTest, LoadReportStillSamplesPastTheCap) {
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_load_big");
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["results"].size (), 100u);
+    EXPECT_EQ (body["resultsStored"], 150u);
+    EXPECT_EQ (body["resultsCap"], 100u);
+}
+
+/// Statuses of a report's `results`, in the order the report lists them.
+std::vector<int> result_statuses (const nlohmann::json& body) {
+    std::vector<int> statuses;
+    for (const auto& row : body["results"]) {
+        statuses.push_back (row["statusCode"].get<int> ());
+    }
+    return statuses;
+}
+
+// Past the cap the report keeps the failures, not the run's opening: three
+// 500s stored last (the position the old first-100 cut dropped) are all in the
+// 100 returned, and the rows come back in timestamp order whatever order the
+// selection took them in (#2210).
+TEST_F (RunsRouteTest, ReportCapKeepsFailuresStoredPastIt) {
+    seed ({ .id = "run_tail_failures", .type = vayu::RunType::Load });
+    for (int i = 0; i < 150; i++) {
+        const bool failing = i >= 147;
+        seed_result ("run_tail_failures", failing ? 500 : 200, 1.0, 1000 + i);
+    }
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_tail_failures");
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["results"].size (), 100u);
+    EXPECT_EQ (body["resultsStored"], 150u);
+    EXPECT_EQ (body["resultsCap"], 100u);
+
+    const auto statuses = result_statuses (body);
+    EXPECT_EQ (std::count (statuses.begin (), statuses.end (), 500), 3);
+    EXPECT_EQ (std::count (statuses.begin (), statuses.end (), 200), 97);
+
+    int64_t previous = 0;
+    for (const auto& row : body["results"]) {
+        EXPECT_LE (previous, row["timestamp"].get<int64_t> ());
+        previous = row["timestamp"].get<int64_t> ();
+    }
+    // The healthy rows that fill the rest are the earliest stored, so the three
+    // failures close the list.
+    EXPECT_EQ (statuses.back (), 500);
+    EXPECT_EQ (body["results"][0]["timestamp"], 1000);
+}
+
+// A transport failure is recorded under status 0 and is a failure like any
+// 4xx/5xx: it outranks healthy rows, and failures beyond the cap fill all of it.
+TEST_F (RunsRouteTest, ReportCapKeepsTransportErrorsAndFillsWithFailures) {
+    seed ({ .id = "run_tail_transport", .type = vayu::RunType::Load });
+    for (int i = 0; i < 130; i++) {
+        seed_result ("run_tail_transport", 200, 1.0, 1000 + i);
+    }
+    for (int i = 0; i < 5; i++) {
+        seed_result ("run_tail_transport", 0, 0.0, 2000 + i);
+    }
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_tail_transport");
+    ASSERT_EQ (status, 200);
+    auto statuses = result_statuses (body);
+    ASSERT_EQ (statuses.size (), 100u);
+    EXPECT_EQ (std::count (statuses.begin (), statuses.end (), 0), 5);
+
+    seed ({ .id = "run_all_failing", .type = vayu::RunType::Load });
+    for (int i = 0; i < 120; i++) {
+        seed_result ("run_all_failing", i % 2 == 0 ? 0 : 503, 1.0, 1000 + i);
+    }
+    auto [failing_status, failing_body] =
+    vayu::http::routes::run_report_response (*db_, "run_all_failing");
+    ASSERT_EQ (failing_status, 200);
+    statuses = result_statuses (failing_body);
+    ASSERT_EQ (statuses.size (), 100u);
+    EXPECT_EQ (std::count_if (statuses.begin (), statuses.end (),
+               [] (int code) { return vayu::is_success_status (code); }),
+    0);
+    EXPECT_EQ (failing_body["resultsStored"], 120u);
+}
+
+// At or under the cap nothing is selected away: every row comes back.
+TEST_F (RunsRouteTest, ReportUnderCapReturnsEveryRow) {
+    seed ({ .id = "run_small", .type = vayu::RunType::Load });
+    for (int i = 0; i < 100; i++) {
+        seed_result ("run_small", i == 99 ? 500 : 200, 1.0, 1000 + i);
+    }
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_small");
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["results"].size (), 100u);
+    EXPECT_EQ (body["resultsStored"], 100u);
+    EXPECT_EQ (body["resultsCap"], 100u);
 }
 
 TEST_F (RunsRouteTest, MalformedSnapshotYieldsEmptySummaryNot500) {
