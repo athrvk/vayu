@@ -55,10 +55,8 @@ const PRIMITIVES = new Set([
  * "it was already there" is not one of the reasons.
  */
 const NOT_A_MESSAGE: Record<string, string> = {
-	"modules/history/main/components/OverviewTab.tsx":
+	"components/shared/ErrorSummary.tsx":
 		"an error *count* and its rate, inside the error summary card - the number is the content, not a sentence about a failure",
-	"modules/dashboard/components/RequestResponseView.tsx":
-		"the run's total-errors figure in a definition row; the label beside it is muted and only the value is red",
 	"components/shared/ContractCoverage.tsx":
 		"the per-operation 'N failed' tally in a coverage row, beside its 'N off-range' sibling",
 	"components/shared/TestValidationSummary.tsx":

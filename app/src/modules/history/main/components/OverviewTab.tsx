@@ -11,7 +11,6 @@
  * Displays test configuration, summary statistics, status codes, and errors.
  */
 
-import { AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
@@ -19,6 +18,7 @@ import {
 	CapacitySummary,
 	ContractCoverage,
 	CustomMetricsSummary,
+	ErrorSummary,
 	RequestElementsSummary,
 	RunWarnings,
 	SampledSchemaValidation,
@@ -29,7 +29,6 @@ import {
 	stoppedRunOf,
 	CancelledRequestsNote,
 } from "@/components/shared";
-import { formatErrorPercent } from "@/modules/dashboard/utils/format";
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
@@ -37,36 +36,6 @@ import { extractTestFailures } from "../test-validation";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { TabProps } from "../../types";
 import { httpStatusClass, statusCodeLabel, STATUS_CLASS_STYLE } from "@/constants/http-status";
-
-/**
- * Display labels for `report.errors.types` keys (`error_type_name` in the
- * engine's `load_strategy.cpp`, one entry per `vayu::ErrorCode`).
- *
- * Not `errorType.replace(/_/g, " ")` through `capitalize`: that renders
- * protocol acronyms as "Ssl Error" / "Dns Failed" / "Invalid Url", losing
- * the casing SSL/DNS/URL carry everywhere else in the UI. A key this map
- * does not carry (a future `ErrorCode`) falls back to the same
- * underscore-to-space, sentence-cased rendering rather than the raw token.
- */
-const ERROR_TYPE_LABELS: Record<string, string> = {
-	timeout: "Timeout",
-	connection_failed: "Connection failed",
-	dns_failed: "DNS failed",
-	ssl_error: "SSL error",
-	invalid_url: "Invalid URL",
-	invalid_method: "Invalid method",
-	script_error: "Script error",
-	data_binding_failed: "Data binding failed",
-	proxy_error: "Proxy error",
-	internal_error: "Internal error",
-	unknown: "Unknown",
-};
-
-function errorTypeLabel(errorType: string): string {
-	if (ERROR_TYPE_LABELS[errorType]) return ERROR_TYPE_LABELS[errorType];
-	const spaced = errorType.replace(/_/g, " ");
-	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
 
 export default function OverviewTab({ report, runId, derived, anomalies }: TabProps) {
 	// Read by run id rather than passed down: `PerformanceTab` reads the same
@@ -215,88 +184,12 @@ export default function OverviewTab({ report, runId, derived, anomalies }: TabPr
 			{/* Outside every count above and below; a stopped run can have this and no errors. */}
 			<CancelledRequestsNote count={report.summary.cancelledRequests} />
 
-			{/* Errors */}
-			{report.errors && report.errors.total > 0 && (
-				<Card className="enter-fade border-destructive/30">
-					<CardHeader>
-						<CardTitle className="flex items-center gap-2 text-destructive-text">
-							<AlertCircle className="w-5 h-5" />
-							Error summary
-						</CardTitle>
-					</CardHeader>
-					<CardContent className="space-y-3">
-						<div className="flex justify-between items-center p-3 bg-destructive/10 border border-destructive/20">
-							<span className="text-sm font-medium text-destructive-text">
-								Total errors
-							</span>
-							<span className="text-lg font-bold text-destructive-text">
-								{formatNumber(report.errors.total)} (
-								{formatErrorPercent(report.summary.errorRate, 2)}%)
-							</span>
-						</div>
-
-						<div className="grid grid-cols-2 gap-2">
-							<div className="flex justify-between items-center p-2 bg-muted rounded-md text-sm">
-								<span>HTTP errors</span>
-								<span className="font-medium">
-									{formatNumber(derived.httpErrors)}
-								</span>
-							</div>
-							<div className="flex justify-between items-center p-2 bg-muted rounded-md text-sm">
-								<span>No response</span>
-								<span className="font-medium">
-									{formatNumber(derived.noResponse)}
-								</span>
-							</div>
-						</div>
-
-						{report.errors.types && Object.entries(report.errors.types).length > 0 && (
-							<div className="space-y-2">
-								<p className="text-xs font-medium text-muted-foreground">
-									By error type
-								</p>
-								{Object.entries(report.errors.types).map(([errorType, count]) => (
-									<div
-										key={errorType}
-										className="flex justify-between items-center p-2 bg-muted rounded-md text-sm"
-									>
-										<span>{errorTypeLabel(errorType)}</span>
-										<span className="font-medium">
-											{formatNumber(count as number)}
-										</span>
-									</div>
-								))}
-							</div>
-						)}
-
-						{report.errors.byStatusCode &&
-							Object.entries(report.errors.byStatusCode).length > 0 && (
-								<div className="space-y-2">
-									<p className="text-xs font-medium text-muted-foreground">
-										By status code
-									</p>
-									{Object.entries(report.errors.byStatusCode).map(
-										([code, count]) => (
-											<div
-												key={code}
-												className="flex justify-between items-center p-2 bg-muted rounded-md text-sm"
-											>
-												<span className="font-mono">
-													{code === "0"
-														? "No response (status 0)"
-														: `HTTP ${code}`}
-												</span>
-												<span className="font-medium">
-													{formatNumber(count as number)}
-												</span>
-											</div>
-										)
-									)}
-								</div>
-							)}
-					</CardContent>
-				</Card>
-			)}
+			<ErrorSummary
+				errors={report.errors}
+				errorRate={report.summary.errorRate}
+				httpErrors={derived.httpErrors}
+				noResponse={derived.noResponse}
+			/>
 		</>
 	);
 }

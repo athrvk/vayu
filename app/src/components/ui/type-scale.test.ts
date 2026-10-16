@@ -322,6 +322,7 @@ const withoutComments = (source: string): string =>
 	source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(?<!:)\/\/.*$/gm, " ");
 
 const TILE_READOUTS = [
+	"components/shared/ErrorSummary.tsx",
 	"modules/collections/CollectionDetail/shared.tsx",
 	"modules/dashboard/components/RequestResponseView.tsx",
 	"modules/history/main/components/OverviewTab.tsx",
