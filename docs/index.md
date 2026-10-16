@@ -29,7 +29,7 @@ Coming from another tool? Read the honest comparison:
 [k6](compare/vayu-vs-k6.md) &middot;
 [JMeter](compare/vayu-vs-jmeter.md)
 
-![The load-test dashboard at 52,738 req/s and 738,406 requests with a 100% success rate: throughput, latency percentiles and error counters streaming live from the C++ engine while the UI stays responsive.](images/vayu-loadtest2.png){ .shot }
+![The load-test run view: rate fidelity, throughput, error counters and latency percentiles from the C++ engine, with the run in the history sidebar.](images/vayu-loadtest2.png){ .shot }
 
 ## Install
 
