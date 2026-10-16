@@ -199,7 +199,9 @@ function MetricsView({
 				: (metrics.latency_p99_ms ?? 0),
 			meanLatency: metrics.avg_latency_ms ?? 0,
 			medianLatency: finalReport?.latency?.p50 ?? metrics.latency_p50_ms ?? 0,
-			p95Latency: finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0,
+			p95Latency: isCompleted
+				? (finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0)
+				: (metrics.latency_p95_ms ?? 0),
 			testDuration: finalReport?.summary?.testDuration,
 			elapsedSeconds: lastElapsedSeconds,
 			setupOverhead: finalReport?.summary?.setupOverhead,
@@ -343,14 +345,14 @@ function MetricsView({
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 									style={{ background: "hsl(var(--primary))" }}
 								/>
-								latency
+								average latency (incl. queue wait)
 							</span>
 							<span>
 								<span
 									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 									style={{ background: "hsl(var(--info))" }}
 								/>
-								wire
+								wire time
 							</span>
 							<span>
 								<span
