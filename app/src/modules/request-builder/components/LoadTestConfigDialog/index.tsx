@@ -325,6 +325,11 @@ export default function LoadTestConfigDialog({
 							"Pick a profile, set its parameters, then start the run."
 						)}
 					</DialogDescription>
+					<p className="text-label leading-relaxed text-muted-foreground">
+						A request that sets no timeout of its own times out after Default Request
+						Timeout (Settings › Network &amp; connectivity). To pace virtual users, add
+						a Think time element on the request&apos;s Elements tab.
+					</p>
 				</DialogHeader>
 
 				<DialogBody className="space-y-4">
