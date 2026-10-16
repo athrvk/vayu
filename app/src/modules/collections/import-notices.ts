@@ -32,6 +32,7 @@ import type {
 } from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { containsVariableToken } from "@/constants/variables";
+import { formatNumber } from "@/lib/format-number";
 import { parentFolder } from "@/lib/file-path";
 
 export type NoticeTier = "action" | "note";
@@ -318,6 +319,33 @@ function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 		notices.push({ tier: "note", text: `Fetched from: ${report.fetched.join(", ")}` });
 	}
 	return notices;
+}
+
+/**
+ * The count line under a parsed file, shared by the single-file preview and
+ * every batch row.
+ *
+ * `ImportMeta` names no format family, so the shape is read off the counts: a
+ * file with no requests and no folders that carries environments or globals is
+ * an environment export, and "0 requests" would be noise there. Anything else
+ * is a collection or spec, where "0 examples" is an answer (#481) and an
+ * environment segment appears only when there is one to report.
+ */
+export function describeCounts(meta: ImportMeta): string {
+	const count = (n: number, noun: string) => `${formatNumber(n)} ${pluralize(n, noun)}`;
+	const environmentSegments = [
+		meta.environmentCount > 0 && count(meta.environmentCount, "environment"),
+		meta.globalCount > 0 && count(meta.globalCount, "global"),
+	].filter((segment): segment is string => segment !== false);
+	const environmentOnly =
+		meta.requestCount === 0 && meta.folderCount === 0 && environmentSegments.length > 0;
+	if (environmentOnly) return environmentSegments.join(" · ");
+	return [
+		count(meta.requestCount, "request"),
+		count(meta.folderCount, "folder"),
+		count(meta.exampleCount, "example"),
+		...environmentSegments,
+	].join(" · ");
 }
 
 /**

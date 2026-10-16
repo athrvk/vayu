@@ -313,7 +313,7 @@ describe("a toggle supersedes the re-parse already running", () => {
 		renderModal();
 		dropFiles({ name: "a.json", text: fileSpec });
 		// Both options start on, and the fixture's environment is what says so.
-		await waitFor(() => expect(screen.getByText(/1 environments/)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText("1 environment")).toBeInTheDocument());
 
 		// Toggle 1, held: scripts off, environments still on.
 		const first = deferred();
@@ -327,7 +327,9 @@ describe("a toggle supersedes the re-parse already running", () => {
 		fireEvent.click(screen.getByText(/Import environments & variables/i));
 
 		second.resolve();
-		await waitFor(() => expect(screen.getByText(/0 environments/)).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getByText("0 requests · 0 folders · 0 examples")).toBeInTheDocument()
+		);
 
 		// The loser lands last. Sharing one generation, its patch passes
 		// `patchTab`'s check and wins the entries - a preview parsed with
@@ -339,8 +341,8 @@ describe("a toggle supersedes the re-parse already running", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 		});
 
-		expect(screen.getByText(/0 environments/)).toBeInTheDocument();
-		expect(screen.queryByText(/1 environments/)).not.toBeInTheDocument();
+		expect(screen.getByText("0 requests · 0 folders · 0 examples")).toBeInTheDocument();
+		expect(screen.queryByText("1 environment")).not.toBeInTheDocument();
 	});
 
 	it("closes the toggles while an apply is in flight", async () => {

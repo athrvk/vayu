@@ -11,10 +11,16 @@
  * rendered preview would need a fixture per case to show.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
 import type { ImportMeta, RequestDraft } from "@/services/importers/types";
-import { bodiesWithoutFileNotice, fileReferenceNeeds, importNotices } from "./import-notices";
+import {
+	bodiesWithoutFileNotice,
+	describeCounts,
+	fileReferenceNeeds,
+	importNotices,
+} from "./import-notices";
+import { stubNumberLocale } from "@/test/number-locale";
 import { collection, request, result } from "./import-preview.testkit";
 
 function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
@@ -31,6 +37,63 @@ function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
 		...overrides,
 	};
 }
+
+describe("describeCounts", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
+	const cases: [string, Partial<ImportMeta>, string][] = [
+		[
+			"a Postman collection names no environments or globals",
+			{ requestCount: 1, folderCount: 3 },
+			"1 request · 3 folders · 0 examples",
+		],
+		[
+			"singular and plural per segment",
+			{ requestCount: 2, folderCount: 1, exampleCount: 1 },
+			"2 requests · 1 folder · 1 example",
+		],
+		[
+			"zero examples stays an answer",
+			{ requestCount: 5, folderCount: 0, exampleCount: 0 },
+			"5 requests · 0 folders · 0 examples",
+		],
+		[
+			"counts get thousands separators",
+			{ requestCount: 1200, folderCount: 2 },
+			"1,200 requests · 2 folders · 0 examples",
+		],
+		[
+			"a collection that also carries environments names them",
+			{ requestCount: 1, environmentCount: 2, globalCount: 1 },
+			"1 request · 0 folders · 0 examples · 2 environments · 1 global",
+		],
+		["an environment file is only its environment", { environmentCount: 1 }, "1 environment"],
+		["a globals file is only its globals", { globalCount: 4 }, "4 globals"],
+		[
+			"a file with both scopes names both",
+			{ environmentCount: 2, globalCount: 1 },
+			"2 environments · 1 global",
+		],
+		[
+			"an environment file parsed with environments off has nothing to import",
+			{},
+			"0 requests · 0 folders · 0 examples",
+		],
+		[
+			"a folder-only file is not an environment file",
+			{ folderCount: 1, environmentCount: 1 },
+			"0 requests · 1 folder · 0 examples · 1 environment",
+		],
+	];
+
+	it.each(cases)("%s", (_name, counts, expected) => {
+		expect(describeCounts(meta(counts))).toBe(expected);
+	});
+});
 
 describe("importNotices - a branch past the depth bound", () => {
 	it("says how many branches were left out, as something to finish", () => {
