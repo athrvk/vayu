@@ -60,7 +60,42 @@ import RawRequestResponse from "./RawRequestResponse";
 import ClientErrorView from "./ClientErrorView";
 import SaveAsExampleDialog from "./SaveAsExampleDialog";
 import SendingWave from "./SendingWave";
+import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
+import { useFittedTabs } from "@/components/layout/useFittedTabs";
+import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
+
+/**
+ * The eight sub-tabs, in strip order. One list: the fit measures these labels
+ * and the strip draws these triggers, so a ninth tab cannot be drawn without
+ * being measured.
+ *
+ * Always all eight, whatever the response carries (issue #59's constant tab
+ * set) - a normal response gets an honest "not an event stream" rather than a
+ * tab that comes and goes.
+ */
+const RESPONSE_TABS: readonly { id: ResponseTab; label: string }[] = [
+	{ id: "body", label: "Body" },
+	{ id: "headers", label: "Headers" },
+	{ id: "cookies", label: "Cookies" },
+	{ id: "timing", label: "Timing" },
+	{ id: "console", label: "Console" },
+	{ id: "tests", label: "Tests" },
+	{ id: "events", label: "Events" },
+	{ id: "raw-request", label: "Raw" },
+];
+const RESPONSE_TAB_IDS = RESPONSE_TABS.map((t) => t.id);
+const RESPONSE_TAB_LABELS = RESPONSE_TABS.map((t) => t.label);
+
+/** What each tab's mark may grow to, so a badge arriving after the fit still fits. */
+const RESPONSE_MARK_ALLOWANCE: Partial<Record<ResponseTab, number>> = {
+	headers: MARK_ALLOWANCE.count,
+	console: MARK_ALLOWANCE.count,
+	tests: MARK_ALLOWANCE.chip,
+	events: MARK_ALLOWANCE.wideCount,
+};
+const responseMarkAllowance = (id: ResponseTab) =>
+	RESPONSE_MARK_ALLOWANCE[id] ?? MARK_ALLOWANCE.none;
 
 /**
  * The Tests tab's pass/fail chip, animated into a track that costs nothing at
@@ -183,6 +218,16 @@ export default function ResponseViewer() {
 	}
 
 	const [savingExample, setSavingExample] = useState(false);
+
+	// Called ahead of the early returns below, which would skip it; the wrapper it
+	// measures only exists once there is a response to draw. The labels and the
+	// triggers below are the one `RESPONSE_TABS` list.
+	const { containerRef, visibleIds, overflowedIds } = useFittedTabs({
+		ids: RESPONSE_TAB_IDS,
+		labels: RESPONSE_TAB_LABELS,
+		activeId: activeTab,
+		markAllowance: responseMarkAllowance,
+	});
 
 	/*
 	 * The live stream, when it is this request's (issue #574).
@@ -409,6 +454,7 @@ export default function ResponseViewer() {
 	 * to keep as an example of one.
 	 */
 	const canSaveExample = !!requestId && !isStreaming && !isClientError;
+	const isShown = (id: ResponseTab) => visibleIds.includes(id);
 
 	return (
 		<div
@@ -459,78 +505,98 @@ export default function ResponseViewer() {
 				    "Surfaces, and the rule colour that reads on each". */}
 				<div className="flex items-center justify-between border-b border-rule px-4 gap-2">
 					{/*
-					    `min-w-0`, or the tabs cannot scroll. A flex item defaults to
-					    `min-width: auto` and refuses to shrink below its content, so
-					    `overflow-x-auto` never engages and the row overflows instead -
-					    pushing the status and actions out of the pane. It mattered less
-					    when the right-hand group was just the actions; it matters now
-					    that the response's own facts live there.
+					    The fit measures this wrapper, not the list: the list shrinks to
+					    whatever it draws, so measuring it reads back the previous fit
+					    (`useFittedTabs`). `flex-1 min-w-0` makes the wrapper the room the
+					    row leaves for tabs; the Save button keeps its own. Tabs that do
+					    not fit are in the "+N" menu rather than scrolled out of sight,
+					    which a hidden scrollbar gave no cue of.
 					 */}
-					<TabsList
-						variant="bare"
-						className="min-w-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
-					>
-						<TabsTrigger value="body">
-							<TabLabel>Body</TabLabel>
-						</TabsTrigger>
-						<TabsTrigger value="headers">
-							<TabLabel>Headers</TabLabel>
-							<TabCount value={Object.keys(shown.headers).length} />
-						</TabsTrigger>
-						<TabsTrigger value="cookies">
-							<TabLabel>Cookies</TabLabel>
-						</TabsTrigger>
-						<TabsTrigger value="timing">
-							<TabLabel>Timing</TabLabel>
-						</TabsTrigger>
-						{/*
-						 * No icon. This was the only one across the fifteen triggers in
-						 * the two strips - the response pane's seven and the request
-						 * builder's eight - so it read as Console being a different
-						 * *kind* of thing rather than as an aid to finding it. What
-						 * actually distinguishes this tab when it matters is the error
-						 * dot below, which the icon sat next to and competed with.
-						 *
-						 * It was also 20px on a strip that had just gained four
-						 * permanent tabs, though that is the smaller reason.
-						 */}
-						<TabsTrigger value="console">
-							<TabLabel>Console</TabLabel>
-							{hasScriptError ? (
-								// A script error that logged nothing must still be flagged
-								// (issue #111). A dot rather than a count, so a future
-								// `count="none"` cannot silently delete the only failure
-								// signal - and it outranks the count, because the failure is
-								// the thing you need to see.
-								<TabErrorDot />
-							) : (
-								<TabCount value={consoleLogCount} />
+					<div ref={containerRef} className="flex min-w-0 flex-1 items-stretch">
+						<TabsList variant="bare" className="overflow-hidden flex-nowrap">
+							{isShown("body") && (
+								<TabsTrigger value="body">
+									<TabLabel>Body</TabLabel>
+								</TabsTrigger>
 							)}
-						</TabsTrigger>
-						<TabsTrigger value="tests">
-							<TabLabel>Tests</TabLabel>
-							{/* A result, not a count - it keeps its chip, and says nothing
-							    at all when nothing ran rather than a "0/0" that reads like
-							    a result. Rendered unconditionally all the same: see
-							    `TestsResultChip`, which holds the width open so a chip
-							    arriving does not push Events and Raw sideways. */}
-							<TestsResultChip results={testResults} />
-						</TabsTrigger>
-						{/*
-						 * Always rendered, like the seven beside it (issue #59's
-						 * constant tab set) - a normal response gets an honest
-						 * "not an event stream" rather than a tab that comes and
-						 * goes. The count is the *received* total, which is not
-						 * the row count once a stored list has been capped.
-						 */}
-						<TabsTrigger value="events">
-							<TabLabel>Events</TabLabel>
-							<TabCount value={totalEvents ?? events.length} />
-						</TabsTrigger>
-						<TabsTrigger value="raw-request">
-							<TabLabel>Raw</TabLabel>
-						</TabsTrigger>
-					</TabsList>
+							{isShown("headers") && (
+								<TabsTrigger value="headers">
+									<TabLabel>Headers</TabLabel>
+									<TabCount value={Object.keys(shown.headers).length} />
+								</TabsTrigger>
+							)}
+							{isShown("cookies") && (
+								<TabsTrigger value="cookies">
+									<TabLabel>Cookies</TabLabel>
+								</TabsTrigger>
+							)}
+							{isShown("timing") && (
+								<TabsTrigger value="timing">
+									<TabLabel>Timing</TabLabel>
+								</TabsTrigger>
+							)}
+							{/*
+							 * No icon. This was the only one across the fifteen triggers in
+							 * the two strips - the response pane's seven and the request
+							 * builder's eight - so it read as Console being a different
+							 * *kind* of thing rather than as an aid to finding it. What
+							 * actually distinguishes this tab when it matters is the error
+							 * dot below, which the icon sat next to and competed with.
+							 *
+							 * It was also 20px on a strip that had just gained four
+							 * permanent tabs, though that is the smaller reason.
+							 */}
+							{isShown("console") && (
+								<TabsTrigger value="console">
+									<TabLabel>Console</TabLabel>
+									{hasScriptError ? (
+										// A script error that logged nothing must still be flagged
+										// (issue #111). A dot rather than a count, so a future
+										// `count="none"` cannot silently delete the only failure
+										// signal - and it outranks the count, because the failure is
+										// the thing you need to see.
+										<TabErrorDot />
+									) : (
+										<TabCount value={consoleLogCount} />
+									)}
+								</TabsTrigger>
+							)}
+							{isShown("tests") && (
+								<TabsTrigger value="tests">
+									<TabLabel>Tests</TabLabel>
+									{/* A result, not a count - it keeps its chip, and says nothing
+									    at all when nothing ran rather than a "0/0" that reads like
+									    a result. Rendered unconditionally all the same: see
+									    `TestsResultChip`, which holds the width open so a chip
+									    arriving does not push Events and Raw sideways. */}
+									<TestsResultChip results={testResults} />
+								</TabsTrigger>
+							)}
+							{/*
+							 * Always in the set, like the seven beside it (issue #59's
+							 * constant tab set) - a normal response gets an honest
+							 * "not an event stream" rather than a tab that comes and
+							 * goes. Whether it is drawn here or in the menu is only the
+							 * room. The count is the *received* total, which is not
+							 * the row count once a stored list has been capped.
+							 */}
+							{isShown("events") && (
+								<TabsTrigger value="events">
+									<TabLabel>Events</TabLabel>
+									<TabCount value={totalEvents ?? events.length} />
+								</TabsTrigger>
+							)}
+							{isShown("raw-request") && (
+								<TabsTrigger value="raw-request">
+									<TabLabel>Raw</TabLabel>
+								</TabsTrigger>
+							)}
+						</TabsList>
+						<TabOverflowMenu
+							tabs={RESPONSE_TABS.filter((t) => overflowedIds.includes(t.id))}
+							onSelect={setActiveTab}
+						/>
+					</div>
 
 					{/*
 					 * Here rather than beside Copy and Download, which sit in the body

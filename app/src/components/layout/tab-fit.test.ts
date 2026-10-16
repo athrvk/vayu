@@ -16,7 +16,16 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { fitTabs, naturalTabWidth, TAB_CHROME, TAB_CLOSE_SPACE, TAB_ICON_SPACE } from "./tab-fit";
+import {
+	fitTabs,
+	naturalTabWidth,
+	naturalTriggerWidth,
+	MARK_ALLOWANCE,
+	TAB_CHROME,
+	TAB_CLOSE_SPACE,
+	TAB_ICON_SPACE,
+	TRIGGER_CHROME,
+} from "./tab-fit";
 import {
 	TAB_MIN_WIDTH,
 	TAB_MAX_WIDTH,
@@ -55,6 +64,30 @@ describe("naturalTabWidth", () => {
 		expect(naturalTabWidth({ label: "x".repeat(200), hasIcon: false }, measure)).toBe(
 			TAB_MAX_WIDTH
 		);
+	});
+});
+
+describe("naturalTriggerWidth", () => {
+	it("is the name plus the trigger's padding", () => {
+		expect(naturalTriggerWidth("abcdefghij", measure)).toBe(TRIGGER_CHROME + 100);
+	});
+
+	it("adds the room a mark may grow into, and only that", () => {
+		const bare = naturalTriggerWidth("abcdefghij", measure);
+		expect(naturalTriggerWidth("abcdefghij", measure, MARK_ALLOWANCE.count) - bare).toBe(
+			MARK_ALLOWANCE.count
+		);
+	});
+
+	it("rounds a fractional measurement up, never down", () => {
+		// A canvas reports 29.2; budgeting 29 lets the name clip by a sub-pixel.
+		expect(naturalTriggerWidth("x", () => 29.2)).toBe(TRIGGER_CHROME + 30);
+	});
+
+	it("is not clamped to the document tab's bounds", () => {
+		// A section tab is far narrower than TAB_MIN_WIDTH; clamping would overstate
+		// every one and overflow tabs that fit.
+		expect(naturalTriggerWidth("a", measure)).toBeLessThan(TAB_MIN_WIDTH);
 	});
 });
 
@@ -112,6 +145,26 @@ describe("fitTabs", () => {
 		const r = fitTabs([100, 100], 0, 0);
 		expect(r.visible).toEqual([0, 1]);
 		expect(r.overflowed).toEqual([]);
+	});
+
+	it("takes the reserved width from the caller instead of the New-tab button", () => {
+		// Three 100px tabs in exactly 300: with no reserve they fit, with the
+		// default New-tab button's 30px they do not.
+		const w = [100, 100, 100];
+		expect(fitTabs(w, 300, 0, { reserved: 0 }).overflowed).toEqual([]);
+		expect(fitTabs(w, 300, 0).overflowed.length).toBeGreaterThan(0);
+	});
+
+	it("shows everything before the first measurement when nothing is reserved", () => {
+		// 0 - reserved is negative, which is still "not measured yet".
+		const r = fitTabs([100, 100], 0, 0, { reserved: 8 });
+		expect(r.visible).toEqual([0, 1]);
+		expect(r.overflowed).toEqual([]);
+	});
+
+	it("still never overflows the active tab with custom options", () => {
+		const r = fitTabs([100, 100, 100, 100], 250, 3, { reserved: 0 });
+		expect(r.visible).toContain(3);
 	});
 
 	it("handles an empty strip", () => {

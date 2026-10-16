@@ -15,6 +15,9 @@ import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { isBlankScriptElement } from "@/lib/elements";
+import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
+import { useFittedTabs } from "@/components/layout/useFittedTabs";
+import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import { useRequestBuilderContext } from "../../context";
 import type { RequestTab, TabInfo } from "../../types";
 import InfoPanel from "./panels/InfoPanel";
@@ -41,6 +44,21 @@ import { displayPathRows, pathRowsOf, queryRowsOf } from "../../utils/path-varia
  * mount-on-demand behaviour; only these two carry state a remount destroys.
  */
 const EDITOR_TABS = new Set<RequestTab>(["body", "elements"]);
+
+/**
+ * `variant="inset"`'s `px-1` on both sides of the list, which the fit's wrapper
+ * contains but the triggers cannot use.
+ */
+const LIST_PADDING = 8;
+
+/**
+ * What a tab's mark may grow to once it arrives. A tab with no `badge` key can
+ * never carry one (Examples), and a `presence` tab draws a dot, not digits.
+ */
+function markAllowanceOf(tab: TabInfo): number {
+	if (!("badge" in tab)) return MARK_ALLOWANCE.none;
+	return tab.presence ? MARK_ALLOWANCE.dot : MARK_ALLOWANCE.count;
+}
 
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
@@ -141,35 +159,57 @@ export default function RequestTabs() {
 		},
 	];
 
+	const markAllowances = new Map(tabs.map((t) => [t.id, markAllowanceOf(t)]));
+	const { containerRef, visibleIds, overflowedIds } = useFittedTabs({
+		ids: tabs.map((t) => t.id),
+		labels: tabs.map((t) => t.label),
+		activeId: activeTab,
+		markAllowance: (id) => markAllowances.get(id) ?? MARK_ALLOWANCE.none,
+		reserved: LIST_PADDING,
+	});
+
 	return (
 		<Tabs
 			value={activeTab}
 			onValueChange={(v) => setActiveTab(v as RequestTab)}
 			className="flex-1 flex flex-col overflow-hidden"
 		>
-			{/* Tab Headers */}
-			<TabsList
-				variant="inset"
-				className="w-full overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
-			>
-				{tabs.map((tab) => (
-					<TabsTrigger key={tab.id} value={tab.id}>
-						<TabLabel>{tab.label}</TabLabel>
-						{/*
-						 * Unconditional for every tab that *can* carry a count,
-						 * `undefined` and all - `TabCount` animates its own track
-						 * open rather than reserving one. Gating the element here is
-						 * exactly what made typing the first character into an empty
-						 * Params table shove the seven tabs after Params, and the
-						 * `Table` toggle sharing their row, sideways. Examples can
-						 * never carry a count, so it declares no `badge` key at all
-						 * and pays no width at all, ever - which is why this asks
-						 * whether the key is *there*, not whether its value is set.
-						 */}
-						{"badge" in tab && <TabCount value={tab.badge} presence={tab.presence} />}
-					</TabsTrigger>
-				))}
-			</TabsList>
+			{/*
+			 * Tab Headers. The fit measures the wrapper, not the list, which shrinks
+			 * to what it draws (`useFittedTabs`); `w-full` rather than `flex-1`
+			 * because the wrapper sits in a column, where `flex-1` would grow it
+			 * vertically and leave its width to its content. Tabs that do not fit are
+			 * in the "+N" menu rather than scrolled out of sight.
+			 */}
+			<div ref={containerRef} className="flex w-full shrink-0 items-stretch">
+				<TabsList variant="inset" className="overflow-hidden flex-nowrap">
+					{tabs
+						.filter((tab) => visibleIds.includes(tab.id))
+						.map((tab) => (
+							<TabsTrigger key={tab.id} value={tab.id}>
+								<TabLabel>{tab.label}</TabLabel>
+								{/*
+								 * Unconditional for every tab that *can* carry a count,
+								 * `undefined` and all - `TabCount` animates its own track
+								 * open rather than reserving one. Gating the element here is
+								 * exactly what made typing the first character into an empty
+								 * Params table shove the seven tabs after Params, and the
+								 * `Table` toggle sharing their row, sideways. Examples can
+								 * never carry a count, so it declares no `badge` key at all
+								 * and pays no width at all, ever - which is why this asks
+								 * whether the key is *there*, not whether its value is set.
+								 */}
+								{"badge" in tab && (
+									<TabCount value={tab.badge} presence={tab.presence} />
+								)}
+							</TabsTrigger>
+						))}
+				</TabsList>
+				<TabOverflowMenu
+					tabs={tabs.filter((tab) => overflowedIds.includes(tab.id))}
+					onSelect={setActiveTab}
+				/>
+			</div>
 
 			{/*
 			 * TabsContent per tab, not a plain <div>. Radix derives an

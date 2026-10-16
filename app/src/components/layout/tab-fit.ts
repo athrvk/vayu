@@ -95,11 +95,57 @@ export function naturalTabWidth(tab: TabMetrics, measure: (text: string) => numb
 	return Math.max(TAB_MIN_WIDTH, Math.min(TAB_MAX_WIDTH, Math.ceil(content)));
 }
 
+/**
+ * What a Radix `TabsTrigger` draws that is not its name: `px-2` on both sides.
+ * The two-pixel `gap-0.5` the list puts between triggers is charged here too, so
+ * a trigger's width is also its slot in the row. Comfortable-density pixels, the
+ * safe direction to be wrong in - see `TAB_CHROME`.
+ */
+export const TRIGGER_CHROME = 16 + 2;
+
+/**
+ * What a trailing mark on a trigger adds once it has arrived, in px, the trigger's
+ * own `gap-1.5` (6) included.
+ *
+ * A mark animates open after the fit has been decided (`MARK_TRACK` in
+ * `ui/tabs.tsx`), so the fit budgets for the widest a tab can get rather than
+ * for what it shows now; otherwise a badge arriving late widens a trigger past
+ * the room the fit gave it and the strip clips again. `wideCount` is for a count
+ * with no small ceiling (an event stream's length).
+ */
+export const MARK_ALLOWANCE = {
+	none: 0,
+	dot: 6 + 5,
+	count: 6 + 2 * 6,
+	wideCount: 6 + 5 * 6,
+	chip: 6 + 40,
+} as const;
+
+/**
+ * The width a section-tab trigger wants: its name at the bold weight (the label
+ * reserves the semibold width in every state, `TabLabel`), the trigger's padding,
+ * and room for the marks it may grow. `measure` must be built at the trigger's
+ * 600 weight, not the strip's.
+ */
+export function naturalTriggerWidth(
+	label: string,
+	measure: (text: string) => number,
+	markAllowance = 0
+): number {
+	return TRIGGER_CHROME + Math.ceil(measure(label)) + markAllowance;
+}
+
 export interface FitResult {
 	/** Indices of the tabs to render, in strip order. */
 	visible: number[];
 	/** Indices that did not fit, in strip order. */
 	overflowed: number[];
+}
+
+/** What the row spends on things that are not tabs. */
+export interface FitOptions {
+	/** Width the row spends on things that are not tabs (default: the New-tab button). */
+	reserved?: number;
 }
 
 /**
@@ -113,9 +159,14 @@ export interface FitResult {
  * - **The active tab is never overflowed.** Picking a tab from the menu has to
  *   put it on screen, or the menu looks like it did nothing.
  */
-export function fitTabs(widths: number[], availableWidth: number, activeIndex: number): FitResult {
+export function fitTabs(
+	widths: number[],
+	availableWidth: number,
+	activeIndex: number,
+	{ reserved = TAB_NEW_BUTTON_WIDTH }: FitOptions = {}
+): FitResult {
 	const all = widths.map((_, i) => i);
-	const room = availableWidth - TAB_NEW_BUTTON_WIDTH;
+	const room = availableWidth - reserved;
 	// Before the first measurement `availableWidth` is 0. Show everything rather
 	// than nothing: one frame of a too-wide strip is clipped, whereas one frame
 	// of an empty strip is a flash of missing UI.

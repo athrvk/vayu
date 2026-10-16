@@ -70,11 +70,12 @@ const Tabs = TabsPrimitive.Root;
 type TabSize = "xs" | "sm";
 
 /*
- * `px-2`, not `px-2.5`. Measured: the response strip is 465px of triggers at
- * `px-2.5` and 437px at `px-2`, and the request strip 532px against 500px. The
- * response pane got seven permanent tabs when the conditional ones were removed,
- * and the request strip has carried eight for a while - at a 50/50 split neither
- * had the room, so both scrolled.
+ * `px-2`, not `px-2.5`. Measured when the response strip had seven tabs: 465px
+ * of triggers at `px-2.5` and 437px at `px-2`, and the request strip 532px
+ * against 500px. Both carry eight now and neither fits a ~430px pane, which is
+ * why they fit-and-overflow (`useFittedTabs`) rather than scroll; the saved
+ * pixels are tabs that stay out of the "+N" menu. `naturalTriggerWidth` budgets this
+ * padding, so the two move together.
  *
  * Vertical padding is untouched: `xs` is still a 24px band and `sm` a 28px one,
  * which is the step the rest of the app is built on.
@@ -138,7 +139,7 @@ function TabsTrigger({
 				"ring-offset-background transition-colors",
 				"hover:text-foreground",
 				// `ring-inset`, because a trigger fills its list's height exactly and
-				// the scrolling strips are `overflow-y-hidden` - an outward ring had
+				// the strips are `overflow-hidden` - an outward ring had
 				// no room and rendered as two clipped vertical strokes. Inset also
 				// keeps the fix on the trigger, where the ring is, rather than
 				// asking every present and future tab strip to leave room for it.
@@ -252,7 +253,7 @@ function TabLabel({ children }: { children: string }) {
  * all times - it worked, but every countable tab then paid that width (plus
  * the trigger's `gap-1.5` before it) permanently, on every tab strip in the
  * app, whether or not anything was ever counted. That is dead space a strip
- * that already scrolls at seven or eight tabs (see SIZE) cannot afford to
+ * that already overflows at seven or eight tabs (see SIZE) cannot afford to
  * spend on tabs that usually show nothing.
  *
  * The replacement is the `grid-template-columns: 0fr -> 1fr` technique

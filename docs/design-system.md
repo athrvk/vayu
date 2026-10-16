@@ -3504,7 +3504,7 @@ read as a fraction, and there is no fraction to report.
 | Mono font | `font-mono` |
 | Code font (utility) | `font-code` |
 | Thin scrollbar | nothing - 6px is the global baseline (see [Scrollbar](#scrollbar)) |
-| Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) |
+| Tab-strip scrollbar | `scrollbar-strip` (4px, thumb on hover) - collection detail only; the request and response strips fit-and-overflow |
 | Variable color | `text-variable` or `.variable-highlight` |
 
 ### Never use
@@ -3713,10 +3713,20 @@ Surfaces where a permanent 6px reserve reads as a dead band opt out with `[scrol
 
 ### Tab strips: `scrollbar-strip`
 
-A `TabsList` that scrolls natively (request builder, response viewer,
-collection detail) draws the baseline bar directly under a 24px band of tabs.
-The scoped utility takes those strips to 4px and hides the thumb until the
-strip is hovered:
+**The request builder's and the response viewer's strips do not scroll** (#2200).
+They were `overflow-x-auto` with this bar hidden, so at the default split
+(~430px a pane) the last tabs were cut off with nothing to say they existed.
+Each now measures the room it has (`useFittedTabs`, the canvas-measured fit
+`TabStrip` uses for document tabs), draws the triggers that fit in an
+`overflow-hidden` list and sends the rest to a `+N` menu (`TabOverflowMenu`)
+that sits beside the `TabsList`, never inside it. The active tab is always
+drawn, and each tab's width budgets the mark (count, dot, result chip) it may
+grow, because marks animate in after the fit. The measured element is a wrapper
+that fills the row, not the list, which shrinks to what it draws.
+
+A `TabsList` that scrolls natively (collection detail) draws the baseline bar
+directly under a 24px band of tabs. The scoped utility takes that strip to 4px
+and hides the thumb until the strip is hovered:
 
 ```css
 /* index.css, @layer utilities */
