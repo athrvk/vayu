@@ -25,6 +25,12 @@ export {
 export { ResponseTimeVsConcurrencyChart, HdrPercentileChart } from "./ScatterAndDistribution";
 // Exported for the panels that print the same numbers a chart plots - a summary
 // beside a line has to spell its peak the way the line's tooltip does.
-export { fmtVitals } from "./formatters";
+export { fmtVitals, fmtMs, fmtRate, fmtPct } from "./formatters";
 export { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
 export { CustomMetricsChart } from "./CustomMetricsChart";
+export {
+	RunP95TrendChart,
+	RunThroughputTrendChart,
+	RunErrorRateTrendChart,
+} from "./RunTrendCharts";
+export type { RunTrendPoint } from "./RunTrendCharts";

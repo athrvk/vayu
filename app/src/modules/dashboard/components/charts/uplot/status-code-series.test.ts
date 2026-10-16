@@ -55,6 +55,7 @@ const CHART_FILES = [
 	"TimeSeriesCharts.tsx",
 	"ScatterAndDistribution.tsx",
 	"CustomMetricsChart.tsx",
+	"RunTrendCharts.tsx",
 ];
 
 describe("chart series colours", () => {
