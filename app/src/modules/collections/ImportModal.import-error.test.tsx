@@ -75,7 +75,7 @@ describe("ImportModal - failed import", () => {
 	/** Drive the modal to the point where Import has been clicked and has failed. */
 	async function failAnImport() {
 		renderModal();
-		selectTab(/Paste JSON/i);
+		selectTab(/^Paste$/i);
 		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
 		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 		await waitFor(() =>

@@ -90,7 +90,9 @@ export function toFileRef(
  * `buildExecBody` below). Shared by the builder's save, the "gone" pane's cURL
  * snippet (issue #1436) and the Send snapshot `sentRequestOf` takes.
  */
-export function toBodyPayload(request: RequestState): RequestBody {
+export function toBodyPayload(
+	request: Pick<RequestState, "bodyMode" | "body" | "formData" | "urlEncoded" | "binaryFile">
+): RequestBody {
 	if (request.bodyMode === "form-data") {
 		return { mode: "form-data", fields: withFileTrust(toKeyValueEntries(request.formData)) };
 	}

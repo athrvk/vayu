@@ -253,7 +253,7 @@ describe("a tab shows its own work", () => {
 		dropFiles({ name: "bad.json", text: spec("Broken") });
 		await waitFor(() => expect(screen.getByText(/Unrecognized format/i)).toBeInTheDocument());
 
-		selectTab(/Paste JSON/i);
+		selectTab(/^Paste$/i);
 
 		expect(screen.queryByText(/Unrecognized format/i)).not.toBeInTheDocument();
 	});

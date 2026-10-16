@@ -37,7 +37,7 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import { useImportModalStore, useTabsStore, type ImportReport } from "@/stores";
+import { useImportModalStore, useTabsStore, useToastStore, type ImportReport } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { useCollectionsQuery } from "@/queries/collections";
 import { queryKeys } from "@/queries/keys";
@@ -69,9 +69,14 @@ import {
 import { useSpecDocumentLimit } from "@/hooks/useSpecDocumentLimit";
 import { fileBaseName } from "@/lib/file-path";
 import { ImportProgressView, type ImportProgress } from "./ImportProgressView";
-import { MethodBadge, FieldError } from "@/components/shared";
+import { Callout, MethodBadge, FieldError } from "@/components/shared";
 import { isCommitEnter } from "@/lib/keyboard";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { useNewRequest } from "@/hooks/useNewRequest";
+import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
+import { importCommand, type CommandImport } from "@/services/curl/parseCurl";
+import { droppedFlagsNotice } from "@/modules/request-builder/utils/paste-disclosure";
+import { presetFromCommand } from "./curl-request-preset";
 
 type Tab = "file" | "url" | "paste";
 type Phase = "idle" | "detecting" | "preview" | "error";
@@ -119,6 +124,8 @@ export function ImportModal() {
 	const { data: collections = [] } = useCollectionsQuery();
 	const readBoundSpecs = useBoundSpecReader();
 	const openCollectionSpecTab = useTabsStore((s) => s.openCollectionSpecTab);
+	const showToast = useToastStore((s) => s.showToast);
+	const { newRequest, pickerProps } = useNewRequest();
 
 	const [tab, setTab] = useState<Tab>("file");
 	/**
@@ -141,6 +148,8 @@ export function ImportModal() {
 		paste: IDLE_TAB,
 	}));
 	const [pasteText, setPasteText] = useState("");
+	/** The Paste tab's text when it is a curl/wget command, which is not a collection (#2250). */
+	const [pastedCommand, setPastedCommand] = useState<CommandImport | null>(null);
 	const [url, setUrl] = useState("");
 	const [importEnvironments, setImportEnvironments] = useState(true);
 	const [importScripts, setImportScripts] = useState(true);
@@ -239,7 +248,10 @@ export function ImportModal() {
 	const resetTab = (t: Tab) => {
 		const at = supersede(t);
 		if (t === "url") setUrl("");
-		if (t === "paste") setPasteText("");
+		if (t === "paste") {
+			setPasteText("");
+			setPastedCommand(null);
+		}
 		patchTab(t, at, IDLE_TAB);
 	};
 
@@ -496,11 +508,30 @@ export function ImportModal() {
 	// is what puts the progress panel on screen (issue #882).
 	const isBusy = phase === "detecting";
 
-	/** Detect and preview a pasted document, on the Paste tab's own slice. */
+	/**
+	 * Detect and preview a pasted document, on the Paste tab's own slice.
+	 *
+	 * A curl/wget command is a request, not a collection, so it never reaches the
+	 * engine, whose answer would be "Unrecognized format" (#2250).
+	 */
 	const handlePaste = async (): Promise<void> => {
 		if (isBusy) return;
 		const at = supersede("paste");
+		const command = importCommand(pasteText);
+		setPastedCommand(command);
+		if (command) {
+			patchTab("paste", at, IDLE_TAB);
+			return;
+		}
 		await runBatch("paste", at, [{ text: pasteText }]);
+	};
+
+	/** The creation flow the URL bar's paste feeds, and the same disclosure of what it dropped. */
+	const openCommandAsRequest = (command: CommandImport): void => {
+		newRequest(presetFromCommand(command.request));
+		handleClose();
+		const notice = droppedFlagsNotice(command.dropped);
+		if (notice) showToast(notice);
 	};
 
 	const handleFetchUrl = async () => {
@@ -866,13 +897,13 @@ export function ImportModal() {
 						<div>
 							<Textarea
 								value={pasteText}
-								onChange={(e) => setPasteText(e.target.value)}
-								placeholder="Paste collection JSON or YAML here"
+								onChange={(e) => {
+									setPasteText(e.target.value);
+									setPastedCommand(null);
+								}}
+								placeholder="Paste collection JSON or YAML, or a curl command"
 								className="h-40 w-full font-mono text-xs"
 							/>
-							<p className="mt-2 text-label text-muted-foreground">
-								A curl command? Paste it into a request&apos;s URL bar.
-							</p>
 							<Button
 								onClick={() => void handlePaste()}
 								disabled={!pasteText.trim() || isBusy}
@@ -880,6 +911,22 @@ export function ImportModal() {
 							>
 								Detect and preview
 							</Button>
+							{pastedCommand && (
+								<Callout
+									severity="info"
+									className="mt-3"
+									action={
+										<Button
+											size="sm"
+											onClick={() => openCommandAsRequest(pastedCommand)}
+										>
+											Open as new request
+										</Button>
+									}
+								>
+									This is a curl command. Open it as a new request.
+								</Callout>
+							)}
 						</div>
 					)}
 					{/*
@@ -982,7 +1029,7 @@ export function ImportModal() {
 						{(["file", "url", "paste"] as Tab[]).map((t) => (
 							<TabsTrigger key={t} value={t}>
 								<TabLabel>
-									{t === "file" ? "File" : t === "url" ? "URL" : "Paste JSON"}
+									{t === "file" ? "File" : t === "url" ? "URL" : "Paste"}
 								</TabLabel>
 							</TabsTrigger>
 						))}
@@ -1097,6 +1144,8 @@ export function ImportModal() {
 					/>
 				)}
 			</DialogContent>
+			{/* Beside the content, not in it: the dialog closes before the picker is answered. */}
+			<CollectionPicker {...pickerProps} />
 		</Dialog>
 	);
 }

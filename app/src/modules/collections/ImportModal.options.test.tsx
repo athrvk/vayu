@@ -68,7 +68,7 @@ function selectTab(name: RegExp) {
 }
 
 async function reachPreview() {
-	selectTab(/Paste JSON/i);
+	selectTab(/^Paste$/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
 	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 	await waitFor(() => expect(screen.getByRole("button", { name: /^Import/i })).toBeVisible());
