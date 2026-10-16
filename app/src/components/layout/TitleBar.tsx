@@ -43,6 +43,7 @@ import {
 import {
 	canGoBack,
 	canGoForward,
+	useEnvSwitcherStore,
 	useImportModalStore,
 	useSessionStore,
 	useTabsStore,
@@ -324,6 +325,8 @@ function EnvSwitcher() {
 	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const openImport = useImportModalStore((s) => s.open);
 	const showToast = useToastStore((s) => s.showToast);
+	const menuOpen = useEnvSwitcherStore((s) => s.isOpen);
+	const setMenuOpen = useEnvSwitcherStore((s) => s.setOpen);
 	const activeEnv = environments.find((e) => e.id === activeEnvironmentId);
 
 	/*
@@ -394,7 +397,7 @@ function EnvSwitcher() {
 	};
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
 			<DropdownMenuTrigger asChild>
 				<button
 					className={cn(
