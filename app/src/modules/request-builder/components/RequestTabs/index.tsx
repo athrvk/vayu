@@ -60,6 +60,15 @@ function markAllowanceOf(tab: TabInfo): number {
 	return tab.presence ? MARK_ALLOWANCE.dot : MARK_ALLOWANCE.count;
 }
 
+/**
+ * A tab's trailing mark, shared by its trigger and its "+N" menu item. A tab
+ * with no `badge` key can never carry one (Examples).
+ */
+function countMarkOf(tab: TabInfo) {
+	if (!("badge" in tab)) return null;
+	return <TabCount value={tab.badge} presence={tab.presence} />;
+}
+
 export default function RequestTabs() {
 	const { request, activeTab, setActiveTab } = useRequestBuilderContext();
 
@@ -199,14 +208,14 @@ export default function RequestTabs() {
 								 * and pays no width at all, ever - which is why this asks
 								 * whether the key is *there*, not whether its value is set.
 								 */}
-								{"badge" in tab && (
-									<TabCount value={tab.badge} presence={tab.presence} />
-								)}
+								{countMarkOf(tab)}
 							</TabsTrigger>
 						))}
 				</TabsList>
 				<TabOverflowMenu
-					tabs={tabs.filter((tab) => overflowedIds.includes(tab.id))}
+					tabs={tabs
+						.filter((tab) => overflowedIds.includes(tab.id))
+						.map((tab) => ({ id: tab.id, label: tab.label, mark: countMarkOf(tab) }))}
 					onSelect={setActiveTab}
 				/>
 			</div>

@@ -11,15 +11,42 @@
  * Displays sampled request details for load tests.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, Badge } from "@/components/ui";
+import {
+	Card,
+	CardContent,
+	CardHeader,
+	CardTitle,
+	Badge,
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@/components/ui";
 import { EmptyState, SampleRetentionNote, CapturedDataWarning } from "@/components/shared";
 import { formatNumber } from "@/lib/format-number";
 import { useRunSamplesQuery } from "@/queries/runs";
 import SampleRequestCard from "./SampleRequestCard";
 import { sampleResultsWithoutValidationRow } from "../test-validation";
-import type { TabProps, SampleResult } from "../../types";
+import {
+	SAMPLE_FILTERS,
+	SAMPLE_FILTER_LABEL,
+	countByFilter,
+	filterSamples,
+	isSampleFilter,
+	numberByTime,
+	type SampleFilter,
+} from "../sample-filter";
+import type { TabProps } from "../../types";
+
+interface SamplesTabProps extends TabProps {
+	/**
+	 * The chip selected. Left out, the tab keeps its own; given, the owner picks
+	 * it (a summary row that opens its examples sets it - #2213) and hears the
+	 * user's own choice through {@link onFilterChange}.
+	 */
+	filter?: SampleFilter;
+	onFilterChange?: (filter: SampleFilter) => void;
+}
 
 // `resultsStored > resultsCap` is the engine's own statement that `results` is a
 // selection and not everything stored. A report without the pair predates it
@@ -30,23 +57,40 @@ function storedBeyondCap(report: TabProps["report"]): number | null {
 	return resultsStored > resultsCap ? resultsStored : null;
 }
 
-export default function SamplesTab({ report }: TabProps) {
-	const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+export default function SamplesTab({ report, filter, onFilterChange }: SamplesTabProps) {
+	// Keyed by the row's number, not its array position, so the open row stays the
+	// same sample when a chip narrows the list.
+	const [expandedNumber, setExpandedNumber] = useState<number | null>(null);
+	const [localFilter, setLocalFilter] = useState<SampleFilter>("all");
+	const activeFilter = filter ?? localFilter;
 
 	// Fetched only once a row is open, which is the whole reason the captured
 	// bodies are not part of the report payload.
 	const { data: captured } = useRunSamplesQuery(
 		report.metadata?.runId ?? null,
-		expandedIndex !== null
+		expandedNumber !== null
 	);
 
 	// The synthetic test-validation row is not a captured request - it carries no
 	// response, so this tab would draw it as a status-0 card with nothing behind
 	// it. Its failures are named in the Overview instead (issue #726).
-	const samples = sampleResultsWithoutValidationRow(report.results);
+	const rows = useMemo(
+		() => numberByTime(sampleResultsWithoutValidationRow(report.results)),
+		[report.results]
+	);
+	const counts = useMemo(() => countByFilter(rows), [rows]);
+	const visibleRows = useMemo(() => filterSamples(rows, activeFilter), [rows, activeFilter]);
 	const storedTotal = storedBeyondCap(report);
 
-	if (samples.length === 0) {
+	const selectFilter = (next: string) => {
+		// Radix emits "" when the active chip is clicked again; a filter is always
+		// chosen.
+		if (!isSampleFilter(next)) return;
+		setLocalFilter(next);
+		onFilterChange?.(next);
+	};
+
+	if (rows.length === 0) {
 		return (
 			<Card>
 				{/* The card supplies the frame; EmptyState brings its own padding, so
@@ -69,11 +113,11 @@ export default function SamplesTab({ report }: TabProps) {
 					<CardTitle>Sampled Request Details</CardTitle>
 					<div className="flex items-center gap-2">
 						<Badge variant="secondary" className="text-xs">
-							{samples.length} samples shown
+							{visibleRows.length} samples shown
 						</Badge>
 						{storedTotal !== null && (
 							<Badge variant="outline" className="text-xs">
-								{`${samples.length} of ${formatNumber(storedTotal)} stored`}
+								{`${rows.length} of ${formatNumber(storedTotal)} stored`}
 							</Badge>
 						)}
 					</div>
@@ -88,26 +132,47 @@ export default function SamplesTab({ report }: TabProps) {
 			<CardContent className="p-0 bg-card surface-card">
 				<SampleRetentionNote
 					sampling={report.sampling}
-					shown={samples.length}
+					shown={rows.length}
 					budget="traces"
 					className="mx-5 mb-3"
 				/>
 				<CapturedDataWarning sampling={report.sampling} className="mx-5 mb-3" />
-				<div className="divide-y divide-rule">
-					{samples.map((sample: SampleResult, idx: number) => (
-						<SampleRequestCard
-							key={idx}
-							sample={sample}
-							index={idx}
-							runId={report.metadata?.runId}
-							isExpanded={expandedIndex === idx}
-							onToggle={() => setExpandedIndex(expandedIndex === idx ? null : idx)}
-							captured={
-								sample.id === undefined ? undefined : captured?.get(sample.id)
-							}
-						/>
+				<ToggleGroup
+					aria-label="Filter samples"
+					value={activeFilter}
+					onValueChange={selectFilter}
+					className="mx-5 mb-3"
+				>
+					{SAMPLE_FILTERS.map((value) => (
+						<ToggleGroupItem key={value} value={value}>
+							{SAMPLE_FILTER_LABEL[value]}
+							<span className="tabular-nums text-muted-foreground">
+								{formatNumber(counts[value])}
+							</span>
+						</ToggleGroupItem>
 					))}
-				</div>
+				</ToggleGroup>
+				{visibleRows.length === 0 ? (
+					<EmptyState variant="inline" title="No samples match this filter" />
+				) : (
+					<div className="divide-y divide-rule">
+						{visibleRows.map(({ number, sample }) => (
+							<SampleRequestCard
+								key={number}
+								sample={sample}
+								index={number - 1}
+								runId={report.metadata?.runId}
+								isExpanded={expandedNumber === number}
+								onToggle={() =>
+									setExpandedNumber(expandedNumber === number ? null : number)
+								}
+								captured={
+									sample.id === undefined ? undefined : captured?.get(sample.id)
+								}
+							/>
+						))}
+					</div>
+				)}
 			</CardContent>
 		</Card>
 	);
