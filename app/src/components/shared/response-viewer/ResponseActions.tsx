@@ -36,6 +36,7 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
+import { downloadTextFile } from "@/lib/download-text-file";
 import { cn } from "@/lib/utils";
 
 export interface ResponseActionsProps {
@@ -54,14 +55,9 @@ export function ResponseActions({ content, fileExtension, className }: ResponseA
 	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	const handleDownload = () => {
-		const blob = new Blob([content], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
 		// Stamped at click time, not render time.
-		a.download = `response-${Date.now()}.${fileExtension || "txt"}`;
-		a.click();
-		URL.revokeObjectURL(url);
+		const fileName = `response-${Date.now()}.${fileExtension || "txt"}`;
+		downloadTextFile(content, fileName, "text/plain");
 	};
 
 	return (

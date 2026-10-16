@@ -6,8 +6,8 @@
  */
 
 /**
- * What the environment row's "Export as Postman Environment" does with the
- * engine's answer (#2253): save the document and say what it left out.
+ * What the environment row's "Export as Postman Environment" tells the user
+ * about the engine's answer (#2253): what the saved document left out.
  */
 
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -15,17 +15,6 @@ import type { PostmanEnvironmentExportNotes } from "@/types";
 
 /** The `notCarried` code for `json`-typed variables, which Postman has no type for. */
 const JSON_TYPES_NOT_CARRIED = "variable_types";
-
-/** Hand `text` to the browser as a file called `fileName`. */
-export function downloadJsonFile(fileName: string, text: string): void {
-	const blob = new Blob([text], { type: "application/json" });
-	const url = URL.createObjectURL(blob);
-	const anchor = document.createElement("a");
-	anchor.href = url;
-	anchor.download = fileName;
-	anchor.click();
-	URL.revokeObjectURL(url);
-}
 
 /**
  * The success toast: the file's name, then each loss that has a count. A

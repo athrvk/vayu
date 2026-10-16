@@ -80,6 +80,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
 import { useCopy } from "@/hooks/useCopy";
 import { environmentReference } from "@/lib/agent-reference";
+import { downloadTextFile } from "@/lib/download-text-file";
 import {
 	Badge,
 	Button,
@@ -90,7 +91,7 @@ import {
 } from "@/components/ui";
 import { DEFAULT_ENVIRONMENT_NAME } from "@/constants/environment";
 import { apiService } from "@/services/api";
-import { downloadJsonFile, postmanEnvironmentExportMessage } from "./postman-environment-export";
+import { postmanEnvironmentExportMessage } from "./postman-environment-export";
 
 /**
  * Globals, Environments, Collections - the level-1 rows a screen reader counts
@@ -311,7 +312,7 @@ export default function VariablesCategoryTree() {
 			const { text, fileName, notes } = await apiService.exportPostmanEnvironment({
 				environmentId: env.id,
 			});
-			downloadJsonFile(fileName, text);
+			downloadTextFile(text, fileName, "application/json");
 			showToast(postmanEnvironmentExportMessage(fileName, notes), "success");
 		} catch (error) {
 			reportFailure(error, "Couldn't export the environment");
