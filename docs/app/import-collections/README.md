@@ -282,8 +282,9 @@ The dialog closes on a full success and `announceImport` takes over (issue
 ledger is the one place the loss report is drawn from, and the dialog discards
 it, so what the user would otherwise have to finish by hand is kept:
 
-- `useImportMutation` resolves with `{ idMap, rootIds }`: each root
-  collection's temp id mapped to the real id the engine minted. That is what the steps below address.
+- `useImportMutation` resolves with `{ idMap, rootIds, environmentIds }`: each root
+  collection's (and each created environment's) temp id mapped to the real id the engine
+  minted. That is what the steps below address.
 - One `ImportReport` per applied file (the notice lines, the file-reference
   needs, the counts) goes into `import-report-store`, keyed by each root
   collection's real id. A file with nothing to report stores nothing.
@@ -294,6 +295,10 @@ it, so what the user would otherwise have to finish by hand is kept:
   a report has action-tier lines or file references to relink. When there is a
   report, the toast's one action opens the collection on its Info tab, even
   when the user is already inside it on another sub-tab.
+- If the whole import created exactly one environment and the engine reports none
+  active, it is activated, and the toast says so or offers the next step in place of
+  the action slot (the notes action keeps the slot when there is one). See
+  [postman-environment.md](postman-environment.md#active-environment-after-the-apply).
 - The Info tab of each new root carries an **Import notes** callout
   (`CollectionDetail/ImportNotesCallout.tsx`): the same notice lines and
   file-reference list the preview drew, under the file's name. It stays, past

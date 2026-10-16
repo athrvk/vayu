@@ -247,7 +247,29 @@ describe("useImportMutation", () => {
 		});
 
 		expect(applied.rootIds).toEqual({ c1: "col_1", c2: "col_2" });
+		expect(applied.environmentIds).toEqual({ e1: "env_1" });
 		expect(applied.idMap).toEqual({ c1: "col_1", c2: "col_2", e1: "env_1" });
+	});
+
+	// The import dialog activates a lone new environment from this map; an
+	// environment the user excluded was never sent, so it must not appear here.
+	it("resolves no environment ids when the import left environments out", async () => {
+		vi.mocked(apiService.applyImport).mockResolvedValue({ idMap: { c1: "col_1" } });
+		const qc = appDefaultsClient();
+		const wrapper = ({ children }: { children: ReactNode }) =>
+			createElement(QueryClientProvider, { client: qc }, children);
+		const { result } = renderHook(() => useImportMutation(), { wrapper });
+
+		const applied = await result.current.mutateAsync({
+			result: {
+				...structuredClone(COLLECTION_ONLY),
+				environments: [{ name: "Prod", description: "", variables: {} }],
+			},
+			opts: { importEnvironments: false, importScripts: true },
+		});
+
+		expect(applied.environmentIds).toEqual({});
+		expect(vi.mocked(apiService.applyImport).mock.calls[0][0].environments).toEqual([]);
 	});
 
 	/**
