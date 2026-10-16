@@ -76,7 +76,7 @@ beforeEach(() => {
 describe("the load-test dialog layout", () => {
 	it("widens to the two-pane size at lg and stays a single column below it", () => {
 		const { panel } = open();
-		expect(panel.className).toContain("lg:max-w-3xl");
+		expect(panel.className).toContain("lg:max-w-4xl");
 		// The unprefixed cap is the single-column width below `lg`.
 		expect(panel.className).toContain("max-w-xl");
 	});

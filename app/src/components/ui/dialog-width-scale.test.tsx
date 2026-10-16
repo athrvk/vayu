@@ -15,7 +15,7 @@
  * now four: `lg` (512px) for a form or a decision, `xl` (576px) for a dialog
  * holding something with a shape of its own, `2xl` (672px) for one whose job
  * is *browsing* that shape - the data-row picker, added by issue #892 - and
- * `lg:max-w-3xl` (768px, from the `lg` breakpoint only) for a dense config that
+ * `lg:max-w-4xl` (896px, from the `lg` breakpoint only) for a dense config that
  * is two independent groups laid in two panes, the load-test dialog (#2231).
  *
  * The scale grows by widening it here with a reason, which is what the last
@@ -85,8 +85,8 @@ const ALLOWED = new Set([
 	"sm:max-w-2xl",
 	// The two-pane size (#2231), spelled with the breakpoint so below `lg` the
 	// dialog stays the `xl` single column. Only the prefixed spelling is listed:
-	// a bare `max-w-3xl` would be the wider modal the scale does not take.
-	"lg:max-w-3xl",
+	// a bare `max-w-4xl` would be the wider modal the scale does not take.
+	"lg:max-w-4xl",
 ]);
 
 describe("the dialog width scale", () => {
@@ -115,13 +115,13 @@ describe("the dialog width scale", () => {
 	});
 
 	it("reads a breakpoint-prefixed width and refuses a bare unlisted one", () => {
-		// `lg:max-w-3xl` is on the scale; the same size with no breakpoint, or
+		// `lg:max-w-4xl` is on the scale; the same size with no breakpoint, or
 		// at another one, is a one-off the scan has to surface.
 		const tag = (cls: string) => `<DialogContent className="${cls}">`;
-		expect(panelWidths(tag("max-w-xl lg:max-w-3xl"))).toEqual(["max-w-xl", "lg:max-w-3xl"]);
-		expect(panelWidths(tag("max-w-3xl")).filter((w) => !ALLOWED.has(w))).toEqual(["max-w-3xl"]);
-		expect(panelWidths(tag("lg:max-w-4xl")).filter((w) => !ALLOWED.has(w))).toEqual([
-			"lg:max-w-4xl",
+		expect(panelWidths(tag("max-w-xl lg:max-w-4xl"))).toEqual(["max-w-xl", "lg:max-w-4xl"]);
+		expect(panelWidths(tag("max-w-4xl")).filter((w) => !ALLOWED.has(w))).toEqual(["max-w-4xl"]);
+		expect(panelWidths(tag("lg:max-w-5xl")).filter((w) => !ALLOWED.has(w))).toEqual([
+			"lg:max-w-5xl",
 		]);
 	});
 

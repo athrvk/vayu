@@ -105,7 +105,7 @@ function DialogContent({ className, children, showClose = true, ...props }: Dial
 					// is the task, which is `sm:max-w-2xl` (672px, opened for the
 					// data-row picker, issue #892: seven CSV columns at 576px leave
 					// ~60px each); or it is a dense config that is two independent
-					// groups, which is `max-w-xl lg:max-w-3xl` (768px from the `lg`
+					// groups, which is `max-w-xl lg:max-w-4xl` (896px from the `lg`
 					// breakpoint, one column below it) and lays them in two panes
 					// (issue #2231). They had been five values including two
 					// one-off pixel widths, so the same kind of dialog came out a

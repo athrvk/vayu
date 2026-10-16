@@ -2568,7 +2568,7 @@ a `className` assertion, and styles nothing.
 | Standard | `sm:max-w-lg` (512px) | A form or a decision - a confirm, a rename, a picker, a short field set. |
 | Wide | `max-w-xl` (576px), the primitive's default | A dialog holding something with a shape of its own: a table, a diff, a preview, a dense config. |
 | Browser | `sm:max-w-2xl` (672px) | A dialog whose job is *reading* that shape and picking out of it, not confirming something about it. One call site: the data-row picker beside Send. |
-| Two-pane | `max-w-xl lg:max-w-3xl` (576px, 768px from the `lg` breakpoint) | A dense config that is two independent groups, which a single column makes scroll past one to reach the other. One call site: the load-test dialog, with the run's shape on the left and what it records and checks on the right. Below `lg` it is the Wide column. |
+| Two-pane | `max-w-xl lg:max-w-4xl` (576px, 896px from the `lg` breakpoint) | A dense config that is two independent groups, which a single column makes scroll past one to reach the other. One call site: the load-test dialog, with the run's shape on the left and what it records and checks on the right. Below `lg` it is the Wide column. |
 
 These had drifted to five values across eleven call sites, including two one-off
 pixel widths, so the same kind of dialog came out a different size depending on
@@ -2580,7 +2580,7 @@ reason, rather than opening a one-off.
 at 576px leaves about 60px a column, which is one truncated cell per column and
 nothing scannable.
 
-`lg:max-w-3xl` was opened for the load-test dialog (issue #2231), whose fields
+`lg:max-w-4xl` was opened for the load-test dialog (issue #2231), whose fields
 had grown to a single column taller than a laptop viewport. The width is not
 what earns it: the content is two groups that do not depend on each other, laid
 side by side from `lg` (1024px). The size is the two-pane one only - a dialog

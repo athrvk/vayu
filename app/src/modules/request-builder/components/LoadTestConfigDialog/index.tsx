@@ -306,7 +306,7 @@ export default function LoadTestConfigDialog({
 
 	return (
 		<Dialog open onOpenChange={(open) => !open && onClose()}>
-			<DialogContent className="max-w-xl lg:max-w-3xl">
+			<DialogContent className="max-w-xl lg:max-w-4xl">
 				<DialogHeader>
 					<DialogTitle>Run a load test</DialogTitle>
 					<DialogDescription>
@@ -404,19 +404,14 @@ export default function LoadTestConfigDialog({
 							<p className="rounded-md border border-border bg-panel px-3 py-2 text-label leading-relaxed text-muted-foreground">
 								{summarise(profile, blockingError !== null)}
 							</p>
+						</div>
 
-							{/*
-							 * After the profile summary, not before it: the summary is still
-							 * describing the profile fields directly above it, and Scripts is the
-							 * first control that is not about the profile.
-							 */}
+						<div className="min-w-0 space-y-4">
 							<ScriptsOverrideToggle
 								value={scriptsOverride}
 								onChange={setScriptsOverride}
 							/>
-						</div>
 
-						<div className="min-w-0 space-y-4">
 							<DataFileSection dataFile={dataFile} disabled={isStarting} />
 
 							<RecordingSection
