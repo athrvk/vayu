@@ -8900,8 +8900,8 @@ readings are served separately by
 [`GET /runs/:runId/monitor`](#get-runsrunidmonitor).
 
 `results[].id` is the `results` row id, and the join key against
-`GET /runs/:runId/samples`. The rows are listed by `timestamp`, not by `id`. It is absent on reports served by an engine older
-than 0.15.0.
+`GET /runs/:runId/samples`. It is absent on reports served by an engine older
+than 0.15.0. The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
 snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
