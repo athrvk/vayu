@@ -25,6 +25,7 @@ import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/
 import { Button } from "@/components/ui";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import { DashboardHeader, MetricsView } from "./components";
+import { useCollectionRunTarget } from "./hooks/useCollectionRunTarget";
 import { TIMING } from "@/config/timing";
 import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress } from "@/lib/run-status";
@@ -48,6 +49,9 @@ export default function LoadTestDashboard() {
 	// by nothing - so a dead metrics stream looked like a run with no data.
 	const streamError = useDashboardStore((s) => s.error);
 	const setStreamError = useDashboardStore((s) => s.setError);
+
+	// A collection load run has no URL; this is what the header says instead.
+	const { collectionName, stepCount } = useCollectionRunTarget(currentRunId);
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
@@ -336,6 +340,7 @@ export default function LoadTestDashboard() {
 					isStopping={isStopping}
 					onStop={handleStop}
 					outcome={judgement?.outcome}
+					comment={report.metadata?.configuration?.comment}
 				/>
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />
@@ -354,6 +359,9 @@ export default function LoadTestDashboard() {
 				onStop={handleStop}
 				requestUrl={requestInfo?.url}
 				requestMethod={requestInfo?.method}
+				collectionName={collectionName}
+				stepCount={stepCount}
+				comment={loadTestConfig?.comment}
 				elapsedDuration={elapsedDuration}
 				configuration={loadTestConfig ?? undefined}
 			/>

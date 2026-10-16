@@ -40,6 +40,10 @@ vi.mock("./components", () => ({
 	},
 }));
 
+// The collection target is read from the run's row; these cases are about the
+// live configuration, not that lookup (`dashboard.collection-run.test.tsx`).
+vi.mock("./hooks/useCollectionRunTarget", () => ({ useCollectionRunTarget: () => ({}) }));
+
 vi.mock("@/services", () => ({
 	apiService: { getRunReport: vi.fn().mockResolvedValue(null) },
 	loadTestService: {

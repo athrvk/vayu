@@ -34,6 +34,9 @@ export * from "./ExternalChangeCallout";
 // "12 requests cancelled by Stop" - outside every error and request count
 export * from "./CancelledRequestsNote";
 
+// "Comment  nightly baseline" - a run's own line, under its title
+export * from "./RunComment";
+
 // "17 errors (17.00%)", by type and by status code - the history Overview and the dashboard
 export * from "./ErrorSummary";
 

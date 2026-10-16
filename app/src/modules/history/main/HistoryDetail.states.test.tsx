@@ -21,12 +21,15 @@
  * query it failed on exposes a `refetch`.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import HistoryDetail from "./HistoryDetail";
 import { useTabsStore } from "@/stores";
+import { formatInstant } from "@/lib/time-value";
 
 const refetch = vi.fn();
+const collections: { id: string; name: string }[] = [];
 const refetchRun = vi.fn();
 const useRunReportQuery = vi.fn();
 const reportQuery = {
@@ -59,7 +62,7 @@ vi.mock("@/queries", async () => {
 			return reportQuery;
 		},
 		isRunNotFound: runs.isRunNotFound,
-		useCollectionsQuery: () => ({ data: [] }),
+		useCollectionsQuery: () => ({ data: collections }),
 	};
 });
 
@@ -94,6 +97,7 @@ beforeEach(() => {
 	refetch.mockClear();
 	refetchRun.mockClear();
 	useRunReportQuery.mockClear();
+	collections.length = 0;
 	reportQuery.data = undefined;
 	reportQuery.isLoading = false;
 	reportQuery.error = null;
@@ -375,5 +379,169 @@ describe("HistoryDetail load run in progress", () => {
 
 		expect(screen.getByTestId("load-test-detail")).toBeTruthy();
 		expect(screen.queryByText(/this load test is still running/i)).toBeNull();
+	});
+});
+
+/**
+ * The header names the run by what it ran, not by its type and id (#2270).
+ *
+ * The id was the title's neighbour in a mono face and the type was the title:
+ * two runs of two requests read "Load test run_8f3a" and "Load test run_c01d",
+ * so the pane could not be told from the tab strip's identical-looking
+ * neighbour. The id is now a small copyable detail, the start time sits by the
+ * status, and the comment the user wrote at launch is read under the title.
+ *
+ * Layout (that the title truncates, the detail line sits under it) is not
+ * unit-testable: jsdom has no layout. These pin the content and the wiring.
+ *
+ * Mutation check: render `RUN_TYPE_NAME[run.type]` in the `h1` again and the
+ * name and collection cases redden; drop the `DEFAULT_REQUEST_NAME` test in
+ * `runTitle` and the default-name case reddens; hand `RunComment` the
+ * `summary` alone and the snapshot case reddens.
+ */
+describe("HistoryDetail header", () => {
+	const START = 1_750_000_000_000;
+	const title = () => screen.getByRole("heading", { level: 1 }).textContent;
+
+	function openRun(run: Record<string, unknown>) {
+		runQuery.data = {
+			id: "run-1",
+			type: "design",
+			status: "completed",
+			startTime: START,
+			...run,
+		};
+		// What a settled load run needs; a design run never asks.
+		reportQuery.data = { metadata: { runType: "load" } };
+		render(<HistoryDetail />);
+	}
+
+	it("titles a run with the request's name, not its type or id", () => {
+		openRun({ configSnapshot: { requestName: "Create order" } });
+
+		expect(title()).toBe("Create order");
+		expect(screen.getByRole("heading", { level: 1 }).textContent).not.toContain("run-1");
+	});
+
+	it("still says what kind of run it is, beside the id", () => {
+		openRun({ type: "load", configSnapshot: { requestName: "Create order" } });
+
+		expect(screen.getByText(/Load test\s*·/)).toBeTruthy();
+	});
+
+	it("reads the name off a list row's summary when there is no snapshot", () => {
+		openRun({ summary: { requestName: "From the list" } });
+
+		expect(title()).toBe("From the list");
+	});
+
+	it.each(["New Request", "   ", ""])("ignores the placeholder name %j", (requestName) => {
+		openRun({ configSnapshot: { requestName } });
+
+		expect(title()).toBe("Send");
+	});
+
+	it("falls back to the run type, once, when nothing names the run", () => {
+		openRun({ type: "load" });
+
+		expect(title()).toBe("Load test");
+		// The type is the title; repeating it beside the id would say it twice.
+		expect(screen.getAllByText(/Load test/)).toHaveLength(1);
+	});
+
+	it("titles a collection run with its collection's name", () => {
+		collections.push({ id: "col_1", name: "Checkout" });
+		openRun({ type: "scenario", configSnapshot: { scenario: { collectionId: "col_1" } } });
+
+		expect(title()).toBe("Checkout");
+	});
+
+	it("titles a collection load run (type load) with its collection too", () => {
+		collections.push({ id: "col_1", name: "Checkout" });
+		openRun({ type: "load", configSnapshot: { scenario: { collectionId: "col_1" } } });
+
+		expect(title()).toBe("Checkout");
+	});
+
+	it("names a collection run by its id once the collection is gone, never blank", () => {
+		openRun({ type: "scenario", configSnapshot: { scenario: { collectionId: "col_gone" } } });
+
+		expect(title()).toBe("col_gone");
+	});
+
+	it("keeps the request's name over the collection's", () => {
+		collections.push({ id: "col_1", name: "Checkout" });
+		openRun({
+			type: "scenario",
+			configSnapshot: { requestName: "Nightly", scenario: { collectionId: "col_1" } },
+		});
+
+		expect(title()).toBe("Nightly");
+	});
+
+	it("shows when the run started through the time card", () => {
+		openRun({});
+
+		const time = document.querySelector("time");
+		expect(time?.getAttribute("datetime")).toBe(new Date(START).toISOString());
+		expect(time?.textContent).toBe(formatInstant(START, "datetime"));
+	});
+
+	describe("the run id", () => {
+		const writeText = vi.fn();
+		const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+
+		beforeEach(() => {
+			writeText.mockReset().mockResolvedValue(undefined);
+			Object.defineProperty(navigator, "clipboard", {
+				value: { writeText },
+				configurable: true,
+			});
+		});
+		afterEach(() => {
+			if (original) Object.defineProperty(navigator, "clipboard", original);
+			else Reflect.deleteProperty(navigator, "clipboard");
+		});
+
+		it("is a mono detail, not the title", () => {
+			openRun({ configSnapshot: { requestName: "Create order" } });
+
+			const id = screen.getByText("run-1");
+			expect(id.className).toContain("font-mono");
+			expect(screen.getByRole("heading", { level: 1 }).contains(id)).toBe(false);
+		});
+
+		it("is copied by a button with an accessible name", async () => {
+			openRun({});
+
+			fireEvent.click(screen.getByRole("button", { name: "Copy run ID" }));
+
+			await waitFor(() => expect(writeText).toHaveBeenCalledWith("run-1"));
+		});
+	});
+
+	describe("the comment", () => {
+		it("is labelled Comment and sits with the header, under the title", () => {
+			openRun({
+				configSnapshot: { requestName: "Create order", comment: "after the cache fix" },
+			});
+
+			const comment = screen.getByText("after the cache fix").closest("p");
+			expect(within(comment!).getByText("Comment")).toBeTruthy();
+			const header = screen.getByRole("heading", { level: 1 }).closest("div.border-b");
+			expect(header?.contains(comment)).toBe(true);
+		});
+
+		it("is read from the list row's summary when the snapshot has none", () => {
+			openRun({ summary: { comment: "from the row" } });
+
+			expect(screen.getByText("from the row")).toBeTruthy();
+		});
+
+		it.each([undefined, "", "   "])("is absent, with no empty label, for %j", (comment) => {
+			openRun({ configSnapshot: { comment } });
+
+			expect(screen.queryByText("Comment")).toBeNull();
+		});
 	});
 });

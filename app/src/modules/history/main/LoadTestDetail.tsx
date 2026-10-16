@@ -347,11 +347,12 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 				<RunOutcomeBanner judgement={judgement} className="mb-3" />
 
 				{/* Load test config used for this run. Gated on protocolLabel too, not
-				    just mode/comment - POST /runs accepts an iterations-only body with
-				    no `mode` key (execution.cpp only requires mode+duration OR
+				    just mode - POST /runs accepts an iterations-only body with no
+				    `mode` key (execution.cpp only requires mode+duration OR
 				    iterations), so a run can legitimately have neither and still carry
-				    a protocol worth showing. */}
-				{config && (config.mode || config.comment || protocolLabel) && (
+				    a protocol worth showing. The run's comment is not here: it is
+				    drawn under the run's title by the header above this pane. */}
+				{config && (config.mode || protocolLabel) && (
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-3 p-3 border rounded-md bg-background/50">
 						<div className="flex items-center gap-2 text-muted-foreground">
 							<Settings2 className="size-icon shrink-0" />
@@ -429,12 +430,6 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 								<span className="text-foreground font-mono">
 									{config.timeout}ms
 								</span>
-							</div>
-						)}
-						{config.comment && (
-							<div className="w-full mt-1 pt-2 border-t border-border/50">
-								<span className="text-muted-foreground">Note: </span>
-								<span className="text-foreground/90 italic">{config.comment}</span>
 							</div>
 						)}
 					</div>

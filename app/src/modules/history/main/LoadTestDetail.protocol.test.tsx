@@ -91,11 +91,11 @@ describe("LoadTestDetail protocol chip", () => {
 		expect(screen.queryByText("Protocol:")).not.toBeInTheDocument();
 	});
 
-	it("shows the Protocol row even when the run has neither mode nor comment", () => {
+	it("shows the Protocol row even when the run has no mode", () => {
 		// POST /runs accepts an iterations-only body with no `mode` key
 		// (execution.cpp requires mode+duration OR iterations, not both), so the
-		// "Test config" wrapper must not gate solely on mode/comment - a run with
-		// neither can still have a protocol worth showing.
+		// "Test config" wrapper must not gate solely on mode - a run without one
+		// can still have a protocol worth showing.
 		const modeless = report("http2");
 		delete modeless.metadata!.configuration!.mode;
 
