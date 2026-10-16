@@ -1598,7 +1598,8 @@ value the memo or the SLO seed filled in and the user left alone, spelled as
 they are in `thresholds` (`latencyP99Ms`, `custom.<name>.<stat>`). The engine
 only stores it and echoes it as `metadata.configuration.carriedBudgets`, which
 `ThresholdVerdict` reads to tag those rows "carried over"; the verdict itself is
-computed the same either way. It is omitted when nothing was carried, and
+computed the same either way. The list is cut at the engine's 64-entry cap
+(each key may be up to 512 bytes of UTF-8). It is omitted when nothing was carried, and
 `RunCollectionDialog` and MCP never send it.
 
 `maxAssertionFailureRatePct` (issue #1497) is the sixth budget, judged against

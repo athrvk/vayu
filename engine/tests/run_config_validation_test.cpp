@@ -742,13 +742,29 @@ TEST (RunConfigValidation, CarriedBudgetsPastEitherBoundAreRejected) {
     expect_rejected (too_many, "64 entries");
 
     auto too_long              = valid_config ();
-    too_long["carriedBudgets"] = carried_budgets (1, 201);
+    too_long["carriedBudgets"] = carried_budgets (1, 513);
     expect_rejected (too_long, "carriedBudgets");
-    expect_rejected (too_long, "200 bytes");
+    expect_rejected (too_long, "512 bytes");
+}
+
+TEST (RunConfigValidation, ACarriedCustomKeyTheDialogCanBuildIsAccepted) {
+    // The dialog allows a custom metric name of 100 UTF-16 units; 100 CJK
+    // characters are 300 bytes, so the whole key is over 300.
+    std::string name;
+    for (int i = 0; i < 100; ++i) {
+        name += "\xE6\xB5\x8B"; // U+6D4B, three bytes
+    }
+    const std::string key = "custom." + name + ".p95";
+    ASSERT_GT (key.size (), 300U);
+
+    auto config              = valid_config ();
+    config["carriedBudgets"] = nlohmann::json::array ({ key });
+    const auto reason        = validate_run_config (config);
+    EXPECT_FALSE (reason.has_value ()) << "refused: " << reason.value_or ("");
 }
 
 TEST (RunConfigValidation, CarriedBudgetsAtTheirBoundsEmptyOrNullAreAccepted) {
-    for (const nlohmann::json& good : { carried_budgets (64, 200),
+    for (const nlohmann::json& good : { carried_budgets (64, 512),
          nlohmann::json::array (), nlohmann::json (nullptr),
          nlohmann::json::array ({ "latencyP99Ms", "custom.checkout.p95" }) }) {
         auto config              = valid_config ();

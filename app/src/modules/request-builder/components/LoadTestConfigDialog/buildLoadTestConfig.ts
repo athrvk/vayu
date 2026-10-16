@@ -43,6 +43,9 @@ export interface LoadTestDraft {
 	isStreamingRequest: boolean;
 }
 
+/** `MAX_CARRIED_BUDGETS` in `engine/src/http/routes/execution.cpp`. */
+const MAX_CARRIED_BUDGETS = 64;
+
 type NumericParam = Exclude<keyof ProfileParams, "mode">;
 
 /** The single-request payload's spelling of each neutral parameter. */
@@ -70,14 +73,15 @@ function engineFields(params: ProfileParams) {
 /**
  * The carried keys that the payload actually judges, or `undefined` when none
  * remain - a key with no budget behind it (an unparseable field the payload
- * skipped) names nothing the report holds.
+ * skipped) names nothing the report holds. At most `MAX_CARRIED_BUDGETS`: the
+ * engine refuses a longer list, and this one only labels rows.
  */
 function carriedInThresholds(
 	carried: readonly string[] | undefined,
 	thresholds: LoadTestConfig["thresholds"]
 ): string[] | undefined {
 	const declared = new Set(Object.keys(thresholds ?? {}));
-	const judged = (carried ?? []).filter((key) => declared.has(key));
+	const judged = (carried ?? []).filter((key) => declared.has(key)).slice(0, MAX_CARRIED_BUDGETS);
 	return judged.length > 0 ? judged : undefined;
 }
 

@@ -125,6 +125,21 @@ describe("buildLoadTestConfig", () => {
 			expect(config.carriedBudgets).toEqual(["latencyP99Ms"]);
 		});
 
+		it("sends at most the 64 keys the engine accepts", () => {
+			// Mutation check: dropping the slice sends all 70 and the engine
+			// answers 400 invalid_run_config.
+			const rows = Array.from({ length: 70 }, (_, i) => ({
+				id: `c${i}`,
+				name: `m${i}`,
+				stat: "p95" as const,
+				value: "5",
+			}));
+			const keys = rows.map((row) => `custom.${row.name}.${row.stat}`);
+			const config = build({ customBudgets: rows, carriedBudgets: keys });
+			expect(Object.keys(config.thresholds ?? {})).toHaveLength(70);
+			expect(config.carriedBudgets).toEqual(keys.slice(0, 64));
+		});
+
 		it("is absent when no budget is declared at all", () => {
 			const config = build({ carriedBudgets: ["latencyP99Ms"] });
 			expect(config.thresholds).toBeUndefined();

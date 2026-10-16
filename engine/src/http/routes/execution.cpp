@@ -973,9 +973,12 @@ std::optional<std::string> check_constant_rps_rate (const nlohmann::json& config
 // never interprets, so the bounds only keep a client from parking an unbounded
 // payload in the snapshot and every report: the app names one metric key per
 // carried-over budget, far fewer than this. A length is bytes of UTF-8 (what
-// the parser hands over), not characters.
+// the parser hands over), not characters. The byte bound must admit every key
+// the app can build: `custom.<name>.<stat>` with a name of 100 UTF-16 units at
+// up to 3 bytes each is about 320 bytes, and a key refused here fails a run
+// start over a field that never changes the run.
 constexpr std::size_t MAX_CARRIED_BUDGETS      = 64;
-constexpr std::size_t MAX_CARRIED_BUDGET_BYTES = 200;
+constexpr std::size_t MAX_CARRIED_BUDGET_BYTES = 512;
 
 std::optional<std::string> check_carried_budgets (const nlohmann::json& config) {
     const auto list = config.find ("carriedBudgets");

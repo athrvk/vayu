@@ -6373,7 +6373,7 @@ as the report's
 reads the entries, so it does not check them against `thresholds`, and the
 verdict is computed the same with or without it. Absent or `null` means none
 were carried, and the report then has no such key. A non-array, a non-string
-entry, more than **64 entries**, or an entry longer than **200 bytes** of
+entry, more than **64 entries**, or an entry longer than **512 bytes** of
 UTF-8 is a `400` `invalid_run_config` naming `carriedBudgets`, before the run
 row exists. MCP's `start_load_run` does not accept the key: an agent declares
 its budgets explicitly, so none of them are carried over.
@@ -7379,7 +7379,7 @@ default, and whose message names the offending field and why the bound exists:
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event histogram. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the SLO setting. |
-| `carriedBudgets` | array of at most `64` strings, each at most `200` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
+| `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
 An **absent** field, or an explicit `null`, is always accepted - every one of
 them has a default. The route erases every top-level `null` before anything
