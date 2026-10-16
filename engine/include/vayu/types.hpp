@@ -1150,6 +1150,19 @@ inline const char* to_string (RunStatus status) {
     return "unknown";
 }
 
+/// Whether the engine has finished with the run. A stopped run is a result
+/// (cut short), so it is terminal; pending and running ones are not.
+inline bool is_terminal (RunStatus status) {
+    switch (status) {
+    case RunStatus::Completed:
+    case RunStatus::Failed:
+    case RunStatus::Stopped: return true;
+    case RunStatus::Pending:
+    case RunStatus::Running: return false;
+    }
+    return false;
+}
+
 inline std::optional<RunStatus> parse_run_status (const std::string& str) {
     if (str == "pending")
         return RunStatus::Pending;

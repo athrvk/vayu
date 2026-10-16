@@ -3925,6 +3925,125 @@ kept, uncounted. `true` writes every value as stored.
 - `400` `Invalid 'includeSecrets': must be true or false`.
 - `404` `Environment not found`.
 
+### POST /export/run-report
+
+A finished **load** run as a document to share (issue #2127): its report, the
+configuration it ran with and its time series, with everything that could carry
+a credential or a payload left out (`core/run_export.hpp`). The document's
+schema is [`run-export.schema.json`](run-export.schema.json), JSON Schema
+draft-07 with `additionalProperties: false` at every level. **Reads only.**
+
+**Request:**
+```json
+{
+  "runId": "run_5a7c...",      // Required, non-empty
+  "format": "json",            // Optional - "json" (default), "markdown", "html"
+  "series": "full",            // Optional - "full" (default) or "none"
+  "baseRunId": "run_e8f0..."   // Optional - a second finished load run
+}
+```
+
+Only `json` is written today; `markdown` and `html` answer `400
+format_not_available` naming the issue that adds each (#2131, #2135). The
+formats are one table (`RUN_EXPORT_FORMATS`), so each adds a row and its
+renderer. `series: "none"` leaves `timeSeries` out; `full` reads every tick of
+[`GET /runs/:runId/metrics`](#get-runsrunidmetrics), paged at its 50000-tick
+maximum to the end. `baseRunId` is checked like `runId` (below); the document's
+`comparison` is `null` until the comparison against it is written.
+
+**Response:**
+```json
+{
+  "text": "{\n  \"schema\": \"vayu.run-report\",\n  \"schemaVersion\": 1, ...",
+  "fileName": "Create order 2026-10-05 0810.run.json",
+  "mimeType": "application/json",
+  "notes": { "urlCredentialsOmitted": 1 }
+}
+```
+
+- `text` is the document, two-space indented, invalid UTF-8 replaced.
+- `fileName` is `<title> <UTC start, YYYY-MM-DD HHmm>.run.json`, with every
+  character a filesystem refuses replaced by `_` (the rule
+  `POST /export/postman` uses; `run` when nothing is left). The title is the
+  one the run's reference line uses (below).
+- `notes.urlCredentialsOmitted` counts the values the URL rule below dropped.
+
+**What the document carries is an allowlist.** Every member is copied from the
+report or the run's stored snapshot by name, so a field the report gains later
+is absent here until it is added on purpose:
+
+1. No `results[]`, no trace (`trace`, `rawRequest`, `sentHeaders`), no captured
+   sample, anywhere. A trace records what was sent, credentials included, and a
+   sample holds response headers and bodies verbatim.
+2. `config` holds the `method`; the `url` after `redact_url_credentials`
+   (`core/vayu_extensions.hpp`: a `user:pass@` password dropped and the user
+   name kept, a credential-named query or fragment value emptied, a lone
+   `{{variable}}` kept); `headerNames` and `paramNames`, names only, whether
+   enabled or not; `body` as `{mode, bytes}`, `bytes` the size of the body text
+   as stored and `null` for a body that is not text; `auth` as `{mode}`; and the
+   report's `metadata.configuration` tuning object. Never a header or
+   parameter value, never the body.
+3. Text the engine copied from a script or a response is carried as counts
+   only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
+   `lifecycle` outcome drops its `message`, and the report's `auth` section
+   (whose `lastError` is a token endpoint's words) is left out.
+4. Text the user wrote (the request name, the run comment, the data file's
+   display name, step, transaction, metric and series names) is carried as
+   written.
+5. Within a section a value is copied only when it is a scalar or a list of
+   scalars; anything deeper is named member by member.
+
+**The document** (`"schema": "vayu.run-report"`, `"schemaVersion": 1`; a
+breaking change bumps the integer and is noted here):
+
+| Member | Holds |
+|--------|-------|
+| `generatedAt`, `engineVersion` | Epoch milliseconds of the export; the engine's version |
+| `run` | `id`, `reference`, `type` (`load`), `status`, `startTime`, `endTime`, `name` (the request name, or `null`), `comment` (or `null`), `baseline` |
+| `verdict` | `{state, stoppedEarly, reason}`, derived below |
+| `config` | As in rule 2 |
+| `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
+| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`; absent for `series: "none"` |
+| `comparison` | `null` |
+| `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
+
+`statusCodes`, `errors.byStatusCode` and a tick's `status_codes` are objects,
+code to count, in the document: the report itself writes the first two as
+`[[code, count], ...]` pairs.
+
+`run.reference` is the *Copy for agent* run line
+([MCP: Naming what the user means](mcp.md#naming-what-the-user-means)) with the
+start in ISO-8601 UTC, because a file is read away from the locale and zone the
+app would print it in: `Vayu run "Create order" (run_5a7c...) - load test, POST
+/v1/orders, 2026-10-05T08:10:00Z, completed`. The title is the request name
+unless it is the default `New Request`, else the collection a collection load
+run ran, else the method and path; the URL is cut to its path.
+
+`verdict` is the app's run verdict (`judgeRun` in
+`app/src/components/shared/run-outcome.ts`) over the same report fields, so the
+file and the screen it came from agree. It adds no rule of its own:
+
+| `status` and budgets | `state` | `reason` |
+|----------------------|---------|----------|
+| `stopped` | `not_judged` | `stopped` |
+| `failed`, no budget missed | `failed` | `run_failed` |
+| A declared budget missed (`thresholdValidation.failed > 0`) | `failed` | `budgets_missed` |
+| Every budget met, `summary.errorRate` 0 | `passed` | `budgets_met` |
+| Every budget met, some requests errored | `not_judged` | `budgets_met_with_errors` |
+| No budget declared | `not_judged` | `no_budgets` |
+
+`stoppedEarly` is `status == "stopped"`.
+
+**Errors:**
+
+| Status | `error.code` | When |
+|--------|--------------|------|
+| `400` | `bad_request` | The body is not an object; `runId` missing or empty; `format` not one of the table's names; `series` not `full` or `none`; `baseRunId` not a non-empty string, or equal to `runId` |
+| `400` | `format_not_available` | `format` is `markdown` or `html` |
+| `400` | `unsupported_run_type` | The run or the base is a design or collection-sequence run |
+| `404` | `not_found` | The run or the base does not exist |
+| `409` | `run_in_progress` | The run or the base is `pending` or `running`: its numbers are not a result yet. A `stopped` run is a result |
+
 ## Environments
 
 ### GET /environments
@@ -8635,13 +8754,13 @@ named it.
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
     "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
   },
-  "statusCodes": { "200": 5970, "500": 30 },
+  "statusCodes": [[200, 5970], [500, 30]],
   "rateControl": { "targetRps": 100, "actualRps": 99.5, "achievement": 99.5 },
   "errors": {
     "total": 30,
     "withDetails": 30,
     "types": { "timeout": 20, "connection_failed": 10 },
-    "byStatusCode": { "500": 30 }
+    "byStatusCode": [[500, 30]]
   },
   "timingBreakdown": {
     "avgDnsMs": 5.2, "avgConnectMs": 12.3, "avgTlsMs": 45.1,
@@ -8719,6 +8838,14 @@ named it.
   "resultsCap": 100
 }
 ```
+
+**`statusCodes` and `errors.byStatusCode` are `[[code, count], ...]` pairs** on
+the wire, in ascending code order, not objects: each is a `std::map<int,
+size_t>`, which nlohmann serialises that way. The app folds the pairs
+(`run-report-transformer.ts`) and the MCP comparison reads either form
+(`statusCodeEntries`). The stored summary, a live `metrics` frame and the
+document [`POST /export/run-report`](#post-exportrun-report) writes all spell
+the distribution as an object.
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every

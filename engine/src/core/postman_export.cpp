@@ -1971,24 +1971,6 @@ json postman_items (const PostmanExportFolder& folder, const json& auth_in_force
     return items;
 }
 
-/// A file name with every character a filesystem refuses replaced; @p fallback
-/// when nothing is left.
-std::string safe_file_stem (const std::string& name, std::string_view fallback) {
-    std::string stem;
-    for (const char ch : name) {
-        const auto byte   = static_cast<unsigned char> (ch);
-        const bool unsafe = byte < 0x20 ||
-        std::string_view ("<>:\"/\\|?*").find (ch) != std::string_view::npos;
-        stem += unsafe ? '_' : ch;
-    }
-    // Windows refuses a name ending in a dot or a space.
-    while (!stem.empty () && (stem.back () == '.' || stem.back () == ' ')) {
-        stem.pop_back ();
-    }
-    const std::size_t begin = stem.find_first_not_of (' ');
-    return begin == std::string::npos ? std::string (fallback) : stem.substr (begin);
-}
-
 bool is_uuid (std::string_view text) {
     if (text.size () != 36) {
         return false;
@@ -2048,6 +2030,22 @@ json environment_row (const std::string& name, const json& variable) {
 }
 
 } // namespace
+
+std::string safe_file_stem (const std::string& name, std::string_view fallback) {
+    std::string stem;
+    for (const char ch : name) {
+        const auto byte   = static_cast<unsigned char> (ch);
+        const bool unsafe = byte < 0x20 ||
+        std::string_view ("<>:\"/\\|?*").find (ch) != std::string_view::npos;
+        stem += unsafe ? '_' : ch;
+    }
+    // Windows refuses a name ending in a dot or a space.
+    while (!stem.empty () && (stem.back () == '.' || stem.back () == ' ')) {
+        stem.pop_back ();
+    }
+    const std::size_t begin = stem.find_first_not_of (' ');
+    return begin == std::string::npos ? std::string (fallback) : stem.substr (begin);
+}
 
 std::optional<std::string> postman_saved_response_text (const PostmanExportRequest& sent,
 const PostmanExportExample& example,

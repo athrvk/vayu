@@ -575,6 +575,7 @@ add_library(vayu_core STATIC
     src/core/openapi_drafts.cpp
     src/core/openapi_export.cpp
     src/core/postman_export.cpp
+    src/core/run_export.cpp
     src/core/vayu_extensions.cpp
     src/core/path_template.cpp
     src/core/query_encoding.cpp
@@ -797,6 +798,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/spec_bind.cpp
         src/http/routes/spec_export.cpp
         src/http/routes/postman_export.cpp
+        src/http/routes/run_export.cpp
         src/http/routes/reorder.cpp
         src/http/routes/environments.cpp
         src/http/routes/client_certificates.cpp

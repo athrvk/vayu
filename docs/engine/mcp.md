@@ -991,7 +991,10 @@ quoted name: a header naming the two run ids, then each run's own line.
 Every line below is the app's formatter (`app/src/lib/agent-reference.ts`) run
 over one fixture, the entities in `app/src/lib/agent-reference.docs.test.ts`,
 which fails when a line here stops matching its output. The run times are shown
-as `en-US` in UTC; the app prints the user's own locale and zone.
+as `en-US` in UTC; the app prints the user's own locale and zone. A run exported
+as a file ([`POST /export/run-report`](api-reference.md#post-exportrun-report))
+carries its line as `run.reference` with the start in ISO-8601 UTC
+(`2026-10-05T08:10:00Z`), since a file is read away from any one locale.
 
 ```
 Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders

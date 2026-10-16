@@ -1356,7 +1356,7 @@ std::chrono::steady_clock::time_point now);
 
 /**
  * Testable core of `GET /runs/:id/report`: `{http_status, json_body}`, 404 for
- * a missing run. Defined in runs.cpp.
+ * a missing run. Defined in runs.cpp; `POST /export/run-report` reads it too.
  */
 std::pair<int, nlohmann::json>
 run_report_response (vayu::db::Database& db, const std::string& run_id);
@@ -1365,7 +1365,7 @@ run_report_response (vayu::db::Database& db, const std::string& run_id);
  * Testable core of `GET /runs/:id/metrics`: one `{data, pagination}` page of
  * the run's ticks, 404 for a missing run. @p limit and @p offset arrive
  * clamped (at most `RUN_TIME_SERIES_PAGE_MAX` ticks a page). Defined in
- * metrics.cpp.
+ * metrics.cpp; `POST /export/run-report` pages it to the end.
  */
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id,
@@ -1374,6 +1374,25 @@ int64_t offset);
 
 /// The most ticks one `run_time_series_response` page returns.
 constexpr int64_t RUN_TIME_SERIES_PAGE_MAX = 50000;
+
+/**
+ * Testable core of `POST /export/run-report` (#2127): a finished load run as
+ * a shareable document (`core/run_export.hpp`), nothing written. Defined in
+ * run_export.cpp.
+ */
+std::pair<int, nlohmann::json>
+export_run_report_response (vayu::db::Database& db, const nlohmann::json& json);
+
+/**
+ * The one wrapper every export route answers through: parse the body, run
+ * @p core, log a refusal, serialise with invalid UTF-8 replaced. Defined in
+ * postman_export.cpp.
+ */
+void answer_export (const char* path,
+const httplib::Request& req,
+httplib::Response& res,
+std::pair<int, nlohmann::json> (*core) (vayu::db::Database&, const nlohmann::json&),
+vayu::db::Database& db);
 
 /**
  * @brief Callback type for graceful shutdown
@@ -1427,6 +1446,7 @@ void register_spec_describe_routes (RouteContext& ctx);
 void register_spec_bind_routes (RouteContext& ctx);
 void register_spec_export_routes (RouteContext& ctx);
 void register_postman_export_routes (RouteContext& ctx);
+void register_run_export_routes (RouteContext& ctx);
 void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);

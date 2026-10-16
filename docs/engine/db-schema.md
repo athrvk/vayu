@@ -1295,7 +1295,10 @@ with its credentials withheld. Composition has already written every
 `results.trace_data` still records what was sent, credentials included, by
 design ([architecture](architecture.md#security)). Rows stored before #1803 stay
 as they were written: nothing rewrites a stored snapshot, and the schema
-version did not change.
+version did not change. A run exported as a file is held to a stricter rule than
+the snapshot: [`POST /export/run-report`](api-reference.md#post-exportrun-report)
+copies an allowlist of the snapshot (header and parameter names, the body's mode
+and size, the URL with its credentials blanked) and none of its values.
 
 **`config_snapshot`'s body is capped at `maxTraceBodyBytes`** (issue #1486), the
 same limit and the same sibling-key shape the [`results`](#results) trace bodies

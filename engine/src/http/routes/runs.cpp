@@ -771,17 +771,8 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
 // summary is therefore not final either, and caching its empty outcome would
 // hide the real one for good.
 bool carries_load_result_summary (const vayu::db::Run& run) {
-    if (run.type != vayu::RunType::Load || run.summary.empty ()) {
-        return false;
-    }
-    switch (run.status) {
-    case vayu::RunStatus::Completed:
-    case vayu::RunStatus::Failed:
-    case vayu::RunStatus::Stopped: return true;
-    case vayu::RunStatus::Pending:
-    case vayu::RunStatus::Running: return false;
-    }
-    return false;
+    return run.type == vayu::RunType::Load && !run.summary.empty () &&
+    vayu::is_terminal (run.status);
 }
 
 // Serialize one run into a list row: identity + status + the compact summary,

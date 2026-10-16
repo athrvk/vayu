@@ -1,0 +1,597 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Vayu run report export",
+  "description": "The document POST /export/run-report writes for a finished load run (issue #2127), schema version 1. Built by allowlist: every member below is copied on purpose, and no other member is ever written. A breaking change bumps schemaVersion and is noted in docs/engine/api-reference.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "schemaVersion", "generatedAt", "engineVersion", "run", "verdict", "config",
+    "report", "comparison", "notCarried"
+  ],
+  "properties": {
+    "schema": {"const": "vayu.run-report"},
+    "schemaVersion": {"const": 1},
+    "generatedAt": {"description": "Epoch milliseconds.", "type": "integer"},
+    "engineVersion": {"type": "string"},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "reference", "type", "status", "startTime", "endTime", "name", "comment",
+        "baseline"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "reference": {
+          "description": "The Copy for agent run line, start in ISO-8601 UTC, URL cut to its path.",
+          "type": "string",
+          "pattern": "^Vayu run \""
+        },
+        "type": {"const": "load"},
+        "status": {"enum": ["completed", "failed", "stopped"]},
+        "startTime": {"type": "integer"},
+        "endTime": {"type": "integer"},
+        "name": {"type": ["string", "null"]},
+        "comment": {"type": ["string", "null"]},
+        "baseline": {"type": "boolean"}
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "stoppedEarly", "reason"],
+      "properties": {
+        "state": {"enum": ["passed", "failed", "not_judged"]},
+        "stoppedEarly": {"type": "boolean"},
+        "reason": {
+          "enum": [
+            "stopped", "run_failed", "budgets_missed", "budgets_met", "budgets_met_with_errors",
+            "no_budgets"
+          ]
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "url", "headerNames", "paramNames", "body", "auth", "configuration"],
+      "properties": {
+        "method": {"type": ["string", "null"]},
+        "url": {
+          "description": "Credentials blanked by redact_url_credentials.",
+          "type": ["string", "null"]
+        },
+        "headerNames": {"$ref": "#/definitions/names"},
+        "paramNames": {"$ref": "#/definitions/names"},
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "bytes"],
+          "properties": {"mode": {"type": "string"}, "bytes": {"type": ["integer", "null"]}}
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {"mode": {"type": "string"}}
+        },
+        "configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {"type": "string"},
+            "duration": {"type": ["string", "number"]},
+            "concurrency": {"type": "number"},
+            "startConcurrency": {"type": "number"},
+            "rampUpDuration": {"type": ["string", "number"]},
+            "timeout": {"type": ["string", "number"]},
+            "targetRps": {"type": "number"},
+            "comment": {"type": "string"},
+            "followRedirects": {"type": "boolean"},
+            "maxRedirects": {"type": "number"},
+            "httpVersion": {"type": "string"},
+            "acceptEncoding": {"type": "boolean"},
+            "dataRowCount": {"type": "number"},
+            "dataFileName": {"type": "string"},
+            "dataFileHash": {"type": "string"},
+            "carriedBudgets": {"$ref": "#/definitions/names"}
+          }
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "latency", "statusCodes", "errors"],
+      "properties": {
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
+            "noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
+            "avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+            "peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
+            "httpVersionDowngraded", "throughputBytesPerSec"
+          ],
+          "properties": {
+            "totalRequests": {"type": "number"},
+            "successfulRequests": {"type": "number"},
+            "failedRequests": {"type": "number"},
+            "httpErrorRequests": {"type": "number"},
+            "noResponseRequests": {"type": "number"},
+            "cancelledRequests": {"type": "number"},
+            "errorRate": {"type": "number"},
+            "totalDurationSeconds": {"type": "number"},
+            "avgRps": {"type": "number"},
+            "testDuration": {"type": "number"},
+            "sendRate": {"type": "number"},
+            "throughput": {"type": "number"},
+            "setupOverhead": {"type": "number"},
+            "peakConcurrency": {"type": "number"},
+            "droppedRequests": {"type": "number"},
+            "avgQueueWaitMs": {"type": "number"},
+            "bytesSent": {"type": "number"},
+            "bytesReceived": {"type": "number"},
+            "httpVersionDowngraded": {"type": "number"},
+            "throughputBytesPerSec": {"type": "number"}
+          }
+        },
+        "latency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999"],
+          "properties": {
+            "min": {"type": "number"},
+            "max": {"type": "number"},
+            "avg": {"type": "number"},
+            "median": {"type": "number"},
+            "p50": {"type": "number"},
+            "p75": {"type": "number"},
+            "p90": {"type": "number"},
+            "p95": {"type": "number"},
+            "p99": {"type": "number"},
+            "p999": {"type": "number"}
+          }
+        },
+        "statusCodes": {"$ref": "#/definitions/codeCounts"},
+        "rateControl": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetRps", "actualRps", "achievement"],
+          "properties": {
+            "targetRps": {"type": "number"},
+            "actualRps": {"type": "number"},
+            "achievement": {"type": "number"}
+          }
+        },
+        "errors": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "withDetails", "types"],
+          "properties": {
+            "total": {"type": "number"},
+            "withDetails": {"type": "number"},
+            "types": {"$ref": "#/definitions/countMap"},
+            "byStatusCode": {"$ref": "#/definitions/codeCounts"}
+          }
+        },
+        "timingBreakdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "avgDnsMs": {"type": "number"},
+            "avgConnectMs": {"type": "number"},
+            "avgTlsMs": {"type": "number"},
+            "avgFirstByteMs": {"type": "number"},
+            "avgDownloadMs": {"type": "number"},
+            "phases": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "dns": {"$ref": "#/definitions/phase"},
+                "connect": {"$ref": "#/definitions/phase"},
+                "tls": {"$ref": "#/definitions/phase"},
+                "firstByte": {"$ref": "#/definitions/phase"},
+                "download": {"$ref": "#/definitions/phase"}
+              }
+            }
+          }
+        },
+        "stream": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "completions": {"type": "number"},
+            "totalEvents": {"type": "number"},
+            "capped": {"type": "number"},
+            "eventsPerSecond": {"type": "number"},
+            "events": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "min": {"type": "number"},
+                "max": {"type": "number"},
+                "p50": {"type": "number"},
+                "p90": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "count": {"type": "number"}
+              }
+            }
+          }
+        },
+        "slowRequests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "thresholdMs", "percentage"],
+          "properties": {
+            "count": {"type": "number"},
+            "thresholdMs": {"type": "number"},
+            "percentage": {"type": "number"}
+          }
+        },
+        "sampling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "errorsDropped": {"type": "number"},
+            "successTracesDropped": {"type": "number"},
+            "slowTracesDropped": {"type": "number"},
+            "responseSamplesDropped": {"type": "number"},
+            "exemplarsDropped": {"type": "number"},
+            "sampleBodiesDropped": {"type": "number"},
+            "responseBodiesCaptured": {"type": "number"},
+            "responseSampleBudgetSpent": {"type": "boolean"}
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "message"],
+            "properties": {
+              "code": {"type": "string"},
+              "message": {
+                "description": "Written by the engine; names user-chosen variable names at most.",
+                "type": "string"
+              },
+              "count": {"type": "number"},
+              "names": {"$ref": "#/definitions/names"},
+              "steps": {"type": "number"}
+            }
+          }
+        },
+        "scenario": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "iterations": {"type": "number"},
+            "iterationsCompleted": {"type": "number"},
+            "stepsExecuted": {"type": "number"},
+            "passed": {"type": "number"},
+            "failed": {"type": "number"},
+            "skipped": {"type": "number"},
+            "errored": {"type": "number"},
+            "stepsStored": {"type": "number"},
+            "stepsDropped": {"type": "number"},
+            "virtualUsers": {"type": "number"},
+            "iterationsAbandoned": {"type": "number"},
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "index": {"type": "number"},
+                  "name": {"type": "string"},
+                  "requestId": {"type": "string"},
+                  "method": {"type": "string"},
+                  "executed": {"type": "number"},
+                  "errors": {"type": "number"},
+                  "httpErrors": {"type": "number"},
+                  "noResponse": {"type": "number"},
+                  "unresolvedTokens": {"type": "number"},
+                  "preRequestScript": {"type": "string"},
+                  "latency": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {"type": "number"},
+                      "p50": {"type": "number"},
+                      "p95": {"type": "number"},
+                      "p99": {"type": "number"},
+                      "max": {"type": "number"}
+                    }
+                  },
+                  "elements": {"type": "array", "items": {"$ref": "#/definitions/elementTally"}}
+                }
+              }
+            },
+            "transactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {"type": "string"},
+                  "count": {"type": "number"},
+                  "errors": {"type": "number"},
+                  "latency": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {"type": "number"},
+                      "p50": {"type": "number"},
+                      "p90": {"type": "number"},
+                      "p95": {"type": "number"},
+                      "p99": {"type": "number"},
+                      "max": {"type": "number"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "monitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "samples": {"type": "number"},
+            "failures": {"type": "number"},
+            "series": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "min": {"type": "number"},
+                  "max": {"type": "number"},
+                  "avg": {"type": "number"},
+                  "count": {"type": "number"}
+                }
+              }
+            }
+          }
+        },
+        "testValidation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "samplesTested": {"type": "number"},
+            "testsPassed": {"type": "number"},
+            "testsFailed": {"type": "number"},
+            "successRate": {"type": "number"}
+          }
+        },
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sloMs": {"type": "number"},
+            "stopReason": {"type": "string"},
+            "maxHealthyConcurrency": {"type": "number"},
+            "maxHealthyRps": {"type": "number"},
+            "p99AtMaxHealthyMs": {"type": "number"},
+            "kneeConcurrency": {"type": "number"},
+            "kneeP99Ms": {"type": "number"},
+            "levels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "concurrency": {"type": "number"},
+                  "rps": {"type": "number"},
+                  "p99Ms": {"type": "number"}
+                }
+              }
+            }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operationsTotal": {"type": "number"},
+            "operationsCovered": {"type": "number"},
+            "declaredResponsesTotal": {"type": "number"},
+            "declaredResponsesHit": {"type": "number"},
+            "declaredResponseCoveragePct": {"type": "number"},
+            "undeclaredStatusesSeen": {"type": "number"},
+            "transportErrors": {"type": "number"},
+            "undeclaredOperationRequests": {"type": "number"},
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "operationId": {"type": "string"},
+                  "method": {"type": "string"},
+                  "path": {"type": "string"},
+                  "sent": {"type": "number"},
+                  "statusesSeen": {"type": "array", "items": {"type": "number"}},
+                  "declaredHit": {"$ref": "#/definitions/names"},
+                  "declaredMissed": {"$ref": "#/definitions/names"},
+                  "undeclaredSeen": {"type": "array", "items": {"type": "number"}},
+                  "transportErrors": {"type": "number"},
+                  "otherStatusResponses": {"type": "number"},
+                  "statusesTruncated": {"type": "number"}
+                }
+              }
+            }
+          }
+        },
+        "schemaValidation": {
+          "description": "Counts only: the bounded failures[] examples carry validator messages about response bodies and are left out; failuresTotal keeps their number.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sampled": {"type": "number"},
+            "checked": {"type": "number"},
+            "valid": {"type": "number"},
+            "failed": {"type": "number"},
+            "unevaluated": {"type": "number"},
+            "failuresTotal": {"type": "number"},
+            "exact": {"type": "boolean"},
+            "failOnSchemaError": {"type": "boolean"},
+            "uncheckedReasons": {"$ref": "#/definitions/countMap"},
+            "unevaluatedKeywords": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {"keyword": {"type": "string"}, "count": {"type": "number"}}
+              }
+            }
+          }
+        },
+        "lifecycle": {
+          "description": "Outcomes only: the message a setup or teardown script threw is left out.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "setup": {"$ref": "#/definitions/lifecycleOutcomes"},
+            "teardown": {"$ref": "#/definitions/lifecycleOutcomes"}
+          }
+        },
+        "elements": {"type": "array", "items": {"$ref": "#/definitions/elementTally"}},
+        "thresholdValidation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checks", "passed", "failed", "verdict"],
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["metric", "limit", "passed", "evaluated"],
+                "properties": {
+                  "metric": {"type": "string"},
+                  "limit": {"type": "number"},
+                  "actual": {"type": "number"},
+                  "passed": {"type": "boolean"},
+                  "evaluated": {"type": "boolean"}
+                }
+              }
+            },
+            "passed": {"type": "number"},
+            "failed": {"type": "number"},
+            "verdict": {"enum": ["passed", "failed"]}
+          }
+        },
+        "customMetrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "count"],
+            "properties": {
+              "type": {"enum": ["trend", "counter", "rate"]},
+              "count": {"type": "number"},
+              "p50": {"type": "number"},
+              "p95": {"type": "number"},
+              "p99": {"type": "number"},
+              "max": {"type": "number"},
+              "value": {"type": "number"}
+            }
+          }
+        }
+      }
+    },
+    "timeSeries": {
+      "description": "Every tick of GET /runs/:id/metrics, allowlisted. Absent when the export asked for series: none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "elapsed_seconds", "requests_completed", "requests_failed", "current_rps",
+          "current_concurrency", "throughput", "error_rate", "status_codes", "latency_p50_ms",
+          "latency_p95_ms", "latency_p99_ms"
+        ],
+        "properties": {
+          "elapsed_seconds": {"type": "number"},
+          "requests_completed": {"type": "number"},
+          "requests_failed": {"type": "number"},
+          "current_rps": {"type": "number"},
+          "current_concurrency": {"type": "number"},
+          "throughput": {"type": "number"},
+          "error_rate": {"type": "number"},
+          "status_codes": {"$ref": "#/definitions/codeCounts"},
+          "latency_p50_ms": {"type": "number"},
+          "latency_p95_ms": {"type": "number"},
+          "latency_p99_ms": {"type": "number"}
+        }
+      }
+    },
+    "comparison": {
+      "description": "The comparison against baseRunId is not written yet (#2127); null.",
+      "type": "null"
+    },
+    "notCarried": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "enum": ["traces_and_samples", "request_values", "message_text", "credential_refreshes"]
+          },
+          "message": {"type": "string"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "names": {"type": "array", "items": {"type": "string"}},
+    "countMap": {"type": "object", "additionalProperties": {"type": "number"}},
+    "codeCounts": {
+      "description": "Status code to count. The report's own statusCodes is [[code, count], ...] pairs; the export writes an object.",
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^-?[0-9]+$": {"type": "number"}}
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "p50": {"type": "number"},
+        "p95": {"type": "number"},
+        "p99": {"type": "number"},
+        "max": {"type": "number"},
+        "count": {"type": "number"}
+      }
+    },
+    "elementTally": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"type": "string"},
+        "passed": {"type": "number"},
+        "failed": {"type": "number"},
+        "skipped": {"type": "number"},
+        "deferred": {"type": "number"}
+      }
+    },
+    "lifecycleOutcomes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"},
+          "outcome": {"type": "string"},
+          "waitedMs": {"type": "number"}
+        }
+      }
+    }
+  }
+}

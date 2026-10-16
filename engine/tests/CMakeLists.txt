@@ -174,6 +174,8 @@ add_executable(vayu_tests
     spec_export_route_test.cpp
     postman_export_test.cpp
     postman_export_route_test.cpp
+    run_export_test.cpp
+    run_export_schema_test.cpp
     vayu_extensions_test.cpp
     workspace_backup_test.cpp
     trash_test.cpp
@@ -205,6 +207,7 @@ add_executable(vayu_tests
     ../src/http/routes/spec_bind.cpp
     ../src/http/routes/spec_export.cpp
     ../src/http/routes/postman_export.cpp
+    ../src/http/routes/run_export.cpp
     ../src/http/routes/reorder.cpp
     ../src/http/routes/runs.cpp
     ../src/http/routes/collections.cpp
