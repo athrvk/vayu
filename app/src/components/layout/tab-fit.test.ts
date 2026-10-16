@@ -155,14 +155,6 @@ describe("fitTabs", () => {
 		expect(fitTabs(w, 300, 0).overflowed.length).toBeGreaterThan(0);
 	});
 
-	it("takes the overflow control's width from the caller", () => {
-		// 350 reserved 0: three tabs do not fit (360). Paying a 50px control leaves
-		// 300 for tabs, so two fit; a 150px control leaves 200, so one.
-		const w = [120, 120, 120];
-		expect(fitTabs(w, 350, 0, { reserved: 0, overflowWidth: 50 }).visible).toEqual([0, 1]);
-		expect(fitTabs(w, 350, 0, { reserved: 0, overflowWidth: 150 }).visible).toEqual([0]);
-	});
-
 	it("shows everything before the first measurement when nothing is reserved", () => {
 		// 0 - reserved is negative, which is still "not measured yet".
 		const r = fitTabs([100, 100], 0, 0, { reserved: 8 });
@@ -171,7 +163,7 @@ describe("fitTabs", () => {
 	});
 
 	it("still never overflows the active tab with custom options", () => {
-		const r = fitTabs([100, 100, 100, 100], 250, 3, { reserved: 0, overflowWidth: 40 });
+		const r = fitTabs([100, 100, 100, 100], 250, 3, { reserved: 0 });
 		expect(r.visible).toContain(3);
 	});
 

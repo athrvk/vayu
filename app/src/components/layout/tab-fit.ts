@@ -146,8 +146,6 @@ export interface FitResult {
 export interface FitOptions {
 	/** Width the row spends on things that are not tabs (default: the New-tab button). */
 	reserved?: number;
-	/** Width of the "+N" control, paid whenever something overflows. */
-	overflowWidth?: number;
 }
 
 /**
@@ -165,7 +163,7 @@ export function fitTabs(
 	widths: number[],
 	availableWidth: number,
 	activeIndex: number,
-	{ reserved = TAB_NEW_BUTTON_WIDTH, overflowWidth = TAB_OVERFLOW_WIDTH }: FitOptions = {}
+	{ reserved = TAB_NEW_BUTTON_WIDTH }: FitOptions = {}
 ): FitResult {
 	const all = widths.map((_, i) => i);
 	const room = availableWidth - reserved;
@@ -178,7 +176,7 @@ export function fitTabs(
 	if (total <= room) return { visible: all, overflowed: [] };
 
 	// Something must overflow, so the control has to be paid for.
-	const budget = room - overflowWidth;
+	const budget = room - TAB_OVERFLOW_WIDTH;
 	const shown: number[] = [];
 	let used = 0;
 
