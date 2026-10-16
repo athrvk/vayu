@@ -11,8 +11,8 @@
  * `isPrivateHost` in `electron/mcp/safety.ts` decides which monitor endpoints
  * skip the MCP allowlist; `isLocalHost` in `src/lib/host-locality.ts` decides
  * which load-test targets the dialog calls local (#2117). They are the same
- * classification, written twice, because the process boundary forbids sharing a
- * source file in either direction (TS6059 / TS6305, see `compare.conformance.test.ts`).
+ * classification, mirrored on purpose because the process boundary forbids
+ * sharing a source file (see `compare.conformance.test.ts`); change both.
  *
  * Drift here would be quiet and costly: the dialog warning about a host the MCP
  * gate treats as the user's own, or the reverse. The table below is the
@@ -63,6 +63,10 @@ const HOSTS: readonly string[] = [
 	"[::ffff:127.0.0.1]",
 	"[::ffff:10.1.2.3]",
 	"[::ffff:8.8.8.8]",
+	// the hex pair URL.hostname actually reports for the mapped spellings
+	"[::ffff:7f00:1]",
+	"[::ffff:a01:203]",
+	"[::ffff:808:808]",
 	// an unbracketed IPv6 never arrives from URL.hostname
 	"::1",
 	"",

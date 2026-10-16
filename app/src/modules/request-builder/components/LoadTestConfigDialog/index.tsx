@@ -190,7 +190,11 @@ export default function LoadTestConfigDialog({
 	const target = useMemo(() => (url === undefined ? null : classifyTarget(url)), [url]);
 	const remoteTarget =
 		target?.kind === "host" && !target.isLocal
-			? { host: target.host, requestCount: totalRequests(profile) }
+			? {
+					host: target.host,
+					requestCount: totalRequests(profile),
+					countWithheld: blockingError !== null,
+				}
 			: null;
 
 	const notices = buildNotices({

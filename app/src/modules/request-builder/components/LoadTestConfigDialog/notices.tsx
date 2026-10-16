@@ -21,6 +21,16 @@ export interface RemoteTarget {
 	host: string;
 	/** From `totalRequests`; null where the count is the target's answer. */
 	requestCount: number | null;
+	/** A blocking error is live, so a figure from the form would describe a run that cannot start. */
+	countWithheld: boolean;
+}
+
+/** What the advisory says Starting sends: a count, the target's answer, or neither while blocked. */
+function sendsPhrase({ requestCount, countWithheld }: RemoteTarget): string {
+	if (requestCount === null) return "as many requests as the target can answer";
+	if (countWithheld) return "requests";
+
+	return `about ${requestsPhrase(requestCount)}`;
 }
 
 /** The validation messages, plus the facts that raise an advisory. */
@@ -160,11 +170,8 @@ export function buildNotices({
 			severity: "info",
 			node: (
 				<Callout severity="info" title="This target is not on your machine or network">
-					Starting sends{" "}
-					{remoteTarget.requestCount === null
-						? "as many requests as the target can answer"
-						: `about ${requestsPhrase(remoteTarget.requestCount)}`}{" "}
-					to <span className="font-mono">{remoteTarget.host}</span>.
+					Starting sends {sendsPhrase(remoteTarget)} to{" "}
+					<span className="font-mono">{remoteTarget.host}</span>.
 				</Callout>
 			),
 		});

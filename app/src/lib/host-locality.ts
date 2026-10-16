@@ -12,13 +12,9 @@
  *        can tell a local target from one that belongs to someone else (#2117).
  *
  * **This file is mirrored, on purpose, by `isPrivateHost` in
- * `electron/mcp/safety.ts`.** The two processes cannot share a source file:
- * `tsconfig.node.json` emits the main process with `rootDir: "electron"`, so it
- * cannot compile a file from `src/` (TS6059), and the renderer cannot import one
- * from `electron/` either, since that is a referenced composite project (TS6305).
- * The mirror is pinned by `electron/mcp/host-locality.conformance.test.ts`, which
- * runs *both* implementations over one host table and fails on any divergence.
- * Change this file and change that one.
+ * `electron/mcp/safety.ts`; change both.** The process boundary forbids sharing
+ * a source file (see `run-compare.ts`), and
+ * `electron/mcp/host-locality.conformance.test.ts` fails on any divergence.
  *
  * Textual, like the MCP allowlist: a DNS name that *resolves* to a private
  * address is not local here, because resolving it would make the answer depend
@@ -41,14 +37,27 @@ function isLocalIpv4(address: string): boolean {
 	return false;
 }
 
+/**
+ * The dotted quad behind an IPv4-mapped IPv6 address, else the address unchanged.
+ * `URL` serializes `::ffff:127.0.0.1` as `::ffff:7f00:1`, so the hex pair is the
+ * form that arrives; the dotted spelling is kept for a caller passing it directly.
+ */
+function unmapIpv4(address: string): string {
+	const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(address);
+	if (dotted) return dotted[1];
+	const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+	if (!hex) return address;
+	const [high, low] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+	return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+}
+
 /** Whether `host` (as `URL.hostname` reports it) names a machine on the user's own network. */
 export function isLocalHost(host: string): boolean {
 	if (host === "localhost" || host.endsWith(".localhost")) return true;
 
 	if (host.startsWith("[") && host.endsWith("]")) {
-		// `::ffff:127.0.0.1` is a v4 address wearing a v6 spelling, so it is
-		// classified as the v4 one rather than falling through as "not local".
-		const address = host.slice(1, -1).replace(/^::ffff:/, "");
+		// An IPv4-mapped address is classified as the v4 one it wraps.
+		const address = unmapIpv4(host.slice(1, -1));
 		if (/^\d+\.\d+\.\d+\.\d+$/.test(address)) return isLocalIpv4(address);
 		if (address === "::1" || address === "::") return true;
 		// fc00::/7 (unique local) and fe80::/10 (link local).

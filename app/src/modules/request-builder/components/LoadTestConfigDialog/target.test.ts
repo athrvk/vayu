@@ -14,6 +14,8 @@ describe("classifyTarget", () => {
 		["http://localhost:3000/x", "localhost", true],
 		["http://192.168.1.20:8080/", "192.168.1.20", true],
 		["http://[::1]:8080/", "[::1]", true],
+		// URL reports the mapped form as `[::ffff:7f00:1]`, not the typed dotted quad.
+		["http://[::ffff:127.0.0.1]:3000/", "[::ffff:7f00:1]", true],
 		["https://user:secret@Api.Example.com/x", "api.example.com", false],
 		// Sent as http when no scheme is typed, not read as a `localhost:` scheme.
 		["localhost:3000/x", "localhost", true],

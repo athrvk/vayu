@@ -5,10 +5,6 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-/**
- * @vitest-environment jsdom
- */
-
 import { describe, expect, it } from "vitest";
 import { isLocalHost } from "./host-locality";
 
@@ -25,6 +21,8 @@ describe("isLocalHost", () => {
 		"[::1]",
 		"[fd00::1]",
 		"[::ffff:127.0.0.1]",
+		"[::ffff:7f00:1]",
+		"[::ffff:a01:203]",
 	])("%s is local", (host) => {
 		expect(isLocalHost(host)).toBe(true);
 	});
@@ -35,6 +33,7 @@ describe("isLocalHost", () => {
 		"172.32.0.1",
 		"172.15.0.1",
 		"[2001:db8::1]",
+		"[::ffff:808:808]",
 	])("%s is not local", (host) => {
 		expect(isLocalHost(host)).toBe(false);
 	});

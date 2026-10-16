@@ -1438,6 +1438,17 @@ describe("the target (issue #2117)", () => {
 		}
 	);
 
+	it("withholds the count while a blocking error is live, as the summary does", () => {
+		open({ url: "https://api.example.com/" });
+		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+		fireEvent.change(screen.getByLabelText(/error rate/i), { target: { value: "150" } });
+
+		const advisory = screen.getByText(ADVISORY).parentElement;
+		expect(advisory).toHaveTextContent("Starting sends requests to api.example.com.");
+		expect(advisory).not.toHaveTextContent(/\d,\d{3}/);
+		expect(advisory).not.toHaveTextContent(/as many requests as the target/);
+	});
+
 	it.each([
 		["a localhost URL", "http://localhost:3000/x", "localhost"],
 		["a private IPv4 address", "http://192.168.1.20:8080/health", "192.168.1.20"],
@@ -1467,7 +1478,7 @@ describe("the target (issue #2117)", () => {
 		const { onStart } = open({ method: "GET", url: "{{baseUrl}}/orders" });
 
 		expect(dialog()).toHaveAccessibleDescription(
-			/Host unknown: \{\{baseUrl\}\} has no value in the active environment/
+			/Host unknown: \{\{baseUrl\}\} has no value in any scope\./
 		);
 		expect(screen.queryByText(ADVISORY)).not.toBeInTheDocument();
 		// Unknown is not a block: the user may be right and the variable resolved

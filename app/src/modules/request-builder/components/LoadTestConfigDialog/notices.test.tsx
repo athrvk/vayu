@@ -40,7 +40,7 @@ describe("buildNotices", () => {
 	});
 
 	it("raises the off-network advisory as info, below every blocking notice", () => {
-		const remoteTarget = { host: "api.example.com", requestCount: 6000 };
+		const remoteTarget = { host: "api.example.com", requestCount: 6000, countWithheld: false };
 		expect(keys({ remoteTarget })).toEqual(["remote-target"]);
 		expect(buildNotices({ ...CLEAN, remoteTarget })[0].severity).toBe("info");
 		expect(

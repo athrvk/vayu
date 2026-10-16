@@ -50,8 +50,8 @@ function unknownHostText({ variable }: Extract<Target, { kind: "unknown" }>) {
 	if (variable === null) return "Host unknown";
 	return (
 		<>
-			Host unknown: <span className="font-mono">{`{{${variable}}}`}</span> has no value in the
-			active environment
+			Host unknown: <span className="font-mono">{`{{${variable}}}`}</span> has no value in any
+			scope.
 		</>
 	);
 }
