@@ -604,6 +604,15 @@ should_skip_install() {
 	[ -n "$installed" ] && [ "$installed" = "$target" ]
 }
 
+# Refused before anything is downloaded: an older macOS installs fine and then
+# the app will not launch.
+require_macos_floor() {
+	local have
+	have="$(sw_vers -productVersion)"
+	version_at_least "$have" "$MACOS_MIN_VERSION" \
+		|| die_with "$EXIT_UNSUPPORTED" "Vayu needs macOS $MACOS_MIN_VERSION (Ventura) or later (this Mac is $have)."
+}
+
 require_supported_os() {
 	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
 		return 0
@@ -619,9 +628,10 @@ require_supported_os() {
 			# they were missing from this list, which is how a missing tool
 			# turned into a failure partway through an install instead of a
 			# refusal to start one.
-			for tool in curl codesign xattr shasum ditto plutil osascript sudo; do
+			for tool in curl codesign xattr shasum ditto plutil osascript sudo sw_vers; do
 				command -v "$tool" >/dev/null 2>&1 || die "Required tool missing: $tool"
 			done
+			require_macos_floor
 			;;
 		Linux)
 			# Only x86_64 AppImages are published, so an arm64 Linux box would
@@ -729,6 +739,10 @@ sha256_of() {
 # always was and only warns.
 FIRST_CHECKSUMMED_VERSION="0.33.0"
 FIRST_ATTESTED_VERSION="0.40.0"
+
+# The oldest macOS the app launches on. Moves with docs/index.md and
+# VAYU_MACOS_DEPLOYMENT_TARGET in engine/CMakeLists.txt.
+MACOS_MIN_VERSION="13.3"
 
 # True when $1 is the same release as $2 or a later one. Plain numeric
 # major.minor.patch compare in bash: `sort -V` is not on every platform this
@@ -1008,6 +1022,24 @@ installed_app_path() {
 	esac
 }
 
+# A fresh install ends with the app closed, so ask - but only where someone can
+# answer and a window can open. confirm() returns 0 with no terminal and under
+# VAYU_ASSUME_YES and VAYU_DRYRUN, which would read here as "yes", so those
+# are refused up front rather than left to its defaults.
+offer_open_after_install() {
+	if [ "${VAYU_DRYRUN:-0}" = "1" ]; then
+		printf '[dry-run] would offer to open Vayu\n'
+		return 0
+	fi
+	[ "${VAYU_ASSUME_YES:-0}" = "1" ] && return 0
+	[ -r "$VAYU_TTY" ] || return 0
+	if [ "$(platform)" = "Linux" ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+		return 0
+	fi
+	confirm 'Open Vayu now?' || return 0
+	launch_app
+}
+
 do_install() {
 	require_supported_os
 	acquire_lock
@@ -1085,6 +1117,8 @@ do_install() {
 			# It was running when the user started this, so put it back.
 			log 'Reopening Vayu...'
 			launch_app
+		else
+			offer_open_after_install
 		fi
 	)
 }
@@ -1237,6 +1271,10 @@ elsewhere) and ad-hoc signs it. Linux installs the AppImage under
 Updating quits a running Vayu first (it asks). Set VAYU_ASSUME_YES=1 to skip
 the prompt. Re-running when the latest version is already installed does
 nothing unless --force is given.
+
+When it finishes it offers to open Vayu (never with VAYU_ASSUME_YES=1 or
+without a terminal). It refuses a macOS older than 13.3 before downloading
+anything (exit 4).
 
 Exit codes: 0 done (including "already installed"), 1 failed, 2 bad usage,
 3 declined (you said no, or the password was refused), 4 unsupported machine,

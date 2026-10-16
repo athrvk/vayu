@@ -551,6 +551,35 @@ if (VAYU_DRYRUN=0 HOME='' require_supported_os) >/dev/null 2>&1; then
 fi
 unset -f uname
 
+# The macOS floor. The tool loop uses `command -v`, which finds functions, so
+# the tools a Linux host lacks are stubbed as functions.
+platform() { printf 'Darwin\n'; }
+for tool in curl codesign xattr shasum ditto plutil osascript sudo; do
+	eval "$tool() { :; }"
+done
+for macos in 13.2 12.7.6 10.15.7; do
+	sw_vers() { printf '%s\n' "$macos"; }
+	status=0
+	out="$(VAYU_DRYRUN=0 require_supported_os 2>&1)" || status=$?
+	[ "$status" = "$EXIT_UNSUPPORTED" ] \
+		|| fail "macOS $macos should be refused with exit $EXIT_UNSUPPORTED, got $status"
+	echo "$out" | grep -q "13\.3" || fail "the refusal for macOS $macos should name 13.3: $out"
+	echo "$out" | grep -q "$macos" || fail "the refusal should say which macOS this is: $out"
+done
+for macos in 13.3 13.6.1 14.5 26.0; do
+	sw_vers() { printf '%s\n' "$macos"; }
+	(VAYU_DRYRUN=0 require_supported_os) >/dev/null 2>&1 || fail "macOS $macos should be accepted"
+done
+# A Mac without sw_vers is refused as a missing tool, not read as version "".
+unset -f sw_vers
+if (VAYU_DRYRUN=0 PATH=/nonexistent require_supported_os) >/dev/null 2>&1; then
+	fail "a Mac without sw_vers should be refused"
+fi
+for tool in curl codesign xattr shasum ditto plutil osascript sudo; do
+	unset -f "$tool"
+done
+platform() { uname -s; }
+
 printf 'PASS: host checks\n'
 
 # --- the answer that aborts an install ---------------------------------------
@@ -718,6 +747,74 @@ APP_PATH="$APP_PATH_SAVED"
 
 printf 'PASS: staging sweep\n'
 
+# --- launch offer ------------------------------------------------------------
+# After a fresh install, offer_open_after_install asks once. confirm() answers
+# yes with no terminal and under VAYU_ASSUME_YES, so each of those has to be
+# refused before it is reached. launch_app is stubbed to leave a mark.
+ORIGINAL_LAUNCH_APP="$(declare -f launch_app)"
+ORIGINAL_PLATFORM="$(declare -f platform)"
+LAUNCHED="$TMPROOT/launched"
+ANSWER="$TMPROOT/answer"
+launch_app() { : >"$LAUNCHED"; }
+offered() {
+	# usage: offered <platform> [VAR=value ...]
+	local os="$1"
+	shift
+	rm -f "$LAUNCHED"
+	platform() { printf '%s\n' "$os"; }
+	(env_run "$@") >/dev/null 2>&1
+	[ -e "$LAUNCHED" ]
+}
+env_run() {
+	local assignment
+	for assignment in "$@"; do export "${assignment?}"; done
+	offer_open_after_install
+}
+
+printf 'y\n' >"$ANSWER"
+offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY=:0 WAYLAND_DISPLAY= \
+	|| fail "a yes on Linux with a display should launch Vayu"
+offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY= WAYLAND_DISPLAY=wayland-0 \
+	|| fail "Wayland alone counts as a display"
+offered Darwin VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY= WAYLAND_DISPLAY= \
+	|| fail "macOS needs no DISPLAY to launch"
+printf '\n' >"$ANSWER"
+offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY=:0 WAYLAND_DISPLAY= \
+	|| fail "an empty answer defaults to yes"
+printf 'n\n' >"$ANSWER"
+if offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY=:0 WAYLAND_DISPLAY=; then
+	fail "a no must not launch Vayu"
+fi
+if offered Darwin VAYU_DRYRUN=0 VAYU_TTY="$ANSWER"; then
+	fail "a no must not launch Vayu on macOS either"
+fi
+
+# Nobody to ask: the default of confirm() is yes, so the gate has to stop it.
+if offered Darwin VAYU_DRYRUN=0 VAYU_TTY="$TMPROOT/no-such-terminal"; then
+	fail "without a terminal the installer must not ask or launch"
+fi
+printf 'y\n' >"$ANSWER"
+if offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" VAYU_ASSUME_YES=1 DISPLAY=:0; then
+	fail "VAYU_ASSUME_YES must not launch the app"
+fi
+if offered Darwin VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" VAYU_ASSUME_YES=1; then
+	fail "VAYU_ASSUME_YES must not launch the app on macOS either"
+fi
+if offered Linux VAYU_DRYRUN=0 VAYU_TTY="$ANSWER" DISPLAY= WAYLAND_DISPLAY=; then
+	fail "Linux without a display must not launch the app"
+fi
+
+# Dry-run names the offer and does not make it.
+out="$(VAYU_DRYRUN=1 offer_open_after_install 2>&1)"
+echo "$out" | grep -q '^\[dry-run\] would offer to open Vayu$' || fail "dry-run should name the offer: $out"
+[ ! -e "$LAUNCHED" ] || fail "dry-run must not launch"
+
+unset -f offered env_run
+eval "$ORIGINAL_LAUNCH_APP"
+eval "$ORIGINAL_PLATFORM"
+
+printf 'PASS: launch offer\n'
+
 # --- running-app guard -------------------------------------------------------
 # Last, because these stub out running_pids/confirm and the stubs would leak
 # into anything after them.
@@ -798,3 +895,18 @@ if [ "$last_quit" -ge "$swap" ] || [ "$last_quit" -le "$download" ]; then
 fi
 
 printf 'PASS: running-app guard\n'
+
+# A fresh install (nothing running to reopen) reaches the offer; an update that
+# reopened the app does not get asked about the same thing twice.
+running_pids() { :; }
+platform() { printf 'Linux\n'; }
+out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
+echo "$out" | grep -q "would offer to open Vayu" || fail "a fresh install should offer to open Vayu"
+running_pids() { printf '99999\n'; }
+out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
+if echo "$out" | grep -q "would offer to open Vayu"; then
+	fail "an app the installer quit is reopened, not offered"
+fi
+echo "$out" | grep -q "Reopening Vayu" || fail "the update path should keep reopening"
+
+printf 'PASS: launch offer wiring\n'

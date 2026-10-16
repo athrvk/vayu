@@ -49,7 +49,7 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     **macOS 13.3 (Ventura) or later.** Electron sets a macOS 13 floor for the
     app, and the engine raises it to 13.3: libc++ only ships floating-point
     `std::to_chars` from that release, and the engine cannot be built without
-    it. On anything older the installed app will not launch.
+    it. The installer refuses an older macOS before downloading.
 
     Installs the latest release to `/Applications`, and asks for your password
     once. Vayu ships unsigned, so the script ad-hoc signs the app and clears the
@@ -57,7 +57,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     not unverifiable: the script checks the download against its published
     checksum and refuses to install without one, and every asset of a release
     from 0.40.0 on carries a build-provenance attestation - confirm one by hand
-    with `gh attestation verify <file> --repo athrvk/vayu`.
+    with `gh attestation verify <file> --repo athrvk/vayu`. When it finishes,
+    it offers to open Vayu.
 
     **Updating is the same command.** It keeps your collections and settings,
     offers to quit Vayu if it is running (and reopens it after), and does
@@ -92,7 +93,8 @@ Windows (x64), macOS 13.3+ (universal), and Linux (AppImage). No account, no sig
     The same command as macOS. It installs the AppImage under
     `~/.local/share/vayu` and registers a launcher entry, so Vayu shows up in
     your applications menu. Nothing it writes leaves your home directory, so it
-    never asks for root. Re-run it to update. x86_64 only.
+    never asks for root. Re-run it to update. x86_64 only. When it finishes, it
+    offers to open Vayu if a desktop session is running.
 
     **glibc 2.35 or later**: Ubuntu 22.04, Linux Mint 21, Debian 12, Fedora 36
     or newer. The release is built on the oldest supported Ubuntu LTS so it runs
