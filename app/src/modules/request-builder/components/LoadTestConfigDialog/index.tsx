@@ -318,7 +318,7 @@ export default function LoadTestConfigDialog({
 					 */}
 					<div className="space-y-1.5">
 						<Label htmlFor="lt-comment" className="text-xs">
-							Comment
+							Run label
 							<span className="ml-1 font-normal text-muted-foreground">
 								(optional)
 							</span>
@@ -329,8 +329,15 @@ export default function LoadTestConfigDialog({
 							value={comment}
 							onChange={(e) => setComment(e.target.value)}
 							placeholder="Checkout after the cache change"
+							aria-describedby="lt-comment-hint"
 							className="text-sm"
 						/>
+						<p
+							id="lt-comment-hint"
+							className="text-label leading-relaxed text-muted-foreground"
+						>
+							Shown with this run in History.
+						</p>
 					</div>
 
 					<div className="space-y-1.5">

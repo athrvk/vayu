@@ -790,13 +790,28 @@ describe("recording & limits is one surface", () => {
 		expect(first.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 	});
 
-	it("puts the comment field at the top of the dialog, before Load profile", () => {
+	it("puts the run label field at the top of the dialog, before Load profile", () => {
 		open();
-		const comment = screen.getByLabelText(/^comment/i);
+		const runLabel = screen.getByLabelText(/^run label/i);
 		const profileLabel = screen.getByText("Load profile");
 		expect(
-			comment.compareDocumentPosition(profileLabel) & Node.DOCUMENT_POSITION_FOLLOWING
+			runLabel.compareDocumentPosition(profileLabel) & Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
+	});
+
+	it("names the first field a run label and says where it shows", () => {
+		open();
+		const runLabel = screen.getByLabelText(/^run label/i);
+		expect(screen.queryByLabelText(/^comment/i)).not.toBeInTheDocument();
+		expect(runLabel).toHaveAccessibleDescription("Shown with this run in History.");
+	});
+
+	it("still submits the run label as the payload's comment", () => {
+		const { onStart } = open();
+		fireEvent.change(screen.getByLabelText(/^run label/i), {
+			target: { value: "after the cache change" },
+		});
+		expect(started(onStart).comment).toBe("after the cache change");
 	});
 
 	it("leaves the toggle a real button, so Tab reaches it and Enter/Space fire it", () => {
@@ -846,7 +861,7 @@ describe("keyboard", () => {
 			/target rate/i,
 			/^duration/i,
 			/slow request threshold/i,
-			/^comment/i,
+			/^run label/i,
 		]) {
 			expect(screen.getByLabelText(label)).toBeInTheDocument();
 		}
