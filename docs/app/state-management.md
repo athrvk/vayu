@@ -1145,7 +1145,7 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 ```typescript
 {
   currentRunId: string | null
-  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped". The dashboard lays out all three of completed/failed/stopped as the final report, a stopped run once `finalReport` is set (#2136)
+  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped". Any of completed/failed/stopped with a `finalReport` renders History's `LoadTestDetail` over it (#2136, #2220); without one the live view stays, carrying the report Retry
   isStreaming: boolean
   currentMetrics: LoadTestMetrics | null
   historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)
@@ -1153,7 +1153,6 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
   liveWindowSeconds: number | null             // Live retention window; null = full run
   finalReport: RunReport | null
   error: string | null
-  activeView: "metrics" | "request-response"
   isStopping: boolean
   loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
@@ -1169,7 +1168,7 @@ const {
   setRunConfig,     // Fill in loadTestConfig / requestInfo of a run started without them (agent runs)
   addMetricsBatch,  // Efficiently fold batch into history and update aggregates
   addMonitorSamples, // Append scraped server vitals, bounded by maxRetainedTicks
-  setFinalReport, setError, setActiveView, setStopping,
+  setFinalReport, setError, setStopping,
   setLiveWindowSeconds,  // Update the live retention window (from useLiveWindowSync)
   setMaxRetainedTicks
 } = useDashboardStore();

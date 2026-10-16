@@ -11,8 +11,8 @@
 
 /**
  * The report's error summary names the engine's two kinds of error (issue
- * #2124) beside the total, and the total is the same number the hero card and
- * the Request/Response view print.
+ * #2124) beside the total, and the total is the same number the hero card
+ * prints.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -20,7 +20,6 @@ import { screen, within, fireEvent } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import OverviewTab from "./OverviewTab";
 import type { SampleDestination } from "../sample-filter";
-import RequestResponseView from "@/modules/dashboard/components/RequestResponseView";
 import { withQueryClient } from "@/test/query-wrapper";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import type { RunReport } from "@/types";
@@ -68,31 +67,21 @@ describe("report error summary", () => {
 		expect(within(summary).getByText("HTTP errors").nextSibling?.textContent).toBe("15");
 		expect(within(summary).getByText("No response").nextSibling?.textContent).toBe("2");
 		expect(summary.textContent).toContain("17 (17.00%)");
-	});
-
-	it("Request/Response view prints the same card", () => {
-		render(withQueryClient(<RequestResponseView report={report} />));
-
-		const summary = screen.getByText("Error summary").closest<HTMLElement>(".enter-fade")!;
-		expect(summary.textContent).toContain("17 (17.00%)");
-		expect(within(summary).getByText("HTTP errors").nextSibling?.textContent).toBe("15");
-		expect(within(summary).getByText("No response").nextSibling?.textContent).toBe("2");
 		expect(within(summary).getByText("Timeout").nextSibling?.textContent).toBe("2");
 	});
 
-	it("Request/Response view lists the status codes an HTTP-only run failed with", () => {
+	it("Overview lists the status codes an HTTP-only run failed with", () => {
+		const httpOnly: RunReport = {
+			...report,
+			errors: { total: 15, withDetails: 0, types: {}, byStatusCode: { "500": 15 } },
+		};
 		render(
 			withQueryClient(
-				<RequestResponseView
-					report={{
-						...report,
-						errors: {
-							total: 15,
-							withDetails: 0,
-							types: {},
-							byStatusCode: { "500": 15 },
-						},
-					}}
+				<OverviewTab
+					report={httpOnly}
+					runId="run_1"
+					derived={reportToDerived(httpOnly)}
+					anomalies={[]}
 				/>
 			)
 		);
@@ -132,14 +121,9 @@ describe("requests cancelled by Stop (issue #2136)", () => {
 				<OverviewTab report={r} runId="run_1" derived={reportToDerived(r)} anomalies={[]} />
 			)
 		);
-	const requestResponse = (r: RunReport) =>
-		render(withQueryClient(<RequestResponseView report={r} />));
 
-	it.each([
-		["Overview", overview],
-		["Request/Response view", requestResponse],
-	])("%s says so for a run with no errors, in the same words", (_name, renderReport) => {
-		renderReport(stopped(12));
+	it("says so for a run with no errors", () => {
+		overview(stopped(12));
 
 		const line = screen.getByText("12 requests cancelled by Stop");
 		expect(line.className).toContain("text-muted-foreground");
@@ -147,23 +131,17 @@ describe("requests cancelled by Stop (issue #2136)", () => {
 		expect(screen.queryByText("Error summary")).toBeNull();
 	});
 
-	it.each([
-		["Overview", overview],
-		["Request/Response view", requestResponse],
-	])("%s counts one request in the singular", (_name, renderReport) => {
-		renderReport(stopped(1));
+	it("counts one request in the singular", () => {
+		overview(stopped(1));
 		expect(screen.getByText("1 request cancelled by Stop")).toBeTruthy();
 	});
 
-	it.each([
-		["Overview", overview],
-		["Request/Response view", requestResponse],
-	])("%s draws nothing for zero or an engine that predates the count", (_name, renderReport) => {
-		const { unmount } = renderReport(stopped(0));
+	it("draws nothing for zero or an engine that predates the count", () => {
+		const { unmount } = overview(stopped(0));
 		expect(screen.queryByText(/cancelled by Stop/)).toBeNull();
 		unmount();
 
-		renderReport(stopped(undefined));
+		overview(stopped(undefined));
 		expect(screen.queryByText(/cancelled by Stop/)).toBeNull();
 	});
 

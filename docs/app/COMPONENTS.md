@@ -509,7 +509,7 @@ Info's blank-name rule survives the buttons' removal by being spoken instead: `r
 
 Live load-test metrics. Entry: `modules/dashboard/index.tsx`.
 
-Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported. A run that finishes any way at all lays out as the final report: `completed`, `failed` and `stopped` alike (issues #1932, #2136; a stopped run once its report has arrived, since the Stop click flips the mode before the report is fetched), so a user-stopped run gets the report breadcrumb, the report's numbers and the "Not judged - Stopped before it finished" verdict rather than staying in the live layout.
+Connects to the engine SSE metrics stream (`/runs/:runId/live`, via the load-test service / dashboard store), shows live metrics while running, and converges on the final report on completion. Stop action supported. A run that finishes any way at all - `completed`, `failed` and `stopped` alike (issues #1932, #2136) - renders History's own [`LoadTestDetail`](#history-moduleshistory) over its report once the report has arrived (issue #2220), so the same run shows the same numbers, labels and verdict here as when it is reopened from History. Above it the dashboard keeps only an identity row (Back and the status pill with the run's outcome) and the stream-error callout; the crumb, the request line, the configuration and the "Not judged - Stopped before it finished" verdict are the report's own. Until the report arrives (a stopped run's, which the Stop click precedes, or one whose fetch failed) the live layout stays, with the "Couldn't load the run report" Retry. The live view has no tab bar.
 
 The dashboard is **mode-adaptive**: a `useMode()` discriminator maps the run config to one of `constant_rps` / `constant_concurrency` / `iterations` / `ramp_up`, and the hero row + stat row + charts render the surfaces appropriate to that mode. `MetricsView` is a thin orchestrator over a modular tree:
 
@@ -544,16 +544,15 @@ after the frame left the run's retained ring.
 |---|---|
 | `DashboardHeader.tsx` | Run status, method and URL, stop button, and the config summary line (virtual users, mode, a data-driven run's row count and the file it came from, elapsed) |
 | `MetricsView.tsx` | Orchestrator - composes the hero row, stat row, and charts per mode |
-| `RequestResponseView.tsx` | Status-code distribution, error breakdown, timing breakdown, sampled requests. An expanded validation-failure sample lists each failing test's `trace.failures` message, not just the `ERR` chip and pass/fail counts |
 | `shared.tsx`, `tooltips.tsx`, `format.ts` | Shared bits (Eyebrow/InfoChip) + centralized InfoChip wording + the `fmt()` / `fmtRate()` number formatters (their own module so `shared.tsx` exports only components; `fmtRate` is `formatRate` with a "-" for a missing value, which `formatRate` alone would print as a measured `0`) |
 
 **`hero/` - mode-adaptive hero cards** (`HeroRow.tsx` selects per mode, all built on `HeroCardShell.tsx`): `RateFidelityCard`, `DroppedRequestsCard`, `AchievedThroughputCard`, `ThroughputCard`, `ThroughputTwinCard`, `CurrentConcurrencyCard`, `ConcurrencyUtilCard`, `SaturationCard`, `ProgressCard`, `ErrorRateCard`, and `LatencyPercentilesCard` (live p95 and p99 with mean/median beneath, added by `HeroRow` for the throughput-led modes - `constant_rps`, `constant_concurrency`, `iterations` - which therefore carry no p99 stat; `ramp_up` and `capacity` keep theirs as p99 at peak in the stats row). Throughput on these cards prints through `formatRate`, so 3940 reads `3,940`. The closed-loop count reads "virtual users" on every card ("Active virtual users", "Virtual user utilisation", "Throughput per virtual user", "Peak virtual users"); under `constant_rps` the same series counts requests, so that mode's stat says "Peak in-flight requests". `isClosedLoopMode` and `concurrencyMeasureLabel` in `constants/load-test-modes.ts` make that call, and the card components and their props keep the `Concurrency` identifiers.
 
-`ErrorRateCard` shows the engine's one error definition (issue #2124): a response outside 2xx/3xx, or no response at all; a 3xx is a success and is drawn in the green `2xx/3xx` segment. Its percentage is `failedRequests / totalRequests`, and the card is told the split rather than recounting it: the legend's **HTTP errors** and **No response** come from `DashboardDerived.httpErrors` / `noResponse`, read off the live tick (`http_errors`, `no_response`) or the report's `summary` by `utils/errorBreakdown.ts`. Its status bar buckets `DashboardDerived.statusCodes`, which `MetricsView` takes from the final report once there is one and from the latest tick's `status_codes` before that, so the bar fills during the run instead of staying empty until the report loads. The report views (`history/main/components/OverviewTab.tsx`, `RequestResponseView.tsx`) print the same two words beside "Total errors" by both rendering the one shared [`ErrorSummary`](#error-summary-componentssharederrorsummarytsx), fed `httpErrors` / `noResponse` from the same split. The card's colour follows the digits it prints: red for any rate above zero, success for a printed zero. A rate under 0.1% takes a second decimal (`0.01`), and one that rounds to nothing even then reads `<0.01`, through `formatErrorPercent` in `utils/format.ts`, so a nonzero rate is never `0.0` in red. A request cancelled by a user Stop (issue #2136) is not an error and is in neither the rate nor the bar: the engine keeps it outside `totalRequests` and the status-code distribution, and reports it as `summary.cancelledRequests`. Both report views say so in one muted line, "N requests cancelled by Stop", from `components/shared/CancelledRequestsNote.tsx` (silent for zero and for an engine that predates the count), placed outside the error card so a stopped run with no errors still shows it.
+`ErrorRateCard` shows the engine's one error definition (issue #2124): a response outside 2xx/3xx, or no response at all; a 3xx is a success and is drawn in the green `2xx/3xx` segment. Its percentage is `failedRequests / totalRequests`, and the card is told the split rather than recounting it: the legend's **HTTP errors** and **No response** come from `DashboardDerived.httpErrors` / `noResponse`, read off the live tick (`http_errors`, `no_response`) or the report's `summary` by `utils/errorBreakdown.ts`. Its status bar buckets `DashboardDerived.statusCodes`, which `MetricsView` takes from the latest tick's `status_codes`, so the bar fills during the run instead of staying empty until the report loads; a finished run's card reads the report's distribution through `reportToDerived`. The report (`history/main/components/OverviewTab.tsx`) prints the same two words beside "Total errors" in the shared [`ErrorSummary`](#error-summary-componentssharederrorsummarytsx), fed `httpErrors` / `noResponse` from the same split. The card's colour follows the digits it prints: red for any rate above zero, success for a printed zero. A rate under 0.1% takes a second decimal (`0.01`), and one that rounds to nothing even then reads `<0.01`, through `formatErrorPercent` in `utils/format.ts`, so a nonzero rate is never `0.0` in red. A request cancelled by a user Stop (issue #2136) is not an error and is in neither the rate nor the bar: the engine keeps it outside `totalRequests` and the status-code distribution, and reports it as `summary.cancelledRequests`. The report says so in one muted line, "N requests cancelled by Stop", from `components/shared/CancelledRequestsNote.tsx` (silent for zero and for an engine that predates the count), placed outside the error card so a stopped run with no errors still shows it.
 
-**`charts/`** - all time-series, scatter, and distribution plots are centralized in **`charts/uplot/`** and built on a single Canvas primitive, `UPlotChart.tsx` (uPlot). Import them from `charts/uplot/index.ts` so live and history render identical components: `LatencyPercentilesChart` (p50/p95/p99), `LatencyBreakdownChart` (two series, "average latency (incl. queue wait)" and "wire time", with the queue-wait gap shaded between them), `RequestRateChart` (configured-vs-achieved throughput), `ConnectionsChart` (the run's concurrency series, named by its `mode`: virtual users, or in-flight requests under `constant_rps`), `ErrorRateChart`, `ServerVitalsChart` (scraped server metrics joined onto the run timeline) (from `TimeSeriesCharts.tsx`); `ResponseTimeVsConcurrencyChart` (ramp_up capacity discovery w/ breakpoint marker) and `HdrPercentileChart` (from `ScatterAndDistribution.tsx`); `StatusCodesOverTimeChart` (stacked: it plots running totals so the bands stack, and passes each class' own per-interval count as `tipValues` so the tooltip reads "responses / 0.5 s" per class, with a class that had none in the hovered interval left out, #2143); and `CustomMetricsChart` - a `metric.record` / `pm.metrics` run's declared trends/counters/rates, one series per name (a trend plots its p95, a counter/rate its one value), cycling the same categorical palette `ServerVitalsChart` does since neither chart has a semantic mapping for a run-chosen name (issue #1579). Supporting modules in the same folder: `buildData.ts` (series → uPlot data), `chartFocus.ts` + `syncKeys.ts` (scatter↔time cross-highlight/cursor sync), `plugins.ts`, `formatters.ts`, and `uplotTheme.ts` (CSS-token-driven theming). `plugins.ts` carries the two overlay layers `UPlotChart` registers for every chart: `markersPlugin` pins a single value (`Marker` - the capacity breakpoint, the target RPS, the SLO) and `annotationsPlugin` shades a span (`Annotation` - the detected anomaly windows, drawn under the markers so a dashed rule stays legible over a band). The time-series wrappers take the domain shapes (`breakpoint`, `anomalies`) and map them onto those chart-layer ones, so a caller never assembles a marker or a band by hand. Outside `uplot/`, `HdrPercentilePlot.tsx` is now just the loading skeleton (`SkeletonHdrPlot`), `TimingWaterfall.tsx` remains an SVG chart, and two plain-DOM readouts sit beside it inside the same card: `PhasePercentiles.tsx` (per-phase percentiles over every completion) and `StreamMetrics.tsx` (issue #576 - what a streaming run's transfers delivered: events/sec, the per-completion event distribution, and how many streams a cap ended rather than the server). Both render `null` when their report section is absent, which is every non-streaming run for the second - the engine omits the section rather than zeroing it, so a card claiming an event rate of zero is a state the dashboard cannot reach.
+**`charts/`** - all time-series, scatter, and distribution plots are centralized in **`charts/uplot/`** and built on a single Canvas primitive, `UPlotChart.tsx` (uPlot). Import them from `charts/uplot/index.ts` so live and history render identical components: `LatencyPercentilesChart` (p50/p95/p99), `LatencyBreakdownChart` (two series, "average latency (incl. queue wait)" and "wire time", with the queue-wait gap shaded between them), `RequestRateChart` (configured-vs-achieved throughput), `ConnectionsChart` (the run's concurrency series, named by its `mode`: virtual users, or in-flight requests under `constant_rps`), `ErrorRateChart`, `ServerVitalsChart` (scraped server metrics joined onto the run timeline) (from `TimeSeriesCharts.tsx`); `ResponseTimeVsConcurrencyChart` (ramp_up capacity discovery w/ breakpoint marker) and `HdrPercentileChart` (from `ScatterAndDistribution.tsx`); `StatusCodesOverTimeChart` (stacked: it plots running totals so the bands stack, and passes each class' own per-interval count as `tipValues` so the tooltip reads "responses / 0.5 s" per class, with a class that had none in the hovered interval left out, #2143); and `CustomMetricsChart` - a `metric.record` / `pm.metrics` run's declared trends/counters/rates, one series per name (a trend plots its p95, a counter/rate its one value), cycling the same categorical palette `ServerVitalsChart` does since neither chart has a semantic mapping for a run-chosen name (issue #1579). Supporting modules in the same folder: `buildData.ts` (series → uPlot data), `chartFocus.ts` + `syncKeys.ts` (scatter↔time cross-highlight/cursor sync), `plugins.ts`, `formatters.ts`, and `uplotTheme.ts` (CSS-token-driven theming). `plugins.ts` carries the two overlay layers `UPlotChart` registers for every chart: `markersPlugin` pins a single value (`Marker` - the capacity breakpoint, the target RPS, the SLO) and `annotationsPlugin` shades a span (`Annotation` - the detected anomaly windows, drawn under the markers so a dashed rule stays legible over a band). The time-series wrappers take the domain shapes (`breakpoint`, `anomalies`) and map them onto those chart-layer ones, so a caller never assembles a marker or a band by hand. Outside `uplot/`, `HdrPercentilePlot.tsx` is now just the skeleton (`SkeletonHdrPlot`) and `TimingWaterfall.tsx` an SVG chart; the live `MetricsView` draws both in their empty state, since the report that fills them replaces the live view. Two plain-DOM readouts render in History's Performance tab: `PhasePercentiles.tsx` (per-phase percentiles over every completion) and `StreamMetrics.tsx` (issue #576 - what a streaming run's transfers delivered: events/sec, the per-completion event distribution, and how many streams a cap ended rather than the server). Both render `null` when their report section is absent, which is every non-streaming run for the second - the engine omits the section rather than zeroing it, so a card claiming an event rate of zero is a state the dashboard cannot reach.
 
-**`stats/`** - `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set (three cards for the throughput-led modes, four for `ramp_up` / `capacity`); `ModeStatCards.tsx`, `StatCard.tsx`. Latencies, rates and percentages in the run cards, the History header tiles, `LatencyMetric`, the step table, the baseline comparison and the chart value formatters in `charts/uplot/formatters.ts` go through `formatMs` (or `formatLatency`, which adds the unit), `formatRate` and `formatPercent` in `lib/format-number.ts`, beside `formatNumber`, so one value prints one way (issue #2217). A measured latency under 0.01 ms prints `<0.01`, not `0` (#2243). The axis tick formatters stay compact, but `axisMs` labels each tick with its unit and picks its decimals from the whole tick array (`UPlotChart` passes `yFormat` the splits), so a 0 to 3 ms axis reads `0ms 0.5ms 1ms 1.5ms` rather than a run of repeated whole numbers.
+**`stats/`** - `ModeStatsRow.tsx` routes to the per-mode Row 4 stat set (three cards for the throughput-led modes, four for `ramp_up` / `capacity`); `ModeStatCards.tsx`, `StatCard.tsx`, `LatencyStat.tsx` (one figure of the HDR plot's footer, shared by `MetricsView` and the History Performance tab). Latencies, rates and percentages in the run cards, the History header tiles, `LatencyMetric`, the step table, the baseline comparison and the chart value formatters in `charts/uplot/formatters.ts` go through `formatMs` (or `formatLatency`, which adds the unit), `formatRate` and `formatPercent` in `lib/format-number.ts`, beside `formatNumber`, so one value prints one way (issue #2217). A measured latency under 0.01 ms prints `<0.01`, not `0` (#2243). The axis tick formatters stay compact, but `axisMs` labels each tick with its unit and picks its decimals from the whole tick array (`UPlotChart` passes `yFormat` the splits), so a 0 to 3 ms axis reads `0ms 0.5ms 1ms 1.5ms` rather than a run of repeated whole numbers.
 
 **`hooks/`** - `useMode.ts` (run-config → mode discriminator).
 
@@ -676,15 +675,15 @@ The picker is told **which run it is for** (`loadTest`), because a row means som
 
 `services/data-files/` is the parser: `tabular.ts` (a hand-rolled RFC 4180 tokenizer - quoted delimiters, embedded newlines, doubled quotes, CRLF - shared by CSV and TSV, which differ only in the delimiter) and `index.ts` (format detection by extension with a content sniff fallback, the header rules, the JSON/JSONL paths). CSV and TSV values are **strings, always**, so `007` survives; JSON and JSONL keep native types, and the preview states the asymmetry. The header row *is* the mapping - column names become `{{data.column}}` tokens and `pm.iterationData` keys - so an empty or duplicated header cell is a parse error rather than a column nobody can address.
 
-`LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`:
+`LoadTestDetail` is **mode-aware** (header strip + tabs adapt to the run's mode, derived via `reportToDerived` → the same `DashboardDerived` shape the live dashboard uses) and composes the tabbed report under `main/components/`. It is also what the dashboard renders for a finished run (issue #2220), keyed on the run id, so a run reads the same right after it ends as from History later:
 
 | Component | Role |
 |---|---|
-| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead), `ErrorSummary` (the error card, shared with the dashboard's Request / Response tab; given `onOpenSample` by `LoadTestDetail`, its status and error-type rows open the Samples tab at the first loaded sample they count, via `locateSample` in `sample-filter.ts`, and a row with no loaded sample is disabled), and `TestValidationSummary` (the last carrying the run's named `pm.test` failures and passed `totalRequests`, so its tested-of-total line has a denominator) |
+| `OverviewTab.tsx` | Summary - renders the dashboard's mode-adaptive `HeroRow` + `ModeStatsRow`; the Rate-Control card is gated to `constant_rps`; also the shared `ThresholdVerdict`, `CustomMetricsSummary`, `ContractCoverage`, `SampledSchemaValidation`, `ScriptLifecycleSummary`, `RequestElementsSummary` (a single-request run's own `extract.*`/`assert.*`/`timer.*` outcomes, issues #1594/#1641 - absent for a scenario run, whose per-step tallies live in the Steps tab instead), `ErrorSummary` (the error card; given `onOpenSample` by `LoadTestDetail`, its status and error-type rows open the Samples tab at the first loaded sample they count, via `locateSample` in `sample-filter.ts`, and a row with no loaded sample is disabled), and `TestValidationSummary` (the last carrying the run's named `pm.test` failures and passed `totalRequests`, so its tested-of-total line has a denominator); `SlowRequestsCard.tsx` ends the tab with the count, threshold and share behind the Samples tab's Slow chip, absent when `slowRequests.count` is 0 |
 | `RunEvents.tsx` | The run's detected anomaly windows in words (`detectAnomalies`), plus any stretch the host spent asleep under the run (`stores/host-sleep-store.ts`, issue #1357); silent for a clean run that the machine stayed awake for |
-| `PerformanceTab.tsx` | Latency/throughput detail |
+| `PerformanceTab.tsx` | Latency/throughput detail; the run-level phase averages card (`PhaseAveragesCard.tsx`, "Timing breakdown", `longLabel` per phase, gated by `hasPhaseAverages` so a percentiles-only report prints no card of dashes) sits beside the per-phase percentiles. A finished run also gets what the dashboard's report showed: the HDR percentile plot (`HdrPercentileChart`, the "HDR percentile plot" card, always present) with its min / mean / p50 / p95 / p99 / max footer, and a "Stream events" card (`StreamMetrics`, gated on `report.stream`, so only a streaming run has it). The dashboard's "Avg request timing" waterfall is not a card here: it draws the same `hasPhaseAverages` data the Timing breakdown card prints |
 | `RunTrend.tsx`, `run-trend.ts` | p95, throughput and error rate across the open run's request's runs, from the runs list's `resultSummary`; mounted under the Performance tab, absent for a run with no `requestId` or fewer than two summarised runs (#2165) |
-| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. When the report says the engine cut `results` (`resultsStored > resultsCap`, #2210) a second badge beside "N samples shown" reads "N of M stored"; it is absent when every stored row is shown or on a report from an engine that predates the pair. The tab opens oldest first (`sample-filter.ts`: stable sort by `timestamp`) and a row's `#N` is its place in that order, so a chip never renumbers it and the open row is keyed by it. A `ToggleGroup` of status-class chips with counts over the loaded rows (All, Errors, 4xx, 5xx, No response, Slow) narrows the list; Errors is `isErrorStatus`, the classes are `httpStatusClass`, and Slow is the engine's `trace.isSlow` verdict. "N samples shown" counts the visible rows; "N of M stored" counts the loaded ones. The selected chip is local unless the owner passes `filter` / `onFilterChange`; `LoadTestDetail` does, because Radix unmounts an inactive tab and a local chip would reset on every switch. `initialExpandedNumber` opens one row at mount: an Overview error row (#2213) sets the chip and that number and switches to this tab, and any tab the user then picks clears the number, so returning to Samples does not re-open it. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle |
+| `SamplesTab.tsx`, `SampleRequestCard.tsx` | Sampled request/response pairs; the synthetic test-validation row (`test-validation.ts`) is dropped here so it is never drawn as a request with no response. When the report says the engine cut `results` (`resultsStored > resultsCap`, #2210) a second badge beside "N samples shown" reads "N of M stored"; it is absent when every stored row is shown or on a report from an engine that predates the pair. The tab opens oldest first (`sample-filter.ts`: stable sort by `timestamp`) and a row's `#N` is its place in that order, so a chip never renumbers it and the open row is keyed by it. A `ToggleGroup` of status-class chips with counts over the loaded rows (All, Errors, 4xx, 5xx, No response, Slow) narrows the list; Errors is `isErrorStatus`, the classes are `httpStatusClass`, and Slow is the engine's `trace.isSlow` verdict. "N samples shown" counts the visible rows; "N of M stored" counts the loaded ones. The selected chip is local unless the owner passes `filter` / `onFilterChange`; `LoadTestDetail` does, because Radix unmounts an inactive tab and a local chip would reset on every switch. `initialExpandedNumber` opens one row at mount: an Overview error row (#2213) sets the chip and that number and switches to this tab, and any tab the user then picks clears the number, so returning to Samples does not re-open it. Each header carries a "Copy for agent" icon button (`runSampleReference`, #2047) in `SampledExchange`'s `actions` slot, outside the toggle. An open row also states what its trace carries (`SampleTraceDetails.tsx`, in the `details` slot): "Error type", "Data row: N" (`trace.dataRowIndex`, row 0 included, #449) and the "Failed tests (N)" list of `trace.failures` (#111); a slow sample gets the "Slow request" `Callout` with its `totalMs` against `thresholdMs`. The captured bodies come from `GET /runs/:id/samples`, requested only once a row is open and joined to the row by `sample.id` |
 | `ScenarioStepsTab.tsx` | Per-step latency and counts for a **scenario load run** - see below; its element rows are the shared `ElementTally` |
 | `TimingBreakdown.tsx` | DNS/connect/TLS/first-byte/download breakdown |
 | `LatencyMetric.tsx`, `HistoricalChartsSection.tsx` | Metric cards + historical charts. A failed time-series fetch (`LoadTestDetail`'s `seriesFailure`) draws the shared `ErrorState` with Try again instead of the "insufficient data" sentence, or, when some pages loaded, a warning `Callout` naming how many points did, whose retry resumes at the failed page (issue #1944). A failed server-vitals fetch (`monitorFailure`) is a warning `Callout` with Try again drawn above the section whatever the time series holds, and holds the auto-paging back while the query is in error (issue #2062) |
@@ -1543,10 +1542,10 @@ A run's error card: **Total errors** with its rate (`formatErrorPercent`, two
 digits), the **HTTP errors** / **No response** split, then **By error type**
 (transport errors, through `errorTypeLabel` so `ssl_error` reads "SSL error")
 and **By status code** (`HTTP 500`, or "No response (status 0)"). The history
-Overview and the dashboard's Request / Response tab both render it, because two
-hand-built copies had drifted: the dashboard's printed raw type keys and no
-status-code list, so a run whose errors were all HTTP 500 showed an empty list
-under a non-zero total. `ERROR_TYPE_LABELS` has one definition, there.
+Overview renders it, and the dashboard shows the same Overview for a finished
+run (#2220). It was shared because two hand-built copies had drifted: the
+dashboard's own report printed raw type keys and no status-code list, so a run
+whose errors were all HTTP 500 showed an empty list under a non-zero total. `ERROR_TYPE_LABELS` has one definition, there.
 
 Props are `errors` (`RunReport["errors"]`), `errorRate` (a percent), and the
 `httpErrors` / `noResponse` split, which the caller reads (`DashboardDerived`, or
@@ -1556,17 +1555,16 @@ code row (or By error type row) is a `listRow` `Button` that reports its code
 (or its raw type key, not the label); absent, those rows are plain text.
 `hasSamples(target)` (`{ kind: "status", code }` or `{ kind: "errorType", key }`)
 lets the caller refuse a row: it is drawn disabled and reads "No sample of this
-was kept". Only the history Overview passes the handlers (#2213), to open the
-Samples tab at an example of the row; the dashboard's Request / Response tab
-passes none and keeps plain rows.
+was kept". The history Overview passes the handlers (#2213), to open the
+Samples tab at an example of the row.
 
 ## Threshold Verdict (`components/shared/ThresholdVerdict.tsx`)
 
 The run's verdict against the pass/fail budgets it declared
 (`RunReport.thresholdValidation`): one row per budget - the limit, what the run
-measured, and whether it met it - under a Passed/Failed header. Two surfaces
-show it, the dashboard's report view and the history detail's Overview, so it
-lives here once.
+measured, and whether it met it - under a Passed/Failed header. The history
+detail's Overview shows it, which is also the dashboard's view of a finished
+run (#2220).
 
 It is the **aggregate** counterpart to the Test Validation card beside it: a
 `pm.test` script sees one response at a time and structurally cannot assert a
@@ -1741,10 +1739,10 @@ judges it against the scripts the run carries. `ThresholdVerdict` is the third
 reading of the same run and the aggregate of both, since a script sees one
 response at a time and cannot assert a p99.
 
-Two surfaces render it - the live dashboard's `RequestResponseView` and the
-history detail's Overview - and until #726 only the first did. The dashboard is
-mounted **only while a run is being watched**, so a run reopened from History
-showed thresholds, status codes and schema verdicts and never said whether its
+The history detail's Overview renders it, and the dashboard shows that same
+Overview for a finished run (#2220). Until #726 only the dashboard's own report
+view did, and the dashboard is mounted **only while a run is being watched**,
+so a run reopened from History showed thresholds, status codes and schema verdicts and never said whether its
 assertions had run at all: a run that failed 13 of 100 sampled test executions
 read exactly like one that asserted nothing, precisely where someone audits
 results.
@@ -2220,12 +2218,13 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 - `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
-- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered by both sampled-exchange views
+- `TimingPhaseTiles.tsx` - the dense tile grid (one labelled box per phase), rendered inside the sampled-exchange shell
 - `SampledExchange.tsx` - the sampled-exchange shell: summary row, expansion, error block and timing tiles
 
-> **One shell, two sample lists.** The dashboard's live sample list and the
-> history detail's stored one show the same thing - a sampled HTTP exchange you
-> can expand - and were two components. #60 gave them the same per-concern
+> **One shell for a sample row.** The dashboard's live sample list and the
+> history detail's stored one showed the same thing - a sampled HTTP exchange
+> you can expand - and were two components (the dashboard's went with #2220,
+> when it began rendering History's report). #60 gave them the same per-concern
 > primitives, which moved the drift up into the shells rather than removing it:
 > each still owned its summary row, its expansion chrome and its section order,
 > so a spacing or empty-state fix to one did not reach the other. By the time
@@ -2235,14 +2234,12 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 >
 > `SampledExchange` is **presentational over already-shaped data**: a status
 > code, a latency, a pre-resolved phase list. Expansion stays the parent's
-> state, as it already was on the history side - the dashboard holds a `Set` of
-> open indices, the history detail a single one. Sections that genuinely differ
-> arrive as slots (`details` before the timing tiles, `children` after, and
+> state; the history detail holds a single open row. What the caller adds
+> arrives as slots (`details` before the timing tiles, `children` after, and
 > `actions` beside the summary, outside its button), not as
-> boolean flags; the callers keep their own chrome (the history card's
-> outcome-tinted border) and their own timestamp formatting, because a live row
-> placing a sample inside a seconds-old run wants milliseconds where a stored
-> row dating a run wants the day.
+> boolean flags; the caller keeps its own chrome and its own timestamp
+> formatting, because a stored row dating a run wants the day where a row
+> placing a sample inside a seconds-old run would want milliseconds.
 >
 > Its icon reads **error** for a transport `error` or any status outside
 > 200-399 (`isErrorStatus` in `constants/http-status.ts`, the renderer's copy of
@@ -2250,21 +2247,21 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > success tick; a caller that knows better passes `state`.
 >
 > Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
-> sentinel, so a view that hand-rolls a row again fails) and
+> sentinel, so a view that hand-rolls a row fails) and
 > `SampledExchange.test.tsx` (the shell's own behaviour).
 
-> **One list, five renderers.** The five network phases are drawn by the
-> request-builder's `ResponseTimingTab` (timeline + legend), the dashboard's
-> run-level averages card and per-sample tiles, the dashboard's
+> **One list, four renderers.** The five network phases are drawn by the
+> request-builder's `ResponseTimingTab` (timeline + legend), the history
+> Performance tab's `PhaseAveragesCard`, the dashboard's
 > `charts/TimingWaterfall`, and the history `SampleRequestCard`. Each used to
-> declare its own copy of the list, so adding a phase meant finding all five and
-> nothing pointed you at the other four. Two had already drifted: the waterfall
+> declare its own copy of the list, so adding a phase meant finding every
+> renderer and nothing pointed you at the others. Two had already drifted: the waterfall
 > painted TTFB with `--primary` - an accent-tracking token the design system
 > forbids for a chart series, and the very bug `ResponseTimingTab`'s header
 > comment describes fixing in its own copy - and carried private tooltip strings
 > that `phase-tips.ts` existed to replace.
 >
-> Add a phase to `TIMING_PHASES` and all five pick it up.
+> Add a phase to `TIMING_PHASES` and every renderer picks it up.
 > `timing-phases.test.tsx` guards that by mocking in a sixth phase and asking
 > each renderer to show it, so a call site that goes back to a local array fails.
 

@@ -11,15 +11,13 @@
 /**
  * Where the Error rate card's inputs come from (issue #2124). The card read
  * the status map from the final report only, so its bar was empty for the
- * whole run; the live tick carries that map and now fills it. The completed
- * view builds its metrics from the report, which has no `status_codes`, so the
- * bar must come from the report's own distribution there rather than empty.
+ * whole run; the live tick carries that map and now fills it. A finished run's
+ * card reads the report's distribution through `reportToDerived` (#2220).
  */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { RunReport } from "@/types";
 import type { DisplayMetrics, MetricsViewProps } from "../types";
 import MetricsView from "./MetricsView";
 
@@ -35,30 +33,12 @@ const baseMetrics: DisplayMetrics = {
 	bytes_received: 25000,
 };
 
-const report = {
-	summary: {
-		totalRequests: 100,
-		successfulRequests: 85,
-		failedRequests: 15,
-		httpErrorRequests: 13,
-		noResponseRequests: 2,
-		errorRate: 15,
-		totalDurationSeconds: 6,
-		avgRps: 83,
-	},
-	latency: { min: 5, max: 120, avg: 27, p50: 22, p90: 40, p95: 48, p99: 96 },
-	statusCodes: { "200": 85, "500": 13, "0": 2 },
-	errors: { total: 15, withDetails: 0, types: {} },
-} as unknown as RunReport;
-
 function renderCard(overrides: Partial<MetricsViewProps>) {
 	render(
 		<TooltipProvider>
 			<MetricsView
 				metrics={baseMetrics}
 				historicalMetrics={[]}
-				isCompleted={false}
-				finalReport={null}
 				mode="constant_concurrency"
 				concurrency={10}
 				{...overrides}
@@ -99,24 +79,5 @@ describe("MetricsView error rate card", () => {
 
 		expect(card.textContent).toContain("HTTP errors 15");
 		expect(card.textContent).toContain("No response 0");
-	});
-
-	it("keeps the bar filled from the report once the run is completed", () => {
-		// The completed view's metrics come from the report and carry no map.
-		const { card, widths } = renderCard({
-			isCompleted: true,
-			finalReport: report,
-			metrics: {
-				...baseMetrics,
-				http_errors: 13,
-				no_response: 2,
-			},
-		});
-
-		expect(widths[0]).toBeCloseTo(85);
-		expect(widths[2]).toBeCloseTo(13);
-		expect(widths[3]).toBeCloseTo(2);
-		expect(card.textContent).toContain("HTTP errors 13");
-		expect(card.textContent).toContain("No response 2");
 	});
 });

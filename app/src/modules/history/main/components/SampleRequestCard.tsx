@@ -9,13 +9,10 @@
  * SampleRequestCard Component
  *
  * A single stored sampled request, expandable. The row, the expansion chrome,
- * the error block and the timing tiles are the shared `SampledExchange` - the
- * dashboard's live sample list renders the same shell (#76), as a flat
- * `divide-y` strip (`RequestResponseView.tsx`) rather than a boxed card per
- * row - which is what this now matches too, rather than the two drifting into
- * different shapes for the same component. What is left here is what is
- * genuinely history's: a stored run's date formatting and the response
- * section.
+ * the error block and the timing tiles are the shared `SampledExchange` (#76),
+ * laid out as a flat `divide-y` strip rather than a boxed card per row. What is
+ * left here is what is genuinely history's: a stored run's date formatting and
+ * the response section.
  *
  * The response comes from `GET /runs/:id/samples` (issue #174), not from the
  * trace. This card used to read `sample.trace.request.headers` and
@@ -34,10 +31,12 @@ import {
 } from "@/components/shared/response-viewer";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
+import { Callout } from "@/components/shared";
 import { runSampleReference } from "@/lib/agent-reference";
 import { isSlowSample } from "../sample-filter";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
+import { SampleTraceDetails } from "./SampleTraceDetails";
 
 interface SampleRequestCardProps {
 	sample: SampleResult;
@@ -65,15 +64,17 @@ export default function SampleRequestCard({
 			? runSampleReference({ resultId: sample.id }, { id: runId })
 			: null;
 
-	// A stored sample is dating a run, not placing a moment inside one, so this
-	// side wants the day where the dashboard's live row wants milliseconds.
+	// A stored sample is dating a run, not placing a moment inside one, so it
+	// wants the day rather than milliseconds.
 	// Gating on the phases themselves, not on `sample.trace`. The two used to be
 	// decided separately - the wrapper rendered whenever a trace existed, while
 	// the breakdown inside it returned null unless DNS, connect or TLS was
 	// present - so a trace carrying only TTFB and download printed a "Timing
 	// Breakdown" heading with nothing under it. `SampledExchange` gates on the
 	// list, so the heading cannot outlive its content.
-	const phases = phasesFromTrace(sample.trace);
+	const trace = sample.trace;
+	const phases = phasesFromTrace(trace);
+	const isSlow = isSlowSample(sample);
 
 	return (
 		<SampledExchange
@@ -83,10 +84,11 @@ export default function SampleRequestCard({
 			latencyMs={sample.latencyMs}
 			timestamp={<TimeValue value={sample.timestamp} />}
 			error={sample.error}
-			isSlow={isSlowSample(sample)}
+			isSlow={isSlow}
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={onToggle}
+			details={<SampleTraceDetails trace={trace} />}
 			actions={
 				reference !== null && (
 					<CopyForAgentButton
@@ -95,15 +97,24 @@ export default function SampleRequestCard({
 					/>
 				)
 			}
-			// Flat divide-y strip, matching the dashboard's live list
-			// (`RequestResponseView.tsx`) rather than a boxed card per row - no
-			// per-row radius needed, the same "square on purpose" exception a
-			// full-bleed divider strip already gets there. Status rides the
-			// `StatusIcon` tint alone now, not a second, redundant colour on
-			// the border. `border-rule` reads the `surface-card` the parent
-			// `CardContent` declares (issue #1650).
+			// Flat divide-y strip rather than a boxed card per row - no per-row
+			// radius needed, the "square on purpose" exception a full-bleed
+			// divider strip gets. Status rides the `StatusIcon` tint alone, not
+			// a second, redundant colour on the border. `border-rule` reads the
+			// `surface-card` the parent `CardContent` declares (issue #1650).
 			className="border-b border-rule last:border-b-0"
 		>
+			{isSlow && (
+				<Callout severity="warning" title="Slow request">
+					{trace?.totalMs?.toFixed(1)}ms
+					{trace?.thresholdMs !== undefined && (
+						<span className="text-muted-foreground ml-1">
+							(threshold: {trace.thresholdMs}ms)
+						</span>
+					)}
+				</Callout>
+			)}
+
 			{/* The captured exchange, when this run stored one for this row.
 			    Rendering nothing (not an empty heading) when it did not is
 			    deliberate: most samples in a healthy run carry no body, and a

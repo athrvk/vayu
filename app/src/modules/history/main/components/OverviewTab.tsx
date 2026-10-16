@@ -34,6 +34,7 @@ import {
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
+import { SlowRequestsCard } from "./SlowRequestsCard";
 import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
 import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
 import { useHostSleeps } from "@/stores/host-sleep-store";
@@ -223,6 +224,11 @@ export default function OverviewTab({
 				}
 				hasSamples={(target) => locateSample(sampleRows, target) !== null}
 			/>
+
+			{/* Past the totals and the verdicts: this is the count behind the
+			    Samples tab's "Slow" chip. Absent when no request crossed the
+			    threshold. */}
+			<SlowRequestsCard slowRequests={report.slowRequests} />
 		</>
 	);
 }

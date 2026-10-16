@@ -13,9 +13,8 @@
  * error rate met a budget, so a run where every assertion passed can still have
  * missed the thing it was run to check.
  *
- * Two surfaces show it - the live dashboard's report view and the history
- * detail's Overview - so it lives here once rather than being written twice and
- * drifting. Silent when the run declared no budgets: an absent section says
+ * The history detail's Overview shows it, which is also the dashboard's view of
+ * a finished run (#2220). Silent when the run declared no budgets: an absent section says
  * "not judged", which is a different claim from "judged and passed nothing" and
  * is the reason a run without budgets renders exactly as it did before.
  *

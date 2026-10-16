@@ -14,8 +14,8 @@
  *
  * The engine writes `testValidation` into every load-run report and stores the
  * named failures on a synthetic result row - and until this issue exactly one
- * surface read either: the live dashboard's `RequestResponseView`, mounted only
- * while the run is being watched. Reopened later, a run that failed 13 of 100
+ * surface read either: the dashboard's own report view, mounted only while the
+ * run is being watched. Reopened later, a run that failed 13 of 100
  * sampled test executions was indistinguishable from one that asserted nothing,
  * precisely where someone audits results. This is the pair of wiring guards for
  * the two tabs that answer it, which is where the defect lived - not in the

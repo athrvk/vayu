@@ -8,8 +8,9 @@
 /**
  * One sampled HTTP exchange: a summary row you can expand into the detail.
  *
- * Two views show this - the dashboard's live sample list and the history
- * detail's stored one - and they were two separate components (#76). #60 had
+ * Two views showed this - the dashboard's live sample list and the history
+ * detail's stored one - and they were two separate components (#76); the
+ * dashboard's went with #2220, when it began rendering History's report. #60 had
  * already given them the same per-concern primitives (`StatusCodeBadge`,
  * `HeadersViewer`, `ResponseBody`), so the drift moved up a level and lived in
  * the shells: each owned its own summary row, its own expansion chrome, its own
@@ -22,23 +23,21 @@
  *
  * **Presentational, over already-shaped data.** It takes a status code, a
  * latency and a pre-resolved phase list; it does not know whether they arrived
- * over SSE a moment ago or came out of SQLite. Expansion is the parent's state,
- * as it already was on the history side - the dashboard holds a `Set` of open
- * indices and the history detail one open index, and neither belongs in here.
+ * over SSE a moment ago or came out of SQLite. Expansion is the parent's state -
+ * the history detail holds one open index - and does not belong in here.
  * That is the same split `LoadTestDetail` uses to reuse the dashboard's derived
  * components.
  *
- * **What differs by site stays a slot, not a flag.** The expanded sections are
- * genuinely different - the dashboard has an error type, per-test failures and
- * a slow-request warning; the history card shows request headers - so they
- * arrive as `details` (before the timing tiles) and `children` (after). The
+ * **What a caller adds stays a slot, not a flag.** The history card's expanded
+ * sections - the trace details (error type, data row, per-test failures, the
+ * slow-request warning) and the request and response - arrive as `details`
+ * (before the timing tiles) and `children` (after). The
  * alternative was a component driven by booleans, which is what the response
  * viewers were deliberately not merged into.
  *
- * The `timestamp` is a `ReactNode` the caller formats, for the one difference
- * that is real rather than incidental: a live row is placing a sample within a
- * run that is seconds old and wants milliseconds, while a stored row is dating
- * a run and wants the day.
+ * The `timestamp` is a `ReactNode` the caller formats: a stored row is dating a
+ * run and wants the day, where a row placing a sample within a run seconds old
+ * would want milliseconds.
  */
 
 import { type ReactNode } from "react";

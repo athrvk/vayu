@@ -10,29 +10,25 @@
  */
 
 /**
- * Issue #76 guard: both sampled-exchange views render through the shared shell.
+ * Issue #76 guard: the sampled-exchange view renders through the shared shell.
  *
- * The dashboard's live sample list and the history detail's stored one show the
- * same thing - a sampled HTTP exchange, expandable - and were two components.
- * #60 gave them the same per-concern primitives, which moved the drift up into
- * the shells rather than removing it: each still owned its summary row, its
- * expansion chrome and its section order, so a fix to one did not reach the
- * other.
+ * The dashboard's sample list and the history detail's stored one showed the
+ * same thing - a sampled HTTP exchange, expandable - and were two components
+ * that drifted in their summary rows, expansion chrome and section order. The
+ * dashboard's went with #2220, when the dashboard began rendering History's
+ * report; the shell stays the one place a sample row is drawn.
  *
  * `SampledExchange` is replaced with a sentinel here, so a view that goes back
  * to a hand-rolled row fails - which asserting on rendered markup would not,
  * since a hand-rolled row can render the same status chip and latency. The
- * props each view passes are echoed into the DOM, because "renders the shell"
- * is only half of it: the live/stored difference has to stay in the caller.
+ * props the view passes are echoed into the DOM, because "renders the shell"
+ * is only half of it: the stored-row specifics have to stay in the caller.
  */
 
 import type { ReactNode } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
-
-import type { RunReport } from "@/types";
-import { withQueryClient } from "@/test/query-wrapper";
 
 vi.mock("@/components/shared/response-viewer/SampledExchange", () => ({
 	SampledExchange: (props: Record<string, unknown>) => (
@@ -55,48 +51,7 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 
 const trace = { dnsMs: 1, connectMs: 2, tlsMs: 3, firstByteMs: 4, downloadMs: 5 };
 
-describe("both sampled views render through SampledExchange (#76)", () => {
-	it("the dashboard's live sample list", async () => {
-		const RequestResponseView = (
-			await import("@/modules/dashboard/components/RequestResponseView")
-		).default;
-
-		const report = {
-			summary: {
-				totalRequests: 1,
-				successfulRequests: 1,
-				failedRequests: 0,
-				errorRate: 0,
-				totalDurationSeconds: 1,
-				avgRps: 1,
-			},
-			latency: { min: 5, max: 5, avg: 5, p50: 5, p90: 5, p95: 5, p99: 5 },
-			statusCodes: {},
-			errors: { total: 0, withDetails: 0, types: {} },
-			results: [
-				{
-					timestamp: Date.UTC(2024, 0, 1, 10, 11, 12, 345),
-					statusCode: 503,
-					statusText: "Service Unavailable",
-					latencyMs: 5,
-					trace: { ...trace, request_number: 7 },
-				},
-			],
-		} as unknown as RunReport;
-
-		render(withQueryClient(<RequestResponseView report={report} />));
-
-		const row = screen.getByTestId("sampled-exchange");
-		expect(row).toHaveAttribute("data-status", "503");
-		// The engine's request number, not the array index.
-		expect(row).toHaveAttribute("data-label", "7");
-		expect(row).toHaveAttribute("data-phases", "5");
-		// A live row places a sample inside a run that is seconds old, so it
-		// keeps milliseconds. Losing that to the history card's locale date is
-		// exactly the drift a shared shell could otherwise introduce.
-		expect(row.textContent).toMatch(/\d{2}:\d{2}:\d{2}\.345/);
-	});
-
+describe("the sampled view renders through SampledExchange (#76)", () => {
 	it("the history detail's stored sample card", async () => {
 		const SampleRequestCard = (
 			await import("@/modules/history/main/components/SampleRequestCard")

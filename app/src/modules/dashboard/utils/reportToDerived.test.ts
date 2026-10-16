@@ -129,6 +129,25 @@ describe("reportToDerived", () => {
 		expect(d.showDropped).toBe(false);
 	});
 
+	it("reads a ramp duration's unit and drops one that is not a duration (#1945)", () => {
+		const rampOf = (rampUpDuration: string) =>
+			reportToDerived(
+				baseReport({
+					metadata: {
+						runId: "r3",
+						runType: "load",
+						status: "completed",
+						startTime: 0,
+						endTime: 1,
+						configuration: { mode: "ramp_up", concurrency: 50, rampUpDuration },
+					},
+				})
+			).rampUpDurationSeconds;
+
+		expect(rampOf("2m")).toBe(120);
+		expect(rampOf("soon")).toBeUndefined();
+	});
+
 	it("defaults missing optional fields without producing NaN-prone undefineds", () => {
 		const d = reportToDerived(
 			baseReport({

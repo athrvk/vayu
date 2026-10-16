@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 

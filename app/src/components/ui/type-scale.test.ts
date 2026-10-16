@@ -324,11 +324,10 @@ const withoutComments = (source: string): string =>
 const TILE_READOUTS = [
 	"components/shared/ErrorSummary.tsx",
 	"modules/collections/CollectionDetail/shared.tsx",
-	"modules/dashboard/components/RequestResponseView.tsx",
 	"modules/history/main/components/OverviewTab.tsx",
 	"modules/history/main/components/LatencyMetric.tsx",
 	// Three run-summary numbers that were 20px until #1409, in the same shape as
-	// the four above: a bold number in a muted tile.
+	// the ones above: a bold number in a muted tile.
 	"modules/history/main/LoadTestDetail.tsx",
 ] as const;
 

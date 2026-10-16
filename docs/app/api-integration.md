@@ -935,12 +935,11 @@ expands a sample** - passing `true` unconditionally would reintroduce exactly th
 cost the split exists to avoid. It returns a `Map` keyed by `resultId`, joined
 against `report.results[].id`.
 
-Two surfaces consume it - the dashboard's Sampled Requests
-(`RequestResponseView`) and the history Samples tab - and both render
-`CapturedResponseNotice` (truncated / dropped for budget / binary) and
-`CapturedDataWarning` (the run stored responses verbatim, including anything
-credential-shaped). Both notices live in `components/shared`, so the wording
-exists once rather than twice.
+The history Samples tab consumes it (the dashboard shows the same tab for a
+finished run, #2220) and renders `CapturedResponseNotice` (truncated / dropped
+for budget / binary) and `CapturedDataWarning` (the run stored responses
+verbatim, including anything credential-shaped). Both notices live in
+`components/shared`, beside the shell they annotate.
 
 **A sample carries the response side only, so its request headers are the
 composed ones.** `GET /runs/:id/samples` returns response headers and body; what

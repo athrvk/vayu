@@ -12,7 +12,7 @@
  */
 
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { Card, CardContent, CardHeader, CardTitle, InfoChip } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
@@ -20,11 +20,16 @@ import { isRateLimitedRun, hasPercentileSignal } from "@/modules/dashboard/utils
 import {
 	LatencyPercentilesChart,
 	ResponseTimeVsConcurrencyChart,
+	HdrPercentileChart,
 	CHART_SYNC,
 } from "@/modules/dashboard/components/charts/uplot";
 import { PhasePercentiles } from "@/modules/dashboard/components/charts/PhasePercentiles";
+import { StreamMetrics } from "@/modules/dashboard/components/charts/StreamMetrics";
+import { LatencyStat } from "@/modules/dashboard/components/stats/LatencyStat";
+import { TOOLTIPS } from "@/modules/dashboard/components/tooltips";
 import LatencyMetric from "./LatencyMetric";
 import MonitorSummary from "./MonitorSummary";
+import { PhaseAveragesCard } from "./PhaseAveragesCard";
 import HistoricalChartsSection from "./HistoricalChartsSection";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { PerformanceTabProps } from "../../types";
@@ -166,17 +171,68 @@ export default function PerformanceTab({
 				</CardContent>
 			</Card>
 
+			{/* The distribution's whole shape and its two ends. The tiles above stop
+			    at the tail percentiles; this is the curve between them, with the
+			    min and max the tiles do not carry. A card of its own so two cards do
+			    not share the title "Latency distribution". */}
+			<Card className="enter-fade surface-card">
+				<CardHeader>
+					<div className="flex items-baseline justify-between">
+						<CardTitle>
+							HDR percentile plot
+							<InfoChip tip={TOOLTIPS.latencyDistribution} />
+						</CardTitle>
+						<span className="text-micro font-mono text-muted-foreground">
+							from HdrHistogram
+						</span>
+					</div>
+				</CardHeader>
+				<CardContent>
+					<HdrPercentileChart report={report} />
+					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
+						<LatencyStat k="min" v={report.latency.min} />
+						<LatencyStat k="mean" v={report.latency.avg} />
+						<LatencyStat k="p50" v={report.latency.p50} />
+						<LatencyStat k="p95" v={report.latency.p95} />
+						<LatencyStat k="p99" v={report.latency.p99} />
+						<LatencyStat k="max" v={report.latency.max} />
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Per-phase averages over the retained trace sample - the figure a run
+			    that stored traces but no phase histograms still has. Absent when
+			    the report carries no phase average. */}
+			<PhaseAveragesCard timingBreakdown={report.timingBreakdown} />
+
 			{/* Per-phase percentiles. Its own card rather than rows inside Latency
 			    Distribution: those are whole-request percentiles and these split
 			    one request across five phases, so a p99 here is not comparable to
 			    the p99 above. Absent section = no card, as everywhere else. */}
 			{report.timingBreakdown?.phases && (
-				<Card className="enter-fade">
+				<Card className="enter-fade surface-card">
 					<CardHeader>
 						<CardTitle>Phase latency percentiles</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<PhasePercentiles report={report} />
+					</CardContent>
+				</Card>
+			)}
+
+			{/* Streaming runs only. Read against the First byte row above, which is
+			    the same run's time to first event; absent for every run that did
+			    not stream, as the engine omits the section rather than write zeros. */}
+			{report.stream && (
+				<Card className="enter-fade surface-card">
+					<CardHeader>
+						<CardTitle>
+							Stream events
+							<InfoChip tip={TOOLTIPS.streamEvents} />
+						</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<StreamMetrics report={report} />
 					</CardContent>
 				</Card>
 			)}

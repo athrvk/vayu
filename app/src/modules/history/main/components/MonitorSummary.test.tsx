@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { RunReport } from "@/types";
 import type { DashboardDerived } from "@/modules/dashboard/types";
 import PerformanceTab from "./PerformanceTab";

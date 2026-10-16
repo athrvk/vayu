@@ -6,7 +6,8 @@
  */
 
 /**
- * MetricsView - mode-adaptive dashboard orchestrator.
+ * MetricsView - mode-adaptive dashboard orchestrator for a run in progress.
+ * A finished run is drawn by History's `LoadTestDetail` instead (#2220).
  *
  * Reads the run mode (useMode), computes a single memoized {@link DashboardDerived}
  * bundle, and composes the rows:
@@ -15,7 +16,8 @@
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up: Response-time-vs-concurrency scatter)
- *   Row 3   - HDR percentile plot + Avg request timing waterfall
+ *   Row 3   - HDR percentile plot + Avg request timing waterfall, as placeholders:
+ *             both need the final report
  *   Row 4   - ModeStatsRow   (mode-adaptive: 3 or 4 stat cards)
  *
  * Card/chart variants live in hero/, charts/, stats/. This file routes and
@@ -24,7 +26,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatNumber } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
@@ -47,28 +49,26 @@ import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { errorBreakdown } from "../utils/errorBreakdown";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
+import { LatencyStat } from "./stats/LatencyStat";
 import {
 	RequestRateChart,
 	LatencyBreakdownChart,
 	LatencyPercentilesChart,
 	StatusCodesOverTimeChart,
 	ResponseTimeVsConcurrencyChart,
-	HdrPercentileChart,
 	ServerVitalsChart,
 	CustomMetricsChart,
 	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
-import { PhasePercentiles } from "./charts/PhasePercentiles";
-import { StreamMetrics } from "./charts/StreamMetrics";
-import { hasPhaseAverages } from "@/components/shared/response-viewer/timing-phases";
+
+/** The HDR card's footer figures, drawn as dashes until the report has them. */
+const HDR_FOOTER_STATS = ["min", "mean", "p50", "p95", "p99", "max"] as const;
 
 function MetricsView({
 	metrics,
 	historicalMetrics,
-	isCompleted,
-	finalReport,
 	targetRps,
 	concurrency,
 	mode,
@@ -159,11 +159,7 @@ function MetricsView({
 		// "Rate Fidelity" measures throughput fidelity (responses/sec vs target).
 		// Prefer cumulative measures over current_rps (which is a delta-per-100ms
 		// and routinely blips to 0 in low-RPS tests).
-		const actualRps =
-			finalReport?.rateControl?.actualRps ??
-			finalReport?.summary?.throughput ??
-			metrics.throughput ??
-			metrics.current_rps;
+		const actualRps = metrics.throughput ?? metrics.current_rps;
 		const droppedRequests = metrics.dropped_requests ?? 0;
 		const failedRequests = metrics.requests_failed ?? 0;
 		const { httpErrors, noResponse } = errorBreakdown(
@@ -174,37 +170,30 @@ function MetricsView({
 
 		return {
 			mode: loadMode,
-			isCompleted,
+			isCompleted: false,
 			targetRps,
 			actualRps,
-			sendRate: metrics.send_rate ?? finalReport?.summary?.sendRate,
-			throughput: metrics.throughput ?? finalReport?.summary?.throughput,
+			sendRate: metrics.send_rate,
+			throughput: metrics.throughput,
 			currentRps: metrics.current_rps ?? 0,
 			avgQueueWaitMs: metrics.avg_queue_wait_ms ?? 0,
 			totalRequests: metrics.requests_completed,
 			failedRequests,
 			httpErrors,
 			noResponse,
-			// The report's distribution wins once there is one; the live tick's
-			// map is what fills the bar during the run (issue #2124).
-			statusCodes: finalReport?.statusCodes ?? metrics.status_codes ?? {},
+			// The live tick's map is what fills the bar during the run (issue #2124).
+			statusCodes: metrics.status_codes ?? {},
 			requestsExpected: metrics.requests_expected ?? 0,
 			requestsSent: metrics.requests_sent ?? 0,
 			peakConcurrency,
 			currentConcurrency: metrics.current_concurrency ?? 0,
 			configuredConcurrency: rampConfig?.targetConcurrency ?? concurrency,
 			backpressure: metrics.backpressure ?? 0,
-			p99Latency: isCompleted
-				? (finalReport?.latency?.p99 ?? metrics.latency_p99_ms ?? 0)
-				: (metrics.latency_p99_ms ?? 0),
+			p99Latency: metrics.latency_p99_ms ?? 0,
 			meanLatency: metrics.avg_latency_ms ?? 0,
-			medianLatency: finalReport?.latency?.p50 ?? metrics.latency_p50_ms ?? 0,
-			p95Latency: isCompleted
-				? (finalReport?.latency?.p95 ?? metrics.latency_p95_ms ?? 0)
-				: (metrics.latency_p95_ms ?? 0),
-			testDuration: finalReport?.summary?.testDuration,
+			medianLatency: metrics.latency_p50_ms ?? 0,
+			p95Latency: metrics.latency_p95_ms ?? 0,
 			elapsedSeconds: lastElapsedSeconds,
-			setupOverhead: finalReport?.summary?.setupOverhead,
 			droppedRequests,
 			showDropped: isRateLimitedRun(mode, targetRps) && droppedRequests > 0,
 			rampDeviationPct: rampOverlay?.rampDeviationPct,
@@ -215,10 +204,8 @@ function MetricsView({
 		};
 	}, [
 		metrics,
-		finalReport,
 		lastElapsedSeconds,
 		loadMode,
-		isCompleted,
 		targetRps,
 		concurrency,
 		mode,
@@ -297,7 +284,6 @@ function MetricsView({
 					<RequestRateChart
 						history={chartWindow}
 						targetRps={targetRps}
-						isCompleted={isCompleted}
 						rampOverlay={rampOverlay}
 						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
@@ -365,7 +351,6 @@ function MetricsView({
 					</div>
 					<LatencyBreakdownChart
 						history={chartWindow}
-						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
 						anomalies={anomalies}
 						sleeps={hostSleeps}
@@ -441,7 +426,6 @@ function MetricsView({
 							</div>
 							<LatencyPercentilesChart
 								history={chartWindow}
-								isCompleted={isCompleted}
 								syncKey={CHART_SYNC.live}
 								breakpoint={breakpoint}
 								anomalies={anomalies}
@@ -485,11 +469,7 @@ function MetricsView({
 							)}
 						</div>
 					</div>
-					<StatusCodesOverTimeChart
-						history={chartWindow}
-						isCompleted={isCompleted}
-						syncKey={CHART_SYNC.live}
-					/>
+					<StatusCodesOverTimeChart history={chartWindow} syncKey={CHART_SYNC.live} />
 				</div>
 			)}
 
@@ -509,7 +489,6 @@ function MetricsView({
 					<ServerVitalsChart
 						history={chartWindow}
 						samples={monitorSamples}
-						isCompleted={isCompleted}
 						syncKey={CHART_SYNC.live}
 						anomalies={anomalies}
 						sleeps={hostSleeps}
@@ -530,15 +509,12 @@ function MetricsView({
 							metric.record / pm.metrics
 						</span>
 					</div>
-					<CustomMetricsChart
-						history={chartWindow}
-						isCompleted={isCompleted}
-						syncKey={CHART_SYNC.live}
-					/>
+					<CustomMetricsChart history={chartWindow} syncKey={CHART_SYNC.live} />
 				</div>
 			)}
 
-			{/* Row 3 - HDR plot + Timing waterfall */}
+			{/* Row 3 - HDR plot + Timing waterfall. Both read the final report, which
+			    replaces this view when it lands, so here they only hold the place. */}
 			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
 				{/* HDR */}
 				<div className="bg-card surface-card border border-border rounded-md p-3.5">
@@ -551,24 +527,14 @@ function MetricsView({
 							</span>
 						</h3>
 						<span className="text-micro font-mono text-muted-foreground">
-							{finalReport ? "from HdrHistogram" : "available after completion"}
+							available after completion
 						</span>
 					</div>
-					{/* Render the plot at fixed dimensions whether or not the report is
-					    in yet - keeps the card height stable across the live → completed
-					    transition. */}
-					{finalReport ? (
-						<HdrPercentileChart report={finalReport} />
-					) : (
-						<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
-					)}
+					<SkeletonHdrPlot message="p50 / p95 / p99 finalize after the run completes" />
 					<div className="flex justify-between gap-3 mt-2.5 pt-2.5 border-t border-dashed border-rule text-label font-mono text-muted-foreground">
-						<LatencyStat k="min" v={finalReport?.latency?.min} />
-						<LatencyStat k="mean" v={finalReport?.latency?.avg} />
-						<LatencyStat k="p50" v={finalReport?.latency?.p50} />
-						<LatencyStat k="p95" v={finalReport?.latency?.p95} />
-						<LatencyStat k="p99" v={finalReport?.latency?.p99} />
-						<LatencyStat k="max" v={finalReport?.latency?.max} />
+						{HDR_FOOTER_STATS.map((k) => (
+							<LatencyStat key={k} k={k} v={undefined} />
+						))}
 					</div>
 				</div>
 
@@ -579,60 +545,15 @@ function MetricsView({
 							Avg request timing
 							<InfoChip tip={TOOLTIPS.avgRequestTiming} />
 						</h3>
-						<span className="text-micro font-mono text-muted-foreground">
-							{hasPhaseAverages(finalReport?.timingBreakdown)
-								? "from timing samples"
-								: "-"}
-						</span>
+						<span className="text-micro font-mono text-muted-foreground">-</span>
 					</div>
-					<TimingWaterfall report={finalReport} />
-					{/* Percentiles under the averages, separated by a rule and its
-					    own heading: they are the same five phases measured over a
-					    different population (every completion, not the trace
-					    sample), so running them together as more rows would invite
-					    a column-to-column comparison that is not valid. Renders
-					    nothing when the run recorded no distributions. */}
-					{finalReport?.timingBreakdown?.phases && (
-						<div className="mt-3.5 pt-3.5 border-t border-rule">
-							<h3 className="text-xs font-semibold text-foreground mb-3">
-								Phase percentiles
-								<InfoChip tip={TOOLTIPS.phasePercentiles} />
-							</h3>
-							<PhasePercentiles report={finalReport} />
-						</div>
-					)}
-					{/* Streaming runs only, and in this card rather than a fourth
-					    one of its own: what a stream delivered is read against
-					    the first-byte row directly above it, which is the same
-					    run's time to first event. Absent for every run that did
-					    not stream - see StreamMetrics. */}
-					{finalReport?.stream && (
-						<div className="mt-3.5 pt-3.5 border-t border-rule">
-							<h3 className="text-xs font-semibold text-foreground mb-3">
-								Stream events
-								<InfoChip tip={TOOLTIPS.streamEvents} />
-							</h3>
-							<StreamMetrics report={finalReport} />
-						</div>
-					)}
+					<TimingWaterfall report={null} />
 				</div>
 			</div>
 
 			{/* Row 4 - Bottom stat row */}
 			<ModeStatsRow d={derived} />
 		</div>
-	);
-}
-
-function LatencyStat({ k, v }: { k: string; v: number | undefined }) {
-	return (
-		<span>
-			<span className="text-muted-foreground">{k}</span>{" "}
-			<span className="text-foreground font-semibold">
-				{v === undefined ? "-" : formatMs(v)}
-			</span>
-			<span className="text-muted-foreground">{v === undefined ? "" : "ms"}</span>
-		</span>
 	);
 }
 
