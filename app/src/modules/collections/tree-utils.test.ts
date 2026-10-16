@@ -27,6 +27,7 @@ import {
 	collectionNamePath,
 	isDescendant,
 	collectDescendantEntityIds,
+	countSubtreeRequests,
 	type TreeNode,
 } from "./tree-utils";
 
@@ -223,6 +224,32 @@ describe("collectDescendantEntityIds", () => {
 		expect([...collectDescendantEntityIds("elsewhere", tree(), () => [])]).toEqual([
 			"elsewhere",
 		]);
+	});
+});
+
+describe("countSubtreeRequests", () => {
+	const tree = () =>
+		budgeted([named("root"), named("mid", "root"), named("leaf", "mid"), named("elsewhere")]);
+	const counts: Record<string, number> = { root: 1, mid: 2, leaf: 4, elsewhere: 100 };
+	const countIn = (id: string) => counts[id] ?? 0;
+
+	it("sums the requests of the folder and every descendant, folders uncounted", () => {
+		expect(countSubtreeRequests("root", tree(), countIn)).toBe(7);
+	});
+
+	it("leaves out a branch above or beside the folder", () => {
+		expect(countSubtreeRequests("mid", tree(), countIn)).toBe(6);
+	});
+
+	it("is the folder's own requests when it has no child folders", () => {
+		expect(countSubtreeRequests("leaf", tree(), countIn)).toBe(4);
+	});
+
+	it("terminates on a parentId cycle and counts each folder once", () => {
+		const looped = budgeted([named("a", "b"), named("b", "a")]);
+
+		expect(countSubtreeRequests("a", looped, () => 3)).toBe(6);
+		expect(steps).toBeGreaterThan(0);
 	});
 });
 

@@ -12,6 +12,7 @@ import { useCollectionTreeContext } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
+import { countSubtreeRequests } from "./tree-utils";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
 import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
@@ -100,6 +101,21 @@ export default function CollectionItem({
 	// Folders and requests are one set of treeitems inside one group, so the
 	// requests continue the folders' numbering rather than restarting it.
 	const childSetSize = childCollections.length + requests.length;
+	// A root counts every request beneath it (what an import preview reports);
+	// a nested folder counts its direct children. See `DrawerSectionCount`.
+	const subtreeRequestCount = useMemo(
+		() =>
+			depth === 0
+				? countSubtreeRequests(
+						collection.id,
+						allCollections,
+						(id) => getRequestsByCollection(id).length
+					)
+				: 0,
+		[depth, collection.id, allCollections, getRequestsByCollection]
+	);
+	const badgeCount =
+		depth === 0 ? subtreeRequestCount : requests.length + childCollections.length;
 	// Ties the children's group back to this row for assistive tech - see the
 	// `aria-owns` note on the row itself.
 	const childrenId = `tree-group-${collection.id}`;
@@ -340,9 +356,7 @@ export default function CollectionItem({
 								    section cannot drift into two idioms again (issue
 								    #1688 - Variables drew the same fact as a filled
 								    Badge one click away from this). */}
-								<DrawerSectionCount
-									value={requests.length + childCollections.length}
-								/>
+								<DrawerSectionCount value={badgeCount} />
 							</>
 						)}
 					</button>
