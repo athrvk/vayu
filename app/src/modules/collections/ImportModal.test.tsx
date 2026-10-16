@@ -136,6 +136,30 @@ describe("ImportModal", () => {
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeInTheDocument();
 	});
 
+	/**
+	 * The detection badge prints the engine's `meta.format` as written, so an
+	 * Insomnia v5 document is named as such (#2119). Mutation check: print
+	 * anything but `meta.format` in the preview and this fails.
+	 */
+	it("previews an Insomnia v5 export under its own format name", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "Acme", requests: [request({ name: "List users" })] }),
+				],
+				meta: { format: "Insomnia Export v5" },
+			})
+		);
+		renderModal();
+		selectTab(/Paste JSON/i);
+		fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
+			target: { value: "type: collection.insomnia.rest/5.0" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
+		await waitFor(() => expect(screen.getByText("Insomnia Export v5")).toBeInTheDocument());
+		expect(screen.getByText(/Acme/)).toBeInTheDocument();
+	});
+
 	// `size-target` (issue #1679), not `size-icon`: a bare checkbox is its own
 	// hit target. Mutation check: put `size-icon` back and this fails.
 	it("gives the import-environments and import-scripts checkboxes their own hit target", async () => {
