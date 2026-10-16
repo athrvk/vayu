@@ -11,7 +11,7 @@
  * rendered preview would need a fixture per case to show.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
 import type { ImportMeta, RequestDraft } from "@/services/importers/types";
 import {
@@ -20,6 +20,7 @@ import {
 	fileReferenceNeeds,
 	importNotices,
 } from "./import-notices";
+import { stubNumberLocale } from "@/test/number-locale";
 import { collection, request, result } from "./import-preview.testkit";
 
 function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
@@ -38,6 +39,12 @@ function meta(overrides: Partial<ImportMeta> = {}): ImportMeta {
 }
 
 describe("describeCounts", () => {
+	let restoreLocale: () => void;
+	beforeEach(() => {
+		restoreLocale = stubNumberLocale("en-US");
+	});
+	afterEach(() => restoreLocale());
+
 	const cases: [string, Partial<ImportMeta>, string][] = [
 		[
 			"a Postman collection names no environments or globals",
