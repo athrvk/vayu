@@ -275,8 +275,9 @@ export default function LoadTestDashboard() {
 	/*
 	 * One notice slot for both failures the dashboard can hit. The stream error
 	 * comes first: without live metrics the page has nothing to show, whereas a
-	 * missing report still leaves whatever was captured. A report on screen has
-	 * nothing left to retry, so only the stream error can reach it.
+	 * missing report still leaves whatever was captured. Only the live view shows
+	 * them: a report on screen has nothing left to retry or reconnect, and a stream
+	 * error can outlive the run when a remount's status check lands the report.
 	 */
 	const reportNotice = report ? null : reportError;
 	const notices = (streamError || reportNotice) && (
@@ -336,7 +337,6 @@ export default function LoadTestDashboard() {
 					onStop={handleStop}
 					outcome={judgement?.outcome}
 				/>
-				{notices}
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />
 				</div>

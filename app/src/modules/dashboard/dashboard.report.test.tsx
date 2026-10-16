@@ -107,6 +107,25 @@ describe("the dashboard's finished run", () => {
 		}
 	);
 
+	it("drops a stale stream error once the report is on screen", () => {
+		// A remount's status check can land the report while the error from a
+		// dropped stream is still set; Reconnect on a finished run does nothing.
+		useDashboardStore.setState({ error: "stream dropped" });
+		renderDashboard("completed", reportFor("completed"));
+
+		expect(screen.queryByText("Lost the live metrics stream")).toBeNull();
+		expect(screen.getByRole("tab", { name: "Sampled requests" })).toBeInTheDocument();
+		useDashboardStore.setState({ error: null });
+	});
+
+	it("still shows the stream error while there is no report", () => {
+		useDashboardStore.setState({ error: "stream dropped" });
+		renderDashboard("running", null, true);
+
+		expect(screen.getByText("Lost the live metrics stream")).toBeInTheDocument();
+		useDashboardStore.setState({ error: null });
+	});
+
 	it("keeps the live metrics, and no tab bar, for a running run", () => {
 		renderDashboard("running", null, true);
 
