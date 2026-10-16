@@ -82,6 +82,15 @@ recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml` /
 URL and Paste tabs are single by construction and travel the same path as a
 one-entry batch, so there is no second flow beside this one to drift from it.
 
+The Paste tab takes one other thing that is not a document: a curl or wget
+command (#2250). It is a request, not a collection, so `handlePaste` runs
+`importCommand` first and a hit never reaches `detectBatch` or the engine, whose
+answer would be "Unrecognized format". The dialog offers **Open as new request**
+instead, which hands `presetFromCommand` (`curl-request-preset.ts`, the stored
+shapes the builder's save sends) to `useNewRequest`, closes, and toasts
+`droppedFlagsNotice` for any flag the command carried that Vayu cannot, as the
+URL bar's paste does.
+
 `detectBatch(documents, opts, intake)` returns one `BatchEntry` per picked file,
 in pick order, and **every picked file gets a row** - that is the property the
 whole module exists for. The dialog used to read `e.dataTransfer.files[0]` with

@@ -50,7 +50,7 @@ function stubPostmanFile() {
 
 function previewPastedFile() {
 	renderModal();
-	const tab = screen.getByRole("tab", { name: /Paste JSON/i });
+	const tab = screen.getByRole("tab", { name: /^Paste$/i });
 	fireEvent.mouseDown(tab);
 	fireEvent.click(tab);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {

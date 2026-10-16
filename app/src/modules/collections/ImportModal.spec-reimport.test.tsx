@@ -68,6 +68,16 @@ vi.mock("@/queries/collections", () => ({
 	useCollectionsQuery: () => ({ data: state.collections }),
 }));
 
+// The dialog mounts the new-request flow for a pasted curl command; this file
+// replaces `@/queries/collections` wholesale, which that flow's mutations live in.
+vi.mock("@/hooks/useNewRequest", () => ({
+	useNewRequest: () => ({
+		newRequest: vi.fn(),
+		isCreating: false,
+		pickerProps: { open: false, onOpenChange: vi.fn(), collections: [], onSelect: vi.fn() },
+	}),
+}));
+
 vi.mock("@/services/api", () => ({
 	apiService: {
 		getSpec: vi.fn().mockImplementation(async (id: string) => {
@@ -171,7 +181,7 @@ function selectTab(name: RegExp) {
 
 async function previewPaste(text: string) {
 	renderModal();
-	selectTab(/Paste JSON/i);
+	selectTab(/^Paste$/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: text } });
 	fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
 	// The Import button only exists in the preview phase, whatever format the

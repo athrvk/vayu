@@ -49,7 +49,7 @@ function selectTab(name: RegExp) {
 
 function preview() {
 	renderModal();
-	selectTab(/Paste JSON/i);
+	selectTab(/^Paste$/i);
 	fireEvent.change(screen.getByPlaceholderText(/Paste/i), {
 		target: { value: JSON.stringify({ any: "document" }) },
 	});
