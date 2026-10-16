@@ -30,7 +30,8 @@ export function ScriptsOverrideToggle({ value, onChange }: ScriptsOverrideToggle
 				Scripts
 				<span className="block text-xs font-normal text-muted-foreground">
 					As marked runs a script inline only where its own element says to; the other two
-					override every script this run.
+					override every script this run. Tests in a post-request script run on a sample
+					unless All inline.
 				</span>
 			</Label>
 			<ToggleGroup

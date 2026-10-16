@@ -300,6 +300,7 @@ describe("no retired word names the count on a surface that shows it (#2128)", (
 						onStart={vi.fn()}
 						isStarting={false}
 						hasPreRequestScript={false}
+						hasPostRequestScript={false}
 						isStreamingRequest={false}
 					/>
 				);

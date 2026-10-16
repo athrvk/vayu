@@ -30,7 +30,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { LOAD_TEST_CEILING_BOUNDS, LOAD_TEST_DEFAULTS, LOAD_TEST_LIMITS } from "./load-test";
+import {
+	LOAD_TEST_CEILING_BOUNDS,
+	LOAD_TEST_DEFAULTS,
+	LOAD_TEST_LIMITS,
+	MAX_RESPONSE_SAMPLES,
+	RESPONSE_SAMPLE_PERIOD,
+} from "./load-test";
 
 /**
  * The engine files this reads, held in the testkit rather than spelled here:
@@ -179,5 +185,20 @@ describe("load-test limits parity with the engine", () => {
 		// run"`, and leaving that in place would make every assertion above
 		// describe a payload the endpoint still rejects.
 		expect(executionCpp).toMatch(/read_stream_flag\s*\(config\)/);
+	});
+
+	// --- The post-request script replay sample --------------------------------
+	//
+	// The dialog tells the user how many responses their post-request script
+	// sees. These are the engine's defaults for that sampler, not the
+	// 1,000,000 `limits::MAX_RESPONSE_SAMPLES` request-field ceiling nor the
+	// success sample rate that governs stored traces.
+
+	it("states the engine's default response-sample period", () => {
+		expect(RESPONSE_SAMPLE_PERIOD).toBe(engineConstant("DEFAULT_RESPONSE_SAMPLE_RATE"));
+	});
+
+	it("states the engine's default response-sample cap", () => {
+		expect(MAX_RESPONSE_SAMPLES).toBe(engineConstant("DEFAULT_MAX_RESPONSE_SAMPLES"));
 	});
 });
