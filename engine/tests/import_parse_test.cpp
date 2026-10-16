@@ -514,11 +514,10 @@ environments:
 }
 
 /**
- * A design document or a mock server export is refused by name rather than as
- * "Unrecognised format" (#2119): the app shows a sentence that is not exactly
- * that one verbatim, and "this is a design document" is the answer the user
- * can act on. A collection in a format version Vayu was not written for is
- * named the same way. Mutation check: return `std::nullopt` from
+ * A design document, a mock server export and a collection in another format
+ * version are refused by name rather than as "Unrecognised format" (#2119): a
+ * person who picked the wrong file is told what it is, and the dialog shows
+ * the sentence as written. Mutation check: return `std::nullopt` from
  * `insomnia_type` and every case answers "Unrecognised format".
  */
 TEST (InsomniaV5Import, RefusesWhatIsNotACollectionByName) {
@@ -597,9 +596,8 @@ TEST (InsomniaV5Import, NamesTheFieldOfAMalformedExport) {
 /**
  * An environment document holds environments only, gated by the same option
  * as every other format's. With no sub-environment the one environment is
- * named after the document - the name the user gave it - not Insomnia's fixed
- * "Base Environment"; with sub-environments each is one environment, the base
- * written under it.
+ * named after the document, not after the base environment; with
+ * sub-environments each is one environment, the base written under it.
  */
 TEST (InsomniaV5Import, AnEnvironmentDocumentImportsItsEnvironmentsOnly) {
     const std::string document = R"(type: environment.insomnia.rest/5.0
@@ -626,6 +624,134 @@ environments:
     ASSERT_TRUE (gated.ok ()) << gated.error;
     EXPECT_TRUE (gated.result.at ("environments").empty ());
     EXPECT_EQ (gated.result.at ("meta").at ("environmentCount"), 0);
+}
+
+/**
+ * `settings.followRedirects` is a JSON boolean in v5 where v4 wrote a string;
+ * both spellings land on the request's own `followRedirects`. Mutation check:
+ * passing a boolean through unconverted in `carry_redirects` leaves the field
+ * absent for both cases.
+ */
+TEST (InsomniaV5Import, ReadsABooleanFollowRedirectsSetting) {
+    for (const bool follow : { true, false }) {
+        SCOPED_TRACE (follow ? "true" : "false");
+        const ImportParse parsed = parse_import (
+        std::string (
+        "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n"
+        "  - name: R\n    url: https://x.example/a\n    method: GET\n"
+        "    settings:\n      followRedirects: ") +
+        (follow ? "true" : "false") + "\n",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const auto& request = first_request (parsed.result.at ("collections")[0]);
+        ASSERT_TRUE (request.contains ("followRedirects"));
+        EXPECT_EQ (request.at ("followRedirects"), follow);
+    }
+}
+
+/**
+ * A gRPC item is told apart by `protoFileId`, by `protoMethodName` or by the
+ * `greq_` prefix of its `meta.id`, any one alone; each is tallied as `grpc`
+ * and none becomes a request. Mutation check: dropping any one of the three
+ * conditions in `v5_item_kind` turns that case into a request (the URL-bearing
+ * items) or drops it uncounted.
+ */
+TEST (InsomniaV5Import, TalliesAGrpcItemByAnyOfItsThreeMarkers) {
+    const std::vector<std::pair<std::string, std::string>> cases{
+        { "protoFileId", "    protoFileId: pf_1\n" },
+        { "protoMethodName", "    protoMethodName: /pkg.Svc/Call\n" },
+        { "greq_ id", "    meta:\n      id: greq_1\n" },
+    };
+    for (const auto& [marker, member] : cases) {
+        SCOPED_TRACE (marker);
+        const ImportParse parsed = parse_import (
+        "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n"
+        "  - name: G\n    url: grpcb.in:9000\n" +
+        member,
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (parsed.result.at ("meta").at ("requestCount"), 0);
+        EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("grpc"), 1);
+    }
+}
+
+/**
+ * `importScripts=false` drops a v5 item's `scripts` as it drops a v4 item's,
+ * and the same document keeps them with the option on. Mutation check: carrying
+ * the scripts regardless of the option, or never carrying them, reds one side.
+ */
+TEST (InsomniaV5Import, ImportScriptsOffDropsTheScripts) {
+    const std::string document = R"(type: collection.insomnia.rest/5.0
+name: W
+collection:
+  - name: R
+    url: https://x.example/a
+    method: GET
+    scripts:
+      preRequest: console.log(1);
+      afterResponse: insomnia.test('x', () => {});
+)";
+    const ImportParse on       = parse_import (document, {}, {});
+    ASSERT_TRUE (on.ok ()) << on.error;
+    EXPECT_EQ (first_request (on.result.at ("collections")[0]).at ("elements").size (), 2U);
+
+    ImportOptions off;
+    off.import_scripts      = false;
+    const ImportParse gated = parse_import (document, off, {});
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_FALSE (first_request (gated.result.at ("collections")[0]).contains ("elements"));
+}
+
+/**
+ * An environment document with no sub-environment imports one environment
+ * named after the document, whatever the base environment calls itself, and
+ * "Environment" when the document has no name either. A collection document's
+ * base keeps its own name. Mutation check: carrying the base's `name` for an
+ * environment document (the `V5Collection` guard in `add_environments`) names
+ * the first case after the base; the fallback is the `resource_name` default.
+ */
+TEST (InsomniaV5Import, NamesALoneEnvironmentAfterTheDocument) {
+    const auto only_name = [] (const std::string& document) {
+        const ImportParse parsed = parse_import (document, {}, {});
+        EXPECT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (parsed.result.at ("environments").size (), 1U);
+        return parsed.result.at ("environments")[0].at ("name");
+    };
+    EXPECT_EQ (
+    only_name ("type: environment.insomnia.rest/5.0\nname: Shared\n"
+               "environments:\n  name: Whatever\n  data:\n    a: 1\n"),
+    "Shared");
+    EXPECT_EQ (only_name ("type: environment.insomnia.rest/5.0\n"
+                          "environments:\n  data:\n    a: 1\n"),
+    "Environment");
+    EXPECT_EQ (only_name ("type: collection.insomnia.rest/5.0\nname: Acme\n"
+                          "environments:\n  name: Base\n  data:\n    a: 1\n"),
+    "Base");
+}
+
+/**
+ * An empty folder may be written without `children`; its `fld_` id is what
+ * says it is a folder. A bare item with neither `url` nor `method` and no such
+ * id stays dropped. Mutation check: returning `Unknown` for the `fld_` case in
+ * `v5_item_kind` leaves no folder.
+ */
+TEST (InsomniaV5Import, KeepsAnEmptyFolderWrittenWithoutChildren) {
+    const ImportParse parsed = parse_import (R"(type: collection.insomnia.rest/5.0
+name: W
+collection:
+  - name: Empty
+    meta:
+      id: fld_empty
+  - name: Stray
+    meta:
+      id: other_1
+)",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("folderCount"), 1);
+    const auto& children = parsed.result.at ("collections")[0].at ("children");
+    ASSERT_EQ (children.size (), 1U);
+    EXPECT_EQ (children[0].at ("name"), "Empty");
 }
 
 TEST (ImportParse, GatingTheOptionsChangesWhatTheCountsPromise) {

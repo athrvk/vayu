@@ -62,7 +62,7 @@ Variable references go through the same [template normalization](./insomnia-v4.m
 
 ### Environment documents
 
-An `environment.insomnia.rest/5.x` document imports **environments only**, under `importEnvironments` exactly as a [Postman environment](./postman-environment.md) export does: `collections` is empty, and with the option off nothing is created. Insomnia names the base environment of an environment document "Base Environment" no matter what you called the file, so the reader leaves that name off and the environment is named after the document's own `name`. With sub-environments, each imports under its own name with the base values merged in beneath it, as in a collection.
+An `environment.insomnia.rest/5.x` document imports **environments only**, under `importEnvironments` exactly as a [Postman environment](./postman-environment.md) export does: `collections` is empty, and with the option off nothing is created. The document's own `name` names the environment, and the base environment's own `name` is ignored in an environment document (a collection document keeps it). A document with no `name` either imports its environment as "Environment". With sub-environments, each imports under its own name with the base values merged in beneath it, as in a collection.
 
 ## What is not imported
 
@@ -70,7 +70,7 @@ An `environment.insomnia.rest/5.x` document imports **environments only**, under
 |-----------------|---------|
 | a gRPC item | Dropped and counted in `meta.skipped` as `grpc`. |
 | a WebSocket item | Dropped and counted in `meta.skipped` as `websocket`. |
-| any other `collection[]` item that is not a folder and has neither `url` nor `method` | Dropped silently, not counted. |
+| any other `collection[]` item that is not a folder and has neither `url` nor `method` | Dropped silently, not counted. An item with no `children` is still a folder when its `meta.id` starts with `fld_`. |
 | `cookieJar` | Not imported. |
 | `certificates` | Not imported. |
 | a folder's `headers` and `environment` | Not imported - the v4 reading has no place for either on a folder. |
@@ -103,11 +103,11 @@ The row-shape errors v4 raises for `parameters`, `headers` and `body` apply unch
 Every v5 member the reader consumes is taken from Insomnia's v5 schema. **None of them has been checked against a real Insomnia 11 export**, so this list is the page's honest edge. A member spelled otherwise reads as absent, and the first real export that disagrees is a one-line fix in `InsomniaV5Flattener`.
 
 - **Document:** `type`, `name`, `description` (or `meta.description`), `collection` (the item list), `environments`.
-- **Item, any kind:** `name`, `description` or `meta.description`, `meta.id` (read for the gRPC and WebSocket id prefixes only).
-- **Folder:** `children` (its presence is what makes an item a folder), `authentication`, `scripts.preRequest`, `scripts.afterResponse`.
+- **Item, any kind:** `name`, `description` or `meta.description`, `meta.id` (read for the folder, gRPC and WebSocket id prefixes only).
+- **Folder:** `children` (its presence is what makes an item a folder), or, for an empty folder written without it, a `fld_` prefix on `meta.id` and no `url` or `method`; `authentication`, `scripts.preRequest`, `scripts.afterResponse`.
 - **Request:** `url`, `method`, `headers`, `parameters`, `pathParameters`, `body`, `authentication`, `scripts.preRequest`, `scripts.afterResponse`, `settings.followRedirects`. Rows and bodies are assumed to keep v4's inner shape (`name` / `value` / `disabled`, `body.mimeType` / `text` / `params`).
 - **gRPC / WebSocket detection:** `protoFileId`, `protoMethodName`, the `greq_` and `ws-req_` id prefixes in `meta.id`, and a `ws://` / `wss://` URL.
-- **Environments:** `environments.name`, `environments.data`, and `environments.subEnvironments[]` with `name` and `data` each.
+- **Environments:** `environments.name`, `environments.data`, and `environments.subEnvironments[]` with `name` and `data` each. That an environment document's own `name` is the name the user gave it, and its base environment's `name` is not, is also assumed: Insomnia's actual naming of the base was not checked.
 
 ## Related
 

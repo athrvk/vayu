@@ -2226,7 +2226,8 @@ json resource_name (const json* resource, const char* fallback) {
 }
 
 /**
- * One Insomnia v4 export's resource tree, indexed by parent.
+ * An Insomnia export's resource tree - a v4 resource list, or the flattened
+ * list a v5 document becomes - indexed by parent.
  *
  * The walk is a member function rather than a recursive lambda so each step of
  * it - a request, a folder, the environments - reads as its own thing; the
@@ -2521,9 +2522,11 @@ json parse_insomnia (const json& parsed, const ImportOptions& options) {
 
 /**
  * What a v5 `collection[]` item is. v5 writes no type per item, so the shape
- * decides: a `children` member makes a folder, a gRPC or WebSocket request is
- * told apart by its proto members, its `ws(s)://` URL or the id prefix
- * Insomnia mints for it, and anything else with a `url` or `method` is HTTP.
+ * decides: a `children` member makes a folder (an empty folder may be written
+ * without one, so a `fld_` id with no `url` or `method` is one too), a gRPC or
+ * WebSocket request is told apart by its proto members, its `ws(s)://` URL or
+ * the id prefix Insomnia mints for it, and anything else with a `url` or
+ * `method` is HTTP.
  */
 enum class V5Item : std::uint8_t { Folder, Request, WebSocket, Grpc, Unknown };
 
@@ -2543,7 +2546,7 @@ V5Item v5_item_kind (const json& item) {
     if (prop (&item, "url") != nullptr || prop (&item, "method") != nullptr) {
         return V5Item::Request;
     }
-    return V5Item::Unknown;
+    return id.starts_with ("fld_") ? V5Item::Folder : V5Item::Unknown;
 }
 
 /// Each member @p keys names, copied when @p from states it - the members v5
@@ -2595,13 +2598,8 @@ void carry_redirects (const json& item, json& resource) {
  * `parse_insomnia_resources` reads both versions and a mapping rule is never
  * written twice.
  *
- * Every v5 member read here is taken from Insomnia's v5 schema and was not
- * checked against a real export when this was written: `collection[]` items
- * with `name`, `url`, `method`, `description` or `meta.description`,
- * `headers`, `parameters`, `pathParameters`, `body`, `authentication`,
- * `scripts`, `settings` and, on a folder, `children`; and a top-level
- * `environments` object with `name`, `data` and `subEnvironments[]`. A member
- * spelled otherwise reads as absent.
+ * Member spellings are assumed from Insomnia's v5 schema; a differently
+ * spelled member reads as absent.
  *
  * Ids are minted from a counter rather than taken from `meta.id`: the tree
  * keys every edge by id, and nothing makes a hand-edited file's ids unique.
@@ -2680,9 +2678,8 @@ class InsomniaV5Flattener {
 
     /**
      * The base environment and its sub-environments, as v4 parented them. In
-     * an environment document the base's own name is Insomnia's fixed "Base
-     * Environment", so it is left off and the tree names the environment
-     * after the document instead, which is the name the user gave it.
+     * an environment document the base's own name is ignored, so the tree
+     * names the environment after the document's `name`.
      */
     void add_environments (const json* environments, const std::string& workspace) {
         if (environments == nullptr || environments->is_null ()) {
