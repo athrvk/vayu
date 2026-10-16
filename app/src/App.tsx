@@ -30,6 +30,7 @@ import { useMenuActions } from "./hooks/useMenuActions";
 import { useNotificationActivation } from "./hooks/useNotificationActivation";
 import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
+import { useWindowFileDrop } from "./hooks/useWindowFileDrop";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
 import { useAppFocusMirror } from "./hooks/useAppFocusMirror";
@@ -109,6 +110,9 @@ function App() {
 	// a Jump List task. Mounted here for the same reason `useNotificationActivation`
 	// is: one listener on the preload bridge, one action per request (#1364).
 	useOpenIntent();
+
+	// A file dropped anywhere else on the window opens the same dialog (#2252).
+	useWindowFileDrop();
 
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.

@@ -496,6 +496,21 @@ export function ImportModal() {
 		await runBatch("file", at, await Promise.all(picked.map(readDocument)));
 	};
 
+	// Files dropped on the window outside this dialog (issue #2252). Keyed on the
+	// pending list as well as `isOpen`: a drop onto the dialog's own chrome while
+	// it is already open changes nothing but the list.
+	const pendingFiles = useImportModalStore((s) => s.pendingFiles);
+	useEffect(() => {
+		if (!isOpen || pendingFiles.length === 0) return;
+		const files = useImportModalStore.getState().takePendingFiles();
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot store handoff, as the pending-path effect
+		setTab("file");
+		void handleFiles(files);
+		// `handleFiles` is rebuilt every render; the take above empties the list,
+		// so the re-run it causes finds nothing.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isOpen, pendingFiles]);
+
 	// Fetching a URL is the only source the user can enter twice by hand, so it is
 	// the one that needs the guard. `phase === "detecting"` was set here and in
 	// the detect path and then never read by anything that renders - the button

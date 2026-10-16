@@ -82,6 +82,15 @@ recursing, filtered to `IMPORTABLE_EXTENSIONS` - `.json` / `.yaml` / `.yml` /
 URL and Paste tabs are single by construction and travel the same path as a
 one-entry batch, so there is no second flow beside this one to drift from it.
 
+A file dropped **anywhere on the window** opens the dialog with it (#2252),
+the way a Dock or taskbar drop does (#1364): `useWindowFileDrop` queues the
+dropped `File`s on `import-modal-store` (`openWithFiles`) and `ImportModal`
+takes them once into the File tab's `handleFiles`, so a window drop is another
+source of the same batch, not another flow. The listener is bubble-phase on
+`window` and skips an event something already cancelled, because the dialog's
+own dropzone and the binary body panel handle their drops themselves. A drag
+that is not carrying files (selected text, a tab) is left alone.
+
 The Paste tab takes one other thing that is not a document: a curl or wget
 command (#2250). It is a request, not a collection, so `handlePaste` runs
 `importCommand` first and a hit never reaches `detectBatch` or the engine, whose
