@@ -78,6 +78,7 @@ export default function SampleRequestCard({
 		<SampledExchange
 			label={index + 1}
 			statusCode={sample.statusCode}
+			statusText={sample.statusText}
 			latencyMs={sample.latencyMs}
 			timestamp={<TimeValue value={sample.timestamp} />}
 			error={sample.error}
