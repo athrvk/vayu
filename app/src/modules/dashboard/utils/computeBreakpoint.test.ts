@@ -42,6 +42,7 @@ describe("computeBreakpoint", () => {
 		expect(bp.concurrency).toBe(30);
 		expect(bp.timeSeconds).toBe(3);
 		expect(bp.p99Ms).toBe(260);
+		expect(bp.sloMs).toBe(200);
 	});
 
 	it("reports not-crossed when p99 stays under threshold throughout", () => {
@@ -54,6 +55,13 @@ describe("computeBreakpoint", () => {
 		);
 		expect(bp.crossed).toBe(false);
 		expect(bp.concurrency).toBeNull();
+		expect(bp.sloMs).toBe(200);
+	});
+
+	it("carries the threshold it was given, not the default", () => {
+		const under = [tick({ latency_p99_ms: 120 })];
+		expect(computeBreakpoint(under, 350).sloMs).toBe(350);
+		expect(computeBreakpoint([tick({ latency_p99_ms: 400 })], 350).sloMs).toBe(350);
 	});
 
 	it("defaults the SLO threshold to 200ms", () => {
@@ -67,5 +75,6 @@ describe("computeBreakpoint", () => {
 		const bp = computeBreakpoint([], 200);
 		expect(bp.crossed).toBe(false);
 		expect(bp.concurrency).toBeNull();
+		expect(bp.sloMs).toBe(200);
 	});
 });

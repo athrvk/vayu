@@ -386,7 +386,13 @@ function derivedIn(mode: LoadMode): DashboardDerived {
 		rampUpDurationSeconds: 10,
 		startConcurrency: 1,
 		targetConcurrency: CONCURRENCY,
-		breakpoint: { crossed: true, concurrency: CONCURRENCY, timeSeconds: 5, p99Ms: 227 },
+		breakpoint: {
+			crossed: true,
+			concurrency: CONCURRENCY,
+			timeSeconds: 5,
+			p99Ms: 227,
+			sloMs: 200,
+		},
 	};
 }
 
@@ -419,7 +425,13 @@ describe("the dashboard's cards name the count in virtual users (#2128)", () => 
 		[
 			"Saturation",
 			<SaturationCard
-				breakpoint={{ crossed: true, concurrency: CONCURRENCY, timeSeconds: 5, p99Ms: 227 }}
+				breakpoint={{
+					crossed: true,
+					concurrency: CONCURRENCY,
+					timeSeconds: 5,
+					p99Ms: 227,
+					sloMs: 200,
+				}}
 				failedRequests={0}
 			/>,
 			[formatConcurrency(CONCURRENCY)],

@@ -24,25 +24,34 @@ import { render } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import type { RampOverlay } from "../../../utils/metricsTransforms";
 import { CONCURRENCY_LABEL, IN_FLIGHT_LABEL } from "@/constants/load-test-modes";
-import { RequestRateChart, ConnectionsChart, LatencyBreakdownChart } from "./TimeSeriesCharts";
+import {
+	RequestRateChart,
+	ConnectionsChart,
+	LatencyBreakdownChart,
+	LatencyPercentilesChart,
+	ServerVitalsChart,
+} from "./TimeSeriesCharts";
+import { CustomMetricsChart } from "./CustomMetricsChart";
 import { ResponseTimeVsConcurrencyChart } from "./ScatterAndDistribution";
 
 const mockState = vi.hoisted(() => ({
 	constructions: 0,
 	series: [] as { label: string }[],
 	markers: [] as { label: string }[],
+	props: {} as { yMin?: number | null; y2Label?: string },
 }));
 
 // Hoisted above these imports by vitest, so `RequestRateChart` above resolves
 // against this mock, not the real `UPlotChart`.
 vi.mock("./UPlotChart", () => ({
-	UPlotChart: ({
-		series,
-		markers,
-	}: {
+	UPlotChart: (props: {
 		series: { label: string }[];
 		markers?: { label: string }[];
+		yMin?: number | null;
+		y2Label?: string;
 	}) => {
+		const { series, markers } = props;
+		mockState.props = props;
 		mockState.series = series;
 		mockState.markers = markers ?? [];
 		// A mount-only effect counts constructions, not renders: React keeps the
@@ -155,9 +164,59 @@ describe("ResponseTimeVsConcurrencyChart - breakpoint marker", () => {
 		render(
 			<ResponseTimeVsConcurrencyChart
 				history={historyOf(4)}
-				breakpoint={{ crossed: true, concurrency: 45, timeSeconds: 2, p99Ms: 227 }}
+				breakpoint={{
+					crossed: true,
+					concurrency: 45,
+					timeSeconds: 2,
+					p99Ms: 227,
+					sloMs: 200,
+				}}
 			/>
 		);
 		expect(mockState.markers.map((m) => m.label)).toContain("~45 virtual users");
+	});
+});
+
+describe("RequestRateChart - what the secondary axis measures", () => {
+	it("names the ramp overlay's axis for the virtual users it counts", () => {
+		render(
+			<RequestRateChart
+				history={historyOf(4)}
+				rampOverlay={rampOverlayOf(3)}
+				mode="ramp_up"
+			/>
+		);
+		expect(mockState.props.y2Label).toBe(CONCURRENCY_LABEL);
+	});
+
+	it("leaves a run with no overlay without a label, as it has no secondary axis", () => {
+		render(<RequestRateChart history={historyOf(4)} rampOverlay={null} mode="ramp_up" />);
+		expect(mockState.props.y2Label).toBeUndefined();
+	});
+});
+
+describe("charts' y base", () => {
+	const samples = [
+		{ timestamp: 0, series: { cpu: -3 } },
+		{ timestamp: 2000, series: { cpu: 4 } },
+	];
+
+	it("leaves the base at the primitive's zero default for a metric with a natural floor", () => {
+		render(<LatencyPercentilesChart history={historyOf(4)} />);
+		expect("yMin" in mockState.props).toBe(false);
+	});
+
+	it("opts server vitals out, which are in the target's own units and may be negative", () => {
+		render(<ServerVitalsChart history={historyOf(4)} samples={samples} />);
+		expect(mockState.props.yMin).toBeNull();
+	});
+
+	it("opts custom metrics out, which are in a script's own units and may be negative", () => {
+		const history = historyOf(4).map((t) => ({
+			...t,
+			custom_metrics: { delta: { type: "counter" as const, count: 1, value: -1 } },
+		}));
+		render(<CustomMetricsChart history={history} />);
+		expect(mockState.props.yMin).toBeNull();
 	});
 });

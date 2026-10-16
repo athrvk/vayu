@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import type uPlot from "uplot";
-import { tooltipPlugin } from "./plugins";
+import { tooltipPlugin, type Annotation } from "./plugins";
 import type { UplotTheme } from "./uplotTheme";
 
 const THEME = { font: "12px sans-serif" } as unknown as UplotTheme;
@@ -149,5 +149,82 @@ describe("tooltipPlugin", () => {
 			expect(tip.children[0].textContent).toBe("1.0s");
 			expect(tip.children[1].textContent).toBe("responses / 0.5 s");
 		});
+	});
+});
+
+describe("tooltipPlugin annotation hover", () => {
+	const COLOURED = {
+		font: "12px sans-serif",
+		color: (role: string) => (role === "warning" ? "rgb(255, 0, 0)" : "rgb(0, 0, 255)"),
+	} as unknown as UplotTheme;
+	/** One second per 10px. */
+	const px = (seconds: number) => seconds * 10;
+
+	const WINDOW: Annotation = {
+		startSeconds: 5,
+		endSeconds: 12,
+		label: "p99 4.3x baseline for 7s",
+		role: "warning",
+	};
+	const SLEEP: Annotation = {
+		startSeconds: 20,
+		endSeconds: 20,
+		label: "host slept 40s",
+		role: "warning",
+	};
+
+	/** Hover CSS-pixel `left` and return the tooltip's rows as text. */
+	function hoverAt(left: number, annotations: Annotation[]): HTMLElement {
+		const over = document.createElement("div");
+		const u = {
+			over,
+			cursor: { idx: 0, left, top: 10 },
+			data: [[1], [5]],
+			series: [{}, { label: "rps", stroke: "red" }],
+			valToPos: (v: number) => px(v),
+		} as unknown as uPlot;
+		const plugin = tooltipPlugin({ theme: COLOURED, annotations: () => annotations });
+		(plugin.hooks.init as (u: uPlot) => void)(u);
+		(plugin.hooks.setCursor as (u: uPlot) => void)(u);
+		return over.querySelector(".vayu-chart-tooltip") as HTMLElement;
+	}
+	const texts = (tip: HTMLElement) => Array.from(tip.children, (r) => r.textContent);
+
+	it("names the band the cursor is inside", () => {
+		expect(texts(hoverAt(px(8), [WINDOW]))).toEqual(["1.0s", "rps5", WINDOW.label]);
+	});
+
+	it("names nothing off the band", () => {
+		expect(texts(hoverAt(px(30), [WINDOW]))).toEqual(["1.0s", "rps5"]);
+	});
+
+	it("reaches an instant from a few pixels either side, not from far away", () => {
+		expect(texts(hoverAt(px(20) + 3, [SLEEP]))).toContain(SLEEP.label);
+		expect(texts(hoverAt(px(20) - 3, [SLEEP]))).toContain(SLEEP.label);
+		expect(texts(hoverAt(px(20) + 20, [SLEEP]))).not.toContain(SLEEP.label);
+	});
+
+	it("skips an annotation with no label", () => {
+		const unlabelled: Annotation = { ...WINDOW, label: "" };
+		expect(texts(hoverAt(px(8), [unlabelled]))).toEqual(["1.0s", "rps5"]);
+	});
+
+	it("lists every annotation under the cursor", () => {
+		const overlapping: Annotation = { ...WINDOW, label: "error burst", startSeconds: 7 };
+		const tip = hoverAt(px(8), [WINDOW, overlapping]);
+		expect(texts(tip).slice(2)).toEqual([WINDOW.label, "error burst"]);
+	});
+
+	it("shows the label as text, never markup", () => {
+		const hostile: Annotation = { ...WINDOW, label: "<img src=x onerror=alert(1)>" };
+		const tip = hoverAt(px(8), [hostile]);
+		expect(tip.querySelector("img")).toBeNull();
+		expect(tip.textContent).toContain(hostile.label);
+	});
+
+	it("colours the swatch by the annotation's role", () => {
+		const tip = hoverAt(px(8), [WINDOW]);
+		const swatch = tip.lastElementChild?.firstElementChild as HTMLElement;
+		expect(swatch.style.background).toBe("rgb(255, 0, 0)");
 	});
 });

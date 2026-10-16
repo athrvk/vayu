@@ -285,6 +285,7 @@ function MetricsView({
 						history={chartWindow}
 						targetRps={targetRps}
 						rampOverlay={rampOverlay}
+						mode={loadMode}
 						syncKey={CHART_SYNC.live}
 						breakpoint={breakpoint}
 						anomalies={anomalies}

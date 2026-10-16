@@ -93,6 +93,7 @@ describe("reportToDerived", () => {
 		expect(d.statusCodes).toEqual({ "200": 600 });
 		expect(d.showDropped).toBe(false); // rate-limited but zero drops → Rate Fidelity card
 		expect(d.breakpoint.crossed).toBe(false);
+		expect(d.breakpoint.sloMs).toBeNull(); // a report holds no per-tick series, so no SLO was judged
 	});
 
 	it("shows the dropped card only when a rate-limited run actually dropped requests", () => {

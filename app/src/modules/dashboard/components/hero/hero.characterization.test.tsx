@@ -43,12 +43,19 @@ import { HeroRow } from "./HeroRow";
 import type { DashboardDerived } from "../../types";
 import type { Breakpoint } from "../../utils/computeBreakpoint";
 
-const crossed: Breakpoint = { crossed: true, concurrency: 45, timeSeconds: 6, p99Ms: 227 };
+const crossed: Breakpoint = {
+	crossed: true,
+	concurrency: 45,
+	timeSeconds: 6,
+	p99Ms: 227,
+	sloMs: 200,
+};
 const notCrossed: Breakpoint = {
 	crossed: false,
 	concurrency: null,
 	timeSeconds: null,
 	p99Ms: null,
+	sloMs: 200,
 };
 
 const snap = (ui: React.ReactElement) => {
@@ -161,7 +168,13 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 		elapsedSeconds: 10,
 		droppedRequests: 0,
 		showDropped: false,
-		breakpoint: { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null },
+		breakpoint: {
+			crossed: false,
+			concurrency: null,
+			timeSeconds: null,
+			p99Ms: null,
+			sloMs: 200,
+		},
 	};
 }
 

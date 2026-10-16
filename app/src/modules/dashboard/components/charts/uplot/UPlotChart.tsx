@@ -37,6 +37,7 @@ import {
 	type ValueFormatter,
 } from "./plugins";
 import { subscribeFocus, publishFocus, type FocusValue } from "./chartFocus";
+import { rangeFrom } from "./yRange";
 
 export type { Marker, Annotation } from "./plugins";
 
@@ -90,6 +91,15 @@ export interface UPlotChartProps {
 	/** Gets every tick of the axis as well, so a label can pick its decimals from the spacing. */
 	yFormat?: (v: number, splits: readonly number[]) => string;
 	y2Format?: (v: number) => string;
+	/** What the secondary axis measures. Without it the right-hand scale reads as an unlabelled second set of numbers. */
+	y2Label?: string;
+	/**
+	 * Where the value axes start (default 0). A zero base keeps the plot's height
+	 * proportional to the value, so a wobble around 500 does not read as a collapse.
+	 * `null` opts out and keeps uPlot's auto-range, for series in arbitrary
+	 * user units that may be negative. Data below the base is never clipped.
+	 */
+	yMin?: number | null;
 	/** Reference markers: breakpoint (vertical), target/SLO (horizontal). */
 	markers?: Marker[];
 	/** Shaded x-axis windows: the run's detected anomaly spans. */
@@ -139,6 +149,8 @@ export function UPlotChart({
 	xTime = false,
 	yFormat = defaultY,
 	y2Format = (v) => `${Math.round(v)}`,
+	y2Label,
+	yMin = 0,
 	markers = [],
 	annotations = [],
 	syncKey,
@@ -198,8 +210,19 @@ export function UPlotChart({
 						`${s.label}:${s.role}:${s.kind ?? "line"}:${s.scale ?? "y"}:${s.bandTo ?? ""}`
 				)
 				.join("|") +
-			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}`,
-		[series, themeKey, height, syncKey, isLive, xTime, xValueSync, tooltipCaption]
+			`|${themeKey}|${height}|${syncKey ?? ""}|${isLive}|${xTime}|${xValueSync}|${tooltipCaption ?? ""}|${yMin ?? "auto"}|${y2Label ?? ""}`,
+		[
+			series,
+			themeKey,
+			height,
+			syncKey,
+			isLive,
+			xTime,
+			xValueSync,
+			tooltipCaption,
+			yMin,
+			y2Label,
+		]
 	);
 
 	useEffect(() => {
@@ -274,6 +297,7 @@ export function UPlotChart({
 					...axisBase,
 					scale: "y2",
 					side: 1,
+					...(y2Label ? { label: y2Label, labelFont: theme.font } : {}),
 					grid: { show: false },
 					values: (_u, sp) => sp.map((v) => y2Format(v)),
 				});
@@ -294,7 +318,11 @@ export function UPlotChart({
 					sync: syncKey && xValueSync ? { key: syncKey, scales: ["x", null] } : undefined,
 					points: { size: 6 },
 				},
-				scales: { x: { time: false } },
+				scales: {
+					x: { time: false },
+					y: { range: rangeFrom(yMin) },
+					...(hasY2 ? { y2: { range: rangeFrom(yMin) } } : {}),
+				},
 				legend: { show: false },
 				series: uSeries,
 				bands,
@@ -330,6 +358,7 @@ export function UPlotChart({
 						xLabel: xTooltipFormat ?? (xTime ? defaultTimeTooltip : xFormat),
 						caption: tooltipCaption,
 						tipValues: () => tipValuesRef.current,
+						annotations: () => annotationsRef.current,
 					}),
 				],
 			};
@@ -414,7 +443,7 @@ export function UPlotChart({
 		};
 		// `shapeSig` is the serialized form of everything this effect reads -
 		// series identity, theme, height, sync key, live/x-axis flags, tooltip
-		// caption - so the omitted deps are all inside it. Listing `series` or
+		// caption, y base and y2 label - so the omitted deps are all inside it. Listing `series` or
 		// `data` instead would tear the plot down and rebuild it on every data
 		// tick, which the `setData` effect below exists to avoid.
 		// eslint-disable-next-line react-hooks/exhaustive-deps

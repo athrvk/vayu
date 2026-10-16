@@ -10,6 +10,7 @@ import { durationSeconds } from "@/constants/load-test";
 import type { DashboardDerived } from "../types";
 import { resolveMode } from "../hooks/useMode";
 import { errorBreakdown } from "./errorBreakdown";
+import { notCrossed } from "./computeBreakpoint";
 import { isRateLimitedRun } from "./metricsTransforms";
 
 /**
@@ -65,6 +66,6 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		rampUpDurationSeconds: durationSeconds(cfg.rampUpDuration) ?? undefined,
 		startConcurrency: cfg.startConcurrency,
 		targetConcurrency: cfg.concurrency,
-		breakpoint: { crossed: false, concurrency: null, timeSeconds: null, p99Ms: null },
+		breakpoint: notCrossed(null),
 	};
 }

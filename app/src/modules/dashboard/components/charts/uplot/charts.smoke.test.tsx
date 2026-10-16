@@ -99,7 +99,13 @@ describe("centralized uPlot charts - smoke", () => {
 					peakAchieved: 95,
 					rampDeviationPct: 8,
 				}}
-				breakpoint={{ crossed: true, concurrency: 60, timeSeconds: 3, p99Ms: 104 }}
+				breakpoint={{
+					crossed: true,
+					concurrency: 60,
+					timeSeconds: 3,
+					p99Ms: 104,
+					sloMs: 100,
+				}}
 			/>
 		);
 		expect(container.querySelector("div")).not.toBeNull();
