@@ -83,7 +83,7 @@ export function FirstRunWelcome({
 					<ActionTile
 						icon={Plus}
 						label="New request"
-						description="Start from an empty request and send it."
+						description="Start from an empty request, or paste a curl command."
 						onClick={onNewRequest}
 					/>
 				</div>

@@ -870,6 +870,9 @@ export function ImportModal() {
 								placeholder="Paste collection JSON or YAML here"
 								className="h-40 w-full font-mono text-xs"
 							/>
+							<p className="mt-2 text-label text-muted-foreground">
+								A curl command? Paste it into a request&apos;s URL bar.
+							</p>
 							<Button
 								onClick={() => void handlePaste()}
 								disabled={!pasteText.trim() || isBusy}
