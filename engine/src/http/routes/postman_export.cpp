@@ -8,7 +8,8 @@
 /**
  * @file http/routes/postman_export.cpp
  * @brief `POST /export/postman` - a collection out as a Postman Collection
- *        v2.1.0 document.
+ *        v2.1.0 document - and `POST /export/postman-environment`, one
+ *        environment out as a Postman environment export.
  *
  * The assembly is `core/postman_export.hpp`; this route owns the reads. The
  * whole subtree is exported, with no stop at a collection bound to another
@@ -194,6 +195,70 @@ export_postman_response (vayu::db::Database& db, const nlohmann::json& json) {
         { "notes", vayu::core::postman_export_notes_json (outcome.notes) } } };
 }
 
+/**
+ * Testable core of POST /export/postman-environment - one environment as a
+ * Postman environment export, nothing written. 400 for a body that is not an
+ * object, a missing or empty `environmentId`, or a non-boolean
+ * `includeSecrets`; 404 for an environment that does not exist.
+ */
+std::pair<int, nlohmann::json>
+export_postman_environment_response (vayu::db::Database& db, const nlohmann::json& json) {
+    if (!json.is_object ()) {
+        return { 400, error_body (400, "Invalid body: must be an object") };
+    }
+    const auto id_field = json.find ("environmentId");
+    if (id_field == json.end () || !id_field->is_string () ||
+    id_field->get<std::string> ().empty ()) {
+        return { 400, error_body (400, "Invalid 'environmentId': must be a non-empty string") };
+    }
+    vayu::core::PostmanExportEnvironment environment;
+    if (auto refusal = read_include_secrets (json, environment.include_secrets)) {
+        return { 400, error_body (400, *refusal) };
+    }
+
+    const auto row = db.get_environment (id_field->get<std::string> ());
+    if (!row) {
+        return { 404, error_body (404, "Environment not found") };
+    }
+    environment.id        = row->id;
+    environment.name      = row->name;
+    environment.variables = column (row->variables, ordered::object ());
+
+    const auto outcome = vayu::core::export_postman_environment (environment);
+    return { 200,
+        nlohmann::json{ { "text", outcome.text }, { "fileName", outcome.file_name },
+        { "notes", vayu::core::postman_environment_export_notes_json (outcome.notes) } } };
+}
+
+namespace {
+
+/// Both export routes answer through one wrapper: parse, run @p core, log a
+/// refusal, serialise with invalid UTF-8 replaced.
+void answer_export (const char* path,
+const httplib::Request& req,
+httplib::Response& res,
+std::pair<int, nlohmann::json> (*core) (vayu::db::Database&, const nlohmann::json&),
+vayu::db::Database& db) {
+    try {
+        auto json           = nlohmann::json::parse (req.body);
+        auto [status, body] = core (db, json);
+        if (status != 200) {
+            vayu::utils::log_warning ("http",
+            std::string ("POST ") + path + " - " + std::to_string (status) +
+            ": " + error_message_of (body));
+        }
+        res.status = status;
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("http",
+        std::string ("POST ") + path + " - Error: " + std::string (e.what ()));
+        send_error (res, 400, e.what ());
+    }
+}
+
+} // namespace
+
 void register_postman_export_routes (RouteContext& ctx) {
     /**
      * POST /export/postman
@@ -204,23 +269,20 @@ void register_postman_export_routes (RouteContext& ctx) {
      */
     ctx.server.Post ("/export/postman",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = export_postman_response (ctx.db, json);
-            if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "POST /export/postman - " + std::to_string (status) + ": " +
-                error_message_of (body));
-            }
-            res.status = status;
-            res.set_content (
-            body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
-            "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "http", "POST /export/postman - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
-        }
+        answer_export ("/export/postman", req, res, export_postman_response, ctx.db);
+    });
+
+    /**
+     * POST /export/postman-environment
+     * One environment as a Postman environment export.
+     * Body params: environmentId (required), includeSecrets (default false).
+     * Returns: {text, fileName, notes}, 400 for a bad body, 404 when the
+     * environment does not exist. Reads only.
+     */
+    ctx.server.Post ("/export/postman-environment",
+    [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        answer_export ("/export/postman-environment", req, res,
+        export_postman_environment_response, ctx.db);
     });
 }
 

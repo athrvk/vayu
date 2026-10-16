@@ -433,6 +433,7 @@ apiService.diffSpec(payload): Promise<SpecDiffResponse>  // POST /specs/diff
 apiService.bindSpec(payload): Promise<SpecBindResponse>  // POST /specs/bind
 apiService.exportSpec(payload): Promise<SpecExportResponse> // POST /specs/export
 apiService.exportPostman(payload): Promise<PostmanExportResponse> // POST /export/postman
+apiService.exportPostmanEnvironment(payload): Promise<PostmanEnvironmentExportResponse> // POST /export/postman-environment
 ```
 
 `describeSpec` is the read that replaced the last parse this app did of a spec
@@ -474,6 +475,17 @@ Postman Collection v2.1 text, a `<name>.postman_collection.json` file name, and
 notes with the request and folder counts plus `notCarried` - one entry per kind
 of thing Postman has no place for, each with a count and the engine's sentence,
 which the dialog prints as written.
+
+`exportPostmanEnvironment` is the same read for one environment (issue #2253):
+an environment id and `includeSecrets` (default `false`, which keeps each secret
+variable's row and name and writes its value `""`, counted in
+`notes.secretsOmitted`). The answer is the Postman environment text, a
+`<name>.postman_environment.json` file name and notes with `variablesExported`
+plus `notCarried`, whose one kind is `variable_types`: `json`-typed variables,
+which Postman has no type for, written as `default`. The renderer's only caller
+is the environment row's **Export as Postman Environment** item, which sends the
+id alone, downloads `text` as `fileName` and puts `secretsOmitted` and the
+`variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).
 
 **Neither index is sent on any write that stores a document** - not by
 `createSpec`, `syncSpec` or the `specs` section of `importCollection` below. The

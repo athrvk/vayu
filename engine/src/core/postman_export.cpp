@@ -1059,6 +1059,13 @@ std::optional<json> postman_events (const json& elements, EventOwner owner, Walk
 // Variables
 // ---------------------------------------------------------------------------
 
+/// A stored variable's `value` as Postman's string: absent and `null` are "".
+std::string variable_value_text (const json& variable) {
+    const auto value = variable.find ("value");
+    return value == variable.end () || value->is_null () ? std::string () :
+                                                           js::js_string_of (*value);
+}
+
 std::optional<json> postman_variables (const json& stored, Walk& walk) {
     if (!stored.is_object () || stored.empty ()) {
         return std::nullopt;
@@ -1074,10 +1081,7 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
         }
         json row;
         row["key"]             = entry.key ();
-        const auto value       = variable.find ("value");
-        row["value"]           = value == variable.end () || value->is_null () ?
-                  std::string () :
-                  js::js_string_of (*value);
+        row["value"]           = variable_value_text (variable);
         const std::string type = text_of (variable, "type");
         if (flag_of (variable, "secret", false)) {
             row["type"] = "secret";
@@ -1967,8 +1971,9 @@ json postman_items (const PostmanExportFolder& folder, const json& auth_in_force
     return items;
 }
 
-/// A file name with every character a filesystem refuses replaced.
-std::string safe_file_stem (const std::string& name) {
+/// A file name with every character a filesystem refuses replaced; @p fallback
+/// when nothing is left.
+std::string safe_file_stem (const std::string& name, std::string_view fallback) {
     std::string stem;
     for (const char ch : name) {
         const auto byte   = static_cast<unsigned char> (ch);
@@ -1981,7 +1986,7 @@ std::string safe_file_stem (const std::string& name) {
         stem.pop_back ();
     }
     const std::size_t begin = stem.find_first_not_of (' ');
-    return begin == std::string::npos ? std::string ("collection") : stem.substr (begin);
+    return begin == std::string::npos ? std::string (fallback) : stem.substr (begin);
 }
 
 bool is_uuid (std::string_view text) {
@@ -2008,6 +2013,38 @@ std::uint64_t fnv1a (std::string_view text, std::uint64_t basis) {
         hash *= 0x100000001b3ULL;
     }
     return hash;
+}
+
+/// `notCarried` as the routes answer with it.
+nlohmann::json not_carried_json (const std::vector<PostmanNotCarried>& entries) {
+    nlohmann::json out = nlohmann::json::array ();
+    for (const PostmanNotCarried& entry : entries) {
+        out.push_back (nlohmann::json{ { "code", entry.code },
+        { "count", entry.count }, { "message", entry.message } });
+    }
+    return out;
+}
+
+/// The `type` an environment row is written with: `secret`, else the stored
+/// type Postman has, else its own unset marker `default`.
+std::string environment_row_type (const json& variable) {
+    if (flag_of (variable, "secret", false)) {
+        return "secret";
+    }
+    const std::string type = text_of (variable, "type");
+    return type == "string" || type == "number" || type == "boolean" ?
+    type :
+    std::string ("default");
+}
+
+/// One `values[]` row of a Postman environment export, in Postman's key order.
+json environment_row (const std::string& name, const json& variable) {
+    json row;
+    row["key"]     = name;
+    row["value"]   = variable_value_text (variable);
+    row["type"]    = environment_row_type (variable);
+    row["enabled"] = row_enabled (variable);
+    return row;
 }
 
 } // namespace
@@ -2107,8 +2144,8 @@ const PostmanExportOptions& options) {
     }
 
     PostmanExportOutcome outcome;
-    outcome.text      = js::js_json_tabbed (document);
-    outcome.file_name = safe_file_stem (root.name) + ".postman_collection.json";
+    outcome.text = js::js_json_tabbed (document);
+    outcome.file_name = safe_file_stem (root.name, "collection") + ".postman_collection.json";
     outcome.notes.requests_exported = walk.requests;
     outcome.notes.folders_exported  = walk.folders;
     outcome.notes.secrets_omitted   = walk.secrets_omitted;
@@ -2122,16 +2159,55 @@ const PostmanExportOptions& options) {
     return outcome;
 }
 
-nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes) {
-    nlohmann::json not_carried = nlohmann::json::array ();
-    for (const PostmanNotCarried& entry : notes.not_carried) {
-        not_carried.push_back (nlohmann::json{ { "code", entry.code },
-        { "count", entry.count }, { "message", entry.message } });
+PostmanEnvironmentExportOutcome export_postman_environment (
+const PostmanExportEnvironment& environment) {
+    PostmanEnvironmentExportOutcome outcome;
+    const json stored =
+    environment.variables.is_object () ? environment.variables : json::object ();
+    const json variables = environment.include_secrets ?
+    stored :
+    vayu_ext::redact_variables (stored, outcome.notes.secrets_omitted);
+
+    json values    = json::array ();
+    int json_typed = 0;
+    for (auto entry = variables.begin (); entry != variables.end (); ++entry) {
+        if (!entry.value ().is_object ()) {
+            continue;
+        }
+        values.push_back (environment_row (entry.key (), entry.value ()));
+        json_typed += text_of (entry.value (), "type") == "json" ? 1 : 0;
     }
+    outcome.notes.variables_exported = static_cast<int> (values.size ());
+    if (json_typed > 0) {
+        const LossText& loss =
+        LOSS_TEXT.at (static_cast<std::size_t> (Loss::VariableTypes));
+        outcome.notes.not_carried.push_back (
+        { std::string (loss.code), json_typed, std::string (loss.message) });
+    }
+
+    json document;
+    document["id"]                      = environment.id;
+    document["name"]                    = environment.name;
+    document["values"]                  = std::move (values);
+    document["_postman_variable_scope"] = "environment";
+    outcome.text                        = js::js_json_tabbed (document);
+    outcome.file_name =
+    safe_file_stem (environment.name, "environment") + ".postman_environment.json";
+    return outcome;
+}
+
+nlohmann::json postman_environment_export_notes_json (
+const PostmanEnvironmentExportNotes& notes) {
+    return nlohmann::json{ { "variablesExported", notes.variables_exported },
+        { "secretsOmitted", notes.secrets_omitted },
+        { "notCarried", not_carried_json (notes.not_carried) } };
+}
+
+nlohmann::json postman_export_notes_json (const PostmanExportNotes& notes) {
     return nlohmann::json{ { "requestsExported", notes.requests_exported },
         { "foldersExported", notes.folders_exported },
         { "secretsOmitted", notes.secrets_omitted },
-        { "notCarried", std::move (not_carried) } };
+        { "notCarried", not_carried_json (notes.not_carried) } };
 }
 
 } // namespace vayu::core
