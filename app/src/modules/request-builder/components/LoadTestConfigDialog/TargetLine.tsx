@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { MethodBadge } from "@/components/shared";
+import { CopyForAgentButton, MethodBadge } from "@/components/shared";
 import { truncateUrl } from "@/lib/truncate-url";
 import type { Target } from "./target";
 
@@ -17,13 +17,15 @@ interface TargetLineProps {
 	/** The variable-resolved URL, as the run will send it. */
 	url: string;
 	target: Target;
+	/** The saved request's agent reference line; absent for an unsaved request. */
+	agentReference?: string;
 }
 
 /**
  * What the run is aimed at, said before the profile is configured (#2117). The
  * description line of the dialog: spans only, because it renders inside a `<p>`.
  */
-export function TargetLine({ method, url, target }: TargetLineProps) {
+export function TargetLine({ method, url, target, agentReference }: TargetLineProps) {
 	const shown = url.trim();
 	return (
 		<>
@@ -35,6 +37,9 @@ export function TargetLine({ method, url, target }: TargetLineProps) {
 					</span>
 				) : (
 					<span className="min-w-0 text-foreground">{unknownHostText(target)}</span>
+				)}
+				{agentReference !== undefined && (
+					<CopyForAgentButton reference={agentReference} label="Copy request for agent" />
 				)}
 			</span>
 			{shown !== "" && (

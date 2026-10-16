@@ -343,6 +343,10 @@ export default function RequestBuilder() {
 	// The saved row names the request in a budget's "Copy for agent" (#2047).
 	const savedRequestId = fetchedRequest?.id;
 	const savedRequestName = fetchedRequest?.name;
+	const collectionPath = useMemo(
+		() => collectionAncestors.map((collection) => collection.name),
+		[collectionAncestors]
+	);
 	const thresholdOwner = useMemo<ThresholdOwner | undefined>(
 		() =>
 			savedRequestId !== undefined && savedRequestName !== undefined
@@ -1076,6 +1080,7 @@ export default function RequestBuilder() {
 					collectionId={fetchedRequest?.collectionId}
 					request={pendingLoadTestAuditRequest}
 					referenceOwner={thresholdOwner}
+					collectionPath={collectionPath}
 					method={pendingLoadTestRequest?.method}
 					url={pendingLoadTestUrl}
 				/>

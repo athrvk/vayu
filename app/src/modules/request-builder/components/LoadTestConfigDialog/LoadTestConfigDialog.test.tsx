@@ -23,6 +23,7 @@ import {
 	within,
 	cleanup,
 	act,
+	waitFor,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
@@ -1427,6 +1428,71 @@ describe("pass/fail budgets", () => {
 
 		expect(screen.getByLabelText(/p99 latency/i)).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: /for agent$/ })).not.toBeInTheDocument();
+	});
+});
+
+describe("the agent affordances (#2230)", () => {
+	const OWNER = { type: "request", request: { id: "req_7", name: "Orders" } } as const;
+	const COPY_REQUEST = { name: "Copy request for agent" };
+	const writeText = vi.fn();
+
+	beforeEach(() => {
+		writeText.mockReset().mockResolvedValue(undefined);
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+	});
+
+	it("tells every caller an agent can start the run, naming Settings' own labels", () => {
+		open();
+
+		const footer = screen.getByText(/An agent can start this run too/);
+		expect(footer).toHaveTextContent(
+			"An agent can start this run too with start_load_run (Settings › AI agents (MCP)). Its host must be on the Target allowlist."
+		);
+		expect(footer).toHaveClass("text-label", "text-muted-foreground");
+	});
+
+	it("copies the saved request, with its collection path, from beside the host", async () => {
+		open({
+			method: "GET",
+			url: "https://api.example.com/v1/orders",
+			referenceOwner: OWNER,
+			collectionPath: ["Payments", "Auth"],
+		});
+
+		// Inside the description, so it must keep the host's room to truncate.
+		const button = screen.getByRole("button", COPY_REQUEST);
+		expect(screen.getByRole("dialog")).toHaveAccessibleDescription(/api\.example\.com/);
+		expect(button).toHaveClass("shrink-0");
+		fireEvent.click(button);
+
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith(
+				'Vayu request "Orders" (req_7) in Payments / Auth'
+			)
+		);
+	});
+
+	it("copies the bare line for a request at the root", async () => {
+		open({ url: "https://api.example.com/", referenceOwner: OWNER });
+		fireEvent.click(screen.getByRole("button", COPY_REQUEST));
+
+		await waitFor(() =>
+			expect(writeText).toHaveBeenCalledWith('Vayu request "Orders" (req_7)')
+		);
+	});
+
+	it("offers no request copy for an unsaved request or a run owner", () => {
+		// Mutation check: drop the `referenceOwner?.type === "request"` gate and
+		// the unsaved case grows a button copying a line with no id; this reds.
+		open({ url: "https://api.example.com/" });
+		expect(screen.queryByRole("button", COPY_REQUEST)).not.toBeInTheDocument();
+		cleanup();
+
+		open({
+			url: "https://api.example.com/",
+			referenceOwner: { type: "run", run: { id: "run_1" } },
+		});
+		expect(screen.queryByRole("button", COPY_REQUEST)).not.toBeInTheDocument();
 	});
 });
 
