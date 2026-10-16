@@ -144,6 +144,17 @@ export const LOAD_TEST_LIMITS: LoadTestLimits = {
 };
 
 /**
+ * How the engine samples responses for the post-request script replay: it runs
+ * the script on one response in `RESPONSE_SAMPLE_PERIOD` and keeps at most
+ * `MAX_RESPONSE_SAMPLES` of them (`DEFAULT_RESPONSE_SAMPLE_RATE` /
+ * `DEFAULT_MAX_RESPONSE_SAMPLES`). A different knob from the success sample
+ * rate, which governs stored timing traces; pinned against the engine's header
+ * by `load-test.engine-parity.test.ts`.
+ */
+export const RESPONSE_SAMPLE_PERIOD = 100;
+export const MAX_RESPONSE_SAMPLES = 1000;
+
+/**
  * Convert the dialog's percentage into the engine's `success_sample_rate`.
  *
  * The engine treats that field as a sampling **period** - it keeps a trace when

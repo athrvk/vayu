@@ -27,25 +27,16 @@
  */
 
 import { useMemo } from "react";
-import {
-	AlertTriangle,
-	ArrowDownRight,
-	ArrowUpRight,
-	Copy,
-	GitCompareArrows,
-	Minus,
-	Pin,
-} from "lucide-react";
+import { Copy, GitCompareArrows, Pin } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
-import { cn } from "@/lib/utils";
-import { formatNumber } from "@/lib/format-number";
-import { compareReports, deltaVerdict, type MetricDelta } from "@/lib/run-compare";
+import { compareReports } from "@/lib/run-compare";
 import { runComparisonReference } from "@/lib/agent-reference";
 import { runReferenceInput } from "@/lib/run-reference-input";
 import { useCopy } from "@/hooks/useCopy";
 import { useBaselineRunQuery, useRunQuery, useRunReportQuery } from "@/queries";
 import type { RunReport } from "@/types";
+import { ComparabilityWarnings, DeltaCell } from "./run-comparison-parts";
 
 interface BaselineComparisonProps {
 	/** The open run's report - the "target" of the comparison. */
@@ -57,72 +48,13 @@ interface BaselineComparisonProps {
 /**
  * The metrics worth a strip: the p99 a run is judged on, and the two totals.
  *
- * Three, deliberately, and not the whole diff. `compareReports` also computes
- * p50/p90/p95/avg/max and the status-code merge, and #472 listed "latency
- * percentiles and status codes" among its criteria - so the curation is
- * recorded here rather than left to read as an oversight (#503). This strip is
- * a glance in a report header, answering "is this run worse than the one I
- * pinned?" in one line; the run's own percentile charts and status-code table
- * sit a few hundred pixels below it in the same view, and an agent that wants
- * every delta has `compare_runs`. Six percentile columns here would repeat that
- * page and bury the one number the header exists to show.
+ * Three, deliberately: this is a glance in a report header, answering "is this
+ * run worse than the one I pinned?" in one line. The rest of the diff (every
+ * percentile, both throughput measures, the status-code merge) is the header's
+ * Compare action, `RunComparisonView`, against the baseline or any other run of
+ * the request (#2164).
  */
 const HEADLINE_METRICS = ["latency.p99", "summary.avgRps", "summary.errorRate"] as const;
-
-const METRIC_LABELS: Record<string, string> = {
-	"latency.p99": "P99 latency",
-	"summary.avgRps": "Throughput",
-	"summary.errorRate": "Error rate",
-};
-
-/** Units belong to the metric, not to the delta arithmetic. */
-function formatValue(metric: string, value: number): string {
-	if (metric.startsWith("latency.")) return `${formatNumber(value)}ms`;
-	if (metric === "summary.avgRps") return `${formatNumber(value)} rps`;
-	if (metric === "summary.errorRate") return `${value.toFixed(2)}%`;
-	return formatNumber(value);
-}
-
-function DeltaCell({ metric }: { metric: MetricDelta }) {
-	const verdict = deltaVerdict(metric);
-	const tone =
-		verdict === "improved"
-			? "text-status-success-text"
-			: verdict === "regressed"
-				? "text-status-error-text"
-				: "text-muted-foreground";
-	const Arrow =
-		metric.delta === null || metric.delta === 0
-			? Minus
-			: metric.delta > 0
-				? ArrowUpRight
-				: ArrowDownRight;
-
-	return (
-		<div className="flex flex-col gap-0.5 min-w-0">
-			<span className="text-xs text-muted-foreground">{METRIC_LABELS[metric.metric]}</span>
-			{metric.target === null ? (
-				// Neither run recorded it. Saying so beats a 0 that reads as a
-				// measurement, and beats an em-dash with no explanation.
-				<span className="text-sm text-muted-foreground">not recorded</span>
-			) : (
-				<span className="flex items-baseline gap-1.5 min-w-0 flex-wrap">
-					<span className="text-sm font-medium text-foreground">
-						{formatValue(metric.metric, metric.target)}
-					</span>
-					<span className={cn("flex items-center gap-0.5 text-xs font-medium", tone)}>
-						<Arrow className="size-icon-sm shrink-0" />
-						{metric.pctChange === null
-							? metric.delta === null
-								? "vs no baseline value"
-								: `${metric.delta > 0 ? "+" : ""}${formatValue(metric.metric, metric.delta)}`
-							: `${metric.pctChange > 0 ? "+" : ""}${metric.pctChange.toFixed(1)}%`}
-					</span>
-				</span>
-			)}
-		</div>
-	);
-}
 
 export default function BaselineComparison({ report, runId }: BaselineComparisonProps) {
 	/*
@@ -209,21 +141,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					<DeltaCell key={metric.metric} metric={metric} />
 				))}
 			</div>
-			{comparison.comparability.length > 0 && (
-				<ul className="mt-2 flex flex-col gap-1" aria-label="Comparability warnings">
-					{comparison.comparability.map((warning) => (
-						<li
-							key={warning.code}
-							className="flex items-start gap-2 text-xs text-status-warning-text"
-						>
-							<AlertTriangle className="mt-0.5 size-icon-sm shrink-0" />
-							<span>
-								{warning.message} {warning.base} vs {warning.target}.
-							</span>
-						</li>
-					))}
-				</ul>
-			)}
+			<ComparabilityWarnings warnings={comparison.comparability} />
 		</div>
 	);
 }

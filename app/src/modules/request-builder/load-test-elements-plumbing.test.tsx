@@ -28,8 +28,11 @@ import { render, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useDashboardStore } from "@/stores";
-import type { LoadTestConfig } from "@/types";
+import type { Collection, ElementDef, LoadTestConfig } from "@/types";
 import type { RequestState } from "./types";
+
+/** What the collection-ancestor query hands back; reset per test. */
+let ancestors: Collection[] = [];
 
 const composeRequest = vi.fn();
 const executeRequest = vi.fn();
@@ -68,7 +71,7 @@ vi.mock("@/queries", async (importOriginal) => {
 		...actual,
 		useRequestQuery: () => requestQuery,
 		useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), mutate: vi.fn() }),
-		useCollectionAncestors: () => [],
+		useCollectionAncestors: () => ancestors,
 	};
 });
 
@@ -168,6 +171,7 @@ beforeEach(() => {
 	startLoadTest.mockReset().mockResolvedValue({ runId: "run_1" });
 	providerProps = {};
 	dialogProps = {};
+	ancestors = [];
 	useTabsStore.setState({
 		openTabs: [{ id: "t1", type: "request", entityId: "req_1", title: "Req" } as never],
 		activeTabId: "t1",
@@ -201,5 +205,60 @@ describe("a load run sends the resolved chain as requestElements", () => {
 		expect(payload.requestElements).toEqual([
 			{ ...PRE_SCRIPT, origin: { kind: "request", id: "req_1" } },
 		]);
+	});
+});
+
+/**
+ * `hasPostRequestScript` on the dialog: computed from the same resolved chain
+ * the run composes, so an inherited collection script counts and a script
+ * marked inline does not (the run runs it on every response, not on a sample).
+ */
+describe("the dialog's hasPostRequestScript", () => {
+	const postScript = (config: Record<string, unknown>, id = "el_post"): ElementDef => ({
+		id,
+		kind: "script.post",
+		enabled: true,
+		config: { script: "pm.test('ok', () => {});", ...config },
+	});
+
+	async function dialogHasPostRequestScript(elements: ElementDef[]): Promise<unknown> {
+		renderBuilder();
+		await act(async () => {
+			(providerProps.onStartLoadTest as (request: RequestState) => void)({
+				...REQUEST,
+				elements,
+			});
+		});
+		expect(dialogProps).toHaveProperty("hasPostRequestScript");
+		return dialogProps.hasPostRequestScript;
+	}
+
+	it("is true for a request whose only script is a post-request one", async () => {
+		expect(await dialogHasPostRequestScript([postScript({})])).toBe(true);
+	});
+
+	it("is false when the post-request script is marked inline", async () => {
+		expect(await dialogHasPostRequestScript([postScript({ inline: true })])).toBe(false);
+	});
+
+	it("is false for a request with only a pre-request script", async () => {
+		expect(await dialogHasPostRequestScript([PRE_SCRIPT])).toBe(false);
+	});
+
+	it("is true for a post-request script inherited from a collection", async () => {
+		ancestors = [
+			{
+				id: "col_1",
+				name: "Col",
+				description: "",
+				order: 0,
+				variables: {},
+				auth: { mode: "none" },
+				elements: [postScript({}, "el_inherited")],
+				createdAt: "",
+				updatedAt: "",
+			},
+		];
+		expect(await dialogHasPostRequestScript([])).toBe(true);
 	});
 });

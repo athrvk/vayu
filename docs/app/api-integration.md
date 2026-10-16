@@ -773,7 +773,12 @@ Adding a load `mode` beside the block makes it a **scenario load run** (issue
 #357): the same plan, driven by `concurrency` virtual users on the event loop.
 The *presence* of `mode` is the whole discriminator, so a design-mode payload
 must carry none at all - not a falsy one - and `RunCollectionDialog` therefore
-spreads the load fields in rather than always sending them. `constant_rps`, and
+spreads the load fields in rather than always sending them. The dialog offers
+the three closed-loop modes: `constant_concurrency` and `ramp_up` send
+`duration` (and, for the ramp, `startConcurrency` and `rampUpDuration`, camelCase
+with `"Ns"` strings), while `iterations` sends the top-level total of passes and
+no `duration`; the top-level `iterations` is distinct from `scenario.iterations`,
+which is sent only when Load test is off. `constant_rps`, and
 any non-zero `rps`/`targetRps` on any mode, is a `400`: an open-loop arrival
 rate over a multi-step sequence is an arrival-rate executor the engine does not
 implement, and it is refused rather than quietly run closed-loop. Such a run's

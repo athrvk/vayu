@@ -59,6 +59,12 @@ export interface LoadTestConfigDialogProps {
 	isStarting: boolean;
 	/** True when the pending request has a non-empty preRequestScript. */
 	hasPreRequestScript: boolean;
+	/**
+	 * True when a post-request script (the request's own or an inherited
+	 * collection one) would be replayed after the run on a sample of
+	 * responses, i.e. it is not marked inline (`hasReplayedPostScript`).
+	 */
+	hasPostRequestScript: boolean;
 	/** Variable-resolved OAuth 2.0 config, when the effective auth is oauth2. */
 	oauth2Config?: OAuth2Config;
 	/**
@@ -111,6 +117,7 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting,
 	hasPreRequestScript,
+	hasPostRequestScript,
 	oauth2Config,
 	isStreamingRequest,
 	collectionId,
@@ -200,6 +207,7 @@ export default function LoadTestConfigDialog({
 	const notices = buildNotices({
 		...errors,
 		hasPreRequestScript,
+		hasPostRequestScript,
 		scriptsOverride,
 		defaultHeaderDifference,
 		remoteTarget,

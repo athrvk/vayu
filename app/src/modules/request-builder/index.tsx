@@ -61,7 +61,7 @@ import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import { composePathParams } from "./utils/path-variables";
 import { bodyModeHeaders, toFlatHeaders } from "./utils/key-value";
-import { elementsParts, scriptTextFor } from "./utils/elements-parts";
+import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
 	disabledDefaults,
@@ -1063,6 +1063,13 @@ export default function RequestBuilder() {
 					hasPreRequestScript={
 						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
 					}
+					hasPostRequestScript={hasReplayedPostScript(
+						elementsParts(
+							collectionAncestors,
+							fetchedRequest?.id,
+							pendingLoadTestRequest?.elements ?? []
+						)
+					)}
 					oauth2Config={pendingOAuth2Config ?? undefined}
 					isStreamingRequest={!!pendingLoadTestRequest?.stream}
 					collectionId={fetchedRequest?.collectionId}

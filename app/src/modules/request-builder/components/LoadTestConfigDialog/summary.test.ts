@@ -72,6 +72,35 @@ describe("summarise", () => {
 		// here - how many levels the search holds is the target's answer.
 		expect(s).not.toMatch(/in total/);
 	});
+
+	describe("for a collection's sequence", () => {
+		const sequence = (input: Parameters<typeof summarise>[0]) =>
+			summarise(input, false, "sequence");
+
+		it("counts passes through the sequence, never requests", () => {
+			const s = sequence({ ...base, mode: "iterations", iterations: 50, concurrency: 5 });
+			expect(s).toBe("Runs the sequence 50 times across 5 virtual users, then stops.");
+			expect(s).not.toMatch(/request/);
+		});
+
+		it("singularises the pass and the virtual user", () => {
+			expect(sequence({ ...base, mode: "iterations", iterations: 1, concurrency: 1 })).toBe(
+				"Runs the sequence 1 time across 1 virtual user, then stops."
+			);
+		});
+
+		it("does not promise a pass count it cannot know for a timed run", () => {
+			const s = sequence({ ...base, mode: "constant_concurrency", concurrency: 10 });
+			expect(s).toContain("Keeps 10 virtual users walking the sequence for 60s");
+			expect(s).not.toMatch(/request/);
+		});
+
+		it("reads a ramp as the single-request summary does", () => {
+			expect(sequence({ ...base, mode: "ramp_up" })).toBe(
+				summarise({ ...base, mode: "ramp_up" })
+			);
+		});
+	});
 });
 
 describe("totalRequests", () => {

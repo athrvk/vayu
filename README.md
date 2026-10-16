@@ -6,6 +6,20 @@
 - **Most Postman scripts run unmodified** - a QuickJS runtime implementing the `pm.*` API
 - **MCP server built in** - Claude Code, Cursor, VS Code, Codex and Zed (via the stdio CLI) drive the same engine the UI does
 
+MCP ([Model Context Protocol](https://athrvk.github.io/vayu/engine/mcp/)) is the open standard that lets coding agents such as Claude Code or Cursor call tools; Vayu exposes its engine as one, so an agent can send the request it just wrote, load test it and read the report without leaving your editor.
+
+**Install:**
+
+```powershell
+winget install athrvk.Vayu
+```
+
+```sh
+bash -c "$(curl --proto '=https' --tlsv1.2 -fsSL https://athrvk.github.io/vayu/install.sh)"
+```
+
+Windows takes the winget line; macOS and Linux take the script. [Details for every platform](#install).
+
 [![Latest Release](https://img.shields.io/github/v/release/athrvk/vayu)](https://github.com/athrvk/vayu/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/athrvk/vayu/total)](https://github.com/athrvk/vayu/releases)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%26%20Apache--2.0-blue.svg)](LICENSE)
@@ -15,16 +29,11 @@
 
 ## See it in action
 
-<!-- The lead asset here should MOVE: a <30s GIF/MP4 of build request -> send ->
-     flip to load test -> dashboard streaming at 50k req/s. The owner records it;
-     drop it in as docs/images/vayu-demo.gif above the two stills below and the
-     section is done. Structure is deliberately GIF-ready. -->
+![Load test run view with the history sidebar](docs/images/vayu-loadtest2.png)
+*The load-test run view, with the run kept in the history sidebar: rate fidelity, throughput, error counters, and the pass/fail budget verdict.*
 
-![Load test dashboard](docs/images/vayu-loadtest2.png)
-*The load-test dashboard: 52,738 req/s at concurrency 64, 738,406 requests, 100% success. Throughput, latency percentiles, and error counters stream live from the C++ engine while the UI stays responsive, with every run kept in the history sidebar.*
-
-![GraphQL request builder](docs/images/vayu-graphql.png)
-*REST and GraphQL request builder with collections, layered environments, and Postman-compatible scripting.*
+![GraphQL request builder with a collection sidebar](docs/images/vayu-graphql.png)
+*The request builder with a GraphQL query, its variables, and the response, beside the collection sidebar.*
 
 ---
 
@@ -50,9 +59,7 @@ The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the E
 
 Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same ~57k system throughput ceiling, and at that ceiling the machine is still 79% idle, so it is the target saturating, not the client. Full methodology, the concurrency sweep, the `workers` A/B, tuning notes, and a one-command reproduction script are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
-**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout:
-
-![In-app load test sustaining 51,922 req/s over 60 seconds with 3,115,391 requests and a 0.0% error rate](docs/images/vayu-loadtest4.png)
+**And from the UI, not just the CLI.** A 60-second run started from the app's own Load Test panel sustained **51,922 req/s - 3,115,391 requests, zero errors, zero dropped**, p50 1.20 ms / p99 1.52 ms, with the charts streaming live throughout. The run and its chart are in **[Engine Benchmarks](https://athrvk.github.io/vayu/engine/benchmarks/)**.
 
 ---
 

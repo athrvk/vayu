@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
 	Upload,
 	CheckCircle2,
@@ -39,6 +40,8 @@ import {
 import { useImportModalStore, useTabsStore, type ImportReport } from "@/stores";
 import { useImportMutation } from "@/queries/import";
 import { useCollectionsQuery } from "@/queries/collections";
+import { queryKeys } from "@/queries/keys";
+import { useSetActiveEnvironmentMutation } from "@/queries/environments";
 import { useBoundSpecReader } from "@/queries/specs";
 import {
 	matchBoundSpecs,
@@ -51,6 +54,7 @@ import { type ImportResult } from "@/services/importers/types";
 import { importNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { announceImport, buildImportReport } from "./import-report";
+import { activateImportedEnvironment } from "./import-environment";
 import { ImportFileFolders } from "./ImportFileFolders";
 import { importFailureMessage } from "@/services/importers/failure-message";
 import {
@@ -110,6 +114,8 @@ export function ImportModal() {
 	const isOpen = useImportModalStore((s) => s.isOpen);
 	const close = useImportModalStore((s) => s.close);
 	const importMutation = useImportMutation();
+	const setActiveEnvironment = useSetActiveEnvironmentMutation();
+	const queryClient = useQueryClient();
 	const { data: collections = [] } = useCollectionsQuery();
 	const readBoundSpecs = useBoundSpecReader();
 	const openCollectionSpecTab = useTabsStore((s) => s.openCollectionSpecTab);
@@ -597,6 +603,9 @@ export function ImportModal() {
 		const at = generation.current[t];
 		const outcomes = new Map<string, BatchEntry["outcome"]>();
 		const reports: ImportReport[] = [];
+		// Across the whole batch: "exactly one environment" is a property of the import,
+		// not of a file, so two files carrying one each is two.
+		const createdEnvironmentIds: string[] = [];
 		// The apply is one transaction per file and always was; the only sign of it
 		// used to be a button reading "Importing…" for all of them.
 		patchTab(t, at, { progress: { stage: "applying", done: 0, total: applicable.length } });
@@ -613,6 +622,7 @@ export function ImportModal() {
 						: {}),
 				});
 				reports.push(buildImportReport(result, Object.values(applied?.rootIds ?? {})));
+				createdEnvironmentIds.push(...Object.values(applied?.environmentIds ?? {}));
 				outcomes.set(entry.id, { ok: true, message: "Imported" });
 			} catch (e) {
 				// There is no rollback since #145: the engine write is atomic, so a validation
@@ -631,8 +641,19 @@ export function ImportModal() {
 		}
 		const failures = [...outcomes.values()].filter((o) => o && !o.ok);
 		if (failures.length === 0) {
+			// Before the dialog closes: the engine's answer decides the toast, and the
+			// dialog is still holding the progress view while it is asked.
+			const environment = await activateImportedEnvironment(createdEnvironmentIds, {
+				listEnvironments: () =>
+					queryClient.fetchQuery({
+						queryKey: queryKeys.environments.list(),
+						queryFn: () => apiService.listEnvironments(),
+						staleTime: 0,
+					}),
+				activate: (id) => setActiveEnvironment.mutateAsync({ id, previousId: null }),
+			});
 			handleClose();
-			announceImport(reports);
+			announceImport(reports, environment ?? undefined);
 			return;
 		}
 		setTabs((current) => {
@@ -849,6 +870,9 @@ export function ImportModal() {
 								placeholder="Paste collection JSON or YAML here"
 								className="h-40 w-full font-mono text-xs"
 							/>
+							<p className="mt-2 text-label text-muted-foreground">
+								A curl command? Paste it into a request&apos;s URL bar.
+							</p>
 							<Button
 								onClick={() => void handlePaste()}
 								disabled={!pasteText.trim() || isBusy}

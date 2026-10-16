@@ -143,7 +143,7 @@ scattered strings land the same way.
 |---|---|
 | "Request failed" | "No response after 30s. The server at api.example.com accepted the connection but didn't reply. Raise the timeout in Settings › Network & connectivity or check the server." |
 | "Failed to fetch" | "Couldn't connect to localhost:3000 (ECONNREFUSED). Nothing is listening on that port - is your server running?" |
-| "No collections yet" | Heading: "No collections yet." Body: "Group related requests and share variables across them." Buttons: [New collection] [Import]. |
+| "No collections yet" | Heading: "No collections yet." Body: "Requests live in collections; your first one is created for you." Buttons: [New request] [Import]. |
 | "Are you sure?" / [OK] | Title: "Delete 'Prod API'?" Body: "Its 12 variables are removed. Requests that use them will send the literal `{{baseUrl}}`. This can't be undone." Buttons: [Cancel] [Delete environment]. |
 | "Variable not found" | "`{{authToken}}` isn't defined in 'Staging' or globals. It will be sent as literal text." |
 | Static "Save" button | "Save" (disabled when clean) → "Saving…" → "Saved" (fades after 2s). On failure: "Couldn't save - disk full. Changes kept in this tab." |

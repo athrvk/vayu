@@ -74,6 +74,10 @@ export function RecordingSection({
 					<span>1% - a trickle</span>
 					<span>100% - everything</span>
 				</div>
+				<p className="text-label leading-relaxed text-muted-foreground">
+					Sets which successful responses keep a stored timing trace. Post-request tests
+					are sampled separately.
+				</p>
 			</div>
 
 			<NumberField

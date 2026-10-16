@@ -74,16 +74,31 @@ export function totalRequests({
 }
 
 /**
+ * What one unit of work is. A single-request run counts requests; a collection
+ * run counts passes through the sequence, and calling a pass a request would
+ * understate the load by the sequence's length.
+ */
+export type SummarySubject = "request" | "sequence";
+
+/**
  * @param blocked  When a validation error is live the numbers describe a run
  *                 that cannot start, so the estimate is withheld rather than
  *                 printed as a confident falsehood.
+ * @param subject  `"sequence"` rewords the two modes that name a count of work
+ *                 (Constant Virtual Users and Fixed Iterations); the ramp reads
+ *                 the same either way.
  */
-export function summarise(input: SummaryInput, blocked = false): string {
+export function summarise(
+	input: SummaryInput,
+	blocked = false,
+	subject: SummarySubject = "request"
+): string {
 	const {
 		mode,
 		duration,
 		rps,
 		concurrency,
+		iterations,
 		rampDuration,
 		startConcurrency,
 		stepDuration,
@@ -101,6 +116,10 @@ export function summarise(input: SummaryInput, blocked = false): string {
 
 	const total = totalRequests(input);
 
+	if (mode === "iterations" && subject === "sequence") {
+		return `Runs the sequence ${plural(iterations, "time")} across ${virtualUsers(concurrency)}, then stops.`;
+	}
+
 	if (mode === "iterations" && total !== null) {
 		return `Sends exactly ${requestsPhrase(total)} using ${virtualUsers(concurrency)}, then stops.`;
 	}
@@ -109,6 +128,12 @@ export function summarise(input: SummaryInput, blocked = false): string {
 		const shape = `Holds ${count(rps)} requests/s for ${count(duration)}s`;
 		if (blocked) return `${shape}.`;
 		return `${shape} - about ${requestsPhrase(total)} in total.`;
+	}
+
+	if (mode === "constant_concurrency" && subject === "sequence") {
+		return `Keeps ${virtualUsers(concurrency)} walking the sequence for ${count(
+			duration
+		)}s. How many passes that makes depends on how fast the target responds.`;
 	}
 
 	if (mode === "constant_concurrency") {

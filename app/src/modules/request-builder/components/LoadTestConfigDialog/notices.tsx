@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
+import { MAX_RESPONSE_SAMPLES, RESPONSE_SAMPLE_PERIOD } from "@/constants/load-test";
 import { requestsPhrase } from "./summary";
 import type { DraftErrors } from "./validation";
 
@@ -36,6 +37,8 @@ function sendsPhrase({ requestCount, countWithheld }: RemoteTarget): string {
 /** The validation messages, plus the facts that raise an advisory. */
 export interface NoticeInputs extends DraftErrors {
 	hasPreRequestScript: boolean;
+	/** A post-request script the run would replay on a sample, not inline. */
+	hasPostRequestScript: boolean;
 	scriptsOverride: string;
 	/** What differs between the design and load default headers, or null. */
 	defaultHeaderDifference: string | null;
@@ -44,7 +47,7 @@ export interface NoticeInputs extends DraftErrors {
 }
 
 /**
- * Up to four notices can be on screen at once. Severity is a prop and the
+ * Several notices can be on screen at once. Severity is a prop and the
  * blocking ones sort above the advisory ones, because with a stack that is the
  * only thing saying which one is stopping you.
  */
@@ -56,6 +59,7 @@ export function buildNotices({
 	budgetsError,
 	monitoringError,
 	hasPreRequestScript,
+	hasPostRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
 	remoteTarget,
@@ -145,8 +149,23 @@ export function buildNotices({
 			node: (
 				<Callout severity="warning" title="Pre-request script won't run">
 					Running JS per request would cap throughput, so the load engine skips it unless
-					Scripts below is set to All inline. Your post-request script still runs once
-					afterwards, against sampled responses.
+					Scripts below is set to All inline.
+				</Callout>
+			),
+		});
+	}
+
+	if (hasPostRequestScript && scriptsOverride !== "allInline") {
+		list.push({
+			key: "post-script",
+			severity: "info",
+			node: (
+				<Callout severity="info" title="Tests run afterwards, on a sample">
+					Your post-request script is replayed after the run on about 1 in{" "}
+					{RESPONSE_SAMPLE_PERIOD} responses (at most{" "}
+					{MAX_RESPONSE_SAMPLES.toLocaleString()}), not on every response. assert.*
+					elements check every response. To run the script on every response, set Scripts
+					to All inline - it costs throughput.
 				</Callout>
 			),
 		});

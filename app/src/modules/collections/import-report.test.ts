@@ -55,4 +55,15 @@ describe("importToastMessage", () => {
 			"Imported 3 files; 1 thing to finish."
 		);
 	});
+
+	it("joins what became of the active environment to the same sentence", () => {
+		const lossy = report({ notices: [{ tier: "action", text: "a" }] });
+		expect(importToastMessage([lossy], { kind: "activated", name: "Staging" })).toBe(
+			'Imported "Pet Store" - 60 requests, 4 folders; 1 thing to finish; "Staging" is now the active environment.'
+		);
+	});
+
+	it("is unchanged when the import touched no environment", () => {
+		expect(importToastMessage([report()], undefined)).toBe(importToastMessage([report()]));
+	});
 });
