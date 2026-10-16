@@ -61,6 +61,17 @@ function renderTabs(overrides: Partial<RequestState> = {}, updateField = vi.fn()
 }
 
 const settingsTab = () => screen.getByRole("tab", { name: /settings/i });
+
+/*
+ * The tab's mark is a dot, not a count (#2199): assert the dot is drawn, and
+ * that the trigger's accessible name is still the bare label - a digit or a
+ * glyph in the name would be read out as "Settings 1".
+ */
+const expectMarked = (tab: HTMLElement) => {
+	expect(tab.querySelector("[data-slot='tab-presence-dot']")).not.toBeNull();
+	expect(tab).toHaveAccessibleName("Settings");
+	expect(tab.querySelector("sup")?.textContent).toBe("");
+};
 const followToggle = () => screen.getByRole("switch", { name: /follow redirects/i });
 const hopLimit = () => screen.getByLabelText(/maximum redirects/i);
 const protocolPicker = () => screen.getByRole("combobox", { name: /protocol/i });
@@ -90,12 +101,12 @@ describe("Settings tab", () => {
 
 	it("badges when following is turned off", () => {
 		renderTabs({ followRedirects: false });
-		expect(settingsTab().textContent).toContain("1");
+		expectMarked(settingsTab());
 	});
 
 	it("badges when the hop limit differs from the default", () => {
 		renderTabs({ maxRedirects: DEFAULT_MAX_REDIRECTS + 5 });
-		expect(settingsTab().textContent).toContain("1");
+		expectMarked(settingsTab());
 	});
 
 	it("badges when TLS verification is off, even with everything else default", () => {
@@ -103,7 +114,7 @@ describe("Settings tab", () => {
 		// accepts any certificate is indistinguishable from one that does not
 		// until a surface says so, and the tab strip is the first one visible.
 		renderTabs({ verifySSL: false });
-		expect(settingsTab().textContent).toContain("1");
+		expectMarked(settingsTab());
 	});
 
 	it("badges when the protocol differs from the default, even with default redirects", () => {
@@ -112,7 +123,7 @@ describe("Settings tab", () => {
 		// badge - this is the case the rename to isRequestSettingsNonDefault
 		// exists for.
 		renderTabs({ httpVersion: "http2" });
-		expect(settingsTab().textContent).toContain("1");
+		expectMarked(settingsTab());
 	});
 
 	it("badges for each of Postman's protocol switches on its own (#1765)", () => {
@@ -125,7 +136,7 @@ describe("Settings tab", () => {
 			{ disableUrlEncoding: true },
 		] satisfies Partial<RequestState>[]) {
 			const view = renderTabsView(overrides);
-			expect(settingsTab().textContent).toContain("1");
+			expectMarked(settingsTab());
 			view.unmount();
 		}
 	});

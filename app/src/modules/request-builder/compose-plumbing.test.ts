@@ -85,10 +85,13 @@ describe("every send site composes engine-side and never resolves client-side", 
 	});
 
 	it("no send site resolves variables or inherit auth client-side anymore", () => {
-		for (const src of [builder ?? "", runView ?? ""]) {
-			// `resolveString` was the execution-time interpolation.
-			expect(src).not.toContain("resolveString");
-		}
+		// `resolveString` was the execution-time interpolation.
+		expect(runView ?? "").not.toContain("resolveString");
+		// It survives in the builder only for the load dialog's target preview
+		// (`pendingLoadTestUrl`, #2117), which names a host and sends nothing.
+		const stringResolves = (builder ?? "").match(/resolveString\(/g) ?? [];
+		expect(stringResolves).toHaveLength(1);
+		expect(builder).toMatch(/pendingLoadTestUrl = useMemo\([^;]*?resolveString\(/);
 		// `resolveObject` survives in the builder only for the load dialog's
 		// OAuth expiry *preview* (pendingOAuth2Config), which sends nothing.
 		const previewUses = (builder ?? "").match(/resolveObject\(/g) ?? [];

@@ -272,6 +272,17 @@ function TabLabel({ children }: { children: string }) {
 const MARK_TRACK =
 	"grid overflow-hidden transition-[grid-template-columns,margin-inline-start] duration-150 ease-out";
 
+/** The dot `TabCount` draws in `presence` mode; decorative, so never named. */
+function PresenceDot() {
+	return (
+		<span
+			aria-hidden="true"
+			data-slot="tab-presence-dot"
+			className="size-[5px] shrink-0 rounded-full bg-primary-text"
+		/>
+	);
+}
+
 /**
  * The small superscript count on a tab.
  *
@@ -315,8 +326,25 @@ const MARK_TRACK =
  * on any tab that can carry a count, passing `undefined` when it has none -
  * gating the element is what reintroduces the shift. A tab that can never
  * carry one renders no `TabCount` at all and pays no width, ever.
+ *
+ * **`presence` draws a dot instead of the value** (#2199). A tab that has
+ * "something here" but nothing to count - Info, Body, Auth, Settings - used to
+ * pass `1`, which read as a count of one beside Params and Headers, whose
+ * numbers are real. With `presence`, any non-empty `value` means present and
+ * the cell holds a dot, so the digit can never be mistaken for a quantity. Same
+ * track, same held exit, same unconditional-render contract; the dot is
+ * `aria-hidden` and the cell carries no text, so the trigger's accessible name
+ * stays the bare label (a screen reader loses nothing a digit never said).
  */
-function TabCount({ value, className }: { value?: number | string | null; className?: string }) {
+function TabCount({
+	value,
+	presence = false,
+	className,
+}: {
+	value?: number | string | null;
+	presence?: boolean;
+	className?: string;
+}) {
 	const live = value === 0 || value === undefined || value === null ? null : value;
 	/*
 	 * The track reads `live`, the text reads `shown`: the collapse starts on
@@ -331,6 +359,7 @@ function TabCount({ value, className }: { value?: number | string | null; classN
 	return (
 		<sup
 			data-slot="tab-count"
+			data-presence={presence ? "" : undefined}
 			className={cn(
 				MARK_TRACK,
 				live === null ? "grid-cols-[0fr] -ms-1.5" : "grid-cols-[1fr] ms-0"
@@ -349,10 +378,13 @@ function TabCount({ value, className }: { value?: number | string | null; classN
 					// changes.
 					"transition-opacity duration-150 ease-out",
 					shown === null || fading ? "opacity-0" : "opacity-100",
+					// `1em` is the line a digit would occupy (`leading-none` at the
+					// micro step), so the dot sits where the digit's centre would.
+					presence && "flex h-[1em] items-center justify-center",
 					className
 				)}
 			>
-				{shown}
+				{presence ? shown !== null && <PresenceDot /> : shown}
 			</span>
 		</sup>
 	);

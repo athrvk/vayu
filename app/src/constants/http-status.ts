@@ -55,6 +55,20 @@ export function httpStatusClass(code: number): HttpStatusClass {
 }
 
 /**
+ * Does this status count as an error? The renderer's copy of the engine's one
+ * definition (`vayu::is_success_status`, #2124): 200-399 succeeds, and every
+ * other code is an error - 4xx, 5xx, a stray 1xx, and the 0 a transport
+ * failure is recorded under.
+ *
+ * Deliberately not `httpStatusClass`: that answers which colour a code wears,
+ * where 1xx groups with redirect and `0` is its own non-error class. A row
+ * that says "this one failed" must agree with the run's error tally instead.
+ */
+export function isErrorStatus(code: number): boolean {
+	return !(code >= 200 && code < 400);
+}
+
+/**
  * The utility class for each class, per surface role.
  *
  * Every value is a complete literal. Tailwind scans source text, and this repo

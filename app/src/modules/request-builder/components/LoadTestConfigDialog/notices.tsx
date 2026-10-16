@@ -9,12 +9,30 @@ import type { ReactNode } from "react";
 import { Callout, SEVERITY_ORDER, type Severity } from "@/components/shared";
 import { Button } from "@/components/ui";
 import { MAX_RESPONSE_SAMPLES, RESPONSE_SAMPLE_PERIOD } from "@/constants/load-test";
+import { requestsPhrase } from "./summary";
 import type { DraftErrors } from "./validation";
 
 export interface Notice {
 	key: string;
 	severity: Severity;
 	node: ReactNode;
+}
+
+/** A target outside the user's own network, and what starting sends to it. */
+export interface RemoteTarget {
+	host: string;
+	/** From `totalRequests`; null where the count is the target's answer. */
+	requestCount: number | null;
+	/** A blocking error is live, so a figure from the form would describe a run that cannot start. */
+	countWithheld: boolean;
+}
+
+/** What the advisory says Starting sends: a count, the target's answer, or neither while blocked. */
+function sendsPhrase({ requestCount, countWithheld }: RemoteTarget): string {
+	if (requestCount === null) return "as many requests as the target can answer";
+	if (countWithheld) return "requests";
+
+	return `about ${requestsPhrase(requestCount)}`;
 }
 
 /** The validation messages, plus the facts that raise an advisory. */
@@ -25,6 +43,8 @@ export interface NoticeInputs extends DraftErrors {
 	scriptsOverride: string;
 	/** What differs between the design and load default headers, or null. */
 	defaultHeaderDifference: string | null;
+	/** Set only for a host that is not local; never gates Start (#2117). */
+	remoteTarget: RemoteTarget | null;
 	/**
 	 * Budgets the dialog opened with that the user did not type this time
 	 * (issue #2194): the sentence naming them, and what clears exactly those.
@@ -48,6 +68,7 @@ export function buildNotices({
 	hasPostRequestScript,
 	scriptsOverride,
 	defaultHeaderDifference,
+	remoteTarget,
 	carriedBudgets,
 }: NoticeInputs): Notice[] {
 	const list: Notice[] = [];
@@ -164,6 +185,19 @@ export function buildNotices({
 			node: (
 				<Callout severity="info" title="This load run's default headers differ">
 					{defaultHeaderDifference}
+				</Callout>
+			),
+		});
+	}
+
+	if (remoteTarget) {
+		list.push({
+			key: "remote-target",
+			severity: "info",
+			node: (
+				<Callout severity="info" title="This target is not on your machine or network">
+					Starting sends {sendsPhrase(remoteTarget)} to{" "}
+					<span className="font-mono">{remoteTarget.host}</span>.
 				</Callout>
 			),
 		});

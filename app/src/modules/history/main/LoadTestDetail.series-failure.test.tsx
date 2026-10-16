@@ -57,6 +57,7 @@ vi.mock("@/queries/runs", () => ({
 	useRunQuery: () => ({ data: undefined }),
 	useBaselineRunQuery: () => ({ data: undefined }),
 	useRunReportQuery: () => ({ data: undefined }),
+	useRequestRunsQuery: () => ({ data: undefined }),
 }));
 
 const REPORT = {

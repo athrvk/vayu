@@ -128,6 +128,20 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 }
 
 /**
+ * The dotted quad behind an IPv4-mapped IPv6 address, else the address unchanged.
+ * `URL` serializes `::ffff:127.0.0.1` as `::ffff:7f00:1`, so the hex pair is the
+ * form that arrives; the dotted spelling is kept for a caller passing it directly.
+ */
+function unmapIpv4(address: string): string {
+	const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(address);
+	if (dotted) return dotted[1];
+	const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+	if (!hex) return address;
+	const [high, low] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+	return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+}
+
+/**
  * Whether `host` names a machine on the user's own network - loopback, an
  * RFC1918 / RFC4193 private address, or a link-local one.
  *
@@ -139,13 +153,12 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
  * address is not one of these, and stays subject to the allowlist. Resolving it
  * here would make the guard's answer depend on the network it is asked on.
  */
-function isPrivateHost(host: string): boolean {
+export function isPrivateHost(host: string): boolean {
 	if (host === "localhost" || host.endsWith(".localhost")) return true;
 
 	if (host.startsWith("[") && host.endsWith("]")) {
-		// `::ffff:127.0.0.1` is a v4 address wearing a v6 spelling, so it is
-		// classified as the v4 one rather than falling through as "not private".
-		const address = host.slice(1, -1).replace(/^::ffff:/, "");
+		// An IPv4-mapped address is classified as the v4 one it wraps.
+		const address = unmapIpv4(host.slice(1, -1));
 		if (/^\d+\.\d+\.\d+\.\d+$/.test(address)) return isPrivateIpv4(address);
 		if (address === "::1" || address === "::") return true;
 		// fc00::/7 (unique local) and fe80::/10 (link local).

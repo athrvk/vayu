@@ -29,7 +29,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
-import type { RequestBuilderContextValue } from "../../types";
+import type { RequestBuilderContextValue, RequestState } from "../../types";
 import { createDefaultRequestState } from "../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import RequestTabs from "./index";
@@ -53,10 +53,16 @@ vi.mock("./panels/BodyPanel", () => ({ default: () => null }));
 vi.mock("./panels/AuthPanel", () => ({ default: () => null }));
 vi.mock("./panels/SettingsPanel", () => ({ default: () => null }));
 
-function renderTabs(description?: string, params?: KeyValueItem[], url?: string) {
+function renderTabs(
+	description?: string,
+	params?: KeyValueItem[],
+	url?: string,
+	overrides: Partial<RequestState> = {}
+) {
 	const value = {
 		request: {
 			...createDefaultRequestState(),
+			...overrides,
 			description,
 			...(params ? { params } : {}),
 			...(url ? { url } : {}),
@@ -89,6 +95,9 @@ const tabNames = () => screen.getAllByRole("tab").map(labelOf);
 // show. "No count" is the empty slot, not a missing element.
 const countOf = (tab: HTMLElement) => tab.querySelector("sup")?.textContent || null;
 
+/** Whether the tab draws the presence dot (#2199) - the dot is absent, not hidden, when idle. */
+const dotOf = (tab: HTMLElement) => tab.querySelector("[data-slot='tab-presence-dot']");
+
 describe("the Info tab", () => {
 	it("is the first tab in the row", () => {
 		renderTabs();
@@ -109,19 +118,52 @@ describe("the Info tab", () => {
 		expect(screen.queryByRole("tab", { name: /Docs/ })).not.toBeInTheDocument();
 	});
 
-	it("badges presence, not a count, like Body and Auth do", () => {
+	it("draws a presence dot, not a count, and keeps its accessible name exact", () => {
 		renderTabs("Returns settled payouts.");
-		expect(countOf(screen.getAllByRole("tab")[0])).toBe("1");
+		const info = screen.getAllByRole("tab")[0];
+		expect(dotOf(info)).not.toBeNull();
+		expect(countOf(info)).toBeNull();
+		expect(info).toHaveAccessibleName("Info");
 	});
 
 	it("stays quiet when there is no description", () => {
 		renderTabs();
-		expect(countOf(screen.getAllByRole("tab")[0])).toBeNull();
+		expect(dotOf(screen.getAllByRole("tab")[0])).toBeNull();
 	});
 
 	it("treats a whitespace-only description as none", () => {
 		renderTabs("   \n  ");
-		expect(countOf(screen.getAllByRole("tab")[0])).toBeNull();
+		expect(dotOf(screen.getAllByRole("tab")[0])).toBeNull();
+	});
+});
+
+describe("the Body and Auth tabs", () => {
+	it.each([
+		["Body", { bodyMode: "json" }],
+		["Auth", { auth: { mode: "bearer", token: "t" } }],
+	] as [string, Partial<RequestState>][])(
+		"%s draws a presence dot, not a count, with its accessible name exact",
+		(name, overrides) => {
+			renderTabs(undefined, undefined, undefined, overrides);
+			const tab = screen.getByRole("tab", { name });
+			expect(dotOf(tab)).not.toBeNull();
+			expect(countOf(tab)).toBeNull();
+			expect(tab).toHaveAccessibleName(name);
+		}
+	);
+
+	it.each(["Body", "Auth"])("%s is unmarked on a default request", (name) => {
+		renderTabs();
+		expect(dotOf(screen.getByRole("tab", { name }))).toBeNull();
+	});
+});
+
+describe("the counted tabs keep their numbers", () => {
+	it("draws Params' count as a number, with no dot", () => {
+		renderTabs(undefined, [{ id: "q", key: "page", value: "1", enabled: true }]);
+		const params = screen.getByRole("tab", { name: /^Params/ });
+		expect(countOf(params)).toBe("1");
+		expect(dotOf(params)).toBeNull();
 	});
 });
 

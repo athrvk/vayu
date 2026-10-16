@@ -6,7 +6,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
+import { Tooltip, TooltipContent, TooltipHint, TooltipTrigger } from "@/components/ui";
 
 export interface RailButtonProps {
 	active: boolean;
@@ -15,6 +15,8 @@ export interface RailButtonProps {
 	label: string;
 	/** Shown after the label in the tooltip; deliberately not in the name. */
 	shortcut?: string;
+	/** A second tooltip line saying what the label covers; not part of the name. */
+	hint?: string;
 	children: React.ReactNode;
 	/**
 	 * Which window edge this button's rail sits on - which side the active
@@ -51,6 +53,7 @@ export function RailButton({
 	onClick,
 	label,
 	shortcut,
+	hint,
 	children,
 	side,
 	variant,
@@ -107,6 +110,7 @@ export function RailButton({
 			{/* Away from the window edge this button's rail sits on - see the `side` doc above. */}
 			<TooltipContent side={side === "left" ? "right" : "left"}>
 				<p>{shortcut ? `${label} ${shortcut}` : label}</p>
+				{hint && <TooltipHint className="block">{hint}</TooltipHint>}
 			</TooltipContent>
 		</Tooltip>
 	);

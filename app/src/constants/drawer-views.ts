@@ -28,6 +28,12 @@ export interface DrawerViewDescriptor {
 	view: DrawerView;
 	/** What the button is called - the Dock's accessible name. */
 	label: string;
+	/**
+	 * A one-line gloss the rail's tooltip shows under the label, for a name that
+	 * is a bare noun saying nothing of what is behind it (`docs/ux-writing.md`).
+	 * Absent for a name that explains itself. Never part of the accessible name.
+	 */
+	hint?: string;
 	icon: LucideIcon;
 	/**
 	 * Which named motion this view's glyph plays on hover or focus of the
@@ -97,7 +103,13 @@ export const DRAWER_VIEWS: readonly DrawerViewDescriptor[] = [
 	 * Collections a solid trapezoid, History a filled circle, Variables two
 	 * open curves, Settings a round cog.
 	 */
-	{ view: "services", label: "Services", icon: Radio, motion: ICON_MOTION.waves },
+	{
+		view: "services",
+		label: "Services",
+		hint: "Webhook inbox, OAuth issuer, mock servers",
+		icon: Radio,
+		motion: ICON_MOTION.waves,
+	},
 	/*
 	 * `Trash2`, the same glyph every delete affordance in the app already
 	 * uses - and that repetition is the argument for it rather than against
