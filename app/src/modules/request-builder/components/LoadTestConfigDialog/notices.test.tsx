@@ -98,7 +98,6 @@ describe("buildNotices", () => {
 			expect(text.length).toBeGreaterThan(0);
 			expect(text).toContain("about 1 in 100 responses (at most 1,000)");
 			expect(text).toContain("assert.* elements check every response");
-			expect(text).not.toContain("10%");
 			expect(text).not.toContain("%");
 		});
 	});
