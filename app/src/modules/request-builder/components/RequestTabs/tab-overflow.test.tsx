@@ -18,7 +18,9 @@
  * `TabStrip.overflow.test.tsx` does for the document strip.
  *
  * Mutation check: render every trigger regardless of `visibleIds` and the
- * narrow cases fail (all eight tabs, no "more tabs" button).
+ * narrow cases fail (all eight tabs, no "more tabs" button). *
+ * Mutation check (marks): drop `{tab.mark}` in `TabOverflowMenu` and the count
+ * and presence-dot case fails.
  */
 
 import { useState } from "react";

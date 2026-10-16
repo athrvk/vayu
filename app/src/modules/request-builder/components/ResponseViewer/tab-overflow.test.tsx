@@ -19,7 +19,10 @@
  * `TabStrip.overflow.test.tsx` does for the document strip.
  *
  * Mutation check: render every trigger regardless of `visibleIds` and the
- * narrow cases fail (all eight tabs, no "more tabs" button).
+ * narrow cases fail (all eight tabs, no "more tabs" button). *
+ * Mutation check (marks): set the `attention` map to `undefined` and the trigger
+ * dot and name cases fail; drop `{tab.mark}` in `TabOverflowMenu` and the item
+ * cases fail.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
