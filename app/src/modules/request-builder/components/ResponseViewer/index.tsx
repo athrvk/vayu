@@ -19,7 +19,7 @@
  * Uses shared ResponseBody component for body display with Pretty/Raw/Preview modes.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { BookmarkPlus, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -456,6 +456,34 @@ export default function ResponseViewer() {
 	const canSaveExample = !!requestId && !isStreaming && !isClientError;
 	const isShown = (id: ResponseTab) => visibleIds.includes(id);
 
+	/*
+	 * Each mark is one node, handed to its trigger when the tab is on the strip
+	 * and to its "+N" menu item when it is not, so the two cannot disagree.
+	 */
+	const headersMark = <TabCount value={Object.keys(shown.headers).length} />;
+	const consoleMark = hasScriptError ? (
+		// A script error that logged nothing must still be flagged (issue #111).
+		// A dot rather than a count, so a future `count="none"` cannot silently
+		// delete the only failure signal - and it outranks the count, because the
+		// failure is the thing you need to see.
+		<TabErrorDot />
+	) : (
+		<TabCount value={consoleLogCount} />
+	);
+	const testsMark = <TestsResultChip results={testResults} />;
+	const eventsMark = <TabCount value={totalEvents ?? events.length} />;
+	const marks: Partial<Record<ResponseTab, ReactNode>> = {
+		headers: headersMark,
+		console: consoleMark,
+		tests: testsMark,
+		events: eventsMark,
+	};
+	// The failures a hidden tab must not swallow: the "+N" trigger flags them.
+	const attention: Partial<Record<ResponseTab, boolean>> = {
+		console: hasScriptError,
+		tests: testResults.some((t) => !t.passed),
+	};
+
 	return (
 		<div
 			className="relative flex-1 flex flex-col surface-card overflow-hidden"
@@ -522,7 +550,7 @@ export default function ResponseViewer() {
 							{isShown("headers") && (
 								<TabsTrigger value="headers">
 									<TabLabel>Headers</TabLabel>
-									<TabCount value={Object.keys(shown.headers).length} />
+									{headersMark}
 								</TabsTrigger>
 							)}
 							{isShown("cookies") && (
@@ -549,16 +577,7 @@ export default function ResponseViewer() {
 							{isShown("console") && (
 								<TabsTrigger value="console">
 									<TabLabel>Console</TabLabel>
-									{hasScriptError ? (
-										// A script error that logged nothing must still be flagged
-										// (issue #111). A dot rather than a count, so a future
-										// `count="none"` cannot silently delete the only failure
-										// signal - and it outranks the count, because the failure is
-										// the thing you need to see.
-										<TabErrorDot />
-									) : (
-										<TabCount value={consoleLogCount} />
-									)}
+									{consoleMark}
 								</TabsTrigger>
 							)}
 							{isShown("tests") && (
@@ -569,7 +588,7 @@ export default function ResponseViewer() {
 									    a result. Rendered unconditionally all the same: see
 									    `TestsResultChip`, which holds the width open so a chip
 									    arriving does not push Events and Raw sideways. */}
-									<TestsResultChip results={testResults} />
+									{testsMark}
 								</TabsTrigger>
 							)}
 							{/*
@@ -583,7 +602,7 @@ export default function ResponseViewer() {
 							{isShown("events") && (
 								<TabsTrigger value="events">
 									<TabLabel>Events</TabLabel>
-									<TabCount value={totalEvents ?? events.length} />
+									{eventsMark}
 								</TabsTrigger>
 							)}
 							{isShown("raw-request") && (
@@ -593,7 +612,13 @@ export default function ResponseViewer() {
 							)}
 						</TabsList>
 						<TabOverflowMenu
-							tabs={RESPONSE_TABS.filter((t) => overflowedIds.includes(t.id))}
+							tabs={RESPONSE_TABS.filter((t) => overflowedIds.includes(t.id)).map(
+								(t) => ({
+									...t,
+									mark: marks[t.id],
+									attention: attention[t.id],
+								})
+							)}
 							onSelect={setActiveTab}
 						/>
 					</div>

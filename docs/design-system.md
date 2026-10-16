@@ -3724,6 +3724,11 @@ drawn, and each tab's width budgets the mark (count, dot, result chip) it may
 grow, because marks animate in after the fit. The measured element is a wrapper
 that fills the row, not the list, which shrinks to what it draws.
 
+A hidden tab's mark follows its label in the menu item, and a hidden tab that
+holds a failure (a script error, a failing test run) puts a `TabErrorDot` on the
+`+N` trigger and says so in its `aria-label`: the menu is closed, so an item's
+own mark would otherwise be the only place the failure showed.
+
 A `TabsList` that scrolls natively (collection detail) draws the baseline bar
 directly under a 24px band of tabs. The scoped utility takes that strip to 4px
 and hides the thumb until the strip is hovered:

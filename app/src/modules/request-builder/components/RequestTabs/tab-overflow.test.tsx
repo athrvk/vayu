@@ -52,10 +52,16 @@ const ALL_LABELS = [
 ];
 
 /** The real context's `activeTab` is state in the builder; this keeps it in the harness. */
-function Harness({ initial }: { initial: RequestTab }) {
+function Harness({
+	initial,
+	patch = {},
+}: {
+	initial: RequestTab;
+	patch?: Partial<ReturnType<typeof createDefaultRequestState>>;
+}) {
 	const [activeTab, setActiveTab] = useState<RequestTab>(initial);
 	const value = {
-		request: createDefaultRequestState(),
+		request: { ...createDefaultRequestState(), ...patch },
 		activeTab,
 		setActiveTab,
 	} as unknown as RequestBuilderContextValue;
@@ -160,5 +166,51 @@ describe("the request tab strip, fitted to its pane", () => {
 		expect(settings).toBeDefined();
 		expect(settings).toHaveAttribute("aria-selected", "true");
 		expect(moreButton()).not.toBeNull();
+	});
+
+	describe("what the hidden tabs carry", () => {
+		/**
+		 * Settings is the last tab, so it is in the menu at this width; Info is
+		 * first, so the active tab (Params, kept on screen) is not it.
+		 */
+		const renderNarrowWith = (patch: Partial<ReturnType<typeof createDefaultRequestState>>) => {
+			stubStripWidth(240);
+			render(<Harness initial="params" patch={patch} />);
+		};
+		const menuItem = (label: string) => {
+			const item = screen
+				.getAllByRole("menuitem")
+				.find((el) => el.textContent?.startsWith(label));
+			if (!item) throw new Error(`no menu item starting "${label}"`);
+			return item;
+		};
+
+		it("draws a count on an item whose tab counts, and a dot on one that is only present", () => {
+			renderNarrowWith({
+				headers: [
+					{ id: "h1", key: "Accept", value: "*/*", enabled: true },
+					{ id: "h2", key: "X-Trace", value: "1", enabled: true },
+				],
+				description: "Looks up a user",
+				bodyMode: "json",
+			});
+			openMore(moreButton() as HTMLElement);
+			expect(menuItem("Headers")).toHaveTextContent("2");
+			expect(menuItem("Headers").querySelector('[data-slot="tab-presence-dot"]')).toBeNull();
+			expect(menuItem("Body").querySelector('[data-slot="tab-presence-dot"]')).not.toBeNull();
+		});
+
+		it("never marks the trigger: nothing on the request side is an error", () => {
+			renderNarrowWith({ description: "Looks up a user", bodyMode: "json" });
+			const more = moreButton() as HTMLElement;
+			expect(more).toHaveAccessibleName(/^\d+ more tabs$/);
+			expect(more.querySelector('[data-slot="tab-error-dot"]')).toBeNull();
+		});
+
+		it("draws nothing after the label of a tab that can never carry a mark", () => {
+			renderNarrowWith({});
+			openMore(moreButton() as HTMLElement);
+			expect(menuItem("Examples")).toHaveTextContent(/^Examples$/);
+		});
 	});
 });
