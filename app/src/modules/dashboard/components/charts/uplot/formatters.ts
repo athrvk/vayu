@@ -5,16 +5,20 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatMs, formatPercent, formatRate } from "@/lib/format-number";
+
 /** Shared value/axis formatters for the centralized charts. */
 
-export const fmtMs = (v: number | null | undefined): string =>
-	v == null ? "-" : v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${v.toFixed(0)}ms`;
+export const fmtMs = (v: number | null | undefined): string => {
+	if (v == null) return "-";
+	return v >= 1000 ? `${formatMs(v / 1000)}s` : `${formatMs(v)}ms`;
+};
 
 export const axisMs = (v: number): string =>
 	v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
 
 export const fmtRate = (v: number | null | undefined): string =>
-	v == null ? "-" : `${v.toFixed(0)}/s`;
+	v == null ? "-" : `${formatRate(v)}/s`;
 
 export const axisRate = (v: number): string =>
 	v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
@@ -23,7 +27,7 @@ export const fmtCount = (v: number | null | undefined): string =>
 	v == null ? "-" : `${Math.round(v)}`;
 
 export const fmtPct = (v: number | null | undefined): string =>
-	v == null ? "-" : `${v.toFixed(1)}%`;
+	v == null ? "-" : `${formatPercent(v)}%`;
 
 export const axisPct = (v: number): string => `${Math.round(v)}%`;
 

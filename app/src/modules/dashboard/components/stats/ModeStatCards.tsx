@@ -13,7 +13,7 @@
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
 
-import { formatNumber } from "@/lib/format-number";
+import { formatMs, formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
@@ -74,7 +74,7 @@ export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Mean iter time"
-			value={d.meanLatency.toFixed(0)}
+			value={formatMs(d.meanLatency)}
 			unit="ms"
 			infoTip={TOOLTIPS.meanIterTime}
 		/>
@@ -101,7 +101,7 @@ export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="p99 at peak"
-			value={value.toFixed(0)}
+			value={formatMs(value)}
 			unit="ms"
 			infoTip={TOOLTIPS.p99AtPeak}
 		/>
