@@ -6,6 +6,7 @@
  */
 
 import type { LoadTestLimits } from "@/constants/load-test";
+import { CONCURRENCY_LABEL, CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { NumberField } from "@/components/shared";
 import { usesDuration } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
@@ -49,10 +50,10 @@ export function ProfileFields({
 					id="lt-concurrency"
 					label={
 						mode === "ramp_up"
-							? "Target connections"
+							? `Target ${CONCURRENCY_UNIT}`
 							: mode === "capacity"
-								? "Stop climbing at"
-								: "Connections"
+								? `Maximum ${CONCURRENCY_UNIT}`
+								: CONCURRENCY_LABEL
 					}
 					value={profile.concurrency}
 					onChange={set("concurrency")}
@@ -132,7 +133,7 @@ export function ProfileFields({
 					hint={
 						mode === "capacity"
 							? "The first level the search measures. It steps up from here while latency holds."
-							: "Connections at the start of the ramp. The engine climbs from here to the target."
+							: `${CONCURRENCY_LABEL} at the start of the ramp. The engine climbs from here to the target.`
 					}
 				/>
 			)}

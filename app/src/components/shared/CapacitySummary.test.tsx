@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { CapacitySummary } from "./CapacitySummary";
+import { CONCURRENCY_LABEL } from "@/constants/load-test-modes";
 import type { RunReport } from "@/types/domain";
 
 type Capacity = NonNullable<RunReport["capacity"]>;
@@ -49,14 +50,20 @@ describe("CapacitySummary", () => {
 	it("states the sustained capacity and the level that gave out", () => {
 		render(<CapacitySummary capacity={capacity()} />);
 		const headline = screen.getByText(/Sustained/).textContent ?? "";
-		expect(headline).toContain("48");
+		expect(headline).toContain("48 virtual users");
 		expect(headline).toContain("23,400");
 		expect(headline).toContain("41.2ms");
 		expect(headline).toContain("200ms budget");
 
 		const knee = screen.getByText(/It gave out at/).textContent ?? "";
-		expect(knee).toContain("64");
+		expect(knee).toContain("64 virtual users");
 		expect(knee).toContain("312ms");
+		cleanup();
+	});
+
+	it("heads the levels table with the app's one name for the count", () => {
+		render(<CapacitySummary capacity={capacity()} />);
+		expect(screen.getByRole("columnheader", { name: CONCURRENCY_LABEL })).toBeTruthy();
 		cleanup();
 	});
 
@@ -91,7 +98,7 @@ describe("CapacitySummary", () => {
 			/>
 		);
 		expect(screen.queryByText(/It gave out at/)).toBeNull();
-		expect(screen.getByText("Reached the concurrency ceiling")).toBeTruthy();
+		expect(screen.getByText("Reached the virtual user ceiling")).toBeTruthy();
 		cleanup();
 	});
 
@@ -130,7 +137,7 @@ describe("CapacitySummary", () => {
 		// still reports the section (that the search judged nothing is itself
 		// the finding), with `levels: []` and no `maxHealthy*`. Falling into the
 		// "no level met the budget" branch would claim the target breached at
-		// the lowest concurrency tried, contradicting the badge beside it.
+		// the fewest virtual users tried, contradicting the badge beside it.
 		render(
 			<CapacitySummary
 				capacity={capacity({

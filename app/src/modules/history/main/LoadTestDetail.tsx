@@ -32,7 +32,11 @@ import {
 	ScrollArea,
 } from "@/components/ui";
 import { formatNumber } from "@/lib/format-number";
-import { loadTestTypeToLabel } from "@/constants/load-test-modes";
+import {
+	CONCURRENCY_LABEL,
+	formatConcurrency,
+	loadTestTypeToLabel,
+} from "@/constants/load-test-modes";
 import {
 	MethodBadge,
 	RunOutcomeBanner,
@@ -96,9 +100,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const virtualUsers = report.scenario?.virtualUsers;
 	const sequenceLabel = isScenarioLoad
 		? `${scenarioSteps.length} ${pluralize(scenarioSteps.length, "step")} per iteration` +
-			(virtualUsers === undefined
-				? ""
-				: ` - ${virtualUsers} ${pluralize(virtualUsers, "virtual user")}`)
+			(virtualUsers === undefined ? "" : ` - ${formatConcurrency(virtualUsers)}`)
 		: "";
 
 	// Fetch the persisted per-tick time-series once, here, so both the Overview
@@ -346,7 +348,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						)}
 						{config.concurrency != null && config.concurrency > 0 && (
 							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Concurrency:</span>
+								<span className="text-muted-foreground">{CONCURRENCY_LABEL}:</span>
 								<span className="text-foreground font-mono">
 									{config.concurrency}
 								</span>

@@ -10,13 +10,14 @@
  *
  * Uses the centralized uPlot charts (same components the live dashboard renders),
  * all wired to one `syncKey` so hovering any chart moves the cursor across all of
- * them - read RPS, connections and status composition at the same instant.
+ * them - read RPS, concurrency and status composition at the same instant.
  */
 
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Callout, ErrorState } from "@/components/shared";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
+import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL, isClosedLoopMode } from "@/constants/load-test-modes";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 import type { HostSleep } from "@/stores/host-sleep-store";
@@ -50,6 +51,8 @@ interface HistoricalChartsSectionProps {
 	isLoading?: boolean;
 	isFetchingMore?: boolean;
 	progress?: { loaded: number; total: number };
+	/** The run's mode, which decides whether its concurrency series counts virtual users or requests. */
+	mode?: string;
 	breakpoint?: Breakpoint | null;
 	anomalies?: Anomaly[] | null;
 	/** Intervals the host slept under the run, marked beside the anomaly windows. */
@@ -89,6 +92,7 @@ function SeriesCharts({
 	isLoading,
 	isFetchingMore,
 	progress,
+	mode,
 	breakpoint,
 	anomalies,
 	sleeps,
@@ -177,10 +181,13 @@ function SeriesCharts({
 
 			<Card>
 				<CardHeader className="pb-2">
-					<CardTitle>Active connections</CardTitle>
+					<CardTitle>
+						{isClosedLoopMode(mode) ? `Active ${CONCURRENCY_UNIT}` : IN_FLIGHT_LABEL}
+					</CardTitle>
 				</CardHeader>
 				<CardContent>
 					<ConnectionsChart
+						mode={mode}
 						history={data}
 						isCompleted
 						syncKey={SYNC_KEY}

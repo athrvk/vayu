@@ -40,7 +40,7 @@ export function HeroRow({ d }: { d: DashboardDerived }) {
 
 /** The two mode-sensitive hero cards (card #1 and card #2). */
 function renderModeCards(d: DashboardDerived) {
-	// "Current concurrency" is an instantaneous metric - it's 0 once the run
+	// "Active virtual users" is an instantaneous metric - it's 0 once the run
 	// ends. On completed runs show the peak reached instead, so the live-only
 	// concurrency cards stay meaningful in the historical view.
 	const activeConcurrency = d.isCompleted ? d.peakConcurrency : d.currentConcurrency;

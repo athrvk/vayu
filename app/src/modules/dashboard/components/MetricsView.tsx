@@ -24,6 +24,7 @@
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber } from "@/lib/format-number";
+import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
@@ -376,7 +377,7 @@ function MetricsView({
 						<div className="bg-card surface-card border border-border rounded-md p-3.5">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
-									Response time vs concurrency
+									Response time vs {CONCURRENCY_UNIT}
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
 								<div className="flex gap-3.5 text-label font-mono text-muted-foreground">

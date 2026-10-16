@@ -5434,6 +5434,22 @@ describe("dispatchTool", () => {
 		expect(Object.keys(loadRun!.inputSchema)).toContain("scenario");
 	});
 
+	test("start_load_run names the simulated-user count 'virtual users', not in-flight or concurrency (#2128)", () => {
+		// The app's one word for this number. The parameter names keep
+		// `concurrency`; their descriptions are what an agent reads, so they carry
+		// the same wording the UI does.
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		for (const field of ["concurrency", "startConcurrency", "stepDuration"]) {
+			expect(shape[field].description, field).toMatch(/virtual user/i);
+		}
+		// `concurrency` is not a rate-paced run's target, and the description says so.
+		expect(shape.concurrency.description).toMatch(/constant_rps/);
+		expect(shape.concurrency.description).not.toMatch(/^Target in-flight requests/);
+	});
+
 	test("both execute-shaped tools name the validation script the same way", () => {
 		// One field in the app - the request builder's Tests tab - drives both
 		// Send and a load run. It reached the engine under two names

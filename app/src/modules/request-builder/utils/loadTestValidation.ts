@@ -51,7 +51,7 @@ export function validateStartConcurrencyFloor(
 ): string | null {
 	if (mode !== "ramp_up" && mode !== "capacity") return null;
 	if (!Number.isFinite(startConcurrency)) {
-		return "Start must be a number of connections, and at least 1.";
+		return "Start must be a number of virtual users, and at least 1.";
 	}
 	if (startConcurrency < 1) {
 		return `Start (${startConcurrency}) must be at least 1, since the run climbs from it and can't climb from nothing. The engine rejects a lower start rather than raising it for you.`;
@@ -63,7 +63,7 @@ export function validateStartConcurrencyFloor(
  * Ramp-Up climbs from `startConcurrency` to `concurrency`. A start above the
  * target is a ramp *down*, which contradicts the profile the user picked and is
  * almost always a transposed pair rather than an intent - the engine would
- * happily run it, shedding connections over the ramp.
+ * happily run it, shedding virtual users over the ramp.
  *
  * Returns a user-facing message when invalid, or null (including for every
  * non-ramp mode).

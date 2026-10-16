@@ -23,7 +23,7 @@ import { useClientSettingsStore } from "@/stores";
 import { DEFAULT_LOAD_TEST_CEILINGS, LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
 
 const ceilings = () => useClientSettingsStore.getState().loadTestCeilings;
-const connectionsField = () => screen.getByLabelText(/max connections/i) as HTMLInputElement;
+const connectionsField = () => screen.getByLabelText(/max virtual users/i) as HTMLInputElement;
 
 beforeEach(() => {
 	cleanup();
@@ -106,7 +106,7 @@ describe("LoadTestingPanel", () => {
 		// one side without the other is the thing that makes this screen unclear.
 		render(<LoadTestingPanel />);
 		for (const label of [
-			/max connections/i,
+			/max virtual users/i,
 			/max target rate/i,
 			/max duration/i,
 			/max requests/i,
