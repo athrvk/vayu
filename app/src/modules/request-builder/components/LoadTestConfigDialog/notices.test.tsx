@@ -1,11 +1,15 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Copyright (c) 2026 Atharva Kusumbia
  *
  * This source code is licensed under the Apache 2.0 license found in the
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { buildNotices, type NoticeInputs } from "./notices";
 
 const CLEAN: NoticeInputs = {
@@ -53,5 +57,38 @@ describe("buildNotices", () => {
 
 	it("says nothing about scripts when the request has no pre-request script", () => {
 		expect(keys({ hasPreRequestScript: false, scriptsOverride: "asMarked" })).toEqual([]);
+	});
+
+	describe("carried budgets (#2194)", () => {
+		const carriedBudgets = {
+			summary: "Budgets carried over from Orders: p99.",
+			onClear: vi.fn(),
+		};
+
+		it("raises an info notice only when something is carried", () => {
+			expect(keys({ carriedBudgets })).toEqual(["carried-budgets"]);
+			expect(keys({ carriedBudgets: null })).toEqual([]);
+		});
+
+		it("sorts beneath a blocking notice", () => {
+			expect(keys({ carriedBudgets, budgetsError: "p99 is out of range" })).toEqual([
+				"budgets",
+				"carried-budgets",
+			]);
+		});
+
+		it("shows the sentence and a button that clears", () => {
+			// Mutation check: drop the `action` and the click finds no button.
+			const onClear = vi.fn();
+			const [notice] = buildNotices({
+				...CLEAN,
+				carriedBudgets: { summary: "Budgets carried over from Orders: p99.", onClear },
+			});
+			render(<>{notice.node}</>);
+			expect(screen.getByText(/carried over from Orders/)).toBeInTheDocument();
+			fireEvent.click(screen.getByRole("button", { name: "Clear carried-over budgets" }));
+			expect(onClear).toHaveBeenCalledTimes(1);
+			cleanup();
+		});
 	});
 });

@@ -1,0 +1,173 @@
+/**
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the Apache 2.0 license found in the
+ * LICENSE file in the "app" directory of this source tree.
+ */
+
+import { describe, it, expect } from "vitest";
+import { emptyBudgetDraft, type BudgetDraft, type CustomBudgetDraft } from "./budgets";
+import {
+	NO_CARRIED,
+	budgetsChanged,
+	clearCarried,
+	describeCarried,
+	findCarriedBudgets,
+	stillCarried,
+} from "./carried-budgets";
+
+const draft = (values: Partial<BudgetDraft> = {}): BudgetDraft => ({
+	...emptyBudgetDraft(),
+	...values,
+});
+const row = (values: Partial<CustomBudgetDraft> = {}): CustomBudgetDraft => ({
+	id: "c1",
+	name: "cart",
+	stat: "p95",
+	value: "5",
+	...values,
+});
+
+describe("findCarriedBudgets", () => {
+	it("calls a p99 the memo never recorded the SLO seed", () => {
+		expect(findCarriedBudgets(undefined, []).fixed).toEqual({ latencyP99Ms: "slo" });
+	});
+
+	it("calls a non-blank memo value carried from the memo, p99 included", () => {
+		const { fixed } = findCarriedBudgets({ latencyP99Ms: "150", maxErrorRatePct: "2" }, []);
+		expect(fixed).toEqual({ latencyP99Ms: "memo", maxErrorRatePct: "memo" });
+	});
+
+	it("does not carry a field the memo recorded as cleared", () => {
+		// A cleared p99 is a decision, not a seed waiting to happen.
+		expect(findCarriedBudgets({ latencyP99Ms: "", latencyP50Ms: "  " }, []).fixed).toEqual({});
+	});
+
+	it("carries the custom rows that name a metric and a ceiling", () => {
+		const rows = [row({ id: "a" }), row({ id: "b", value: "" }), row({ id: "c", name: "" })];
+		expect(findCarriedBudgets({ latencyP99Ms: "" }, rows).customIds).toEqual(["a"]);
+	});
+});
+
+describe("stillCarried", () => {
+	const initial = {
+		budgets: draft({ latencyP99Ms: "150", maxErrorRatePct: "2" }),
+		customBudgets: [row()],
+	};
+	const carried = findCarriedBudgets(initial.budgets, initial.customBudgets);
+
+	it("keeps everything while the draft is as it opened", () => {
+		expect(stillCarried(carried, initial, initial)).toEqual(carried);
+	});
+
+	it("drops a field the user edited, cleared or typed over, and keeps the rest", () => {
+		const current = {
+			...initial,
+			budgets: draft({ latencyP99Ms: "90", maxErrorRatePct: "2" }),
+		};
+		expect(stillCarried(carried, initial, current).fixed).toEqual({ maxErrorRatePct: "memo" });
+
+		const cleared = { ...initial, budgets: draft({ maxErrorRatePct: "2" }) };
+		expect(stillCarried(carried, initial, cleared).fixed).toEqual({ maxErrorRatePct: "memo" });
+	});
+
+	it("drops a custom row that was edited or removed", () => {
+		const edited = { ...initial, customBudgets: [row({ value: "9" })] };
+		expect(stillCarried(carried, initial, edited).customIds).toEqual([]);
+		const removed = { ...initial, customBudgets: [] };
+		expect(stillCarried(carried, initial, removed).customIds).toEqual([]);
+	});
+
+	it("claims nothing for a row the user added", () => {
+		const added = { ...initial, customBudgets: [row(), row({ id: "mine" })] };
+		expect(stillCarried(carried, initial, added).customIds).toEqual(["c1"]);
+	});
+});
+
+describe("clearCarried", () => {
+	it("blanks exactly the carried fields and drops exactly the carried rows", () => {
+		const carried = {
+			fixed: { latencyP99Ms: "slo", maxErrorRatePct: "memo" },
+			customIds: ["c1"],
+		} as const;
+		const result = clearCarried(
+			{ fixed: { ...carried.fixed }, customIds: [...carried.customIds] },
+			draft({ latencyP99Ms: "200", maxErrorRatePct: "2", minThroughputRps: "50" }),
+			[row(), row({ id: "mine" })]
+		);
+		expect(result.budgets).toEqual(draft({ minThroughputRps: "50" }));
+		expect(result.customBudgets.map((r) => r.id)).toEqual(["mine"]);
+	});
+
+	it("is a no-op for nothing carried", () => {
+		const budgets = draft({ latencyP99Ms: "200" });
+		expect(clearCarried(NO_CARRIED, budgets, []).budgets).toEqual(budgets);
+	});
+});
+
+describe("budgetsChanged", () => {
+	const base = { budgets: draft({ latencyP99Ms: "150" }), customBudgets: [row()] };
+
+	it("is false for the same budgets", () => {
+		expect(budgetsChanged(base, { budgets: { ...base.budgets }, customBudgets: [row()] })).toBe(
+			false
+		);
+	});
+
+	it("sees a changed fixed field, custom value, added row and removed row", () => {
+		expect(budgetsChanged(base, { ...base, budgets: draft({ latencyP99Ms: "" }) })).toBe(true);
+		expect(budgetsChanged(base, { ...base, customBudgets: [row({ value: "6" })] })).toBe(true);
+		expect(budgetsChanged(base, { ...base, customBudgets: [row(), row({ id: "x" })] })).toBe(
+			true
+		);
+		expect(budgetsChanged(base, { ...base, customBudgets: [] })).toBe(true);
+	});
+});
+
+describe("describeCarried", () => {
+	const budgets = draft({ latencyP99Ms: "150", maxErrorRatePct: "2" });
+
+	it("names the request that set a memo value", () => {
+		const carried = findCarriedBudgets(budgets, []);
+		expect(describeCarried(carried, budgets, [], { requestName: "Orders" })).toBe(
+			"Budgets carried over from Orders: p99 latency at most 150 ms, Error rate at most 2%. They will judge this run."
+		);
+	});
+
+	it("falls back to the last load test without an origin", () => {
+		const carried = findCarriedBudgets(budgets, []);
+		expect(describeCarried(carried, budgets, [], undefined)).toContain(
+			"carried over from your last load test"
+		);
+	});
+
+	it("attributes a lone SLO seed to Settings, not to a past run", () => {
+		const seeded = draft({ latencyP99Ms: "200" });
+		const text = describeCarried(findCarriedBudgets(undefined, []), seeded, [], {
+			requestName: "Orders",
+		});
+		expect(text).toBe(
+			"Budgets prefilled: p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+		);
+	});
+
+	it("annotates only the seeded field when memo values sit beside it", () => {
+		const mixed = draft({ latencyP50Ms: "80", latencyP99Ms: "200" });
+		const carried = findCarriedBudgets({ latencyP50Ms: "80" }, []);
+		expect(describeCarried(carried, mixed, [], undefined)).toBe(
+			"Budgets carried over from your last load test: p50 latency at most 80 ms, p99 latency at most 200 ms (from Settings > Dashboard > SLO threshold). They will judge this run."
+		);
+	});
+
+	it("lists carried custom rows by their engine key", () => {
+		const rows = [row()];
+		const carried = findCarriedBudgets({ latencyP99Ms: "" }, rows);
+		expect(describeCarried(carried, draft(), rows, { requestName: "Orders" })).toBe(
+			"Budgets carried over from Orders: custom.cart.p95 at most 5. They will judge this run."
+		);
+	});
+
+	it("is null when nothing is carried", () => {
+		expect(describeCarried(NO_CARRIED, draft(), [], undefined)).toBeNull();
+	});
+});

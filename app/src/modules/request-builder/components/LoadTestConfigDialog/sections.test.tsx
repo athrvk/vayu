@@ -34,7 +34,7 @@ function renderBudgets(disabled: boolean) {
 			disabled={disabled}
 		/>
 	);
-	fireEvent.click(screen.getByRole("button", { name: /budgets/i }));
+	fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
 }
 
 describe("BudgetsSection", () => {
