@@ -217,8 +217,7 @@ export function formatResponseTime(ms: number): string {
  */
 export const ENGINE_COST_TIP =
 	"Time Vayu's engine spent on this send: building the request, auth, cookies and " +
-	"assembling the answer. It leaves out the network transfer, your scripts and rendering. " +
-	"A token fetched on first use counts as auth.";
+	"assembling the answer. It leaves out the network transfer, your scripts and rendering.";
 
 /** A figure the engine reported: absent, NaN and negative all mean "nothing to show". */
 export const isReportedMs = (ms: number | undefined): ms is number =>
