@@ -14,9 +14,7 @@
  */
 
 /** In the order the engine's `RUN_EXPORT_FORMATS` lists them. */
-export const MCP_EXPORT_FORMAT_IDS: readonly string[] = ["json"];
+export const MCP_EXPORT_FORMAT_IDS: readonly string[] = ["json", "markdown"];
 
-/** Markdown when the engine writes it, else the format it always has. */
-export const defaultMcpExportFormat: string = MCP_EXPORT_FORMAT_IDS.includes("markdown")
-	? "markdown"
-	: "json";
+/** What an agent reads best: the engine's default is `json`, which suits a program. */
+export const defaultMcpExportFormat = "markdown";

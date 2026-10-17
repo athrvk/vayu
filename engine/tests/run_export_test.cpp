@@ -355,16 +355,44 @@ TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {
     { "target", "GET https://x.test/a" } }));
 }
 
-TEST_F (RunExportTest, LaterFormatsAreNamedNotAvailable) {
+TEST_F (RunExportTest, HtmlIsNamedNotAvailable) {
     seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
-    for (const auto& [format, issue] :
-    { std::pair{ "markdown", "#2131" }, std::pair{ "html", "#2135" } }) {
-        auto [status, body] = export_run_report_response (
-        *db_, json{ { "runId", "run_load" }, { "format", format } });
-        EXPECT_EQ (status, 400);
-        EXPECT_EQ (body["error"]["code"], "format_not_available");
-        EXPECT_NE (body["error"]["message"].get<std::string> ().find (issue), std::string::npos)
-        << body.dump ();
+    auto [status, body] = export_run_report_response (
+    *db_, json{ { "runId", "run_load" }, { "format", "html" } });
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["code"], "format_not_available");
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("#2135"), std::string::npos)
+    << body.dump ();
+}
+
+TEST_F (RunExportTest, MarkdownIsTextMarkdownNamedAfterTheRun) {
+    seed_leak_run ("run_leak");
+    auto [status, envelope] = export_run_report_response (
+    *db_, json{ { "runId", "run_leak" }, { "format", "markdown" } });
+    ASSERT_EQ (status, 200) << envelope.dump ();
+    EXPECT_EQ (envelope["mimeType"], "text/markdown");
+    EXPECT_EQ (envelope["fileName"], "Checkout load 2026-10-05 0810.run.md");
+    EXPECT_EQ (envelope["notes"]["urlCredentialsOmitted"], 2);
+    const std::string text = envelope["text"].get<std::string> ();
+    EXPECT_TRUE (text.starts_with ("# Checkout load\n")) << text;
+    EXPECT_NE (text.find ("| Error rate "), std::string::npos) << text;
+}
+
+TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheMarkdown) {
+    seed_leak_run ("run_leak");
+    seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
+    // The leak run is exported itself, and again as the base of a comparison.
+    for (const json& body : { json{ { "runId", "run_leak" }, { "format", "markdown" } },
+         json{ { "runId", "run_load" }, { "baseRunId", "run_leak" }, { "format", "markdown" } } }) {
+        auto [status, envelope] = export_run_report_response (*db_, body);
+        ASSERT_EQ (status, 200) << envelope.dump ();
+        const std::string text = envelope["text"].get<std::string> ();
+        ASSERT_FALSE (text.empty ());
+        for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY",
+             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+            EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
+                                                              << text;
+        }
     }
 }
 

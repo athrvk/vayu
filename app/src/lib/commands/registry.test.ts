@@ -428,7 +428,11 @@ describe("the run-export commands", () => {
 	};
 
 	it("exist only while a finished run's menu contributes the export slot", () => {
-		expect(exportIds).toEqual(["export-run-save-json"]);
+		expect(exportIds).toEqual([
+			"export-run-save-json",
+			"export-run-save-markdown",
+			"export-run-copy-markdown",
+		]);
 		const ids = (ctx: CommandContext) => availableCommands(ctx).map((c) => c.id);
 		for (const id of exportIds) {
 			expect(ids(runTab)).not.toContain(id);
@@ -446,6 +450,15 @@ describe("the run-export commands", () => {
 		);
 	});
 
+	it("say copy for the clipboard and save for the file", () => {
+		expect(commandTitle(commandById("export-run-copy-markdown"), runTab)).toBe(
+			'Copy "/orders" as Markdown'
+		);
+		expect(commandTitle(commandById("export-run-save-markdown"), runTab)).toBe(
+			'Save "/orders" as Markdown'
+		);
+	});
+
 	it("declare no chord", () => {
 		for (const id of exportIds) expect(commandById(id).shortcut).toBeUndefined();
 	});
@@ -457,7 +470,8 @@ describe("the run-export commands", () => {
 			surfaces: { ...surfaces(), exportRun: (action) => delivered.push(action) },
 		};
 		commandById("export-run-save-json").perform(ctx);
-		expect(delivered.map((action) => action.id)).toEqual(["save-json"]);
+		commandById("export-run-copy-markdown").perform(ctx);
+		expect(delivered.map((action) => action.id)).toEqual(["save-json", "copy-markdown"]);
 	});
 });
 

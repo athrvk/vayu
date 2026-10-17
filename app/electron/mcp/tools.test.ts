@@ -6968,14 +6968,15 @@ describe("dispatchTool", () => {
 		const lastOptions = (client: EngineClient) =>
 			vi.mocked(client.exportRunReport).mock.calls[0][1];
 
-		test("asks for the default format without a series", async () => {
+		test("asks for Markdown, the format an agent reads best, without a series", async () => {
 			const client = fakeClient();
 			const res = await exportWith(client, {});
 			expect(res.isError).toBeFalsy();
 			expect(client.exportRunReport).toHaveBeenCalledTimes(1);
 			expect(vi.mocked(client.exportRunReport).mock.calls[0][0]).toBe("run_b");
+			expect(defaultMcpExportFormat).toBe("markdown");
 			expect(lastOptions(client)).toEqual({
-				format: defaultMcpExportFormat,
+				format: "markdown",
 				series: "none",
 				baseRunId: undefined,
 			});
@@ -6991,6 +6992,12 @@ describe("dispatchTool", () => {
 				baseRunId: "run_a",
 			});
 			expect(client.listBaselineRuns).not.toHaveBeenCalled();
+		});
+
+		test("offers JSON on request, for a program that parses the document", async () => {
+			const client = fakeClient();
+			await exportWith(client, { format: "json" });
+			expect(lastOptions(client)).toMatchObject({ format: "json", series: "none" });
 		});
 
 		test("baseline: true compares against the run pinned for the request", async () => {
