@@ -2302,8 +2302,8 @@ export interface PostmanEnvironmentExportResponse {
 }
 
 /**
- * The formats `POST /export/run-report` names. `json` and `markdown` (#2131)
- * are written; `html` (#2135) answers `400 format_not_available`.
+ * The formats `POST /export/run-report` writes: `json`, `markdown` (#2131) and
+ * `html` (#2135), the last one text/html with the charts drawn inline.
  */
 export type RunReportExportFormat = "json" | "markdown" | "html";
 

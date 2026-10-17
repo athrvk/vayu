@@ -23,6 +23,7 @@ the request in.
 | **UI** | Native desktop app | Java Swing (dated) |
 | **UI responsiveness** | High (sidecar architecture) | Laggy under load |
 | **Memory usage** | Low (direct memory) | High (RAM-intensive) |
+| **Shareable run summary** | One-file HTML report with charts, a Markdown summary and JSON, from the Export menu\*\*\* | HTML dashboard report generated from a results file, written as a folder of pages and scripts |
 | **Protocol breadth** | HTTP, GraphQL, SSE | HTTP, JDBC, JMS, FTP, LDAP, SMTP and more |
 | **Scripting** | QuickJS (`pm.*` syntax) | Groovy / BeanShell |
 | **Distributed execution** | No - single machine | Yes (controller + workers) |
@@ -51,6 +52,11 @@ element model, and a class this importer has no mapping for (a listener, a
 cookie manager, a protocol Vayu's HTTP engine does not speak) is counted by
 its own class name rather than silently dropped. Detail:
 [the JMeter import doc](../app/import-collections/jmeter.md).
+
+\*\*\* **What the file leaves out.** The report holds aggregates and time series
+only, never traces, samples or request values, and the HTML page runs no script
+and loads nothing. Detail:
+[the HTML report](../engine/api-reference.md#the-html-report).
 
 ## The engine, and what it does not cost you
 

@@ -30,10 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cstdlib>
-#include <filesystem>
 #include <fstream>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -41,8 +38,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "run_export_fixtures.hpp"
 #include "run_export_schema_support.hpp"
 #include "vayu/core/run_export_markdown.hpp"
+#include "vayu/core/run_export_view.hpp"
 
 namespace {
 
@@ -50,6 +49,11 @@ using nlohmann::json;
 using nlohmann::ordered_json;
 using vayu::core::escape_markdown_cell;
 using vayu::core::render_run_export_markdown;
+using vayu::tests::case_path;
+using vayu::tests::env_is_set;
+using vayu::tests::fixtures_dir;
+using vayu::tests::read_bytes;
+using vayu::tests::read_document;
 
 /// Everything the golden pairs hold, in the order of the issue's list.
 constexpr auto CASES = std::to_array<std::string_view> (
@@ -58,48 +62,6 @@ constexpr auto CASES = std::to_array<std::string_view> (
 
 /// 6 KB: what an agent reads for one run without it crowding out the rest.
 constexpr std::size_t SIZE_LIMIT_BYTES = 6144;
-
-std::filesystem::path fixtures_dir () {
-    return std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "tests" / "fixtures";
-}
-
-std::filesystem::path case_path (std::string_view name, std::string_view suffix) {
-    return fixtures_dir () / "run-export" / (std::string (name) + std::string (suffix));
-}
-
-/// MSVC deprecates `std::getenv` (C4996) and this suite builds with `/W4 /WX`,
-/// so the deprecation is followed, as `script_types_test.cpp` does.
-bool env_is_set (const char* name) {
-#ifdef _WIN32
-    char* value   = nullptr;
-    size_t length = 0;
-    if (_dupenv_s (&value, &length, name) != 0 || value == nullptr) {
-        return false;
-    }
-    const std::unique_ptr<char, decltype (&std::free)> owned (value, &std::free);
-    return true;
-#else
-    // NOLINTNEXTLINE(concurrency-mt-unsafe)
-    return std::getenv (name) != nullptr;
-#endif
-}
-
-std::string read_bytes (const std::filesystem::path& path) {
-    std::ifstream in (path, std::ios::binary);
-    if (!in.good ()) {
-        ADD_FAILURE () << "fixture missing: " << path;
-        return {};
-    }
-    std::ostringstream buffer;
-    buffer << in.rdbuf ();
-    return buffer.str ();
-}
-
-ordered_json read_document (std::string_view name) {
-    const std::string text = read_bytes (case_path (name, ".document.json"));
-    EXPECT_FALSE (text.empty ()) << name;
-    return ordered_json::parse (text);
-}
 
 // --- reading what the renderer wrote ------------------------------------------
 

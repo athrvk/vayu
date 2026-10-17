@@ -176,8 +176,10 @@ add_executable(vayu_tests
     postman_export_route_test.cpp
     run_export_test.cpp
     run_export_formats_test.cpp
+    run_export_html_test.cpp
     run_export_markdown_test.cpp
     run_export_schema_test.cpp
+    svg_chart_test.cpp
     vayu_extensions_test.cpp
     workspace_backup_test.cpp
     trash_test.cpp

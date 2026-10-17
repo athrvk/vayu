@@ -21,6 +21,7 @@
  * builder reads nothing, so it is testable without a database.
  */
 
+#include "vayu/core/run_export_html.hpp"
 #include "vayu/core/run_export_markdown.hpp"
 
 #include <nlohmann/json.hpp>
@@ -58,14 +59,15 @@ struct RunExportRun {
 /// A document renderer: the finished document in, the file's text out.
 using RunExportRenderer = std::string (*) (const nlohmann::ordered_json& document);
 
-/// One output format of the export. A row with no renderer is accepted by
-/// name and refused as `format_not_available`, naming @ref tracked_by.
+/// One output format of the export.
 struct RunExportFormat {
     std::string_view name;
     std::string_view file_suffix;
     std::string_view mime_type;
     RunExportRenderer render;
-    std::string_view tracked_by;
+    /// Whether the renderer draws the time series, so the route reads every
+    /// tick for it whatever `series` asked.
+    bool needs_series;
 };
 
 /// The document as indented JSON text.
@@ -73,9 +75,9 @@ struct RunExportFormat {
 
 /// Every format the route accepts by name; the first is the default.
 inline constexpr auto RUN_EXPORT_FORMATS = std::to_array<RunExportFormat> ({
-{ "json", ".run.json", "application/json", render_run_export_json, "" },
-{ "markdown", ".run.md", "text/markdown", render_run_export_markdown, "#2131" },
-{ "html", ".run.html", "text/html", nullptr, "#2135" },
+{ "json", ".run.json", "application/json", render_run_export_json, false },
+{ "markdown", ".run.md", "text/markdown", render_run_export_markdown, false },
+{ "html", ".run.html", "text/html", render_run_export_html, true },
 });
 
 /// The @ref RUN_EXPORT_FORMATS row named @p name, or nullptr.
