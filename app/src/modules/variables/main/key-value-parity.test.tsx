@@ -322,7 +322,7 @@ describe("field height", () => {
 describe("destructive row action", () => {
 	it("uses the shared Button variant in the variables table, not a hand-rolled destructive style", () => {
 		renderVariables(true);
-		const remove = screen.getByRole("button", { name: "Delete variable" });
+		const remove = screen.getByRole("button", { name: "Delete test" });
 		// Read off the primitive rather than hardcoded: a change to what
 		// `rowActionDestructive` paints has to reach this table too.
 		for (const cls of variantClasses("rowActionDestructive")) {
@@ -337,7 +337,7 @@ describe("destructive row action", () => {
 		// `focus-visible:` on the button, this one through `group-focus-within:`
 		// on the row - so the assertion is that each declares one of them.
 		renderVariables(true);
-		const varsRemove = screen.getByRole("button", { name: "Delete variable" });
+		const varsRemove = screen.getByRole("button", { name: "Delete test" });
 		const { container: kv } = renderKeyValueRow();
 		const kvRemove = within(kv as HTMLElement).getByRole("button", { name: "Remove row" });
 		for (const button of [varsRemove, kvRemove]) {

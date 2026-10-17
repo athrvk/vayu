@@ -166,7 +166,7 @@ describe("variables editor - per-row reveal state is keyed by row, not by positi
 		expect(isMasked("beta-value")).toBe(true);
 
 		// Delete `alpha`, the revealed one. `beta` moves into its position.
-		fireEvent.click(screen.getAllByRole("button", { name: "Delete variable" })[0]);
+		fireEvent.click(screen.getByRole("button", { name: "Delete alpha" }));
 
 		expect(screen.queryByDisplayValue("alpha-value")).toBeNull();
 		expect(isMasked("beta-value")).toBe(true);
@@ -178,7 +178,7 @@ describe("variables editor - per-row reveal state is keyed by row, not by positi
 		renderEditor(twoSecrets());
 
 		reveal("beta-value");
-		fireEvent.click(screen.getAllByRole("button", { name: "Delete variable" })[0]);
+		fireEvent.click(screen.getByRole("button", { name: "Delete alpha" }));
 
 		expect(isMasked("beta-value")).toBe(false);
 	});
