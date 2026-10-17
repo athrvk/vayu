@@ -12,14 +12,17 @@
  * A file the OS handed Vayu to import (#1364): dropped on the Dock or taskbar
  * icon, or a path on the command line. `useOpenIntent` queues the path on
  * `useImportModalStore`; this is the dialog's half, which reads it back once
- * and imports it like any other File-tab pick.
+ * and imports it like any other File-tab pick - including when it arrives while
+ * the dialog is already open (#2275), where `isOpen` does not change.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportModal } from "./ImportModal";
-import { useImportModalStore } from "@/stores";
+import { useImportModalStore, useToastStore } from "@/stores";
+import { apiService } from "@/services/api";
+import { fileBaseName } from "@/lib/file-path";
 import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 function renderModal() {
@@ -39,12 +42,14 @@ function stubReadSpecFile(
 	return readSpecFile;
 }
 
-describe("ImportModal - a pending path from the OS", () => {
-	beforeEach(() => {
-		vi.restoreAllMocks();
-		delete (window as unknown as { electronAPI?: unknown }).electronAPI;
-	});
+beforeEach(() => {
+	vi.restoreAllMocks();
+	delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+	useImportModalStore.setState({ isOpen: false, pendingPath: null, pendingFiles: [] });
+	useToastStore.setState({ toasts: [] });
+});
 
+describe("ImportModal - a pending path from the OS", () => {
 	it("reads the path back through readSpecFile and imports it", async () => {
 		stubParse(() =>
 			result({
@@ -110,5 +115,73 @@ describe("ImportModal - a pending path from the OS", () => {
 				screen.getByText(/spec\.json is larger than the 10 MB import limit\./i)
 			).toBeInTheDocument()
 		);
+	});
+});
+
+describe("ImportModal - a path from the OS while the dialog is open", () => {
+	/** Each path reads back as a document named for it, and parses to a collection named for it. */
+	function stubTwoSpecs() {
+		stubParse((payload) =>
+			result({
+				collections: [
+					collection({ name: `Parsed ${payload.fileName}`, requests: [request()] }),
+				],
+			})
+		);
+		return stubReadSpecFile(async (specPath) => {
+			const fileName = fileBaseName(specPath);
+			return { bytes: new TextEncoder().encode("{}"), fileName };
+		});
+	}
+
+	const toastMessages = () => useToastStore.getState().toasts.map((t) => t.message);
+
+	it("imports a path that arrives with the dialog already open, with no close and reopen", async () => {
+		const readSpecFile = stubTwoSpecs();
+		useImportModalStore.setState({ isOpen: true });
+		renderModal();
+		expect(readSpecFile).not.toHaveBeenCalled();
+
+		act(() => useImportModalStore.getState().openWithFile("/tmp/a.json"));
+
+		await waitFor(() => expect(screen.getByText(/Parsed a\.json/)).toBeInTheDocument());
+		expect(readSpecFile).toHaveBeenCalledWith("/tmp/a.json", "a.json");
+		expect(useImportModalStore.getState().isOpen).toBe(true);
+		expect(useImportModalStore.getState().pendingPath).toBeNull();
+		// Nothing was under review, so there is nothing to apologise for.
+		expect(toastMessages()).toEqual([]);
+	});
+
+	it("replaces a preview on screen and says so, rather than dropping either file", async () => {
+		const readSpecFile = stubTwoSpecs();
+		useImportModalStore.setState({ isOpen: true, pendingPath: "/tmp/a.json" });
+		renderModal();
+		await waitFor(() => expect(screen.getByText(/Parsed a\.json/)).toBeInTheDocument());
+
+		act(() => useImportModalStore.getState().openWithFile("/tmp/b.json"));
+
+		await waitFor(() => expect(screen.getByText(/Parsed b\.json/)).toBeInTheDocument());
+		expect(screen.queryByText(/Parsed a\.json/)).not.toBeInTheDocument();
+		expect(readSpecFile).toHaveBeenCalledTimes(2);
+		expect(toastMessages()).toEqual([expect.stringContaining('"b.json"')]);
+	});
+
+	it("refuses a path while an apply is in flight, and says so", async () => {
+		const readSpecFile = stubTwoSpecs();
+		// An apply that never answers: the dialog stays in the middle of it.
+		vi.spyOn(apiService, "applyImport").mockImplementation(() => new Promise(() => {}));
+		useImportModalStore.setState({ isOpen: true, pendingPath: "/tmp/a.json" });
+		renderModal();
+		await waitFor(() => expect(screen.getByText(/Parsed a\.json/)).toBeInTheDocument());
+		fireEvent.click(screen.getByRole("button", { name: /^Import/i }));
+		await waitFor(() => expect(apiService.applyImport).toHaveBeenCalled());
+
+		act(() => useImportModalStore.getState().openWithFile("/tmp/b.json"));
+
+		await waitFor(() => expect(toastMessages()).toEqual([expect.stringContaining('"b.json"')]));
+		// The apply's own preview is untouched, and the new file was never read.
+		expect(screen.getByText(/Parsed a\.json/)).toBeInTheDocument();
+		expect(readSpecFile).toHaveBeenCalledTimes(1);
+		expect(useImportModalStore.getState().pendingPath).toBeNull();
 	});
 });
