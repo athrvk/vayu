@@ -129,6 +129,18 @@ export interface RunListQuery {
 }
 
 /**
+ * What `POST /export/run-report` takes beside the run id; an absent member is
+ * the engine's default (`json`, the full series, no comparison).
+ */
+export interface RunReportExportOptions {
+	/** "json" | "markdown" | "html"; only "json" is written yet (#2131, #2135). */
+	format?: string;
+	series?: "full" | "none";
+	/** A second finished load run, which fills the document's `comparison`. */
+	baseRunId?: string;
+}
+
+/**
  * What one budgeted read of a streaming run's events produced (issue #575).
  *
  * `completed` and `capReached` are the two ways a read can stop short, and they
@@ -528,6 +540,22 @@ export class EngineClient {
 
 	getRunReport(runId: string, signal?: AbortSignal): Promise<unknown> {
 		return this.request("GET", `/runs/${encodeURIComponent(runId)}/report`, undefined, signal);
+	}
+
+	/**
+	 * A finished load run as a shareable document (`POST /export/run-report`,
+	 * issue #2127): `{text, fileName, mimeType, notes}`, built by allowlist so
+	 * no trace, sample, header value or body is in it. A POST that writes
+	 * nothing. A missing run or base is a 404, a run still executing a 409 and
+	 * a design or collection-sequence run a 400, each an
+	 * {@link EngineRequestError} carrying the engine's sentence.
+	 */
+	exportRunReport(
+		runId: string,
+		options: RunReportExportOptions = {},
+		signal?: AbortSignal
+	): Promise<unknown> {
+		return this.request("POST", "/export/run-report", { runId, ...options }, signal);
 	}
 
 	/**

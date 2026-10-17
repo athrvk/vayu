@@ -30,6 +30,7 @@
 #include <ctime>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vayu::core {
@@ -231,6 +232,12 @@ const PostmanExportEnvironment& environment);
 /// `PostmanEnvironmentExportNotes` as the route answers with it.
 [[nodiscard]] nlohmann::json postman_environment_export_notes_json (
 const PostmanEnvironmentExportNotes& notes);
+
+/// @p name as a file name stem: every character a filesystem refuses
+/// (`<>:"/\|?*`, control characters) replaced by `_`, a trailing dot or space
+/// and leading spaces dropped; @p fallback when nothing is left. Every export
+/// names its file through this (`core/run_export.hpp` too).
+[[nodiscard]] std::string safe_file_stem (const std::string& name, std::string_view fallback);
 
 /// The Postman object form of @p raw (`raw`, `protocol`, `host[]`, `port`,
 /// `path[]`, `hash`), split the way Postman's own URL parser splits it.

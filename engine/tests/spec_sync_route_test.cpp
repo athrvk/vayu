@@ -46,6 +46,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 
 using nlohmann::json;
 
@@ -68,10 +69,6 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
 const std::string& example_id);
-// Defined in runs.cpp - the reader that must not resolve coverage from the
-// collection's binding as it stands now.
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
 } // namespace vayu::http::routes
 
 namespace {

@@ -2172,6 +2172,11 @@ with `placeholderData: keepPreviousData` so the summary stays while the other
 answer assembles. It is not under `specs` because a Postman document reads no
 binding.
 
+The run report export (`useRunReportExport` in `queries/exports.ts`, issue
+#2127) is a **mutation** and has no key: a click asks again, the answer is
+downloaded the moment it arrives, and its `generatedAt` makes every document a
+new one, so there is nothing a cache could serve.
+
 `specs.match(collectionId, fingerprint)` is the third of that family and the one
 that names no document (issue #761): the pairing of a collection's requests
 against a picked document's operations, answered by `POST /specs/match` since

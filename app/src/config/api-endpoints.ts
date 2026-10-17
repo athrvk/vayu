@@ -112,6 +112,9 @@ export const API_ENDPOINTS = {
 	// One environment as a Postman environment document (issue #2253). Also a
 	// read; the secret values are written empty unless the request asks.
 	POSTMAN_ENVIRONMENT_EXPORT: `/export/postman-environment`,
+	// A finished load run as a file to share (issue #2127). A read: the engine
+	// builds the document by allowlist from the run's report and stores nothing.
+	RUN_REPORT_EXPORT: `/export/run-report`,
 
 	// Batch reorder for both entity kinds (issue #365). One drop is one call and
 	// one engine transaction; a reorder expressed as N sibling PUTs is neither.

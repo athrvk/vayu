@@ -991,7 +991,10 @@ quoted name: a header naming the two run ids, then each run's own line.
 Every line below is the app's formatter (`app/src/lib/agent-reference.ts`) run
 over one fixture, the entities in `app/src/lib/agent-reference.docs.test.ts`,
 which fails when a line here stops matching its output. The run times are shown
-as `en-US` in UTC; the app prints the user's own locale and zone.
+as `en-US` in UTC; the app prints the user's own locale and zone. A run exported
+as a file ([`POST /export/run-report`](api-reference.md#post-exportrun-report))
+carries its line as `run.reference` with the start in ISO-8601 UTC
+(`2026-10-05T08:10:00Z`), since a file is read away from any one locale.
 
 ```
 Vayu request "Create order" (req_3f9c1a52-7b0e-4d1a-9c55-0a1b2c3d4e5f) in Checkout / Orders
@@ -2152,7 +2155,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
-| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source); `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
+| `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |

@@ -11,8 +11,7 @@
  * `ExportSpecDialog`'s sibling, and built the same way on purpose: the engine
  * assembles the document (`POST /export/postman`), the dialog states what it
  * is about to write and what it could not carry, and delivery is the repo's
- * one file-to-disk path - a Blob and an `<a download>`. Mounted only while
- * open, so the mount is the reset and the credentials choice starts off on
+ * one file-to-disk path (`downloadTextFile`). Mounted only while open, so the mount is the reset and the credentials choice starts off on
  * every opening.
  *
  * **The one choice is whether credentials travel.** A Postman export is
@@ -53,6 +52,7 @@ import {
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
+import { downloadTextFile } from "@/lib/download-text-file";
 import { usePostmanExportQuery } from "@/queries/exports";
 import type { Collection, PostmanExportNotes } from "@/types";
 
@@ -80,13 +80,7 @@ export default function ExportPostmanDialog({
 
 	const handleDownload = () => {
 		if (!result) return;
-		const blob = new Blob([result.text], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement("a");
-		anchor.href = url;
-		anchor.download = result.fileName;
-		anchor.click();
-		URL.revokeObjectURL(url);
+		downloadTextFile(result.text, result.fileName, "application/json");
 		onOpenChange(false);
 	};
 

@@ -1,0 +1,1234 @@
+{
+  "$comment": "Cross-language conformance fixture for the run comparison (issue #2127). Read by the app's vitest suite (app/electron/mcp/compare.conformance.test.ts, which replays every case through BOTH app/electron/mcp/compare.ts and app/src/lib/run-compare.ts) and by the engine gtest suite (engine/tests/run_export_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through vayu::core::compare_run_reports). `expected` is compareReports' answer less the two run ids; the engine writes its `comparability` as `differences[]` ({field: code, base, target}, no message) and its `latency`, `throughput` and `reliability` as one `deltas[]` in that order. A case whose input JSON cannot spell (NaN, Infinity) stays inline in the app test.",
+  "cases": [
+    {
+      "name": "a clean regression",
+      "base": {
+        "latency": {"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},
+        "summary": {"avgRps":100,"throughput":99,"errorRate":0.5,"totalRequests":6000},
+        "statusCodes": {"200":5970,"500":30}
+      },
+      "target": {
+        "latency": {"p50":15,"p90":27,"p95":30,"p99":80,"avg":18,"max":200},
+        "summary": {"avgRps":90,"throughput":88,"errorRate":2,"totalRequests":5400},
+        "statusCodes": {"200":5292,"500":108}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":15,"delta":5,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":27,"delta":9,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":30,"delta":10,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":80,"delta":40,"pctChange":100,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":18,"delta":6,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":200,"delta":100,"pctChange":100,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":90,"delta":-10,"pctChange":-10,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": 99,
+            "target": 88,
+            "delta": -11,
+            "pctChange": -11.11111111111111,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":0.5,"target":2,"delta":1.5,"pctChange":300,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":5970,"target":5292},"500":{"base":30,"target":108}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "an improvement in both directions",
+      "base": {
+        "latency": {"p50":20,"p90":30,"p95":40,"p99":90,"avg":25,"max":300},
+        "summary": {"avgRps":80,"throughput":78,"errorRate":3,"totalRequests":4000},
+        "statusCodes": {"200":3880,"503":120}
+      },
+      "target": {
+        "latency": {"p50":9,"p90":14,"p95":19,"p99":35,"avg":11,"max":120},
+        "summary": {"avgRps":140,"throughput":138,"errorRate":0,"totalRequests":7000},
+        "statusCodes": {"200":7000}
+      },
+      "expected": {
+        "latency": [
+          {
+            "metric": "latency.p50",
+            "base": 20,
+            "target": 9,
+            "delta": -11,
+            "pctChange": -55.00000000000001,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "latency.p90",
+            "base": 30,
+            "target": 14,
+            "delta": -16,
+            "pctChange": -53.333333333333336,
+            "direction": "lower-is-better"
+          },
+          {"metric":"latency.p95","base":40,"target":19,"delta":-21,"pctChange":-52.5,"direction":"lower-is-better"},
+          {
+            "metric": "latency.p99",
+            "base": 90,
+            "target": 35,
+            "delta": -55,
+            "pctChange": -61.111111111111114,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "latency.avg",
+            "base": 25,
+            "target": 11,
+            "delta": -14,
+            "pctChange": -56.00000000000001,
+            "direction": "lower-is-better"
+          },
+          {"metric":"latency.max","base":300,"target":120,"delta":-180,"pctChange":-60,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":80,"target":140,"delta":60,"pctChange":75,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": 78,
+            "target": 138,
+            "delta": 60,
+            "pctChange": 76.92307692307693,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":3,"target":0,"delta":-3,"pctChange":-100,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":4000,"target":7000,"delta":3000,"pctChange":75,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":3880,"target":7000},"503":{"base":120,"target":0}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a target report missing every section",
+      "base": {
+        "latency": {"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},
+        "summary": {"avgRps":100,"throughput":99,"errorRate":0.5,"totalRequests":6000},
+        "statusCodes": {"200":6000}
+      },
+      "target": {},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": 99,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": 0.5,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":6000,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":6000,"target":0}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a zero base, where no percentage is definable",
+      "base": {
+        "latency": {"p50":0,"p90":0,"p95":0,"p99":0,"avg":0,"max":0},
+        "summary": {"avgRps":0,"throughput":0,"errorRate":0,"totalRequests":0},
+        "statusCodes": {}
+      },
+      "target": {
+        "latency": {"p50":5,"p90":6,"p95":7,"p99":8,"avg":5,"max":9},
+        "summary": {"avgRps":50,"throughput":49,"errorRate":1,"totalRequests":500},
+        "statusCodes": {"200":495,"429":5}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":0,"target":5,"delta":5,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":0,"target":6,"delta":6,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":0,"target":7,"delta":7,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":0,"target":8,"delta":8,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":0,"target":5,"delta":5,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":0,"target":9,"delta":9,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":0,"target":50,"delta":50,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":0,"target":49,"delta":49,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":0,"target":1,"delta":1,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":0,"target":500,"delta":500,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":0,"target":495},"429":{"base":0,"target":5}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "fractional changes, whose percentages are not round",
+      "base": {
+        "latency": {"p50":3,"p90":7,"p95":9.5,"p99":11.1,"avg":2.2,"max":0.3},
+        "summary": {"avgRps":33.3,"throughput":0.1,"errorRate":0.07,"totalRequests":3}
+      },
+      "target": {
+        "latency": {"p50":4,"p90":6,"p95":9.7,"p99":12.2,"avg":2.1,"max":0.6},
+        "summary": {"avgRps":66.7,"throughput":0.3,"errorRate":0.21,"totalRequests":7}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":3,"target":4,"delta":1,"pctChange":33.33333333333333,"direction":"lower-is-better"},
+          {
+            "metric": "latency.p90",
+            "base": 7,
+            "target": 6,
+            "delta": -1,
+            "pctChange": -14.285714285714285,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "latency.p95",
+            "base": 9.5,
+            "target": 9.7,
+            "delta": 0.1999999999999993,
+            "pctChange": 2.1052631578947296,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "latency.p99",
+            "base": 11.1,
+            "target": 12.2,
+            "delta": 1.0999999999999996,
+            "pctChange": 9.909909909909906,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "latency.avg",
+            "base": 2.2,
+            "target": 2.1,
+            "delta": -0.10000000000000009,
+            "pctChange": -4.545454545454549,
+            "direction": "lower-is-better"
+          },
+          {"metric":"latency.max","base":0.3,"target":0.6,"delta":0.3,"pctChange":100,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {
+            "metric": "summary.avgRps",
+            "base": 33.3,
+            "target": 66.7,
+            "delta": 33.400000000000006,
+            "pctChange": 100.30030030030032,
+            "direction": "higher-is-better"
+          },
+          {
+            "metric": "summary.throughput",
+            "base": 0.1,
+            "target": 0.3,
+            "delta": 0.19999999999999998,
+            "pctChange": 199.99999999999997,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": 0.07,
+            "target": 0.21,
+            "delta": 0.13999999999999999,
+            "pctChange": 199.99999999999994,
+            "direction": "lower-is-better"
+          },
+          {
+            "metric": "summary.totalRequests",
+            "base": 3,
+            "target": 7,
+            "delta": 4,
+            "pctChange": 133.33333333333331,
+            "direction": "neutral"
+          }
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "engine-raw status codes, as arrays of [code, count] pairs",
+      "base": {
+        "latency": {"p50":10,"p90":18,"p95":20,"p99":40,"avg":12,"max":100},
+        "summary": {"avgRps":100,"throughput":99,"errorRate":0.5,"totalRequests":6000},
+        "statusCodes": [[200,5970],[500,30]]
+      },
+      "target": {
+        "latency": {"p50":15,"p90":27,"p95":30,"p99":80,"avg":18,"max":200},
+        "summary": {"avgRps":90,"throughput":88,"errorRate":2,"totalRequests":5400},
+        "statusCodes": [[200,5292],[429,8],[500,100]]
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":10,"target":15,"delta":5,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":18,"target":27,"delta":9,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":20,"target":30,"delta":10,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":40,"target":80,"delta":40,"pctChange":100,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":12,"target":18,"delta":6,"pctChange":50,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":100,"target":200,"delta":100,"pctChange":100,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":90,"delta":-10,"pctChange":-10,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": 99,
+            "target": 88,
+            "delta": -11,
+            "pctChange": -11.11111111111111,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":0.5,"target":2,"delta":1.5,"pctChange":300,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":6000,"target":5400,"delta":-600,"pctChange":-10,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":5970,"target":5292},"429":{"base":0,"target":8},"500":{"base":30,"target":100}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a raw base against a transformed target",
+      "base": {"statusCodes":[[200,10]]},
+      "target": {"statusCodes":{"200":12}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":10,"target":12}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "malformed entries in the array form",
+      "base": {"statusCodes":[[200,10],"500",[],[404],[301,"many"]]},
+      "target": {"statusCodes":[]},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":10,"target":0},"301":{"base":0,"target":0}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "values that are not numbers",
+      "base": {"latency":{"p50":"10","p99":null,"avg":true},"summary":{"errorRate":1},"statusCodes":{"200":"many"}},
+      "target": {"latency":7,"summary":null,"statusCodes":null},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":1,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {"200":{"base":0,"target":0}},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a pre-#1488 baseline against a run that negotiated compression",
+      "base": {"metadata":{"configuration":{"mode":"constant_rps"}}},
+      "target": {"metadata":{"configuration":{"acceptEncoding":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": true,
+        "comparability": [
+          {
+            "code": "compression",
+            "message": "Compression negotiation differs, so byte and latency figures are not directly comparable.",
+            "base": "not negotiated",
+            "target": "negotiated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a stopped 50-user run against a completed 10-user baseline (mode, users, duration, status)",
+      "base": {
+        "metadata": {"status":"completed","configuration":{"mode":"constant_concurrency","concurrency":10}},
+        "summary": {"testDuration":20.004,"avgRps":100}
+      },
+      "target": {
+        "metadata": {"status":"stopped","configuration":{"mode":"ramp_up","concurrency":50,"startConcurrency":5}},
+        "summary": {"testDuration":3.04,"avgRps":40}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":100,"target":40,"delta":-60,"pctChange":-60,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {"code":"mode","message":"Test mode differs.","base":"constant_concurrency","target":"ramp_up"},
+          {"code":"concurrency","message":"Virtual users differ.","base":"10","target":"5 to 50"},
+          {"code":"duration","message":"Run durations differ by more than 2x.","base":"20 s","target":"3 s, stopped"},
+          {"code":"status","message":"Run status differs.","base":"Completed","target":"Stopped"}
+        ]
+      }
+    },
+    {
+      "name": "every comparability rule at once, so the order is pinned",
+      "base": {
+        "metadata": {
+          "status": "completed",
+          "requestMethod": "GET",
+          "requestUrl": "https://api.test/a",
+          "configuration": {
+            "mode": "constant_rps",
+            "concurrency": 10,
+            "targetRps": 100,
+            "httpVersion": "http1.1",
+            "dataFileHash": "aaaaaaaa11112222",
+            "acceptEncoding": false
+          }
+        },
+        "summary": {"testDuration":20}
+      },
+      "target": {
+        "metadata": {
+          "status": "failed",
+          "requestMethod": "POST",
+          "requestUrl": "https://api.test/b",
+          "configuration": {
+            "mode": "ramp_up",
+            "concurrency": 50,
+            "startConcurrency": 2,
+            "rampUpDuration": "10s",
+            "targetRps": 400,
+            "httpVersion": "http2",
+            "dataFileName": "users.csv",
+            "dataFileHash": "bbbbbbbb33334444",
+            "acceptEncoding": true
+          }
+        },
+        "summary": {"testDuration":3}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": true,
+        "comparability": [
+          {"code":"mode","message":"Test mode differs.","base":"constant_rps","target":"ramp_up"},
+          {"code":"concurrency","message":"Virtual users differ.","base":"10","target":"2 to 50, ramp 10s"},
+          {"code":"target_rps","message":"Target request rate differs.","base":"100 rps","target":"400 rps"},
+          {"code":"duration","message":"Run durations differ by more than 2x.","base":"20 s","target":"3 s, failed"},
+          {"code":"status","message":"Run status differs.","base":"Completed","target":"Failed"},
+          {"code":"http_version","message":"HTTP version differs.","base":"http1.1","target":"http2"},
+          {"code":"data_file","message":"Data file differs.","base":"aaaaaaaa","target":"users.csv (bbbbbbbb)"},
+          {"code":"request","message":"Request differs.","base":"GET https://api.test/a","target":"POST https://api.test/b"},
+          {
+            "code": "compression",
+            "message": "Compression negotiation differs, so byte and latency figures are not directly comparable.",
+            "base": "not negotiated",
+            "target": "negotiated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a ramp names its start level and ramp time",
+      "base": {"metadata":{"configuration":{"mode":"ramp_up","concurrency":50,"startConcurrency":1,"rampUpDuration":"10s"}}},
+      "target": {"metadata":{"configuration":{"mode":"ramp_up","concurrency":50,"startConcurrency":25,"rampUpDuration":"10s"}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"concurrency","message":"Virtual users differ.","base":"1 to 50, ramp 10s","target":"25 to 50, ramp 10s"}]
+      }
+    },
+    {
+      "name": "numbers are spelled as String() spells them",
+      "base": {"metadata":{"configuration":{"targetRps":12.5,"concurrency":2.5}}},
+      "target": {"metadata":{"configuration":{"targetRps":100,"concurrency":1e-7}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {"code":"concurrency","message":"Virtual users differ.","base":"2.5","target":"1e-7"},
+          {"code":"target_rps","message":"Target request rate differs.","base":"12.5 rps","target":"100 rps"}
+        ]
+      }
+    },
+    {
+      "name": "durations just above 2x",
+      "base": {"summary":{"testDuration":10}},
+      "target": {"summary":{"testDuration":20.1}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"10 s","target":"20.1 s"}]
+      }
+    },
+    {
+      "name": "durations at exactly 2x",
+      "base": {"summary":{"testDuration":10}},
+      "target": {"summary":{"testDuration":20}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a duration on an exact half tenth rounds up, as toFixed does",
+      "base": {"metadata":{"status":"stopped"},"summary":{"testDuration":0.25}},
+      "target": {"summary":{"testDuration":10.75}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"0.3 s, stopped","target":"10.8 s"}]
+      }
+    },
+    {
+      "name": "a duration just under a half tenth rounds down, whatever its product with 10 says",
+      "base": {"summary":{"testDuration":0.35}},
+      "target": {"metadata":{"status":"failed"},"summary":{"testDuration":1.45}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"duration","message":"Run durations differ by more than 2x.","base":"0.3 s","target":"1.4 s, failed"}]
+      }
+    },
+    {
+      "name": "a zero duration against a real one",
+      "base": {"summary":{"testDuration":0}},
+      "target": {"summary":{"testDuration":20}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a field on one side only, which is unknown and not a difference",
+      "base": {},
+      "target": {
+        "metadata": {"requestMethod":"GET","configuration":{"mode":"iterations","concurrency":5,"httpVersion":"http2"}},
+        "summary": {"testDuration":5}
+      },
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "auto against a pinned HTTP version, and a data file against none",
+      "base": {"metadata":{"configuration":{"httpVersion":"auto"}}},
+      "target": {"metadata":{"configuration":{"httpVersion":"http2","dataFileHash":"bbbbbbbb33334444"}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"data_file","message":"Data file differs.","base":"none","target":"bbbbbbbb"}]
+      }
+    },
+    {
+      "name": "a status differing only in case, compared before it is capitalised",
+      "base": {"metadata":{"status":"completed"}},
+      "target": {"metadata":{"status":"Completed"}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"status","message":"Run status differs.","base":"Completed","target":"Completed"}]
+      }
+    },
+    {
+      "name": "a request url carrying a credential in its query and userinfo",
+      "base": {"metadata":{"requestUrl":"https://u:p@ss@api.test/a?token=s3cret"}},
+      "target": {"metadata":{"requestUrl":"https://api.test/b#frag"}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"request","message":"Request differs.","base":"https://api.test/a","target":"https://api.test/b"}]
+      }
+    },
+    {
+      "name": "a request url with no scheme keeps everything before its query",
+      "base": {"metadata":{"requestMethod":"GET","requestUrl":"{{baseUrl}}/a@b/users?x=1"}},
+      "target": {"metadata":{"requestMethod":"GET","requestUrl":"{{baseUrl}}/orders"}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {
+            "code": "request",
+            "message": "Request differs.",
+            "base": "GET {{baseUrl}}/a@b/users",
+            "target": "GET {{baseUrl}}/orders"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a query-only difference is the same request",
+      "base": {"metadata":{"requestMethod":"GET","requestUrl":"https://api.test/a?page=1"}},
+      "target": {"metadata":{"requestMethod":"GET","requestUrl":"https://api.test/a?page=2"}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "reports with a null metadata and a malformed one",
+      "base": {"metadata":null,"summary":{"testDuration":10}},
+      "target": {"metadata":{"configuration":3},"summary":{"testDuration":10}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "no metadata on either side",
+      "base": {"summary":{"avgRps":1}},
+      "target": {"summary":{"avgRps":1}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":1,"target":1,"delta":0,"pctChange":0,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    }
+  ]
+}

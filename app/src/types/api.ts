@@ -2301,6 +2301,41 @@ export interface PostmanEnvironmentExportResponse {
 	notes: PostmanEnvironmentExportNotes;
 }
 
+/**
+ * The formats `POST /export/run-report` names. Only `json` is written yet;
+ * `markdown` (#2131) and `html` (#2135) answer `400 format_not_available`.
+ */
+export type RunReportExportFormat = "json" | "markdown" | "html";
+
+/** What `POST /export/run-report` is asked: a finished load run, and how to write it. */
+export interface RunReportExportRequest {
+	runId: string;
+	/** Defaults to `json` engine-side. */
+	format?: RunReportExportFormat;
+	/** `full` (the default) carries every tick of the time series; `none` leaves it out. */
+	series?: "full" | "none";
+	/** A second finished load run; fills the document's `comparison`, `null` without it. */
+	baseRunId?: string;
+}
+
+export interface RunReportExportNotes {
+	/**
+	 * Values the URL lost to `redact_url_credentials`: a `user:pass@` password
+	 * and each credential-named query or fragment value.
+	 */
+	urlCredentialsOmitted: number;
+}
+
+export interface RunReportExportResponse {
+	/** The document (`docs/engine/run-export.schema.json`), as text in the requested format. */
+	text: string;
+	/** `<title> <UTC start, YYYY-MM-DD HHmm>.run.json`, made safe for a file system. */
+	fileName: string;
+	/** `application/json` for `json`; what `downloadTextFile` is handed. */
+	mimeType: string;
+	notes: RunReportExportNotes;
+}
+
 export interface SpecSyncRequest {
 	/** The bound collection. Nothing outside its subtree is written. */
 	collectionId: string;

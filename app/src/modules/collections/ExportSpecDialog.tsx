@@ -23,9 +23,9 @@
  * a scheduled task behind a pending line. All of that is one request now, and
  * what is left here is the choice, the summary and the download.
  *
- * Delivery is the repo's one file-to-disk path: a Blob and an `<a download>`,
- * the same shape `ResponseActions` uses. No IPC, no save dialog - there is no
- * such bridge, and the export does not need one.
+ * Delivery is the repo's one file-to-disk path, `downloadTextFile`, the same
+ * one `ResponseActions` uses. No IPC, no save dialog - there is no such
+ * bridge, and the export does not need one.
  *
  * **A bound collection also asks how much to write.** Its document is usually
  * somebody's contract, so the default, "Values only", writes examples and
@@ -65,6 +65,7 @@ import {
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
+import { downloadTextFile } from "@/lib/download-text-file";
 import { useSpecExportQuery } from "@/queries/specs";
 import type { Collection, ExportFormat, ExportMode, ExportNotes } from "@/types";
 
@@ -100,15 +101,11 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 	const reassembling = exported.isFetching && !firstRead;
 	const handleDownload = () => {
 		if (!result) return;
-		const blob = new Blob([result.text], {
-			type: format === "yaml" ? "application/yaml" : "application/json",
-		});
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement("a");
-		anchor.href = url;
-		anchor.download = result.fileName;
-		anchor.click();
-		URL.revokeObjectURL(url);
+		downloadTextFile(
+			result.text,
+			result.fileName,
+			format === "yaml" ? "application/yaml" : "application/json"
+		);
 		onOpenChange(false);
 	};
 

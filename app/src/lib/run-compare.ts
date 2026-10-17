@@ -21,8 +21,10 @@
  * dodge that is TS6307. The mirror is therefore pinned the way this repo pins
  * its other cross-boundary copies (`lib/dynamic-variables.ts`,
  * `McpDataEntity`): a conformance test - `electron/mcp/compare.conformance.test.ts` -
- * runs *both* implementations over the same fixtures and fails on any
- * divergence, in either direction. Change this file and change that one.
+ * runs *both* implementations over `engine/tests/fixtures/run-compare-conformance.json`
+ * and fails on any divergence, in either direction. The engine's run-report
+ * export is a third copy (`engine/src/core/run_compare.cpp`) replaying the same
+ * fixture. Change this file and change the other two.
  *
  * Defensive against missing fields throughout: it reads reports from any engine
  * version and any run type, and a metric a report does not carry is `null`

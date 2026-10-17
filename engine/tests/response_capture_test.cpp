@@ -32,6 +32,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/routes.hpp"
 
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
@@ -39,8 +40,6 @@ std::pair<int, nlohmann::json> run_samples_response (vayu::db::Database& db,
 const std::string& run_id,
 int64_t limit,
 int64_t offset);
-std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
 } // namespace vayu::http::routes
 
 using namespace vayu::core;

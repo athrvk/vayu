@@ -23,240 +23,69 @@
  * reaches across the boundary the way `tools.test.ts` already reaches for
  * `@/constants`: a test may, production code may not.
  *
- * The fixtures below are the contract. A case added here fails whichever side
- * forgot it.
+ * The cases are the contract, and they are shared with the engine:
+ * `engine/tests/fixtures/run-compare-conformance.json` holds each pair of
+ * reports with `compareReports`' recorded answer, and the run-report export's
+ * C++ comparison (`engine/src/core/run_compare.cpp`) replays the same file. A
+ * case added there fails whichever of the three sides answers it differently.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { compareReports as mainCompare, deltaVerdict as mainVerdict } from "./compare.js";
 import {
 	compareReports as rendererCompare,
 	deltaVerdict as rendererVerdict,
 	type MetricDelta,
+	type RunComparison,
 } from "@/lib/run-compare";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 
-/**
- * Every shape the diff has to survive, not only the happy one: a regression, an
- * improvement, a run missing whole sections, a zero base (no percentage is
- * definable), and status-code maps that do not overlap.
- */
-const CASES: { name: string; base: Record<string, unknown>; target: Record<string, unknown> }[] = [
-	{
-		name: "a clean regression",
-		base: {
-			latency: { p50: 10, p90: 18, p95: 20, p99: 40, avg: 12, max: 100 },
-			summary: { avgRps: 100, throughput: 99, errorRate: 0.5, totalRequests: 6000 },
-			statusCodes: { "200": 5970, "500": 30 },
-		},
-		target: {
-			latency: { p50: 15, p90: 27, p95: 30, p99: 80, avg: 18, max: 200 },
-			summary: { avgRps: 90, throughput: 88, errorRate: 2.0, totalRequests: 5400 },
-			statusCodes: { "200": 5292, "500": 108 },
-		},
-	},
-	{
-		name: "an improvement in both directions",
-		base: {
-			latency: { p50: 20, p90: 30, p95: 40, p99: 90, avg: 25, max: 300 },
-			summary: { avgRps: 80, throughput: 78, errorRate: 3, totalRequests: 4000 },
-			statusCodes: { "200": 3880, "503": 120 },
-		},
-		target: {
-			latency: { p50: 9, p90: 14, p95: 19, p99: 35, avg: 11, max: 120 },
-			summary: { avgRps: 140, throughput: 138, errorRate: 0, totalRequests: 7000 },
-			statusCodes: { "200": 7000 },
-		},
-	},
-	{
-		name: "a target report missing every section",
-		base: {
-			latency: { p50: 10, p90: 18, p95: 20, p99: 40, avg: 12, max: 100 },
-			summary: { avgRps: 100, throughput: 99, errorRate: 0.5, totalRequests: 6000 },
-			statusCodes: { "200": 6000 },
-		},
-		target: {},
-	},
-	{
-		name: "a zero base, where no percentage is definable",
-		base: {
-			latency: { p50: 0, p90: 0, p95: 0, p99: 0, avg: 0, max: 0 },
-			summary: { avgRps: 0, throughput: 0, errorRate: 0, totalRequests: 0 },
-			statusCodes: {},
-		},
-		target: {
-			latency: { p50: 5, p90: 6, p95: 7, p99: 8, avg: 5, max: 9 },
-			summary: { avgRps: 50, throughput: 49, errorRate: 1, totalRequests: 500 },
-			statusCodes: { "200": 495, "429": 5 },
-		},
-	},
-	{
-		// The shape the MCP path actually receives: `GET /runs/:id/report` is
-		// read raw there, and the engine's `std::map<int, size_t>` serializes as
-		// an array of pairs. The renderer's transformer folds it to a record
-		// first, so the two sides see different shapes for the same report -
-		// which is precisely why both have to read both.
-		name: "engine-raw status codes, as arrays of [code, count] pairs",
-		base: {
-			latency: { p50: 10, p90: 18, p95: 20, p99: 40, avg: 12, max: 100 },
-			summary: { avgRps: 100, throughput: 99, errorRate: 0.5, totalRequests: 6000 },
-			statusCodes: [
-				[200, 5970],
-				[500, 30],
-			],
-		},
-		target: {
-			latency: { p50: 15, p90: 27, p95: 30, p99: 80, avg: 18, max: 200 },
-			summary: { avgRps: 90, throughput: 88, errorRate: 2.0, totalRequests: 5400 },
-			statusCodes: [
-				[200, 5292],
-				[429, 8],
-				[500, 100],
-			],
-		},
-	},
-	{
-		// One side transformed, one side raw - what a comparison between a
-		// report the renderer cached and one the tool fetched looks like.
-		name: "a raw base against a transformed target",
-		base: { statusCodes: [[200, 10]] },
-		target: { statusCodes: { "200": 12 } },
-	},
-	{
-		// Pairs that are not pairs: an index key with a tuple value would be a
-		// status code the run never saw.
-		name: "malformed entries in the array form",
-		base: { statusCodes: [[200, 10], "500", [], [404], [301, "many"]] },
-		target: { statusCodes: [] },
-	},
-	{
-		name: "values that are not numbers at all",
-		base: {
-			latency: { p50: "10", p99: null, avg: Number.NaN },
-			summary: { avgRps: Number.POSITIVE_INFINITY, errorRate: 1 },
-			statusCodes: { "200": "many" },
-		},
-		target: { latency: 7, summary: null, statusCodes: null },
-	},
-	{
-		// A baseline pinned before loadNegotiateCompression's default flipped
-		// (issue #1488) against a run recorded after: the base carries no
-		// `acceptEncoding` at all, which must read the same as an explicit
-		// `false`, not as "unknown".
-		name: "a pre-#1488 baseline against a run that negotiated compression",
-		base: { metadata: { configuration: { mode: "constant_rps" } } },
-		target: { metadata: { configuration: { acceptEncoding: true } } },
-	},
-	{
-		// The pair #2162 was filed for: a short, stopped, 50-user run against a
-		// pinned 20 s, 10-user one.
-		name: "a stopped 50-user run against a completed 10-user baseline (mode, users, duration, status)",
-		base: {
-			metadata: {
-				status: "completed",
-				configuration: { mode: "constant_concurrency", concurrency: 10 },
-			},
-			summary: { testDuration: 20.004, avgRps: 100 },
-		},
-		target: {
-			metadata: {
-				status: "stopped",
-				configuration: { mode: "ramp_up", concurrency: 50, startConcurrency: 5 },
-			},
-			summary: { testDuration: 3.04, avgRps: 40 },
-		},
-	},
-	{
-		name: "every comparability rule at once, so the order is pinned",
-		base: {
-			metadata: {
-				status: "completed",
-				requestMethod: "GET",
-				requestUrl: "https://api.test/a",
-				configuration: {
-					mode: "constant_rps",
-					concurrency: 10,
-					targetRps: 100,
-					httpVersion: "http1.1",
-					dataFileHash: "aaaaaaaa11112222",
-					acceptEncoding: false,
-				},
-			},
-			summary: { testDuration: 20 },
-		},
-		target: {
-			metadata: {
-				status: "failed",
-				requestMethod: "POST",
-				requestUrl: "https://api.test/b",
-				configuration: {
-					mode: "ramp_up",
-					concurrency: 50,
-					startConcurrency: 2,
-					rampUpDuration: "10s",
-					targetRps: 400,
-					httpVersion: "http2",
-					dataFileName: "users.csv",
-					dataFileHash: "bbbbbbbb33334444",
-					acceptEncoding: true,
-				},
-			},
-			summary: { testDuration: 3 },
-		},
-	},
-	{
-		name: "durations just above 2x",
-		base: { summary: { testDuration: 10 } },
-		target: { summary: { testDuration: 20.1 } },
-	},
-	{
-		name: "durations at exactly 2x",
-		base: { summary: { testDuration: 10 } },
-		target: { summary: { testDuration: 20 } },
-	},
-	{
-		name: "a zero duration against a real one",
-		base: { summary: { testDuration: 0 } },
-		target: { summary: { testDuration: 20 } },
-	},
-	{
-		name: "a field on one side only, which is unknown and not a difference",
-		base: {},
-		target: {
-			metadata: {
-				requestMethod: "GET",
-				configuration: { mode: "iterations", concurrency: 5, httpVersion: "http2" },
-			},
-			summary: { testDuration: 5 },
-		},
-	},
-	{
-		name: "auto against a pinned HTTP version, and a data file against none",
-		base: { metadata: { configuration: { httpVersion: "auto" } } },
-		target: {
-			metadata: { configuration: { httpVersion: "http2", dataFileHash: "bbbbbbbb33334444" } },
-		},
-	},
-	{
-		name: "a request url carrying a credential in its query and userinfo",
-		base: { metadata: { requestUrl: "https://u:pw@api.test/a?token=s3cret" } },
-		target: { metadata: { requestUrl: "https://api.test/b#frag" } },
-	},
-	{
-		name: "reports with a null metadata and a malformed one",
-		base: { metadata: null, summary: { testDuration: 10 } },
-		target: { metadata: { configuration: 3 }, summary: { testDuration: 10 } },
-	},
-	{
-		name: "no metadata on either side",
-		base: { summary: { avgRps: 1 } },
-		target: { summary: { avgRps: 1 } },
-	},
-];
+type Report = Record<string, unknown>;
+
+const [fixturePath] = ENGINE_READING_GUARDS.runCompare.paths.map(fromRepoRoot);
+const CASES = (
+	JSON.parse(readFileSync(fixturePath, "utf8")) as {
+		cases: {
+			name: string;
+			base: Report;
+			target: Report;
+			expected: Omit<RunComparison, "baseRunId" | "targetRunId">;
+		}[];
+	}
+).cases;
+
+const caseNamed = (prefix: string) => {
+	const found = CASES.find((c) => c.name.startsWith(prefix));
+	if (!found) throw new Error(`no fixture case starts with "${prefix}"`);
+	return found;
+};
 
 describe("run comparison mirror", () => {
-	test.each(CASES)("$name diffs identically on both sides", ({ base, target }) => {
-		expect(mainCompare("run_base", "run_target", base, target)).toEqual(
-			rendererCompare("run_base", "run_target", base, target)
+	test("read a non-empty fixture", () => {
+		expect(CASES.length).toBeGreaterThan(0);
+	});
+
+	test.each(CASES)(
+		"$name diffs to the recorded answer on both sides",
+		({ base, target, expected }) => {
+			const answer = { baseRunId: "run_base", targetRunId: "run_target", ...expected };
+			expect(mainCompare("run_base", "run_target", base, target)).toEqual(answer);
+			expect(rendererCompare("run_base", "run_target", base, target)).toEqual(answer);
+		}
+	);
+
+	// JSON has no spelling for NaN or Infinity, so this case cannot live in the
+	// shared fixture; only the two TypeScript sides can be handed one.
+	test("non-finite numbers diff identically on both sides", () => {
+		const base = {
+			latency: { p50: 10, avg: Number.NaN },
+			summary: { avgRps: Number.POSITIVE_INFINITY, testDuration: Number.NaN },
+			statusCodes: { "200": Number.NaN },
+		};
+		const target = { latency: { p50: 12, avg: 3 }, summary: { avgRps: 5, testDuration: 20 } };
+		expect(mainCompare("a", "b", base, target)).toEqual(
+			rendererCompare("a", "b", base, target)
 		);
 	});
 
@@ -322,7 +151,7 @@ describe("run comparison mirror", () => {
 	 * values, on both sides, in the order the strip renders them.
 	 */
 	test("comparability names what differs, with both values, in a fixed order", () => {
-		const { base, target } = CASES.find((c) => c.name.startsWith("a stopped 50-user"))!;
+		const { base, target } = caseNamed("a stopped 50-user");
 		const expected = [
 			{
 				code: "mode",
@@ -389,8 +218,9 @@ describe("run comparison mirror", () => {
 	});
 
 	test("both sides label the same metrics with the same direction", () => {
-		const main = mainCompare("a", "b", CASES[0].base, CASES[0].target);
-		const renderer = rendererCompare("a", "b", CASES[0].base, CASES[0].target);
+		const { base, target } = caseNamed("a clean regression");
+		const main = mainCompare("a", "b", base, target);
+		const renderer = rendererCompare("a", "b", base, target);
 		const directions = (cmp: {
 			latency: MetricDelta[];
 			throughput: MetricDelta[];

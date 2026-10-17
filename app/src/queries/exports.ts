@@ -14,8 +14,9 @@
  */
 
 import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
+import type { RunReportExportRequest } from "@/types";
 import { queryKeys } from "./keys";
 
 /**
@@ -37,5 +38,16 @@ export function usePostmanExportQuery(collectionId: string, includeSecrets: bool
 		placeholderData: keepPreviousData,
 		staleTime: Infinity,
 		retry: false,
+	});
+}
+
+/**
+ * A finished load run as a file (issue #2127). A mutation, not a query: each
+ * click asks again and nothing is cached, because the answer is downloaded the
+ * moment it arrives and `generatedAt` makes every document a new one.
+ */
+export function useRunReportExport() {
+	return useMutation({
+		mutationFn: (payload: RunReportExportRequest) => apiService.exportRunReport(payload),
 	});
 }

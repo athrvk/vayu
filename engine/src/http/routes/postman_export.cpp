@@ -230,10 +230,6 @@ export_postman_environment_response (vayu::db::Database& db, const nlohmann::jso
         { "notes", vayu::core::postman_environment_export_notes_json (outcome.notes) } } };
 }
 
-namespace {
-
-/// Both export routes answer through one wrapper: parse, run @p core, log a
-/// refusal, serialise with invalid UTF-8 replaced.
 void answer_export (const char* path,
 const httplib::Request& req,
 httplib::Response& res,
@@ -256,8 +252,6 @@ vayu::db::Database& db) {
         send_error (res, 400, e.what ());
     }
 }
-
-} // namespace
 
 void register_postman_export_routes (RouteContext& ctx) {
     /**

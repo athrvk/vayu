@@ -350,6 +350,15 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/withhold.conformance.test.ts",
 		paths: ["engine/tests/fixtures/query-encoding-conformance.json"],
 	},
+	/*
+	 * Three copies of one diff (#2127): the renderer's and the MCP server's
+	 * `compareReports`, and the run-report export's comparison in the engine.
+	 * The one reader replays the fixture through both TypeScript copies.
+	 */
+	runCompare: {
+		reader: "app/electron/mcp/compare.conformance.test.ts",
+		paths: ["engine/tests/fixtures/run-compare-conformance.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

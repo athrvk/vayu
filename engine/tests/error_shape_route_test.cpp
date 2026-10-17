@@ -51,8 +51,6 @@ std::pair<int, nlohmann::json> update_environment_response (vayu::db::Database& 
 const std::string& id,
 const nlohmann::json& json);
 std::pair<int, nlohmann::json>
-run_report_response (vayu::db::Database& db, const std::string& run_id);
-std::pair<int, nlohmann::json>
 import_apply_response (vayu::db::Database& db, const nlohmann::json& body);
 } // namespace vayu::http::routes
 

@@ -429,6 +429,25 @@ describe("EngineClient run housekeeping", () => {
 		});
 	});
 
+	it("exports a run report by POST, sending only what was stated", async () => {
+		const { fetchImpl, calls } = recordingFetch({ text: "{}", fileName: "a.run.json" });
+		const engine = client(fetchImpl);
+		await engine.exportRunReport("run_1");
+		await engine.exportRunReport("run_1", { baseRunId: "run_0", series: "none" });
+		expect(calls).toEqual([
+			{
+				url: "http://127.0.0.1:9876/export/run-report",
+				method: "POST",
+				body: JSON.stringify({ runId: "run_1" }),
+			},
+			{
+				url: "http://127.0.0.1:9876/export/run-report",
+				method: "POST",
+				body: JSON.stringify({ runId: "run_1", baseRunId: "run_0", series: "none" }),
+			},
+		]);
+	});
+
 	it("pages the three per-run reads on their own paths", async () => {
 		const { fetchImpl, calls } = recordingFetch();
 		const engine = client(fetchImpl);

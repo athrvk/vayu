@@ -145,7 +145,8 @@ namespace {
 
 // Parse and clamp the pagination query params shared by the time-series routes.
 // Raw parsing stays here; the extracted core is handed clean, clamped ints.
-// limit: default 5000, invalid/<=0 -> 5000, capped at 50000. offset: <0 -> 0.
+// limit: default 5000, invalid/<=0 -> 5000, capped at RUN_TIME_SERIES_PAGE_MAX.
+// offset: <0 -> 0.
 std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request& req) {
     int64_t limit  = 5000;
     int64_t offset = 0;
@@ -154,7 +155,7 @@ std::pair<int64_t, int64_t> parse_time_series_pagination (const httplib::Request
             limit = std::stoll (req.get_param_value ("limit"));
             if (limit <= 0)
                 limit = 5000;
-            limit = std::min<int64_t> (limit, 50000); // Cap at 50k for safety
+            limit = std::min<int64_t> (limit, RUN_TIME_SERIES_PAGE_MAX);
         } catch (...) {
             limit = 5000;
         }

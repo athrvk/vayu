@@ -21,8 +21,11 @@
  * from `src/` (TS6059), and the renderer cannot import one from here either,
  * because this is a referenced composite project (TS6305 - and excluding a
  * file from it to dodge that is TS6307). So the copy is deliberate, and
- * `compare.conformance.test.ts` runs both implementations over the same
- * fixtures and fails on any divergence. Change this file and change that one.
+ * `compare.conformance.test.ts` runs both implementations over
+ * `engine/tests/fixtures/run-compare-conformance.json` and fails on any
+ * divergence. The engine's run-report export is a third copy
+ * (`engine/src/core/run_compare.cpp`) replaying the same fixture. Change this
+ * file and change the other two.
  */
 
 type Report = Record<string, unknown>;
