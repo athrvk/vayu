@@ -107,8 +107,8 @@ scattered strings land the same way.
     destination, one name: the settings item reads "Settings…" everywhere (macOS
     itself now calls it Settings, not Preferences). The macOS Dock menu follows
     the macOS rule; the Windows Jump List follows sentence case. The code that
-    serves both from one template (a per-platform label function in
-    `electron/app-menu.ts`) belongs to the sentence-case sweep, not to this
+    serves both from one template (`createMenu` in `electron/main.ts`, which
+    needs a per-platform label function) belongs to the sentence-case sweep, not to this
     page.
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
