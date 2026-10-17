@@ -99,8 +99,10 @@ scattered strings land the same way.
   request that took 0.4 ms did not take no time, and only an exact 0 prints
   as `0`. `formatLatency` carries the unit for a surface with no slot of its
   own (`999ms`, then `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
-  with `axisMs` (`0.5ms`, `2ms`, `1.5s`), which takes its decimals from the tick
-  spacing so no two neighbouring ticks print alike. Do not `toFixed` a new
+  with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
+  (`1.2k`), which take their decimals from the tick spacing so no two
+  neighbouring ticks print alike (1200, 1210, 1220 read `1.2k/s`, `1.21k/s`,
+  `1.22k/s`) and move the whole axis to one magnitude, never `0` beside `1k`. Do not `toFixed` a new
   latency, rate or percentage for display. Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare

@@ -24,7 +24,7 @@ const restoreIntl = vi.hoisted(() => {
 
 afterAll(restoreIntl);
 
-import { axisMs, fmtMs, fmtPct, fmtRate } from "./formatters";
+import { axisMs, axisRate, axisVitals, fmtMs, fmtPct, fmtRate } from "./formatters";
 
 describe("the chart value formatters", () => {
 	it("draw a missing value as a dash, not 0", () => {
@@ -94,5 +94,42 @@ describe("axisMs", () => {
 	it("labels a lone value without a tick array", () => {
 		expect(axisMs(0.4)).toBe("0.4ms");
 		expect(axisMs(2500)).toBe("2.5s");
+	});
+});
+
+describe("axisRate", () => {
+	const label = (splits: number[]) => splits.map((v) => axisRate(v, splits));
+
+	it("keeps three neighbouring ticks distinct and suffixes each with /s", () => {
+		expect(label([1200, 1210, 1220])).toEqual(["1.2k/s", "1.21k/s", "1.22k/s"]);
+	});
+
+	it("moves the whole axis to thousands once any tick reaches 1000", () => {
+		expect(label([0, 500, 1000, 1500])).toEqual(["0k/s", "0.5k/s", "1k/s", "1.5k/s"]);
+		expect(label([0, 20, 40, 60])).toEqual(["0/s", "20/s", "40/s", "60/s"]);
+	});
+
+	it("labels a lone value without a tick array", () => {
+		expect(axisRate(2500)).toBe("2.5k/s");
+		expect(axisRate(42)).toBe("42/s");
+	});
+});
+
+describe("axisVitals", () => {
+	const label = (splits: number[]) => splits.map((v) => axisVitals(v, splits));
+
+	it("keeps three neighbouring ticks distinct under one magnitude suffix", () => {
+		expect(label([1200, 1210, 1220])).toEqual(["1.2k", "1.21k", "1.22k"]);
+		expect(label([1.2e9, 1.21e9, 1.22e9])).toEqual(["1.2G", "1.21G", "1.22G"]);
+	});
+
+	it("takes the decimals of a fractional axis from its spacing", () => {
+		expect(label([0, 0.25, 0.5])).toEqual(["0", "0.25", "0.5"]);
+		expect(label([0.4, 0.41, 0.42])).toEqual(["0.4", "0.41", "0.42"]);
+	});
+
+	it("labels a lone value without a tick array", () => {
+		expect(axisVitals(2.5e6)).toBe("2.5M");
+		expect(axisVitals(7)).toBe("7");
 	});
 });
