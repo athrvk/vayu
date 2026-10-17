@@ -431,6 +431,7 @@ describe("the run-export commands", () => {
 		expect(exportIds).toEqual([
 			"export-run-save-json",
 			"export-run-save-markdown",
+			"export-run-save-html",
 			"export-run-copy-markdown",
 		]);
 		const ids = (ctx: CommandContext) => availableCommands(ctx).map((c) => c.id);
@@ -456,6 +457,9 @@ describe("the run-export commands", () => {
 		);
 		expect(commandTitle(commandById("export-run-save-markdown"), runTab)).toBe(
 			'Save "/orders" as Markdown'
+		);
+		expect(commandTitle(commandById("export-run-save-html"), runTab)).toBe(
+			'Save "/orders" as HTML report'
 		);
 	});
 

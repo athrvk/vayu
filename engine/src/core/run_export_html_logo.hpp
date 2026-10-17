@@ -1,0 +1,106 @@
+#pragma once
+
+/*
+ * Copyright (c) 2026 Atharva Kusumbia
+ *
+ * This source code is licensed under the AGPL v3 license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * @file core/run_export_html_logo.hpp
+ * @brief The Vayu mark the HTML run report shows beside its wordmark (#2135).
+ *
+ * `shared/icon_png/vayu_icon_64x64.png` as base64, for a `data:image/png`
+ * URI: the page stays one file and fetches nothing. The mark exists only as a
+ * raster, so it is embedded rather than drawn. Regenerate the literal with
+ *
+ *     base64 -w0 shared/icon_png/vayu_icon_64x64.png
+ *
+ * `run_export_html_test.cpp` decodes it and compares it with that file byte for
+ * byte, so a changed icon fails until this is regenerated.
+ */
+
+#include <string_view>
+
+namespace vayu::core {
+
+constexpr std::string_view LOGO_PNG_BASE64 =
+"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";
+
+} // namespace vayu::core

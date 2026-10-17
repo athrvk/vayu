@@ -355,14 +355,37 @@ TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {
     { "target", "GET https://x.test/a" } }));
 }
 
-TEST_F (RunExportTest, HtmlIsNamedNotAvailable) {
-    seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
-    auto [status, body] = export_run_report_response (
-    *db_, json{ { "runId", "run_load" }, { "format", "html" } });
-    EXPECT_EQ (status, 400);
-    EXPECT_EQ (body["error"]["code"], "format_not_available");
-    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("#2135"), std::string::npos)
-    << body.dump ();
+TEST_F (RunExportTest, HtmlIsTextHtmlNamedAfterTheRun) {
+    seed_leak_run ("run_leak");
+    auto [status, envelope] = export_run_report_response (
+    *db_, json{ { "runId", "run_leak" }, { "format", "html" } });
+    ASSERT_EQ (status, 200) << envelope.dump ();
+    EXPECT_EQ (envelope["mimeType"], "text/html");
+    EXPECT_EQ (envelope["fileName"], "Checkout load 2026-10-05 0810.run.html");
+    EXPECT_EQ (envelope["notes"]["urlCredentialsOmitted"], 2);
+    const std::string text = envelope["text"].get<std::string> ();
+    EXPECT_TRUE (text.starts_with ("<!DOCTYPE html>")) << text;
+    EXPECT_NE (text.find ("<h1>Checkout load</h1>"), std::string::npos) << text;
+}
+
+TEST_F (RunExportTest, HtmlDrawsTheSeriesWhateverTheRequestSaidAboutIt) {
+    seed_leak_run ("run_leak");
+    for (const json& series : { json ("full"), json ("none"), json () }) {
+        json body = { { "runId", "run_leak" }, { "format", "html" } };
+        if (!series.is_null ()) {
+            body["series"] = series;
+        }
+        auto [status, envelope] = export_run_report_response (*db_, body);
+        ASSERT_EQ (status, 200) << envelope.dump ();
+        EXPECT_NE (envelope["text"].get<std::string> ().find ("<svg"), std::string::npos)
+        << body.dump ();
+    }
+    // The other formats still honour it.
+    auto [status, envelope] = export_run_report_response (
+    *db_, json{ { "runId", "run_leak" }, { "series", "none" } });
+    ASSERT_EQ (status, 200) << envelope.dump ();
+    EXPECT_EQ (
+    json::parse (envelope["text"].get<std::string> ()).contains ("timeSeries"), false);
 }
 
 TEST_F (RunExportTest, MarkdownIsTextMarkdownNamedAfterTheRun) {
@@ -384,6 +407,24 @@ TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheMarkdown) {
     // The leak run is exported itself, and again as the base of a comparison.
     for (const json& body : { json{ { "runId", "run_leak" }, { "format", "markdown" } },
          json{ { "runId", "run_load" }, { "baseRunId", "run_leak" }, { "format", "markdown" } } }) {
+        auto [status, envelope] = export_run_report_response (*db_, body);
+        ASSERT_EQ (status, 200) << envelope.dump ();
+        const std::string text = envelope["text"].get<std::string> ();
+        ASSERT_FALSE (text.empty ());
+        for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY",
+             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+            EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
+                                                              << text;
+        }
+    }
+}
+
+TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheHtml) {
+    seed_leak_run ("run_leak");
+    seed_run ("run_load", vayu::RunType::Load, vayu::RunStatus::Completed);
+    // The leak run is exported itself, and again as the base of a comparison.
+    for (const json& body : { json{ { "runId", "run_leak" }, { "format", "html" } },
+         json{ { "runId", "run_load" }, { "baseRunId", "run_leak" }, { "format", "html" } } }) {
         auto [status, envelope] = export_run_report_response (*db_, body);
         ASSERT_EQ (status, 200) << envelope.dump ();
         const std::string text = envelope["text"].get<std::string> ();

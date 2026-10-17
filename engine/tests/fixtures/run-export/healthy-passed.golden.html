@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Orders API - Vayu run report</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f3f5f7;
+  --text: #1b1f24;
+  --muted: #4b5563;
+  --rule: #d0d7de;
+  --grid: #e4e8ec;
+  --axis: #6b7280;
+  --accent: #0b5cad;
+  --good-text: #17703a;
+  --good-bg: #e3f6e8;
+  --good-mark: #178040;
+  --bad-text: #b3261e;
+  --bad-bg: #fdeceb;
+  --bad-mark: #c9362d;
+  --rps: #0b7a75;
+  --vus: #6f42c1;
+  --p50: #4d8bd6;
+  --p95: #2368c4;
+  --p99: #0a2f66;
+  --c2xx: #178040;
+  --c4xx: #9a6700;
+  --c5xx: #c9362d;
+  --cnone: #7a3fc0;
+  --ref: #4b5563;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10151b;
+    --surface: #1a2129;
+    --text: #e6eaee;
+    --muted: #a6b0bb;
+    --rule: #2d3640;
+    --grid: #26303a;
+    --axis: #8a95a1;
+    --accent: #79b8ff;
+    --good-text: #56d37b;
+    --good-bg: #12301d;
+    --good-mark: #3fb868;
+    --bad-text: #ff8a80;
+    --bad-bg: #3a1614;
+    --bad-mark: #f0584d;
+    --rps: #3cc9c0;
+    --vus: #b392f0;
+    --p50: #3d73b8;
+    --p95: #6aa6f0;
+    --p99: #cfe3ff;
+    --c2xx: #3fb868;
+    --c4xx: #e3b341;
+    --c5xx: #f0584d;
+    --cnone: #c9a0ff;
+    --ref: #a6b0bb;
+  }
+}
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #f3f5f7;
+    --text: #1b1f24;
+    --muted: #4b5563;
+    --rule: #d0d7de;
+    --grid: #e4e8ec;
+    --axis: #6b7280;
+    --accent: #0b5cad;
+    --good-text: #17703a;
+    --good-bg: #e3f6e8;
+    --good-mark: #178040;
+    --bad-text: #b3261e;
+    --bad-bg: #fdeceb;
+    --bad-mark: #c9362d;
+    --rps: #0b7a75;
+    --vus: #6f42c1;
+    --p50: #4d8bd6;
+    --p95: #2368c4;
+    --p99: #0a2f66;
+    --c2xx: #178040;
+    --c4xx: #9a6700;
+    --c5xx: #c9362d;
+    --cnone: #7a3fc0;
+    --ref: #4b5563;
+  }
+}
+@page { margin: 14mm; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.brand { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
+.brand strong { font-size: 0.95rem; }
+.brand img { vertical-align: middle; margin-right: 0.4rem; }
+h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
+h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+section, footer { margin: 1.75rem 0; }
+a { color: var(--accent); }
+code, .reference { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.reference { margin: 0; color: var(--muted); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+.band { padding: 0.6rem 0.9rem; border-left: 0.4rem solid var(--axis); background: var(--surface); }
+.band p { margin: 0; }
+.band p + p { margin-top: 0.4rem; }
+.band strong { font-size: 1.25rem; }
+.band-good { border-color: var(--good-mark); background: var(--good-bg); }
+.band-good strong { color: var(--good-text); }
+.band-bad { border-color: var(--bad-mark); background: var(--bad-bg); }
+.band-bad strong { color: var(--bad-text); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 0.35rem 0.75rem 0.35rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+thead th { color: var(--muted); font-weight: 600; }
+tbody th { font-weight: 600; }
+td.tone-good { color: var(--good-text); }
+td.tone-bad { color: var(--bad-text); }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.5rem; margin: 0; }
+dl.facts div { display: contents; }
+dt { color: var(--muted); font-weight: 600; }
+dd { margin: 0; overflow-wrap: anywhere; }
+ul.plain { margin: 0; padding-left: 1.2rem; }
+figure { margin: 0 0 1.25rem; }
+figcaption { margin-bottom: 0.25rem; font-weight: 600; }
+.chart-note { color: var(--muted); font-size: 0.85rem; }
+svg.chart { display: block; width: 100%; height: auto; }
+svg .tick, svg .axis-title { fill: var(--muted); font-size: 11px; }
+svg .direct { fill: var(--text); font-size: 11px; }
+svg .grid { fill: none; stroke: var(--grid); stroke-width: 1; }
+svg .axis { fill: none; stroke: var(--axis); stroke-width: 1; }
+svg path.ref { fill: none; stroke: var(--ref); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .line { fill: none; stroke: var(--c); stroke-width: 1.6; stroke-linejoin: round; }
+svg .dot { fill: var(--c); }
+.s-rps { --c: var(--rps); }
+.s-vus { --c: var(--vus); }
+.s-p50 { --c: var(--p50); }
+.s-p95 { --c: var(--p95); }
+.s-p99 { --c: var(--p99); }
+.s-2xx { --c: var(--c2xx); }
+.s-4xx { --c: var(--c4xx); }
+.s-5xx { --c: var(--c5xx); }
+.s-none { --c: var(--cnone); }
+svg .line.s-p99 { stroke-width: 2.2; }
+svg .line.s-4xx { stroke-dasharray: 7 3; }
+svg .line.s-none { stroke-dasharray: 2 3; }
+@media (max-width: 40rem) { dl.facts { grid-template-columns: 1fr; } }
+@media print {
+  body { font-size: 11pt; }
+  nav { display: none; }
+  main { max-width: none; padding: 0; }
+  section, figure, footer { break-inside: avoid; }
+  #charts { break-inside: auto; }
+  .band { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="brand"><img src="data:image/png;base64,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" alt="" width="28" height="28"><strong>Vayu</strong> run report</p>
+<h1>Orders API</h1>
+<p class="reference"><code>Vayu run &quot;Orders API&quot; (run_7f3a91) - load test, GET /orders, 2026-10-05T08:10:00Z, completed</code></p>
+</header>
+<nav aria-label="Sections"><ul>
+<li><a href="#verdict">Verdict</a></li>
+<li><a href="#run">Run</a></li>
+<li><a href="#results">Results</a></li>
+<li><a href="#latency">Latency</a></li>
+<li><a href="#charts">Charts</a></li>
+</ul></nav>
+<section id="verdict" aria-labelledby="verdict-h">
+<h2 id="verdict-h">Verdict</h2>
+<div class="band band-good">
+<p><strong>Passed</strong> - 3 of 3 budgets met</p>
+</div>
+</section>
+<section id="run" aria-labelledby="run-h">
+<h2 id="run-h">Run</h2>
+<dl class="facts">
+<div><dt>Target</dt><dd>GET https://api.example.test/orders?page=1</dd></div>
+<div><dt>Mode</dt><dd>constant concurrency</dd></div>
+<div><dt>Virtual users</dt><dd>50</dd></div>
+<div><dt>Duration</dt><dd>60 s</dd></div>
+<div><dt>Started</dt><dd>2026-10-05T08:10:00Z</dd></div>
+<div><dt>Engine version</dt><dd>1.14.0</dd></div>
+<div><dt>Comment</dt><dd>nightly baseline</dd></div>
+</dl>
+</section>
+<section id="results" aria-labelledby="results-h">
+<h2 id="results-h">Results</h2>
+<div class="scroll"><table aria-labelledby="results-h">
+<thead><tr><th scope="col">Metric</th><th scope="col">Value</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">Requests</th><td>29,944</td><td>-</td></tr>
+<tr><th scope="row">Requests per second</th><td>499 req/s</td><td class="tone-good">&gt;= 400 req/s - met</td></tr>
+<tr><th scope="row">Error rate</th><td>0.0%</td><td class="tone-good">&lt;= 1.0% - met</td></tr>
+<tr><th scope="row">Bytes in</th><td>36.6 MB</td><td>-</td></tr>
+<tr><th scope="row">Bytes out</th><td>2.9 MB</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="latency" aria-labelledby="latency-h">
+<h2 id="latency-h">Latency</h2>
+<div class="scroll"><table aria-labelledby="latency-h">
+<thead><tr><th scope="col">Measure</th><th scope="col">Latency (ms)</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">min</th><td>3.1</td><td>-</td></tr>
+<tr><th scope="row">p50</th><td>94</td><td>-</td></tr>
+<tr><th scope="row">p90</th><td>149</td><td>-</td></tr>
+<tr><th scope="row">p95</th><td>171</td><td class="tone-good">&lt;= 300 ms - met</td></tr>
+<tr><th scope="row">p99</th><td>238</td><td>-</td></tr>
+<tr><th scope="row">p999</th><td>332</td><td>-</td></tr>
+<tr><th scope="row">max</th><td>413</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="charts" aria-labelledby="charts-h">
+<h2 id="charts-h">Charts</h2>
+<figure>
+<figcaption>Throughput and virtual users</figcaption>
+<svg class="chart" viewBox="0 0 720.0 386.0" role="img" aria-label="Throughput and virtual users over time" aria-describedby="chart-throughput-desc"><title>Throughput and virtual users over time</title><desc id="chart-throughput-desc">Throughput: min 220 req/s, max 512 req/s, peak at 4 s. Virtual users: min 18, max 50, peak at 2 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Throughput (req/s)</text><path class="grid" d="M58.0 166.0H596.0M58.0 119.3H596.0M58.0 72.7H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="119.3" text-anchor="end" dominant-baseline="central">200</text><text class="tick y" x="50.0" y="72.7" text-anchor="end" dominant-baseline="central">400</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">600</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>Throughput: min 220 req/s, max 512 req/s, peak at 4 s</title><polyline class="line s-rps" points="67.0,114.7 75.9,47.9 84.9,48.6 93.9,46.5 102.8,47.2 111.8,47.2 120.8,47.7 129.7,49.6 138.7,47.7 147.7,52.1 156.6,48.6 165.6,48.4 174.6,48.9 183.5,50.7 192.5,47.7 201.5,48.9 210.4,50.5 219.4,51.0 228.4,51.2 237.3,49.3 246.3,50.5 255.3,50.0 264.2,46.8 273.2,47.2 282.2,50.7 291.1,49.3 300.1,47.5 309.1,50.3 318.0,49.1 327.0,47.5 336.0,48.9 344.9,51.0 353.9,52.1 362.9,51.4 371.8,48.4 380.8,48.9 389.8,49.6 398.7,50.5 407.7,49.8 416.7,48.9 425.6,48.2 434.6,52.1 443.6,49.8 452.5,47.9 461.5,47.7 470.5,46.5 479.4,48.2 488.4,47.2 497.4,51.2 506.3,46.5 515.3,50.3 524.3,51.4 533.2,47.5 542.2,50.5 551.2,49.6 560.1,52.1 569.1,51.4 578.1,49.3 587.0,51.0 596.0,48.9"/></g><text class="direct rps" x="604.0" y="48.9" dominant-baseline="central">Throughput</text></g><g class="panel"><text class="axis-title" x="58.0" y="194.0">Virtual users (count)</text><path class="grid" d="M58.0 342.0H596.0M58.0 314.0H596.0M58.0 286.0H596.0M58.0 258.0H596.0M58.0 230.0H596.0M58.0 202.0H596.0"/><text class="tick y" x="50.0" y="342.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="314.0" text-anchor="end" dominant-baseline="central">10</text><text class="tick y" x="50.0" y="286.0" text-anchor="end" dominant-baseline="central">20</text><text class="tick y" x="50.0" y="258.0" text-anchor="end" dominant-baseline="central">30</text><text class="tick y" x="50.0" y="230.0" text-anchor="end" dominant-baseline="central">40</text><text class="tick y" x="50.0" y="202.0" text-anchor="end" dominant-baseline="central">50</text><path class="axis" d="M58.0 202.0V342.0H596.0"/><g class="series"><title>Virtual users: min 18, max 50, peak at 2 s</title><polyline class="line s-vus" points="67.0,291.6 75.9,202.0 84.9,202.0 93.9,202.0 102.8,202.0 111.8,202.0 120.8,202.0 129.7,202.0 138.7,202.0 147.7,202.0 156.6,202.0 165.6,202.0 174.6,202.0 183.5,202.0 192.5,202.0 201.5,202.0 210.4,202.0 219.4,202.0 228.4,202.0 237.3,202.0 246.3,202.0 255.3,202.0 264.2,202.0 273.2,202.0 282.2,202.0 291.1,202.0 300.1,202.0 309.1,202.0 318.0,202.0 327.0,202.0 336.0,202.0 344.9,202.0 353.9,202.0 362.9,202.0 371.8,202.0 380.8,202.0 389.8,202.0 398.7,202.0 407.7,202.0 416.7,202.0 425.6,202.0 434.6,202.0 443.6,202.0 452.5,202.0 461.5,202.0 470.5,202.0 479.4,202.0 488.4,202.0 497.4,202.0 506.3,202.0 515.3,202.0 524.3,202.0 533.2,202.0 542.2,202.0 551.2,202.0 560.1,202.0 569.1,202.0 578.1,202.0 587.0,202.0 596.0,202.0"/></g><text class="direct vus" x="604.0" y="202.0" dominant-baseline="central">Virtual users</text></g><text class="tick x" x="58.0" y="357.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="357.0" text-anchor="middle">10</text><text class="tick x" x="237.3" y="357.0" text-anchor="middle">20</text><text class="tick x" x="327.0" y="357.0" text-anchor="middle">30</text><text class="tick x" x="416.7" y="357.0" text-anchor="middle">40</text><text class="tick x" x="506.3" y="357.0" text-anchor="middle">50</text><text class="tick x" x="596.0" y="357.0" text-anchor="middle">60</text><text class="axis-title" x="327.0" y="376.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+<figure>
+<figcaption>Latency percentiles</figcaption>
+<svg class="chart" viewBox="0 0 720.0 210.0" role="img" aria-label="Latency percentiles over time" aria-describedby="chart-latency-desc"><title>Latency percentiles over time</title><desc id="chart-latency-desc">p50: min 90 ms, max 98 ms, peak at 18 s. p95: min 165 ms, max 180 ms, peak at 10 s. p99: min 228 ms, max 331 ms, peak at 37 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Latency (ms)</text><path class="grid" d="M58.0 166.0H596.0M58.0 131.0H596.0M58.0 96.0H596.0M58.0 61.0H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="131.0" text-anchor="end" dominant-baseline="central">100</text><text class="tick y" x="50.0" y="96.0" text-anchor="end" dominant-baseline="central">200</text><text class="tick y" x="50.0" y="61.0" text-anchor="end" dominant-baseline="central">300</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">400</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>p50: min 90 ms, max 98 ms, peak at 18 s</title><polyline class="line s-p50" points="67.0,134.5 75.9,133.8 84.9,133.1 93.9,133.1 102.8,132.8 111.8,133.8 120.8,133.8 129.7,132.4 138.7,133.5 147.7,132.4 156.6,132.1 165.6,134.5 174.6,133.1 183.5,133.5 192.5,132.1 201.5,132.8 210.4,133.1 219.4,131.7 228.4,133.5 237.3,133.8 246.3,133.8 255.3,134.2 264.2,132.4 273.2,132.8 282.2,133.5 291.1,133.5 300.1,133.8 309.1,132.8 318.0,131.7 327.0,133.1 336.0,132.4 344.9,133.1 353.9,133.5 362.9,132.4 371.8,133.1 380.8,134.2 389.8,133.5 398.7,134.2 407.7,132.8 416.7,132.8 425.6,132.1 434.6,134.5 443.6,134.5 452.5,133.8 461.5,133.1 470.5,132.4 479.4,132.8 488.4,131.7 497.4,134.2 506.3,133.8 515.3,133.1 524.3,131.7 533.2,132.1 542.2,132.4 551.2,132.8 560.1,133.1 569.1,133.8 578.1,132.4 587.0,133.1 596.0,132.1"/></g><g class="series"><title>p95: min 165 ms, max 180 ms, peak at 10 s</title><polyline class="line s-p95" points="67.0,106.5 75.9,105.5 84.9,106.9 93.9,106.9 102.8,106.9 111.8,107.6 120.8,106.5 129.7,105.8 138.7,108.3 147.7,103.0 156.6,104.1 165.6,103.7 174.6,104.1 183.5,104.8 192.5,104.4 201.5,103.0 210.4,107.9 219.4,107.9 228.4,105.1 237.3,106.9 246.3,107.6 255.3,105.8 264.2,106.9 273.2,104.8 282.2,104.1 291.1,106.5 300.1,104.1 309.1,103.0 318.0,104.1 327.0,103.0 336.0,104.8 344.9,106.2 353.9,103.7 362.9,103.0 371.8,103.0 380.8,105.1 389.8,104.4 398.7,108.3 407.7,107.9 416.7,105.5 425.6,103.4 434.6,107.6 443.6,104.8 452.5,107.6 461.5,103.7 470.5,105.8 479.4,106.5 488.4,103.0 497.4,104.8 506.3,103.7 515.3,103.0 524.3,107.9 533.2,106.2 542.2,106.2 551.2,106.2 560.1,107.2 569.1,103.0 578.1,104.4 587.0,104.8 596.0,107.6"/></g><g class="series"><title>p99: min 228 ms, max 331 ms, peak at 37 s</title><polyline class="line s-p99" points="67.0,77.8 75.9,82.4 84.9,83.8 93.9,84.5 102.8,83.8 111.8,80.6 120.8,78.2 129.7,79.9 138.7,83.8 147.7,82.7 156.6,81.3 165.6,81.7 174.6,85.2 183.5,79.6 192.5,83.1 201.5,84.5 210.4,82.0 219.4,85.2 228.4,86.2 237.3,86.2 246.3,84.1 255.3,79.2 264.2,83.1 273.2,85.2 282.2,78.5 291.1,85.2 300.1,81.3 309.1,78.9 318.0,82.0 327.0,77.8 336.0,83.1 344.9,80.6 353.9,77.8 362.9,82.7 371.8,81.0 380.8,81.0 389.8,50.2 398.7,80.3 407.7,84.5 416.7,81.7 425.6,82.4 434.6,85.5 443.6,80.6 452.5,81.7 461.5,84.8 470.5,79.2 479.4,80.6 488.4,77.8 497.4,78.2 506.3,79.2 515.3,85.2 524.3,83.4 533.2,81.3 542.2,82.7 551.2,79.6 560.1,84.1 569.1,78.2 578.1,79.9 587.0,79.2 596.0,79.9"/></g><path class="ref" d="M58.0 61.0H596.0"/><text class="direct ref" x="604.0" y="61.0" dominant-baseline="central">p95 budget 300 ms</text><text class="direct p99" x="604.0" y="79.9" dominant-baseline="central">p99</text><text class="direct p95" x="604.0" y="107.6" dominant-baseline="central">p95</text><text class="direct p50" x="604.0" y="132.1" dominant-baseline="central">p50</text></g><text class="tick x" x="58.0" y="181.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="181.0" text-anchor="middle">10</text><text class="tick x" x="237.3" y="181.0" text-anchor="middle">20</text><text class="tick x" x="327.0" y="181.0" text-anchor="middle">30</text><text class="tick x" x="416.7" y="181.0" text-anchor="middle">40</text><text class="tick x" x="506.3" y="181.0" text-anchor="middle">50</text><text class="tick x" x="596.0" y="181.0" text-anchor="middle">60</text><text class="axis-title" x="327.0" y="200.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+<figure>
+<figcaption>Responses per interval by class</figcaption>
+<svg class="chart" viewBox="0 0 720.0 210.0" role="img" aria-label="Responses per interval by class" aria-describedby="chart-status-desc"><title>Responses per interval by class</title><desc id="chart-status-desc">2xx/3xx: min 220 responses, max 512 responses, peak at 4 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Responses per tick</text><path class="grid" d="M58.0 166.0H596.0M58.0 119.3H596.0M58.0 72.7H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="119.3" text-anchor="end" dominant-baseline="central">200</text><text class="tick y" x="50.0" y="72.7" text-anchor="end" dominant-baseline="central">400</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">600</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>2xx/3xx: min 220 responses, max 512 responses, peak at 4 s</title><polyline class="line s-2xx" points="67.0,114.7 75.9,47.9 84.9,48.6 93.9,46.5 102.8,47.2 111.8,47.2 120.8,47.7 129.7,49.6 138.7,47.7 147.7,52.1 156.6,48.6 165.6,48.4 174.6,48.9 183.5,50.7 192.5,47.7 201.5,48.9 210.4,50.5 219.4,51.0 228.4,51.2 237.3,49.3 246.3,50.5 255.3,50.0 264.2,46.8 273.2,47.2 282.2,50.7 291.1,49.3 300.1,47.5 309.1,50.3 318.0,49.1 327.0,47.5 336.0,48.9 344.9,51.0 353.9,52.1 362.9,51.4 371.8,48.4 380.8,48.9 389.8,49.6 398.7,50.5 407.7,49.8 416.7,48.9 425.6,48.2 434.6,52.1 443.6,49.8 452.5,47.9 461.5,47.7 470.5,46.5 479.4,48.2 488.4,47.2 497.4,51.2 506.3,46.5 515.3,50.3 524.3,51.4 533.2,47.5 542.2,50.5 551.2,49.6 560.1,52.1 569.1,51.4 578.1,49.3 587.0,51.0 596.0,48.9"/></g><text class="direct 2xx" x="604.0" y="48.9" dominant-baseline="central">2xx/3xx</text></g><text class="tick x" x="58.0" y="181.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="181.0" text-anchor="middle">10</text><text class="tick x" x="237.3" y="181.0" text-anchor="middle">20</text><text class="tick x" x="327.0" y="181.0" text-anchor="middle">30</text><text class="tick x" x="416.7" y="181.0" text-anchor="middle">40</text><text class="tick x" x="506.3" y="181.0" text-anchor="middle">50</text><text class="tick x" x="596.0" y="181.0" text-anchor="middle">60</text><text class="axis-title" x="327.0" y="200.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+
+</section>
+<footer>
+<p>Generated by Vayu 1.14.0. No request or response data is included.</p>
+</footer>
+</main>
+</body>
+</html>

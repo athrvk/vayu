@@ -12,5 +12,12 @@
     "extension": ".run.md",
     "copyable": true,
     "mcp": true
+  },
+  {
+    "id": "html",
+    "mimeType": "text/html",
+    "extension": ".run.html",
+    "copyable": false,
+    "mcp": false
   }
 ]

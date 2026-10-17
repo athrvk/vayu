@@ -3943,15 +3943,15 @@ draft-07 with `additionalProperties: false` at every level. **Reads only.**
 }
 ```
 
-`json` and `markdown` are written; `html` answers `400 format_not_available`
-naming the issue that adds it (#2135). The formats are one table
+`json`, `markdown` and `html` are written. The formats are one table
 (`RUN_EXPORT_FORMATS`), so each adds a row and its renderer, and a row to
 `engine/tests/fixtures/run-export-formats.json`, which the app's format
 registry and the MCP server's list are held to. Every format renders the same
 document, so what the rules below leave out is left out of all of them.
 `series: "none"` leaves `timeSeries` out; `full` reads every tick of
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics), paged at its 50000-tick
-maximum to the end. `baseRunId` is checked like `runId` (below) and fills the
+maximum to the end. `html` draws the series, so it reads every tick whatever
+`series` says. `baseRunId` is checked like `runId` (below) and fills the
 document's `comparison`; without it `comparison` is `null`.
 
 **Response:**
@@ -3965,10 +3965,12 @@ document's `comparison`; without it `comparison` is `null`.
 ```
 
 - `text` is the document: for `json` two-space indented with invalid UTF-8
-  replaced, for `markdown` the report [below](#the-markdown-report).
-- `mimeType` is `application/json`, or `text/markdown` for `markdown`.
+  replaced, for `markdown` the report [below](#the-markdown-report), for `html`
+  the page [below](#the-html-report).
+- `mimeType` is `application/json`, `text/markdown` for `markdown` or
+  `text/html` for `html`.
 - `fileName` is `<title> <UTC start, YYYY-MM-DD HHmm>.run.json` (`.run.md` for
-  `markdown`), with every
+  `markdown`, `.run.html` for `html`), with every
   character a filesystem refuses replaced by `_` (the rule
   `POST /export/postman` uses; `run` when nothing is left). The title is the
   one the run's reference line uses (below).
@@ -4133,12 +4135,69 @@ hold the renderer to its exact bytes for each shape of run
 (`run_export_markdown_test.cpp`); a deliberate change to the output is
 regenerated with `VAYU_UPDATE_GOLDEN=1`, never edited by hand.
 
+#### The HTML report
+
+`format: "html"` renders the same document as one self-contained page, to open
+in a browser, attach to a ticket or print: `<title> <UTC start>.run.html`
+(`core/run_export_html.hpp`). Like the Markdown report it is a pure function of
+the document, so it can say nothing the document does not.
+
+It holds the Markdown report's sections in the same order (title and reference
+line, verdict, run, results, latency with its budgets, errors, comparison,
+warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
+description list for the run - from the same reading of the document, so the two
+cannot word a verdict differently. Above the title sits a one-line brand
+(the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
+an empty `alt` because the wordmark names the product). The mark is
+`shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
+(`run_export_html_logo.hpp`) because it exists only as a raster; the test suite
+compares the embedded bytes with that file. Then come three charts drawn from
+`timeSeries`, then the footer, which names the engine version:
+
+1. Throughput (req/s) and virtual users, two stacked panels sharing the x-axis.
+2. Latency p50, p95 and p99 in ms, with the p95 budget as a labelled dashed line
+   when the run declared one. The axis stretches to reach the budget, so a
+   generous budget is drawn however far above the data it lies.
+3. Responses per tick by class: 2xx/3xx, 4xx, 5xx and No response (status code
+   0). A tick carries cumulative counts, so each class is drawn as what it
+   gained since the previous tick, a count that moved backwards adding nothing.
+   A class that saw no response is not drawn and has no label.
+
+Every y-axis starts at 0 and names its unit, the x-axis is seconds from the start
+of the run, and each line is labelled where it ends instead of in a legend; the
+percentile lines differ in lightness, not hue, since red and amber mean failure
+here. Each chart has an accessible name and a `<desc>` giving every series'
+minimum, maximum and the time of its peak, read from every tick. A line is
+drawn from at most 480 points: a longer series is cut into 240 stretches and
+each keeps its lowest and highest value, so a one-tick spike survives, and the
+file stays under 300 KB for a run of any length.
+
+**The page loads nothing and runs nothing.** There is no script, no `<link>`,
+frame or font and no `url(...)`; the one image is the brand mark above, an inline
+`data:image/png` URI, so it is the only `src` attribute and it cannot fetch
+anything. A `Content-Security-Policy` meta tag (`default-src 'none'; style-src
+'unsafe-inline'; img-src data:`) enforces that: no request leaves the page. The
+only `href` values are `#` anchors to the
+page's own sections: the target URL is text, never a link. The charts are inline
+`<svg>`, which is why hovering a line shows its summary natively. Every string
+written into the page (name, comment, URL, error keys, warning text, data file
+name) goes through one `escape_html`, in text and attribute position alike.
+
+The page follows the reader's colour scheme (`color-scheme: light dark`, the
+palette switched by `prefers-color-scheme`, no toggle) and prints light on A4
+(`@page` margin 14 mm, sections and charts kept whole, the verdict band printed
+in colour). Pass and fail are always a word beside the colour (`Passed`,
+`Failed`, `Not judged`, `met`, `missed`); the palette holds 4.5:1 for text and
+3:1 for graphics in both schemes (`run_export_html_test.cpp` measures it).
+
+`engine/tests/fixtures/run-export/<case>.golden.html` pins the bytes for two
+shapes of run, regenerated like the Markdown goldens.
+
 **Errors:**
 
 | Status | `error.code` | When |
 |--------|--------------|------|
 | `400` | `bad_request` | The body is not an object; `runId` missing or empty; `format` not one of the table's names; `series` not `full` or `none`; `baseRunId` not a non-empty string, or equal to `runId` |
-| `400` | `format_not_available` | `format` is `html` |
 | `400` | `unsupported_run_type` | The run or the base is a design or collection-sequence run |
 | `404` | `not_found` | The run or the base does not exist |
 | `409` | `run_in_progress` | The run or the base is `pending` or `running`: its numbers are not a result yet. A `stopped` run is a result |

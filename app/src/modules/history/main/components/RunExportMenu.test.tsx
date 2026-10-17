@@ -78,6 +78,16 @@ function markdownEnvelope(): RunReportExportResponse {
 	};
 }
 
+/** The engine's HTML answer: the file name and type are the engine's, as the others are. */
+function htmlEnvelope(): RunReportExportResponse {
+	return {
+		text: "<!DOCTYPE html><html><body><h1>Orders</h1></body></html>",
+		fileName: "Orders 2026-10-17 0841.run.html",
+		mimeType: "text/html",
+		notes: { urlCredentialsOmitted: 0 },
+	};
+}
+
 const exportRunReport = vi.mocked(apiService.exportRunReport);
 const download = vi.mocked(downloadTextFile);
 const writeText = vi.fn();
@@ -113,7 +123,12 @@ describe("the Export menu's items", () => {
 		const menu = await openMenu();
 
 		const labels = runExportActions().map((action) => action.label);
-		expect(labels).toEqual(["Save as JSON", "Save as Markdown", "Copy as Markdown"]);
+		expect(labels).toEqual([
+			"Save as JSON",
+			"Save as Markdown",
+			"Save as HTML report",
+			"Copy as Markdown",
+		]);
 		const items = within(menu)
 			.getAllByRole("menuitem")
 			.map((item) => item.textContent);
@@ -206,6 +221,25 @@ describe("the Export menu's items", () => {
 			)
 		);
 		expect(exportRunReport).toHaveBeenCalledWith({ runId: "run_1", format: "markdown" });
+		expect(writeText).not.toHaveBeenCalled();
+	});
+
+	it("saves the HTML report by the engine's file name and type, and offers no copy of it", async () => {
+		exportRunReport.mockResolvedValue(htmlEnvelope());
+		renderMenu();
+		const menu = await openMenu();
+		expect(within(menu).queryByRole("menuitem", { name: "Copy as HTML report" })).toBeNull();
+
+		fireEvent.click(within(menu).getByRole("menuitem", { name: "Save as HTML report" }));
+
+		await waitFor(() =>
+			expect(download).toHaveBeenCalledWith(
+				htmlEnvelope().text,
+				"Orders 2026-10-17 0841.run.html",
+				"text/html"
+			)
+		);
+		expect(exportRunReport).toHaveBeenCalledWith({ runId: "run_1", format: "html" });
 		expect(writeText).not.toHaveBeenCalled();
 	});
 });

@@ -75,4 +75,28 @@ inline std::string escape_xml_content (std::string_view text, char attribute_quo
     return out;
 }
 
+/**
+ * @p text as HTML character data or the inside of a quoted attribute value.
+ *
+ * One function for both positions and both quote styles: `&`, `<`, `>`, `"`
+ * and `'` are all rewritten, so a token cannot end the attribute it sits in
+ * (whichever delimiter that used) or open a tag in character data. Every other
+ * byte, multi-byte UTF-8 included, is left as it was written.
+ */
+inline std::string escape_html (std::string_view text) {
+    std::string out;
+    out.reserve (text.size ());
+    for (const char c : text) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        case '\'': out += "&#39;"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
 } // namespace vayu::utils
