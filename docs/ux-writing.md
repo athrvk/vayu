@@ -53,7 +53,7 @@ that you would like them to. The renderer is clean today
 (`rg -n -i "failed to|could not" app/src app/electron --glob '!*.test.*' -g '*.{ts,tsx}'`
 finds nothing in a rendered string). What remains are engine response bodies
 that the app shows after its own "Couldn't ..." prefix; a test holds both
-surfaces (the voice and casing scan, tracked under #2290). Log strings and code
+surfaces (the voice and casing scan, #2300). Log strings and code
 comments are a separate surface and keep whatever form reads well there.
 
 ## Terminology glossary
