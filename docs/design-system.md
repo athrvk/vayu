@@ -3073,7 +3073,7 @@ headings and button labels ("No collections yet", "Delete forever?"). They are
 stored data, not interface copy: the history views compare a persisted run's
 `requestName` to `DEFAULT_REQUEST_NAME` by literal, so lower-casing one would
 make runs already recorded under it read as a name the user chose. Every other
-string is sentence case; the rule and its one exception are in
+string is sentence case; the rule and its exceptions are in
 [ux-writing.md](ux-writing.md#decision-rules).
 
 ### Cards
@@ -3528,7 +3528,7 @@ read as a fraction, and there is no fraction to report.
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
 - Hardcoded hex method colors like `text-[#22c55e]` - use `method-get` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
-- Hardcoded purple for Load Test / secondary actions - use `text-primary/border-primary/bg-primary/10`
+- Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
 
 These rules are enforced for the request/response tree by
 `modules/request-builder/components/ResponseViewer/palette-tokens.test.ts`. They
