@@ -577,6 +577,7 @@ add_library(vayu_core STATIC
     src/core/postman_export.cpp
     src/core/run_compare.cpp
     src/core/run_export.cpp
+    src/core/run_export_html.cpp
     src/core/run_export_markdown.cpp
     src/core/run_export_view.cpp
     src/core/svg_chart.cpp

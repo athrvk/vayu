@@ -118,6 +118,8 @@ struct ReportComparison {
     ReportTable table;
     /// One sentence per setup difference between the two runs; empty when none.
     std::vector<ReportText> differences;
+    /// Why the differences matter; empty exactly when @ref differences is.
+    ReportText caveat;
 };
 
 /// The sections of a report, each already worded. A section the document has

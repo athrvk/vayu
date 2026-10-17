@@ -300,9 +300,7 @@ std::string comparison_block (const ReportView& view) {
     if (comparison.differences.empty ()) {
         return out;
     }
-    out += "\nThe two runs were not set up the same way, so these changes "
-           "may not be "
-           "like for like:\n\n";
+    out += "\n" + markdown_text (comparison.caveat) + "\n\n";
     for (const ReportText& difference : comparison.differences) {
         out += "- " + markdown_text (difference) + '\n';
     }

@@ -56,14 +56,9 @@ std::set<FormatKey> fixture_formats (const json& fixture) {
     return keys;
 }
 
-/// Only a row with a renderer: the others are accepted by name and refused as
-/// `format_not_available`, so no client can ask for them.
 std::set<FormatKey> writable_formats () {
     std::set<FormatKey> keys;
     for (const vayu::core::RunExportFormat& row : vayu::core::RUN_EXPORT_FORMATS) {
-        if (row.render == nullptr) {
-            continue;
-        }
         keys.emplace (std::string (row.name), std::string (row.mime_type),
         std::string (row.file_suffix));
     }

@@ -837,6 +837,11 @@ std::optional<ReportComparison> comparison_of (const ordered& document) {
         std::ranges::transform (
         differences, std::back_inserter (out.differences), difference_line);
     }
+    if (!out.differences.empty ()) {
+        out.caveat =
+        "The two runs were not set up the same way, so these changes "
+        "may not be like for like:";
+    }
     return out;
 }
 

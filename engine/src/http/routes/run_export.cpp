@@ -53,8 +53,7 @@ read_optional_id (const nlohmann::json& json, const char* key) {
     return field->get<std::string> ();
 }
 
-/// `format`: absent is the table's first row; a row without a renderer is
-/// refused naming the issue that adds it.
+/// `format`: absent is the table's first row.
 std::expected<const RunExportFormat*, RouteError> read_format (const nlohmann::json& json) {
     const auto field = json.find ("format");
     if (field == json.end () || field->is_null ()) {
@@ -70,16 +69,11 @@ std::expected<const RunExportFormat*, RouteError> read_format (const nlohmann::j
         }
         return route_error (400, "Invalid 'format': must be one of " + names);
     }
-    if (format->render == nullptr) {
-        return route_error (400,
-        std::format ("The '{}' format is not available yet ({})", format->name,
-        format->tracked_by),
-        "format_not_available");
-    }
     return format;
 }
 
-/// `series`: `"full"` (the default) or `"none"`.
+/// `series`: `"full"` (the default) or `"none"`. A format that draws the series
+/// reads it whatever this says (@ref RunExportFormat::needs_series).
 std::expected<bool, RouteError> read_series (const nlohmann::json& json) {
     const auto field = json.find ("series");
     if (field == json.end () || field->is_null ()) {
@@ -114,7 +108,7 @@ std::expected<RunExportRequest, RouteError> read_export_request (const nlohmann:
     if (!series) {
         return std::unexpected (series.error ());
     }
-    request.series = *series;
+    request.series = *series || request.format->needs_series;
     auto base      = read_optional_id (json, "baseRunId");
     if (!base) {
         return std::unexpected (base.error ());
@@ -211,8 +205,7 @@ read_export_run (vayu::db::Database& db, const vayu::db::Run& row) {
 /**
  * Testable core of POST /export/run-report - the document assembled and
  * returned, nothing written. 400 for a malformed body, an unknown `format` or
- * `series`, a format not available yet (`format_not_available`), a base equal
- * to the run, or a run or base that is not a load run
+ * `series`, a base equal to the run, or a run or base that is not a load run
  * (`unsupported_run_type`); 404 for a missing run or base; 409 for a run or
  * base still executing (`run_in_progress`).
  */

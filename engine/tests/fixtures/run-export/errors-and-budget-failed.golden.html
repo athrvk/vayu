@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Checkout submit - Vayu run report</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #f3f5f7;
+  --text: #1b1f24;
+  --muted: #4b5563;
+  --rule: #d0d7de;
+  --grid: #e4e8ec;
+  --axis: #6b7280;
+  --accent: #0b5cad;
+  --good-text: #17703a;
+  --good-bg: #e3f6e8;
+  --good-mark: #178040;
+  --bad-text: #b3261e;
+  --bad-bg: #fdeceb;
+  --bad-mark: #c9362d;
+  --rps: #0b7a75;
+  --vus: #6f42c1;
+  --p50: #4d8bd6;
+  --p95: #2368c4;
+  --p99: #0a2f66;
+  --c2xx: #178040;
+  --c4xx: #9a6700;
+  --c5xx: #c9362d;
+  --cnone: #7a3fc0;
+  --ref: #4b5563;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10151b;
+    --surface: #1a2129;
+    --text: #e6eaee;
+    --muted: #a6b0bb;
+    --rule: #2d3640;
+    --grid: #26303a;
+    --axis: #8a95a1;
+    --accent: #79b8ff;
+    --good-text: #56d37b;
+    --good-bg: #12301d;
+    --good-mark: #3fb868;
+    --bad-text: #ff8a80;
+    --bad-bg: #3a1614;
+    --bad-mark: #f0584d;
+    --rps: #3cc9c0;
+    --vus: #b392f0;
+    --p50: #3d73b8;
+    --p95: #6aa6f0;
+    --p99: #cfe3ff;
+    --c2xx: #3fb868;
+    --c4xx: #e3b341;
+    --c5xx: #f0584d;
+    --cnone: #c9a0ff;
+    --ref: #a6b0bb;
+  }
+}
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #f3f5f7;
+    --text: #1b1f24;
+    --muted: #4b5563;
+    --rule: #d0d7de;
+    --grid: #e4e8ec;
+    --axis: #6b7280;
+    --accent: #0b5cad;
+    --good-text: #17703a;
+    --good-bg: #e3f6e8;
+    --good-mark: #178040;
+    --bad-text: #b3261e;
+    --bad-bg: #fdeceb;
+    --bad-mark: #c9362d;
+    --rps: #0b7a75;
+    --vus: #6f42c1;
+    --p50: #4d8bd6;
+    --p95: #2368c4;
+    --p99: #0a2f66;
+    --c2xx: #178040;
+    --c4xx: #9a6700;
+    --c5xx: #c9362d;
+    --cnone: #7a3fc0;
+    --ref: #4b5563;
+  }
+}
+@page { margin: 14mm; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
+h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+section, footer { margin: 1.75rem 0; }
+a { color: var(--accent); }
+code, .reference { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.reference { margin: 0; color: var(--muted); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+.band { padding: 0.6rem 0.9rem; border-left: 0.4rem solid var(--axis); background: var(--surface); }
+.band p { margin: 0; }
+.band p + p { margin-top: 0.4rem; }
+.band strong { font-size: 1.25rem; }
+.band-good { border-color: var(--good-mark); background: var(--good-bg); }
+.band-good strong { color: var(--good-text); }
+.band-bad { border-color: var(--bad-mark); background: var(--bad-bg); }
+.band-bad strong { color: var(--bad-text); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 0.35rem 0.75rem 0.35rem 0; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+thead th { color: var(--muted); font-weight: 600; }
+tbody th { font-weight: 600; }
+td.tone-good { color: var(--good-text); }
+td.tone-bad { color: var(--bad-text); }
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.5rem; margin: 0; }
+dl.facts div { display: contents; }
+dt { color: var(--muted); font-weight: 600; }
+dd { margin: 0; overflow-wrap: anywhere; }
+ul.plain { margin: 0; padding-left: 1.2rem; }
+figure { margin: 0 0 1.25rem; }
+figcaption { margin-bottom: 0.25rem; font-weight: 600; }
+.chart-note { color: var(--muted); font-size: 0.85rem; }
+svg.chart { display: block; width: 100%; height: auto; }
+svg .tick, svg .axis-title, svg .note { fill: var(--muted); font-size: 11px; }
+svg .direct { fill: var(--text); font-size: 11px; }
+svg .grid { fill: none; stroke: var(--grid); stroke-width: 1; }
+svg .axis { fill: none; stroke: var(--axis); stroke-width: 1; }
+svg path.ref { fill: none; stroke: var(--ref); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .line { fill: none; stroke: var(--c); stroke-width: 1.6; stroke-linejoin: round; }
+svg .dot { fill: var(--c); }
+.s-rps { --c: var(--rps); }
+.s-vus { --c: var(--vus); }
+.s-p50 { --c: var(--p50); }
+.s-p95 { --c: var(--p95); }
+.s-p99 { --c: var(--p99); }
+.s-2xx { --c: var(--c2xx); }
+.s-4xx { --c: var(--c4xx); }
+.s-5xx { --c: var(--c5xx); }
+.s-none { --c: var(--cnone); }
+svg .line.s-p99 { stroke-width: 2.2; }
+svg .line.s-4xx { stroke-dasharray: 7 3; }
+svg .line.s-none { stroke-dasharray: 2 3; }
+@media (max-width: 40rem) { dl.facts { grid-template-columns: 1fr; } }
+@media print {
+  body { font-size: 11pt; }
+  nav { display: none; }
+  main { max-width: none; padding: 0; }
+  section, figure, footer { break-inside: avoid; }
+  #charts { break-inside: auto; }
+  .band { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Checkout submit</h1>
+<p class="reference"><code>Vayu run &quot;Checkout submit&quot; (run_b2c840) - load test, POST /checkout, 2026-10-05T08:10:00Z, completed</code></p>
+</header>
+<nav aria-label="Sections"><ul>
+<li><a href="#verdict">Verdict</a></li>
+<li><a href="#run">Run</a></li>
+<li><a href="#results">Results</a></li>
+<li><a href="#latency">Latency</a></li>
+<li><a href="#errors">Errors</a></li>
+<li><a href="#warnings">Warnings</a></li>
+<li><a href="#charts">Charts</a></li>
+</ul></nav>
+<section id="verdict" aria-labelledby="verdict-h">
+<h2 id="verdict-h">Verdict</h2>
+<div class="band band-bad">
+<p><strong>Failed</strong> - p95 &lt;= 800 ms missed (903 ms); error rate &lt;= 1.0% missed (15.0%)</p>
+</div>
+</section>
+<section id="run" aria-labelledby="run-h">
+<h2 id="run-h">Run</h2>
+<dl class="facts">
+<div><dt>Target</dt><dd>POST https://api.example.test/checkout</dd></div>
+<div><dt>Mode</dt><dd>constant concurrency</dd></div>
+<div><dt>Virtual users</dt><dd>100</dd></div>
+<div><dt>Duration</dt><dd>120 s</dd></div>
+<div><dt>Started</dt><dd>2026-10-05T08:10:00Z</dd></div>
+<div><dt>Engine version</dt><dd>1.14.0</dd></div>
+</dl>
+</section>
+<section id="results" aria-labelledby="results-h">
+<h2 id="results-h">Results</h2>
+<div class="scroll"><table aria-labelledby="results-h">
+<thead><tr><th scope="col">Metric</th><th scope="col">Value</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">Requests</th><td>12,000</td><td>-</td></tr>
+<tr><th scope="row">Requests per second</th><td>100 req/s</td><td class="tone-good">&gt;= 50 req/s - met</td></tr>
+<tr><th scope="row">Error rate</th><td>15.0% (HTTP errors 1,500, No response 300)</td><td class="tone-bad">&lt;= 1.0% - missed</td></tr>
+<tr><th scope="row">Bytes in</th><td>9.3 MB</td><td>-</td></tr>
+<tr><th scope="row">Bytes out</th><td>1.5 MB</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="latency" aria-labelledby="latency-h">
+<h2 id="latency-h">Latency</h2>
+<div class="scroll"><table aria-labelledby="latency-h">
+<thead><tr><th scope="col">Measure</th><th scope="col">Latency (ms)</th><th scope="col">Budget</th></tr></thead>
+<tbody>
+<tr><th scope="row">min</th><td>4</td><td>-</td></tr>
+<tr><th scope="row">p50</th><td>352</td><td>-</td></tr>
+<tr><th scope="row">p90</th><td>690</td><td>-</td></tr>
+<tr><th scope="row">p95</th><td>903</td><td class="tone-bad">&lt;= 800 ms - missed</td></tr>
+<tr><th scope="row">p99</th><td>2,210</td><td class="tone-good">&lt;= 3,000 ms - met</td></tr>
+<tr><th scope="row">p999</th><td>3,001</td><td>-</td></tr>
+<tr><th scope="row">max</th><td>3,121</td><td>-</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="errors" aria-labelledby="errors-h">
+<h2 id="errors-h">Errors</h2>
+<div class="scroll"><table aria-labelledby="errors-h">
+<thead><tr><th scope="col">Error</th><th scope="col">Requests</th></tr></thead>
+<tbody>
+<tr><th scope="row">HTTP 500</th><td>1,200</td></tr>
+<tr><th scope="row">HTTP 503</th><td>300</td></tr>
+<tr><th scope="row">timeout</th><td>200</td></tr>
+<tr><th scope="row">connection_reset</th><td>100</td></tr>
+</tbody>
+</table></div>
+</section>
+<section id="warnings" aria-labelledby="warnings-h">
+<h2 id="warnings-h">Warnings</h2>
+<ul class="plain">
+<li>Some requests were not sent because the run was at its concurrency limit (dropped_requests)</li>
+</ul>
+</section>
+<section id="charts" aria-labelledby="charts-h">
+<h2 id="charts-h">Charts</h2>
+<figure>
+<figcaption>Throughput and virtual users</figcaption>
+<svg class="chart" viewBox="0 0 720.0 386.0" role="img" aria-label="Throughput and virtual users over time" aria-describedby="chart-throughput-desc"><title>Throughput and virtual users over time</title><desc id="chart-throughput-desc">Throughput: min 92 req/s, max 108 req/s, peak at 17 s. Virtual users: min 100, max 100, peak at 1 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Throughput (req/s)</text><path class="grid" d="M58.0 166.0H596.0M58.0 119.3H596.0M58.0 72.7H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="119.3" text-anchor="end" dominant-baseline="central">50</text><text class="tick y" x="50.0" y="72.7" text-anchor="end" dominant-baseline="central">100</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">150</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>Throughput: min 92 req/s, max 108 req/s, peak at 17 s</title><polyline class="line s-rps" points="62.5,73.6 67.0,77.3 71.5,80.1 75.9,78.3 80.4,66.1 84.9,66.1 89.4,73.6 93.9,80.1 98.3,76.4 102.8,76.4 107.3,67.1 111.8,68.0 116.3,70.8 120.8,76.4 125.2,68.9 129.7,67.1 134.2,65.2 138.7,65.2 143.2,72.7 147.7,69.9 152.1,68.0 156.6,66.1 161.1,67.1 165.6,68.9 170.1,76.4 174.6,75.5 179.1,71.7 183.5,79.2 188.0,65.2 192.5,67.1 197.0,72.7 201.5,70.8 206.0,74.5 210.4,66.1 214.9,79.2 219.4,74.5 223.9,77.3 228.4,69.9 232.8,69.9 237.3,76.4 241.8,76.4 246.3,67.1 250.8,77.3 255.3,77.3 259.8,74.5 264.2,77.3 268.7,70.8 273.2,72.7 277.7,68.9 282.2,76.4 286.6,65.2 291.1,68.9 295.6,68.9 300.1,67.1 304.6,69.9 309.1,67.1 313.5,66.1 318.0,69.9 322.5,69.9 327.0,67.1 331.5,80.1 336.0,73.6 340.4,76.4 344.9,67.1 349.4,67.1 353.9,72.7 358.4,72.7 362.9,66.1 367.3,79.2 371.8,72.7 376.3,70.8 380.8,74.5 385.3,79.2 389.8,67.1 394.2,80.1 398.7,78.3 403.2,71.7 407.7,74.5 412.2,68.0 416.7,68.0 421.2,66.1 425.6,78.3 430.1,68.0 434.6,79.2 439.1,67.1 443.6,69.9 448.1,74.5 452.5,73.6 457.0,76.4 461.5,72.7 466.0,67.1 470.5,65.2 474.9,68.0 479.4,70.8 483.9,75.5 488.4,65.2 492.9,75.5 497.4,67.1 501.8,70.8 506.3,67.1 510.8,74.5 515.3,67.1 519.8,65.2 524.3,75.5 528.8,66.1 533.2,68.0 537.7,69.9 542.2,80.1 546.7,73.6 551.2,76.4 555.7,74.5 560.1,76.4 564.6,76.4 569.1,78.3 573.6,75.5 578.1,77.3 582.5,76.4 587.0,79.2 591.5,74.5 596.0,79.2"/></g><text class="direct rps" x="604.0" y="79.2" dominant-baseline="central">Throughput</text></g><g class="panel"><text class="axis-title" x="58.0" y="194.0">Virtual users (count)</text><path class="grid" d="M58.0 342.0H596.0M58.0 314.0H596.0M58.0 286.0H596.0M58.0 258.0H596.0M58.0 230.0H596.0M58.0 202.0H596.0"/><text class="tick y" x="50.0" y="342.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="314.0" text-anchor="end" dominant-baseline="central">20</text><text class="tick y" x="50.0" y="286.0" text-anchor="end" dominant-baseline="central">40</text><text class="tick y" x="50.0" y="258.0" text-anchor="end" dominant-baseline="central">60</text><text class="tick y" x="50.0" y="230.0" text-anchor="end" dominant-baseline="central">80</text><text class="tick y" x="50.0" y="202.0" text-anchor="end" dominant-baseline="central">100</text><path class="axis" d="M58.0 202.0V342.0H596.0"/><g class="series"><title>Virtual users: min 100, max 100, peak at 1 s</title><polyline class="line s-vus" points="62.5,202.0 67.0,202.0 71.5,202.0 75.9,202.0 80.4,202.0 84.9,202.0 89.4,202.0 93.9,202.0 98.3,202.0 102.8,202.0 107.3,202.0 111.8,202.0 116.3,202.0 120.8,202.0 125.2,202.0 129.7,202.0 134.2,202.0 138.7,202.0 143.2,202.0 147.7,202.0 152.1,202.0 156.6,202.0 161.1,202.0 165.6,202.0 170.1,202.0 174.6,202.0 179.1,202.0 183.5,202.0 188.0,202.0 192.5,202.0 197.0,202.0 201.5,202.0 206.0,202.0 210.4,202.0 214.9,202.0 219.4,202.0 223.9,202.0 228.4,202.0 232.8,202.0 237.3,202.0 241.8,202.0 246.3,202.0 250.8,202.0 255.3,202.0 259.8,202.0 264.2,202.0 268.7,202.0 273.2,202.0 277.7,202.0 282.2,202.0 286.6,202.0 291.1,202.0 295.6,202.0 300.1,202.0 304.6,202.0 309.1,202.0 313.5,202.0 318.0,202.0 322.5,202.0 327.0,202.0 331.5,202.0 336.0,202.0 340.4,202.0 344.9,202.0 349.4,202.0 353.9,202.0 358.4,202.0 362.9,202.0 367.3,202.0 371.8,202.0 376.3,202.0 380.8,202.0 385.3,202.0 389.8,202.0 394.2,202.0 398.7,202.0 403.2,202.0 407.7,202.0 412.2,202.0 416.7,202.0 421.2,202.0 425.6,202.0 430.1,202.0 434.6,202.0 439.1,202.0 443.6,202.0 448.1,202.0 452.5,202.0 457.0,202.0 461.5,202.0 466.0,202.0 470.5,202.0 474.9,202.0 479.4,202.0 483.9,202.0 488.4,202.0 492.9,202.0 497.4,202.0 501.8,202.0 506.3,202.0 510.8,202.0 515.3,202.0 519.8,202.0 524.3,202.0 528.8,202.0 533.2,202.0 537.7,202.0 542.2,202.0 546.7,202.0 551.2,202.0 555.7,202.0 560.1,202.0 564.6,202.0 569.1,202.0 573.6,202.0 578.1,202.0 582.5,202.0 587.0,202.0 591.5,202.0 596.0,202.0"/></g><text class="direct vus" x="604.0" y="202.0" dominant-baseline="central">Virtual users</text></g><text class="tick x" x="58.0" y="357.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="357.0" text-anchor="middle">20</text><text class="tick x" x="237.3" y="357.0" text-anchor="middle">40</text><text class="tick x" x="327.0" y="357.0" text-anchor="middle">60</text><text class="tick x" x="416.7" y="357.0" text-anchor="middle">80</text><text class="tick x" x="506.3" y="357.0" text-anchor="middle">100</text><text class="tick x" x="596.0" y="357.0" text-anchor="middle">120</text><text class="axis-title" x="327.0" y="376.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+<figure>
+<figcaption>Latency percentiles</figcaption>
+<svg class="chart" viewBox="0 0 720.0 210.0" role="img" aria-label="Latency percentiles over time" aria-describedby="chart-latency-desc"><title>Latency percentiles over time</title><desc id="chart-latency-desc">p50: min 333 ms, max 434 ms, peak at 46 s. p95: min 721 ms, max 990 ms, peak at 52 s. p99: min 1,950 ms, max 2,793 ms, peak at 52 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Latency (ms)</text><path class="grid" d="M58.0 166.0H596.0M58.0 119.3H596.0M58.0 72.7H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="119.3" text-anchor="end" dominant-baseline="central">1,000</text><text class="tick y" x="50.0" y="72.7" text-anchor="end" dominant-baseline="central">2,000</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">3,000</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>p50: min 333 ms, max 434 ms, peak at 46 s</title><polyline class="line s-p50" points="62.5,150.1 67.0,149.1 71.5,148.9 75.9,149.6 80.4,149.9 84.9,148.9 89.4,150.4 93.9,148.7 98.3,149.4 102.8,148.7 107.3,150.0 111.8,149.1 116.3,149.4 120.8,149.7 125.2,149.7 129.7,150.1 134.2,149.4 138.7,150.3 143.2,148.6 147.7,150.1 152.1,150.2 156.6,149.9 161.1,149.2 165.6,150.3 170.1,150.3 174.6,150.3 179.1,148.4 183.5,150.0 188.0,149.6 192.5,146.8 197.0,145.8 201.5,145.8 206.0,147.4 210.4,146.6 214.9,145.8 219.4,146.5 223.9,146.5 228.4,147.5 232.8,147.0 237.3,147.6 241.8,146.0 246.3,146.1 250.8,146.5 255.3,147.3 259.8,146.4 264.2,145.7 268.7,146.8 273.2,147.2 277.7,146.5 282.2,146.1 286.6,147.3 291.1,147.4 295.6,145.9 300.1,147.6 304.6,145.8 309.1,147.4 313.5,147.0 318.0,147.1 322.5,146.7 327.0,147.1 331.5,146.7 336.0,146.2 340.4,146.4 344.9,147.4 349.4,147.7 353.9,147.4 358.4,146.0 362.9,146.4 367.3,146.2 371.8,149.7 376.3,149.9 380.8,150.3 385.3,149.9 389.8,149.0 394.2,149.7 398.7,149.4 403.2,149.3 407.7,149.5 412.2,149.7 416.7,149.7 421.2,148.8 425.6,148.8 430.1,149.1 434.6,150.5 439.1,149.8 443.6,149.2 448.1,150.0 452.5,148.4 457.0,150.1 461.5,150.1 466.0,148.5 470.5,149.6 474.9,149.8 479.4,150.3 483.9,148.9 488.4,149.4 492.9,149.1 497.4,150.2 501.8,148.6 506.3,149.2 510.8,150.3 515.3,149.3 519.8,149.4 524.3,150.0 528.8,149.5 533.2,149.4 537.7,148.8 542.2,149.4 546.7,149.2 551.2,148.5 555.7,150.2 560.1,149.2 564.6,148.7 569.1,150.5 573.6,149.9 578.1,148.8 582.5,148.5 587.0,148.6 591.5,148.6 596.0,149.8"/></g><g class="series"><title>p95: min 721 ms, max 990 ms, peak at 52 s</title><polyline class="line s-p95" points="62.5,132.1 67.0,129.0 71.5,127.0 75.9,130.3 80.4,127.9 84.9,130.3 89.4,127.0 93.9,131.4 98.3,128.4 102.8,129.0 107.3,127.6 111.8,126.7 116.3,128.4 120.8,129.1 125.2,128.3 129.7,127.6 134.2,127.5 138.7,131.4 143.2,129.6 147.7,129.6 152.1,131.4 156.6,130.0 161.1,127.6 165.6,128.6 170.1,127.6 174.6,132.0 179.1,131.6 183.5,131.5 188.0,128.5 192.5,122.5 197.0,122.2 201.5,119.9 206.0,123.4 210.4,121.9 214.9,125.6 219.4,125.1 223.9,125.4 228.4,120.6 232.8,121.6 237.3,125.3 241.8,120.2 246.3,122.0 250.8,124.2 255.3,123.1 259.8,120.9 264.2,123.4 268.7,121.8 273.2,124.3 277.7,124.4 282.2,119.8 286.6,121.8 291.1,119.8 295.6,125.4 300.1,124.0 304.6,125.0 309.1,123.0 313.5,121.2 318.0,123.4 322.5,122.1 327.0,124.8 331.5,120.2 336.0,120.8 340.4,120.0 344.9,123.4 349.4,125.9 353.9,122.4 358.4,120.4 362.9,121.2 367.3,120.6 371.8,129.5 376.3,130.9 380.8,131.3 385.3,132.3 389.8,128.2 394.2,128.2 398.7,129.9 403.2,130.1 407.7,130.8 412.2,131.3 416.7,128.4 421.2,132.3 425.6,128.6 430.1,130.2 434.6,132.4 439.1,128.8 443.6,128.8 448.1,127.2 452.5,128.9 457.0,128.7 461.5,128.6 466.0,128.4 470.5,132.4 474.9,127.4 479.4,128.6 483.9,130.8 488.4,126.9 492.9,131.2 497.4,129.9 501.8,126.3 506.3,131.0 510.8,128.4 515.3,126.7 519.8,127.4 524.3,129.2 528.8,128.2 533.2,131.5 537.7,129.3 542.2,131.7 546.7,130.8 551.2,130.6 555.7,130.8 560.1,129.9 564.6,127.6 569.1,132.1 573.6,129.2 578.1,130.2 582.5,129.2 587.0,131.9 591.5,127.5 596.0,131.8"/></g><g class="series"><title>p99: min 1,950 ms, max 2,793 ms, peak at 52 s</title><polyline class="line s-p99" points="62.5,60.3 67.0,73.4 71.5,60.3 75.9,71.4 80.4,65.4 84.9,70.1 89.4,61.9 93.9,73.3 98.3,61.0 102.8,64.3 107.3,64.4 111.8,66.3 116.3,72.9 120.8,70.4 125.2,73.0 129.7,60.0 134.2,68.9 138.7,64.6 143.2,66.3 147.7,65.4 152.1,71.0 156.6,72.8 161.1,66.5 165.6,71.1 170.1,64.9 174.6,65.0 179.1,73.0 183.5,60.3 188.0,72.5 192.5,62.0 197.0,71.4 201.5,69.9 206.0,64.1 210.4,73.6 214.9,66.7 219.4,66.8 223.9,75.0 228.4,64.9 232.8,66.7 237.3,61.8 241.8,69.6 246.3,63.5 250.8,73.6 255.3,71.8 259.8,69.7 264.2,73.0 268.7,74.9 273.2,72.9 277.7,62.0 282.2,71.2 286.6,63.7 291.1,35.7 295.6,60.3 300.1,63.0 304.6,62.5 309.1,62.7 313.5,73.3 318.0,74.3 322.5,68.1 327.0,61.9 331.5,60.9 336.0,65.1 340.4,59.7 344.9,65.8 349.4,69.1 353.9,66.1 358.4,64.1 362.9,73.6 367.3,69.4 371.8,60.9 376.3,60.8 380.8,59.7 385.3,68.6 389.8,70.5 394.2,69.6 398.7,62.7 403.2,75.0 407.7,68.6 412.2,64.7 416.7,67.7 421.2,73.5 425.6,72.6 430.1,60.5 434.6,64.9 439.1,66.2 443.6,61.7 448.1,68.3 452.5,70.0 457.0,71.9 461.5,67.4 466.0,74.4 470.5,70.9 474.9,70.7 479.4,63.2 483.9,69.1 488.4,74.0 492.9,72.8 497.4,61.8 501.8,63.0 506.3,62.9 510.8,61.0 515.3,63.2 519.8,68.8 524.3,63.0 528.8,65.6 533.2,72.9 537.7,66.1 542.2,69.3 546.7,62.7 551.2,74.3 555.7,61.4 560.1,73.2 564.6,64.5 569.1,59.8 573.6,64.2 578.1,61.7 582.5,67.9 587.0,66.6 591.5,64.9 596.0,74.6"/></g><path class="ref" d="M58.0 128.7H596.0"/><text class="direct p99" x="604.0" y="74.6" dominant-baseline="central">p99</text><text class="direct ref" x="604.0" y="128.7" dominant-baseline="central">p95 budget 800 ms</text><text class="direct p95" x="604.0" y="141.7" dominant-baseline="central">p95</text><text class="direct p50" x="604.0" y="154.7" dominant-baseline="central">p50</text></g><text class="tick x" x="58.0" y="181.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="181.0" text-anchor="middle">20</text><text class="tick x" x="237.3" y="181.0" text-anchor="middle">40</text><text class="tick x" x="327.0" y="181.0" text-anchor="middle">60</text><text class="tick x" x="416.7" y="181.0" text-anchor="middle">80</text><text class="tick x" x="506.3" y="181.0" text-anchor="middle">100</text><text class="tick x" x="596.0" y="181.0" text-anchor="middle">120</text><text class="axis-title" x="327.0" y="200.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+<figure>
+<figcaption>Responses per interval by class</figcaption>
+<svg class="chart" viewBox="0 0 720.0 210.0" role="img" aria-label="Responses per interval by class" aria-describedby="chart-status-desc"><title>Responses per interval by class</title><desc id="chart-status-desc">2xx/3xx: min 79 responses, max 108 responses, peak at 17 s. 5xx: min 0 responses, max 19 responses, peak at 67 s. No response: min 0 responses, max 5 responses, peak at 90 s.</desc><g class="panel"><text class="axis-title" x="58.0" y="18.0">Responses per tick</text><path class="grid" d="M58.0 166.0H596.0M58.0 119.3H596.0M58.0 72.7H596.0M58.0 26.0H596.0"/><text class="tick y" x="50.0" y="166.0" text-anchor="end" dominant-baseline="central">0</text><text class="tick y" x="50.0" y="119.3" text-anchor="end" dominant-baseline="central">50</text><text class="tick y" x="50.0" y="72.7" text-anchor="end" dominant-baseline="central">100</text><text class="tick y" x="50.0" y="26.0" text-anchor="end" dominant-baseline="central">150</text><path class="axis" d="M58.0 26.0V166.0H596.0"/><g class="series"><title>2xx/3xx: min 79 responses, max 108 responses, peak at 17 s</title><polyline class="line s-2xx" points="62.5,73.6 67.0,77.3 71.5,80.1 75.9,78.3 80.4,66.1 84.9,66.1 89.4,73.6 93.9,80.1 98.3,76.4 102.8,76.4 107.3,67.1 111.8,68.0 116.3,70.8 120.8,76.4 125.2,68.9 129.7,67.1 134.2,65.2 138.7,65.2 143.2,72.7 147.7,69.9 152.1,68.0 156.6,66.1 161.1,67.1 165.6,68.9 170.1,76.4 174.6,75.5 179.1,71.7 183.5,79.2 188.0,65.2 192.5,76.4 197.0,84.8 201.5,82.0 206.0,85.7 210.4,76.4 214.9,90.4 219.4,87.6 223.9,87.6 228.4,82.9 232.8,79.2 237.3,85.7 241.8,86.7 246.3,76.4 250.8,89.5 255.3,88.5 259.8,86.7 264.2,86.7 268.7,82.9 273.2,81.1 277.7,78.3 282.2,84.8 286.6,78.3 291.1,78.3 295.6,77.3 300.1,74.5 304.6,82.0 309.1,82.0 313.5,81.1 318.0,82.9 322.5,85.7 327.0,77.3 331.5,92.3 336.0,82.9 340.4,92.3 344.9,79.2 349.4,77.3 353.9,85.7 358.4,90.4 362.9,79.2 367.3,92.3 371.8,77.3 376.3,73.6 380.8,80.1 385.3,82.0 389.8,70.8 394.2,80.1 398.7,78.3 403.2,71.7 407.7,74.5 412.2,68.0 416.7,68.0 421.2,66.1 425.6,78.3 430.1,68.0 434.6,79.2 439.1,67.1 443.6,69.9 448.1,74.5 452.5,73.6 457.0,76.4 461.5,77.3 466.0,68.0 470.5,66.1 474.9,69.9 479.4,71.7 483.9,76.4 488.4,69.9 492.9,79.2 497.4,68.9 501.8,74.5 506.3,67.1 510.8,74.5 515.3,67.1 519.8,65.2 524.3,75.5 528.8,66.1 533.2,68.0 537.7,69.9 542.2,80.1 546.7,73.6 551.2,76.4 555.7,74.5 560.1,76.4 564.6,76.4 569.1,78.3 573.6,75.5 578.1,77.3 582.5,76.4 587.0,79.2 591.5,74.5 596.0,79.2"/></g><g class="series"><title>5xx: min 0 responses, max 19 responses, peak at 67 s</title><polyline class="line s-5xx" points="62.5,166.0 67.0,166.0 71.5,166.0 75.9,166.0 80.4,166.0 84.9,166.0 89.4,166.0 93.9,166.0 98.3,166.0 102.8,166.0 107.3,166.0 111.8,166.0 116.3,166.0 120.8,166.0 125.2,166.0 129.7,166.0 134.2,166.0 138.7,166.0 143.2,166.0 147.7,166.0 152.1,166.0 156.6,166.0 161.1,166.0 165.6,166.0 170.1,166.0 174.6,166.0 179.1,166.0 183.5,166.0 188.0,166.0 192.5,156.7 197.0,153.9 201.5,154.8 206.0,154.8 210.4,155.7 214.9,154.8 219.4,152.9 223.9,155.7 228.4,152.9 232.8,156.7 237.3,156.7 241.8,155.7 246.3,156.7 250.8,153.9 255.3,154.8 259.8,153.9 264.2,156.7 268.7,153.9 273.2,157.6 277.7,156.7 282.2,157.6 286.6,152.9 291.1,156.7 295.6,157.6 300.1,158.5 304.6,153.9 309.1,151.1 313.5,151.1 318.0,152.9 322.5,150.1 327.0,155.7 331.5,153.9 336.0,156.7 340.4,150.1 344.9,153.9 349.4,155.7 353.9,152.9 358.4,148.3 362.9,152.9 367.3,152.9 371.8,161.3 376.3,163.2 380.8,160.4 385.3,163.2 389.8,162.3 394.2,166.0 398.7,166.0 403.2,166.0 407.7,166.0 412.2,166.0 416.7,166.0 421.2,166.0 425.6,166.0 430.1,166.0 434.6,166.0 439.1,166.0 443.6,166.0 448.1,166.0 452.5,166.0 457.0,166.0 461.5,166.0 466.0,166.0 470.5,166.0 474.9,166.0 479.4,166.0 483.9,166.0 488.4,166.0 492.9,166.0 497.4,166.0 501.8,166.0 506.3,166.0 510.8,166.0 515.3,166.0 519.8,166.0 524.3,166.0 528.8,166.0 533.2,166.0 537.7,166.0 542.2,166.0 546.7,166.0 551.2,166.0 555.7,166.0 560.1,166.0 564.6,166.0 569.1,166.0 573.6,166.0 578.1,166.0 582.5,166.0 587.0,166.0 591.5,166.0 596.0,166.0"/></g><g class="series"><title>No response: min 0 responses, max 5 responses, peak at 90 s</title><polyline class="line s-none" points="62.5,166.0 67.0,166.0 71.5,166.0 75.9,166.0 80.4,166.0 84.9,166.0 89.4,166.0 93.9,166.0 98.3,166.0 102.8,166.0 107.3,166.0 111.8,166.0 116.3,166.0 120.8,166.0 125.2,166.0 129.7,166.0 134.2,166.0 138.7,166.0 143.2,166.0 147.7,166.0 152.1,166.0 156.6,166.0 161.1,166.0 165.6,166.0 170.1,166.0 174.6,166.0 179.1,166.0 183.5,166.0 188.0,166.0 192.5,166.0 197.0,166.0 201.5,166.0 206.0,166.0 210.4,166.0 214.9,166.0 219.4,166.0 223.9,166.0 228.4,166.0 232.8,166.0 237.3,166.0 241.8,166.0 246.3,166.0 250.8,166.0 255.3,166.0 259.8,166.0 264.2,166.0 268.7,166.0 273.2,166.0 277.7,166.0 282.2,166.0 286.6,166.0 291.1,166.0 295.6,166.0 300.1,166.0 304.6,166.0 309.1,166.0 313.5,166.0 318.0,166.0 322.5,166.0 327.0,166.0 331.5,166.0 336.0,166.0 340.4,166.0 344.9,166.0 349.4,166.0 353.9,166.0 358.4,166.0 362.9,166.0 367.3,166.0 371.8,166.0 376.3,166.0 380.8,166.0 385.3,166.0 389.8,166.0 394.2,166.0 398.7,166.0 403.2,166.0 407.7,166.0 412.2,166.0 416.7,166.0 421.2,166.0 425.6,166.0 430.1,166.0 434.6,166.0 439.1,166.0 443.6,166.0 448.1,166.0 452.5,166.0 457.0,166.0 461.5,161.3 466.0,165.1 470.5,165.1 474.9,164.1 479.4,165.1 483.9,165.1 488.4,161.3 492.9,162.3 497.4,164.1 501.8,162.3 506.3,166.0 510.8,166.0 515.3,166.0 519.8,166.0 524.3,166.0 528.8,166.0 533.2,166.0 537.7,166.0 542.2,166.0 546.7,166.0 551.2,166.0 555.7,166.0 560.1,166.0 564.6,166.0 569.1,166.0 573.6,166.0 578.1,166.0 582.5,166.0 587.0,166.0 591.5,166.0 596.0,166.0"/></g><text class="direct 2xx" x="604.0" y="79.2" dominant-baseline="central">2xx/3xx</text><text class="direct 5xx" x="604.0" y="153.0" dominant-baseline="central">5xx</text><text class="direct none" x="604.0" y="166.0" dominant-baseline="central">No response</text></g><text class="tick x" x="58.0" y="181.0" text-anchor="middle">0</text><text class="tick x" x="147.7" y="181.0" text-anchor="middle">20</text><text class="tick x" x="237.3" y="181.0" text-anchor="middle">40</text><text class="tick x" x="327.0" y="181.0" text-anchor="middle">60</text><text class="tick x" x="416.7" y="181.0" text-anchor="middle">80</text><text class="tick x" x="506.3" y="181.0" text-anchor="middle">100</text><text class="tick x" x="596.0" y="181.0" text-anchor="middle">120</text><text class="axis-title" x="327.0" y="200.0" text-anchor="middle">Seconds from start</text></svg>
+</figure>
+
+</section>
+<footer>
+<p>Generated by Vayu 1.14.0. No request or response data is included.</p>
+</footer>
+</main>
+</body>
+</html>
