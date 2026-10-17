@@ -9,7 +9,8 @@
  */
 
 /**
- * LoadTestDetail's "Test config" row names the data set a run bound (#1940).
+ * LoadTestDetail's "Test config" box names the data set a run bound (#1940),
+ * under its "Details" disclosure.
  * The rows are never stored; the report's `dataRowCount` is the whole record.
  *
  * Since #2051 the row also names the file (`2 rows · users.csv`); the hash
@@ -19,7 +20,7 @@
  * shown-count cases redden; drop the file-name suffix and the named case reddens.
  */
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import LoadTestDetail from "./LoadTestDetail";
@@ -80,13 +81,16 @@ function mount(
 	config: { targetRps?: number; concurrency?: number } = {}
 ) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	return render(
+	const view = render(
 		<QueryClientProvider client={qc}>
 			<TooltipProvider>
 				<LoadTestDetail report={report(dataRowCount, file, config)} runId="r" />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+	// The fixture always carries a target rate, so the disclosure is always there.
+	fireEvent.click(screen.getByRole("button", { name: "Details" }));
+	return view;
 }
 
 describe("LoadTestDetail data row count", () => {

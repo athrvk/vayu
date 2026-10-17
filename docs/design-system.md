@@ -706,7 +706,7 @@ restart banner was the last `dark:`-paired holdout, and it moved to the
 `--warning` family the "Pending" chip one card below it already used - which
 is the argument for widening: the token existed, the banner just predated it.
 Two exemptions are listed in the guard, both `text-purple-500` marking a
-*load test* (`RunItem`'s bolt, `LoadTestDetail`'s P99 arrow). That is a kind
+*load test* (`RunItem`'s bolt, `RunKeyMetrics`'s P99 arrow). That is a kind
 rather than a status, so the app's one violet token - `--status-redirect`,
 which means 3xx - would be the wrong word, and both were measured where they
 sit (4.36/4.59 and 3.50/3.66 against the 3.0 icon bar) rather than assumed.

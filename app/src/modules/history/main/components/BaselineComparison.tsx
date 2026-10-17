@@ -10,7 +10,7 @@
  *
  * "Is this run slower than the one I pinned?" - the deltas between the open
  * load run and the baseline pinned for the same request, in the load report's
- * header.
+ * body, above the tabs.
  *
  * Absent, not empty, when there is nothing to say: no baseline pinned, the open
  * run *is* the baseline, or the baseline's report has not loaded. A strip that
@@ -48,7 +48,7 @@ interface BaselineComparisonProps {
 /**
  * The metrics worth a strip: the p99 a run is judged on, and the two totals.
  *
- * Three, deliberately: this is a glance in a report header, answering "is this
+ * Three, deliberately: this is a glance above the report's tabs, answering "is this
  * run worse than the one I pinned?" in one line. The rest of the diff (every
  * percentile, both throughput measures, the status-code merge) is the header's
  * Compare action, `RunComparisonView`, against the baseline or any other run of
@@ -108,7 +108,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 	].filter((m) => (HEADLINE_METRICS as readonly string[]).includes(m.metric));
 
 	return (
-		<div className="enter-fade mb-3 p-3 border rounded-md bg-background/50">
+		<div className="enter-fade p-3 border rounded-md bg-background/50">
 			<div className="flex items-center gap-2 mb-2 flex-wrap">
 				<GitCompareArrows className="size-icon shrink-0 text-muted-foreground" />
 				<span className="text-sm font-medium text-muted-foreground">vs baseline</span>
