@@ -23,7 +23,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { DOC_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { declaredValues, indexCss as css } from "@/lib/css-tokens.testkit";
+import { declaredValues, familiesWithTextPair, indexCss as css } from "@/lib/css-tokens.testkit";
 
 /** Repository-relative, so CI can route the page this reads. See the testkit. */
 const [DESIGN_SYSTEM_DOC] = DOC_READING_GUARDS.designSystem.paths;
@@ -171,5 +171,102 @@ describe("design-system.md token values", () => {
 				expect(overridden, `${name} not overridden under Comfortable`).toBe(comfortablePx);
 			}
 		}
+	});
+
+	// Issue #2290: a snippet is copied before the prose around it is read, so a
+	// recipe that the source guards would fail teaches the next session the
+	// pattern CI then rejects. This holds the page to the same bans, comments
+	// inside a block included - a comment reading "use text-[10px]" is copied
+	// just as readily. The lists are the guards' own, restated because those
+	// tests keep theirs private; `palette-tokens.test.ts` and
+	// `status-color-tokens.test.ts` are the source of truth.
+	it("code blocks in the page contain no pattern the source guards ban", () => {
+		const PALETTE = [
+			"red",
+			"orange",
+			"amber",
+			"yellow",
+			"lime",
+			"green",
+			"emerald",
+			"teal",
+			"cyan",
+			"sky",
+			"blue",
+			"indigo",
+			"violet",
+			"purple",
+			"fuchsia",
+			"pink",
+			"rose",
+			"slate",
+			"gray",
+			"zinc",
+			"neutral",
+			"stone",
+		];
+		const families = familiesWithTextPair();
+		expect(families.length, "no status families derived from index.css").toBeGreaterThan(0);
+
+		const banned: [string, RegExp][] = [
+			["arbitrary text size", /\btext-\[\d+(?:\.\d+)?px\]/],
+			["arbitrary height", /\bh-\[\d+(?:\.\d+)?px\]/],
+			["3.5 icon size (use size-icon-sm)", /\b(?:h|w|size)-3\.5\b/],
+			[
+				"raw palette colour",
+				new RegExp(
+					String.raw`\b(?:[a-z-]+:)*(?:text|bg|border|ring|fill|stroke|from|via|to|outline|decoration|divide|accent|caret|shadow)-(?:${PALETTE.join("|")})-\d{2,3}\b`
+				),
+			],
+			["text-white (use the -foreground token)", /\btext-white\b/],
+			...families.map((family): [string, RegExp] => [
+				`bare text-${family} (use text-${family}-text)`,
+				new RegExp(`\\btext-${family}(?![-\\w])`),
+			]),
+		];
+
+		const hits: string[] = [];
+		const check = (lineNo: number, line: string) => {
+			for (const [label, pattern] of banned) {
+				if (pattern.test(line)) {
+					hits.push(`design-system.md:${lineNo}  ${label}: ${line.trim().slice(0, 88)}`);
+				}
+			}
+		};
+
+		let inFence = false;
+		let scannedBlocks = 0;
+		doc.split(/\r?\n/).forEach((line, i) => {
+			if (/^\s*```/.test(line)) {
+				inFence = !inFence;
+				if (inFence) scannedBlocks++;
+				return;
+			}
+			if (inFence) check(i + 1, line);
+		});
+		expect(inFence, "a fenced block is never closed").toBe(false);
+		expect(
+			scannedBlocks,
+			"no fenced blocks found - has the fence syntax changed?"
+		).toBeGreaterThan(30);
+
+		// The Tailwind Utility Reference is tables, not fences, and is where the
+		// bare status foregrounds were last found.
+		const start = doc.indexOf("\n## Tailwind Utility Reference\n");
+		expect(start, "the Tailwind Utility Reference heading has moved").toBeGreaterThan(-1);
+		const end = doc.indexOf("\n## ", start + 1);
+		const firstLine = doc.slice(0, start + 1).split("\n").length;
+		const tableRows = doc
+			.slice(start, end === -1 ? undefined : end)
+			.split("\n")
+			.map((line, i) => ({ line, lineNo: firstLine + i }))
+			.filter(({ line }) => line.startsWith("|"));
+		expect(
+			tableRows.length,
+			"no utility-table rows found - has the table moved?"
+		).toBeGreaterThan(10);
+		for (const { line, lineNo } of tableRows) check(lineNo, line);
+
+		expect(hits.join("\n")).toBe("");
 	});
 });

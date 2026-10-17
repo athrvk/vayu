@@ -45,10 +45,16 @@ isn't the same:
    full disk and a refused connection are different problems with different
    fixes.
 
-**One opener only: "Couldn't [verb] [object]."** `Failed to` and `Could not`
-are banned in UI text (they're both still in the codebase in ~60+ places -
-that's the drift this rule exists to stop). Log strings and code comments are
-a separate surface and keep whatever form reads well there.
+**One opener only: "Couldn't [verb] [object]."** `Failed to`, `Could not` and
+`Please` are banned in UI text. The first two are the passive, formal register
+the voice section rules out; `Please` is the apology's softer cousin and breaks
+the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
+that you would like them to. The renderer is clean today
+(`rg -n -i "failed to|could not" app/src app/electron --glob '!*.test.*' -g '*.{ts,tsx}'`
+finds nothing in a rendered string). What remains are engine response bodies
+that the app shows after its own "Couldn't ..." prefix; a test holds both
+surfaces (the voice and casing scan, tracked under #2290). Log strings and code
+comments are a separate surface and keep whatever form reads well there.
 
 ## Terminology glossary
 
@@ -57,21 +63,22 @@ already consistent in the codebase, plus fixing the one real overload.
 
 | Concept | Term | Notes |
 |---|---|---|
-| A named group of requests | **Collection** | Never "Folder" - don't introduce it even for nested sub-groups. |
+| A named group of requests | **Collection** | Never "Folder" in a string a user reads - don't introduce it even for nested sub-groups. The ban covers copy, not identifiers (`DEFAULT_FOLDER_NAME`, a row type in the tree code) or engineering prose. |
 | A named set of variables (dev/staging/prod) | **Environment** | No synonym. |
 | A single HTTP request | **Request** | Never "Call" as a noun for it - "call" stays fine in prose ("a script calls `pm.variables.get`"). |
 | A `{{token}}` value | **Variable** | Never "env var" - a variable can live in collection or global scope too, not just an environment, so that phrasing is inaccurate, not just inconsistent. |
 | Where a variable resolves from (global / collection / environment / row) | **Scope** | Use it a bit more deliberately in variable-related copy (tooltips, the variable popover) rather than avoiding it. |
 | Firing a single request | **Send** | Locked. Matches Postman/Insomnia convention and keeps "Run" free for the two below. |
-| Firing a whole collection sequentially | **Run** | As in "Collection Run" / run history - already established. |
+| Firing a whole collection sequentially | **Run** | As in "Collection run" / run history - already established. |
 | The free-text line a user writes about a run when starting it | **Comment** | The run header (History, and the live dashboard's) labels it "Comment", and the payload key is `comment`. Never "Note" or "Description". The start dialog's field is the **Run label**, a field name for the act of typing it. |
 | The load-testing feature | **Load test** (noun), **Run** (verb: "Run a load test") | Already consistent as its own noun phrase. |
 | A recorded run, by kind (History, tab titles, Recent runs) | **Send**, **Collection run**, **Load test** | One name per `Run["type"]` (`design`, `scenario`, `load`), defined once as `RUN_TYPE_NAME` in `modules/history/types.ts`. Never "Design" or "Design mode": `design` is the wire value, not a word the user sees. A run list's empty state says "No runs", never "No test runs" - a send is a run too. |
-| Assertions on a response | **Tests** (tab), **Test Validation** (results) | The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
+| Assertions on a response | **Tests** (tab), **Test validation** (results) | The one real overload - "Test" means two different things across the load-test feature and response assertions. Not renaming either (both are established, product-defined terms), but never let both appear in the same sentence or dialog without a qualifier ("load test" / "response tests") to disambiguate. |
 | A pre-request/post-request script | **Script**, living under the **Elements** tab | Keep "Elements" as the tab name (the consolidation from separate Pre-request/Tests tabs was deliberate), but individual script errors/labels keep saying "Pre-request script" / "Post-request script" (sentence case, matching the engine's own labels in `script_kinds.cpp`) - renaming those to "Elements" would lose information the label carries. Discoverability for someone looking for "Pre-request Script" or "Tests" is carried by two lines instead: the empty Elements panel's gloss (with a Post-request script chip), and the response Tests tab's empty state, which points at the Elements tab. An inline empty state is one line (`title` only), so the pointer is folded into it. |
 | A failed request in a load test's numbers | **Error**; the two kinds are **HTTP errors** and **No response** | A request is an error when its response status is outside 2xx/3xx, or it got no response at all (timeout, refused connection, DNS or TLS failure). A 3xx is a success. One definition for every error count and rate (the live card, the report, History, the budget verdict, the Steps table's Errors column), so never "failed" in one place and "error" in another. This reconciles with the first source under "Errors have three sources": a target API's 404 or 500 is still *data* in the Send pane and gets no error chrome there, but in a load test it is counted as an HTTP error because the run's rate is the question being asked. Never "transport error" in user copy. A request a user's **Stop** cancelled before it was answered is none of **error** or **failed**: it got no outcome from the target, so it is counted apart as **cancelled** and is never an error. Say "N requests cancelled by Stop" (a fragment, muted, never destructive); it is in no error count, rate or total. |
-| The number of simulated users in a closed-loop load test | **Virtual users** | Never "VUs", "Connections", "Concurrency" or "concurrent users" in UI copy; prose pluralises it ("1 virtual user", "64 virtual users"). Written once in `constants/load-test-modes.ts` (`CONCURRENCY_LABEL`, `CONCURRENCY_UNIT`, `formatConcurrency`), and the mode is **Constant Virtual Users**. The open-loop measurement keeps **In-flight requests**: a Constant RPS run's stat, chart title and series say that, every other mode says virtual users (`isClosedLoopMode`, `concurrencyMeasureLabel`). API and MCP field names keep `concurrency`, and genuine TCP/TLS "connection" copy (Settings > Network, the connection-reuse charts) is not this quantity. |
-| The mock-server feature | **Mock server** | Sentence-case mid-sentence, Title Case only in headings - this is normal casing variance, not a naming split. |
+| The number of simulated users in a closed-loop load test | **Virtual users** | Never "VUs", "Connections", "Concurrency" or "concurrent users" in UI copy; prose pluralises it ("1 virtual user", "64 virtual users"). Written once in `constants/load-test-modes.ts` (`CONCURRENCY_LABEL`, `CONCURRENCY_UNIT`, `formatConcurrency`), and the mode is **Constant virtual users**. The open-loop measurement keeps **In-flight requests**: a Constant RPS run's stat, chart title and series say that, every other mode says virtual users (`isClosedLoopMode`, `concurrencyMeasureLabel`). API and MCP field names keep `concurrency`, and genuine TCP/TLS "connection" copy (Settings > Network, the connection-reuse charts) is not this quantity. |
+| The five load-test modes | **Constant RPS**, **Constant virtual users**, **Fixed request count**, **Ramp-up**, **Capacity discovery** | Sentence case like every other label; only the acronym (RPS) keeps its casing. Written once in `constants/load-test-modes.ts` (`loadTestModeLabel`). |
+| The mock-server feature | **Mock server** | Sentence case in a heading as in a sentence; there is no Title Case variant. |
 | Vayu's own backend process (the daemon on port 9876) | **Vayu's engine** | Bare "the engine" isn't wrong grammatically, but avoid it as a sentence's opening word or its subject noun with nothing attached - "Vayu's engine" is what tells the reader whose process failed rather than leaving "engine" to mean the request's own target server. |
 | The collapsible panel left of the main area (the Collections, History, Variables, Services, Trash and Settings views) | **Sidebar** | "Sidebar" is the word a user reads - in the empty-tab hint, the shortcut labels, the "Sidebar views" group, the palette. "Drawer" is an identifier only (`Drawer`, `DrawerPanel`, `TOGGLE_DRAWER_CHORD`, `DRAWER_VIEW_CHORDS`) and never appears in a string a user can see. |
 | Multi-project container | *(doesn't exist)* | "Workspace" isn't a Vayu concept. Don't introduce it as filler vocabulary during a string rewrite even where a sentence seems to want one. The one exception is **Backup** (Settings › General), a feature that used to be called "Workspace backup" - "Backup" alone is the locked term now, and "Workspace" should not reappear as a qualifier for it. |
@@ -81,9 +88,28 @@ already consistent in the codebase, plus fixing the one real overload.
 Rules a writer or reviewer can apply without judgment calls, so hundreds of
 scattered strings land the same way.
 
-- **Case.** Sentence case everywhere - buttons, headings, tabs, menu items.
-  Proper nouns and protocol names keep their casing (HTTP, cURL, OpenAPI,
-  GraphQL, JSON).
+- **Case.** Sentence case everywhere - buttons, headings, tabs, menu items,
+  feature and mode names ("Collection run", "Constant virtual users"). There is
+  no Title Case exception for a feature name. Proper nouns, acronyms and
+  protocol names keep their casing (HTTP, RPS, cURL, OpenAPI, GraphQL, JSON).
+  Two exceptions, both stated so neither is mistaken for drift:
+  - **The three stored default names stay Title Case**: "New Collection", "New
+    Request", "New Environment". They are stored data, not interface copy.
+    `RunItem.tsx` and `lib/agent-reference.ts` compare a persisted
+    `summary.requestName` to `DEFAULT_REQUEST_NAME` by literal, so lower-casing
+    the default would make every run already recorded as "New Request" read as a
+    name the user chose. A name the user types is theirs and keeps its casing.
+  - **The menu bar macOS draws at the top of the screen follows the platform's
+    Title Case** ("Check for Updates", "Toggle Developer Tools"), because that
+    is how a macOS user reads it. Every other string is sentence case, including
+    the same menu template popped from the title-bar icon on Windows and Linux:
+    that is an in-app surface and has no platform convention to follow. One
+    destination, one name: the settings item reads "Settings…" everywhere (macOS
+    itself now calls it Settings, not Preferences). The macOS Dock menu follows
+    the macOS rule; the Windows Jump List follows sentence case. The code that
+    serves both from one template (a per-platform label function in
+    `electron/app-menu.ts`) belongs to the sentence-case sweep, not to this
+    page.
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis.
@@ -175,7 +201,7 @@ scattered strings land the same way.
 |---|---|
 | "Request failed" | "No response after 30s. The server at api.example.com accepted the connection but didn't reply. Raise the timeout in Settings › Network & connectivity or check the server." |
 | "Failed to fetch" | "Couldn't connect to localhost:3000 (ECONNREFUSED). Nothing is listening on that port - is your server running?" |
-| "No collections yet" | Heading: "No collections yet." Body: "Requests live in collections; your first one is created for you." Buttons: [New request] [Import]. |
+| "No collections yet" | Heading: "No collections yet". Body: "Requests live in collections; your first one is created for you." Buttons: [New request] [Import]. |
 | "Are you sure?" / [OK] | Title: "Delete 'Prod API'?" Body: "Its 12 variables are removed. Requests that use them will send the literal `{{baseUrl}}`. This can't be undone." Buttons: [Cancel] [Delete environment]. |
 | "Variable not found" | "`{{authToken}}` isn't defined in 'Staging' or globals. It will be sent as literal text." |
 | Static "Save" button | "Save" (disabled when clean) → "Saving…" → "Saved" (fades after 2s). On failure: "Couldn't save - disk full. Changes kept in this tab." |
