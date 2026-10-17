@@ -149,7 +149,7 @@ function StatusLegend({
 				className="inline-block w-2 h-2 rounded-sm mr-1.5 align-[1px]"
 				style={{ background: color }}
 			/>
-			{label} {count}
+			{label} {formatNumber(count)}
 			{infoTip && <InfoChip tip={infoTip} />}
 		</span>
 	);

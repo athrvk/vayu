@@ -26,7 +26,7 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatNumber } from "@/lib/format-number";
+import { formatNumber, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
@@ -258,7 +258,7 @@ function MetricsView({
 										className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
 										style={{ background: "hsl(var(--subtle-foreground))" }}
 									/>
-									target {targetRps} req/s
+									target {formatRate(targetRps)} req/s
 								</span>
 							)}
 							{rampOverlay && (

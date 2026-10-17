@@ -800,3 +800,27 @@ describe("empty and loading", () => {
 		expect(screen.queryByText(/loading this run's steps/i)).toBeNull();
 	});
 });
+
+describe("the header tally", () => {
+	it("groups thousands in the iteration and step counts", () => {
+		// Mutation check: put a raw `{scenario.iterationsCompleted}`,
+		// `{scenario.iterations}` or `{scenario.stepsExecuted}` back and this reddens.
+		reportQuery.data = report({
+			scenario: {
+				iterations: 23456,
+				iterationsCompleted: 12345,
+				stepsExecuted: 34567,
+				passed: 0,
+				failed: 0,
+				skipped: 0,
+				errored: 0,
+				stepsStored: 0,
+				stepsDropped: 0,
+			},
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText("12,345 of 23,456 iterations - 34,567 steps")).toBeTruthy();
+	});
+});

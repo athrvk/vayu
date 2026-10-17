@@ -23,11 +23,13 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import LoadTestDetail from "./LoadTestDetail";
+import { CONCURRENCY_LABEL } from "@/constants/load-test-modes";
 import type { RunReport } from "@/types";
 
 function report(
 	dataRowCount: number | undefined,
-	file: { dataFileName?: string; dataFileHash?: string } = {}
+	file: { dataFileName?: string; dataFileHash?: string } = {},
+	config: { targetRps?: number; concurrency?: number } = {}
 ): RunReport {
 	return {
 		metadata: {
@@ -44,6 +46,7 @@ function report(
 				targetRps: 200,
 				dataRowCount,
 				...file,
+				...config,
 			},
 		},
 		summary: {
@@ -73,13 +76,14 @@ function report(
 
 function mount(
 	dataRowCount: number | undefined,
-	file: { dataFileName?: string; dataFileHash?: string } = {}
+	file: { dataFileName?: string; dataFileHash?: string } = {},
+	config: { targetRps?: number; concurrency?: number } = {}
 ) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
 		<QueryClientProvider client={qc}>
 			<TooltipProvider>
-				<LoadTestDetail report={report(dataRowCount, file)} runId="r" />
+				<LoadTestDetail report={report(dataRowCount, file, config)} runId="r" />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
@@ -119,5 +123,20 @@ describe("LoadTestDetail data row count", () => {
 		mount(count);
 
 		expect(screen.queryByText("Data:")).toBeNull();
+	});
+});
+
+describe("LoadTestDetail config box number grouping", () => {
+	it("groups thousands in the target rate, the concurrency and the row count", () => {
+		// Mutation check: put a raw `{config.targetRps}`, `{config.concurrency}`
+		// or `{config.dataRowCount}` interpolation back and the matching
+		// assertion reddens.
+		mount(34567, {}, { targetRps: 12345, concurrency: 23456 });
+
+		// The rate card repeats the target, so read each value off its own label.
+		const valueOf = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
+		expect(valueOf("Target RPS:")).toBe("12,345");
+		expect(valueOf(`${CONCURRENCY_LABEL}:`)).toBe("23,456");
+		expect(screen.getByText("34,567 rows")).toBeInTheDocument();
 	});
 });

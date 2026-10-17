@@ -51,6 +51,7 @@ import { useRunReportQuery } from "@/queries";
 import { useStopRun } from "@/hooks/useStopRun";
 import { isRunInProgress } from "@/lib/run-status";
 import { dataFileNote } from "@/lib/run-data-file";
+import { formatNumber } from "@/lib/format-number";
 import { useDataFileStatus } from "@/hooks/useDataFileStatus";
 import { scenarioFromSnapshot } from "@/components/layout/context-bar/run-scenario";
 import { useScenarioRunStore } from "@/stores";
@@ -284,8 +285,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{scenario && (
 					<span className="text-xs text-muted-foreground">
-						{scenario.iterationsCompleted} of {scenario.iterations} iteration
-						{scenario.iterations === 1 ? "" : "s"} - {scenario.stepsExecuted} step
+						{formatNumber(scenario.iterationsCompleted)} of{" "}
+						{formatNumber(scenario.iterations)} iteration
+						{scenario.iterations === 1 ? "" : "s"} -{" "}
+						{formatNumber(scenario.stepsExecuted)} step
 						{scenario.stepsExecuted === 1 ? "" : "s"}
 					</span>
 				)}

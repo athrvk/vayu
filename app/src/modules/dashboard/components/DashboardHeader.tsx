@@ -20,6 +20,7 @@ import type { DashboardHeaderProps, DashboardMode } from "../types";
 import { MethodBadge, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { formatClock, pluralize } from "../utils/format";
+import { formatNumber } from "@/lib/format-number";
 
 /**
  * What the status pill says. Streaming wins over the mode. Idle, and a run that
@@ -89,7 +90,7 @@ function DashboardHeader({
 	const rowCount = configuration?.dataRowCount;
 	if (rowCount != null && rowCount > 0) {
 		const fileName = configuration?.dataFileName;
-		const rows = `${rowCount} ${pluralize(rowCount, "row")}`;
+		const rows = `${formatNumber(rowCount)} ${pluralize(rowCount, "row")}`;
 		configParts.push(fileName ? `${rows} from ${fileName}` : rows);
 	}
 	if (displayMs > 0) configParts.push(`${formatClock(displayMs)} elapsed`);
