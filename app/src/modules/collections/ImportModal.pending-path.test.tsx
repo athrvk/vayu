@@ -22,6 +22,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore, useToastStore } from "@/stores";
 import { apiService } from "@/services/api";
+import { fileBaseName } from "@/lib/file-path";
 import { collection, request, result, stubParse } from "./import-preview.testkit";
 
 function renderModal() {
@@ -128,7 +129,7 @@ describe("ImportModal - a path from the OS while the dialog is open", () => {
 			})
 		);
 		return stubReadSpecFile(async (specPath) => {
-			const fileName = specPath.slice(specPath.lastIndexOf("/") + 1);
+			const fileName = fileBaseName(specPath);
 			return { bytes: new TextEncoder().encode("{}"), fileName };
 		});
 	}
