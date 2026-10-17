@@ -22,6 +22,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { Chord } from "@/lib/platform";
+import type { RunExportAction } from "@/lib/run-export-formats";
 import type { Tab } from "@/stores";
 import type { Collection } from "@/types";
 
@@ -73,6 +74,13 @@ export interface CommandSurfaces {
 	 * disabled or has become Stop.
 	 */
 	sendRequest?: () => void;
+	/**
+	 * Export the finished load run on screen, as its export menu would (#2139),
+	 * so the menu's comparison toggle decides the palette's export too.
+	 * Contributed by that mounted menu; absent on every other tab and while an
+	 * export is already in flight.
+	 */
+	exportRun?: (action: RunExportAction) => void;
 }
 
 /**

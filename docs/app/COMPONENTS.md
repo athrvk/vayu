@@ -586,7 +586,7 @@ A **load** run that is still `running` or `pending` is the opposite case, and it
 
 `LoadTestDetail.tsx`'s scrolling body, above the tabs, carries `main/components/BaselineComparison.tsx`, the **vs-baseline strip**: the open run's p99, throughput and error rate against the run pinned for the same request, each delta coloured by `MetricDelta.direction` rather than by its sign (latency up is a regression, throughput up is not). It resolves the pin itself through `main/components/usePinnedBaseline.ts`, the lookup the Export menu's comparison toggle shares (`useBaselineRunQuery`: by `requestId`, or by url+method for a run of an unsaved request, the url and method read off the loaded run's `configSnapshot` through `runReferenceInput`, the report's `metadata` standing in where the snapshot has neither) and fetches the run from the shared cache the pane above already filled, so it stays self-contained instead of threading a prop through every call site. It renders **nothing** when no run is pinned, when the open run *is* the pin, or before the baseline's report has loaded - a strip of zeros would claim "nothing changed" about runs that were never compared. Under the deltas it lists the **comparability warnings** (#2162), one `AlertTriangle` row per entry of `RunComparison.comparability`, each the message followed by the baseline's value and then this run's ("Run durations differ by more than 2x. 20 s vs 3 s, stopped."): mode, virtual users, target rate, duration, status, HTTP version, data file, request and compression negotiation, because a short stopped run against a long one always reads as a throughput and tail-latency regression. A like-for-like pair draws no list, and a field a report does not carry is never a warning. The list is computed in `compareReports`, so `compare_runs` returns the same entries. The diff comes from `lib/run-compare.ts`, mirrored by the MCP tool's `electron/mcp/compare.ts` and pinned to it by `compare.conformance.test.ts`. Three metrics, deliberately: it is a glance above the report's tabs, and the rest of the diff (every percentile, both throughput measures, the status-code merge) is the **Compare** view below. Its label row carries a text **Copy comparison for agent** button (#2047): `runComparisonReference` over the baseline row and the open run, both mapped through `runReferenceInput`, toast "Reference copied".
 
-**Export a finished run** (#2139). `main/components/RunExportMenu.tsx` is a `DropdownMenu` behind a text **Export** button (the `Download` glyph, styled like Copy for agent), mounted by the run tab's header and by the post-run `DashboardHeader`, each only for a finished load run. Its items are `runExportActions` from `lib/run-export-formats.ts`: a **Save as …** item per format ("Save as JSON") and a **Copy as …** item per format marked `copyable` (none today; the copy goes through `useCopy`). **Include comparison with baseline** is a checkbox item, ticked by default and present only when `usePinnedBaseline` finds a pin other than this run; ticked, the export sends that run as `baseRunId`. A foot note under a `border-rule` divider (the content declares `bg-card surface-card`, `--popover` and `--card` being one colour) says what the file carries: the target URL, names and comments, no request or response data. A save asks `useRunReportExport` (`POST /export/run-report`, the series at its default) and only once the engine answers hands its `text`, `fileName` and `mimeType` to `downloadTextFile` untouched, toasting `Exported <file>`, plus ` - N URL credentials left out` when `notes.urlCredentialsOmitted` is above zero. A failure toasts `Couldn't export the run - <engine message>` and downloads nothing. The items are disabled while an export is in flight.
+**Export a finished run** (#2139). `main/components/RunExportMenu.tsx` is a `DropdownMenu` behind a text **Export** button (the `Download` glyph, styled like Copy for agent), mounted by the run tab's header and by the post-run `DashboardHeader`, each only for a finished load run. Its items are `runExportActions` from `lib/run-export-formats.ts`, the list the palette's export commands are generated from: a **Save as …** item per format ("Save as JSON") and a **Copy as …** item per format marked `copyable` (none today; the copy goes through `useCopy`). **Include comparison with baseline** is a checkbox item, ticked by default and present only when `usePinnedBaseline` finds a pin other than this run; ticked, the export sends that run as `baseRunId`. A foot note under a `border-rule` divider (the content declares `bg-card surface-card`, `--popover` and `--card` being one colour) says what the file carries: the target URL, names and comments, no request or response data. A save asks `useRunReportExport` (`POST /export/run-report`, the series at its default) and only once the engine answers hands its `text`, `fileName` and `mimeType` to `downloadTextFile` untouched, toasting `Exported <file>`, plus ` - N URL credentials left out` when `notes.urlCredentialsOmitted` is above zero. A failure toasts `Couldn't export the run - <engine message>` and downloads nothing. The items are disabled while an export is in flight. The mounted menu also fills the palette's `exportRun` slot ([Command Registry](#command-registry-libcommands)).
 
 **Compare any two runs** (#2164). The header's **Compare** action (beside the breadcrumb, drawn only for a run that has a `requestId`: a comparison needs the request to find its sibling runs by) and the History row's **Compare with…** menu entry (`RunItem`, for a finished load run with a `requestId`; it opens the run's tab and sets `tabs-store`'s `compareRunTarget`, which `LoadTestDetail` consumes) open `main/components/RunComparisonView.tsx` in place of the report's tabs. It is in-pane state of `LoadTestDetail`, not a tab type, so Back to report returns to the report. The view diffs the open run (the target) against a run chosen in a `Select` (the base): `useRequestRunsQuery` lists the request's load runs (`GET /runs?requestId=&type=load`), and `comparableRuns` keeps the completed and stopped ones other than the open run, adding the pinned baseline when it is older than the page. The default is the pinned baseline (`useBaselineRunQuery`) when it differs from the open run, else the newest other run. Option labels are the start time, the status and, for the pin, "Baseline", so two runs of one request tell apart. Under the comparability warnings it draws one table of **every** `compareReports` row (P50 to max latency, throughput and response rate, error rate, total requests) and one of the status-code merge, a code only one run saw counting zero on the other side; the change column is coloured by `MetricDelta.direction` like the strip, and a status-code count change is neutral, since counts follow how long a run ran. The strip and the view share `run-comparison-parts.tsx` (`DeltaCell`, `DeltaChange`, `ComparabilityWarnings`) and `run-comparison-format.ts` (`METRIC_LABELS`, `formatValue`), so a fix to a unit, a tone or a warning lands on both. A chosen run deleted since the list loaded shows "This run no longer exists" with the picker still open; a request with no other finished run shows an empty state.
 
@@ -1345,12 +1345,15 @@ in step or could enumerate them.
   only, toggle theme, open settings) plus one
   command per drawer view - **generated** from `constants/drawer-views.ts`, the same table `ActivityRail`
   reads, filtered to drop Settings (which `open-settings` already covers, tab and all) - plus one
-  command per settings section, **generated** from `app-panels.ts` and `engine-categories.ts` so
+  command per run-export action, **generated** from `runExportActions` (`lib/run-export-formats.ts`),
+  the list the Export menu draws (`Save "<tab>" as JSON`; available only while a mounted menu fills
+  `exportRun`, no chord) - plus one command per settings section, **generated** from `app-panels.ts` and `engine-categories.ts` so
   a section added there appears here without an edit and cannot be named differently.
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
-- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Two
-  named slots, start-load-test and send, both contributed by the mounted request builder.
+- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Three
+  named slots: start-load-test and send, contributed by the mounted request builder, and
+  export-run, contributed by a finished load run's Export menu.
 
 Two rules make it work without a dependency-injection tangle:
 
@@ -1370,7 +1373,7 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
 - **Host-owned** (`newRequest`, `runCollection`, `toggleThemeMode`, `copy`) - dialogs and hooks
   that are React but that *any* rendering caller can mount for itself. The palette does exactly
   that in `useCommandSurfaces`, so offering `surfaces` at all means offering these four.
-- **Contributed by a mounted feature** (`startLoadTest`, `sendRequest`) - state that exists only
+- **Contributed by a mounted feature** (`startLoadTest`, `sendRequest`, `exportRun`) - state that exists only
   inside one component tree and cannot be lifted without copying it. Starting a load test needs
   the request builder's **live editor draft**, before autosave has run; the palette is a sibling of
   `RequestBuilderProvider`, so a command reading a store would find only the last *saved* request
@@ -1391,6 +1394,14 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
   the row disappears with it rather than sitting on screen offering something the Send button
   would refuse.
 
+  A finished load run's export fills the third slot, `exportRun` (#2139), through
+  `useRegisterExportRunSurface`, mounted by `modules/history/main/components/RunExportMenu.tsx`.
+  What an export sends depends on that menu's comparison toggle, so the handler takes a
+  `RunExportAction` and delivers it as the menu's own item would. It is withdrawn while an export
+  is in flight. Only the active tab's view is mounted (`renderTabContent` in `Shell.tsx`), so the
+  run tab's menu and the dashboard's never hold the slot at once; the identity-checked clear
+  covers the hand-over.
+
 The rejected alternative is worth naming, because it is the tempting one: reading the draft out
 of the provider from outside it, or recomposing the payload inside the command, would be a second
 copy of `buildExecBody` and of the run policy - the "hand-rolled copy of a primitive" defect this
@@ -1398,9 +1409,10 @@ registry exists to remove.
 
 The channel is deliberately a **closed union of named slots**, not a registry of arbitrary named
 surfaces. Send had the same live-draft problem, and #1243 gave it the second slot rather than a
-second channel: `LiveSurfaceSlot` is `"startLoadTest" | "sendRequest"` and nothing else, so a
-third feature with this problem is a decision taken in `live-surfaces.ts`, not a name a caller
-can invent by passing a string.
+second channel; #2139 gave the run export the third. `LiveSurfaceSlot` is the keys of one handler
+table in `live-surfaces.ts` - `"startLoadTest" | "sendRequest" | "exportRun"` - and nothing else,
+so a fourth feature with this problem is a decision taken there, not a name a caller can invent by
+passing a string.
 
 Consumers: `modules/palette/sources/commandItems.ts` (the Commands and Settings groups) and
 `hooks/useMenuActions.ts` (Preferences… → `open-settings`). `lib/commands/registry.test.ts` walks
@@ -1410,7 +1422,9 @@ handing over the request *as edited*, and to clearing itself on unmount.
 `modules/request-builder/send-request-command-surface.test.tsx` holds the same for Send - the
 request crossing the channel *as edited*, not as last saved - plus the gate: it asserts the row is
 absent while the URL is empty, while a send is already in flight, and while this builder's own
-stream is open.
+stream is open. `modules/history/main/components/RunExportMenu.test.tsx` holds the export slot:
+filled while the menu is mounted, cleared on unmount, withdrawn while an export is in flight, and
+delivering with the menu's comparison toggle.
 
 ## Tab Breadcrumb (`components/shared/TabBreadcrumb.tsx`)
 

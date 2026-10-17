@@ -22,14 +22,18 @@
  * the Appearance panel, so a toggle from here reaches the panel's radio group
  * directly and the toggle's direction is never read from a stale copy (#1855).
  *
- * Two more surfaces are **not** hosted here, and cannot be: starting a load test
- * and sending both need the request builder's live editor draft, which exists
+ * Three more surfaces are **not** hosted here, and cannot be. Starting a load
+ * test and sending both need the request builder's live editor draft, which exists
  * only inside a provider the palette is a sibling of. The mounted builder
  * contributes them through `lib/commands/live-surfaces.ts` and this hook merges
  * what is registered, so those commands are offered while a builder is on screen
  * and absent the rest of the time. Send is withdrawn for a second reason as
  * well - the builder stops offering it while it could not send at all - so its
  * row tracks the Send button rather than merely the builder's presence.
+ *
+ * A finished load run's export menu contributes the third the same way: what an
+ * export sends depends on that menu's comparison toggle, which lives in the
+ * mounted run view.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -55,6 +59,7 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 	const startLoadTest = useLiveCommandSurfaceStore((s) => s.startLoadTest);
 	const sendRequest = useLiveCommandSurfaceStore((s) => s.sendRequest);
+	const exportRun = useLiveCommandSurfaceStore((s) => s.exportRun);
 
 	const dismissRunDialog = useCallback(() => setRunTarget(null), []);
 
@@ -77,8 +82,9 @@ export function useCommandSurfaces(): UseCommandSurfacesReturn {
 			copy,
 			...(startLoadTest ? { startLoadTest } : {}),
 			...(sendRequest ? { sendRequest } : {}),
+			...(exportRun ? { exportRun } : {}),
 		}),
-		[newRequest, toggleThemeMode, copy, startLoadTest, sendRequest]
+		[newRequest, toggleThemeMode, copy, startLoadTest, sendRequest, exportRun]
 	);
 
 	return { surfaces, pickerProps, runTarget, dismissRunDialog };

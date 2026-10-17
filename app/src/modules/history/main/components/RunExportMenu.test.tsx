@@ -9,8 +9,8 @@
  */
 
 /**
- * The finished run's Export menu (#2139): what it asks the engine, and what it
- * does with the answer.
+ * The finished run's Export menu (#2139): what it asks the engine, what it
+ * does with the answer, and the palette slot it fills.
  *
  * The engine names the file and picks its type, so a save hands both through
  * untouched and only once the answer is here; a failure downloads nothing. The
@@ -19,7 +19,8 @@
  *
  * Mutation checks: drop `baseRunId` from the payload and the comparison case
  * reds; download before the export resolves, or with the registry's MIME type
- * rather than the engine's, and the save case reds.
+ * rather than the engine's, and the save case reds; register the slot while an
+ * export is in flight and the withdrawal case reds.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -27,6 +28,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { withQueryClient } from "@/test/query-wrapper";
 import { apiService } from "@/services/api";
 import { downloadTextFile } from "@/lib/download-text-file";
+import { useLiveCommandSurfaceStore } from "@/lib/commands";
 import { runExportActions, type RunExportFormatEntry } from "@/lib/run-export-formats";
 import { useToastStore } from "@/stores";
 import type { Run, RunReportExportResponse } from "@/types";
@@ -101,6 +103,7 @@ beforeEach(() => {
 	writeText.mockReset().mockResolvedValue(undefined);
 	Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 	useToastStore.setState({ toasts: [] });
+	useLiveCommandSurfaceStore.setState({ exportRun: null });
 });
 afterEach(cleanup);
 
@@ -250,5 +253,59 @@ describe("the comparison with the baseline", () => {
 		fireEvent.click(within(menu).getByRole("menuitem", { name: "Save as JSON" }));
 		await waitFor(() => expect(download).toHaveBeenCalledTimes(2));
 		expect(exportRunReport).toHaveBeenLastCalledWith({ runId: "run_1", format: "json" });
+	});
+});
+
+/*
+ * The palette's half: the menu is what fills the `exportRun` slot, in the
+ * manner `send-request-command-surface.test.tsx` holds for Send.
+ */
+describe("the exportRun command surface", () => {
+	const registered = () => useLiveCommandSurfaceStore.getState().exportRun;
+	const [saveJson] = runExportActions();
+
+	it("is filled while the menu is mounted and cleared when it unmounts", () => {
+		expect(registered()).toBeNull();
+		const { unmount } = renderMenu();
+		expect(registered()).not.toBeNull();
+
+		unmount();
+
+		expect(registered()).toBeNull();
+	});
+
+	it("exports through the menu's own handler, comparison included", async () => {
+		queries.baseline = loadRun("run_0");
+		renderMenu();
+
+		act(() => registered()!(saveJson));
+
+		await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+		expect(exportRunReport).toHaveBeenCalledWith({
+			runId: "run_1",
+			format: "json",
+			baseRunId: "run_0",
+		});
+	});
+
+	it("is withdrawn while an export is in flight, and offered again once it lands", async () => {
+		let answer!: (value: RunReportExportResponse) => void;
+		exportRunReport.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+		renderMenu();
+
+		act(() => registered()!(saveJson));
+		await waitFor(() => expect(registered()).toBeNull());
+
+		await act(async () => answer(envelope()));
+		await waitFor(() => expect(registered()).not.toBeNull());
+	});
+
+	it("leaves the clear to the current holder", () => {
+		renderMenu();
+		const current = registered();
+
+		act(() => useLiveCommandSurfaceStore.getState().clearSurface("exportRun", () => {}));
+
+		expect(registered()).toBe(current);
 	});
 });

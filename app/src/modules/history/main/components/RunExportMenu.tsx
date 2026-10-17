@@ -15,6 +15,11 @@
  * The engine writes the document, names the file and picks its type; this menu
  * asks, then hands the answer to `downloadTextFile` untouched. A failed export
  * downloads nothing and says why, in the engine's words.
+ *
+ * The items are `runExportActions`, the list the palette's export commands are
+ * generated from, and the palette reaches them through this menu's own handler
+ * (`useRegisterExportRunSurface`): the comparison toggle below decides what a
+ * palette export carries too.
  */
 
 import { useId, useState } from "react";
@@ -29,6 +34,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
+import { useRegisterExportRunSurface } from "@/lib/commands";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { formatNumber } from "@/lib/format-number";
 import { runExportActions, type RunExportAction } from "@/lib/run-export-formats";
@@ -91,6 +97,10 @@ export default function RunExportMenu({ runId, requestUrl, requestMethod }: RunE
 		downloadTextFile(result.text, result.fileName, result.mimeType);
 		showToast(savedMessage(result), "success");
 	};
+
+	// Withdrawn while one export is in flight, as the items are disabled: a
+	// second would download the file twice.
+	useRegisterExportRunSurface(isPending ? null : (action) => void deliver(action));
 
 	return (
 		<DropdownMenu>

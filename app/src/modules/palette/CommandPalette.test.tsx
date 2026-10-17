@@ -234,7 +234,11 @@ beforeEach(() => {
 	useImportModalStore.setState({ isOpen: false });
 	useSettingsStore.setState({ selectedCategory: "appearance", highlightedKey: null });
 	stampedCommand.id = null;
-	useLiveCommandSurfaceStore.setState({ startLoadTest: null, sendRequest: null });
+	useLiveCommandSurfaceStore.setState({
+		startLoadTest: null,
+		sendRequest: null,
+		exportRun: null,
+	});
 });
 afterEach(cleanup);
 
@@ -774,6 +778,37 @@ describe("commands", () => {
 			expect(useLayoutStore.getState().paletteOpen).toBe(false);
 		}
 	);
+
+	/*
+	 * The third slot (#2139): a finished run's Export menu contributes it, and
+	 * the row hands its action to that handler. Drop the `exportRun` merge in
+	 * `useCommandSurfaces` and the row never appears.
+	 */
+	it("offers the run-export command only while a mounted Export menu contributes it", () => {
+		useTabsStore.setState({
+			openTabs: [{ id: "t1", type: "run", entityId: "run_1" }],
+			activeTabId: "t1",
+			tabFocusedAt: {},
+		});
+		renderPalette();
+		open();
+		// The run query is stubbed empty here, so the strip calls this tab "Run".
+		expect(screen.queryByText('Save "Run" as JSON')).not.toBeInTheDocument();
+		cleanup();
+
+		const invoked = vi.fn();
+		useLiveCommandSurfaceStore.setState({ exportRun: invoked });
+		renderPalette();
+		open();
+		expect(screen.getByText('Save "Run" as JSON')).toBeInTheDocument();
+
+		typeQuery('Save "Run" as');
+		pressEnter();
+
+		expect(invoked).toHaveBeenCalledTimes(1);
+		expect(invoked.mock.calls[0][0]).toMatchObject({ id: "save-json", delivery: "save" });
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+	});
 
 	/*
 	 * The join the registry test cannot see (#2047): the line is the tab
