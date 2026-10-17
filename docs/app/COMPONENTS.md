@@ -2890,7 +2890,8 @@ takes the focus colour in place of the ring, so one edge draws. No `text-box`
 trim, ever: with `py-0` it clips descenders and underscores (`input.test.tsx`).
 A caller never writes an `h-*`, `size-*` or `h-full` class on an `Input`, a
 `VariableInput` or a `SecretInput`: `chrome-floors.test.ts` fails the tag that
-does. `SecretInput` forwards `size`. `size` is the variant, not the native
+does. `SecretInput` forwards `size`, and `id`, which lands on the inner input so a
+`<Label htmlFor>` names the field rather than the wrapper `div`. `size` is the variant, not the native
 numeric `size` attribute, which `Input` omits.
 
 ### `dialog-cancel-button`

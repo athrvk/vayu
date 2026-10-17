@@ -226,6 +226,22 @@ describe("ClientCertificatesCard", () => {
 		);
 	});
 
+	it("names the passphrase field by its label, whichever format is chosen", () => {
+		renderCard();
+		fireEvent.click(screen.getByRole("button", { name: /add certificate/i }));
+
+		const field = screen.getByLabelText(/Key passphrase/);
+		expect(field).toHaveAttribute("type", "password");
+		expect(screen.queryByLabelText(/Bundle password/)).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("radio", { name: /PKCS#12 bundle/i }));
+
+		// The label's words follow the format; the binding does not, so the same
+		// input stays named.
+		expect(screen.getByLabelText(/Bundle password/)).toBe(field);
+		expect(screen.queryByLabelText(/Key passphrase/)).not.toBeInTheDocument();
+	});
+
 	it("shows a format it does not recognise rather than taking the card down", () => {
 		// A row hand-edited around the routes: the engine refuses to store this
 		// and still lists it. Indexing straight into the format table would

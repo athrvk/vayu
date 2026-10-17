@@ -21,6 +21,8 @@ import { TooltipIconButton } from "./tooltip-icon-button";
 import { Input, type InputProps } from "./input";
 
 interface SecretInputProps {
+	/** Lets a `<Label htmlFor>` bind to the inner input rather than the wrapper. */
+	id?: string;
 	value: string;
 	onChange: (value: string) => void;
 	placeholder?: string;
@@ -47,6 +49,7 @@ interface SecretInputProps {
 }
 
 export function SecretInput({
+	id,
 	value,
 	onChange,
 	placeholder,
@@ -61,6 +64,7 @@ export function SecretInput({
 	return (
 		<div className="relative">
 			<Input
+				id={id}
 				type={revealed ? "text" : "password"}
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
