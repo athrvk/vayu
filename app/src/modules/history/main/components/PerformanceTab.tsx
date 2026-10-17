@@ -184,7 +184,7 @@ export default function PerformanceTab({
 			    at the tail percentiles; this is the curve between them, with the
 			    min and max the tiles do not carry. A card of its own so two cards do
 			    not share the title "Latency distribution". */}
-			<Card className="enter-fade surface-card">
+			<Card className="enter-fade">
 				<CardHeader>
 					<div className="flex items-baseline justify-between">
 						<CardTitle>
@@ -219,7 +219,7 @@ export default function PerformanceTab({
 			    one request across five phases, so a p99 here is not comparable to
 			    the p99 above. Absent section = no card, as everywhere else. */}
 			{report.timingBreakdown?.phases && (
-				<Card className="enter-fade surface-card">
+				<Card className="enter-fade">
 					<CardHeader>
 						<CardTitle>Phase latency percentiles</CardTitle>
 					</CardHeader>
@@ -233,7 +233,7 @@ export default function PerformanceTab({
 			    the same run's time to first event; absent for every run that did
 			    not stream, as the engine omits the section rather than write zeros. */}
 			{report.stream && (
-				<Card className="enter-fade surface-card">
+				<Card className="enter-fade">
 					<CardHeader>
 						<CardTitle>
 							Stream events

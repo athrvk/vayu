@@ -267,6 +267,8 @@ declared surface silently falls back to the invisible default. So guard the
 _declarations_ (`surface-rule.test.tsx`, `ImportModal.surface-rule.test.tsx`);
 asserting `border-rule` is present proves nothing. The surface classes are in
 use across the tree; a new surface declares one rather than picking a token.
+`Card` declares its own (`bg-card surface-card`, `card.test.tsx`), so inside one
+a divider is `border-rule` and nothing else.
 On an element whose primitive already sets a background utility
 (`DialogContent`'s `bg-background`), `surface-card` alone loses the cascade:
 write the pair `bg-card surface-card` (see `docs/design-system.md`).

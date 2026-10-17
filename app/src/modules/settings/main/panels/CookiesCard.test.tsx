@@ -173,4 +173,20 @@ describe("CookiesCard", () => {
 		// A bare "Clear" repeated per scope is indistinguishable to a screen reader.
 		expect(screen.queryAllByRole("button", { name: /^clear$/i })).toHaveLength(0);
 	});
+
+	it("declares the surface its cookie dividers read", () => {
+		const { container } = render(<CookiesCard />);
+		const rules = Array.from(container.querySelectorAll(".border-rule"));
+
+		// One divider per scope.
+		// A render that reached no divider would pass the loop below having
+		// checked nothing.
+		expect(rules.length).toBeGreaterThanOrEqual(2);
+		for (const rule of rules) {
+			expect(
+				rule.closest(".surface-card, .surface-sunken"),
+				`border-rule under no surface: ${rule.getAttribute("class")}`
+			).not.toBeNull();
+		}
+	});
 });
