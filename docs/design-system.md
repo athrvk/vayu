@@ -29,10 +29,19 @@ on the wrong side of the convention (active tabs are normally the lightest thing
 in light UIs). `--tab-active` deepens it to ΔL\* 4.82 in light and stays equal to
 `--background` in dark, where nothing needed fixing.
 
-The active tab also carries a `border-t-2 border-t-primary` stripe. That is the
-*primary* signal, because it reads identically in both themes, where a surface
-shift does not. Inactive tabs carry `border-t-2 border-t-transparent` so the
-stripe does not displace their contents by 2px.
+The active tab also carries a 2px bar on its bottom edge, on the side the
+content is on. That is the *primary* signal, because it reads identically in both
+themes, where a surface shift does not. The bar is an `after:` pseudo-element
+(`after:absolute after:inset-x-0 after:bottom-0 after:h-0.5`) that every tab
+carries, `after:bg-transparent` at rest and `data-[active=true]:after:bg-primary`
+when active; the 1px `border-b` rule under the strip is `border-b-border` at rest
+and `data-[active=true]:border-b-transparent` when active. The base is stable and
+the modifier changes only a colour, which is why switching tabs transitions: a
+class string that swapped wholesale would add and remove the bar, and nothing can
+transition between present and absent. `after:transition-colors` is on its own
+line because a pseudo-element paints separately from its box. The bar is
+absolutely positioned, so it never displaces the tab's contents. The reference is
+`app/src/components/layout/TabItem.tsx`.
 
 **Paper White light mode** - light surfaces use a cool near-neutral (zinc) family; higher surfaces are lighter (canvas → panel → white card).  
 **Dark canvas** - dark mode uses near-black with subtle violet undertones (zinc-950 family).
@@ -343,8 +352,8 @@ things text contrast never touches: focus rings, control boundaries, and the
 | `--ring` vs every surface | 4.57–5.39 | 5.11–6.75 | passes comfortably |
 | `--border` / `--input` vs card | 1.30 | 1.00 | decorative only - see below |
 
-**A divider *inside* a card needs `border-border-strong`.** `--border` is
-tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
+**A divider *inside* a card says `border-rule`, not a border token.** `--border`
+is tuned for the canvas - its dark value is commented "= rgba(255,255,255,0.07)
 on dark canvas", where it measures 1.14. Measured against the surfaces it is
 actually used on:
 
@@ -354,10 +363,14 @@ actually used on:
 | `--border-strong` | 1.47 | 1.39 | 1.28 | **1.11** |
 
 At 1.00 the divider is the same colour as the card and simply is not there
-in dark mode. `--border-strong` gives 1.28, which is what `--border` itself
-achieves on a card in light mode - so the strong token on dark reads the way
-the default token reads on light. This is not enforced by a test: whether a
-border sits on a card is an ancestry question a source scan cannot answer.
+in dark mode. `--border-strong` fixes the card (1.28) but is weaker than
+`--border` on `--muted` in dark, so no single border token serves every surface -
+which is why the answer is `border-rule` ([below](#border-rule-let-the-surface-pick-the-token))
+and the table above is the measurement behind it, not a recipe. Whether a border
+sits on a card is an ancestry question a source scan of the `border-*` classes
+cannot answer; what a test can hold is the *declarations*. `surface-rule.test.tsx`
+does that for the surfaces that adopt `surface-card`, and the shared `Card`
+primitive declaring one itself is tracked in #2294.
 
 **Ask what the box sits *on*, not what it is.** A card's own outline is fine on
 `border-border`, because that edge faces the canvas, where the token measures
@@ -1267,8 +1280,11 @@ Appearance → Interface → Density, owned by `appearance-store`
 | Card padding | `p-4` (`CardHeader`/`CardContent`/`CardFooter`) | 12px | 16px |
 | Dialog padding | `p-5` (`DialogContent`) | 15px | 20px |
 | Drawer row height | `h-8` | 24px | 32px |
-| Icon (menu/toolbar) | `w-3.5 h-3.5` | 10.5px | 14px |
 | Icon (panel heading) | `w-5 h-5` | 15px | 20px |
+
+Menu and toolbar icons are not a density row: they sit on a fixed floor, `size-icon-sm`
+(12px) or `size-icon` (16px), in the
+[Chrome, Target and Icon Floors](#chrome-target-and-icon-floors) table below.
 
 `density.test.ts` reads both `--spacing` declarations directly off `index.css`
 and reds if either value changes. `spacing-scale.test.ts` guards `Card` and
@@ -1387,7 +1403,7 @@ the last row of the shell column, so the layout keeps everything else clear of
 it automatically. The toast viewport is `position: fixed` and anchors to the
 window instead, so it has to subtract the strip's height by hand - and with a
 plain `bottom-4` it did not, landing 16px off the window floor, inside the
-Dock's 32px band and covering its lower half, "Connected" and the version string
+Dock's 32px band and covering its lower half, "Engine connected" and the version string
 included. Measured in the app: viewport bottom 704px against a Dock top of 688px.
 
 Both sides now go through the token - `h-[var(--dock-height)]` on the Dock,
@@ -1436,7 +1452,21 @@ live. **Always use `rounded-md`/`rounded-lg`/`rounded-sm`, never Tailwind's
 unsuffixed `rounded`** (fixed 4px - it ignores `--radius` and won't follow the
 control). `rounded-full` stays a pill regardless.
 
-Cards and panels use `rounded-md`. Badges/chips use `rounded-sm`.
+The primitives are the reference, not a table of their own: `Badge` and the
+chips that match it are `rounded-md` (`badge-variants.ts`), `Card` is `rounded-lg`
+with `shadow` (`card.tsx`), and a bordered panel that is not a `Card` takes
+`rounded-md`. A card you need is `Card` / `CardHeader` / `CardContent`; a
+hand-rolled `bg-card border rounded-md` copy does not receive the primitive's
+fixes and is drift that the drift sweep removes, not a second recipe.
+
+**Elevation steps in use**, so a new surface picks one rather than inventing a
+shadow: `shadow-sm` on form controls (`Input`, `Select` trigger, `Switch` track,
+the non-default `Button` variants), plain `shadow` on `Card` and the solid
+primary `Button`, `shadow-md` on popovers and menus (`Popover`, `DropdownMenu`,
+`ContextMenu`, `Select` content, the suggestion lists), `shadow-lg` on `Dialog`
+and the toast. The stray is the dropdown submenu (`dropdown-menu.tsx`
+`DropdownMenuSubContent`), which sits at `shadow-lg` while its parent menu is
+`shadow-md`; the `Switch` thumb's `shadow-lg` is a knob on a track, not a surface.
 
 **`rounded-full` is for circles, not for chips.** Status dots, spinners,
 circular icon wells, colour swatches, switch tracks - things whose shape *is* a
@@ -1493,9 +1523,9 @@ Defined in both `index.css` and `tailwind.config.js`. All three `vayu-*` animati
 <Loader2 className="size-icon-sm animate-spin" />
 ```
 
-**Live dot pattern:**
+**Live dot pattern** (as shipped in `ResponseStatusBar.tsx`):
 ```tsx
-<span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+<span className="size-1.5 rounded-full bg-status-success animate-pulse" />
 ```
 
 ### Motion vocabulary (entrances and exits)
@@ -1931,7 +1961,7 @@ state at all. Use the dedicated variants, which step up to `accent-active`:
 | Variant | Use | Hover |
 |---------|-----|-------|
 | `rowAction` | neutral (`⋯`, edit, copy) | `bg-accent-active` + `text-foreground` |
-| `rowActionDestructive` | delete / remove | `bg-accent-active` + `text-destructive` |
+| `rowActionDestructive` | delete / remove | `bg-accent-active` + `text-destructive-text` |
 
 Destructive rows share the neutral shape and differ **only** in glyph colour on
 hover. No red background tint: the row already carries one fill, a second
@@ -2064,8 +2094,8 @@ header band, body below it.
   exported for a *row* to use the same idiom, which is how the collection tree
   stays in step without gaining a section header - its panel band already says
   "Collections", and a section of the same name inside it would be a double
-  heading. A root folder's count is the requests in its whole subtree; a nested
-  folder's is its direct children.
+  heading. A root collection's count is the requests in its whole subtree; a nested
+  collection's is its direct children.
 - **The section's ARIA stays at the call site.** Variables' headers are
   `role="treeitem"` rows in a roving-tabindex tree and their "+" sits outside that
   row on purpose (the tree has no create key, so the button is the drawer's own
@@ -2092,7 +2122,7 @@ header band, body below it.
   there being no parent row to be a child of - in the GraphQL schema explorer,
   whose search results are one flat level. Each carrying its own
   `px-*` is how one expanded folder came to show up to five different left
-  edges, with "Empty folder" left of its own parent's label (#1372). An empty
+  edges, with "Empty collection" left of its own parent's label (#1372). An empty
   level also has to _say_ so: its group holds no `treeitem`, so the folder row
   carries `aria-describedby` pointing at the placeholder rather than the
   placeholder taking a role inside a group that owns rows.
@@ -2797,7 +2827,7 @@ itself above this strip by the same value - the token is what keeps the two
 from drifting apart.
 
 The centre holds the engine connection light (a `bg-current` dot plus
-Starting… / Connected / Disconnected, on `status-success-text` when connected
+Starting… / Engine connected / Engine disconnected, on `status-success-text` when connected
 and `--muted-foreground` otherwise), a running-services button and a
 pending-restart button that render only when there is something to report, the
 save status, and the version string. **This strip is where the connection
@@ -2913,7 +2943,9 @@ create of its own the action points at the surface that does
 ("Browse collections" from the mock pane), and where the state is one the
 user caused it undoes that ("Clear the filters", "Clear the filter"). The
 collections sidebar offers its create path plus Import as a two-`Button`
-`flex gap-2` wrapper ("New collection", "Import") rather than a lone link. A pane
+`flex gap-2` wrapper ("New request", "Import") rather than a lone link
+(`CollectionTree.tsx`): with no collection to hold it, a new request is what
+makes the first one, as its description says. A pane
 that is a selection prompt ("No run selected"), a not-found, a loading step
 or a wait on someone else's traffic gets none: there is nothing to offer.
 The `inline` variant takes an action for this reason - the drawer's group
@@ -3035,18 +3067,21 @@ control of its own, and `aria-busy` on the pane already carries the state for
 assistive tech. Confined to `ResponseViewer` - the pane it says something about
 is the one with the wave.
 
-**Default entity names are Title Case** ("New Collection", "New Folder"),
-even beside sentence-case headings and button labels ("No collections yet",
-"Delete forever?"). The name is a proper noun for the thing until the user
-renames it; the surrounding UI copy is not.
+**Default entity names are Title Case** - the three stored defaults, "New
+Collection", "New Request" and "New Environment" - even beside sentence-case
+headings and button labels ("No collections yet", "Delete forever?"). They are
+stored data, not interface copy: the history views compare a persisted run's
+`requestName` to `DEFAULT_REQUEST_NAME` by literal, so lower-casing one would
+make runs already recorded under it read as a name the user chose. Every other
+string is sentence case; the rule and its exceptions are in
+[ux-writing.md](ux-writing.md#decision-rules).
 
 ### Cards
 
-```tsx
-<div className="bg-card border border-border rounded-md p-4">
-  ...
-</div>
-```
+Use `Card` / `CardHeader` / `CardContent` (`app/src/components/ui/card.tsx`),
+which own the surface, radius, shadow and padding. A hand-rolled
+`bg-card border rounded-md` box is drift that the drift sweep removes, not a
+pattern to copy.
 
 Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-900` for card surfaces. Always `bg-card`.
 
@@ -3327,27 +3362,19 @@ stop, holding the tooltip, with the inert control inside it:
 
 ### Destructive Actions
 
-```tsx
-/* Error/warning banner */
-<div className="bg-destructive/10 text-destructive rounded-md p-3">...</div>
+Three shapes, and each has a component rather than a recipe to copy:
 
-/* Stop button */
-<Button
-  variant="ghost"
-  className="text-destructive hover:bg-destructive/10 hover:text-destructive border border-destructive/30"
->
-  Stop
-</Button>
-
-/* Delete icon button */
-<Button
-  variant="ghost"
-  size="icon"
-  className="hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100"
->
-  <Trash2 className="size-icon-sm" />
-</Button>
-```
+- **A banner** (an error or warning about the form or pane) is `Callout`
+  (`components/shared/Callout.tsx`) with `severity`, which owns the tint, the
+  glyph and the `-text` foreground. A hand-rolled `bg-destructive/10` box is
+  the drift it replaced.
+- **Stop** is `StopRunButton` (`components/shared/StopRunButton.tsx`): a
+  destructive outline over `ghost` with the label on `text-destructive-text`.
+  The bare `text-destructive` is a fill token and is not a foreground (see
+  Semantic Status Colors).
+- **A row's delete** is an icon button with `variant="rowActionDestructive"`
+  (`Button` with `size="icon"`, or `TooltipIconButton` where a tooltip names
+  it), revealed per Row Actions above.
 
 #### Reversibility
 
@@ -3377,37 +3404,22 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
 
 ### URL Bar (Flat Style)
 
-```tsx
-<div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-panel shrink-0">
-  <MethodSelector />   {/* w-[76px] h-[34px] bg-accent font-mono font-semibold text-label */}
-  <UrlInput className="flex-1 h-[34px] bg-card border border-border rounded-md px-3 text-[13px] font-mono focus:border-primary focus:outline-none transition-colors" />
-
-  {/* Primary action */}
-  <button className="h-[34px] px-4 rounded-md bg-primary text-white text-[13px] font-semibold ...">
-    {isExecuting
-      ? <><Loader2 className="size-icon-sm animate-spin" /> Sending</>
-      : <>▶ Send</>
-    }
-  </button>
-
-  {/* Secondary action - always token-based (text-primary/border-primary/bg-primary/10), never hardcoded purple */}
-  <button className="h-[34px] px-3.5 rounded-md text-[12px] font-semibold text-primary border border-primary bg-primary/10 ...">
-    <Zap className="w-3.5 h-3.5" /> Load Test
-  </button>
-</div>
-```
+The reference is `app/src/modules/request-builder/components/UrlBar/index.tsx`,
+and its header comment carries the reasoning; this section is the summary, not a
+recipe to copy. One `h-control` row: the method and URL as a single `bg-card
+surface-card` field, then Send and Load test attached as a pair. Send is the
+solid action on `bg-primary-fill` with a white label, reads "Send" (or
+"Sending…" while in flight) and carries no leading glyph; Load test is the
+outlined action on the same accent and reads "Load test". Both are token-based:
+no hardcoded purple, no bracketed pixel heights.
 
 ### Dashboard Header (Compact 52px)
 
-```tsx
-<div className="h-[52px] flex items-center gap-3 px-5 bg-panel border-b border-border shrink-0">
-  {/* Status pill - LIVE (green animated dot) or COMPLETED/STOPPED (muted) */}
-  {/* Method badge - inline <span> with hsl(var(--method-xxx)) inline style */}
-  {/* URL - font-mono text-[12px] flex-1 truncate */}
-  {/* Config summary - text-[12px] text-muted-foreground hidden sm:block */}
-  {/* Stop button - ghost variant, destructive color, Loader2 spinner while stopping */}
-</div>
-```
+The reference is `app/src/modules/dashboard/components/DashboardHeader.tsx`: an
+`h-band-lg` row on `bg-panel` whose bottom edge is `border-rule`, holding the
+run's status pill (`RunStatusPill`), a `MethodBadge`, the URL, a config summary
+and `StopRunButton`. The band height is the `--spacing-band-lg` token, not a
+literal; see Chrome, Target and Icon Floors.
 
 The header has a live elapsed timer (`liveTick` state) that resets to 0 at the start of each run.
 
@@ -3437,49 +3449,17 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
 ### Hero Metric Card
 
-```
-┌─────────────────────────────────────────┐
-│ LABEL (11px, uppercase, muted)          │
-│ 34px bold mono value   unit (xs, muted) │
-│ sub-label (11px, muted)                 │
-│ [sparkline 110w] (optional, below)      │
-└─────────────────────────────────────────┘
-```
-
-```tsx
-<div className="bg-card border border-border rounded-md p-4 flex flex-col gap-1">
-  <Eyebrow>{label}</Eyebrow>
-  <div className="flex items-baseline gap-1.5 mt-0.5">
-    <span
-      className="text-[34px] font-bold leading-none font-mono tabular-nums"
-      style={{ color: valueColor || "hsl(var(--foreground))" }}
-    >
-      {value}
-    </span>
-    {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
-  </div>
-  {sub && <p className="text-label text-muted-foreground mt-0.5">{sub}</p>}
-  {sparkData && sparkData.length > 1 && (
-    <div className="mt-2">
-      <Sparkline data={sparkData} color={sparkColor || "hsl(var(--primary))"} />
-    </div>
-  )}
-</div>
-```
+The reference is `app/src/modules/dashboard/components/hero/HeroCardShell.tsx`,
+which every hero card is built on: a `surface-card` box with an eyebrow label, a
+`text-hero` mono value with an optional unit beside it, an optional sub-label,
+and an optional `Sparkline` below.
 
 Note: sparkline renders **below** the value row, not beside it.
 
 ### Secondary Stat Card
 
-```tsx
-<div className="bg-card border border-border rounded-md p-3">
-  <Eyebrow className="mb-1.5">{label}</Eyebrow>
-  <div className="flex items-baseline gap-1">
-    <span className="text-[22px] font-bold font-mono text-foreground">{value}</span>
-    {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
-  </div>
-</div>
-```
+The reference is `app/src/modules/dashboard/components/stats/StatCard.tsx`: the
+same anatomy as the hero card at the `p-3` tier, with a `text-metric` value.
 
 ### Latency Distribution Bar
 
@@ -3528,10 +3508,10 @@ read as a fraction, and there is no fraction to report.
 | Strong border | `border-border-strong` |
 | Hover state | `hover:bg-accent` |
 | Selected state | `bg-accent-active` |
-| Success | `text-success`, `bg-success/10` |
-| Warning | `text-warning`, `bg-warning/10` |
+| Success | `text-success-text`, `bg-success/10` |
+| Warning | `text-warning-text`, `bg-warning/10` |
 | Info | `text-info`, `bg-info/10` |
-| Error | `text-destructive`, `bg-destructive/10` |
+| Error | `text-destructive-text`, `bg-destructive/10` |
 | Method text (GET) | `method-get` (and `method-post`, `method-put`, etc.) |
 | Method bg (GET) | `bg-method-get` (and `bg-method-post`, etc.) |
 | Mono font | `font-mono` |
@@ -3548,7 +3528,7 @@ read as a fraction, and there is no fraction to report.
 - `text-gray-500`, `text-gray-400` - use `text-muted-foreground`
 - Hardcoded hex method colors like `text-[#22c55e]` - use `method-get` or `hsl(var(--method-get))`
 - `${hexColor}18` hex-alpha concatenation - use `hsl(var(--method-xxx) / 0.1)`
-- Hardcoded purple for Load Test / secondary actions - use `text-primary/border-primary/bg-primary/10`
+- Hardcoded purple for Load test / secondary actions - use `text-primary/border-primary/bg-primary/10`
 
 These rules are enforced for the request/response tree by
 `modules/request-builder/components/ResponseViewer/palette-tokens.test.ts`. They
