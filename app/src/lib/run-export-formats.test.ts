@@ -17,7 +17,11 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { RUN_EXPORT_FORMATS } from "./run-export-formats";
+import {
+	RUN_EXPORT_FORMATS,
+	runExportActions,
+	type RunExportFormatEntry,
+} from "./run-export-formats";
 
 interface FixtureRow {
 	id: string;
@@ -47,9 +51,36 @@ describe("run export format conformance", () => {
 		expect(registry).toEqual(fixture);
 	});
 
-	it("labels every format and repeats none", () => {
-		expect(RUN_EXPORT_FORMATS.every((format) => format.label.length > 0)).toBe(true);
+	it("names every format and repeats none", () => {
+		expect(RUN_EXPORT_FORMATS.every((format) => format.name.length > 0)).toBe(true);
 		const ids = RUN_EXPORT_FORMATS.map((format) => format.id);
 		expect(new Set(ids).size).toBe(ids.length);
+	});
+});
+
+/*
+ * No format is copyable yet, so the copy half of the builder is held here on a
+ * stubbed table. Mutation check: drop the `copyable` filter and the JSON row
+ * gains a copy action; drop the copy half and Markdown loses its own.
+ */
+describe("runExportActions", () => {
+	const markdown = {
+		...RUN_EXPORT_FORMATS[0],
+		id: "markdown",
+		name: "Markdown",
+		copyable: true,
+	} as unknown as RunExportFormatEntry;
+
+	it("offers a save per format, then a copy per copyable format", () => {
+		const actions = runExportActions([RUN_EXPORT_FORMATS[0], markdown]);
+		expect(actions.map(({ id, delivery, label }) => ({ id, delivery, label }))).toEqual([
+			{ id: "save-json", delivery: "save", label: "Save as JSON" },
+			{ id: "save-markdown", delivery: "save", label: "Save as Markdown" },
+			{ id: "copy-markdown", delivery: "copy", label: "Copy as Markdown" },
+		]);
+	});
+
+	it("offers only Save as JSON from today's table", () => {
+		expect(runExportActions().map((action) => action.label)).toEqual(["Save as JSON"]);
 	});
 });

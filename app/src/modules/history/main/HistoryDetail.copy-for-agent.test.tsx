@@ -42,6 +42,8 @@ vi.mock("@/queries", () => ({
 vi.mock("./LoadTestDetail", () => ({ default: () => null }));
 vi.mock("./DesignRunView", () => ({ default: () => null }));
 vi.mock("./ScenarioRunView", () => ({ default: () => null }));
+// The export menu has a suite of its own, `HistoryDetail.export.test.tsx`.
+vi.mock("./components/RunExportMenu", () => ({ default: () => null }));
 
 function run(overrides: Partial<Run>): Run {
 	return {

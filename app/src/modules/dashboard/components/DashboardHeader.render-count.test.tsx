@@ -30,6 +30,9 @@ vi.mock("@/stores", () => ({
 	},
 }));
 
+// The menu fetches; what is counted here is the header's own body.
+vi.mock("@/modules/history/main/components/RunExportMenu", () => ({ default: () => null }));
+
 const onStop = async () => {};
 const configuration = { mode: "constant_rps", targetRps: 10 };
 const base: DashboardHeaderProps = {
@@ -93,6 +96,21 @@ describe("DashboardHeader render count", () => {
 		h.rerender({ collectionName: "Checkout", stepCount: 4, comment: "nightly" });
 		expect(h.count()).toBe(before + 1);
 		h.rerender({ collectionName: "Checkout", stepCount: 4, comment: "nightly" });
+		expect(h.count()).toBe(before + 1);
+	});
+
+	// The export target is primitives too (#2139), for the same reason.
+	it("re-renders when the export target arrives, and not for the same one again", () => {
+		const h = mount();
+		const before = h.count();
+		const target = {
+			exportRunId: "run_1",
+			exportRequestUrl: "https://example.test",
+			exportRequestMethod: "GET",
+		};
+		h.rerender({ ...target });
+		expect(h.count()).toBe(before + 1);
+		h.rerender({ ...target });
 		expect(h.count()).toBe(before + 1);
 	});
 });
