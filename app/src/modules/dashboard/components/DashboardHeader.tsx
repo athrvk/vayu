@@ -8,7 +8,9 @@
 /**
  * DashboardHeader Component
  *
- * Compact 52px single-row header with status, method, URL, config info, and stop button
+ * Compact 52px single-row header with status, method, URL, config info, and stop button.
+ * A collection load run has no URL, so the collection and its step count take that
+ * place (#2270); the run's comment, when it has one, sits under it.
  */
 
 import { memo } from "react";
@@ -17,7 +19,7 @@ import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
 import type { Run } from "@/types";
 import type { DashboardHeaderProps, DashboardMode } from "../types";
-import { MethodBadge, RunStatusPill, StopRunButton } from "@/components/shared";
+import { MethodBadge, RunComment, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { formatClock, pluralize } from "../utils/format";
 import { formatNumber } from "@/lib/format-number";
@@ -46,6 +48,9 @@ function DashboardHeader({
 	onStop,
 	requestUrl,
 	requestMethod,
+	collectionName,
+	stepCount,
+	comment,
 	elapsedDuration = 0,
 	outcome,
 	configuration,
@@ -114,14 +119,28 @@ function DashboardHeader({
 			{/* Method badge */}
 			{requestMethod && <MethodBadge method={requestMethod} size="md" />}
 
-			{/* URL */}
-			{requestUrl ? (
-				<span className="text-xs font-mono text-foreground flex-1 truncate min-w-0">
-					{requestUrl}
-				</span>
-			) : (
-				<span className="flex-1" />
-			)}
+			{/* URL, or the collection a collection load run is aimed at */}
+			<div className="flex-1 min-w-0">
+				{requestUrl ? (
+					<span className="block text-xs font-mono text-foreground truncate">
+						{requestUrl}
+					</span>
+				) : (
+					collectionName && (
+						<span className="block text-xs text-foreground truncate">
+							{collectionName}
+							{stepCount != null && (
+								<span className="text-muted-foreground">
+									{" "}
+									&middot; {stepCount} {pluralize(stepCount, "step")}
+								</span>
+							)}
+						</span>
+					)
+				)}
+				{/* `title` for what the single line cuts off. */}
+				<RunComment comment={comment} className="truncate" title={comment} />
+			</div>
 
 			{/* Config summary */}
 			{configSummary && (

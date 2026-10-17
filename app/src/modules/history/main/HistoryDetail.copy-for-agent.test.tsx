@@ -18,7 +18,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import HistoryDetail from "./HistoryDetail";
 import { formatInstant } from "@/lib/time-value";
 import { useTabsStore, useToastStore } from "@/stores";

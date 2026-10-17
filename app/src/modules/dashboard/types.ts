@@ -33,6 +33,16 @@ export interface DashboardHeaderProps {
 	onStop: () => Promise<void>;
 	requestUrl?: string;
 	requestMethod?: string;
+	/**
+	 * The collection a collection load run is aimed at, and how many steps one
+	 * pass over it has (#2270). Shown where the URL would be, for a run that
+	 * has none; ignored when there is a `requestUrl`. Primitives, like every
+	 * prop here: the header is memo'd on `Object.is`.
+	 */
+	collectionName?: string;
+	stepCount?: number;
+	/** The run's own line, shown under the identity - see `RunComment`. */
+	comment?: string;
 	elapsedDuration?: number;
 	/**
 	 * The finished run's verdict (`run-outcome.ts`), so a `completed` pill does not
@@ -46,7 +56,6 @@ export interface DashboardHeaderProps {
 		duration?: number | string | undefined;
 		targetRps?: number;
 		concurrency?: number;
-		comment?: string;
 		/**
 		 * How many `data` rows the run bound (issue #993): off the stored
 		 * snapshot once the report loads - which keeps the count in the rows'

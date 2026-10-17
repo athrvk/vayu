@@ -84,4 +84,15 @@ describe("DashboardHeader render count", () => {
 		h.rerender({ outcome: "failed" });
 		expect(h.count()).toBe(before + 1);
 	});
+
+	// The collection target and comment are primitives (#2270): an object would
+	// be new on every dashboard tick and defeat the comparator.
+	it("re-renders when the collection target arrives, and not for the same one again", () => {
+		const h = mount();
+		const before = h.count();
+		h.rerender({ collectionName: "Checkout", stepCount: 4, comment: "nightly" });
+		expect(h.count()).toBe(before + 1);
+		h.rerender({ collectionName: "Checkout", stepCount: 4, comment: "nightly" });
+		expect(h.count()).toBe(before + 1);
+	});
 });

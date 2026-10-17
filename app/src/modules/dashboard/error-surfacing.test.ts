@@ -51,6 +51,10 @@ vi.mock("./components", () => ({
 	DashboardHeader: () => null,
 	MetricsView: () => null,
 }));
+// The collection target is read from the run's row; these cases are about the
+// live configuration, not that lookup (`dashboard.collection-run.test.tsx`).
+vi.mock("./hooks/useCollectionRunTarget", () => ({ useCollectionRunTarget: () => ({}) }));
+
 vi.mock("@/modules/history/main/LoadTestDetail", () => ({ default: () => null }));
 
 import { loadTestService } from "@/services/load-test-service";

@@ -24,7 +24,7 @@
  * sanitize, must render as "nothing recorded" rather than throw.
  */
 
-import type { Run } from "@/types";
+import type { Run, RunConfigSnapshot } from "@/types";
 import { dataFileFromBlock } from "@/lib/run-data-file";
 
 /** One resolved step of the plan, as the snapshot's manifest records it. */
@@ -70,7 +70,18 @@ function num(value: unknown): number | undefined {
  */
 export function scenarioFromSnapshot(run: Run | undefined): ScenarioSnapshot | null {
 	if (run?.type !== "scenario") return null;
-	const block = run.configSnapshot?.scenario;
+	return scenarioOfSnapshot(run.configSnapshot);
+}
+
+/**
+ * The same block with no `run.type` gate, for the one reader that wants a
+ * scenario *load* run too: it is `type: "load"` but its work is a sequence, and
+ * the engine stores the same manifest for it.
+ */
+export function scenarioOfSnapshot(
+	snapshot: RunConfigSnapshot | undefined
+): ScenarioSnapshot | null {
+	const block = snapshot?.scenario;
 	if (!isRecord(block)) return null;
 
 	const steps = Array.isArray(block.steps)
