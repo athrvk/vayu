@@ -37,7 +37,7 @@ describe("TransactionsSummary", () => {
 		render(<TransactionsSummary transactions={transactions} />);
 		expect(screen.getByText("checkout")).toBeInTheDocument();
 		expect(screen.getByText("(480 runs)")).toBeInTheDocument();
-		expect(screen.getByText("p50 14.2ms / p95 26.5ms / max 55.4ms")).toBeInTheDocument();
+		expect(screen.getByText("p50 14ms / p95 27ms / max 55ms")).toBeInTheDocument();
 	});
 
 	it("names the error count when a transaction failed at least once", () => {

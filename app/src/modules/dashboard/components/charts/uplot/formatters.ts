@@ -34,6 +34,33 @@ function tickStep(splits: readonly number[]): number {
 	return Number.isFinite(step) ? step : Math.abs(splits[0]) || 1;
 }
 
+interface MagnitudeTier {
+	divisor: number;
+	suffix: string;
+}
+
+const K: MagnitudeTier = { divisor: 1e3, suffix: "k" };
+const M: MagnitudeTier = { divisor: 1e6, suffix: "M" };
+const G: MagnitudeTier = { divisor: 1e9, suffix: "G" };
+
+/**
+ * One tick of an axis in thousands / millions / billions, written to the
+ * spacing of the whole tick array: the tier comes from the largest tick, so an
+ * axis reads "0k 1k 2k" and never "0" beside "1k", and the decimals from the
+ * step, so 1200 / 1210 / 1220 read "1.2k 1.21k 1.22k" rather than three "1.2k".
+ * `tiers` is ordered largest first; below the smallest, the value is unscaled.
+ * Without `splits` the value stands alone.
+ */
+function scaledTick(v: number, splits: readonly number[], tiers: readonly MagnitudeTier[]): string {
+	const largest = Math.max(...splits.map(Math.abs));
+	const { divisor, suffix } = tiers.find((tier) => largest >= tier.divisor) ?? {
+		divisor: 1,
+		suffix: "",
+	};
+	const digits = decimalsFor(tickStep(splits) / divisor);
+	return `${Number((v / divisor).toFixed(digits))}${suffix}`;
+}
+
 /**
  * A latency axis tick with its unit. uPlot hands the formatter the whole tick
  * array, so the decimals come from the tick spacing rather than each value
@@ -50,8 +77,8 @@ export const axisMs = (v: number, splits: readonly number[] = [v]): string => {
 export const fmtRate = (v: number | null | undefined): string =>
 	v == null ? "-" : `${formatRate(v)}/s`;
 
-export const axisRate = (v: number): string =>
-	v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+export const axisRate = (v: number, splits: readonly number[] = [v]): string =>
+	`${scaledTick(v, splits, [K])}/s`;
 
 export const fmtCount = (v: number | null | undefined): string =>
 	v == null ? "-" : `${Math.round(v)}`;
@@ -80,11 +107,5 @@ export const fmtVitals = (v: number | null | undefined): string => {
 	return v.toFixed(3);
 };
 
-export const axisVitals = (v: number): string => {
-	const abs = Math.abs(v);
-	if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}G`;
-	if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
-	if (abs >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
-	if (abs >= 10) return `${Math.round(v)}`;
-	return `${v.toFixed(2)}`;
-};
+export const axisVitals = (v: number, splits: readonly number[] = [v]): string =>
+	scaledTick(v, splits, [G, M, K]);

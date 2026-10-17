@@ -112,7 +112,7 @@ describe("a p99 reads the same across the app", () => {
 	it.each([
 		[2.2749, "2.27ms"],
 		[0.04, "0.04ms"],
-		[1234, "1,234ms"],
+		[1234, "1.23s"],
 		[108, "108ms"],
 	])("%s", (p99, expected) => {
 		expect(historyHeaderTile(p99)).toBe(expected);

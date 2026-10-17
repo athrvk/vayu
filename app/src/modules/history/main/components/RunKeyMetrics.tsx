@@ -13,7 +13,7 @@
  */
 
 import { Activity, CheckCircle, TrendingUp } from "lucide-react";
-import { formatMs, formatNumber, formatPercent } from "@/lib/format-number";
+import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
 import type { RunReport } from "@/types";
 
 function successRateOf(summary: RunReport["summary"]): number {
@@ -33,7 +33,7 @@ export default function RunKeyMetrics({ report }: { report: RunReport }) {
 					<span className="text-xs text-muted-foreground">P99 latency</span>
 				</div>
 				<p className="text-lg font-bold text-foreground">
-					{formatMs(report.latency.p99)}ms
+					{formatLatency(report.latency.p99)}
 				</p>
 			</div>
 			<div className="bg-muted/50 p-3">

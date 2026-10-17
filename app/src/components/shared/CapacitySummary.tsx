@@ -23,6 +23,7 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { formatLatency } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
 import { formatRps } from "./run-outcome";
 import type { RunReport } from "@/types/domain";
@@ -63,11 +64,6 @@ const STOP_REASONS: Record<string, { label: string; detail: string; degraded: bo
 		degraded: false,
 	},
 };
-
-/** Trailing zeros are noise on a latency the search measured to the ms. */
-function formatMs(value: number): string {
-	return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
 
 export interface CapacitySummaryProps {
 	capacity: RunReport["capacity"];
@@ -137,13 +133,13 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 							</span>{" "}
 							req/s, with a p99 of{" "}
 							<span className="font-mono font-semibold">
-								{formatMs(capacity.p99AtMaxHealthyMs ?? 0)}ms
+								{formatLatency(capacity.p99AtMaxHealthyMs ?? 0)}
 							</span>{" "}
-							against a {formatMs(capacity.sloMs)}ms budget.
+							against a {formatLatency(capacity.sloMs)} budget.
 						</>
 					) : (
 						<>
-							No level met the {formatMs(capacity.sloMs)}ms budget - the target was
+							No level met the {formatLatency(capacity.sloMs)} budget - the target was
 							already over it at the fewest virtual users the search tried.
 						</>
 					)}
@@ -156,7 +152,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 						</span>{" "}
 						{concurrencyUnit(capacity.kneeConcurrency)}, where p99 reached{" "}
 						<span className="font-mono font-medium text-warning-text">
-							{formatMs(capacity.kneeP99Ms ?? 0)}ms
+							{formatLatency(capacity.kneeP99Ms ?? 0)}
 						</span>
 						.
 					</p>
@@ -203,7 +199,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 														: "text-muted-foreground"
 												)}
 											>
-												{formatMs(level.p99Ms)}ms
+												{formatLatency(level.p99Ms)}
 											</td>
 										</tr>
 									);

@@ -14,7 +14,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { formatMs } from "@/lib/format-number";
+import { formatLatencyParts } from "@/lib/format-number";
 
 interface LatencyMetricProps {
 	label: string;
@@ -39,13 +39,14 @@ const TIER_BG = {
 
 export default function LatencyMetric({ label, value, sloMs, severity }: LatencyMetricProps) {
 	const tier = severity && sloMs !== undefined && value > sloMs ? severity : "neutral";
+	const { value: digits, unit } = formatLatencyParts(value);
 
 	return (
 		<div className={cn("p-3 text-center", TIER_BG[tier])}>
 			<p className="text-xs text-muted-foreground mb-1">{label}</p>
 			<p className={cn("text-lg font-bold", TIER_TEXT[tier])}>
-				{formatMs(value)}
-				<span className="text-xs ml-0.5">ms</span>
+				{digits}
+				<span className="text-xs ml-0.5">{unit}</span>
 			</p>
 		</div>
 	);
