@@ -11,7 +11,7 @@
  * The open load run against any other finished load run of the same request:
  * every latency percentile, both throughput measures, the reliability rows and
  * the status-code merge, under the comparability warnings. It is the full diff
- * behind the report header's vs-baseline strip, and it replaces the report's
+ * behind the report's vs-baseline strip, and it replaces the report's
  * tabs in the same pane rather than opening a tab of its own (#2164).
  *
  * The compared run defaults to the pinned baseline when there is one and it is

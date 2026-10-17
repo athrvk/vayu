@@ -188,13 +188,14 @@ describe("LoadTestDetail's scrolling body", () => {
 	});
 
 	it("puts the three key metrics at the top of Overview, not in the header", () => {
-		const { header, body } = renderDetail();
+		const { header } = renderDetail();
 
 		for (const label of ["P99 latency", "Total requests", "Success rate"]) {
 			expect(within(header).queryByText(label)).toBeNull();
 		}
-		expect(within(body()).getByText("Success rate")).toBeVisible();
-		expect(within(body()).getAllByText("P99 latency")).not.toHaveLength(0);
+		const overview = within(screen.getByRole("tabpanel", { name: /overview/i }));
+		expect(overview.getByText("Success rate")).toBeVisible();
+		expect(overview.getAllByText("Total requests")[0]).toBeVisible();
 	});
 });
 
