@@ -5369,7 +5369,9 @@ covers what the URL check cannot see: a redirect whose `Location` names another
 scheme, and a guessed one (`ftp.example.com/x` would be FTP). Either fails as
 status `0` with error code `INVALID_URL` and libcurl's own message
 (`Protocol "ftp" is disabled`, followed by ` (in redirect)` for a redirect),
-and nothing is read.
+and nothing is read. The libcurl the engine links carries every protocol curl
+builds by default, so these two options, set on every handle, are what restrict
+each transfer to `http` and `https`; the build does not.
 
 #### Non-ASCII hosts
 
