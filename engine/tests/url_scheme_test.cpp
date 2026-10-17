@@ -24,6 +24,12 @@
  *    redirect's `Location`, and the scheme libcurl guesses for a URL that names
  *    none.
  *
+ * libcurl is linked with every protocol curl builds by default (the vcpkg port
+ * has no `HTTP_ONLY` switch since 8.23, #2321), so the build backs neither
+ * layer up: `apply_transport_policy` is the guard, and
+ * `UrlSchemeGuard.EveryFileThatCreatesAHandleAppliesTheTransportPolicy` keeps
+ * it on every handle the engine creates.
+ *
  * Each transfer case reads a file whose contents it then asserts never came
  * back, so a refusal that names the right scheme but still read the file
  * cannot pass.
@@ -43,20 +49,24 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
-#include <set>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
+#include "source_scan.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -137,22 +147,6 @@ TEST (UrlScheme, TheRefusalNamesTheSchemeAndTheTwoThatAreAllowed) {
     ASSERT_HAS_VALUE (problem);
     EXPECT_NE (problem->find ("'FILE'"), std::string::npos) << *problem;
     EXPECT_NE (problem->find ("only http and https"), std::string::npos) << *problem;
-}
-
-// The library underneath agrees: vcpkg builds libcurl without its `non-http`
-// feature, which compiles every other protocol out (`HTTP_ONLY`), so a scheme
-// the two layers below missed would still have nothing to run on. A feature
-// added to `engine/vcpkg.json` that brings one back fails here.
-TEST (UrlScheme, TheLinkedLibcurlSpeaksOnlyHttpAndHttps) {
-    const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
-    ASSERT_NE (info, nullptr);
-    ASSERT_NE (info->protocols, nullptr);
-    std::set<std::string> protocols;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): libcurl's list is null-terminated; the terminator is its only length
-    for (const char* const* name = info->protocols; *name != nullptr; ++name) {
-        protocols.insert (vayu::utils::ascii_lower (*name));
-    }
-    EXPECT_EQ (protocols, (std::set<std::string>{ "http", "https" }));
 }
 
 // ============================================================================
@@ -299,27 +293,98 @@ TEST (UrlSchemeRedirect, AGuessedSchemeIsHeldToTheHandlesAllowlist) {
     expect_protocol_refusal (result.value ());
 }
 
-// The applier on a bare handle, with no URL check in front of it: the one
-// place every driver's handle is configured is enough on its own.
-TEST (UrlSchemeRedirect, TheTransportApplierAloneRefusesAFileUrl) {
-    const SecretFile secret;
-    CURL* curl = curl_easy_init ();
-    ASSERT_NE (curl, nullptr);
+/// What one transfer through a bare handle ended with.
+struct BareTransfer {
+    CURLcode code = CURLE_OK;
     std::string body;
-    const auto url = secret.url ();
+};
+
+/// @p url through a handle configured by `apply_transport_policy` and nothing
+/// else - no URL check in front of it, no driver around it. The timeout only
+/// bounds a handle that was *not* refused (a connect to a closed port, a UDP
+/// exchange that never answers), so a regression fails rather than hangs.
+BareTransfer transfer_on_bare_handle (const std::string& url) {
+    BareTransfer transfer;
+    CURL* curl = curl_easy_init ();
+    EXPECT_NE (curl, nullptr);
+    if (curl == nullptr) {
+        return transfer;
+    }
     vayu::http::set_opt<CURLOPT_URL> (curl, url.c_str ());
     vayu::http::detail::apply_transport_policy (
     curl, vayu::http::TransportPolicy{}, /*verify_ssl=*/true, url);
+    vayu::http::set_opt<CURLOPT_TIMEOUT_MS> (curl, 2000L);
     vayu::http::set_opt<CURLOPT_WRITEFUNCTION> (
     curl, +[] (char* data, size_t size, size_t count, void* sink) -> size_t {
         static_cast<std::string*> (sink)->append (data, size * count);
         return size * count;
     });
-    vayu::http::set_opt<CURLOPT_WRITEDATA> (curl, &body);
-    const CURLcode code = curl_easy_perform (curl);
+    vayu::http::set_opt<CURLOPT_WRITEDATA> (curl, &transfer.body);
+    transfer.code = curl_easy_perform (curl);
     curl_easy_cleanup (curl);
-    EXPECT_EQ (code, CURLE_UNSUPPORTED_PROTOCOL) << curl_easy_strerror (code);
-    EXPECT_EQ (body.find (SECRET), std::string::npos) << "the file was read";
+    return transfer;
+}
+
+// The applier on a bare handle, with no URL check in front of it: the one
+// place every driver's handle is configured is enough on its own.
+TEST (UrlSchemeRedirect, TheTransportApplierAloneRefusesAFileUrl) {
+    const SecretFile secret;
+    const auto transfer = transfer_on_bare_handle (secret.url ());
+    EXPECT_EQ (transfer.code, CURLE_UNSUPPORTED_PROTOCOL)
+    << curl_easy_strerror (transfer.code);
+    EXPECT_EQ (transfer.body.find (SECRET), std::string::npos)
+    << "the file was read";
+}
+
+/// Whether the linked libcurl was built with @p scheme. A protocol this build
+/// never carries answers `CURLE_UNSUPPORTED_PROTOCOL` whatever the handle says,
+/// so it cannot tell a working allowlist from a missing one.
+bool libcurl_carries (std::string_view scheme) {
+    const curl_version_info_data* info = curl_version_info (CURLVERSION_NOW);
+    if (info == nullptr || info->protocols == nullptr) {
+        return false;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): libcurl's list is null-terminated; the terminator is its only length
+    for (const char* const* name = info->protocols; *name != nullptr; ++name) {
+        if (vayu::utils::ascii_lower_equal (*name, scheme)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// libcurl links every protocol curl builds by default (vcpkg's curl port has
+// no way to drop them since 8.23, #2321), so the build no longer backs the two
+// schemes up: `apply_transport_policy` is the guard. Each scheme below is one
+// libcurl would otherwise speak, to a closed port so a handle that did not
+// refuse it would report a connection failure instead.
+TEST (UrlSchemeHandle, TheApplierAloneRefusesEveryOtherProtocolLibcurlSpeaks) {
+    const SecretFile secret;
+    const std::array<std::pair<std::string_view, std::string>, 6> urls = { {
+    { "file", secret.url () },
+    { "ftp", "ftp://127.0.0.1:1/pub/x" },
+    { "gopher", "gopher://127.0.0.1:1/" },
+    { "dict", "dict://127.0.0.1:1/d:x" },
+    { "smtp", "smtp://127.0.0.1:1/" },
+    { "tftp", "tftp://127.0.0.1:1/x" },
+    } };
+
+    size_t exercised = 0;
+    for (const auto& [scheme, url] : urls) {
+        if (!libcurl_carries (scheme)) {
+            continue;
+        }
+        ++exercised;
+        const auto transfer = transfer_on_bare_handle (url);
+        EXPECT_EQ (transfer.code, CURLE_UNSUPPORTED_PROTOCOL)
+        << scheme << ": " << curl_easy_strerror (transfer.code);
+        EXPECT_EQ (transfer.body.find (SECRET), std::string::npos)
+        << scheme << ": the file was read";
+    }
+    // The fixed build carries `file` and `ftp` at least; a count of zero would
+    // pass this loop on a libcurl that had lost every one of them.
+    EXPECT_GE (exercised, 2u)
+    << "the linked libcurl carries almost none of the schemes";
 }
 
 // ============================================================================
@@ -442,6 +507,114 @@ TEST_F (UrlSchemeExecuteTest, APreRequestScriptsSendRequestIsRefusedWithTheSameE
     EXPECT_NE (seen.find ("'file'"), std::string::npos) << seen;
     EXPECT_NE (seen.find ("only http and https"), std::string::npos) << seen;
     EXPECT_EQ (seen.find (SECRET), std::string::npos) << "the file was read";
+}
+
+// ============================================================================
+// Every handle is configured by the applier
+// ============================================================================
+
+// The allowlist is a property of how a handle is configured, so a new place
+// that creates one and skips `apply_transport_policy` would send anything
+// libcurl speaks, and no transfer test above would notice. Source-scanned:
+// a file that creates a handle must also call the applier, or be listed here
+// with the reason it need not.
+
+bool creates_handle (const std::string& code) {
+    return vayu::tests::names_call (code, "curl_easy_init") ||
+    vayu::tests::names_call (code, "curl_easy_duphandle");
+}
+
+bool configures_handle (const std::string& code) {
+    return vayu::tests::names_call (code, "apply_transport_policy");
+}
+
+/// A file that creates handles without configuring them, and the call that
+/// configures them at the point of use. The guard requires that call to be in
+/// the file, so the reason stays true.
+struct HandleCreatorExemption {
+    std::string_view file;
+    std::string_view configured_at_use_by;
+};
+
+/// `CurlHandlePool` pre-creates bare handles; `acquire` resets one and the
+/// worker passes it straight to `setup_easy_handle`, which applies the policy
+/// (`curl_utils.cpp`). No handle leaves the pool unconfigured.
+constexpr std::array<HandleCreatorExemption, 1> HANDLE_CREATOR_EXEMPTIONS = { {
+{ "http/event_loop/event_loop_worker.cpp", "setup_easy_handle" },
+} };
+
+const HandleCreatorExemption* exemption_for (std::string_view file) {
+    const auto found = std::find_if (HANDLE_CREATOR_EXEMPTIONS.begin (),
+    HANDLE_CREATOR_EXEMPTIONS.end (),
+    [&] (const HandleCreatorExemption& entry) { return entry.file == file; });
+    return found == HANDLE_CREATOR_EXEMPTIONS.end () ? nullptr : &*found;
+}
+
+TEST (UrlSchemeGuard, EveryFileThatCreatesAHandleAppliesTheTransportPolicy) {
+    const std::filesystem::path src_dir =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
+    ASSERT_TRUE (std::filesystem::is_directory (src_dir))
+    << src_dir.string () << " is not where the guard looks";
+
+    size_t scanned_files = 0;
+    size_t creators      = 0;
+    std::vector<std::string> offenders;
+
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (src_dir)) {
+        const std::string extension = entry.path ().extension ().string ();
+        if (!entry.is_regular_file () || (extension != ".cpp" && extension != ".hpp")) {
+            continue;
+        }
+        const std::string relative =
+        std::filesystem::relative (entry.path (), src_dir).generic_string ();
+        const std::string code =
+        vayu::tests::strip_comments (vayu::tests::read_source (entry.path ()));
+        ASSERT_FALSE (code.empty ()) << relative << " read as empty";
+        ++scanned_files;
+
+        if (!creates_handle (code)) {
+            continue;
+        }
+        ++creators;
+        if (configures_handle (code)) {
+            continue;
+        }
+        const auto* exemption = exemption_for (relative);
+        if (exemption == nullptr ||
+        !vayu::tests::names_call (code, exemption->configured_at_use_by)) {
+            offenders.push_back (relative);
+        }
+    }
+
+    // A scan that read nothing passes forever, so it says what it read: the
+    // four drivers' files plus the exempt pool.
+    ASSERT_GT (scanned_files, 100u) << "the guard found almost no sources";
+    ASSERT_GE (creators, 4u) << "the guard found almost no handle creators";
+
+    std::string joined;
+    for (const auto& offender : offenders) {
+        joined += "\n  " + offender;
+    }
+    EXPECT_TRUE (offenders.empty ())
+    << "these files create a curl handle without apply_transport_policy, so "
+       "its CURLOPT_PROTOCOLS_STR allowlist (http and https) is never set "
+       "(#2321). Call the applier, or list the file in "
+       "HANDLE_CREATOR_EXEMPTIONS with the call that configures its handles. "
+       "Offenders:"
+    << joined;
+}
+
+TEST (UrlSchemeGuard, TheMatchersSeeACreatorAndAnApplierAndNothingLonger) {
+    EXPECT_TRUE (creates_handle ("CURL* c = curl_easy_init ();"));
+    EXPECT_TRUE (creates_handle ("CURL* d = curl_easy_duphandle (c);"));
+    EXPECT_FALSE (creates_handle ("curl_easy_init_other ();"));
+    EXPECT_FALSE (
+    creates_handle (vayu::tests::strip_comments ("// curl_easy_init ();")));
+    EXPECT_TRUE (
+    configures_handle ("detail::apply_transport_policy (c, p, true, u);"));
+    EXPECT_FALSE (configures_handle ("apply_transport_policy_for_tests ();"));
+    ASSERT_NE (exemption_for ("http/event_loop/event_loop_worker.cpp"), nullptr);
+    EXPECT_EQ (exemption_for ("http/client.cpp"), nullptr);
 }
 
 } // namespace
