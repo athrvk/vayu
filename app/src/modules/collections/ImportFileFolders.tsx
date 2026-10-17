@@ -61,7 +61,7 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 	if (folders.length === 0 && !bodiesNotice) return null;
 
 	return (
-		<div className="space-y-1.5">
+		<div role="status" className="space-y-1.5">
 			{bodiesNotice && <NoticeLine tier="action">{bodiesNotice.text}</NoticeLine>}
 			{folders.length > 0 && (
 				<>

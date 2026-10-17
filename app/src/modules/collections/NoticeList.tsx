@@ -25,7 +25,7 @@ export function NoticeList({
 }) {
 	if (notices.length === 0) return null;
 	return (
-		<Tag className="block space-y-0.5">
+		<Tag role="status" className="block space-y-0.5">
 			{notices.map((notice, i) => (
 				<NoticeLine key={i} tier={notice.tier}>
 					{notice.text}
@@ -38,7 +38,7 @@ export function NoticeList({
 /**
  * One follow-up line about a file that imported. A `span`, so it is valid
  * inside a `<label>`; no `role`, so a screen reader hears it through the
- * preview's one live region rather than as a stack of alerts.
+ * polite `status` of its list rather than as a stack of alerts.
  */
 export function NoticeLine({ tier, children }: { tier: NoticeTier; children: ReactNode }) {
 	const Icon = tier === "action" ? AlertTriangle : Info;
