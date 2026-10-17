@@ -22,6 +22,7 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **Load shapes** | Constant rate, constant users, one ramp then hold, fixed request count, automatic capacity search | Arbitrary `stages` and arrival-rate executors |
 | **UI** | Native desktop app | CLI only |
 | **Live metrics** | Streamed over SSE into a live dashboard | Terminal output, or an external dashboard |
+| **Shareable run summary** | One-file HTML report with charts, a Markdown summary and JSON, from the Export menu\*\* | Built-in web dashboard, exportable as an HTML file; JSON summary export |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) |
 | **Distributed / cloud execution** | No - single machine | Yes |
 | **MCP / agent control** | Built in, local, drives the load engine | Official server (experimental) |
@@ -41,6 +42,13 @@ in both PEM-pair and PKCS#12 form. Detail:
 [proxy settings](../engine/api-reference.md#proxy-settings),
 [TLS trust](../engine/api-reference.md#tls-trust-settings) and
 [client certificates](../engine/api-reference.md#client-certificates).
+
+\*\* **What the file leaves out.** The exported report is built from the run's
+aggregates and time series, never its traces or samples: header and parameter
+values, the body and anything a script or response wrote are not in it, and a
+URL's credentials are dropped. The HTML page has no script and loads nothing, so
+it opens the same from a file, an email attachment or a ticket. Detail:
+[the HTML report](../engine/api-reference.md#the-html-report).
 
 k6 scripts do not import. Bring the OpenAPI spec or Postman collection the
 script was written against, then set the load profile in the Load test dialog.

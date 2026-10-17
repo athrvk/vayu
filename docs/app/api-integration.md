@@ -490,15 +490,16 @@ id alone, downloads `text` as `fileName` and puts `secretsOmitted` and the
 
 `exportRunReport` is the same kind of read for a finished load run (issue
 #2127). `RunReportExportRequest` is `{runId, format?, series?, baseRunId?}`:
-`format` is `"json"` (the default), `"markdown"` or `"html"` (which answers
-`400 format_not_available` until #2135), `series` is `"full"` (the default,
-every tick of the time series) or `"none"`, and `baseRunId` names a second
+`format` is `"json"` (the default), `"markdown"` or `"html"`, `series` is
+`"full"` (the default, every tick of the time series) or `"none"` (which `html`
+ignores: its charts need the series), and `baseRunId` names a second
 finished load run, which fills the document's `comparison`. The answer,
 `RunReportExportResponse`, is `{text, fileName, mimeType, notes}`: the document
 (schema `docs/engine/run-export.schema.json`, built by allowlist so no trace,
 sample, header value or body is in it; for `"markdown"`, its plain GFM
-rendering), `<title> <UTC start, YYYY-MM-DD HHmm>.run.json` (`.run.md`),
-`application/json` (`text/markdown`), and `notes.urlCredentialsOmitted`, the
+rendering; for `"html"`, one self-contained page with the charts),
+`<title> <UTC start, YYYY-MM-DD HHmm>.run.json` (`.run.md`, `.run.html`),
+`application/json` (`text/markdown`, `text/html`), and `notes.urlCredentialsOmitted`, the
 count of values the URL lost. A missing run or base is a `404`, a run still
 executing a `409 run_in_progress`, a design or collection-sequence run a `400
 unsupported_run_type` ([API reference](../engine/api-reference.md#post-exportrun-report)).
