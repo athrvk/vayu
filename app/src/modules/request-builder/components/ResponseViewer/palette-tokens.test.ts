@@ -64,7 +64,7 @@ const GUARDED = ["modules/**/*.tsx", "components/**/*.tsx"];
  */
 const EXCLUDED: string[] = [
 	"modules/history/sidebar/RunItem.tsx",
-	"modules/history/main/LoadTestDetail.tsx",
+	"modules/history/main/components/RunKeyMetrics.tsx",
 ];
 
 const PALETTE = [

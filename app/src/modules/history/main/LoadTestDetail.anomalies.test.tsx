@@ -57,7 +57,7 @@ vi.mock("@/queries/runs", () => ({
 		fetchNextPage: vi.fn(),
 		hasNextPage: false,
 	}),
-	// So is the header's vs-baseline strip. Nothing here pins a run, and a
+	// So is the vs-baseline strip. Nothing here pins a run, and a
 	// strip with no baseline draws nothing - which is the state these cases
 	// render in.
 	useRunQuery: () => ({ data: undefined }),

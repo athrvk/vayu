@@ -524,8 +524,8 @@ plus the file's name and content hash (the SHA-256 of its bytes, so two runs
 can be told apart by the file that drove them), never its path or a row. The
 count and the file's name are what a reader sees afterwards: the
 dashboard's header prints "N rows from users.csv" in its config summary, live
-from the launch config and then from the report, and History's Test config row
-lists it as `Data: N rows · users.csv`. A collection run's tab says
+from the launch config and then from the report, and History's Test config box
+lists it as `Data: N rows · users.csv`, under its Details disclosure. A collection run's tab says
 `Data: users.csv` in its header, the History row's hover card has a `Data file`
 line, and a run tab's tooltip ends with the name. Where the file the run's
 collection remembers now differs on disk from the one the run read, the

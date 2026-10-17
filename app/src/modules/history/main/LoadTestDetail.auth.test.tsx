@@ -10,7 +10,7 @@
  */
 
 /**
- * The mid-run OAuth 2.0 refresh note in LoadTestDetail's header (#478).
+ * The mid-run OAuth 2.0 refresh note in LoadTestDetail's body (#478).
  *
  * The wording is unit-tested in auth-refresh-note.test.ts; what this file adds
  * is that the pane actually draws it - a note computed and never rendered is

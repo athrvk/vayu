@@ -328,7 +328,7 @@ const TILE_READOUTS = [
 	"modules/history/main/components/LatencyMetric.tsx",
 	// Three run-summary numbers that were 20px until #1409, in the same shape as
 	// the ones above: a bold number in a muted tile.
-	"modules/history/main/LoadTestDetail.tsx",
+	"modules/history/main/components/RunKeyMetrics.tsx",
 ] as const;
 
 /**

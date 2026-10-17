@@ -13,11 +13,9 @@
 
 import { useState, useMemo, useEffect } from "react";
 import {
-	CheckCircle,
 	Activity,
 	TrendingUp,
 	BarChart3,
-	Settings2,
 	AlertTriangle,
 	ListOrdered,
 	KeyRound,
@@ -33,12 +31,8 @@ import {
 	TabLabel,
 	ScrollArea,
 } from "@/components/ui";
-import { formatLatency, formatNumber, formatPercent, formatRate } from "@/lib/format-number";
-import {
-	CONCURRENCY_LABEL,
-	formatConcurrency,
-	loadTestTypeToLabel,
-} from "@/constants/load-test-modes";
+import { formatNumber } from "@/lib/format-number";
+import { formatConcurrency } from "@/constants/load-test-modes";
 import {
 	MethodBadge,
 	RunOutcomeBanner,
@@ -46,8 +40,6 @@ import {
 	TruncatedText,
 	reportOutcome,
 } from "@/components/shared";
-import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
-import type { LoadTestConfig } from "@/types";
 import { reportToDerived } from "@/modules/dashboard/utils/reportToDerived";
 import { computeBreakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -59,6 +51,7 @@ import {
 	OverviewTab,
 	PerformanceTab,
 	RunComparisonView,
+	RunConfigSummary,
 	RunTrend,
 	SamplesTab,
 	ScenarioStepsTab,
@@ -81,18 +74,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const [sampleFilter, setSampleFilter] = useState<SampleFilter>("all");
 	const [sampleToExpand, setSampleToExpand] = useState<number>();
 	const [comparing, setComparing] = useState(false);
-	const config = report.metadata?.configuration;
-	// Requested protocol, not the negotiated one (`RunResultTrace.response.httpVersion`
-	// is per-exchange and has no single value across a load run's many requests).
-	// Labelled from the shared HTTP_VERSIONS list so this never keeps its own copy.
-	const requestedHttpVersion = config?.httpVersion;
-	const protocolLabel = isHttpVersion(requestedHttpVersion)
-		? HTTP_VERSIONS.find((v) => v.value === requestedHttpVersion)?.label
-		: undefined;
-	// What actually happened, beside what was asked for. A 0 covers both "no
-	// request was downgraded" and "this run predates the count" - the engine does
-	// not distinguish them (see the field's doc in types/domain.ts), and neither
-	// should draw a warning, so `undefined` folding into 0 loses nothing.
+	// What actually happened, beside the protocol the run asked for. A 0 covers
+	// both "no request was downgraded" and "this run predates the count" - the
+	// engine does not distinguish them (see the field's doc in types/domain.ts),
+	// and neither should draw a warning, so `undefined` folding into 0 loses
+	// nothing.
 	const downgradedRequests = report.summary.httpVersionDowngraded ?? 0;
 
 	/*
@@ -274,25 +260,88 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		[isScenarioLoad, revealDrawerView]
 	);
 
-	const successRate =
-		report.summary.totalRequests > 0
-			? ((report.summary.totalRequests - report.summary.failedRequests) /
-					report.summary.totalRequests) *
-				100
-			: 0;
+	/*
+	 * Everything the report says about the run before its tabs: the verdict, the
+	 * target, the configuration, the baseline strip and the auth note. It scrolls
+	 * with the body (above the tab panel, or above the comparison) so the fixed
+	 * header stays at one row plus the tab strip.
+	 */
+	const runContext = (
+		<div className="flex flex-col gap-3">
+			<RunOutcomeBanner judgement={judgement} />
+
+			{/* Request Info Bar. A scenario load run has no single method or URL -
+			    its target is a sequence - so it says what the sequence was instead
+			    of claiming a "GET Unknown URL" that never existed. */}
+			<div className="flex items-center gap-3 bg-muted/50 p-3">
+				{isScenarioLoad ? (
+					<>
+						{/* Not a `MethodBadge`: SEQUENCE is not a method, and the
+						    primitive would tint it in the OPTIONS colour (the
+						    `getMethodColor` fallback) and truncate it at the
+						    seven-character method column. It keeps the neutral
+						    outline chip, minus a `font-bold` the code font has no
+						    face for - `Badge`'s own `font-semibold` is the weight
+						    the mono step documents (#1199). */}
+						<Badge variant="outline" className="font-mono shrink-0">
+							SEQUENCE
+						</Badge>
+						<TruncatedText className="text-sm text-foreground flex-1">
+							{sequenceLabel}
+						</TruncatedText>
+					</>
+				) : (
+					<>
+						<MethodBadge method={report.metadata?.requestMethod || "GET"} size="md" />
+						<TruncatedText className="text-sm font-mono text-foreground flex-1">
+							{report.metadata?.requestUrl || "Unknown URL"}
+						</TruncatedText>
+					</>
+				)}
+			</div>
+
+			<RunConfigSummary
+				config={report.metadata?.configuration}
+				downgradedRequests={downgradedRequests}
+			/>
+
+			{/* How this run compares with the one pinned as its baseline.
+			    Absent when nothing is pinned, or when this run is the pin -
+			    see BaselineComparison. */}
+			<BaselineComparison report={report} runId={runId} />
+
+			{/* What kept the run authorized. Drawn only when the engine was able to
+			    refresh at all - a run without the section reports nothing here,
+			    exactly as every run did before mid-run refresh existed. */}
+			{authNote && (
+				<div
+					className={`flex items-center gap-2 text-sm p-3 border rounded-md bg-background/50 ${
+						authNote.warning ? "text-status-warning-text" : "text-muted-foreground"
+					}`}
+				>
+					{authNote.warning ? (
+						<AlertTriangle className="size-icon shrink-0" />
+					) : (
+						<KeyRound className="size-icon shrink-0" />
+					)}
+					<span>{authNote.text}</span>
+				</div>
+			)}
+		</div>
+	);
 
 	return (
 		<div className="flex flex-col h-full bg-background">
-			{/* Fixed Header */}
-			<div className="border-b bg-card px-6 py-4">
+			{/* Fixed Header: where this run sits, and nothing else. */}
+			<div className="border-b bg-card px-6 py-2">
 				{/*
 				 * Where this report sits (#1691). A run report opens from the History
 				 * drawer and said nothing about where it came from; "History" reveals
 				 * that list rather than toggling it, so the crumb always shows the
 				 * list it names. The run's own crumb is inert - you are already on it,
-				 * and its url and method are the bar right below.
+				 * and its url and method are the bar at the top of the body.
 				 */}
-				<div className="mb-2 flex items-center gap-2">
+				<div className="flex items-center gap-2">
 					<TabBreadcrumb
 						label="Run location"
 						crumbs={crumbs}
@@ -310,188 +359,6 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 						</Button>
 					)}
 				</div>
-
-				{/* Request Info Bar. A scenario load run has no single method or URL -
-				    its target is a sequence - so it says what the sequence was instead
-				    of claiming a "GET Unknown URL" that never existed. */}
-				<div className="flex items-center gap-3 bg-muted/50 p-3 mb-3">
-					{isScenarioLoad ? (
-						<>
-							{/* Not a `MethodBadge`: SEQUENCE is not a method, and the
-							    primitive would tint it in the OPTIONS colour (the
-							    `getMethodColor` fallback) and truncate it at the
-							    seven-character method column. It keeps the neutral
-							    outline chip, minus a `font-bold` the code font has no
-							    face for - `Badge`'s own `font-semibold` is the weight
-							    the mono step documents (#1199). */}
-							<Badge variant="outline" className="font-mono shrink-0">
-								SEQUENCE
-							</Badge>
-							<TruncatedText className="text-sm text-foreground flex-1">
-								{sequenceLabel}
-							</TruncatedText>
-						</>
-					) : (
-						<>
-							<MethodBadge
-								method={report.metadata?.requestMethod || "GET"}
-								size="md"
-							/>
-							<TruncatedText className="text-sm font-mono text-foreground flex-1">
-								{report.metadata?.requestUrl || "Unknown URL"}
-							</TruncatedText>
-						</>
-					)}
-				</div>
-
-				<RunOutcomeBanner judgement={judgement} className="mb-3" />
-
-				{/* Load test config used for this run. Gated on protocolLabel too, not
-				    just mode - POST /runs accepts an iterations-only body with no
-				    `mode` key (execution.cpp only requires mode+duration OR
-				    iterations), so a run can legitimately have neither and still carry
-				    a protocol worth showing. The run's comment is not here: it is
-				    drawn under the run's title by the header above this pane. */}
-				{config && (config.mode || protocolLabel) && (
-					<div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm mb-3 p-3 border rounded-md bg-background/50">
-						<div className="flex items-center gap-2 text-muted-foreground">
-							<Settings2 className="size-icon shrink-0" />
-							<span className="font-medium">Test config</span>
-						</div>
-						{config.mode && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Mode:</span>
-								<span className="text-foreground capitalize">
-									{loadTestTypeToLabel(config.mode as LoadTestConfig["mode"])}
-								</span>
-							</div>
-						)}
-						{protocolLabel && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Protocol:</span>
-								<span className="text-foreground font-mono">{protocolLabel}</span>
-								{/* The label above is what the run *asked for*, and on its own
-								    it is the mislabelling issue #215 describes: a run whose
-								    every request fell back to HTTP/1.1 still reads "HTTP/2"
-								    here, over latency and throughput measured on HTTP/1.1.
-								    This is the correction, drawn only when the engine counted
-								    a downgrade - see summary.httpVersionDowngraded. */}
-								{downgradedRequests > 0 && (
-									<span
-										className="flex items-center gap-1.5 text-status-warning-text"
-										title={
-											`${formatNumber(downgradedRequests)} of this run's requests asked for ` +
-											`HTTP/2 and negotiated an older protocol.\n` +
-											`The results below were measured over those connections.`
-										}
-									>
-										<AlertTriangle className="size-icon shrink-0" />
-										not negotiated
-									</span>
-								)}
-							</div>
-						)}
-						{config.duration != null && config.duration !== "" && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Duration:</span>
-								<span className="text-foreground font-mono">
-									{String(config.duration)}
-								</span>
-							</div>
-						)}
-						{config.targetRps != null && config.targetRps > 0 && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Target RPS:</span>
-								<span className="text-foreground font-mono">
-									{formatRate(config.targetRps)}
-								</span>
-							</div>
-						)}
-						{config.concurrency != null && config.concurrency > 0 && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">{CONCURRENCY_LABEL}:</span>
-								<span className="text-foreground font-mono">
-									{formatNumber(config.concurrency)}
-								</span>
-							</div>
-						)}
-						{config.dataRowCount != null && config.dataRowCount > 0 && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Data:</span>
-								<span className="text-foreground font-mono">
-									{formatNumber(config.dataRowCount)}{" "}
-									{pluralize(config.dataRowCount, "row")}
-									{config.dataFileName ? ` · ${config.dataFileName}` : ""}
-								</span>
-							</div>
-						)}
-						{config.timeout != null && config.timeout > 0 && (
-							<div className="flex items-center gap-2">
-								<span className="text-muted-foreground">Timeout:</span>
-								<span className="text-foreground font-mono">
-									{config.timeout}ms
-								</span>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* How this run compares with the one pinned as its baseline.
-				    Absent when nothing is pinned, or when this run is the pin -
-				    see BaselineComparison. */}
-				<BaselineComparison report={report} runId={runId} />
-
-				{/* What kept the run authorized. Drawn only when the engine was able to
-				    refresh at all - a run without the section reports nothing here,
-				    exactly as every run did before mid-run refresh existed. */}
-				{authNote && (
-					<div
-						className={`flex items-center gap-2 text-sm mb-3 p-3 border rounded-md bg-background/50 ${
-							authNote.warning ? "text-status-warning-text" : "text-muted-foreground"
-						}`}
-					>
-						{authNote.warning ? (
-							<AlertTriangle className="size-icon shrink-0" />
-						) : (
-							<KeyRound className="size-icon shrink-0" />
-						)}
-						<span>{authNote.text}</span>
-					</div>
-				)}
-
-				{/* Key metrics - p99-led, compact glance (stays visible across tabs) */}
-				<div className="grid grid-cols-3 gap-3">
-					<div className="bg-muted/50 p-3">
-						<div className="flex items-center gap-2 mb-1">
-							{/* Raw palette, and staying. Measured 3.50 light / 3.66 dark on
-						    this tile against the 3.0 icon bar - it clears it in both
-						    themes, and there is no violet semantic token to move it to. */}
-							<TrendingUp className="size-icon text-purple-500" />
-							<span className="text-xs text-muted-foreground">P99 latency</span>
-						</div>
-						<p className="text-lg font-bold text-foreground">
-							{formatLatency(report.latency.p99)}
-						</p>
-					</div>
-					<div className="bg-muted/50 p-3">
-						<div className="flex items-center gap-2 mb-1">
-							<Activity className="size-icon text-primary" />
-							<span className="text-xs text-muted-foreground">Total requests</span>
-						</div>
-						<p className="text-lg font-bold text-foreground">
-							{formatNumber(report.summary.totalRequests)}
-						</p>
-					</div>
-					<div className="bg-muted/50 p-3">
-						<div className="flex items-center gap-2 mb-1">
-							<CheckCircle className="size-icon text-status-success-text" />
-							<span className="text-xs text-muted-foreground">Success rate</span>
-						</div>
-						<p className="text-lg font-bold text-foreground">
-							{formatPercent(successRate)}%
-						</p>
-					</div>
-				</div>
 			</div>
 
 			{comparing && compareRequestId ? (
@@ -500,6 +367,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					runId={runId}
 					requestId={compareRequestId}
 					onClose={() => setComparing(false)}
+					runContext={runContext}
 				/>
 			) : (
 				/* Tabbed Content */
@@ -534,7 +402,8 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</TabsList>
 
 					<ScrollArea className="flex-1">
-						<div className="p-6">
+						<div className="flex flex-col gap-4 p-6">
+							{runContext}
 							<TabsContent value="overview" className="mt-0 space-y-4">
 								<OverviewTab
 									report={report}

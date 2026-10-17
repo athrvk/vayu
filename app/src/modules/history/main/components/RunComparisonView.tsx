@@ -11,7 +11,7 @@
  * The open load run against any other finished load run of the same request:
  * every latency percentile, both throughput measures, the reliability rows and
  * the status-code merge, under the comparability warnings. It is the full diff
- * behind the report header's vs-baseline strip, and it replaces the report's
+ * behind the report's vs-baseline strip, and it replaces the report's
  * tabs in the same pane rather than opening a tab of its own (#2164).
  *
  * The compared run defaults to the pinned baseline when there is one and it is
@@ -20,7 +20,7 @@
  * against that one".
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, GitCompareArrows } from "lucide-react";
 import {
 	Button,
@@ -63,6 +63,11 @@ interface RunComparisonViewProps {
 	requestId: string;
 	/** Back to the report's tabs. */
 	onClose: () => void;
+	/**
+	 * What the report shows above its tabs (request, configuration, ...), drawn
+	 * first in the scrolling body so a comparison does not lose it.
+	 */
+	runContext?: ReactNode;
 }
 
 /** What tells two runs of one request apart in the picker: when, how it ended, whether pinned. */
@@ -235,6 +240,7 @@ export default function RunComparisonView({
 	runId,
 	requestId,
 	onClose,
+	runContext,
 }: RunComparisonViewProps) {
 	const {
 		data: runsPage,
@@ -288,6 +294,7 @@ export default function RunComparisonView({
 
 			<ScrollArea className="flex-1">
 				<div className="flex flex-col gap-4 p-6">
+					{runContext}
 					{loadingRuns && <DetailSkeleton label="Loading runs" rows={3} />}
 					{runsError && (
 						<ErrorState
