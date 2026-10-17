@@ -8,7 +8,9 @@
 /**
  * OverviewTab Component
  *
- * Displays test configuration, summary statistics, status codes, and errors.
+ * Displays the key-metric glance, summary statistics, verdicts, status codes
+ * and errors. The run's request and configuration sit above the tabs, in
+ * `LoadTestDetail`'s scrolling body.
  */
 
 import { useMemo } from "react";
@@ -34,6 +36,7 @@ import {
 import { HeroRow } from "@/modules/dashboard/components/hero/HeroRow";
 import { ModeStatsRow } from "@/modules/dashboard/components/stats/ModeStatsRow";
 import { RunEvents } from "./RunEvents";
+import RunKeyMetrics from "./RunKeyMetrics";
 import { SlowRequestsCard } from "./SlowRequestsCard";
 import { extractTestFailures, sampleResultsWithoutValidationRow } from "../test-validation";
 import { locateSample, numberByTime, type SampleDestination } from "../sample-filter";
@@ -77,9 +80,10 @@ export default function OverviewTab({
 
 	return (
 		<>
-			{/* Mode-adaptive summary - same hero cards + stat row the live dashboard shows.
-			    Config (mode/duration/concurrency/comment) + request URL/method live in the
-			    always-visible header strip, so no separate "Test Configuration" card here. */}
+			{/* The p99-led glance, then the mode-adaptive summary - same hero cards +
+			    stat row the live dashboard shows. Config and request URL/method sit
+			    above the tabs, so no separate "Test Configuration" card here. */}
+			<RunKeyMetrics report={report} />
 			<HeroRow d={derived} />
 			<ModeStatsRow d={derived} />
 

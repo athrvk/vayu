@@ -11,6 +11,7 @@
 
 export { default as BaselineComparison } from "./BaselineComparison";
 export { default as RunComparisonView } from "./RunComparisonView";
+export { default as RunConfigSummary } from "./RunConfigSummary";
 export { default as LatencyMetric } from "./LatencyMetric";
 export { default as SampleRequestCard } from "./SampleRequestCard";
 export { default as ScenarioStepCard } from "./ScenarioStepCard";

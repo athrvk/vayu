@@ -20,7 +20,7 @@
  * against that one".
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, GitCompareArrows } from "lucide-react";
 import {
 	Button,
@@ -63,6 +63,11 @@ interface RunComparisonViewProps {
 	requestId: string;
 	/** Back to the report's tabs. */
 	onClose: () => void;
+	/**
+	 * What the report shows above its tabs (request, configuration, ...), drawn
+	 * first in the scrolling body so a comparison does not lose it.
+	 */
+	runContext?: ReactNode;
 }
 
 /** What tells two runs of one request apart in the picker: when, how it ended, whether pinned. */
@@ -235,6 +240,7 @@ export default function RunComparisonView({
 	runId,
 	requestId,
 	onClose,
+	runContext,
 }: RunComparisonViewProps) {
 	const {
 		data: runsPage,
@@ -288,6 +294,7 @@ export default function RunComparisonView({
 
 			<ScrollArea className="flex-1">
 				<div className="flex flex-col gap-4 p-6">
+					{runContext}
 					{loadingRuns && <DetailSkeleton label="Loading runs" rows={3} />}
 					{runsError && (
 						<ErrorState

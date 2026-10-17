@@ -180,7 +180,7 @@ is the settings pane's) and scroll it directly with `scrollWithin`
 - **No raw Tailwind palette** (`text-green-500`) anywhere in `modules/` or
   `components/` → `palette-tokens.test.ts` (widened from the request/response
   tree by #1693). The two exemptions are `text-purple-500` marking a load test
-  in `RunItem` and `LoadTestDetail`: a kind, not a status, with no token that
+  in `RunItem` and `RunKeyMetrics`: a kind, not a status, with no token that
   means it. Add one only with the measurement that justifies it, in the
   guard's own list.
 - **No chart series on `--primary`, `--accent` or `--chart-1`**: they track the
