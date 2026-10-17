@@ -69,6 +69,7 @@ describe("runExportActions", () => {
 		).toEqual([
 			{ id: "save-json", delivery: "save", label: "Save as JSON" },
 			{ id: "save-markdown", delivery: "save", label: "Save as Markdown" },
+			{ id: "save-html", delivery: "save", label: "Save as HTML report" },
 			{ id: "copy-markdown", delivery: "copy", label: "Copy as Markdown" },
 		]);
 	});

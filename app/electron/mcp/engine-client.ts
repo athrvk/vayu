@@ -133,7 +133,7 @@ export interface RunListQuery {
  * the engine's default (`json`, the full series, no comparison).
  */
 export interface RunReportExportOptions {
-	/** "json" | "markdown" | "html"; "html" is not written yet (#2135). */
+	/** "json" | "markdown" | "html"; the MCP tool refuses "html", the Export menu's alone. */
 	format?: string;
 	series?: "full" | "none";
 	/** A second finished load run, which fills the document's `comparison`. */

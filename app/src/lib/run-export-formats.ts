@@ -49,6 +49,15 @@ export const RUN_EXPORT_FORMATS = [
 		copyable: true,
 		mcp: true,
 	},
+	{
+		id: "html",
+		name: "HTML report",
+		mimeType: "text/html",
+		extension: ".run.html",
+		copyable: false,
+		// A file for a person: an agent can neither save nor render it.
+		mcp: false,
+	},
 ] as const satisfies readonly RunExportFormat[];
 
 export type RunExportFormatId = (typeof RUN_EXPORT_FORMATS)[number]["id"];
