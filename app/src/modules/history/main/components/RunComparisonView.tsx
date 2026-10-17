@@ -293,7 +293,7 @@ export default function RunComparisonView({
 			</div>
 
 			<ScrollArea className="flex-1">
-				<div className="flex flex-col gap-4 p-6">
+				<div className="@container flex flex-col gap-4 p-6">
 					{runContext}
 					{loadingRuns && <DetailSkeleton label="Loading runs" rows={3} />}
 					{runsError && (

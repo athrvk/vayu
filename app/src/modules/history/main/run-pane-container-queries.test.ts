@@ -63,6 +63,7 @@ describe("run-pane grids", () => {
 	it.each([
 		["LoadTestDetail.tsx", join(here, "LoadTestDetail.tsx")],
 		["MetricsView.tsx", join(dashboard, "MetricsView.tsx")],
+		["RunComparisonView.tsx", join(here, "components/RunComparisonView.tsx")],
 	])("%s declares the @container its grids resolve against", (_name, file) => {
 		const source = read(file);
 		expect(source.length).toBeGreaterThan(0);
