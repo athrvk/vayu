@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatMs } from "@/lib/format-number";
+import { formatLatencyParts } from "@/lib/format-number";
 import { Eyebrow } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";
@@ -36,18 +36,10 @@ export function LatencyPercentilesCard({
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				{p99 > 0 ? (
 					<>
-						mean{" "}
-						<span className="text-foreground font-semibold">
-							{formatMs(meanLatency)}
-						</span>{" "}
-						ms
+						mean <LatencyFigure ms={meanLatency} />
 						{medianLatency > 0 && (
 							<>
-								{" · "}median{" "}
-								<span className="text-foreground font-semibold">
-									{formatMs(medianLatency)}
-								</span>{" "}
-								ms
+								{" · "}median <LatencyFigure ms={medianLatency} />
 							</>
 						)}
 					</>
@@ -59,12 +51,25 @@ export function LatencyPercentilesCard({
 	);
 }
 
+/** A mean or median inside the sub-line: the figure in the foreground, its unit beside it. */
+function LatencyFigure({ ms }: { ms: number }) {
+	const { value, unit } = formatLatencyParts(ms);
+	return (
+		<>
+			<span className="text-foreground font-semibold">{value}</span> {unit}
+		</>
+	);
+}
+
 function PercentileValue({ label, ms }: { label: string; ms: number }) {
+	const { value, unit } = formatLatencyParts(ms);
 	return (
 		<div>
 			<div className="text-metric leading-none font-bold font-mono tabular-nums text-foreground">
-				{formatMs(ms)}
-				<span className="text-xs text-muted-foreground font-sans font-normal ml-1">ms</span>
+				{value}
+				<span className="text-xs text-muted-foreground font-sans font-normal ml-1">
+					{unit}
+				</span>
 			</div>
 			<Eyebrow size="xs" className="mt-1.5">
 				{label}

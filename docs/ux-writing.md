@@ -97,8 +97,12 @@ scattered strings land the same way.
   reads `2.27ms` in the History tile, the step table, the stat card and a chart
   tooltip. A measured latency under 0.01 ms reads `<0.01`, never `0`: a
   request that took 0.4 ms did not take no time, and only an exact 0 prints
-  as `0`. `formatLatency` carries the unit for a surface with no slot of its
-  own (`999ms`, then `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
+  as `0`. `formatLatencyParts` returns the digits and the unit together
+  (`{ value: "1.23", unit: "s" }` for 1234 ms), and a stat tile that draws the
+  unit in a slot of its own renders both halves from it, never a literal "ms"
+  beside `formatMs`: 1234 ms reads `1.23 s` on every tile. `formatLatency` is
+  the same pair joined for a surface with no slot of its own (`999ms`, then
+  `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
   (`1.2k`), which take their decimals from the tick spacing so no two
   neighbouring ticks print alike (1200, 1210, 1220 read `1.2k/s`, `1.21k/s`,

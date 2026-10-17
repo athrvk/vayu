@@ -194,7 +194,7 @@ describe("HeroRow latency card", () => {
 			expect(out).toContain("p95");
 			expect(out).toContain("456");
 			expect(out).toContain("p99");
-			expect(out).toContain("1,234");
+			expect(out).toContain("1.23");
 		}
 	);
 

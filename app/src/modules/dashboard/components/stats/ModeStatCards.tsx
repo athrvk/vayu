@@ -13,7 +13,7 @@
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
 
-import { formatLatency, formatMs, formatNumber } from "@/lib/format-number";
+import { formatLatency, formatLatencyParts, formatNumber } from "@/lib/format-number";
 import { fmt } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
@@ -71,11 +71,12 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 
 /** Mean iter time - average wall-clock per iteration (tracks p50 closely). */
 export function MeanIterTimeStat({ d }: { d: DashboardDerived }) {
+	const { value, unit } = formatLatencyParts(d.meanLatency);
 	return (
 		<StatCard
 			label="Mean iter time"
-			value={formatMs(d.meanLatency)}
-			unit="ms"
+			value={value}
+			unit={unit}
 			infoTip={TOOLTIPS.meanIterTime}
 		/>
 	);
@@ -107,13 +108,7 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
 
 /** p99 at peak - tail latency at the breakpoint (or current p99 if uncrossed). */
 export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
-	const value = d.breakpoint.crossed ? (d.breakpoint.p99Ms ?? d.p99Latency) : d.p99Latency;
-	return (
-		<StatCard
-			label="p99 at peak"
-			value={formatMs(value)}
-			unit="ms"
-			infoTip={TOOLTIPS.p99AtPeak}
-		/>
-	);
+	const p99 = d.breakpoint.crossed ? (d.breakpoint.p99Ms ?? d.p99Latency) : d.p99Latency;
+	const { value, unit } = formatLatencyParts(p99);
+	return <StatCard label="p99 at peak" value={value} unit={unit} infoTip={TOOLTIPS.p99AtPeak} />;
 }

@@ -24,7 +24,13 @@ const restoreIntl = vi.hoisted(() => {
 
 afterAll(restoreIntl);
 
-import { formatLatency, formatMs, formatPercent, formatRate } from "./format-number";
+import {
+	formatLatency,
+	formatLatencyParts,
+	formatMs,
+	formatPercent,
+	formatRate,
+} from "./format-number";
 
 describe("formatMs and formatRate: two decimals under 10, whole numbers above", () => {
 	const cases: Array<[string, number | null | undefined, string]> = [
@@ -94,5 +100,30 @@ describe("formatPercent: one decimal, always", () => {
 
 	it.each(cases)("%s", (input, expected) => {
 		expect(formatPercent(input)).toBe(expected);
+	});
+});
+
+describe("formatLatencyParts: the value and its unit for a tile with a slot of its own", () => {
+	const cases: Array<[number | null | undefined, string, "ms" | "s"]> = [
+		[0.0004, "<0.01", "ms"],
+		[2.2749, "2.27", "ms"],
+		[999, "999", "ms"],
+		[999.6, "1.00", "s"],
+		[1234, "1.23", "s"],
+		[12345.6, "12.35", "s"],
+		[0, "0", "ms"],
+		[null, "0", "ms"],
+		[undefined, "0", "ms"],
+	];
+
+	it.each(cases)("%s", (input, value, unit) => {
+		expect(formatLatencyParts(input)).toEqual({ value, unit });
+	});
+
+	it("is what formatLatency prints, joined", () => {
+		for (const [input] of cases) {
+			const { value, unit } = formatLatencyParts(input);
+			expect(formatLatency(input)).toBe(`${value}${unit}`);
+		}
 	});
 });

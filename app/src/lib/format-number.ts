@@ -47,15 +47,33 @@ export function formatMs(ms: number | undefined | null): string {
 	return formatMagnitude(ms);
 }
 
+/** A latency split for a surface that draws its unit in a slot of its own. */
+export interface LatencyParts {
+	value: string;
+	unit: "ms" | "s";
+}
+
 /**
- * A duration in milliseconds with its unit: `formatMs` digits and "ms" up to
- * 999, then seconds with two decimals once it rounds to 1000 ms ("1.23s"); a missing
- * value reads "0ms" (`fmtMs` draws "-" for it). The rule behind
- * every chart tooltip and any surface that has no slot of its own for a unit.
+ * A duration in milliseconds as digits and unit: `formatMs` digits and "ms" up
+ * to 999, then seconds with two decimals once it rounds to 1000 ms (1234 ->
+ * "1.23", "s"); a missing value is "0", "ms". Stat tiles render the two halves
+ * in separate elements, so the unit must come from here and never be written
+ * beside the number.
+ */
+export function formatLatencyParts(ms: number | undefined | null): LatencyParts {
+	if (!isMissing(ms) && Math.round(ms) >= 1000)
+		return { value: (ms / 1000).toFixed(2), unit: "s" };
+	return { value: formatMs(ms), unit: "ms" };
+}
+
+/**
+ * A duration in milliseconds with its unit ("999ms", "1.23s"); a missing value
+ * reads "0ms" (`fmtMs` draws "-" for it). The rule behind every chart tooltip
+ * and any surface that has no slot of its own for a unit.
  */
 export function formatLatency(ms: number | undefined | null): string {
-	if (!isMissing(ms) && Math.round(ms) >= 1000) return `${(ms / 1000).toFixed(2)}s`;
-	return `${formatMs(ms)}ms`;
+	const { value, unit } = formatLatencyParts(ms);
+	return `${value}${unit}`;
 }
 
 /** A per-second rate as digits, no unit, by the same digits rule as `formatMs`. */
