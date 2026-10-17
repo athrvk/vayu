@@ -402,7 +402,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 					</TabsList>
 
 					<ScrollArea className="flex-1">
-						<div className="flex flex-col gap-4 p-6">
+						<div className="@container flex flex-col gap-4 p-6">
 							{runContext}
 							<TabsContent value="overview" className="mt-0 space-y-4">
 								<OverviewTab

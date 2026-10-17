@@ -143,7 +143,7 @@ export default function RunTrend({ requestId, openRunId }: RunTrendProps) {
 				</CardDescription>
 			</CardHeader>
 			<CardContent>
-				<div className="grid grid-cols-1 gap-4 lg:grid-cols-3">{panels}</div>
+				<div className="grid grid-cols-1 gap-4 @3xl:grid-cols-3">{panels}</div>
 			</CardContent>
 		</Card>
 	);

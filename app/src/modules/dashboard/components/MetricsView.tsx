@@ -225,7 +225,7 @@ function MetricsView({
 	}
 
 	return (
-		<div className="p-5 flex flex-col gap-3.5">
+		<div className="@container p-5 flex flex-col gap-3.5">
 			{/* Row 1 - Hero */}
 			<HeroRow d={derived} />
 
@@ -516,9 +516,9 @@ function MetricsView({
 
 			{/* Row 3 - HDR plot + Timing waterfall. Both read the final report, which
 			    replaces this view when it lands, so here they only hold the place. */}
-			<div className="grid grid-cols-[repeat(auto-fit,minmax(380px,1fr))] gap-3">
+			<div className="grid grid-cols-1 @3xl:grid-cols-2 gap-3">
 				{/* HDR */}
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5 min-w-0">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency distribution
@@ -540,7 +540,7 @@ function MetricsView({
 				</div>
 
 				{/* Timing waterfall */}
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<div className="bg-card surface-card border border-border rounded-md p-3.5 min-w-0">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Avg request timing

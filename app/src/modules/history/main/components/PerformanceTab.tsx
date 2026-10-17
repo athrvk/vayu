@@ -149,7 +149,7 @@ export default function PerformanceTab({
 					<CardTitle>Latency distribution</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+					<div className="grid grid-cols-2 @md:grid-cols-3 @3xl:grid-cols-6 gap-4">
 						<LatencyMetric label="Average" value={report.latency.avg} />
 						<LatencyMetric label="P50 (Median)" value={report.latency.p50} />
 						{report.latency.p75 !== undefined && (
@@ -253,7 +253,7 @@ export default function PerformanceTab({
 						<CardTitle>Rate control performance</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<div className="grid grid-cols-3 gap-6">
+						<div className="grid grid-cols-1 @md:grid-cols-3 gap-6">
 							<div className="text-center p-4 bg-muted/50">
 								<p className="text-xs text-muted-foreground mb-2">Target RPS</p>
 								<p className="text-metric font-bold text-foreground">
