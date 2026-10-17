@@ -41,6 +41,14 @@ export const RUN_EXPORT_FORMATS = [
 		copyable: false,
 		mcp: true,
 	},
+	{
+		id: "markdown",
+		name: "Markdown",
+		mimeType: "text/markdown",
+		extension: ".run.md",
+		copyable: true,
+		mcp: true,
+	},
 ] as const satisfies readonly RunExportFormat[];
 
 export type RunExportFormatId = (typeof RUN_EXPORT_FORMATS)[number]["id"];

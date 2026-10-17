@@ -133,7 +133,7 @@ export interface RunListQuery {
  * the engine's default (`json`, the full series, no comparison).
  */
 export interface RunReportExportOptions {
-	/** "json" | "markdown" | "html"; only "json" is written yet (#2131, #2135). */
+	/** "json" | "markdown" | "html"; "html" is not written yet (#2135). */
 	format?: string;
 	series?: "full" | "none";
 	/** A second finished load run, which fills the document's `comparison`. */

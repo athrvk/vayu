@@ -1,0 +1,230 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_a40f22",
+    "reference": "Vayu run \"Orders API\" (run_a40f22) - load test, GET /orders, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187860000,
+    "name": "Orders API",
+    "comment": "after the cache change",
+    "baseline": false
+  },
+  "verdict": {
+    "state": "failed",
+    "stoppedEarly": false,
+    "reason": "budgets_missed"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/orders/v2",
+    "headerNames": [
+      "Accept"
+    ],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "bearer"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "60s",
+      "concurrency": 80,
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 24600,
+      "successfulRequests": 23985,
+      "failedRequests": 615,
+      "httpErrorRequests": 615,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 2.5,
+      "totalDurationSeconds": 60.0,
+      "avgRps": 410.0,
+      "testDuration": 60.0,
+      "sendRate": 410.0,
+      "throughput": 410.0,
+      "setupOverhead": 0.2,
+      "peakConcurrency": 80,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 2460000,
+      "bytesReceived": 31500000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 525000
+    },
+    "latency": {
+      "min": 3.4,
+      "max": 380.0,
+      "avg": 131.7,
+      "median": 118.0,
+      "p50": 118.0,
+      "p75": 150.0,
+      "p90": 190.5,
+      "p95": 226.0,
+      "p99": 301.4,
+      "p999": 372.0
+    },
+    "statusCodes": {
+      "200": 23985,
+      "502": 615
+    },
+    "errors": {
+      "total": 615,
+      "withDetails": 615,
+      "types": {},
+      "byStatusCode": {
+        "502": 615
+      }
+    },
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "latencyP95Ms",
+          "limit": 300,
+          "actual": 226.0,
+          "passed": true,
+          "evaluated": true
+        },
+        {
+          "metric": "maxErrorRatePct",
+          "limit": 1,
+          "actual": 2.5,
+          "passed": false,
+          "evaluated": true
+        }
+      ],
+      "passed": 1,
+      "failed": 1,
+      "verdict": "failed"
+    }
+  },
+  "comparison": {
+    "baseRunId": "run_7f3a91",
+    "baseReference": "Vayu run \"Orders API\" (run_7f3a91) - load test, GET /orders, 2026-10-05T08:10:00Z, completed",
+    "differences": [
+      {
+        "field": "concurrency",
+        "base": "50",
+        "target": "80"
+      },
+      {
+        "field": "request",
+        "base": "GET https://api.example.test/orders",
+        "target": "GET https://api.example.test/orders/v2"
+      }
+    ],
+    "deltas": [
+      {
+        "metric": "latency.p50",
+        "base": 94.2,
+        "target": 118.0,
+        "delta": 23.799999999999997,
+        "pctChange": 25.265392781316343,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "latency.p90",
+        "base": 148.9,
+        "target": 190.5,
+        "delta": 41.599999999999994,
+        "pctChange": 27.938213566151777,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "latency.p95",
+        "base": 171.34,
+        "target": 226.0,
+        "delta": 54.66,
+        "pctChange": 31.901482432590168,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "latency.p99",
+        "base": 238.0,
+        "target": 301.4,
+        "delta": 63.39999999999998,
+        "pctChange": 26.63865546218486,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "latency.avg",
+        "base": 98.4,
+        "target": 131.7,
+        "delta": 33.29999999999998,
+        "pctChange": 33.84146341463413,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "latency.max",
+        "base": 412.7,
+        "target": 380.0,
+        "delta": -32.69999999999999,
+        "pctChange": -7.923431063726675,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "summary.avgRps",
+        "base": 499.07,
+        "target": 410.0,
+        "delta": -89.07,
+        "pctChange": -17.847195784158533,
+        "direction": "higher-is-better"
+      },
+      {
+        "metric": "summary.throughput",
+        "base": null,
+        "target": 410.0,
+        "delta": null,
+        "pctChange": null,
+        "direction": "higher-is-better"
+      },
+      {
+        "metric": "summary.errorRate",
+        "base": 0.0,
+        "target": 2.5,
+        "delta": 2.5,
+        "pctChange": null,
+        "direction": "lower-is-better"
+      },
+      {
+        "metric": "summary.totalRequests",
+        "base": 29944,
+        "target": 24600,
+        "delta": -5344,
+        "pctChange": -17.846647074539142,
+        "direction": "neutral"
+      }
+    ],
+    "statusCodes": {
+      "200": {
+        "base": 29944,
+        "target": 23985
+      },
+      "502": {
+        "base": 0,
+        "target": 615
+      }
+    }
+  },
+  "notCarried": [
+    {
+      "code": "request_values",
+      "message": "Header and parameter values and the request body are left out; names, the body mode and its size are kept"
+    }
+  ]
+}

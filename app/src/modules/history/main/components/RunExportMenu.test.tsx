@@ -20,7 +20,8 @@
  * Mutation checks: drop `baseRunId` from the payload and the comparison case
  * reds; download before the export resolves, or with the registry's MIME type
  * rather than the engine's, and the save case reds; register the slot while an
- * export is in flight and the withdrawal case reds.
+ * export is in flight and the withdrawal case reds; toast before the clipboard
+ * write resolves and the pending-write and refused-write cases red.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,7 +30,7 @@ import { withQueryClient } from "@/test/query-wrapper";
 import { apiService } from "@/services/api";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { useLiveCommandSurfaceStore } from "@/lib/commands";
-import { runExportActions, type RunExportFormatEntry } from "@/lib/run-export-formats";
+import { runExportActions } from "@/lib/run-export-formats";
 import { useToastStore } from "@/stores";
 import type { Run, RunReportExportResponse } from "@/types";
 import RunExportMenu from "./RunExportMenu";
@@ -45,29 +46,6 @@ vi.mock("@/queries", () => ({
 }));
 vi.mock("@/services/api", () => ({ apiService: { exportRunReport: vi.fn() } }));
 vi.mock("@/lib/download-text-file", () => ({ downloadTextFile: vi.fn() }));
-
-// No format is copyable yet; the copy case adds one to the table the menu reads.
-const extraFormats = vi.hoisted(() => ({ rows: [] as unknown[] }));
-vi.mock("@/lib/run-export-formats", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@/lib/run-export-formats")>();
-	return {
-		...actual,
-		runExportActions: () =>
-			actual.runExportActions([
-				...actual.RUN_EXPORT_FORMATS,
-				...(extraFormats.rows as RunExportFormatEntry[]),
-			]),
-	};
-});
-
-const MARKDOWN = {
-	id: "markdown",
-	name: "Markdown",
-	mimeType: "text/markdown",
-	extension: ".run.md",
-	copyable: true,
-	mcp: true,
-} as unknown as RunExportFormatEntry;
 
 function loadRun(id: string): Run {
 	return {
@@ -90,6 +68,16 @@ function envelope(urlCredentialsOmitted = 0): RunReportExportResponse {
 	};
 }
 
+/** The engine's Markdown answer: the file name is the engine's, as the JSON one is. */
+function markdownEnvelope(): RunReportExportResponse {
+	return {
+		text: "# Orders\n\n**Passed** - 3 of 3 budgets met\n",
+		fileName: "Orders 2026-10-17 0841.run.md",
+		mimeType: "text/markdown",
+		notes: { urlCredentialsOmitted: 0 },
+	};
+}
+
 const exportRunReport = vi.mocked(apiService.exportRunReport);
 const download = vi.mocked(downloadTextFile);
 const writeText = vi.fn();
@@ -97,7 +85,6 @@ const writeText = vi.fn();
 beforeEach(() => {
 	queries.run = loadRun("run_1");
 	queries.baseline = null;
-	extraFormats.rows = [];
 	exportRunReport.mockReset().mockResolvedValue(envelope());
 	download.mockReset();
 	writeText.mockReset().mockResolvedValue(undefined);
@@ -126,7 +113,7 @@ describe("the Export menu's items", () => {
 		const menu = await openMenu();
 
 		const labels = runExportActions().map((action) => action.label);
-		expect(labels).toEqual(["Save as JSON"]);
+		expect(labels).toEqual(["Save as JSON", "Save as Markdown", "Copy as Markdown"]);
 		const items = within(menu)
 			.getAllByRole("menuitem")
 			.map((item) => item.textContent);
@@ -145,19 +132,81 @@ describe("the Export menu's items", () => {
 		expect(menu.getAttribute("aria-describedby")).toBe(note.id);
 	});
 
-	it("offers a copy for a copyable format, and copies the engine's text", async () => {
-		extraFormats.rows = [MARKDOWN];
+	it("copies the engine's Markdown, and says so once", async () => {
+		exportRunReport.mockResolvedValue(markdownEnvelope());
 		renderMenu();
 		const menu = await openMenu();
 
 		fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy as Markdown" }));
 
-		await waitFor(() => expect(writeText).toHaveBeenCalledWith(envelope().text));
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdownEnvelope().text));
 		expect(exportRunReport).toHaveBeenCalledWith({ runId: "run_1", format: "markdown" });
 		expect(download).not.toHaveBeenCalled();
 		await waitFor(() =>
-			expect(toasts().map((t) => t.message)).toEqual(["Markdown report copied"])
+			expect(toasts().map((t) => [t.message, t.variant])).toEqual([
+				["Markdown report copied", "success"],
+			])
 		);
+	});
+
+	it("says it copied only once the clipboard has taken the text", async () => {
+		exportRunReport.mockResolvedValue(markdownEnvelope());
+		let accept!: () => void;
+		writeText.mockReturnValue(new Promise<void>((resolve) => (accept = resolve)));
+		renderMenu();
+		fireEvent.click(
+			within(await openMenu()).getByRole("menuitem", { name: "Copy as Markdown" })
+		);
+
+		await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+		expect(toasts()).toHaveLength(0);
+
+		await act(async () => accept());
+
+		await waitFor(() => expect(toasts()).toHaveLength(1));
+	});
+
+	it("says the copy failed, and not that it worked, when the clipboard refuses", async () => {
+		exportRunReport.mockResolvedValue(markdownEnvelope());
+		writeText.mockRejectedValue(new Error("Document is not focused"));
+		renderMenu();
+		fireEvent.click(
+			within(await openMenu()).getByRole("menuitem", { name: "Copy as Markdown" })
+		);
+
+		await waitFor(() => expect(toasts()).toHaveLength(1));
+		expect(toasts()[0].variant).toBe("error");
+		expect(toasts()[0].message).toBe("Couldn't copy: Document is not focused");
+	});
+
+	it("copies nothing, and says why in the engine's words, when the export fails", async () => {
+		exportRunReport.mockRejectedValue(new Error("Run is still running"));
+		renderMenu();
+		fireEvent.click(
+			within(await openMenu()).getByRole("menuitem", { name: "Copy as Markdown" })
+		);
+
+		await waitFor(() => expect(toasts()).toHaveLength(1));
+		expect(toasts()[0].message).toContain("Run is still running");
+		expect(writeText).not.toHaveBeenCalled();
+	});
+
+	it("saves the Markdown by the engine's file name and type", async () => {
+		exportRunReport.mockResolvedValue(markdownEnvelope());
+		renderMenu();
+		fireEvent.click(
+			within(await openMenu()).getByRole("menuitem", { name: "Save as Markdown" })
+		);
+
+		await waitFor(() =>
+			expect(download).toHaveBeenCalledWith(
+				markdownEnvelope().text,
+				"Orders 2026-10-17 0841.run.md",
+				"text/markdown"
+			)
+		);
+		expect(exportRunReport).toHaveBeenCalledWith({ runId: "run_1", format: "markdown" });
+		expect(writeText).not.toHaveBeenCalled();
 	});
 });
 

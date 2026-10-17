@@ -1,0 +1,150 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_b2c840",
+    "reference": "Vayu run \"Checkout submit\" (run_b2c840) - load test, POST /checkout, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187920000,
+    "name": "Checkout submit",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "failed",
+    "stoppedEarly": false,
+    "reason": "budgets_missed"
+  },
+  "config": {
+    "method": "POST",
+    "url": "https://api.example.test/checkout",
+    "headerNames": [
+      "Content-Type",
+      "X-Trace"
+    ],
+    "paramNames": [],
+    "body": {
+      "mode": "json",
+      "bytes": 312
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "120s",
+      "concurrency": 100,
+      "timeout": "10s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 12000,
+      "successfulRequests": 10200,
+      "failedRequests": 1800,
+      "httpErrorRequests": 1500,
+      "noResponseRequests": 300,
+      "cancelledRequests": 0,
+      "errorRate": 15.0,
+      "totalDurationSeconds": 120.0,
+      "avgRps": 100.0,
+      "testDuration": 120.0,
+      "sendRate": 100.0,
+      "throughput": 85.0,
+      "setupOverhead": 0.2,
+      "peakConcurrency": 100,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 1560000,
+      "bytesReceived": 9800000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 81600
+    },
+    "latency": {
+      "min": 4.0,
+      "max": 3120.5,
+      "avg": 410.2,
+      "median": 352.0,
+      "p50": 352.0,
+      "p75": 480.0,
+      "p90": 690.4,
+      "p95": 902.75,
+      "p99": 2210.0,
+      "p999": 3001.0
+    },
+    "statusCodes": {
+      "200": 10200,
+      "500": 1200,
+      "503": 300
+    },
+    "errors": {
+      "total": 1800,
+      "withDetails": 1800,
+      "types": {
+        "timeout": 200,
+        "connection_reset": 100
+      },
+      "byStatusCode": {
+        "500": 1200,
+        "503": 300
+      }
+    },
+    "warnings": [
+      {
+        "code": "dropped_requests",
+        "message": "Some requests were not sent because the run was at its concurrency limit",
+        "count": 42
+      }
+    ],
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "latencyP95Ms",
+          "limit": 800,
+          "actual": 902.75,
+          "passed": false,
+          "evaluated": true
+        },
+        {
+          "metric": "latencyP99Ms",
+          "limit": 3000,
+          "actual": 2210.0,
+          "passed": true,
+          "evaluated": true
+        },
+        {
+          "metric": "maxErrorRatePct",
+          "limit": 1,
+          "actual": 15.0,
+          "passed": false,
+          "evaluated": true
+        },
+        {
+          "metric": "minThroughputRps",
+          "limit": 50,
+          "actual": 100.0,
+          "passed": true,
+          "evaluated": true
+        }
+      ],
+      "passed": 2,
+      "failed": 2,
+      "verdict": "failed"
+    }
+  },
+  "comparison": null,
+  "notCarried": [
+    {
+      "code": "request_values",
+      "message": "Header and parameter values and the request body are left out; names, the body mode and its size are kept"
+    }
+  ]
+}

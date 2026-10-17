@@ -19,18 +19,12 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
-#include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 
 #include <nlohmann/json.hpp>
-#include <valijson/adapters/nlohmann_json_adapter.hpp>
-#include <valijson/schema.hpp>
-#include <valijson/schema_parser.hpp>
-#include <valijson/validator.hpp>
 
+#include "run_export_schema_support.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -39,44 +33,10 @@
 namespace {
 
 using nlohmann::json;
+using vayu::tests::load_run_export_schema;
+using vayu::tests::run_export_schema_errors;
 
 constexpr int64_t START_MS = 1791187800000;
-
-nlohmann::json load_schema () {
-    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
-    ".." / "docs" / "engine" / "run-export.schema.json";
-    std::ifstream in (path);
-    // A schema that failed to open parses "" as invalid JSON, which fails the
-    // first test loudly rather than passing every case for want of a schema.
-    std::stringstream buffer;
-    buffer << in.rdbuf ();
-    return nlohmann::json::parse (buffer.str ());
-}
-
-/// The validator's complaints about @p document, empty when it validates.
-std::string schema_errors (const json& schema_json, const json& document) {
-    valijson::Schema schema;
-    valijson::SchemaParser parser;
-    const valijson::adapters::NlohmannJsonAdapter schema_adapter (schema_json);
-    parser.populateSchema (schema_adapter, schema);
-
-    valijson::Validator validator;
-    const valijson::adapters::NlohmannJsonAdapter target (document);
-    valijson::ValidationResults results;
-    if (validator.validate (schema, target, &results)) {
-        return {};
-    }
-    std::string errors;
-    valijson::ValidationResults::Error error;
-    while (results.popError (error)) {
-        std::string context;
-        for (const std::string& step : error.context) {
-            context += step;
-        }
-        errors += context + ": " + error.description + "\n";
-    }
-    return errors;
-}
 
 json phase () {
     return json{ { "p50", 0.1 }, { "p95", 0.2 }, { "p99", 0.3 }, { "max", 1.0 },
@@ -192,7 +152,7 @@ class RunExportSchemaTest : public ::testing::Test {
         vayu::tests::remove_database_files (DB_PATH);
         db_ = std::make_unique<vayu::db::Database> (DB_PATH);
         db_->init ();
-        schema_ = load_schema ();
+        schema_ = load_run_export_schema ();
         ASSERT_TRUE (schema_.is_object () && schema_.contains ("properties"));
     }
     void TearDown () override {
@@ -249,7 +209,8 @@ class RunExportSchemaTest : public ::testing::Test {
             return {};
         }
         json document = json::parse (envelope["text"].get<std::string> ());
-        EXPECT_EQ (schema_errors (schema_, document), "") << document.dump (2);
+        EXPECT_EQ (run_export_schema_errors (schema_, document), "")
+        << document.dump (2);
         return document;
     }
 
@@ -301,9 +262,9 @@ TEST_F (RunExportSchemaTest, TheSchemaRefusesAMemberItDoesNotName) {
     *db_, json{ { "runId", "run_healthy" } });
     ASSERT_EQ (status, 200);
     json document = json::parse (envelope["text"].get<std::string> ());
-    ASSERT_EQ (schema_errors (schema_, document), "");
+    ASSERT_EQ (run_export_schema_errors (schema_, document), "");
     document["report"]["summary"]["somethingNew"] = 1;
-    EXPECT_NE (schema_errors (schema_, document), "");
+    EXPECT_NE (run_export_schema_errors (schema_, document), "");
 }
 
 } // namespace

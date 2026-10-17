@@ -59,28 +59,25 @@ describe("run export format conformance", () => {
 });
 
 /*
- * No format is copyable yet, so the copy half of the builder is held here on a
- * stubbed table. Mutation check: drop the `copyable` filter and the JSON row
- * gains a copy action; drop the copy half and Markdown loses its own.
+ * Mutation check: drop the `copyable` filter and the JSON row gains a copy
+ * action; drop the copy half and Markdown loses its own.
  */
 describe("runExportActions", () => {
-	const markdown = {
-		...RUN_EXPORT_FORMATS[0],
-		id: "markdown",
-		name: "Markdown",
-		copyable: true,
-	} as unknown as RunExportFormatEntry;
-
 	it("offers a save per format, then a copy per copyable format", () => {
-		const actions = runExportActions([RUN_EXPORT_FORMATS[0], markdown]);
-		expect(actions.map(({ id, delivery, label }) => ({ id, delivery, label }))).toEqual([
+		expect(
+			runExportActions().map(({ id, delivery, label }) => ({ id, delivery, label }))
+		).toEqual([
 			{ id: "save-json", delivery: "save", label: "Save as JSON" },
 			{ id: "save-markdown", delivery: "save", label: "Save as Markdown" },
 			{ id: "copy-markdown", delivery: "copy", label: "Copy as Markdown" },
 		]);
 	});
 
-	it("offers only Save as JSON from today's table", () => {
-		expect(runExportActions().map((action) => action.label)).toEqual(["Save as JSON"]);
+	it("copies only what the table marks copyable", () => {
+		const json = RUN_EXPORT_FORMATS.find((format) => format.id === "json");
+		expect(json?.copyable).toBe(false);
+		expect(
+			runExportActions([json as RunExportFormatEntry]).map((action) => action.label)
+		).toEqual(["Save as JSON"]);
 	});
 });
