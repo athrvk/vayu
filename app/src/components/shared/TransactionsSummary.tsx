@@ -20,12 +20,9 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatLatency } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunTransactionSummary } from "@/types/domain";
-
-function formatMs(value: number): string {
-	return `${value.toFixed(1)}ms`;
-}
 
 export interface TransactionsSummaryProps {
 	transactions: RunTransactionSummary[] | undefined;
@@ -58,9 +55,9 @@ export function TransactionsSummary({ transactions, className }: TransactionsSum
 								</span>
 							</span>
 							<span className="font-mono font-medium">
-								p50 {formatMs(transaction.latency.p50)} / p95{" "}
-								{formatMs(transaction.latency.p95)} / max{" "}
-								{formatMs(transaction.latency.max)}
+								p50 {formatLatency(transaction.latency.p50)} / p95{" "}
+								{formatLatency(transaction.latency.p95)} / max{" "}
+								{formatLatency(transaction.latency.max)}
 							</span>
 						</li>
 					))}

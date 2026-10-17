@@ -71,7 +71,22 @@ describe("ResponseAnnouncer", () => {
 
 	it("speaks seconds rather than four-figure milliseconds", () => {
 		renderWith({ response: makeResponse({ time: 2400 }), isExecuting: false });
-		expect(screen.getByRole("status")).toHaveTextContent("2.4 seconds");
+		expect(screen.getByRole("status")).toHaveTextContent("2.40 seconds");
+	});
+
+	it("speaks the shared digits, singular at exactly one, and a sub-0.01 ms time in words", () => {
+		const spoken = (time: number) => {
+			const { unmount } = renderWith({
+				response: makeResponse({ time }),
+				isExecuting: false,
+			});
+			const text = screen.getByRole("status").textContent;
+			unmount();
+			return text;
+		};
+		expect(spoken(0.5)).toBe("Response 200 OK, 0.5 milliseconds");
+		expect(spoken(1)).toBe("Response 200 OK, 1 millisecond");
+		expect(spoken(0.004)).toBe("Response 200 OK, less than 0.01 milliseconds");
 	});
 
 	it("reports a client-side failure by its message, not as status 0", () => {

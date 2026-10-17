@@ -52,7 +52,7 @@ describe("CapacitySummary", () => {
 		const headline = screen.getByText(/Sustained/).textContent ?? "";
 		expect(headline).toContain("48 virtual users");
 		expect(headline).toContain("23,400");
-		expect(headline).toContain("41.2ms");
+		expect(headline).toContain("41ms");
 		expect(headline).toContain("200ms budget");
 
 		const knee = screen.getByText(/It gave out at/).textContent ?? "";
@@ -158,13 +158,20 @@ describe("CapacitySummary", () => {
 		cleanup();
 	});
 
+	it("writes a latency of a second or more in seconds, from the shared formatter", () => {
+		render(<CapacitySummary capacity={capacity({ kneeP99Ms: 1234, sloMs: 2000 })} />);
+		expect(screen.getByText(/It gave out at/).textContent).toContain("1.23s");
+		expect(screen.getByText(/Sustained/).textContent).toContain("2.00s budget");
+		cleanup();
+	});
+
 	it("marks only the levels that broke the budget", () => {
 		const { container } = render(<CapacitySummary capacity={capacity()} />);
 		const cells = Array.from(container.querySelectorAll("td"));
 		const p99Cells = cells.filter((cell) => cell.textContent?.endsWith("ms"));
 		expect(p99Cells).toHaveLength(2);
 		// Mutation check: compare against `>=` instead of `>` and the healthy
-		// 41.2ms row starts wearing the warning colour too.
+		// 41ms row starts wearing the warning colour too.
 		expect(p99Cells[0].className).not.toContain("text-warning-text");
 		expect(p99Cells[1].className).toContain("text-warning-text");
 		cleanup();

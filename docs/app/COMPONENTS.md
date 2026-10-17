@@ -1650,6 +1650,11 @@ so the rows are keyed by index rather than by level. A `stopReason` this build
 has no words for renders under its raw key, as `ThresholdVerdict` does with an
 unknown metric.
 
+Every latency in the card (headline, knee, budget, table) is `formatLatency`, so
+a level at 1234 ms reads `1.23s` like the rest of the app; the same holds for
+`TransactionsSummary`. No module declares a `formatMs` of its own
+(`lib/no-local-format-ms.test.ts`).
+
 ## Contract Coverage (`components/shared/ContractCoverage.tsx`)
 
 Which operations of a collection's bound OpenAPI contract a run exercised, and

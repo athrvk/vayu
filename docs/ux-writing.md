@@ -107,7 +107,9 @@ scattered strings land the same way.
   (`1.2k`), which take their decimals from the tick spacing so no two
   neighbouring ticks print alike (1200, 1210, 1220 read `1.2k/s`, `1.21k/s`,
   `1.22k/s`) and move the whole axis to one magnitude, never `0` beside `1k`. Do not `toFixed` a new
-  latency, rate or percentage for display. Name a latency series for what it
+  latency, rate or percentage for display, and do not declare a `formatMs` of
+  your own: a source scan fails on it. The screen-reader announcer takes the
+  same digits and speaks the unit as a word (`2.40 seconds`). Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare
   "latency" or "wire".

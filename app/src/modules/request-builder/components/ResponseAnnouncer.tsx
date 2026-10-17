@@ -27,14 +27,21 @@
  */
 
 import { useState } from "react";
+import { formatLatencyParts } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useRequestBuilderContext } from "../context";
 
-function formatMs(ms: number): string {
-	// Spoken, not read. The header's four decimal places are unusable as speech.
-	if (ms < 1) return "under a millisecond";
-	if (ms < 1000) return `${Math.round(ms)} milliseconds`;
-	return `${(ms / 1000).toFixed(1)} seconds`;
+const SPOKEN_UNIT = { ms: "millisecond", s: "second" } as const;
+
+/**
+ * The header's number, spoken: the digits are the shared ones so the announcer
+ * never disagrees with the pane, and the unit is a word. "<0.01" is written out
+ * because a screen reader may skip the symbol and speak a bare "0.01".
+ */
+function spokenDuration(ms: number): string {
+	const { value, unit } = formatLatencyParts(ms);
+	const word = pluralize(Number(value), SPOKEN_UNIT[unit], `${SPOKEN_UNIT[unit]}s`);
+	return `${value.replace(/^</, "less than ")} ${word}`;
 }
 
 export default function ResponseAnnouncer() {
@@ -72,7 +79,7 @@ export default function ResponseAnnouncer() {
 		} else {
 			const parts = [
 				`${response.status} ${response.statusText}`.trim(),
-				formatMs(response.time),
+				spokenDuration(response.time),
 			];
 			const tests = response.testResults;
 			if (tests && tests.length > 0) {
