@@ -578,6 +578,7 @@ add_library(vayu_core STATIC
     src/core/run_compare.cpp
     src/core/run_export.cpp
     src/core/run_export_markdown.cpp
+    src/core/run_export_view.cpp
     src/core/vayu_extensions.cpp
     src/core/path_template.cpp
     src/core/query_encoding.cpp

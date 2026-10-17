@@ -43,6 +43,7 @@
 
 #include "run_export_schema_support.hpp"
 #include "vayu/core/run_export_markdown.hpp"
+#include "vayu/core/run_export_view.hpp"
 
 namespace {
 
