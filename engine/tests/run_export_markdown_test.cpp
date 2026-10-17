@@ -288,6 +288,40 @@ TEST (RunExportMarkdownTest, AStoppedRunSaysHowFarItGot) {
     EXPECT_NE (text.find ("<= 80 ms - not evaluated"), std::string::npos) << text;
 }
 
+TEST (RunExportMarkdownTest, TheStoppedRunReadsItsPlannedDurationLikeTheRunDoes) {
+    struct Spelling {
+        std::string_view duration;
+        std::string_view planned;
+    };
+    // The spellings `parse_duration_ms` takes, so the line agrees with the run.
+    for (const Spelling& spelling :
+    std::to_array<Spelling> ({ { "1.5s", "1.5 s" }, { "30S", "30 s" },
+    { "2m", "120 s" }, { " 500ms ", "0.5 s" }, { "45", "45 s" } })) {
+        ordered_json document = read_document ("stopped-early");
+        document["config"]["configuration"]["duration"] = spelling.duration;
+        const std::string text = render_run_export_markdown (document);
+        EXPECT_NE (
+        text.find ("Stopped early at 3.2 s of " + std::string (spelling.planned) + "\n"),
+        std::string::npos)
+        << spelling.duration << ":\n"
+        << text;
+    }
+
+    // A duration no reader takes leaves the planned half off rather than guessing.
+    ordered_json document = read_document ("stopped-early");
+    document["config"]["configuration"]["duration"] = "soon";
+    EXPECT_NE (
+    render_run_export_markdown (document).find ("Stopped early at 3.2 s\n"),
+    std::string::npos);
+}
+
+TEST (RunExportMarkdownTest, MissedBudgetsWithNoFailedCheckStillSayWhatHappened) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["thresholdValidation"]["checks"] = ordered_json::array ();
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("**Failed** - budgets missed\n"), std::string::npos) << text;
+}
+
 TEST (RunExportMarkdownTest, TheComparisonIsOmittedWithoutOneAndReadsDirectionWithOne) {
     EXPECT_EQ (render_run_export_markdown (read_document ("healthy-passed")).find ("Compared with"),
     std::string::npos);
@@ -382,6 +416,12 @@ constexpr auto ESCAPE_CASES = std::to_array<EscapeCase> ({
 { "a rule at the start is escaped", "--- x", "\\--- x" },
 { "a dash that starts a number is left alone", "-5 ms", "-5 ms" },
 { "an ordered marker at the start is escaped", "1. item", "1\\. item" },
+{ "leading spaces cannot hide a heading", "  # h", "\\# h" },
+{ "leading spaces cannot make a code block", "    code", "code" },
+{ "leading spaces cannot hide an ordered marker", "   1. x", "1\\. x" },
+{ "a leading tab cannot hide a list marker", "\t- x", "\\- x" },
+{ "only spaces is empty", "   ", "" },
+{ "spaces inside the text stay", "a  b", "a  b" },
 { "a number that is not a marker is left alone", "1.5 s", "1.5 s" },
 { "empty stays empty", "", "" },
 });
@@ -414,8 +454,32 @@ TEST (RunExportMarkdownTest, AHostileNameCannotBreakATableOrInjectHtml) {
     EXPECT_EQ (headings, 1);
 }
 
+TEST (RunExportMarkdownTest, AWarningCannotOpenABlockInsideItsListItem) {
+    ordered_json document = read_document ("healthy-passed");
+    document["report"]["warnings"] =
+    ordered_json::array ({ { { "message", "  # heading" } },
+    { { "message", "    code" } }, { { "message", "   1. nested" } } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (
+    text.find ("## Warnings\n\n- \\# heading\n- code\n- 1\\. nested\n"), std::string::npos)
+    << text;
+}
+
+TEST (RunExportMarkdownTest, AWarningNameThatIsNotAStringReadsAsADashNotAnError) {
+    ordered_json document = read_document ("healthy-passed");
+    document["report"]["warnings"] = ordered_json::array ({ { { "message", "slow" },
+    { "names", ordered_json::array ({ "a", 7, nullptr, "b" }) } } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("- slow: a, -, -, b\n"), std::string::npos) << text;
+}
+
 // --- numbers -------------------------------------------------------------------------------------------
 
+/// The (value, expected) pairs per formatter. The app's `formatMs`,
+/// `formatRate` and `formatErrorPercent` (`lib/format-number.ts`) follow the
+/// same tiers but spell them through `Intl`, so a host locale can change a
+/// separator there; this table is the locale-free statement of the tiers, for
+/// the app's formatter to adopt (#2147).
 std::string spell (std::string_view formatter, double value) {
     if (formatter == "figure") {
         return vayu::core::format_run_figure (value);
@@ -436,11 +500,6 @@ std::string spell (std::string_view formatter, double value) {
     return {};
 }
 
-/// The (value, expected) pairs per formatter. The app's `formatMs`,
-/// `formatRate` and `formatErrorPercent` (`lib/format-number.ts`) follow the
-/// same tiers but spell them through `Intl`, so a host locale can change a
-/// separator there; this table is the locale-free statement of the tiers, for
-/// the app's formatter to adopt (#2147).
 TEST (RunExportMarkdownTest, NumbersFollowTheTierTable) {
     const json fixture =
     json::parse (read_bytes (fixtures_dir () / "run-export-number-tiers.json"));

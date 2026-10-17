@@ -31,7 +31,8 @@ namespace vayu::core {
 [[nodiscard]] std::string render_run_export_markdown (const nlohmann::ordered_json& document);
 
 /// @p text as one line of Markdown prose or one table cell: each run of line
-/// breaks and control characters is a single space, and every character that
+/// breaks and control characters is a single space, leading spaces are dropped
+/// (they can open a block after a list marker), and every character that
 /// could close a cell, open a tag, a link, emphasis or a block is
 /// backslash-escaped. The one door free text goes through.
 [[nodiscard]] std::string escape_markdown_cell (std::string_view text);

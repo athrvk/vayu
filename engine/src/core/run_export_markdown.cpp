@@ -14,8 +14,8 @@
 
 #include "vayu/core/run_export_markdown.hpp"
 
+#include "vayu/core/load_pacing.hpp"
 #include "vayu/core/run_compare.hpp"
-#include "vayu/utils/parse.hpp"
 #include "vayu/utils/reentrant.hpp"
 
 #include <algorithm>
@@ -323,7 +323,12 @@ std::string code_span (std::string_view text) {
 } // namespace
 
 std::string escape_markdown_cell (std::string_view text) {
-    const std::string flat   = collapse_breaks (text);
+    // Leading spaces go: two to three of them before a `#` or `1.`, or four
+    // before anything, still open a block after a `- ` prefix, and no reader
+    // of a cell or a heading sees them.
+    const std::string collapsed = collapse_breaks (text);
+    const std::string_view flat = std::string_view (collapsed).substr (
+    std::min (collapsed.find_first_not_of (' '), collapsed.size ()));
     const std::size_t marker = block_marker_at (flat);
     std::string out;
     for (std::size_t at = 0; at < flat.size (); ++at) {
@@ -562,7 +567,8 @@ std::string verdict_detail (const ordered& document, std::string_view reason) {
         return budgets_met_text (document);
     }
     if (reason == "budgets_missed") {
-        return missed_budgets (document);
+        const std::string missed = missed_budgets (document);
+        return missed.empty () ? "budgets missed" : missed;
     }
     if (reason == "budgets_met_with_errors") {
         return budgets_met_text (document) + ", but " + errored_text (document);
@@ -582,7 +588,8 @@ std::string verdict_detail (const ordered& document, std::string_view reason) {
 }
 
 /// A duration in seconds from the configuration's `duration`: a number of
-/// seconds, or `30`, `30s`, `500ms`, `2m`, `1h`.
+/// seconds, or the string `parse_duration_ms` reads (`30`, `1.5s`, `500ms`,
+/// `2m`, `1h`).
 std::optional<double> duration_seconds (const ordered& duration) {
     if (duration.is_number ()) {
         return duration.get<double> ();
@@ -590,22 +597,10 @@ std::optional<double> duration_seconds (const ordered& duration) {
     if (!duration.is_string ()) {
         return std::nullopt;
     }
-    const auto& text         = duration.get_ref<const std::string&> ();
-    const std::size_t digits = text.find_first_not_of ("0123456789");
-    const auto amount = vayu::utils::parse_number<int64_t> (text.substr (0, digits));
-    if (!amount) {
-        return std::nullopt;
-    }
-    const std::string_view unit = digits == std::string::npos ?
-    std::string_view ("s") :
-    std::string_view (text).substr (digits);
-    constexpr auto UNITS = std::to_array<std::pair<std::string_view, double>> (
-    { { "ms", 0.001 }, { "s", 1 }, { "m", 60 }, { "h", 3600 } });
-    const auto found =
-    std::ranges::find (UNITS, unit, &std::pair<std::string_view, double>::first);
-    return found == UNITS.end () ?
-    std::nullopt :
-    std::optional (static_cast<double> (*amount) * found->second);
+    const auto milliseconds =
+    parse_duration_ms (duration.get_ref<const std::string&> ());
+    return milliseconds ? std::optional (static_cast<double> (*milliseconds) / 1000.0) :
+                          std::nullopt;
 }
 
 const ordered& configuration_of (const ordered& document) {
@@ -758,19 +753,18 @@ std::string results_block (const ordered& document) {
 }
 
 struct LatencyRow {
-    std::string_view label;
     std::string_view key;
     std::string_view budget;
 };
 
 constexpr auto LATENCY_ROWS = std::to_array<LatencyRow> ({
-{ "min", "min", "" },
-{ "p50", "p50", "latencyP50Ms" },
-{ "p90", "p90", "" },
-{ "p95", "p95", "latencyP95Ms" },
-{ "p99", "p99", "latencyP99Ms" },
-{ "p999", "p999", "" },
-{ "max", "max", "" },
+{ "min", "" },
+{ "p50", "latencyP50Ms" },
+{ "p90", "" },
+{ "p95", "latencyP95Ms" },
+{ "p99", "latencyP99Ms" },
+{ "p999", "" },
+{ "max", "" },
 });
 
 std::string latency_block (const ordered& document) {
@@ -778,7 +772,7 @@ std::string latency_block (const ordered& document) {
     std::vector<Row> rows;
     rows.reserve (LATENCY_ROWS.size ());
     for (const LatencyRow& row : LATENCY_ROWS) {
-        rows.push_back ({ std::string (row.label),
+        rows.push_back ({ std::string (row.key),
         figure_cell (number_at (latency, { row.key }), format_run_figure),
         row.budget.empty () ? std::string (ABSENT) : budget_cell (document, row.budget) });
     }
@@ -985,8 +979,11 @@ std::string warning_line (const ordered& warning) {
     if (names.is_array () && !names.empty ()) {
         std::string listed;
         for (std::size_t at = 0; at < names.size () && at < MAX_WARNING_NAMES; ++at) {
+            const ordered& name = names[at];
             listed += (at == 0 ? "" : ", ") +
-            escape_markdown_cell (names[at].get<std::string> ());
+            (name.is_string () ?
+            escape_markdown_cell (name.get_ref<const std::string&> ()) :
+            std::string (ABSENT));
         }
         line += ": " + listed;
         if (names.size () > MAX_WARNING_NAMES) {
