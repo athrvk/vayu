@@ -95,6 +95,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.brand { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
+.brand strong { font-size: 0.95rem; }
 h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
 h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
 section, footer { margin: 1.75rem 0; }
@@ -159,6 +161,7 @@ svg .line.s-none { stroke-dasharray: 2 3; }
 <body>
 <main>
 <header>
+<p class="brand"><strong>Vayu</strong> run report</p>
 <h1>Orders API</h1>
 <p class="reference"><code>Vayu run &quot;Orders API&quot; (run_7f3a91) - load test, GET /orders, 2026-10-05T08:10:00Z, completed</code></p>
 </header>

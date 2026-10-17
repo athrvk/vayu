@@ -4146,8 +4146,10 @@ It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, errors, comparison,
 warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
 description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently. Then come three charts drawn from
-`timeSeries`, then the footer:
+cannot word a verdict differently. Above the title sits a one-line wordmark
+(`Vayu run report`, muted, text only: the app's mark is a raster image, which the
+page cannot carry). Then come three charts drawn from `timeSeries`, then the
+footer, which names the engine version:
 
 1. Throughput (req/s) and virtual users, two stacked panels sharing the x-axis.
 2. Latency p50, p95 and p99 in ms, with the p95 budget as a labelled dashed line
