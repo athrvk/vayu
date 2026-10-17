@@ -137,12 +137,39 @@ export function collectionEchoShape(ctx: ToolContext): (row: unknown) => unknown
 export async function callEngineForRunOutput(
 	ctx: ToolContext,
 	fn: () => Promise<unknown>,
-	options: {
-		bound?: (value: unknown) => unknown;
-		signal?: AbortSignal;
-		/** An auth block sent inline, whose API-key header no stored row names. */
-		auth?: unknown;
-	} = {}
+	options: RunOutputOptions = {}
+): Promise<ToolResult> {
+	return withheldRunAnswer(ctx, fn, options, (withheld) =>
+		jsonResult(options.bound ? options.bound(withheld) : withheld)
+	);
+}
+
+/**
+ * {@link callEngineForRunOutput} for a call whose answer is already a document
+ * - Markdown, or JSON the engine serialized - handed to the agent as it is
+ * rather than wrapped in a second JSON layer. The text is masked by the same
+ * projection: every secret form is replaced wherever it falls in the string.
+ */
+export async function callEngineForRunText(
+	ctx: ToolContext,
+	fn: () => Promise<string>,
+	options: Pick<RunOutputOptions, "signal" | "auth"> = {}
+): Promise<ToolResult> {
+	return withheldRunAnswer(ctx, fn, options, (withheld) => textResult(String(withheld)));
+}
+
+interface RunOutputOptions {
+	bound?: (value: unknown) => unknown;
+	signal?: AbortSignal;
+	/** An auth block sent inline, whose API-key header no stored row names. */
+	auth?: unknown;
+}
+
+async function withheldRunAnswer(
+	ctx: ToolContext,
+	fn: () => Promise<unknown>,
+	options: Pick<RunOutputOptions, "signal" | "auth">,
+	render: (withheld: unknown) => ToolResult
 ): Promise<ToolResult> {
 	let answer: unknown;
 	try {
@@ -151,8 +178,7 @@ export async function callEngineForRunOutput(
 		return engineErrorResult(err);
 	}
 	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
-	const withheld = withhold(answer);
-	return jsonResult(options.bound ? options.bound(withheld) : withheld);
+	return render(withhold(answer));
 }
 
 // --- Argument coercion helpers ----------------------------------------------

@@ -25,7 +25,7 @@ export interface RunExportFormat {
 	readonly extension: string;
 	/** Whether the text is also offered on the clipboard. */
 	readonly copyable: boolean;
-	/** Whether the MCP `export_run` tool offers it. */
+	/** Whether the MCP `export_run_report` tool offers it. */
 	readonly mcp: boolean;
 }
 
