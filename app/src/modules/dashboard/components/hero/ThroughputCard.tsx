@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatMs } from "@/lib/format-number";
+import { formatLatencyParts } from "@/lib/format-number";
 import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
@@ -21,12 +21,13 @@ export function ThroughputCard({
 	throughput?: number;
 	meanLatency: number;
 }) {
+	const mean = formatLatencyParts(meanLatency);
 	return (
 		<HeroCardShell label="Throughput" tip={TOOLTIPS.throughput}>
 			<HeroValue value={fmtRate(throughput)} unit="req/s" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
-				mean iter{" "}
-				<span className="text-foreground font-semibold">{formatMs(meanLatency)}</span>ms
+				mean iter <span className="text-foreground font-semibold">{mean.value}</span>
+				{mean.unit}
 			</p>
 		</HeroCardShell>
 	);
