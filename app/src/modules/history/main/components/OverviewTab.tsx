@@ -173,7 +173,7 @@ export default function OverviewTab({
 						<CardTitle>Status code distribution</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+						<div className="grid grid-cols-2 @md:grid-cols-3 @3xl:grid-cols-4 gap-3">
 							{Object.entries(report.statusCodes).map(
 								([code, count]: [string, number]) => {
 									/*

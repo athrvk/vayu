@@ -2716,6 +2716,25 @@ because a drag there resized a box inside a pane the user had already sized, and
 held that size in component state that Radix threw away on the next tab switch
 (#1323). The pane's own splitter is the one control for how tall an editor is.
 
+### A run pane's grids answer to the pane, not the window
+
+The context bar is a fixed-width aside, so a pane at a 1280px window is far
+narrower than a viewport variant believes: `lg:grid-cols-6` fires at 1024px of
+*window* whatever the pane holds, and clipped the P99 tile with the bar open
+(#2272). A grid inside a run pane (`LoadTestDetail`'s content wrapper,
+`MetricsView`'s root) therefore uses **container variants**, not viewport ones.
+The pane root carries `@container`, and its grids read `@md:` / `@3xl:`
+(Tailwind 4's built-in container scale, `@md` = 28rem, `@3xl` = 48rem) against
+the pane's own content width. A container query measures the content box of the
+nearest `@container` ancestor and never the element that declares it, so
+`@container` goes on a wrapper above the grids; a container variant with no
+`@container` ancestor never matches, and the grid silently stays at its base
+column count. A grid item that holds a chart takes `min-w-0`, since uPlot sets
+a fixed canvas width and a grid track's automatic minimum would otherwise stop
+the item shrinking. Chrome that really is window-sized (the dialogs, the
+launcher, the title bar) keeps viewport variants. Layout does not exist in
+jsdom, so `run-pane-container-queries.test.ts` is a source guard.
+
 ### ActivityRail and ContextRail
 
 The primary navigation runs down the window's left edge, not along its bottom
