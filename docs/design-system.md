@@ -2982,6 +2982,11 @@ import dialog carried all three - some with a leading glyph, some announced and 
 hierarchy) and always `role="alert"`, because a message that appears after a keystroke is a change
 nobody is looking at.
 
+A follow-up notice about a file that imported (the import preview's `NoticeList`) is not a
+`FieldError`: the file worked, so the line is drawn `text-warning-text` or muted, and it is not
+announced as an alert. The preview as a whole sits in one `role="status"` region; only a real
+failure (the fetch, the apply, a file that did not parse) is an alert.
+
 `text-destructive-text` is not by itself an error message: it is also the right foreground for a
 failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
 the line where it can be drawn mechanically - the token in a literal class string on the opening

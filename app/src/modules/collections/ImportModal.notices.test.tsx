@@ -16,8 +16,10 @@
  * destructive red beside "1 file part needs a file" - one line naming a
  * conformant construct on every operation, the other naming the single thing the
  * user had to act on, in the same colour and the same sentence. Now each line
- * stands alone, red only when a request will not work as imported, muted when
+ * stands alone, amber only when a request will not work as imported, muted when
  * the import made a choice, and not at all when nothing the user sends changed.
+ * None of them is an alert: the file imported, and a real error is the only
+ * thing in the dialog announced as one (#2291).
  *
  * Mutation check: give `default_response` a tier in `import-notices.ts` and the
  * first case fails - the line reappears.
@@ -121,7 +123,7 @@ describe("the import preview's notices", () => {
 				screen.getByText("Upload an image: body not imported (unsupported media type)")
 			).toBeInTheDocument()
 		);
-		expect(severityOf(/Upload an image: body not imported/)).toContain("text-destructive-text");
+		expect(severityOf(/Upload an image: body not imported/)).toContain("text-warning-text");
 		// The request works with the collection's auth: a choice, not a loss.
 		expect(severityOf(/Find pet by ID: uses collection auth/)).toContain(
 			"text-muted-foreground"
@@ -155,13 +157,34 @@ describe("the import preview's notices", () => {
 				)
 			).toBeInTheDocument()
 		);
-		expect(severityOf(/imported without auth/)).toContain("text-destructive-text");
+		expect(severityOf(/imported without auth/)).toContain("text-warning-text");
 		expect(severityOf(/^1 per-request proxy setting not imported$/)).toContain(
 			"text-muted-foreground"
 		);
 		// A path variable kept as a collection variable changes nothing sent.
 		expect(screen.queryByText(/path variable/i)).not.toBeInTheDocument();
 		expect(screen.queryByText(/·.*·.*not imported/)).not.toBeInTheDocument();
+	});
+
+	it("announces the preview through one status region and no alert (#2291)", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Upload an image" })] }),
+				],
+				meta: {
+					format: "OpenAPI 3.0",
+					skipped: [{ kind: "unmapped_body", count: 1, requests: ["Upload an image"] }],
+				},
+			})
+		);
+		preview();
+
+		const line = await screen.findByText(/Upload an image: body not imported/);
+		expect(screen.queryAllByRole("alert")).toHaveLength(0);
+		expect(line.closest('[role="status"]')).not.toBeNull();
+		expect(line).not.toHaveAttribute("role");
+		expect(line).not.toHaveAttribute("aria-live");
 	});
 
 	it("says where the folders came from when the spec declared no operation tags", async () => {

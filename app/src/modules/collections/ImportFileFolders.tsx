@@ -24,9 +24,8 @@
  * reference it.
  */
 
-import { AlertTriangle, Check, FolderOpen } from "lucide-react";
+import { Check, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui";
-import { FieldError } from "@/components/shared";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
 import { useFileRootsQuery } from "@/queries";
 import { isUnderFolder } from "@/lib/file-path";
@@ -37,6 +36,7 @@ import {
 	fileReferenceNeeds,
 	type FileReferenceNeeds,
 } from "./import-notices";
+import { NoticeLine } from "./NoticeList";
 
 /** Whether `folder` is an allowed folder, or inside one. */
 function covered(folder: string, roots: readonly { path: string }[]): boolean {
@@ -62,14 +62,10 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 
 	return (
 		<div className="space-y-1.5">
-			{bodiesNotice && (
-				<FieldError as="span" icon={AlertTriangle}>
-					{bodiesNotice.text}
-				</FieldError>
-			)}
+			{bodiesNotice && <NoticeLine tier="action">{bodiesNotice.text}</NoticeLine>}
 			{folders.length > 0 && (
 				<>
-					<FieldError as="span" icon={AlertTriangle}>
+					<NoticeLine tier="action">
 						{`${folders.reduce((n, f) => n + f.count, 0)} imported file ${pluralize(
 							folders.reduce((n, f) => n + f.count, 0),
 							"path is",
@@ -79,7 +75,7 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 							"its folder",
 							"their folders"
 						)}, or choose each file in its request`}
-					</FieldError>
+					</NoticeLine>
 					<ul aria-label="Folders the imported files are in" className="space-y-1 pl-5">
 						{folders.map(({ folder, count }) => {
 							const allowed = covered(folder, roots);

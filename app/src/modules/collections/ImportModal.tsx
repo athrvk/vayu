@@ -779,19 +779,24 @@ export function ImportModal() {
 		<>
 			{phase === "preview" ? (
 				<>
-					{single?.result ? (
-						<PreviewView
-							result={single.result}
-							importEnvironments={importEnvironments}
-							onDismiss={() => resetTab(tab)}
-						/>
-					) : (
-						<BatchLedger
-							entries={entries}
-							onToggle={toggleEntry}
-							onDismiss={() => resetTab(tab)}
-						/>
-					)}
+					{/* The one live region for the preview's follow-up notices. The
+					    apply error below stays outside it: it is an alert of its own,
+					    and nesting one in a status region announces it twice. */}
+					<div role="status">
+						{single?.result ? (
+							<PreviewView
+								result={single.result}
+								importEnvironments={importEnvironments}
+								onDismiss={() => resetTab(tab)}
+							/>
+						) : (
+							<BatchLedger
+								entries={entries}
+								onToggle={toggleEntry}
+								onDismiss={() => resetTab(tab)}
+							/>
+						)}
+					</div>
 					{/* An apply that failed leaves the list on screen - the per-file
 					    outcomes are in it - so the message that would have replaced it
 					    is stated here instead. */}
