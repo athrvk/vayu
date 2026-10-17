@@ -79,6 +79,10 @@ struct Chart {
 [[nodiscard]] std::vector<ChartPoint> chart_envelope (const std::vector<ChartPoint>& points,
 std::size_t limit = MAX_CHART_POINTS);
 
+/// @p value to one decimal for SVG markup, a tie rounding away from zero on
+/// every platform however the value was computed (see the definition).
+[[nodiscard]] std::string format_chart_coordinate (double value);
+
 /// @p chart as one `<svg>` element.
 [[nodiscard]] std::string render_svg_chart (const Chart& chart);
 

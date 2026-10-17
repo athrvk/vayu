@@ -56,6 +56,20 @@ chart_envelope (const std::vector<ChartPoint>& points, std::size_t limit) {
     return out;
 }
 
+std::string format_chart_coordinate (double value) {
+    // Layout arithmetic lands on exact decimal ties (106.85) one ulp either
+    // side of the tie, and the side depends on whether the compiler contracts
+    // a*b+c into a fused multiply-add: Apple clang on arm64 does, GCC and MSVC
+    // on x86 do not, so "{:.1f}" alone printed 106.9 on one and 106.8 on the
+    // other. The tie is resolved here, half away from zero, by an offset far
+    // above the arithmetic's error (~1e-13) and far below the 0.05 between a
+    // tie and the next value that rounds differently. The goldens are compared
+    // byte for byte on every platform (#2135).
+    constexpr double TIE_NUDGE = 1e-6;
+    const double tenths = std::round ((value * 10.0) + std::copysign (TIE_NUDGE, value));
+    return std::format ("{:.1f}", tenths / 10.0);
+}
+
 namespace {
 
 // --- layout, in the viewBox's units ------------------------------------------------------------
@@ -73,10 +87,6 @@ constexpr double LABEL_GAP    = 13.0;
 
 constexpr int MAX_Y_INTERVALS = 5;
 constexpr int MAX_X_INTERVALS = 6;
-
-std::string coordinate (double value) {
-    return std::format ("{:.1f}", value);
-}
 
 /// @p text escaped, for the one door every interpolated string goes through.
 std::string safe (std::string_view text) {
@@ -141,18 +151,20 @@ std::string y_axis_markup (const Frame& frame, const YAxis& axis, std::string_vi
     std::string grid = "<path class=\"grid\" d=\"";
     std::string labels;
     for (const double value : tick_values (axis.top, axis.step)) {
-        const std::string y = coordinate (frame.y_of (value));
-        grid += "M" + coordinate (LEFT) + " " + y + "H" + coordinate (LEFT + PLOT_WIDTH);
-        labels += "<text class=\"tick y\" x=\"" + coordinate (LEFT - 8) +
+        const std::string y = format_chart_coordinate (frame.y_of (value));
+        grid += "M" + format_chart_coordinate (LEFT) + " " + y + "H" +
+        format_chart_coordinate (LEFT + PLOT_WIDTH);
+        labels += "<text class=\"tick y\" x=\"" + format_chart_coordinate (LEFT - 8) +
         "\" y=\"" + y + "\" text-anchor=\"end\" dominant-baseline=\"central\">" +
         safe (format_run_figure (value)) + "</text>";
     }
     grid += "\"/>";
-    const std::string bottom = coordinate (frame.top_px + PLOT_HEIGHT);
-    return "<text class=\"axis-title\" x=\"" + coordinate (LEFT) + "\" y=\"" +
-    coordinate (frame.top_px - 8) + "\">" + safe (title) + "</text>" + grid + labels +
-    "<path class=\"axis\" d=\"M" + coordinate (LEFT) + " " + coordinate (frame.top_px) +
-    "V" + bottom + "H" + coordinate (LEFT + PLOT_WIDTH) + "\"/>";
+    const std::string bottom = format_chart_coordinate (frame.top_px + PLOT_HEIGHT);
+    return "<text class=\"axis-title\" x=\"" + format_chart_coordinate (LEFT) +
+    "\" y=\"" + format_chart_coordinate (frame.top_px - 8) + "\">" +
+    safe (title) + "</text>" + grid + labels + "<path class=\"axis\" d=\"M" +
+    format_chart_coordinate (LEFT) + " " + format_chart_coordinate (frame.top_px) +
+    "V" + bottom + "H" + format_chart_coordinate (LEFT + PLOT_WIDTH) + "\"/>";
 }
 
 std::string x_axis_markup (const Frame& frame, std::string_view title) {
@@ -160,13 +172,15 @@ std::string x_axis_markup (const Frame& frame, std::string_view title) {
     const double base = frame.top_px + PLOT_HEIGHT;
     std::string out;
     for (const double value : tick_values (frame.x_max, step)) {
-        out += "<text class=\"tick x\" x=\"" + coordinate (frame.x_of (value)) +
-        "\" y=\"" + coordinate (base + 15) + "\" text-anchor=\"middle\">" +
+        out += "<text class=\"tick x\" x=\"" +
+        format_chart_coordinate (frame.x_of (value)) + "\" y=\"" +
+        format_chart_coordinate (base + 15) + "\" text-anchor=\"middle\">" +
         safe (format_run_figure (value)) + "</text>";
     }
     return out + "<text class=\"axis-title\" x=\"" +
-    coordinate (LEFT + (PLOT_WIDTH / 2)) + "\" y=\"" + coordinate (base + 34) +
-    "\" text-anchor=\"middle\">" + safe (title) + "</text>";
+    format_chart_coordinate (LEFT + (PLOT_WIDTH / 2)) + "\" y=\"" +
+    format_chart_coordinate (base + 34) + "\" text-anchor=\"middle\">" +
+    safe (title) + "</text>";
 }
 
 // --- series ------------------------------------------------------------------------------------------------
@@ -215,13 +229,14 @@ const std::vector<ChartPoint>& drawn) {
     const std::string style = safe (series.style);
     if (drawn.size () == 1) {
         return "<circle class=\"dot s-" + style + "\" cx=\"" +
-        coordinate (frame.x_of (drawn.front ().x)) + "\" cy=\"" +
-        coordinate (frame.y_of (drawn.front ().y)) + "\" r=\"2.5\"/>";
+        format_chart_coordinate (frame.x_of (drawn.front ().x)) + "\" cy=\"" +
+        format_chart_coordinate (frame.y_of (drawn.front ().y)) + "\" r=\"2.5\"/>";
     }
     std::string points;
     for (const ChartPoint& point : drawn) {
-        points += (points.empty () ? "" : " ") + coordinate (frame.x_of (point.x)) +
-        "," + coordinate (frame.y_of (point.y));
+        points += (points.empty () ? "" : " ") +
+        format_chart_coordinate (frame.x_of (point.x)) + "," +
+        format_chart_coordinate (frame.y_of (point.y));
     }
     return "<polyline class=\"line s-" + style + "\" points=\"" + points + "\"/>";
 }
@@ -260,7 +275,8 @@ std::string labels_markup (std::vector<EndLabel>& labels, const Frame& frame) {
     std::string out;
     for (const EndLabel& label : labels) {
         out += "<text class=\"direct " + safe (label.style) + "\" x=\"" +
-        coordinate (LEFT + PLOT_WIDTH + 8) + "\" y=\"" + coordinate (label.y) +
+        format_chart_coordinate (LEFT + PLOT_WIDTH + 8) + "\" y=\"" +
+        format_chart_coordinate (label.y) +
         "\" dominant-baseline=\"central\">" + safe (label.text) + "</text>";
     }
     return out;
@@ -285,8 +301,9 @@ const ChartReference& reference,
 std::vector<EndLabel>& labels) {
     const double y_px = frame.y_of (reference.value);
     labels.push_back ({ reference.label, "ref", y_px });
-    return "<path class=\"ref\" d=\"M" + coordinate (LEFT) + " " +
-    coordinate (y_px) + "H" + coordinate (LEFT + PLOT_WIDTH) + "\"/>";
+    return "<path class=\"ref\" d=\"M" + format_chart_coordinate (LEFT) + " " +
+    format_chart_coordinate (y_px) + "H" +
+    format_chart_coordinate (LEFT + PLOT_WIDTH) + "\"/>";
 }
 
 /// The value the y-axis must reach: the data's peak, or the reference if higher.
@@ -348,8 +365,9 @@ std::string render_svg_chart (const Chart& chart) {
     (std::max (count - 1, 0.0) * PANEL_GAP) + X_AXIS_BAND;
     const std::string id = safe (chart.id) + "-desc";
 
-    std::string out = "<svg class=\"chart\" viewBox=\"0 0 " + coordinate (WIDTH) +
-    " " + coordinate (height) + "\" role=\"img\" aria-label=\"" + safe (chart.label) +
+    std::string out = "<svg class=\"chart\" viewBox=\"0 0 " +
+    format_chart_coordinate (WIDTH) + " " + format_chart_coordinate (height) +
+    "\" role=\"img\" aria-label=\"" + safe (chart.label) +
     "\" aria-describedby=\"" + id + "\"><title>" + safe (chart.label) +
     "</title><desc id=\"" + id + "\">" + safe (description_of (chart)) + "</desc>";
     double plot_top = TOP + TITLE_HEIGHT;

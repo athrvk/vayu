@@ -11,7 +11,9 @@
  *        that keeps a spike, axes that start at zero and name their unit,
  *        descriptions from every sample, and markup that loads nothing.
  *
- * Mutation checks: thin by taking every Nth sample and the spike case reds;
+ * Mutation checks: drop the tie nudge from `format_chart_coordinate` and the
+ * neighbour case reds, print the value unsnapped and the spelling case reds
+ * too (both on any platform); thin by taking every Nth sample and the spike case reds;
  * start an axis at the data's minimum and the zero-axis case reds; drop the
  * `safe` wrapper from a label and the escaping case reds; skip the reference
  * line when it lies far above the data and the far-budget case reds.
@@ -20,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -37,6 +40,7 @@ using vayu::core::ChartPanel;
 using vayu::core::ChartPoint;
 using vayu::core::ChartReference;
 using vayu::core::ChartSeries;
+using vayu::core::format_chart_coordinate;
 using vayu::core::MAX_CHART_POINTS;
 using vayu::core::render_svg_chart;
 using vayu::tests::drawn_values;
@@ -64,6 +68,71 @@ std::string unit = "") {
 Chart one_panel (std::string title, std::vector<ChartSeries> series) {
     return { "c", "A chart", "Seconds from start",
         { { std::move (title), std::move (series), std::nullopt } } };
+}
+
+// --- coordinates ----------------------------------------------------------------------------
+
+struct Tie {
+    double value;
+    std::string_view rounded;
+};
+
+/// Decimal ties that landed one digit apart on macOS arm64 and Linux x86_64 (#2135).
+constexpr std::array<Tie, 10> TIES = { {
+{ 106.85, "106.9" },
+{ 107.55, "107.6" },
+{ 152.15, "152.2" },
+{ 313.55, "313.6" },
+{ 555.65, "555.7" },
+{ -106.85, "-106.9" },
+{ -107.55, "-107.6" },
+{ -152.15, "-152.2" },
+{ -313.55, "-313.6" },
+{ -555.65, "-555.7" },
+} };
+
+/// @p tie as arithmetic with a different error than its literal: halved from its
+/// double, whole plus fraction, a product of tenths, and the single rounding of a
+/// fused multiply-add against the two roundings of a separate one.
+std::vector<double> spellings_of (double tie) {
+    const double whole    = std::trunc (tie);
+    const double tenths   = tie * 10.0;
+    volatile double split = 0.1 * (tenths - (whole * 10.0));
+    return { tie, (tie * 2.0) / 2.0, whole + (tie - whole), tenths * 0.1,
+        std::fma (0.1, tenths - (whole * 10.0), whole), whole + split,
+        std::fma (tenths, 0.1, 0.0), std::fma (tie, 1.0, 0.0) };
+}
+
+TEST (ChartCoordinateTest, ATieRoundsAwayFromZeroHoweverItWasComputed) {
+    for (const Tie& tie : TIES) {
+        for (const double spelling : spellings_of (tie.value)) {
+            EXPECT_EQ (format_chart_coordinate (spelling), tie.rounded) << tie.value;
+        }
+    }
+}
+
+TEST (ChartCoordinateTest, ATieRoundsTheSameWhicheverNeighbourTheArithmeticLandedOn) {
+    for (const Tie& tie : TIES) {
+        double below = tie.value;
+        double above = tie.value;
+        for (int ulps = 0; ulps < 8; ++ulps) {
+            below = std::nextafter (below, 0.0);
+            above = std::nextafter (above, tie.value * 2.0);
+            EXPECT_EQ (format_chart_coordinate (below), tie.rounded)
+            << tie.value << " - " << ulps;
+            EXPECT_EQ (format_chart_coordinate (above), tie.rounded)
+            << tie.value << " + " << ulps;
+        }
+    }
+}
+
+TEST (ChartCoordinateTest, AValueOffATieStillRoundsToTheNearestTenth) {
+    EXPECT_EQ (format_chart_coordinate (106.84), "106.8");
+    EXPECT_EQ (format_chart_coordinate (106.86), "106.9");
+    EXPECT_EQ (format_chart_coordinate (-106.84), "-106.8");
+    EXPECT_EQ (format_chart_coordinate (-106.86), "-106.9");
+    EXPECT_EQ (format_chart_coordinate (0.0), "0.0");
+    EXPECT_EQ (format_chart_coordinate (720.0), "720.0");
 }
 
 // --- thinning ----------------------------------------------------------------------------
