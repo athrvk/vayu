@@ -15,8 +15,10 @@ ways; until then the live view stays, with the report fetch's Retry.
   `completed` pill does not wear the success tick for a run that missed a budget; it is a string
   because the header is memo'd on `Object.is`. The verdict's banner is the report's own
   (`LoadTestDetail`, first in its scrolling body below a one-row breadcrumb header, #2271), so a
-  finished run's header is Back, that pill and the run's comment (#2270, which the report body no
-  longer draws). A collection load run has no URL, so the live header
+  finished run's header is Back, that pill, the run's comment (#2270, which the report body no
+  longer draws) and its Export menu (#2139: `exportRunId`, with the report's URL and method for the
+  baseline lookup, all primitives and handed over only once the report is on screen). A collection
+  load run has no URL, so the live header
   shows its collection name and step count there (`collectionName` / `stepCount`, primitives for
   the same memo reason).
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)

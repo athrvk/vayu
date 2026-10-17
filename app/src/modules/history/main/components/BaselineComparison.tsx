@@ -34,9 +34,10 @@ import { compareReports } from "@/lib/run-compare";
 import { runComparisonReference } from "@/lib/agent-reference";
 import { runReferenceInput } from "@/lib/run-reference-input";
 import { useCopy } from "@/hooks/useCopy";
-import { useBaselineRunQuery, useRunQuery, useRunReportQuery } from "@/queries";
+import { useRunReportQuery } from "@/queries";
 import type { RunReport } from "@/types";
 import { ComparabilityWarnings, DeltaCell } from "./run-comparison-parts";
+import { usePinnedBaseline } from "./usePinnedBaseline";
 
 interface BaselineComparisonProps {
 	/** The open run's report - the "target" of the comparison. */
@@ -57,33 +58,12 @@ interface BaselineComparisonProps {
 const HEADLINE_METRICS = ["latency.p99", "summary.avgRps", "summary.errorRate"] as const;
 
 export default function BaselineComparison({ report, runId }: BaselineComparisonProps) {
-	/*
-	 * The run row, for the request identity a baseline is looked up by - the
-	 * report does not carry one (`requestId` is a property of the run, not of
-	 * its aggregates). Fetched here rather than passed down: the pane above
-	 * already loaded this exact query, so the shared cache answers it without a
-	 * second request, and the strip stays self-contained instead of threading a
-	 * prop through every LoadTestDetail call site for one child to read.
-	 */
-	const { data: run } = useRunQuery(runId || null);
-	const target = run ? runReferenceInput(run) : null;
-	const { copy } = useCopy();
-
-	// A saved request is matched by id; a run of an unsaved request has only the
-	// url and method its row recorded (see `useBaselineRunQuery`).
-	const { data: baselineRun } = useBaselineRunQuery(
-		run
-			? {
-					requestId: run.requestId,
-					url: target?.summary?.url ?? report.metadata?.requestUrl ?? null,
-					method: target?.summary?.method ?? report.metadata?.requestMethod ?? null,
-				}
-			: null
+	const { target, baselineRun, baselineId } = usePinnedBaseline(
+		runId,
+		report.metadata?.requestUrl,
+		report.metadata?.requestMethod
 	);
-
-	// The run being viewed is often the pinned one; comparing it with itself
-	// would print a row of zeros that says nothing.
-	const baselineId = baselineRun && baselineRun.id !== runId ? baselineRun.id : null;
+	const { copy } = useCopy();
 	const { data: baselineReport } = useRunReportQuery(baselineId);
 
 	const comparison = useMemo(

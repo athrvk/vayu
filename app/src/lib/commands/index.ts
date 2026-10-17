@@ -9,6 +9,7 @@ export { COMMANDS, availableCommands, commandById } from "./registry";
 export { baseCommandContext } from "./context";
 export {
 	useLiveCommandSurfaceStore,
+	useRegisterExportRunSurface,
 	useRegisterLoadTestSurface,
 	useRegisterSendRequestSurface,
 } from "./live-surfaces";

@@ -43,6 +43,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type EngineClient,
 } from "./engine-client.js";
+import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
@@ -121,6 +122,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			status: "completed",
 			startTime: 1_755_000_000_000,
 			configSnapshot: { url: "https://api.example.com/users", mode: "constant_rps" },
+		}),
+		exportRunReport: vi.fn().mockResolvedValue({
+			text: '{"schema":"vayu.run-report"}',
+			fileName: "Orders.run.json",
+			mimeType: "application/json",
+			notes: {},
 		}),
 		deleteRun: vi.fn().mockResolvedValue({ message: "Run deleted successfully" }),
 		setRunBaseline: vi.fn().mockResolvedValue({ id: "run_b", baseline: true }),
@@ -417,6 +424,7 @@ describe("tool registry", () => {
 		expect(names).toContain("run_request");
 		expect(names).toContain("start_load_run");
 		expect(names).toContain("compare_runs");
+		expect(names).toContain("export_run_report");
 	});
 
 	test("every tool has a valid category", () => {
@@ -6952,6 +6960,124 @@ describe("dispatchTool", () => {
 			parsed.reliability.find((m) => m.metric === "summary.totalRequests")?.direction
 		).toBe("neutral");
 	});
+
+	describe("export_run_report", () => {
+		const exportWith = (client: EngineClient, args: Record<string, unknown>) =>
+			dispatchTool("export_run_report", { runId: "run_b", ...args }, ctxWith(client));
+
+		const lastOptions = (client: EngineClient) =>
+			vi.mocked(client.exportRunReport).mock.calls[0][1];
+
+		test("asks for the default format without a series", async () => {
+			const client = fakeClient();
+			const res = await exportWith(client, {});
+			expect(res.isError).toBeFalsy();
+			expect(client.exportRunReport).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(client.exportRunReport).mock.calls[0][0]).toBe("run_b");
+			expect(lastOptions(client)).toEqual({
+				format: defaultMcpExportFormat,
+				series: "none",
+				baseRunId: undefined,
+			});
+			expect(client.listBaselineRuns).not.toHaveBeenCalled();
+		});
+
+		test("passes an explicit base run through without a baseline lookup", async () => {
+			const client = fakeClient();
+			await exportWith(client, { baseRunId: "run_a", format: "json" });
+			expect(lastOptions(client)).toEqual({
+				format: "json",
+				series: "none",
+				baseRunId: "run_a",
+			});
+			expect(client.listBaselineRuns).not.toHaveBeenCalled();
+		});
+
+		test("baseline: true compares against the run pinned for the request", async () => {
+			const client = fakeClient();
+			const res = await exportWith(client, { baseline: true });
+			expect(res.isError).toBeFalsy();
+			expect(lastOptions(client)).toMatchObject({ baseRunId: "run_pinned" });
+		});
+
+		test("baseline: true with nothing pinned says so and exports nothing", async () => {
+			const client = fakeClient({
+				listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }),
+			});
+			const res = await exportWith(client, { baseline: true });
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/No run is pinned as the baseline/);
+			expect(client.exportRunReport).not.toHaveBeenCalled();
+		});
+
+		test("refuses a base run and baseline: true together", async () => {
+			const client = fakeClient();
+			const res = await exportWith(client, { baseRunId: "run_a", baseline: true });
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/not both/);
+			expect(client.exportRunReport).not.toHaveBeenCalled();
+		});
+
+		test("refuses html, naming the Export menu, without asking the engine", async () => {
+			const client = fakeClient();
+			const res = await exportWith(client, { format: "html" });
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("Export menu");
+			expect(client.exportRunReport).not.toHaveBeenCalled();
+		});
+
+		test("refuses a format that is neither offered nor html", async () => {
+			const client = fakeClient();
+			const res = await exportWith(client, { format: "yaml" });
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/"format" must be one of/);
+			expect(client.exportRunReport).not.toHaveBeenCalled();
+		});
+
+		test("returns the document itself, not the envelope or a JSON-wrapped string", async () => {
+			const document = "# Orders\n\n| p99 | 40 ms |\n";
+			const client = fakeClient({
+				exportRunReport: vi.fn().mockResolvedValue({
+					text: document,
+					fileName: "Orders.run.md",
+					mimeType: "text/markdown",
+					notes: {},
+				}),
+			});
+			const res = await exportWith(client, {});
+			expect(res.content).toEqual([{ type: "text", text: document }]);
+			expect(res.structuredContent).toBeUndefined();
+		});
+
+		test("an engine refusal is an error result carrying its sentence", async () => {
+			const client = fakeClient({
+				exportRunReport: vi
+					.fn()
+					.mockRejectedValue(
+						new EngineRequestError(
+							"Engine responded 400",
+							400,
+							'{"error":{"code":"unsupported_run_type"}}'
+						)
+					),
+			});
+			const res = await exportWith(client, {});
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("unsupported_run_type");
+		});
+
+		test("an answer with no document text is an error, not an empty result", async () => {
+			const client = fakeClient({ exportRunReport: vi.fn().mockResolvedValue({}) });
+			const res = await exportWith(client, {});
+			expect(res.isError).toBe(true);
+		});
+
+		test("points at the tools that hold what the document leaves out", () => {
+			const description = TOOLS.find((t) => t.name === "export_run_report")?.description;
+			expect(description).toContain("get_run_samples");
+			expect(description).toContain("get_run_report");
+		});
+	});
 });
 
 /**
@@ -11887,6 +12013,44 @@ describe("secret withholding", () => {
 		for (const leak of RUN_LEAKS) expect(JSON.stringify(res), leak).not.toContain(leak);
 	});
 
+	describe("export_run_report", () => {
+		const exportOf = (text: string) =>
+			runClient({
+				exportRunReport: vi.fn().mockResolvedValue({ text, fileName: "r.run.json" }),
+			});
+		const exported = (client: EngineClient, safety?: Partial<McpSafetyConfig>) =>
+			dispatchTool("export_run_report", { runId: "run_1" }, ctxWith(client, safety));
+
+		test("masks a secret typed into a run comment unless revealed", async () => {
+			const raw = `Rolled out with ${RUN_SECRET} as the password`;
+			const asJson = JSON.stringify({ comment: raw });
+			for (const text of [raw, asJson]) {
+				const withheld = firstText(await exported(exportOf(text)));
+				expect(withheld).not.toContain("w/rd");
+				expect(withheld).toContain("<redacted> as the password");
+
+				const revealed = firstText(await exported(exportOf(text), REVEAL));
+				expect(revealed).toBe(text);
+			}
+		});
+
+		test("reads no secret scope when reveal is on", async () => {
+			const client = exportOf("plain");
+			await exported(client, REVEAL);
+			expect(client.getGlobals).not.toHaveBeenCalled();
+		});
+
+		test("fails whole when a masking read fails, rather than export unmasked", async () => {
+			const client = runClient({
+				exportRunReport: vi.fn().mockResolvedValue({ text: RUN_SECRET }),
+				listEnvironments: vi.fn().mockRejectedValue(new Error("engine unreachable")),
+			});
+			const res = await exported(client);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).not.toContain("w/rd");
+		});
+	});
+
 	const SPEC_DIFF = {
 		identical: false,
 		added: [],
@@ -12193,6 +12357,7 @@ describe("secret withholding", () => {
 	test.each([
 		"run_request",
 		"get_run_report",
+		"export_run_report",
 		"get_run_samples",
 		"list_runs",
 		"set_run_baseline",

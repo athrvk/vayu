@@ -10,7 +10,8 @@
  *
  * Compact 52px single-row header with status, method, URL, config info, and stop button.
  * A collection load run has no URL, so the collection and its step count take that
- * place (#2270); the run's comment, when it has one, sits under it.
+ * place (#2270); the run's comment, when it has one, sits under it. A finished
+ * run's header offers the Export menu (#2139).
  */
 
 import { memo } from "react";
@@ -23,6 +24,7 @@ import { MethodBadge, RunComment, RunStatusPill, StopRunButton } from "@/compone
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { formatClock, pluralize } from "../utils/format";
 import { formatNumber } from "@/lib/format-number";
+import RunExportMenu from "@/modules/history/main/components/RunExportMenu";
 
 /**
  * What the status pill says. Streaming wins over the mode. Idle, and a run that
@@ -51,6 +53,9 @@ function DashboardHeader({
 	collectionName,
 	stepCount,
 	comment,
+	exportRunId,
+	exportRequestUrl,
+	exportRequestMethod,
 	elapsedDuration = 0,
 	outcome,
 	configuration,
@@ -147,6 +152,14 @@ function DashboardHeader({
 				<span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
 					{configSummary}
 				</span>
+			)}
+
+			{exportRunId && (
+				<RunExportMenu
+					runId={exportRunId}
+					requestUrl={exportRequestUrl}
+					requestMethod={exportRequestMethod}
+				/>
 			)}
 
 			{/* Stop button */}

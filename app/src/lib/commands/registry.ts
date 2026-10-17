@@ -22,6 +22,7 @@
  * command is a pointer rather than a reimplementation. The settings roster is
  * generated from the two settings registries for the same reason: a category
  * added there appears here without an edit, and cannot be named differently.
+ * The run-export commands are generated from the export formats the same way.
  */
 
 // `Zap` is the load-test mark throughout the app - the dashboard tab, a finished
@@ -76,6 +77,7 @@ import {
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { navigateHistory } from "@/lib/navigate-history";
+import { runExportActions, runExportVerb } from "@/lib/run-export-formats";
 import { openSettingsTab, revealSettingsCategory } from "./reveal-settings";
 import type { Command, CommandContext } from "./types";
 
@@ -403,6 +405,30 @@ const DRAWER_VIEW_COMMANDS: readonly Command[] = DRAWER_VIEWS.filter(
 }));
 
 /**
+ * One command per run-export action (#2139), generated from `runExportActions`,
+ * the list the export menu draws its items from - so the palette offers exactly
+ * the menu's items and a format added to `RUN_EXPORT_FORMATS` arrives in both.
+ *
+ * Each delivers through the mounted menu's own handler (`exportRun`), so the
+ * menu's comparison toggle decides what a palette export carries, and the rows
+ * exist only while a finished load run's menu is on screen. No chord: an export
+ * is an occasional, deliberate act.
+ */
+const RUN_EXPORT_COMMANDS: readonly Command[] = runExportActions().map((action): Command => ({
+	id: `export-run-${action.id}`,
+	title: (ctx) => {
+		const verb = runExportVerb(action.delivery);
+		const target = ctx.activeTabLabel ? `"${ctx.activeTabLabel}"` : "this run";
+		return `${verb} ${target} as ${action.format.name}`;
+	},
+	keywords: ["export", "share", "report", "pr", "slack", action.format.id],
+	group: "action",
+	icon: action.delivery === "save" ? Download : Copy,
+	available: (ctx) => ctx.surfaces?.exportRun !== undefined,
+	perform: (ctx) => ctx.surfaces?.exportRun?.(action),
+}));
+
+/**
  * One command per settings section, generated from the registries the sidebar
  * renders - so the palette cannot offer a section name the screen never shows,
  * nor miss one that was added there.
@@ -439,6 +465,7 @@ const SETTINGS_COMMANDS: readonly Command[] = [
 /** Every command the app declares, in palette order. */
 export const COMMANDS: readonly Command[] = [
 	...ACTION_COMMANDS,
+	...RUN_EXPORT_COMMANDS,
 	...DRAWER_VIEW_COMMANDS,
 	...SETTINGS_COMMANDS,
 ];

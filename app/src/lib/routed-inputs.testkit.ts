@@ -359,6 +359,20 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/compare.conformance.test.ts",
 		paths: ["engine/tests/fixtures/run-compare-conformance.json"],
 	},
+	/*
+	 * The formats the run-report export can write (#2139): the renderer's
+	 * registry and the MCP server's list each read the fixture the engine's
+	 * `RUN_EXPORT_FORMATS` table is held to. `electron/` cannot import
+	 * `src/lib`, so the MCP list is a copy with a reader of its own.
+	 */
+	runExportFormats: {
+		reader: "app/src/lib/run-export-formats.test.ts",
+		paths: ["engine/tests/fixtures/run-export-formats.json"],
+	},
+	mcpRunExportFormats: {
+		reader: "app/electron/mcp/run-export-formats.test.ts",
+		paths: ["engine/tests/fixtures/run-export-formats.json"],
+	},
 } as const satisfies Record<string, ReadingGuard>;
 
 /**

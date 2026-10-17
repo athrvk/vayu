@@ -50,6 +50,7 @@ import LoadTestDetail from "./LoadTestDetail";
 import DesignRunView from "./DesignRunView";
 import ScenarioRunView from "./ScenarioRunView";
 import LoadRunInProgress from "./components/LoadRunInProgress";
+import RunExportMenu from "./components/RunExportMenu";
 
 /**
  * The run's type and id, small and mono, with the id copyable. The type shows
@@ -236,6 +237,14 @@ export default function HistoryDetail() {
 						<Copy className="size-icon-sm" aria-hidden="true" />
 						Copy for agent
 					</Button>
+					{/* A finished load run only: the engine exports nothing else. */}
+					{showsReport && (
+						<RunExportMenu
+							runId={selectedRunId}
+							requestUrl={report?.metadata?.requestUrl}
+							requestMethod={report?.metadata?.requestMethod}
+						/>
+					)}
 				</div>
 				<RunIdLine runId={selectedRunId} typeName={title === typeName ? null : typeName} />
 				<RunComment comment={runComment(run)} className="mt-1" />

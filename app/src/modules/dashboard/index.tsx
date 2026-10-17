@@ -332,8 +332,8 @@ export default function LoadTestDashboard() {
 	if (report) {
 		return (
 			<div className="flex-1 flex flex-col overflow-hidden">
-				{/* Identity only: the report below carries the crumb, the URL, the
-				    configuration and the verdict banner. */}
+				{/* Identity and Export only: the report below carries the crumb, the
+				    URL, the configuration and the verdict banner. */}
 				<DashboardHeader
 					mode={mode}
 					isStreaming={isStreaming}
@@ -341,6 +341,9 @@ export default function LoadTestDashboard() {
 					onStop={handleStop}
 					outcome={judgement?.outcome}
 					comment={report.metadata?.configuration?.comment}
+					exportRunId={currentRunId}
+					exportRequestUrl={report.metadata?.requestUrl}
+					exportRequestMethod={report.metadata?.requestMethod}
 				/>
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />

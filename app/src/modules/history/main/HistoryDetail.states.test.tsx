@@ -92,6 +92,8 @@ async function statefulView(testId: string) {
 vi.mock("./LoadTestDetail", () => statefulView("load-test-detail"));
 vi.mock("./DesignRunView", () => statefulView("design-run-view"));
 vi.mock("./ScenarioRunView", () => statefulView("scenario-run-view"));
+// The export menu has a suite of its own, `HistoryDetail.export.test.tsx`.
+vi.mock("./components/RunExportMenu", () => ({ default: () => null }));
 
 beforeEach(() => {
 	refetch.mockClear();

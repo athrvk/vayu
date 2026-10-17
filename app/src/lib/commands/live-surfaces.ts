@@ -9,7 +9,7 @@
  * The channel a *mounted feature* contributes a command surface through.
  *
  * `CommandSurfaces` was originally the palette host's own set: three dialogs it
- * mounts itself, so it can always offer them. Two actions do not fit that shape.
+ * mounts itself, so it can always offer them. Some actions do not fit that shape.
  * Starting a load test - and sending - needs the request builder's **live editor
  * draft** - the URL, headers, body and auth as currently typed, before autosave
  * has run - and that draft exists only inside `RequestBuilderProvider`, which the
@@ -25,12 +25,14 @@
  * exactly the "hand-rolled copy of a primitive" defect the registry exists to
  * remove. Nothing about either action moves; only its *reachability* changes.
  *
- * **Two named slots, not a registry.** The second one arrived in #1243, the
- * caller this file's first version said it was waiting for: Send has the
- * identical live-draft problem, so it joined as a slot rather than as a second
- * channel. `LiveSurfaceSlot` stays a closed union, spelled the same way on
- * `CommandSurfaces` - a third slot is a decision taken here, not a name a caller
- * can invent by passing a string.
+ * **Three named slots, not a registry.** The second one arrived in #1243: Send
+ * has the identical live-draft problem, so it joined as a slot rather than as a
+ * second channel. The third, `exportRun` (#2139), is a finished run's export
+ * menu: what it sends depends on that menu's own state (whether the comparison
+ * with the baseline is ticked), which lives in the mounted run view and nowhere
+ * else. `LiveSurfaceSlot` stays a closed union, spelled the same way on
+ * `CommandSurfaces` - a fourth slot is a decision taken here, not a name a
+ * caller can invent by passing a string.
  *
  * **The clear is identity-checked.** Unmount effects run before the next mount's
  * effects, so switching request tabs clears then registers in the right order -
@@ -48,65 +50,89 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { create } from "zustand";
+import type { RunExportAction } from "@/lib/run-export-formats";
+
+/** What each slot holds when it is filled - the one place a slot is declared. */
+interface LiveSurfaceHandlers {
+	/** The mounted request builder's start-load-test handler. */
+	startLoadTest: () => void;
+	/**
+	 * The mounted request builder's send handler - absent while that builder is
+	 * on screen but could not send (a run in flight, an empty URL).
+	 */
+	sendRequest: () => void;
+	/**
+	 * The mounted export menu of a finished load run, which delivers `action`
+	 * the way the menu's own item would - absent while an export is in flight.
+	 */
+	exportRun: (action: RunExportAction) => void;
+}
 
 /** The slots a mounted feature can fill, named once for both directions. */
-export type LiveSurfaceSlot = "startLoadTest" | "sendRequest";
+export type LiveSurfaceSlot = keyof LiveSurfaceHandlers;
 
-interface LiveCommandSurfaceState {
-	/** The mounted request builder's start-load-test handler, or null. */
-	startLoadTest: (() => void) | null;
-	/**
-	 * The mounted request builder's send handler, or null - including while that
-	 * builder is on screen but could not send (a run in flight, an empty URL).
-	 */
-	sendRequest: (() => void) | null;
-	registerSurface: (slot: LiveSurfaceSlot, handler: () => void) => void;
+type LiveSurfaceSlots = { [S in LiveSurfaceSlot]: LiveSurfaceHandlers[S] | null };
+
+interface LiveCommandSurfaceState extends LiveSurfaceSlots {
+	registerSurface: <S extends LiveSurfaceSlot>(slot: S, handler: LiveSurfaceHandlers[S]) => void;
 	/** Drops `handler` from `slot` if it is still the registered one. */
-	clearSurface: (slot: LiveSurfaceSlot, handler: () => void) => void;
+	clearSurface: <S extends LiveSurfaceSlot>(slot: S, handler: LiveSurfaceHandlers[S]) => void;
 }
 
 /**
- * A one-slot patch, written where the compiler can see which key it sets - a
- * computed key would need a cast, and a cast here is how the two slots would
- * start accepting a third name nobody declared.
+ * A one-slot patch. The write is keyed by `S`, so the compiler holds the
+ * handler to that slot's own shape - no cast, which is how a slot would start
+ * accepting a handler, or a name, nobody declared.
  */
-function fill(
-	slot: LiveSurfaceSlot,
-	handler: (() => void) | null
-): Partial<LiveCommandSurfaceState> {
-	return slot === "startLoadTest" ? { startLoadTest: handler } : { sendRequest: handler };
+function fill<S extends LiveSurfaceSlot>(
+	slot: S,
+	handler: LiveSurfaceHandlers[S] | null
+): Partial<LiveSurfaceSlots> {
+	const patch: Partial<LiveSurfaceSlots> = {};
+	patch[slot] = handler;
+	return patch;
 }
 
 export const useLiveCommandSurfaceStore = create<LiveCommandSurfaceState>((set) => ({
 	startLoadTest: null,
 	sendRequest: null,
+	exportRun: null,
 	registerSurface: (slot, handler) => set(fill(slot, handler)),
 	clearSurface: (slot, handler) =>
 		set((state) => (state[slot] === handler ? fill(slot, null) : state)),
 }));
 
 /**
- * Publish `handler` in `slot` for as long as the caller is mounted and passes a
- * handler at all; `null` withdraws the contribution without unmounting.
+ * A wrapper over a ref that keeps one identity for the caller's lifetime and
+ * calls whatever `handler` was rendered last.
  *
- * The registered function is a **stable** wrapper over a ref rather than
- * `handler` itself. The builder's own handlers close over the draft, so their
- * identity changes on every keystroke; registering that directly would write to
- * this store - and re-render the palette - once per character typed. The wrapper
- * is written once and reads the current handler when it is called.
+ * The builder's own handlers close over the draft, so their identity changes on
+ * every keystroke; registering that directly would write to the store - and
+ * re-render the palette - once per character typed. The wrapper is written once
+ * and reads the current handler when it is called.
  */
-function useRegisterSurface(slot: LiveSurfaceSlot, handler: (() => void) | null): void {
+function useStableHandler<A extends unknown[]>(
+	handler: ((...args: A) => void) | null
+): (...args: A) => void {
 	const latest = useRef(handler);
 	useEffect(() => {
 		latest.current = handler;
 	}, [handler]);
+	return useCallback((...args: A) => latest.current?.(...args), []);
+}
 
-	const stable = useCallback(() => latest.current?.(), []);
-
-	// The *offer*, not the handler: a slot changes hands when a feature starts or
-	// stops being able to act, never when the draft behind it is edited.
-	const offered = handler !== null;
-
+/**
+ * Publish `stable` in `slot` while `offered`; withdrawing the offer clears it
+ * without unmounting.
+ *
+ * Keyed on the *offer*, not the handler: a slot changes hands when a feature
+ * starts or stops being able to act, never when the state behind it is edited.
+ */
+function useOfferSurface<S extends LiveSurfaceSlot>(
+	slot: S,
+	stable: LiveSurfaceHandlers[S],
+	offered: boolean
+): void {
 	useEffect(() => {
 		if (!offered) return;
 		const { registerSurface, clearSurface } = useLiveCommandSurfaceStore.getState();
@@ -117,7 +143,8 @@ function useRegisterSurface(slot: LiveSurfaceSlot, handler: (() => void) | null)
 
 /** Publish the mounted builder's start-load-test handler. */
 export function useRegisterLoadTestSurface(handler: () => void): void {
-	useRegisterSurface("startLoadTest", handler);
+	const stable = useStableHandler(handler);
+	useOfferSurface("startLoadTest", stable, true);
 }
 
 /**
@@ -125,5 +152,18 @@ export function useRegisterLoadTestSurface(handler: () => void): void {
  * - see `canSendRequest`, the one predicate that decides which.
  */
 export function useRegisterSendRequestSurface(handler: (() => void) | null): void {
-	useRegisterSurface("sendRequest", handler);
+	const stable = useStableHandler(handler);
+	useOfferSurface("sendRequest", stable, handler !== null);
+}
+
+/**
+ * Publish a finished run's export handler, or `null` while it could not export
+ * (one already in flight). Only the active tab's view is mounted, so at most one
+ * menu holds the slot; the identity-checked clear covers the hand-over.
+ */
+export function useRegisterExportRunSurface(
+	handler: ((action: RunExportAction) => void) | null
+): void {
+	const stable = useStableHandler(handler);
+	useOfferSurface("exportRun", stable, handler !== null);
 }
