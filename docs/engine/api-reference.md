@@ -4146,10 +4146,13 @@ It holds the Markdown report's sections in the same order (title and reference
 line, verdict, run, results, latency with its budgets, errors, comparison,
 warnings), written as semantic HTML - one `h1`, tables with `th scope`, a
 description list for the run - from the same reading of the document, so the two
-cannot word a verdict differently. Above the title sits a one-line wordmark
-(`Vayu run report`, muted, text only: the app's mark is a raster image, which the
-page cannot carry). Then come three charts drawn from `timeSeries`, then the
-footer, which names the engine version:
+cannot word a verdict differently. Above the title sits a one-line brand
+(the Vayu mark at 28 px, then the wordmark `Vayu run report`, muted; the mark has
+an empty `alt` because the wordmark names the product). The mark is
+`shared/icon_png/vayu_icon_64x64.png`, embedded as a base64 `data:` URI
+(`run_export_html_logo.hpp`) because it exists only as a raster; the test suite
+compares the embedded bytes with that file. Then come three charts drawn from
+`timeSeries`, then the footer, which names the engine version:
 
 1. Throughput (req/s) and virtual users, two stacked panels sharing the x-axis.
 2. Latency p50, p95 and p99 in ms, with the p95 budget as a labelled dashed line
@@ -4170,9 +4173,11 @@ each keeps its lowest and highest value, so a one-tick spike survives, and the
 file stays under 300 KB for a run of any length.
 
 **The page loads nothing and runs nothing.** There is no script, no `<link>`,
-image, frame or font, no `src` attribute and no `url(...)`; a
-`Content-Security-Policy` meta tag (`default-src 'none'; style-src
-'unsafe-inline'`) enforces that. The only `href` values are `#` anchors to the
+frame or font and no `url(...)`; the one image is the brand mark above, an inline
+`data:image/png` URI, so it is the only `src` attribute and it cannot fetch
+anything. A `Content-Security-Policy` meta tag (`default-src 'none'; style-src
+'unsafe-inline'; img-src data:`) enforces that: no request leaves the page. The
+only `href` values are `#` anchors to the
 page's own sections: the target URL is text, never a link. The charts are inline
 `<svg>`, which is why hovering a line shows its summary natively. Every string
 written into the page (name, comment, URL, error keys, warning text, data file

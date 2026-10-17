@@ -16,6 +16,7 @@
 
 #include "vayu/core/run_export_html.hpp"
 
+#include "run_export_html_logo.hpp"
 #include "svg_chart.hpp"
 #include "vayu/core/run_export_view.hpp"
 #include "vayu/utils/parse.hpp"
@@ -101,6 +102,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 syst
 main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
 .brand { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.85rem; }
 .brand strong { font-size: 0.95rem; }
+.brand img { vertical-align: middle; margin-right: 0.4rem; }
 h1 { margin: 0 0 0.25rem; font-size: 1.6rem; line-height: 1.25; overflow-wrap: anywhere; }
 h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
 section, footer { margin: 1.75rem 0; }
@@ -474,7 +476,7 @@ std::string head_markup (const ReportView& view) {
            "charset=\"utf-8\">\n"
            "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src "
            "'none'; "
-           "style-src 'unsafe-inline'\">\n"
+           "style-src 'unsafe-inline'; img-src data:\">\n"
            "<meta name=\"viewport\" content=\"width=device-width, "
            "initial-scale=1\">\n"
            "<meta name=\"color-scheme\" content=\"light dark\">\n<title>" +
@@ -498,14 +500,19 @@ std::string section_markup (const Section& section) {
     "\">" + section.heading + "</h2>\n" + section.body + "\n</section>\n";
 }
 
-/// The wordmark alone: the app's mark is a raster illustration, and a page that
-/// may carry no image, `src` or `url(...)` cannot hold one.
-constexpr std::string_view BRAND_MARKUP =
-"<p class=\"brand\"><strong>Vayu</strong> run report</p>\n";
+/// The mark and the wordmark. The mark is the one image the page holds, a
+/// `data:` URI so it fetches nothing; its `alt` is empty because the wordmark
+/// beside it already names the product, and `width`/`height` reserve its box.
+std::string brand_markup () {
+    return "<p class=\"brand\"><img src=\"data:image/png;base64," +
+    std::string (LOGO_PNG_BASE64) +
+    "\" alt=\"\" width=\"28\" height=\"28\"><strong>Vayu</strong> run "
+    "report</p>\n";
+}
 
 std::string title_markup (const ReportView& view) {
-    std::string out = "<header>\n" + std::string (BRAND_MARKUP) + "<h1>" +
-    text_of (view.title) + "</h1>\n";
+    std::string out =
+    "<header>\n" + brand_markup () + "<h1>" + text_of (view.title) + "</h1>\n";
     if (!view.reference.empty ()) {
         out += "<p class=\"reference\"><code>" + text_of (view.reference) + "</code></p>\n";
     }

@@ -14,8 +14,9 @@
  * A pure function of the document `build_run_export_document` wrote, so it
  * says nothing the document does not and the leak guarantees of the document
  * (#2127) hold for it by construction. The page is one file that loads
- * nothing and runs nothing: no script, no link, image, frame or font, and
- * the only `href` values point at its own sections. The sections are the
+ * nothing and runs nothing: no script, no link, frame or font, one image
+ * (the Vayu mark as an inline `data:` URI, which fetches nothing), and the
+ * only `href` values point at its own sections. The sections are the
  * Markdown report's (`run_export_view.hpp`); the time series is drawn as three
  * inline-SVG charts (`core/svg_chart.hpp`), each line thinned to at most 480
  * points that keep every stretch's minimum and maximum, so the file stays

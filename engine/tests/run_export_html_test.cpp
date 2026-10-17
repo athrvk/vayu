@@ -8,7 +8,8 @@
 /**
  * @file tests/run_export_html_test.cpp
  * @brief The run-report document as one self-contained HTML page (#2135):
- *        that it loads and runs nothing, escapes every string it writes,
+ *        that it loads and runs nothing (its one image is a `data:` URI, the
+ *        Vayu mark, pinned to the icon file), escapes every string it writes,
  *        stays small for a run of any length without losing a spike, draws
  *        its axes from zero and its status chart from per-tick differences,
  *        reads in light, dark and print, and matches its goldens.
@@ -22,7 +23,10 @@
  * Mutation checks (revert each and the named case reds): add a `<link
  * rel=stylesheet href=https://...>` to the head, a `url(https://...)` to the
  * stylesheet, or make the target URL an `<a href>` and the no-network cases
- * red; write the run's comment without `escape_html` and the hostile-text case
+ * red; point the logo at `https://x/logo.png` or give it a non-PNG `data:` URI
+ * and the same cases red; corrupt one byte of the embedded base64 and the
+ * drift case reds; drop `img-src data:` from the policy and the policy case
+ * reds; write the run's comment without `escape_html` and the hostile-text case
  * reds; thin a series by taking every Nth sample and the spike case reds; feed
  * the status chart the cumulative counts and the per-interval case reds; take
  * a dark text token below 4.5:1 and the contrast case reds.
@@ -35,8 +39,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -48,6 +54,7 @@
 #include "optional_assert.hpp"
 #include "run_export_fixtures.hpp"
 #include "vayu/core/run_export_html.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/text_escape.hpp"
 
 namespace {
@@ -143,6 +150,52 @@ std::string stylesheet_of (const std::string& html) {
     return html.substr (from, html.find ("</style>") - from);
 }
 
+// --- the one image ---------------------------------------------------------------------------------
+
+constexpr std::string_view LOGO_OPEN = "<img src=\"data:image/png;base64,";
+constexpr std::string_view LOGO_CLOSE =
+"\" alt=\"\" width=\"28\" height=\"28\">";
+
+/// The policy the page ships: nothing is loaded, and an image may only be inline.
+constexpr std::string_view POLICY_META =
+"<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; "
+"style-src 'unsafe-inline'; img-src data:\">";
+
+bool is_base64_text (std::string_view text) {
+    return !text.empty () && std::ranges::all_of (text, [] (char c) {
+        return std::isalnum (static_cast<unsigned char> (c)) != 0 || c == '+' ||
+        c == '/' || c == '=';
+    });
+}
+
+/// A page's one permitted image, taken out: its base64 and the markup without it.
+struct SplitLogo {
+    std::string payload;
+    std::string rest;
+};
+
+/// The `<img>` has to be the single image in @p markup and a PNG `data:` URI of
+/// plain base64; anything else (another image, an external `src`, another media
+/// type) is a failure and yields nothing.
+std::optional<SplitLogo> split_logo (const std::string& markup, std::string_view what) {
+    const auto open = markup.find (LOGO_OPEN);
+    if (open == std::string::npos || markup.find ("<img") != open ||
+    markup.find ("<img", open + 1) != std::string::npos) {
+        ADD_FAILURE () << what << ": not exactly one PNG data: <img>";
+        return std::nullopt;
+    }
+    const auto payload_from = open + LOGO_OPEN.size ();
+    const auto close        = markup.find ('"', payload_from);
+    if (close == std::string::npos ||
+    markup.compare (close, LOGO_CLOSE.size (), LOGO_CLOSE) != 0 ||
+    !is_base64_text (std::string_view (markup).substr (payload_from, close - payload_from))) {
+        ADD_FAILURE () << what << ": the <img> is not a bare base64 src with alt, width, height";
+        return std::nullopt;
+    }
+    return SplitLogo{ markup.substr (payload_from, close - payload_from),
+        markup.substr (0, open) + markup.substr (close + LOGO_CLOSE.size ()) };
+}
+
 // --- documents ---------------------------------------------------------------------------------
 
 /// A tick with every member the schema requires.
@@ -181,7 +234,10 @@ ordered_json long_run () {
 
 void expect_loads_and_runs_nothing (const std::string& html, std::string_view what) {
     ASSERT_FALSE (html.empty ()) << what;
-    const std::string markup = markup_only (html);
+    // The logo is the one image; once it is out, every other source is a failure.
+    const auto logo = split_logo (markup_only (html), what);
+    ASSERT_HAS_VALUE (logo);
+    const std::string& markup = logo->rest;
     for (const std::string_view forbidden : { "://", "//cdn", "<script",
          "<link", "<iframe", "<object", "<embed", "@import", "url(",
          "src=", "@font-face", "<img", "<image", "<foreignObject", "xmlns" }) {
@@ -192,11 +248,7 @@ void expect_loads_and_runs_nothing (const std::string& html, std::string_view wh
     for (const std::string& href : hrefs) {
         EXPECT_TRUE (href.starts_with ("#")) << what << ": href=\"" << href << "\"";
     }
-    EXPECT_NE (
-    markup.find ("<meta http-equiv=\"Content-Security-Policy\" "
-                 "content=\"default-src 'none'; style-src 'unsafe-inline'\">"),
-    std::string::npos)
-    << what;
+    EXPECT_NE (markup.find (POLICY_META), std::string::npos) << what;
 }
 
 TEST (RunExportHtmlTest, EveryFixtureLoadsAndRunsNothing) {
@@ -355,7 +407,8 @@ TEST (RunExportHtmlTest, EveryKindOfFreeTextIsEscapedWhereverItIsWritten) {
             const std::string where =
             std::string (field.name) + ": " + std::string (hostile);
             EXPECT_EQ (markup.find ("<script"), std::string::npos) << where;
-            EXPECT_EQ (markup.find ("<img"), std::string::npos) << where;
+            // The logo stays the only image; hostile text adds none.
+            ASSERT_HAS_VALUE (split_logo (markup, where));
             EXPECT_EQ (markup.find ("onerror="), std::string::npos) << where;
             // Written, and written as text.
             EXPECT_NE (html.find (escape_html (hostile)), std::string::npos) << where;
@@ -592,21 +645,58 @@ TEST (RunExportHtmlTest, IsSemanticHtml) {
     EXPECT_NE (html.find ("<nav aria-label=\"Sections\">"), std::string::npos);
 }
 
-TEST (RunExportHtmlTest, TheBrandIsTheWordmarkAboveTheTitleAndNeitherLinkNorImage) {
+/// The brand paragraph's markup, from its open tag to its close.
+std::string brand_paragraph (const std::string& html) {
+    constexpr std::string_view OPEN = "<p class=\"brand\">";
+    const auto at                   = html.find (OPEN);
+    if (at == std::string::npos) {
+        return {};
+    }
+    return html.substr (at, html.find ("</p>", at) + 4 - at);
+}
+
+TEST (RunExportHtmlTest, TheBrandIsTheLogoThenTheWordmarkAboveTheTitleAndNotALink) {
     for (const std::string_view name : ALL_CASES) {
-        const std::string html = render_run_export_html (read_document (name));
-        const std::string brand =
-        "<p class=\"brand\"><strong>Vayu</strong> run report</p>";
+        const std::string html  = render_run_export_html (read_document (name));
+        const std::string brand = brand_paragraph (html);
+        ASSERT_FALSE (brand.empty ()) << name;
         const auto at = html.find (brand);
-        ASSERT_NE (at, std::string::npos) << name;
         EXPECT_GT (html.find ("<h1>"), at) << name << ": the brand leads the header";
         EXPECT_LT (html.rfind ("<header>", at), at) << name;
         EXPECT_EQ (html.find (brand, at + 1), std::string::npos) << name << ": once";
-        // Text only: nothing in the line is a link, an image or a drawing.
-        for (const std::string_view not_here : { "<a", "<img", "<svg", "href", "src" }) {
-            EXPECT_EQ (brand.find (not_here), std::string::npos) << not_here;
+        // The image is first in the line, then the wordmark, then the label.
+        const auto logo = split_logo (brand, name);
+        ASSERT_HAS_VALUE (logo);
+        EXPECT_EQ (
+        brand.find (LOGO_OPEN), std::string_view ("<p class=\"brand\">").size ())
+        << name << ": the logo opens the line";
+        EXPECT_EQ (logo->rest, "<p class=\"brand\"><strong>Vayu</strong> run report</p>")
+        << name << ": the wordmark follows the logo, text only";
+        // The mark is decoration beside a wordmark that names the product, and
+        // its box is fixed so the line does not shift when it paints.
+        EXPECT_NE (brand.find (LOGO_CLOSE), std::string::npos) << name;
+        for (const std::string_view not_here : { "<a", "<svg", "href" }) {
+            EXPECT_EQ (brand.find (not_here), std::string::npos) << name << ": " << not_here;
         }
     }
+}
+
+std::filesystem::path logo_file () {
+    return std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / ".." / "shared" /
+    "icon_png" / "vayu_icon_64x64.png";
+}
+
+TEST (RunExportHtmlTest, TheEmbeddedLogoIsTheIconFileByteForByte) {
+    const std::string icon = read_bytes (logo_file ());
+    ASSERT_FALSE (icon.empty ()) << logo_file ();
+    const std::string html =
+    render_run_export_html (read_document ("healthy-passed"));
+    const auto logo = split_logo (html, "healthy-passed");
+    ASSERT_HAS_VALUE (logo);
+    const auto decoded = vayu::utils::base64_decode (logo->payload);
+    ASSERT_HAS_VALUE (decoded) << "the embedded logo is not base64";
+    EXPECT_EQ (*decoded, icon)
+    << "regenerate run_export_html_logo.hpp from the icon";
 }
 
 TEST (RunExportHtmlTest, TheBrandIsDrawnInTheMutedTokenSoTheContrastTestCoversIt) {
