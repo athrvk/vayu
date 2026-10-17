@@ -3946,7 +3946,9 @@ draft-07 with `additionalProperties: false` at every level. **Reads only.**
 Only `json` is written today; `markdown` and `html` answer `400
 format_not_available` naming the issue that adds each (#2131, #2135). The
 formats are one table (`RUN_EXPORT_FORMATS`), so each adds a row and its
-renderer. `series: "none"` leaves `timeSeries` out; `full` reads every tick of
+renderer, and a row to `engine/tests/fixtures/run-export-formats.json`, which
+the app's format registry and the MCP server's list are held to.
+`series: "none"` leaves `timeSeries` out; `full` reads every tick of
 [`GET /runs/:runId/metrics`](#get-runsrunidmetrics), paged at its 50000-tick
 maximum to the end. `baseRunId` is checked like `runId` (below) and fills the
 document's `comparison`; without it `comparison` is `null`.

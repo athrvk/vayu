@@ -1,0 +1,9 @@
+[
+  {
+    "id": "json",
+    "mimeType": "application/json",
+    "extension": ".run.json",
+    "copyable": false,
+    "mcp": true
+  }
+]
