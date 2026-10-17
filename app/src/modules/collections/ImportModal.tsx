@@ -368,13 +368,40 @@ export function ImportModal() {
 		}
 	};
 
-	// The dialog opening with a path already waiting for it (issue #1364). Read
-	// via `isOpen` rather than a prop: the store is the one place `useOpenIntent`
-	// and this dialog agree on, and `takePendingPath` clears it in the same step
-	// so a second render of this effect - the dialog closing and reopening some
-	// other way - cannot import the same file twice.
+	/**
+	 * A path the OS handed Vayu while the dialog is up (issue #2275), which is the
+	 * File tab's own pick arriving from outside.
+	 *
+	 * An apply in flight refuses it: `importPendingFile` supersedes the File tab,
+	 * and the apply's outcome write - the one that reports which files failed - is
+	 * guarded by that same generation. A preview or a read in progress is replaced,
+	 * because a ledger cannot take a document in after the fact (`detectBatch` is
+	 * all-or-nothing over its documents), and says so rather than swapping quietly.
+	 * Neither is silent; neither leaves the path queued, since a successful apply
+	 * closes the dialog and `close` clears the store.
+	 */
+	const openOsPath = (path: string): void => {
+		const name = fileBaseName(path);
+		if (applying || reimports !== null) {
+			showToast(`Couldn't open "${name}" while an import is running.`);
+			return;
+		}
+		const { phase: filePhase } = tabs.file;
+		if (filePhase === "preview" || filePhase === "detecting") {
+			showToast(`Opened "${name}" in place of the file you were reviewing.`);
+		}
+		void importPendingFile(path);
+	};
+
+	// A path the OS handed Vayu (issue #1364): waiting for the dialog to open, or
+	// arriving while it already is (issue #2275). Keyed on the pending path as well
+	// as `isOpen`, as the pending-files effect below is, because an open dialog
+	// changes nothing but the path. `takePendingPath` stays the one read, and clears
+	// it in the same step, so the re-run that clearing causes finds nothing and
+	// cannot import the same file twice.
+	const pendingPath = useImportModalStore((s) => s.pendingPath);
 	useEffect(() => {
-		if (!isOpen) return;
+		if (!isOpen || !pendingPath) return;
 		const path = useImportModalStore.getState().takePendingPath();
 		if (!path) return;
 		// `importPendingFile` sets `tab` and this tab's phase as its first act,
@@ -382,14 +409,13 @@ export function ImportModal() {
 		// dialog, which is the shape `McpSettingsPanel` and `VariableTableEditor`
 		// suppress this rule for rather than restructuring around it.
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-		void importPendingFile(path);
-		// `importPendingFile` closes over this render's tab state and is rebuilt
-		// every render, so naming it here would re-run the effect continuously.
-		// The take above has already cleared the path, so every run past the
-		// first finds nothing regardless: the open is the event, and the dep
-		// list says exactly that.
+		openOsPath(path);
+		// `openOsPath` closes over this render's tab state and is rebuilt every
+		// render, so naming it here would re-run the effect continuously. The take
+		// above has already cleared the path, so every run past the first finds
+		// nothing regardless.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isOpen]);
+	}, [isOpen, pendingPath]);
 
 	/**
 	 * Re-parse when an option toggle changes, from the text already bundled -
