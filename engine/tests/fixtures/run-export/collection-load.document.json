@@ -1,0 +1,123 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_c91d04",
+    "reference": "Vayu run \"Checkout flow\" (run_c91d04) - load test, collection \"Checkout flow\", 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187920000,
+    "name": null,
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "budgets_met_with_errors"
+  },
+  "config": {
+    "method": null,
+    "url": null,
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "ramp_up",
+      "duration": "2m",
+      "concurrency": 100,
+      "startConcurrency": 5,
+      "rampUpDuration": "30s",
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 8420,
+      "successfulRequests": 8386,
+      "failedRequests": 34,
+      "httpErrorRequests": 30,
+      "noResponseRequests": 4,
+      "cancelledRequests": 0,
+      "errorRate": 0.4,
+      "totalDurationSeconds": 120.0,
+      "avgRps": 70.17,
+      "testDuration": 120.0,
+      "sendRate": 70.17,
+      "throughput": 70.17,
+      "setupOverhead": 0.2,
+      "peakConcurrency": 100,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 1262000,
+      "bytesReceived": 20100000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 167500
+    },
+    "latency": {
+      "min": 8.0,
+      "max": 1450.0,
+      "avg": 230.0,
+      "median": 201.0,
+      "p50": 201.0,
+      "p75": 280.0,
+      "p90": 402.0,
+      "p95": 512.0,
+      "p99": 910.0,
+      "p999": 1320.0
+    },
+    "statusCodes": {
+      "200": 8386,
+      "429": 30
+    },
+    "errors": {
+      "total": 34,
+      "withDetails": 34,
+      "types": {
+        "timeout": 4
+      },
+      "byStatusCode": {
+        "429": 30
+      }
+    },
+    "scenario": {
+      "iterations": 2105,
+      "iterationsCompleted": 2105,
+      "stepsExecuted": 8420,
+      "passed": 8386,
+      "failed": 34,
+      "skipped": 0,
+      "errored": 0,
+      "virtualUsers": 100
+    },
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "latencyP95Ms",
+          "limit": 800,
+          "actual": 512.0,
+          "passed": true,
+          "evaluated": true
+        }
+      ],
+      "passed": 1,
+      "failed": 0,
+      "verdict": "passed"
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

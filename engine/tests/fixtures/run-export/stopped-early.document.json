@@ -1,0 +1,111 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_e5d117",
+    "reference": "Vayu run \"Search\" (run_e5d117) - load test, GET /search, 2026-10-05T08:10:00Z, stopped",
+    "type": "load",
+    "status": "stopped",
+    "startTime": 1791187800000,
+    "endTime": 1791187803200,
+    "name": "Search",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": true,
+    "reason": "stopped"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/search",
+    "headerNames": [],
+    "paramNames": [
+      "q"
+    ],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "20s",
+      "concurrency": 25,
+      "timeout": "30s",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 1489,
+      "successfulRequests": 1489,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 25,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 3.2,
+      "avgRps": 465.3,
+      "testDuration": 3.2,
+      "sendRate": 465.3,
+      "throughput": 465.3,
+      "setupOverhead": 0.2,
+      "peakConcurrency": 25,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 148900,
+      "bytesReceived": 1900000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 593750
+    },
+    "latency": {
+      "min": 2.9,
+      "max": 188.0,
+      "avg": 52.1,
+      "median": 49.0,
+      "p50": 49.0,
+      "p75": 61.0,
+      "p90": 80.2,
+      "p95": 96.8,
+      "p99": 160.0,
+      "p999": 188.0
+    },
+    "statusCodes": {
+      "200": 1489
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "latencyP99Ms",
+          "limit": 80,
+          "passed": false,
+          "evaluated": false
+        }
+      ],
+      "passed": 0,
+      "failed": 1,
+      "verdict": "failed"
+    }
+  },
+  "comparison": null,
+  "notCarried": [
+    {
+      "code": "request_values",
+      "message": "Header and parameter values and the request body are left out; names, the body mode and its size are kept"
+    }
+  ]
+}
