@@ -1,0 +1,129 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_f00d01",
+    "reference": "Vayu run \"Evil | `name` <script>alert(1)</script> # injected [x](javascript:alert(1)) ![i](http://x.test/y.png) &lt;b&gt; *bold* _under_\" (run_f00d01) - load test, GET /h, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187860000,
+    "name": "Evil | `name` <script>alert(1)</script>\n# injected [x](javascript:alert(1)) ![i](http://x.test/y.png) &lt;b&gt; *bold* _under_",
+    "comment": "comment | with `ticks`\n- not a list <i>x</i>",
+    "baseline": false
+  },
+  "verdict": {
+    "state": "failed",
+    "stoppedEarly": false,
+    "reason": "budgets_missed"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/a|b?q=`x`&r=<s>&lt;&amp;_a_b_",
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "10s",
+      "concurrency": 2,
+      "timeout": "30s",
+      "comment": "ignored: the run's comment is its own member",
+      "followRedirects": true,
+      "maxRedirects": 5,
+      "httpVersion": "auto",
+      "acceptEncoding": true
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 100,
+      "successfulRequests": 90,
+      "failedRequests": 10,
+      "httpErrorRequests": 10,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 10.0,
+      "totalDurationSeconds": 10.0,
+      "avgRps": 10.0,
+      "testDuration": 10.0,
+      "sendRate": 10.0,
+      "throughput": 10.0,
+      "setupOverhead": 0.2,
+      "peakConcurrency": 2,
+      "droppedRequests": 0,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 10000,
+      "bytesReceived": 20000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 2000
+    },
+    "latency": {
+      "min": 1.0,
+      "max": 9.0,
+      "avg": 3.0,
+      "median": 2.0,
+      "p50": 2.0,
+      "p75": 3.0,
+      "p90": 4.0,
+      "p95": 5.0,
+      "p99": 8.0,
+      "p999": 9.0
+    },
+    "statusCodes": {
+      "200": 90,
+      "500": 10
+    },
+    "errors": {
+      "total": 10,
+      "withDetails": 10,
+      "types": {
+        "bad|type`<img src=x onerror=alert(1)>": 3,
+        "line\nbreak": 2
+      },
+      "byStatusCode": {
+        "500": 10
+      }
+    },
+    "warnings": [
+      {
+        "code": "x|y",
+        "message": "<b>warn</b> | line one\r\nline two line three | `tick`",
+        "names": [
+          "a|b",
+          "`c`",
+          "<d>"
+        ]
+      }
+    ],
+    "thresholdValidation": {
+      "checks": [
+        {
+          "metric": "custom.my|metric.p95",
+          "limit": 5,
+          "actual": 7.5,
+          "passed": false,
+          "evaluated": true
+        }
+      ],
+      "passed": 0,
+      "failed": 1,
+      "verdict": "failed"
+    }
+  },
+  "comparison": null,
+  "notCarried": [
+    {
+      "code": "request_values",
+      "message": "Header and parameter values and the request body are left out; names, the body mode and its size are kept"
+    }
+  ]
+}

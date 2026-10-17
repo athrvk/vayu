@@ -17,7 +17,9 @@
  * keeps the live `MetricsView`.
  *
  * Mutation check: render `MetricsView` for a finished run again (the pre-#2220
- * branch in `index.tsx`) and the finished cases redden.
+ * branch in `index.tsx`) and the finished cases redden. Hand the live header an
+ * `exportRunId` and the Export cases redden: the engine exports only a finished
+ * run (#2139).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -29,8 +31,12 @@ import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
 
+const headerProps = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("./components", () => ({
-	DashboardHeader: () => null,
+	DashboardHeader: (props: Record<string, unknown>) => {
+		headerProps.push(props);
+		return null;
+	},
 	MetricsView: () => <div data-testid="live-metrics" />,
 }));
 
@@ -140,5 +146,28 @@ describe("the dashboard's finished run", () => {
 
 		expect(screen.getByTestId("live-metrics")).toBeInTheDocument();
 		expect(tabNames()).toEqual([]);
+	});
+});
+
+describe("the header's Export target", () => {
+	const lastHeader = () => headerProps[headerProps.length - 1];
+
+	it("names the finished run, with the report's URL and method for its baseline", () => {
+		renderDashboard("completed", reportFor("completed"));
+
+		expect(lastHeader()).toMatchObject({
+			exportRunId: "run_1",
+			exportRequestUrl: "https://api.test/ping",
+			exportRequestMethod: "GET",
+		});
+	});
+
+	it.each([
+		["a streaming run", "running", true],
+		["a finished run whose report has not arrived", "completed", false],
+	] as const)("is not handed to the header for %s", (_name, mode, isStreaming) => {
+		renderDashboard(mode, null, isStreaming);
+
+		expect(lastHeader().exportRunId).toBeUndefined();
 	});
 });

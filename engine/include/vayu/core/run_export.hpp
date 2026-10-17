@@ -21,6 +21,8 @@
  * builder reads nothing, so it is testable without a database.
  */
 
+#include "vayu/core/run_export_markdown.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <array>
@@ -72,7 +74,7 @@ struct RunExportFormat {
 /// Every format the route accepts by name; the first is the default.
 inline constexpr auto RUN_EXPORT_FORMATS = std::to_array<RunExportFormat> ({
 { "json", ".run.json", "application/json", render_run_export_json, "" },
-{ "markdown", ".run.md", "text/markdown", nullptr, "#2131" },
+{ "markdown", ".run.md", "text/markdown", render_run_export_markdown, "#2131" },
 { "html", ".run.html", "text/html", nullptr, "#2135" },
 });
 

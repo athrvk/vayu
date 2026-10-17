@@ -336,7 +336,7 @@ second process to manage, and nothing leaves the machine.
     url = "http://127.0.0.1:9877/mcp"
     ```
 
-**77 tools, 9 resources, 4 prompts.** Inspection (`list_collections`,
+**78 tools, 9 resources, 4 prompts.** Inspection (`list_collections`,
 `get_run_report`, `compare_runs`), execution (`run_request`,
 `run_collection_smoke`), load (`start_load_run`, `stop_run`), and writes
 (full CRUD over collections, saved requests and environments, plus globals and
@@ -435,7 +435,7 @@ persists.
 
     Yes - Vayu hosts an MCP server on `127.0.0.1:9877` and one command registers
     it with Claude Code, Cursor, VS Code or Codex (Zed connects through the stdio
-    CLI). The agent gets 77 tools
+    CLI). The agent gets 78 tools
     across inspection, execution, load runs and writes, behind a host allowlist,
     load caps, and a write toggle that ships off - and while it is off the write
     tools are not listed at all. It can see what you have open (`get_app_focus`),

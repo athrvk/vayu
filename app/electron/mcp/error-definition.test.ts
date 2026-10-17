@@ -58,12 +58,15 @@ describe("the error definition sentence", () => {
 });
 
 describe("tools and resources that return an error count", () => {
-	test.each(["get_live_metrics", "compare_runs", "get_run_report", "get_run_timeseries"])(
-		"%s carries the definition",
-		(name) => {
-			expect(toolDescription(name)).toContain(RUN_ERROR_DEFINITION_SENTENCE);
-		}
-	);
+	test.each([
+		"get_live_metrics",
+		"compare_runs",
+		"get_run_report",
+		"get_run_timeseries",
+		"export_run_report",
+	])("%s carries the definition", (name) => {
+		expect(toolDescription(name)).toContain(RUN_ERROR_DEFINITION_SENTENCE);
+	});
 
 	test("the run report resource carries the definition", () => {
 		expect(RUN_REPORT_RESOURCE.description).toContain(RUN_ERROR_DEFINITION_SENTENCE);

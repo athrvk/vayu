@@ -29,6 +29,7 @@ import { useImportModalStore, useTabsStore, useSaveStore } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
+import { runExportActions, type RunExportAction } from "@/lib/run-export-formats";
 import type { Collection } from "@/types";
 
 const COLLECTION: Collection = { id: "c1", name: "Payments" } as Collection;
@@ -407,6 +408,70 @@ describe("performing", () => {
 		};
 		commandById("run-collection").perform(ctx);
 		expect(runs).toEqual([COLLECTION]);
+	});
+});
+
+/*
+ * The run-export commands (#2139), generated from the export menu's own action
+ * list and delivered through the mounted menu's handler. Mutation check: drop
+ * the `available` gate and the first case reds; give one a chord and the third
+ * does.
+ */
+describe("the run-export commands", () => {
+	const exportIds = runExportActions().map((action) => `export-run-${action.id}`);
+	const runTab: CommandContext = {
+		activeTab: { id: "t1", type: "run", entityId: "run_1" },
+		activeTabLabel: "/orders",
+		activeTabReference: null,
+		activeCollection: null,
+		surfaces: surfaces(),
+	};
+
+	it("exist only while a finished run's menu contributes the export slot", () => {
+		expect(exportIds).toEqual([
+			"export-run-save-json",
+			"export-run-save-markdown",
+			"export-run-copy-markdown",
+		]);
+		const ids = (ctx: CommandContext) => availableCommands(ctx).map((c) => c.id);
+		for (const id of exportIds) {
+			expect(ids(runTab)).not.toContain(id);
+			expect(ids({ ...runTab, surfaces: { ...surfaces(), exportRun: () => {} } })).toContain(
+				id
+			);
+		}
+	});
+
+	it("name the run tab they export, and fall back when nothing knows its label", () => {
+		const command = commandById("export-run-save-json");
+		expect(commandTitle(command, runTab)).toBe('Save "/orders" as JSON');
+		expect(commandTitle(command, { ...runTab, activeTabLabel: null })).toBe(
+			"Save this run as JSON"
+		);
+	});
+
+	it("say copy for the clipboard and save for the file", () => {
+		expect(commandTitle(commandById("export-run-copy-markdown"), runTab)).toBe(
+			'Copy "/orders" as Markdown'
+		);
+		expect(commandTitle(commandById("export-run-save-markdown"), runTab)).toBe(
+			'Save "/orders" as Markdown'
+		);
+	});
+
+	it("declare no chord", () => {
+		for (const id of exportIds) expect(commandById(id).shortcut).toBeUndefined();
+	});
+
+	it("deliver through the contributed handler, with the action they stand for", () => {
+		const delivered: RunExportAction[] = [];
+		const ctx: CommandContext = {
+			...runTab,
+			surfaces: { ...surfaces(), exportRun: (action) => delivered.push(action) },
+		};
+		commandById("export-run-save-json").perform(ctx);
+		commandById("export-run-copy-markdown").perform(ctx);
+		expect(delivered.map((action) => action.id)).toEqual(["save-json", "copy-markdown"]);
 	});
 });
 

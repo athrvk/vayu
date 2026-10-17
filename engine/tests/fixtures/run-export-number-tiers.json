@@ -1,0 +1,335 @@
+{
+  "$comment": "Locale-independent number tiers of the Markdown run report (issue #2131), as (formatter, value, expected). Read by engine/tests/run_export_markdown_test.cpp against vayu::core::format_run_*. 'figure' is a latency in ms or a rate: two decimals below 10 with trailing zeros dropped, whole numbers from 10, '<0.01' for a positive value that would round to 0; 'percent' is one decimal with '<0.1' for a positive value that would round to 0.0; 'bytes' is 1024-based B/KB/MB/GB. A tie rounds away from zero, as Intl.NumberFormat does. The app's formatMs/formatRate/formatErrorPercent (app/src/lib/format-number.ts) follow the same tiers but spell them through Intl, so the host locale decides their separators; this file is the locale-free statement the app formatter should adopt (#2147), replayed there once that issue lands.",
+  "cases": [
+    {
+      "formatter": "figure",
+      "value": 0,
+      "expected": "0"
+    },
+    {
+      "formatter": "figure",
+      "value": 0.004,
+      "expected": "<0.01"
+    },
+    {
+      "formatter": "figure",
+      "value": 0.0099,
+      "expected": "<0.01"
+    },
+    {
+      "formatter": "figure",
+      "value": 0.01,
+      "expected": "0.01"
+    },
+    {
+      "formatter": "figure",
+      "value": 0.42,
+      "expected": "0.42"
+    },
+    {
+      "formatter": "figure",
+      "value": 2.2749,
+      "expected": "2.27"
+    },
+    {
+      "formatter": "figure",
+      "value": 2.5,
+      "expected": "2.5"
+    },
+    {
+      "formatter": "figure",
+      "value": 4,
+      "expected": "4"
+    },
+    {
+      "formatter": "figure",
+      "value": 9.99,
+      "expected": "9.99"
+    },
+    {
+      "formatter": "figure",
+      "value": 9.996,
+      "expected": "10"
+    },
+    {
+      "formatter": "figure",
+      "value": 10,
+      "expected": "10"
+    },
+    {
+      "formatter": "figure",
+      "value": 10.5,
+      "expected": "11"
+    },
+    {
+      "formatter": "figure",
+      "value": 12.5,
+      "expected": "13"
+    },
+    {
+      "formatter": "figure",
+      "value": 12.6,
+      "expected": "13"
+    },
+    {
+      "formatter": "figure",
+      "value": 0.125,
+      "expected": "0.13"
+    },
+    {
+      "formatter": "figure",
+      "value": 2.675,
+      "expected": "2.67"
+    },
+    {
+      "formatter": "figure",
+      "value": 999,
+      "expected": "999"
+    },
+    {
+      "formatter": "figure",
+      "value": 999.6,
+      "expected": "1,000"
+    },
+    {
+      "formatter": "figure",
+      "value": 1234,
+      "expected": "1,234"
+    },
+    {
+      "formatter": "figure",
+      "value": 1234.5,
+      "expected": "1,235"
+    },
+    {
+      "formatter": "figure",
+      "value": 12345.6,
+      "expected": "12,346"
+    },
+    {
+      "formatter": "figure",
+      "value": 1234567,
+      "expected": "1,234,567"
+    },
+    {
+      "formatter": "figure",
+      "value": -2.2749,
+      "expected": "-2.27"
+    },
+    {
+      "formatter": "figure",
+      "value": -12.5,
+      "expected": "-13"
+    },
+    {
+      "formatter": "figure",
+      "value": -0.001,
+      "expected": "0"
+    },
+    {
+      "formatter": "count",
+      "value": 0,
+      "expected": "0"
+    },
+    {
+      "formatter": "count",
+      "value": 1,
+      "expected": "1"
+    },
+    {
+      "formatter": "count",
+      "value": 999,
+      "expected": "999"
+    },
+    {
+      "formatter": "count",
+      "value": 1000,
+      "expected": "1,000"
+    },
+    {
+      "formatter": "count",
+      "value": 29944,
+      "expected": "29,944"
+    },
+    {
+      "formatter": "count",
+      "value": 1234567,
+      "expected": "1,234,567"
+    },
+    {
+      "formatter": "count",
+      "value": 12.5,
+      "expected": "13"
+    },
+    {
+      "formatter": "count",
+      "value": 12.4,
+      "expected": "12"
+    },
+    {
+      "formatter": "count",
+      "value": -3,
+      "expected": "-3"
+    },
+    {
+      "formatter": "percent",
+      "value": 0,
+      "expected": "0.0"
+    },
+    {
+      "formatter": "percent",
+      "value": -5,
+      "expected": "0.0"
+    },
+    {
+      "formatter": "percent",
+      "value": 0.04,
+      "expected": "<0.1"
+    },
+    {
+      "formatter": "percent",
+      "value": 0.049,
+      "expected": "<0.1"
+    },
+    {
+      "formatter": "percent",
+      "value": 0.05,
+      "expected": "0.1"
+    },
+    {
+      "formatter": "percent",
+      "value": 0.1,
+      "expected": "0.1"
+    },
+    {
+      "formatter": "percent",
+      "value": 0.4,
+      "expected": "0.4"
+    },
+    {
+      "formatter": "percent",
+      "value": 2.5,
+      "expected": "2.5"
+    },
+    {
+      "formatter": "percent",
+      "value": 12.34,
+      "expected": "12.3"
+    },
+    {
+      "formatter": "percent",
+      "value": 15,
+      "expected": "15.0"
+    },
+    {
+      "formatter": "percent",
+      "value": 99.95,
+      "expected": "100.0"
+    },
+    {
+      "formatter": "percent",
+      "value": 100,
+      "expected": "100.0"
+    },
+    {
+      "formatter": "percent",
+      "value": 1234.56,
+      "expected": "1,234.6"
+    },
+    {
+      "formatter": "bytes",
+      "value": 0,
+      "expected": "0 B"
+    },
+    {
+      "formatter": "bytes",
+      "value": -1,
+      "expected": "0 B"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1,
+      "expected": "1 B"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1023,
+      "expected": "1,023 B"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1024,
+      "expected": "1.0 KB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1536,
+      "expected": "1.5 KB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1048575,
+      "expected": "1,024.0 KB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1048576,
+      "expected": "1.0 MB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 2995200,
+      "expected": "2.9 MB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 38400000,
+      "expected": "36.6 MB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 1073741824,
+      "expected": "1.0 GB"
+    },
+    {
+      "formatter": "bytes",
+      "value": 5497558138880,
+      "expected": "5,120.0 GB"
+    },
+    {
+      "formatter": "seconds",
+      "value": 0,
+      "expected": "0 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 3,
+      "expected": "3 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 3.2,
+      "expected": "3.2 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 3.25,
+      "expected": "3.3 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 20,
+      "expected": "20 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 119.96,
+      "expected": "120 s"
+    },
+    {
+      "formatter": "seconds",
+      "value": 1234.5,
+      "expected": "1,234.5 s"
+    }
+  ]
+}

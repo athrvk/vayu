@@ -15,13 +15,16 @@ import { z } from "zod";
 import { EngineRequestError } from "../engine-client.js";
 import { compareReports } from "../compare.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "../error-definition.js";
+import { defaultMcpExportFormat, MCP_EXPORT_FORMAT_IDS } from "../run-export-formats.js";
 import { runOutputShape, WITHHELD_RUN_OUTPUT_SENTENCE } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
+	callEngineForRunText,
 	confirmDestructive,
 	confirmedInput,
+	bool,
 	engineErrorResult,
 	errorResult,
 	isRecord,
@@ -35,6 +38,37 @@ import {
 } from "./kit.js";
 import { describeRun, resolveBaseline } from "./run-housekeeping.js";
 import { runComparisonSchema } from "./output-schemas.js";
+
+/** The Export menu's HTML report: a file for a person, which an agent can neither save nor use. */
+const HTML_FORMAT = "html";
+
+const EXPORT_FORMAT_CHOICES: [string, ...string[]] = [HTML_FORMAT, ...MCP_EXPORT_FORMAT_IDS];
+
+/** The `format` argument, refusing HTML and anything the engine does not write for an agent. */
+function exportFormat(args: Record<string, unknown>): string {
+	const format = str(args, "format") ?? defaultMcpExportFormat;
+	if (format === HTML_FORMAT) {
+		throw new ToolArgError(
+			`"html" is not available here: save it from the Export menu in Vayu's History. ` +
+				`An agent cannot save a file, and the HTML would cost context for nothing. ` +
+				`Use one of: ${MCP_EXPORT_FORMAT_IDS.join(", ")}.`
+		);
+	}
+	if (!MCP_EXPORT_FORMAT_IDS.includes(format)) {
+		throw new ToolArgError(
+			`"format" must be one of: ${[...MCP_EXPORT_FORMAT_IDS, HTML_FORMAT].join(", ")}.`
+		);
+	}
+	return format;
+}
+
+/** The document an export answered with, out of the engine's `{ text, fileName, ... }` envelope. */
+function exportedDocument(answer: unknown): string {
+	if (!isRecord(answer) || typeof answer.text !== "string") {
+		throw new Error("The engine's export answer carried no document text.");
+	}
+	return answer.text;
+}
 
 export const RUN_TOOLS: McpTool[] = [
 	{
@@ -233,6 +267,69 @@ export const RUN_TOOLS: McpTool[] = [
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err);
 			}
+		},
+	},
+	{
+		name: "export_run_report",
+		category: "read",
+		invalidates: [],
+		description:
+			"Export a finished load run as one self-contained document: the same report the Export menu in Vayu's History saves, returned as its text (Markdown as Markdown, JSON as JSON) rather than wrapped in a result object. It holds the run's aggregates (latency percentiles, throughput, error rate, status-code mix), its budgets and their verdicts, the configuration it ran under and, with `baseRunId` or `baseline: true`, a comparison against a second run. It does NOT hold traces, captured samples, per-tick series or request values - call get_run_samples for the samples and get_run_report for the live report data. Not offered for Design-mode or collection-sequence runs, and refused while the run is still executing. The `html` format is the Export menu's alone and is refused here. " +
+			RUN_ERROR_DEFINITION_SENTENCE +
+			" " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
+		annotations: {
+			title: "Export run report",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: {
+			runId: z.string().describe("Run ID to export. Must be a finished load run."),
+			format: z
+				.enum(EXPORT_FORMAT_CHOICES)
+				.optional()
+				.describe(
+					`Document format (default ${defaultMcpExportFormat}). "html" is refused: save it from the Export menu in Vayu's History.`
+				),
+			baseRunId: z
+				.string()
+				.optional()
+				.describe("Run to compare against: fills the document's comparison section."),
+			baseline: z
+				.boolean()
+				.optional()
+				.describe(
+					"true compares against the run pinned as baseline for this run's saved request. Not together with baseRunId."
+				),
+		},
+		handler: async (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			const format = exportFormat(args);
+			if (str(args, "baseRunId") && bool(args, "baseline")) {
+				throw new ToolArgError('Pass "baseRunId" or "baseline", not both.');
+			}
+			let baseRunId = str(args, "baseRunId");
+			if (bool(args, "baseline")) {
+				try {
+					baseRunId = await resolveBaseline(runId, ctx, signal);
+				} catch (err) {
+					if (err instanceof ToolArgError) return errorResult(err.message);
+					return engineErrorResult(err);
+				}
+			}
+			return callEngineForRunText(
+				ctx,
+				async () =>
+					exportedDocument(
+						await ctx.client.exportRunReport(
+							runId,
+							{ format, series: "none", baseRunId },
+							signal
+						)
+					),
+				{ signal }
+			);
 		},
 	},
 ];

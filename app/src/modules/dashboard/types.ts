@@ -43,6 +43,14 @@ export interface DashboardHeaderProps {
 	stepCount?: number;
 	/** The run's own line, shown under the identity - see `RunComment`. */
 	comment?: string;
+	/**
+	 * The finished run the header offers to export (#2139), and the report's
+	 * request URL and method its baseline is looked up by. Set only once the
+	 * report is on screen, so a streaming run never mounts the menu.
+	 */
+	exportRunId?: string;
+	exportRequestUrl?: string;
+	exportRequestMethod?: string;
 	elapsedDuration?: number;
 	/**
 	 * The finished run's verdict (`run-outcome.ts`), so a `completed` pill does not
