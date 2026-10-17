@@ -4151,8 +4151,8 @@ cannot word a verdict differently. Then come three charts drawn from
 
 1. Throughput (req/s) and virtual users, two stacked panels sharing the x-axis.
 2. Latency p50, p95 and p99 in ms, with the p95 budget as a labelled dashed line
-   when the run declared one. A budget more than three times the data's peak is
-   named above the chart instead of drawn, so the lines stay readable.
+   when the run declared one. The axis stretches to reach the budget, so a
+   generous budget is drawn however far above the data it lies.
 3. Responses per tick by class: 2xx/3xx, 4xx, 5xx and No response (status code
    0). A tick carries cumulative counts, so each class is drawn as what it
    gained since the previous tick, a count that moved backwards adding nothing.

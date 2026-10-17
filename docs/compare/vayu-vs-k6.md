@@ -21,7 +21,7 @@ k6 was built for exactly that and Vayu is not trying to be it.
 | **How a test is defined** | The request you built, in the UI | A JavaScript test script |
 | **Load shapes** | Constant rate, constant users, one ramp then hold, fixed request count, automatic capacity search | Arbitrary `stages` and arrival-rate executors |
 | **UI** | Native desktop app | CLI only |
-| **Live metrics** | Streamed over SSE into a live dashboard | Terminal output, or an external dashboard |
+| **Live metrics** | Streamed over SSE into a live dashboard | Terminal summary, a built-in web dashboard (`K6_WEB_DASHBOARD=true`), or an external dashboard |
 | **Shareable run summary** | One-file HTML report with charts, a Markdown summary and JSON, from the Export menu\*\* | Built-in web dashboard, exportable as an HTML file; JSON summary export |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) |
 | **Distributed / cloud execution** | No - single machine | Yes |
@@ -43,11 +43,9 @@ in both PEM-pair and PKCS#12 form. Detail:
 [TLS trust](../engine/api-reference.md#tls-trust-settings) and
 [client certificates](../engine/api-reference.md#client-certificates).
 
-\*\* **What the file leaves out.** The exported report is built from the run's
-aggregates and time series, never its traces or samples: header and parameter
-values, the body and anything a script or response wrote are not in it, and a
-URL's credentials are dropped. The HTML page has no script and loads nothing, so
-it opens the same from a file, an email attachment or a ticket. Detail:
+\*\* **What the file leaves out.** The report holds aggregates and time series
+only, never traces, samples or request values, and the HTML page runs no script
+and loads nothing. Detail:
 [the HTML report](../engine/api-reference.md#the-html-report).
 
 k6 scripts do not import. Bring the OpenAPI spec or Postman collection the

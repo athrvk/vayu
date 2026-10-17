@@ -130,7 +130,7 @@ figure { margin: 0 0 1.25rem; }
 figcaption { margin-bottom: 0.25rem; font-weight: 600; }
 .chart-note { color: var(--muted); font-size: 0.85rem; }
 svg.chart { display: block; width: 100%; height: auto; }
-svg .tick, svg .axis-title, svg .note { fill: var(--muted); font-size: 11px; }
+svg .tick, svg .axis-title { fill: var(--muted); font-size: 11px; }
 svg .direct { fill: var(--text); font-size: 11px; }
 svg .grid { fill: none; stroke: var(--grid); stroke-width: 1; }
 svg .axis { fill: none; stroke: var(--axis); stroke-width: 1; }

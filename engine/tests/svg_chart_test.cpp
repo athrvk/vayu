@@ -13,7 +13,8 @@
  *
  * Mutation checks: thin by taking every Nth sample and the spike case reds;
  * start an axis at the data's minimum and the zero-axis case reds; drop the
- * `safe` wrapper from a label and the escaping case reds.
+ * `safe` wrapper from a label and the escaping case reds; skip the reference
+ * line when it lies far above the data and the far-budget case reds.
  */
 
 #include <gtest/gtest.h>
@@ -258,14 +259,21 @@ TEST (SvgChartTest, ABudgetInsideTheScaleIsALabelledLineAndStretchesTheAxisToIt)
     EXPECT_EQ (y_labels_bottom_up (svg).back (), "300");
 }
 
-TEST (SvgChartTest, ABudgetFarAboveTheDataIsNamedNotDrawnSoTheLinesStayReadable) {
+TEST (SvgChartTest, ABudgetFarAboveTheDataIsStillDrawnAndTheAxisReachesIt) {
     Chart chart = one_panel ("Latency (ms)",
     { series_of ("p95", "p95", per_second (10, [] (std::size_t) { return 100.0; }), " ms") });
-    chart.panels.front ().reference = ChartReference{ "p95 budget 5,000 ms", 5000.0 };
+    chart.panels.front ().reference = ChartReference{ "p95 budget 500 ms", 500.0 };
     const auto svg = render_svg_chart (chart);
-    EXPECT_EQ (svg.find ("<path class=\"ref\""), std::string::npos);
-    EXPECT_NE (svg.find ("p95 budget 5,000 ms, above this scale"), std::string::npos) << svg;
-    EXPECT_EQ (y_labels_bottom_up (svg).back (), "100");
+    EXPECT_NE (svg.find ("<path class=\"ref\""), std::string::npos) << svg;
+    EXPECT_NE (svg.find (">p95 budget 500 ms</text>"), std::string::npos) << svg;
+    EXPECT_EQ (svg.find ("above this scale"), std::string::npos);
+    const auto labels = y_labels_bottom_up (svg);
+    EXPECT_EQ (labels.front (), "0");
+    EXPECT_EQ (labels.back (), "500");
+    // The series is still there, drawn at its own value on the stretched axis.
+    const auto values = drawn_values (svg, "p95");
+    ASSERT_EQ (values.size (), 10U);
+    EXPECT_NEAR (values.front (), 100.0, 0.5);
 }
 
 } // namespace

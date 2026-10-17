@@ -53,11 +53,9 @@ cookie manager, a protocol Vayu's HTTP engine does not speak) is counted by
 its own class name rather than silently dropped. Detail:
 [the JMeter import doc](../app/import-collections/jmeter.md).
 
-\*\*\* **What the file leaves out.** The exported report is built from the run's
-aggregates and time series, never its traces or samples: header and parameter
-values, the body and anything a script or response wrote are not in it, and a
-URL's credentials are dropped. The HTML page has no script and loads nothing, so
-it opens the same from a file, an email attachment or a ticket. Detail:
+\*\*\* **What the file leaves out.** The report holds aggregates and time series
+only, never traces, samples or request values, and the HTML page runs no script
+and loads nothing. Detail:
 [the HTML report](../engine/api-reference.md#the-html-report).
 
 ## The engine, and what it does not cost you

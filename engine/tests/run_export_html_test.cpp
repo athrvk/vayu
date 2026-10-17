@@ -523,6 +523,24 @@ TEST (RunExportHtmlTest, TheP95BudgetIsALabelledLineOnlyWhenTheRunDeclaredOne) {
     EXPECT_EQ (charts_of (none).find ("class=\"ref\""), std::string::npos);
 }
 
+TEST (RunExportHtmlTest, AP95BudgetFarAboveEveryLatencyIsStillDrawnAndTheAxisReachesIt) {
+    ordered_json document = read_document ("healthy-passed");
+    document["report"]["thresholdValidation"]["checks"][0]["limit"] = 5000;
+    const std::string html = render_run_export_html (document);
+    EXPECT_NE (html.find ("<path class=\"ref\""), std::string::npos);
+    EXPECT_NE (html.find (">p95 budget 5,000 ms</text>"), std::string::npos);
+    EXPECT_EQ (html.find ("above this scale"), std::string::npos);
+
+    std::string_view latency;
+    for (const std::string_view panel : panels_in (html)) {
+        if (panel.find (">Latency (ms)</text>") != std::string_view::npos) {
+            latency = panel;
+        }
+    }
+    ASSERT_FALSE (latency.empty ());
+    EXPECT_EQ (y_labels_bottom_up (latency).back (), "5,000");
+}
+
 TEST (RunExportHtmlTest, ARunWithNoSeriesHasNoChartsAndSaysSo) {
     ordered_json document = read_document ("healthy-passed");
     document.erase ("timeSeries");

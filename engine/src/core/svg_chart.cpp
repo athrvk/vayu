@@ -19,7 +19,6 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
-#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -74,10 +73,6 @@ constexpr double LABEL_GAP    = 13.0;
 
 constexpr int MAX_Y_INTERVALS = 5;
 constexpr int MAX_X_INTERVALS = 6;
-
-/// A reference line farther above the data than this multiple of its peak would
-/// flatten the series into the floor, so it is named but not drawn.
-constexpr double REFERENCE_SCALE_LIMIT = 3.0;
 
 std::string coordinate (double value) {
     return std::format ("{:.1f}", value);
@@ -283,35 +278,20 @@ double peak_of (const ChartPanel& panel) {
     return peak;
 }
 
-/// Whether @p reference is drawn on a scale that fits @p peak.
-bool reference_fits (const ChartReference& reference, double peak) {
-    return reference.value <= peak * REFERENCE_SCALE_LIMIT;
-}
-
-/// The reference line, or - when it lies above the scale - a note saying so.
+/// The reference line, labelled at its end like a series. A declared budget is
+/// always drawn, so the axis reaches it however far above the data it lies.
 std::string reference_markup (const Frame& frame,
 const ChartReference& reference,
-bool fits,
 std::vector<EndLabel>& labels) {
-    if (!fits) {
-        return "<text class=\"note\" x=\"" + coordinate (LEFT + PLOT_WIDTH) +
-        "\" y=\"" + coordinate (frame.top_px - 8) + "\" text-anchor=\"end\">" +
-        safe (reference.label + ", above this scale") + "</text>";
-    }
-    const std::string y = coordinate (frame.y_of (reference.value));
-    labels.push_back ({ reference.label, "ref", frame.y_of (reference.value) });
-    return "<path class=\"ref\" d=\"M" + coordinate (LEFT) + " " + y + "H" +
-    coordinate (LEFT + PLOT_WIDTH) + "\"/>";
+    const double y_px = frame.y_of (reference.value);
+    labels.push_back ({ reference.label, "ref", y_px });
+    return "<path class=\"ref\" d=\"M" + coordinate (LEFT) + " " +
+    coordinate (y_px) + "H" + coordinate (LEFT + PLOT_WIDTH) + "\"/>";
 }
 
-/// The value the y-axis must reach: the data's peak, and the reference when it
-/// is drawn.
+/// The value the y-axis must reach: the data's peak, or the reference if higher.
 double axis_peak (const ChartPanel& panel, double peak) {
-    const std::optional<ChartReference>& reference = panel.reference;
-    if (!reference || !reference_fits (*reference, peak)) {
-        return peak;
-    }
-    return std::max (peak, reference->value);
+    return panel.reference ? std::max (peak, panel.reference->value) : peak;
 }
 
 std::string panel_markup (const ChartPanel& panel, double top_px, double x_max) {
@@ -325,8 +305,7 @@ std::string panel_markup (const ChartPanel& panel, double top_px, double x_max) 
         out += series_markup (frame, series, labels);
     }
     if (panel.reference) {
-        out += reference_markup (frame, *panel.reference,
-        reference_fits (*panel.reference, peak), labels);
+        out += reference_markup (frame, *panel.reference, labels);
     }
     return out + labels_markup (labels, frame) + "</g>";
 }
