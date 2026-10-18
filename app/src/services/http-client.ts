@@ -33,7 +33,7 @@ export class ApiError extends Error {
 }
 
 /**
- * The engine did not answer at all: the connection was refused or dropped, or
+ * No answer came back from the engine at all: the connection was refused or dropped, or
  * the call ran out of time before any response arrived.
  *
  * Its own class, not a bare `Error`, because what it means depends on when it

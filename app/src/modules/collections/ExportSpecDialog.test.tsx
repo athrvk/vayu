@@ -28,6 +28,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { withQueryClient } from "@/test/query-wrapper";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import type { Collection, ExportNotes, SpecExportRequest, SpecExportResponse } from "@/types";
 
 const exportSpec = vi.hoisted(() =>
@@ -387,6 +388,14 @@ describe("ExportSpecDialog", () => {
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true
 		);
+	});
+
+	it("names Vayu's engine and a next step when the failure carries no sentence", async () => {
+		exportSpec.mockRejectedValue(new Error(""));
+		open();
+
+		expect(await screen.findByText("Couldn't assemble the document")).toBeTruthy();
+		expect(screen.getByText(new RegExp(ENGINE_NO_ANSWER))).toBeTruthy();
 	});
 
 	it("keeps the summary on screen while the other format assembles", async () => {

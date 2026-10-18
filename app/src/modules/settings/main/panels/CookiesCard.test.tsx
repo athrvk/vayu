@@ -142,14 +142,14 @@ describe("CookiesCard", () => {
 		expect(mutateAsync).toHaveBeenCalledWith(undefined);
 	});
 
-	it("says the jar is unknown when the engine did not answer, rather than empty", () => {
+	it("says the jar is unknown when the engine did not answer, rather than empty, with a next step", () => {
 		queryResult = { isError: true };
 		render(<CookiesCard />);
 
 		// "No cookies stored" would be a claim the app cannot make here, and the
 		// one that stops someone looking for the session that is still live.
 		expect(screen.queryByText(/no cookies stored/i)).not.toBeInTheDocument();
-		expect(screen.getByText(/did not answer/i)).toBeInTheDocument();
+		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 	});
 
 	it("renders no verdict until the query settles", () => {

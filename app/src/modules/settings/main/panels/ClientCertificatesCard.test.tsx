@@ -305,13 +305,13 @@ describe("ClientCertificatesCard", () => {
 		);
 	});
 
-	it("says the engine did not answer rather than showing an empty registry", () => {
+	it("says the engine did not answer, with a next step, rather than showing an empty registry", () => {
 		queryResult = { data: undefined, isError: true };
 		renderCard();
 
 		// "No certificates registered" here would be a claim the card cannot
 		// make - an unreachable engine holds whatever it holds.
-		expect(screen.getByText(/did not answer/i)).toBeInTheDocument();
+		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
 	});
 

@@ -52,6 +52,7 @@ import {
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useCopy } from "@/hooks/useCopy";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { downloadTextFile } from "@/lib/download-text-file";
 import { usePostmanExportQuery } from "@/queries/exports";
 import type { Collection, PostmanExportNotes } from "@/types";
@@ -172,7 +173,7 @@ export default function ExportPostmanDialog({
 /** The engine's sentence when it sent one, else the transport's. */
 function errorText(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
-	return message || "The engine did not answer.";
+	return message || ENGINE_NO_ANSWER;
 }
 
 /**

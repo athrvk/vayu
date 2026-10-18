@@ -32,6 +32,7 @@ import { useState } from "react";
 import { HardDriveDownload, Loader2 } from "lucide-react";
 
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { apiService } from "@/services";
@@ -77,9 +78,9 @@ export function WorkspaceBackupCard() {
 			const isAlreadyRunning = error instanceof ApiError && error.statusCode === 409;
 			const message = isAlreadyRunning
 				? "A backup is already running - it will finish on its own."
-				: error instanceof Error
+				: error instanceof Error && error.message
 					? error.message
-					: "The engine did not answer";
+					: ENGINE_NO_ANSWER;
 			setFailure(message);
 			// The 409 case above isn't a failure, so it gets no error toast -
 			// the inline message already says the backup will finish on its own.
