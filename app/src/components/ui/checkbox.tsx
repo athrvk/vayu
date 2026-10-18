@@ -30,8 +30,10 @@ import { cn } from "@/lib/utils";
  * `size-target`).
  *
  * The checked-state color is the caller's via `className` -
- * `checked:bg-primary checked:border-primary` by default, overridable (e.g.
- * the variables table's per-scope accent) since `cn()` resolves the conflict.
+ * `checked:bg-primary-fill checked:border-primary-fill` by default (a white
+ * mark sits on it, so it is the fill token, not the brightened dark `--primary`),
+ * overridable (e.g. the variables table's per-scope accent) since `cn()`
+ * resolves the conflict.
  */
 export type CheckboxProps = Omit<React.ComponentProps<"input">, "type" | "size">;
 
@@ -57,7 +59,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
 					// adds any to a large one, and Square (`--radius: 0`) is unaffected
 					// at every size.
 					"peer inline-flex shrink-0 cursor-pointer appearance-none rounded-[min(var(--radius-md),25%)] border border-input bg-background transition-colors",
-					"checked:border-primary checked:bg-primary",
+					"checked:border-primary-fill checked:bg-primary-fill",
 					"focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1",
 					"disabled:cursor-not-allowed disabled:opacity-50",
 					className

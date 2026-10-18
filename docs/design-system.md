@@ -151,8 +151,9 @@ The accent is **split into two tokens** to resolve a contrast bind:
   label (`bg-primary-fill`). Kept deep in **both** modes so white text clears
   AA-large (a brightened dark accent would fail white-on-fill).
 
-Rule: white-labelled solid fills use `bg-primary-fill`; everything else accent
-uses `--primary`. `--primary-foreground` (white) sits on the fill.
+Rule: white-labelled solid fills use `bg-primary-fill` - a checked checkbox
+under its white check and an on switch under its thumb included (#2305);
+everything else accent uses `--primary`. `--primary-foreground` (white) sits on the fill.
 
 ```css
 /* Sunset (the values below; the default scheme is Ocean) */
@@ -495,7 +496,16 @@ the strongest available in both themes (1.356 light / 1.343 dark). The
 treatment.
 | switch **off** track vs card | 1.55 | 1.28 | failed |
 | switch off **thumb** vs its track | 1.41 | 12.35 | failed in light |
-| switch **on** track vs card | 5.39 | 5.89 | passes |
+| switch **on** track vs card | 5.41 | 3.20 | passes |
+| switch on **thumb** vs its track | 4.93 | 4.93 | passes |
+
+The on rows are the default scheme (Ocean) with the track on `bg-primary-fill`.
+They used to read `--primary`, which brightens in dark: the track was 5.89
+against the card but only 2.94 under the white thumb. `checked-control-contrast.test.ts`
+holds the thumb and the checkbox's check at 3.0 on the fill in every dark scheme.
+The track against the card is the weaker half of the new pair and is not held:
+`aurora` measures 2.98 in dark, where the thumb's own 5.29 and its position
+carry the state.
 
 The focus ring needed no work, which is the one that matters most for keyboard
 users - worth knowing so nobody "fixes" it.
@@ -933,7 +943,8 @@ it holds **one value in both themes**, so the white label on it never changes
 contrast. `--primary` is the accent as *text*, focus ring, `--variable` and
 `--chart-1`; it brightens in dark mode because those all sit on a near-black
 card and have to read there. Every bare `bg-primary` in the app is a translucent
-wash (`/10`, `/15`, `/30`), never a solid fill under white text.
+wash (`/10`, `/15`, `/30`) or a solid with no text on it - `Progress`'s bar
+(`progress.tsx`), a label-less strip - never a solid fill under white text.
 
 Pinning `--primary` to its light value would look like a contrast fix and is in
 fact a regression: accent *text* on the dark card would fall from APCA Lc 44–69
