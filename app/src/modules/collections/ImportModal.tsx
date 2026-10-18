@@ -1213,13 +1213,15 @@ function PreviewView({
 						{meta.fileName}
 					</span>
 				)}
-				<button
-					className="ml-auto text-muted-foreground hover:text-foreground"
+				<Button
+					size="icon"
+					variant="ghost"
+					className="ml-auto -my-1"
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
 					<X className="size-icon-sm" />
-				</button>
+				</Button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{collections.map((c, i) => (
@@ -1308,13 +1310,15 @@ function BatchLedger({
 				<span className="text-label text-muted-foreground">
 					{selected} selected for import
 				</span>
-				<button
-					className="ml-auto text-muted-foreground hover:text-foreground"
+				<Button
+					size="icon"
+					variant="ghost"
+					className="ml-auto -my-1"
 					onClick={onDismiss}
 					aria-label="Dismiss"
 				>
 					<X className="size-icon-sm" />
-				</button>
+				</Button>
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{entries.map((entry) => (

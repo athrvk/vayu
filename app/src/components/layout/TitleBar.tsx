@@ -105,14 +105,14 @@ function WindowControls() {
 		>
 			<button
 				onClick={() => window.electronAPI?.windowMinimize()}
-				className="h-full px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
+				className="h-full min-w-target px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
 				aria-label="Minimize"
 			>
 				<Minus className="size-icon text-foreground/70" />
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowMaximize()}
-				className="h-full px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
+				className="h-full min-w-target px-3 hover:bg-muted/50 transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center"
 				aria-label={isMaximized ? "Restore" : "Maximize"}
 			>
 				{isMaximized ? (
@@ -123,7 +123,7 @@ function WindowControls() {
 			</button>
 			<button
 				onClick={() => window.electronAPI?.windowClose()}
-				className="h-full px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
+				className="h-full min-w-target px-3 hover:bg-destructive hover:text-destructive-foreground transition-[background-color,color,border-color,opacity,scale] duration-150 active:scale-[0.98] flex items-center justify-center group"
 				aria-label="Close"
 			>
 				<X

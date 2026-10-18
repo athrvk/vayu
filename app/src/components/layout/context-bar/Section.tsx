@@ -38,10 +38,10 @@ interface ContextBarSectionFrameProps {
 /**
  * The width of the chevron's column, shared with the empty header's blank stand-in
  * for it below - the one thing that keeps every section title on the same left
- * edge whether or not its section can be opened. Two hardcoded `w-3`s would line
+ * edge whether or not its section can be opened. Two separately typed widths would line
  * up until one of them changed.
  */
-const CHEVRON_COLUMN = "w-3";
+const CHEVRON_COLUMN = "w-icon-sm";
 
 export function ContextBarSectionFrame({
 	title,
@@ -61,12 +61,12 @@ export function ContextBarSectionFrame({
 			>
 				{expanded ? (
 					<ChevronDown
-						className={cn(CHEVRON_COLUMN, "h-3 shrink-0")}
+						className={cn(CHEVRON_COLUMN, "h-icon-sm shrink-0")}
 						data-icon-motion={ICON_MOTION.nudgeY}
 					/>
 				) : (
 					<ChevronRight
-						className={cn(CHEVRON_COLUMN, "h-3 shrink-0")}
+						className={cn(CHEVRON_COLUMN, "h-icon-sm shrink-0")}
 						data-icon-motion={ICON_MOTION.nudgeX}
 					/>
 				)}

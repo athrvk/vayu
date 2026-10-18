@@ -688,7 +688,7 @@ export default function SettingsMain() {
 								<CardTitle>{entry.label}</CardTitle>
 								{needsRestart && (
 									<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-micro font-semibold border border-warning/30 bg-warning/15 text-warning-text">
-										<RefreshCw className="w-2.5 h-2.5" />
+										<RefreshCw className="size-icon-sm" />
 										Restart required
 									</span>
 								)}

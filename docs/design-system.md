@@ -1247,6 +1247,21 @@ rather than a translation. `size-icon` was wrong for them - each sits beside
 `text-sm` or smaller text, which is why it was written under the default in
 the first place.
 
+**A glyph is `size-icon` or `size-icon-sm`; 12px is the floor** (same test,
+issue #2304). The 3.5 ban read one shape, so glyphs that `--spacing` draws under
+the floor (`size-3` is 9px at Default, `h-2.5 w-2.5` 7.5px) or that spell a
+length by hand (`w-[15px] h-[15px]`) went unflagged. A lucide icon or
+`RunStatusGlyph` whose own `className` carries `size-N`, `h-N` or `w-N` for
+N <= 3 (half steps included), or an arbitrary `w-[Npx]` / `h-[Npx]`, now fails.
+Only the glyph's own className is read: a `<span>` dot, a skeleton bar and a
+solid `fill-current` Circle are shapes the control sizes, not icons. Two glyphs
+stay at 7.5px by design and are listed with their reason in
+`SMALL_GLYPH_ALLOWED`: `InfoChip`'s "i" (inside the chip's own 12px dot) and the
+`ResizableHandle` grip (inside a handle box that carries its own border). The
+entry is a path and an exact tag count, and the test fails when the file stops
+carrying that many, so an entry cannot outlive its glyph. A new exception means
+a new entry with its reason, not a looser regex.
+
 *Superseded decision (issue #1670, kept for history): the shrink applied to
 icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
 Default and `w-3 h-3` read 9px, both checked by eye against a live render.
@@ -1353,7 +1368,7 @@ below.
 | `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu), `InfoChip` (as an `after:` hit box behind its 12px dot) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
-| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693; `size-3` and anything smaller on a glyph since #2304) |
 
 `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
 theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
@@ -1381,25 +1396,44 @@ glyph step is 12-16px, and on a `Button` it replaces `size-target`. A glyph
 passed in an `icon={...}` prop or a `[&_svg]:size-icon-sm` descendant is not the
 box; a small visible dot keeps its size and states the floor as an
 `after:size-target` hit area, as `InfoChip` and `TabItem`'s close button do. It
-also flags a bare `h-8` on those tags (#1912): 24px clears the floor, but it is
-the pre-density literal a control no longer states (`w-8` and `size-8` are
-fine). The one place `h-8` stays is a single-line drawer row (see "Drawer Row
-Metric" below): those are `<div>`s outside the tag set, plus the Settings
-drawer's category rows, which are hand-rolled `<button>`s. The test counts them
-per file in `DRAWER_ROW_BUTTONS` (one tag in `SettingsCategoryTree.tsx`): a
-further `h-8` in that file is an offence, and an entry that stops matching
-exactly that many tags fails the test. A compact text button or select trigger
-states `h-control-sm`, an icon button `size-target`, or `size-control-sm` when
-it sits beside a `control-sm` field and has to span it (the variables table's
-row buttons, the popover's reveal eye; `lib/utils.ts` teaches `cn()` that it
-replaces `size-target`). The text fields are scanned too, by a rule of their own
-(#1830): **a text field states its size, never its height.** `Input`,
-`VariableInput` and `SecretInput` take `size` from three of these tokens (the
-map is `input-size.ts`, shared so the two kinds of field cannot drift), and
-their `className` carries no height class of any kind (`h-N`, `h-[...]`, a
-fraction, `h-full`, `h-control*`, `size-N`; `min-h` and `max-h` are fine).
-UrlInput is the one text field that is a band component, not a control: it
-fills the min-h-band-md URL bar, so its h-full is correct.
+also flags a bare `h-8` or `h-9` on those tags (#1912, #2304): `h-8` is 24px and
+clears the floor, but it is the pre-density literal a control no longer states;
+`h-9` is the 27px `Button` default `h-control` replaced, and a `SelectTrigger`
+carrying it sits proud of the `Input` beside it (`w-8` and `size-8` are fine).
+A third rule is about shape, not a number (#2304): **a plain `<button>` whose
+only content is a lucide glyph states a 24px box on its own `className`**, since
+otherwise it is as wide as the 12px or 16px glyph. The accepted statements are
+`size-target` or `size-full`, an `after:size-target` hit area, or one height
+token (`h-target`, `min-h-target`, `h-control*`, `h-band*`, `h-full`) beside one
+width token (`w-target`, `min-w-target`, `w-full`); an `sr-only` label or a
+ternary between two glyphs still counts as glyph-only. Use `Button size="icon"`
+or `TooltipIconButton` where the control is a real button. The two in-row
+controls of the GraphQL schema tree (the expand chevron and "Show in the tree")
+are the exception: the row is a dense 18px line (`min-h-6`), so a 24px box would
+grow every expandable row and shift its label against the leaf rows, and each is
+a mouse affordance beside the tree's keyboard path (`tabIndex={-1}`). The test
+counts them per file in `BOXLESS_GLYPH_BUTTONS` (two tags in
+`SchemaExplorer.tsx`), spent first-come exactly like `DRAWER_ROW_BUTTONS`: a
+third glyph-only button in that file is an offence, and an entry that stops
+matching exactly that many tags fails the test. A box that arrives in a variable
+is invisible to the scan, so state it inline. The one place `h-8` stays is a
+single-line drawer row (see "Drawer Row Metric" below): those are `<div>`s
+outside the tag set, plus the Settings drawer's category rows, which are
+hand-rolled `<button>`s. The test counts them per file in `DRAWER_ROW_BUTTONS`
+(one tag in `SettingsCategoryTree.tsx`; the exemption covers `h-8` only, never
+`h-9`): a further `h-8` in that file is an offence, and an entry that stops
+matching exactly that many tags fails the test. A compact text button or select
+trigger states `h-control-sm`, an icon button `size-target`, or
+`size-control-sm` when it sits beside a `control-sm` field and has to span it
+(the variables table's row buttons, the popover's reveal eye; `lib/utils.ts`
+teaches `cn()` that it replaces `size-target`). The text fields are scanned too,
+by a rule of their own (#1830): **a text field states its size, never its
+height.** `Input`, `VariableInput` and `SecretInput` take `size` from three of
+these tokens (the map is `input-size.ts`, shared so the two kinds of field
+cannot drift), and their `className` carries no height class of any kind
+(`h-N`, `h-[...]`, a fraction, `h-full`, `h-control*`, `size-N`; `min-h` and
+`max-h` are fine). UrlInput is the one text field that is a band component, not
+a control: it fills the min-h-band-md URL bar, so its h-full is correct.
 
 | `size` | Token | Default | Comfortable | Use |
 |--------|-------|---------|-------------|-----|

@@ -448,7 +448,10 @@ export function SelectSettingRow({
 			<Select value={value} onValueChange={onChange} disabled={disabled}>
 				<SelectTrigger
 					id={triggerId}
-					className={cn("text-sm", compact ? "h-control-sm w-full" : "h-9 max-w-[12rem]")}
+					className={cn(
+						"text-sm",
+						compact ? "h-control-sm w-full" : "h-control max-w-[12rem]"
+					)}
 					aria-label={label}
 					aria-describedby={description ? descriptionId : undefined}
 				>
