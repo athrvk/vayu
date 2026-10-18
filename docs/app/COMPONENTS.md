@@ -2063,7 +2063,7 @@ map to the same row primitives - `NumberSettingRow` / `SelectSettingRow` /
 nesting for a kind whose config groups two fields (`assert.status.range`'s
 `{min, max}`). **Labels come from the schema's own `title` and `description`**
 (issue #1607), not the raw property key - `control.throughput`'s `everyN`
-reads "Every Nth", not `everyN`. A `required` property renders before an
+reads "Every nth", not `everyN`. A `required` property renders before an
 optional one; a property carrying `x-vayu-group: "advanced"` renders instead
 under a disclosure, closed on mount unless the element already has a value
 for one; `x-vayu-unit` (`"ms"` / `"%"` / `"B"`) becomes the numeric field's

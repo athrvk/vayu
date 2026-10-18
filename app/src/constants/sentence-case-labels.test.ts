@@ -26,7 +26,6 @@ const CAPITALISED_NAMES = new Set([
 	"Postman",
 	"Insomnia",
 	"OpenAPI",
-	"Bearer",
 ]);
 
 /** `API`, `RPS`, `PKCE`, `IDs`: capitals by spelling. */
