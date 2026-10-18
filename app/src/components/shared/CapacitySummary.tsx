@@ -23,9 +23,8 @@
 
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { formatLatency } from "@/lib/format-number";
+import { formatLatency, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, concurrencyUnit } from "@/constants/load-test-modes";
-import { formatRps } from "./run-outcome";
 import type { RunReport } from "@/types/domain";
 
 /**
@@ -129,7 +128,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 							</span>{" "}
 							{concurrencyUnit(capacity.maxHealthyConcurrency ?? 0)} at{" "}
 							<span className="font-mono font-semibold">
-								{formatRps(capacity.maxHealthyRps ?? 0)}
+								{formatRate(capacity.maxHealthyRps ?? 0)}
 							</span>{" "}
 							req/s, with a p99 of{" "}
 							<span className="font-mono font-semibold">
@@ -189,7 +188,7 @@ export function CapacitySummary({ capacity, className }: CapacitySummaryProps) {
 												{level.concurrency}
 											</td>
 											<td className="py-1.5 pr-3 text-right font-mono text-muted-foreground">
-												{formatRps(level.rps)}
+												{formatRate(level.rps)}
 											</td>
 											<td
 												className={cn(

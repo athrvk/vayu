@@ -20,6 +20,7 @@ import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
+import { formatLatency } from "@/lib/format-number";
 import { axisMs, fmtMs } from "./formatters";
 import { hdrPercentileMarkers, pctToX } from "./hdrMarkers";
 
@@ -71,7 +72,7 @@ export function ResponseTimeVsConcurrencyChart({
 				orient: "horizontal",
 				value: sloMs,
 				role: SCATTER_LEGEND.slo.role,
-				label: `SLO ${sloMs}ms`,
+				label: `SLO ${formatLatency(sloMs)}`,
 			},
 		];
 		if (breakpoint?.crossed && breakpoint.concurrency != null) {

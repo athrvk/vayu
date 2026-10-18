@@ -13,8 +13,13 @@
  * presentational reads off {@link DashboardDerived}; InfoChip copy via TOOLTIPS.
  */
 
-import { formatLatency, formatLatencyParts, formatNumber } from "@/lib/format-number";
-import { fmt } from "../format";
+import {
+	formatLatency,
+	formatLatencyParts,
+	formatNumber,
+	formatSeconds,
+} from "@/lib/format-number";
+import { fmtRate } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
 import { computeEta } from "../../utils/computeEta";
@@ -31,7 +36,7 @@ export function ThroughputPerVuStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Throughput per virtual user"
-			value={fmt(perVu, 2)}
+			value={fmtRate(perVu)}
 			unit="req/s"
 			infoTip={TOOLTIPS.throughputPerVu}
 		/>
@@ -45,8 +50,7 @@ export function ElapsedStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Elapsed"
-			value={d.elapsedSeconds.toFixed(1)}
-			unit="s"
+			value={formatSeconds(d.elapsedSeconds)}
 			infoTip={TOOLTIPS.duration}
 		/>
 	);
@@ -62,8 +66,7 @@ export function RemainingEtaStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Remaining (ETA)"
-			value={eta !== null ? Math.round(eta).toString() : "-"}
-			unit={eta !== null ? "s" : undefined}
+			value={eta !== null ? formatSeconds(eta) : "-"}
 			infoTip={TOOLTIPS.remainingEta}
 		/>
 	);

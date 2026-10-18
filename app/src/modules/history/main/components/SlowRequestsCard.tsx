@@ -14,7 +14,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { formatNumber } from "@/lib/format-number";
+import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
 import type { RunReport } from "@/types";
 
 export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["slowRequests"] }) {
@@ -35,11 +35,11 @@ export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["sl
 					</div>
 					<div>
 						<p className="text-sm text-muted-foreground">Threshold</p>
-						<p className="font-bold">{slowRequests.thresholdMs}ms</p>
+						<p className="font-bold">{formatLatency(slowRequests.thresholdMs)}</p>
 					</div>
 					<div>
 						<p className="text-sm text-muted-foreground">Percentage</p>
-						<p className="font-bold">{slowRequests.percentage.toFixed(1)}%</p>
+						<p className="font-bold">{formatPercent(slowRequests.percentage)}%</p>
 					</div>
 				</div>
 				<p className="text-xs text-muted-foreground mt-3">

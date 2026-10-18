@@ -9,8 +9,10 @@
  * A local `formatMs` is a second reading of a latency (#2276): CapacitySummary
  * rounded to one decimal, TransactionsSummary appended its own "ms", and the
  * announcer had a third rule, so one value read three ways and none of them
- * moved to seconds. `lib/format-number.ts` is the only place a duration's
- * digits are decided.
+ * moved to seconds. A local `formatSeconds` is the same defect for a clock
+ * (#2318): the anomaly labels rounded to a tenth beside a latency that printed
+ * two decimals. `lib/format-number.ts` is the only place a duration's digits are
+ * decided.
  */
 
 import { describe, it, expect } from "vitest";
@@ -30,26 +32,36 @@ function sources(dir: string): string[] {
 	});
 }
 
-const LOCAL_FORMAT_MS = /\b(?:function\s+formatMs\b|(?:const|let|var)\s+formatMs\b)/;
+const LOCAL_FORMAT_DURATION =
+	/\b(?:function\s+(?:formatMs|formatSeconds)\b|(?:const|let|var)\s+(?:formatMs|formatSeconds)\b)/;
 
-describe("no module declares its own formatMs", () => {
+describe("no module declares its own formatMs or formatSeconds", () => {
 	const files = sources(srcRoot).filter((f) => f !== sharedHome);
 
 	it("scanned a non-empty tree", () => {
 		expect(files.length).toBeGreaterThan(100);
-		expect(readFileSync(sharedHome, "utf8")).toMatch(/export\s+function\s+formatMs\b/);
+		const home = readFileSync(sharedHome, "utf8");
+		expect(home).toMatch(/export\s+function\s+formatMs\b/);
+		expect(home).toMatch(/export\s+function\s+formatSeconds\b/);
 	});
 
 	it("finds a declaration only in lib/format-number.ts", () => {
 		const offenders = files.filter((f) =>
-			LOCAL_FORMAT_MS.test(stripComments(readFileSync(f, "utf8")))
+			LOCAL_FORMAT_DURATION.test(stripComments(readFileSync(f, "utf8")))
 		);
 		expect(offenders.map((f) => path.relative(srcRoot, f))).toEqual([]);
 	});
 
 	it("would catch the declarations it exists for", () => {
-		expect(LOCAL_FORMAT_MS.test("function  formatMs(ms: number) {}")).toBe(true);
-		expect(LOCAL_FORMAT_MS.test("const formatMs = (ms: number) => ms;")).toBe(true);
-		expect(LOCAL_FORMAT_MS.test("import { formatMs } from '@/lib/format-number';")).toBe(false);
+		expect(LOCAL_FORMAT_DURATION.test("function  formatMs(ms: number) {}")).toBe(true);
+		expect(LOCAL_FORMAT_DURATION.test("const formatMs = (ms: number) => ms;")).toBe(true);
+		expect(LOCAL_FORMAT_DURATION.test("function formatSeconds(s: number) {}")).toBe(true);
+		expect(LOCAL_FORMAT_DURATION.test("const formatSeconds = (s: number) => s;")).toBe(true);
+		expect(LOCAL_FORMAT_DURATION.test("import { formatMs } from '@/lib/format-number';")).toBe(
+			false
+		);
+		expect(
+			LOCAL_FORMAT_DURATION.test("import { formatSeconds } from '@/lib/format-number';")
+		).toBe(false);
 	});
 });

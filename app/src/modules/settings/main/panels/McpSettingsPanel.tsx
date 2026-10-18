@@ -280,7 +280,7 @@ const CAP_FIELDS: CapField[] = [
 	{
 		key: "maxDurationSeconds",
 		label: "Max duration",
-		unit: "sec",
+		unit: "s",
 		description:
 			"Ceiling on how long a load run may last. An iterations run stops on a count and never reads a duration, so Max iterations is what bounds that one.",
 		ceiling: LOAD_TEST_CEILING_BOUNDS.durationSeconds.MAX,

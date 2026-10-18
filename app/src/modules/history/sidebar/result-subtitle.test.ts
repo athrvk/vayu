@@ -5,15 +5,33 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect, vi } from "vitest";
+
+// The formatters build their Intl.NumberFormat at module load, so the locale is
+// pinned before the import below runs rather than left to the host.
+const restoreIntl = vi.hoisted(() => {
+	const Real = Intl.NumberFormat;
+	class EnUsNumberFormat extends Real {
+		constructor(_locale?: string | string[], options?: Intl.NumberFormatOptions) {
+			super("en-US", options);
+		}
+	}
+	Intl.NumberFormat = EnUsNumberFormat as typeof Intl.NumberFormat;
+	return () => {
+		Intl.NumberFormat = Real;
+	};
+});
+
+afterAll(restoreIntl);
+
 import { resultSubtitle } from "./result-subtitle";
 
 describe("resultSubtitle", () => {
 	it.each([
-		[{ rps: 485.2, p95Ms: 42, errorRate: 0 }, "485 req/s · p95 42 ms · 0.0% errors"],
-		[{ rps: 12400, p95Ms: 1500, errorRate: 15.14 }, "12,400 req/s · p95 1.50 s · 15.1% errors"],
-		[{ rps: 4.25 }, "4.3 req/s"],
-		[{ p95Ms: 42, errorRate: 2 }, "p95 42 ms · 2.0% errors"],
+		[{ rps: 485.2, p95Ms: 42, errorRate: 0 }, "485 req/s · p95 42ms · 0.0% errors"],
+		[{ rps: 12400, p95Ms: 1500, errorRate: 15.14 }, "12,400 req/s · p95 1.50s · 15.1% errors"],
+		[{ rps: 4.25 }, "4.25 req/s"],
+		[{ p95Ms: 42, errorRate: 2 }, "p95 42ms · 2.0% errors"],
 		[{ errorRate: 0.01 }, "<0.1% errors"],
 		[{ verdict: "passed" as const }, null],
 		[{}, null],

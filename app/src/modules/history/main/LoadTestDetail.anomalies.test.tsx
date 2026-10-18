@@ -128,7 +128,7 @@ describe("a stored run's Events list", () => {
 		expect(screen.getByText(/p99 4\.3x baseline/)).toBeTruthy();
 		// The window, not just the fact - "when" is the question the summary
 		// cannot answer.
-		expect(screen.getByText("20.0s - 21.0s")).toBeTruthy();
+		expect(screen.getByText("20.00s - 21.00s")).toBeTruthy();
 	});
 
 	it("shows nothing for a clean run", () => {

@@ -115,7 +115,7 @@ describe("detectAnomalies - latency spikes", () => {
 		// Baseline is the median of the 15 ticks before the spike (105…119 → 112),
 		// frozen there rather than recomputed as the window extends.
 		expect(found[0].magnitude).toBeCloseTo(480 / 112, 3);
-		expect(found[0].label).toBe("p99 4.3x baseline for 1s");
+		expect(found[0].label).toBe("p99 4.3x baseline for 1.00s");
 	});
 
 	it("does not report a one-tick spike", () => {
@@ -167,7 +167,7 @@ describe("detectAnomalies - error bursts", () => {
 		expect(found[0].startSeconds).toBe(10);
 		expect(found[0].endSeconds).toBe(11);
 		expect(found[0].magnitude).toBeCloseTo(5, 1);
-		expect(found[0].label).toMatch(/errors 5\.0% of requests for 1s/);
+		expect(found[0].label).toMatch(/errors 5\.0% of requests for 1.00s/);
 	});
 });
 
@@ -179,7 +179,7 @@ describe("detectAnomalies - throughput drops", () => {
 		expect(found).toHaveLength(1);
 		expect(found[0].startSeconds).toBe(25);
 		expect(found[0].endSeconds).toBe(27);
-		expect(found[0].label).toMatch(/throughput 40% of baseline for 2s/);
+		expect(found[0].label).toMatch(/throughput 40\.0% of baseline for 2.00s/);
 	});
 
 	it("does not report a ramp winding down, where concurrency fell with it", () => {

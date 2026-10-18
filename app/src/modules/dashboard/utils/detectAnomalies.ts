@@ -63,6 +63,7 @@
  * makes the equivalence tests fail on the first trim.
  */
 
+import { formatPercent, formatSeconds } from "@/lib/format-number";
 import type { LoadTestMetrics } from "@/types";
 
 export type AnomalyKind = "latency_spike" | "error_burst" | "throughput_drop" | "first_5xx";
@@ -116,11 +117,6 @@ export const MIN_CONSECUTIVE_TICKS = 2;
 
 /** Most anomalies reported; beyond this the list stops being readable. */
 export const MAX_ANOMALIES = 20;
-
-/** Seconds, at the precision a reader can act on: "3s", "0.4s". */
-function formatSeconds(seconds: number): string {
-	return seconds >= 10 ? `${Math.round(seconds)}s` : `${Number(seconds.toFixed(1))}s`;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Per-tick storage                                                            */
@@ -527,7 +523,7 @@ function createBurstDetector(): RuleDetector {
 				startSeconds: elapsedAt(history, firstAbs, run.startAbs),
 				endSeconds: elapsedAt(history, firstAbs, run.endAbs),
 				magnitude: run.peak / ERROR_BURST_RATE,
-				label: `errors ${(run.peak * 100).toFixed(1)}% of requests for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
+				label: `errors ${formatPercent(run.peak * 100)}% of requests for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
 			}));
 		},
 	};
@@ -606,7 +602,7 @@ function createDropDetector(): RuleDetector {
 					// trough can be 0 (throughput stopped entirely) - report that as the
 					// worst possible multiple rather than as Infinity.
 					magnitude: share > 0 ? 1 / share : Number.MAX_SAFE_INTEGER,
-					label: `throughput ${Math.round(share * 100)}% of baseline for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
+					label: `throughput ${formatPercent(share * 100)}% of baseline for ${spanOf(history, firstAbs, run.startAbs, run.endAbs)}`,
 				};
 			});
 		},

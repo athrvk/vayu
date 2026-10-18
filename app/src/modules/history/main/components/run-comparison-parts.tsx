@@ -15,6 +15,7 @@
  */
 
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { METRIC_LABELS, formatValue } from "./run-comparison-format";
 import { deltaVerdict, type ComparabilityWarning, type MetricDelta } from "@/lib/run-compare";
@@ -42,7 +43,7 @@ export function DeltaChange({ metric }: { metric: MetricDelta }) {
 				? metric.delta === null
 					? "vs no baseline value"
 					: `${metric.delta > 0 ? "+" : ""}${formatValue(metric.metric, metric.delta)}`
-				: `${metric.pctChange > 0 ? "+" : ""}${metric.pctChange.toFixed(1)}%`}
+				: `${metric.pctChange > 0 ? "+" : ""}${formatPercent(metric.pctChange)}%`}
 		</span>
 	);
 }

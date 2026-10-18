@@ -52,6 +52,7 @@ import {
 
 import { Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { isErrorStatus } from "@/constants/http-status";
+import { formatLatency } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 
 import { StatusCodeBadge } from "./StatusCodeBadge";
@@ -199,7 +200,7 @@ export function SampledExchange({
 								isSlow && "text-status-stopped-text"
 							)}
 						>
-							{latencyMs.toFixed(1)}ms
+							{formatLatency(latencyMs)}
 						</span>
 
 						<span className="text-xs text-muted-foreground sm:ml-auto">

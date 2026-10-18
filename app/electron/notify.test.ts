@@ -114,7 +114,7 @@ function request(patch: Partial<NotifyRequest> = {}): NotifyRequest {
 	return {
 		kind: "load-run-finished",
 		title: "Load test finished",
-		body: "12,400 requests, p95 210 ms, 0.3% errors",
+		body: "12,400 requests, p95 210ms, 0.3% errors",
 		target: { view: "run", runId: "run_7" },
 		...patch,
 	};

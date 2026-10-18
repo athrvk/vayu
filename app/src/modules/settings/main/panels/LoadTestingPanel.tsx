@@ -74,7 +74,7 @@ const FIELDS: readonly CeilingField[] = [
 	{
 		key: "durationSeconds",
 		setting: appSetting("load-max-duration"),
-		unit: "sec",
+		unit: "s",
 		description:
 			"Upper bound on both Duration and Ramp duration. The default of one hour is a session; the ceiling of one day is the engine's own per-transfer limit.",
 	},

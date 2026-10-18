@@ -31,7 +31,7 @@ vi.mock("@/services/api", () => ({
 type Row = NonNullable<RunReport["results"]>[number];
 
 // The latency is the timestamp offset in hundredths, so a row's identity reads off
-// the screen as "10.0ms" without depending on its number.
+// the screen as "10ms" without depending on its number.
 function row(ts: number, statusCode: number, extra: Partial<Row> = {}): Row {
 	return { timestamp: 1_700_000_000_000 + ts, statusCode, latencyMs: ts / 100, ...extra };
 }
@@ -82,7 +82,7 @@ function renderTab(
 }
 
 const rowNumbers = () => screen.queryAllByText(/^#\d+$/).map((el) => el.textContent);
-const rowLatencies = () => screen.queryAllByText(/^\d+\.\dms$/).map((el) => el.textContent);
+const rowLatencies = () => screen.queryAllByText(/^\d+(?:\.\d+)?ms$/).map((el) => el.textContent);
 const chip = (name: string, count: number) =>
 	screen.getByRole("radio", { name: new RegExp(`^${name}\\s*${count}$`) });
 
@@ -90,14 +90,7 @@ describe("SamplesTab ordering", () => {
 	it("opens oldest first, numbered in that order", () => {
 		renderTab();
 
-		expect(rowLatencies()).toEqual([
-			"10.0ms",
-			"20.0ms",
-			"30.0ms",
-			"40.0ms",
-			"50.0ms",
-			"60.0ms",
-		]);
+		expect(rowLatencies()).toEqual(["10ms", "20ms", "30ms", "40ms", "50ms", "60ms"]);
 		expect(rowNumbers()).toEqual(["#1", "#2", "#3", "#4", "#5", "#6"]);
 	});
 
@@ -133,12 +126,12 @@ describe("SamplesTab status-class chips", () => {
 	});
 
 	it.each([
-		["Errors", 4, ["20.0ms", "30.0ms", "50.0ms", "60.0ms"], ["#2", "#3", "#5", "#6"]],
-		["4xx", 1, ["20.0ms"], ["#2"]],
-		["5xx", 2, ["30.0ms", "60.0ms"], ["#3", "#6"]],
-		["No response", 1, ["50.0ms"], ["#5"]],
-		["Slow", 1, ["40.0ms"], ["#4"]],
-		["All", 6, ["10.0ms", "20.0ms", "30.0ms", "40.0ms", "50.0ms", "60.0ms"], null],
+		["Errors", 4, ["20ms", "30ms", "50ms", "60ms"], ["#2", "#3", "#5", "#6"]],
+		["4xx", 1, ["20ms"], ["#2"]],
+		["5xx", 2, ["30ms", "60ms"], ["#3", "#6"]],
+		["No response", 1, ["50ms"], ["#5"]],
+		["Slow", 1, ["40ms"], ["#4"]],
+		["All", 6, ["10ms", "20ms", "30ms", "40ms", "50ms", "60ms"], null],
 	])("%s narrows to its rows and keeps their numbers", (name, count, latencies, numbers) => {
 		renderTab();
 		// Leave All first so the All case proves a way back, not the default.
@@ -153,8 +146,8 @@ describe("SamplesTab status-class chips", () => {
 	it("marks a slow row's latency, which is what the Slow chip found", () => {
 		renderTab();
 
-		expect(screen.getByText("40.0ms")).toHaveClass("text-status-stopped-text");
-		expect(screen.getByText("30.0ms")).not.toHaveClass("text-status-stopped-text");
+		expect(screen.getByText("40ms")).toHaveClass("text-status-stopped-text");
+		expect(screen.getByText("30ms")).not.toHaveClass("text-status-stopped-text");
 	});
 
 	it("says so when a chip has no rows, and the chips stay", () => {
@@ -174,7 +167,7 @@ describe("SamplesTab status-class chips", () => {
 		fireEvent.click(chip("4xx", 1));
 
 		expect(chip("4xx", 1)).toHaveAttribute("aria-checked", "true");
-		expect(rowLatencies()).toEqual(["20.0ms"]);
+		expect(rowLatencies()).toEqual(["20ms"]);
 	});
 
 	it("reports the visible rows in the badge and the loaded ones against the stored total", () => {
@@ -223,7 +216,7 @@ describe("SamplesTab controlled filter", () => {
 		renderTab(makeReport(), { filter: "5xx" });
 
 		expect(chip("5xx", 2)).toHaveAttribute("aria-checked", "true");
-		expect(rowLatencies()).toEqual(["30.0ms", "60.0ms"]);
+		expect(rowLatencies()).toEqual(["30ms", "60ms"]);
 	});
 
 	it("reports a click and leaves the choice to the owner", () => {
@@ -246,6 +239,6 @@ describe("SamplesTab controlled filter", () => {
 
 		rerender(tab("4xx"));
 
-		expect(rowLatencies()).toEqual(["20.0ms"]);
+		expect(rowLatencies()).toEqual(["20ms"]);
 	});
 });

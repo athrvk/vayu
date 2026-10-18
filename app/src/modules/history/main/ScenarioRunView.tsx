@@ -362,7 +362,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 									className={cn("shrink-0", COUNT_CHIP[outcome])}
 									data-outcome-count={outcome}
 								>
-									{counts[outcome]} {outcome}
+									{formatNumber(counts[outcome])} {outcome}
 								</Badge>
 							</button>
 						);

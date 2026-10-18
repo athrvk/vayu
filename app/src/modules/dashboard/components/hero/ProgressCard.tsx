@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatNumber } from "@/lib/format-number";
+import { formatNumber, formatPercent, formatSeconds } from "@/lib/format-number";
 import { TOOLTIPS } from "../tooltips";
 import { computeEta } from "../../utils/computeEta";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
@@ -29,7 +29,7 @@ export function ProgressCard({
 
 	return (
 		<HeroCardShell label="Progress" tip={TOOLTIPS.progress}>
-			<HeroValue value={pct !== undefined ? pct.toFixed(0) : "-"} unit="%" />
+			<HeroValue value={pct !== undefined ? formatPercent(pct) : "-"} unit="%" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				<span className="text-foreground font-semibold">{formatNumber(requestsSent)}</span>{" "}
 				/{" "}
@@ -38,9 +38,8 @@ export function ProgressCard({
 				</span>{" "}
 				complete · ETA{" "}
 				<span className="text-foreground font-semibold">
-					{eta !== null ? eta.toFixed(0) : "-"}
+					{eta !== null ? formatSeconds(eta) : "-"}
 				</span>
-				s
 			</p>
 			{pct !== undefined && <MiniBar pct={pct} color="hsl(var(--primary))" />}
 		</HeroCardShell>

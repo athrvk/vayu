@@ -86,24 +86,24 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 				   pane rather than a control refusing a value, so it is a Callout -
 				   see the three error levels in docs/design-system.md. */
 				<Callout severity="blocking" title="Every scrape failed">
-					{monitor.failures} of {attempts}. Nothing was recorded, so there is no chart
-					above - check that the monitor URL was reachable from the engine for the life of
-					the run.
+					{formatNumber(monitor.failures)} of {formatNumber(attempts)}. Nothing was
+					recorded, so there is no chart above - check that the monitor URL was reachable
+					from the engine for the life of the run.
 				</Callout>
 			)}
 
 			{monitor.samples > 0 && series.length === 0 && (
 				<Callout severity="warning" title="Scrapes carried no metrics">
-					{monitor.samples} scrape{monitor.samples === 1 ? "" : "s"} succeeded, but none
-					carried the metrics this run asked for - check the metric names against the
-					endpoint&apos;s output.
+					{formatNumber(monitor.samples)} scrape{monitor.samples === 1 ? "" : "s"}{" "}
+					succeeded, but none carried the metrics this run asked for - check the metric
+					names against the endpoint&apos;s output.
 				</Callout>
 			)}
 
 			{monitor.samples > 0 && monitor.failures > 0 && (
 				<Callout severity="warning">
-					{monitor.failures} of {attempts} scrapes failed - the gaps in the chart are
-					those.
+					{formatNumber(monitor.failures)} of {formatNumber(attempts)} scrapes failed -
+					the gaps in the chart are those.
 				</Callout>
 			)}
 
@@ -120,7 +120,8 @@ export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
 						))}
 					</div>
 					<p className="text-xs text-muted-foreground">
-						Over {monitor.samples} scrape{monitor.samples === 1 ? "" : "s"}.
+						Over {formatNumber(monitor.samples)} scrape
+						{monitor.samples === 1 ? "" : "s"}.
 					</p>
 				</>
 			)}

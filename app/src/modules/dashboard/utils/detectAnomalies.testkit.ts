@@ -21,6 +21,7 @@
  * that failure is the point. Do not import it from anything that ships.
  */
 
+import { formatPercent, formatSeconds } from "@/lib/format-number";
 import type { LoadTestMetrics } from "@/types";
 import {
 	type Anomaly,
@@ -70,11 +71,6 @@ function findRuns(length: number, isHot: (i: number) => boolean): Array<[number,
 		if (i - start >= MIN_CONSECUTIVE_TICKS) runs.push([start, i - 1]);
 	}
 	return runs;
-}
-
-/** Seconds, at the precision a reader can act on: "3s", "0.4s". */
-function formatSeconds(seconds: number): string {
-	return seconds >= 10 ? `${Math.round(seconds)}s` : `${Number(seconds.toFixed(1))}s`;
 }
 
 function span(history: LoadTestMetrics[], start: number, end: number): string {
@@ -144,7 +140,7 @@ function detectErrorBursts(history: LoadTestMetrics[]): Anomaly[] {
 			startSeconds: history[start].elapsed_seconds,
 			endSeconds: history[end].elapsed_seconds,
 			magnitude: peak / ERROR_BURST_RATE,
-			label: `errors ${(peak * 100).toFixed(1)}% of requests for ${span(history, start, end)}`,
+			label: `errors ${formatPercent(peak * 100)}% of requests for ${span(history, start, end)}`,
 		};
 	});
 }
@@ -176,7 +172,7 @@ function detectThroughputDrops(history: LoadTestMetrics[]): Anomaly[] {
 			// trough can be 0 (throughput stopped entirely) - report that as the
 			// worst possible multiple rather than as Infinity.
 			magnitude: share > 0 ? 1 / share : Number.MAX_SAFE_INTEGER,
-			label: `throughput ${Math.round(share * 100)}% of baseline for ${span(history, start, end)}`,
+			label: `throughput ${formatPercent(share * 100)}% of baseline for ${span(history, start, end)}`,
 		};
 	});
 }

@@ -222,7 +222,7 @@ describe("ConcurrencyUtilCard carries no verdict colour (#2245)", () => {
 		);
 
 		// Non-empty: a card that rendered nothing would pass the absence check.
-		expect(container.textContent).toContain(`${pct}% utilisation`);
+		expect(container.textContent).toContain(`${pct}.0% utilisation`);
 		expect(container.innerHTML).not.toMatch(STATUS_TOKEN);
 		expect(container.innerHTML).not.toMatch(/text-(success|warning|destructive)/);
 	});
@@ -238,5 +238,54 @@ describe("ConcurrencyUtilCard carries no verdict colour (#2245)", () => {
 			"text-foreground"
 		);
 		expect(container.querySelector<HTMLElement>("[style*='width: 40%']")).not.toBeNull();
+	});
+});
+
+describe("hero cards print counts, percents and spans through the shared formatters (#2318)", () => {
+	const text = (ui: React.ReactElement) =>
+		render(<TooltipProvider>{ui}</TooltipProvider>).container.textContent;
+
+	it("groups a four-digit virtual-user count", () => {
+		expect(
+			text(<ConcurrencyUtilCard currentConcurrency={5000} configuredConcurrency={10000} />)
+		).toContain("of 10,000 active");
+		expect(
+			text(<AchievedThroughputCard throughput={8000} configuredConcurrency={10000} />)
+		).toContain("from 10,000 virtual users");
+	});
+
+	it("groups the headline virtual-user count too", () => {
+		expect(text(<CurrentConcurrencyCard currentConcurrency={10000} />)).toContain(
+			"10,000active"
+		);
+		expect(
+			text(<ConcurrencyUtilCard currentConcurrency={9400} configuredConcurrency={10000} />)
+		).toContain("9,400of 10,000 active");
+	});
+
+	it("draws a dash, not a measured zero, for a ramp the run did not declare", () => {
+		const out = text(<CurrentConcurrencyCard currentConcurrency={3} />);
+		expect(out).toContain("targeting - over - ramp");
+		expect(out).toContain("lag -%");
+	});
+
+	it("reads a ramp span and a lag through formatSeconds and formatPercent", () => {
+		expect(
+			text(
+				<CurrentConcurrencyCard
+					currentConcurrency={3}
+					targetConcurrency={50}
+					rampUpDurationSeconds={90}
+					rampDeviationPct={4.25}
+				/>
+			)
+		).toContain("targeting 50 over 90s ramp · lag 4.3%");
+	});
+
+	it("reads a saturation p99 the way the chart does, in seconds from a second up", () => {
+		const slow = { ...crossed, p99Ms: 1234 };
+		expect(text(<SaturationCard breakpoint={slow} failedRequests={0} />)).toContain(
+			"p99 crossed 1.23s at 45"
+		);
 	});
 });

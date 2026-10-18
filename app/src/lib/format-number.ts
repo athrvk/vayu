@@ -76,6 +76,20 @@ export function formatLatency(ms: number | undefined | null): string {
 	return `${value}${unit}`;
 }
 
+/** From here a duration in seconds reads as grouped whole seconds, not "1.25s". */
+const WHOLE_SECONDS_FROM = 60;
+
+/**
+ * A duration in seconds with its unit: under a minute it is `formatLatency`
+ * (0.4 -> "400ms", 4.2 -> "4.20s"), so a clock and a latency never print the
+ * same span two ways; from a minute up whole seconds, grouped (75 -> "75s",
+ * 3600 -> "3,600s"). A missing value reads as `formatLatency` does, "0ms".
+ */
+export function formatSeconds(seconds: number | undefined | null): string {
+	if (!isMissing(seconds) && seconds >= WHOLE_SECONDS_FROM) return `${WHOLE.format(seconds)}s`;
+	return formatLatency(isMissing(seconds) ? null : seconds * 1000);
+}
+
 /** A per-second rate as digits, no unit, by the same digits rule as `formatMs`. */
 export function formatRate(perSecond: number | undefined | null): string {
 	return formatMagnitude(perSecond);
