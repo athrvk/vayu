@@ -23,12 +23,13 @@ import { ApiError } from "@/services/http-client";
 import type { FileRoot } from "@/types";
 
 const roots: FileRoot[] = [];
+let rootsFailed = false;
 const createRoot = vi.fn();
 const deleteRoot = vi.fn();
 const showToast = vi.fn();
 
 vi.mock("@/queries", () => ({
-	useFileRootsQuery: () => ({ data: roots, isLoading: false, isError: false }),
+	useFileRootsQuery: () => ({ data: roots, isLoading: false, isError: rootsFailed }),
 	useCreateFileRootMutation: () => ({ mutateAsync: createRoot, isPending: false }),
 	useDeleteFileRootMutation: () => ({ mutateAsync: deleteRoot, isPending: false }),
 }));
@@ -50,6 +51,7 @@ function renderPanel() {
 
 beforeEach(() => {
 	roots.length = 0;
+	rootsFailed = false;
 	createRoot.mockReset();
 	deleteRoot.mockReset();
 	showToast.mockReset();
@@ -72,6 +74,15 @@ describe("FilesPanel", () => {
 		expect(list.querySelectorAll("li")).toHaveLength(2);
 		expect(screen.getByText("/data/fixtures")).toBeInTheDocument();
 		expect(screen.getByText("C:\\uploads")).toBeInTheDocument();
+	});
+
+	it("says the folders are unknown, with a next step, when the engine did not answer", () => {
+		rootsFailed = true;
+		renderPanel();
+
+		// "No folders allowed yet" would be a claim the panel cannot make here.
+		expect(screen.queryByText("No folders allowed yet.")).not.toBeInTheDocument();
+		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 	});
 
 	it("says so when nothing is allowed", () => {

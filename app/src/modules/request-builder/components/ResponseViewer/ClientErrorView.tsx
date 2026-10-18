@@ -24,6 +24,7 @@ import {
 	Lightbulb,
 	type LucideIcon,
 } from "lucide-react";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 
 interface ErrorIconDisplayProps {
 	icon: LucideIcon;
@@ -55,7 +56,7 @@ const ErrorHints: Record<string, string> = {
 	PROXY_ERROR:
 		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
 	INVALID_URL: "The URL has to start with http:// or https://.",
-	ENGINE_ERROR: "Vayu's engine isn't running or didn't answer. Restart Vayu.",
+	ENGINE_ERROR: ENGINE_NO_ANSWER,
 	AUTH_REQUIRED: "Open the Auth tab to get a token, then send again.",
 	AUTH_FAILED: "Check the Auth tab's token settings, then send again.",
 	INVALID_METHOD:

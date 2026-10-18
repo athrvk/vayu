@@ -42,6 +42,7 @@ import {
 	queryKeys,
 } from "@/queries";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { Button } from "@/components/ui";
 import { useCopy, useEngine, useVariableResolver, type ColumnAuditRequest } from "@/hooks";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
@@ -1022,9 +1023,9 @@ export default function RequestBuilder() {
 			<ErrorState
 				title="Couldn't load this request"
 				detail={
-					requestLookupError instanceof Error
+					requestLookupError instanceof Error && requestLookupError.message
 						? requestLookupError.message
-						: "The engine didn't answer, or answered with an error."
+						: ENGINE_NO_ANSWER
 				}
 				onRetry={() => refetch()}
 				action={closeTabAction}
