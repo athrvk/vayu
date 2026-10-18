@@ -374,8 +374,15 @@ which is why the answer is `border-rule` ([below](#border-rule-let-the-surface-p
 and the table above is the measurement behind it, not a recipe. Whether a border
 sits on a card is an ancestry question a source scan of the `border-*` classes
 cannot answer; what a test can hold is the *declarations*. `surface-rule.test.tsx`
-does that for the surfaces that adopt `surface-card`, and the shared `Card`
-primitive declaring one itself is tracked in #2294.
+does that for the surfaces that adopt `surface-card`. The shared `Card`
+primitive declares one itself (#2294), so a divider anywhere inside a `Card` is
+`border-rule` and nothing more; `card.test.tsx` holds the primitive's class list
+and scans every non-test `.tsx` under `app/src` for a `border-border` (or a
+side form, `border-t-border`) between a `<Card` and its `</Card>`. That scan
+reads the card's own source span, so a border token inside a component a Card
+merely renders is outside it - the four fixtures that render
+`CapacitySummary`, `FilesPanel`, `CookiesCard` and `ClientCertificatesCard`
+cover those by asserting every `.border-rule` has a surface above it.
 
 **Ask what the box sits *on*, not what it is.** A card's own outline is fine on
 `border-border`, because that edge faces the canvas, where the token measures
@@ -424,7 +431,10 @@ their own. Resolved colour is a computed-style question and is checked in the
 browser.
 
 Definitions live in `app/src/index.css` under "Surfaces, and the rule colour that
-reads on each". Adopted by the response-viewer family, the import dialog
+reads on each". `Card` itself carries the `bg-card surface-card` pair, so a card
+and everything inside it resolve `border-rule` without the call site declaring
+anything; add `surface-card` to a `Card` and you are repeating the primitive.
+Adopted by the response-viewer family, the import dialog
 (`ImportModal.surface-rule.test.tsx` guards the latter's declarations) and the
 command list, whose `Command` root declares `bg-card surface-card` so the
 input's divider, the section separators and the footer can all say `border-rule`
@@ -2987,6 +2997,11 @@ import dialog carried all three - some with a leading glyph, some announced and 
 hierarchy) and always `role="alert"`, because a message that appears after a keystroke is a change
 nobody is looking at.
 
+A follow-up notice about a file that imported (the import preview's `NoticeList`) is not a
+`FieldError`: the file worked, so the line is drawn `text-warning-text` or muted, and it is not
+announced as an alert. The preview as a whole sits in one `role="status"` region; only a real
+failure (the fetch, the apply, a file that did not parse) is an alert.
+
 `text-destructive-text` is not by itself an error message: it is also the right foreground for a
 failure count, a "not defined" chip and the Dock's "Not saved". `error-presentation.test.ts` draws
 the line where it can be drawn mechanically - the token in a literal class string on the opening
@@ -3086,7 +3101,9 @@ string is sentence case; the rule and its exceptions are in
 Use `Card` / `CardHeader` / `CardContent` (`app/src/components/ui/card.tsx`),
 which own the surface, radius, shadow and padding. A hand-rolled
 `bg-card border rounded-md` box is drift that the drift sweep removes, not a
-pattern to copy.
+pattern to copy. `Card` carries the `bg-card surface-card` pair itself, so a
+divider inside one writes `border-rule` only; its own outline stays
+`border`, which faces the canvas.
 
 Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-900` for card surfaces. Always `bg-card`.
 

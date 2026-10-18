@@ -15,8 +15,9 @@
  * dashboard's report (#2220), and each draws a `border-rule` that falls back
  * to the invisible default under no declared surface.
  *
- * Mutation-check: drop `surface-card` from the Phase latency percentiles or the
- * Stream events card in `PerformanceTab.tsx` and this fails.
+ * `Card` declares `surface-card` itself (#2294), so the cards here need no
+ * class of their own. Mutation-check: drop `surface-card` from `card.tsx` and
+ * this fails.
  */
 
 import { describe, it, expect } from "vitest";

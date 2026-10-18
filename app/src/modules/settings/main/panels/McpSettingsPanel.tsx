@@ -605,7 +605,7 @@ export default function McpSettingsPanel() {
 				<CardContent className="space-y-4">
 					{/* Server on/off */}
 					<ToggleRow
-						className="rounded-md border border-border bg-muted/30 px-3 py-2.5"
+						className="rounded-md border border-rule bg-muted/30 px-3 py-2.5"
 						label="Enable MCP server"
 						description={
 							<CollapsibleText text="On by default: while Vayu is running, a connected agent can reach the endpoint below. When off, the endpoint stops accepting connections and connected agents get a clean “start Vayu” error. Your choice persists across restarts." />
@@ -731,7 +731,7 @@ export default function McpSettingsPanel() {
 										disabled={!config}
 										title="Toggle all in this group"
 									/>
-									<div className="space-y-1 border-l border-border pl-3">
+									<div className="space-y-1 border-l border-rule pl-3">
 										{catTools.map((tool) => {
 											const on = !(config?.disabledTools ?? []).includes(
 												tool.name
@@ -847,7 +847,7 @@ export default function McpSettingsPanel() {
 								{config.allowlist.map((host) => (
 									<span
 										key={host}
-										className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
+										className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
 									>
 										{host}
 										<button

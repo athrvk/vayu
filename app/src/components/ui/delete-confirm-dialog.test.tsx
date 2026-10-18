@@ -75,6 +75,16 @@ describe("DeleteConfirmDialog", () => {
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 	});
 
+	// Issue #2288: a spinner in place of the label left the button nameless to
+	// assistive tech for exactly the span a delete is running.
+	it("keeps the confirm label and adds a decorative spinner while deleting", () => {
+		open({ isDeleting: true, confirmLabel: "Delete environment" });
+		const confirm = screen.getByRole("button", { name: "Delete environment" });
+		expect(confirm).toBeDisabled();
+		expect(confirm).toHaveAttribute("aria-busy", "true");
+		expect(confirm.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+	});
+
 	// Issue #1689: one template produces the sentence, so every call site that
 	// passes `name` instead of writing its own prose reads the same shape.
 	describe("the generated {name, scope} sentence", () => {
