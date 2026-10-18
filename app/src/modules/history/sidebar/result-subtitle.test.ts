@@ -5,7 +5,25 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect, vi } from "vitest";
+
+// The formatters build their Intl.NumberFormat at module load, so the locale is
+// pinned before the import below runs rather than left to the host.
+const restoreIntl = vi.hoisted(() => {
+	const Real = Intl.NumberFormat;
+	class EnUsNumberFormat extends Real {
+		constructor(_locale?: string | string[], options?: Intl.NumberFormatOptions) {
+			super("en-US", options);
+		}
+	}
+	Intl.NumberFormat = EnUsNumberFormat as typeof Intl.NumberFormat;
+	return () => {
+		Intl.NumberFormat = Real;
+	};
+});
+
+afterAll(restoreIntl);
+
 import { resultSubtitle } from "./result-subtitle";
 
 describe("resultSubtitle", () => {
