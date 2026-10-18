@@ -26,6 +26,7 @@ import { render } from "@/test/render-with-tooltips";
 import { RecentRuns } from "./RecentRuns";
 import { useTabsStore } from "@/stores";
 import type { Run } from "@/types";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 
 function run(over: Partial<Run> = {}): Run {
 	return {
@@ -80,11 +81,25 @@ describe("RecentRuns", () => {
 		expect(screen.getByText("https://api.test/two")).toBeInTheDocument();
 	});
 
+	it.each(["design", "scenario", "load"] as const)(
+		"names a %s row by RUN_TYPE_NAME in its chip and its accessible name",
+		(type) => {
+			render(<RecentRuns runs={[run({ type, summary: undefined })]} />);
+			const name = RUN_TYPE_NAME[type];
+
+			const row = screen.getByRole("button", { name: `Open ${name}, completed` });
+			expect(row).toHaveTextContent(name);
+			expect(row.getAttribute("aria-label")).not.toMatch(
+				/request|scenario|collection(?! run)/i
+			);
+		}
+	);
+
 	it("names the row for assistive tech, including the URL", () => {
 		render(<RecentRuns runs={[run()]} />);
 		expect(
 			screen.getByRole("button", {
-				name: /Open load test run, http:\/\/localhost:8080\/fast, completed/i,
+				name: /Open Load test, http:\/\/localhost:8080\/fast, completed/i,
 			})
 		).toBeInTheDocument();
 	});
@@ -94,12 +109,12 @@ describe("RecentRuns", () => {
 		// would read as a rendering failure.
 		render(<RecentRuns runs={[run({ summary: undefined })]} />);
 		expect(screen.getByText(/No URL recorded/i)).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: /Open load test run/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /Open Load test/i })).toBeInTheDocument();
 	});
 
 	it("still opens the run when the row is clicked", () => {
 		render(<RecentRuns runs={[run({ id: "run-42" })]} />);
-		screen.getByRole("button", { name: /Open load test run/i }).click();
+		screen.getByRole("button", { name: /Open Load test/i }).click();
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({
 			type: "run",
 			entityId: "run-42",
@@ -141,7 +156,7 @@ describe("RecentRuns", () => {
 
 		expect(screen.queryByText("Running")).not.toBeInTheDocument();
 		expect(screen.queryByText("Pending")).not.toBeInTheDocument();
-		for (const row of screen.getAllByRole("button", { name: /Open load test run/i })) {
+		for (const row of screen.getAllByRole("button", { name: /Open Load test/i })) {
 			expect(row.getAttribute("aria-label")).not.toMatch(/running|pending/i);
 		}
 	});

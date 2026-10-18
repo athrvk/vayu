@@ -119,7 +119,7 @@ describe("a load run's verdict glyph", () => {
 		renderRow(loadRun({ resultSummary: { ...RESULT, verdict: "failed" } }));
 
 		expect(
-			screen.getByRole("button", { name: /^Open load test run, completed, verdict failed/ })
+			screen.getByRole("button", { name: /^Open Load test, completed, verdict failed/ })
 		).toBeInTheDocument();
 	});
 });

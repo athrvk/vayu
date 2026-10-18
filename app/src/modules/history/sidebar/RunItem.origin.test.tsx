@@ -130,7 +130,7 @@ describe("the agent badge", () => {
 		renderRow(row({ origin: { kind: "mcp", client: "claude-code" } }));
 		expect(
 			screen.getByRole("button", {
-				name: /^Open .* run, completed.*, started by Claude Code$/,
+				name: /^Open .*, completed.*, started by Claude Code$/,
 			})
 		).toBeInTheDocument();
 	});
@@ -144,9 +144,7 @@ describe("the agent badge", () => {
 		expect(document.querySelector('[data-slot="badge"]')).toBeNull();
 		expect(screen.queryByText("MCP client")).not.toBeInTheDocument();
 		expect(
-			screen
-				.getByRole("button", { name: /^Open .* run, completed/ })
-				.getAttribute("aria-label")
+			screen.getByRole("button", { name: /^Open .*, completed/ }).getAttribute("aria-label")
 		).not.toContain("started by");
 	});
 
