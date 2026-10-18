@@ -74,7 +74,7 @@ import UrlInput from "./UrlInput";
  * built for `--muted` on a panel, and `TooltipContent` paints `--primary-fill`
  * with a white label, so a cap would be a grey chip stamped on the accent.
  * `TooltipHint` in mono is the one tint that reads on that fill; a hand-written
- * `opacity-70` measured 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
+ * 70% alpha measured 2.50:1 on Sunset (`tooltip-hint-contrast.test.ts`).
  */
 function Hint({
 	chord,
