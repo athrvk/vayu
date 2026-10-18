@@ -190,7 +190,7 @@ export default function OverviewTab({
 										<div
 											key={code}
 											className={cn(
-												"p-3 border border-border text-center",
+												"p-3 border border-rule text-center",
 												style.tint
 											)}
 										>

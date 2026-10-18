@@ -13,7 +13,13 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
 	return (
 		<div
 			data-slot="card"
-			className={cn("rounded-lg border bg-card text-card-foreground shadow", className)}
+			// `bg-card surface-card`, the pair: `surface-card` declares the `--rule` a
+			// `border-rule` divider inside the card reads, which on `--border` alone
+			// is the card's own colour in dark (#2294).
+			className={cn(
+				"rounded-lg border bg-card surface-card text-card-foreground shadow",
+				className
+			)}
 			{...props}
 		/>
 	);

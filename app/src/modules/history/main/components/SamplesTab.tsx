@@ -137,11 +137,9 @@ export default function SamplesTab({
 				</div>
 			</CardHeader>
 			{/* `p-0` + a `divide-y` strip below - a flat row per sample, not a
-			    boxed card per row. `surface-card` declares the `--rule`
-			    the strip's dividers read; a bare `divide-y` on `Card`'s
-			    `border bg-card` falls back to `--border`, invisible in dark
-			    (issue #1650). */}
-			<CardContent className="p-0 bg-card surface-card">
+			    boxed card per row. The dividers read the `--rule` that `Card`'s
+			    `surface-card` declares (issue #1650). */}
+			<CardContent className="p-0">
 				<SampleRetentionNote
 					sampling={report.sampling}
 					shown={rows.length}

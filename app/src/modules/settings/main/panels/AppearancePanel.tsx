@@ -403,7 +403,7 @@ export default function AppearancePanel() {
 					</div>
 
 					<div
-						className="border-t border-border pt-4"
+						className="border-t border-rule pt-4"
 						data-setting-anchor={REDUCED_MOTION.anchor}
 					>
 						<ToggleRow

@@ -329,4 +329,21 @@ describe("ClientCertificatesCard", () => {
 		expect(submit().firstElementChild).toBe(glyphBox);
 		expect(submit().querySelector(".enter-fade .animate-spin")).not.toBeNull();
 	});
+
+	it("declares the surface its row and form dividers read", () => {
+		const { container } = renderCard();
+		fireEvent.click(screen.getByRole("button", { name: /add certificate/i }));
+		const rules = Array.from(container.querySelectorAll(".border-rule"));
+
+		// Two entries and the open add form.
+		// A render that reached no divider would pass the loop below having
+		// checked nothing.
+		expect(rules.length).toBeGreaterThanOrEqual(3);
+		for (const rule of rules) {
+			expect(
+				rule.closest(".surface-card, .surface-sunken"),
+				`border-rule under no surface: ${rule.getAttribute("class")}`
+			).not.toBeNull();
+		}
+	});
 });

@@ -172,4 +172,24 @@ describe("FilesPanel", () => {
 		// The typed path still works there.
 		expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
 	});
+
+	it("declares the surface its folder dividers read", () => {
+		roots.push(
+			{ id: "r1", path: "/data/fixtures", createdAt: 1 },
+			{ id: "r2", path: "C:\\uploads", createdAt: 2 }
+		);
+		const { container } = renderPanel();
+		const rules = Array.from(container.querySelectorAll(".border-rule"));
+
+		// One divider per allowed folder.
+		// A render that reached no divider would pass the loop below having
+		// checked nothing.
+		expect(rules.length).toBeGreaterThanOrEqual(2);
+		for (const rule of rules) {
+			expect(
+				rule.closest(".surface-card, .surface-sunken"),
+				`border-rule under no surface: ${rule.getAttribute("class")}`
+			).not.toBeNull();
+		}
+	});
 });
