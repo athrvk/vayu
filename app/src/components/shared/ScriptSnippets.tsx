@@ -37,6 +37,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
+	Card,
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
@@ -155,15 +156,15 @@ export function ScriptSnippets({
 
 			<CollapsibleContent className="mt-2">
 				{/*
-				 * A card, not a sunken slab, because `Command` declares
-				 * `bg-card surface-card` itself: a `bg-transparent` override
-				 * would replace the background utility and leave the surface
+				 * A `Card`, not a sunken slab, because `Command` declares
+				 * `bg-card surface-card` itself (as `Card` does): a `bg-transparent`
+				 * override would replace the background utility and leave the surface
 				 * class standing, so the filter field's own `border-rule`
 				 * would resolve to the card's value inside a sunken box. One
 				 * surface for the box and its contents is the only spelling
 				 * where every rule inside it reads on what it sits on.
 				 */}
-				<div className="rounded-md border border-rule surface-card bg-card overflow-hidden">
+				<Card className="overflow-hidden">
 					{isError ? (
 						<p className="px-3 py-2 text-xs text-muted-foreground">
 							Snippets come from Vayu's engine, which is not answering right now.
@@ -201,7 +202,7 @@ export function ScriptSnippets({
 							</CommandList>
 						</Command>
 					)}
-				</div>
+				</Card>
 			</CollapsibleContent>
 		</Collapsible>
 	);

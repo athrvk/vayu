@@ -21,7 +21,7 @@
  */
 
 import { Folder } from "lucide-react";
-import { Badge, Eyebrow } from "@/components/ui";
+import { Badge, Card, Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
@@ -73,7 +73,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 	const sourceId = source?.id;
 
 	return (
-		<div className="mt-7 p-3.5 px-4 bg-card surface-card border border-border rounded-md">
+		<Card pad="sm" className="mt-7 px-4">
 			{/* Was a hand-typed copy of the eyebrow that had drifted to
 			    `tracking-[0.07em]`. At 11px that is 0.11px per character - not a
 			    deliberate variant, just a copy nobody could diff against the
@@ -145,6 +145,6 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 					requests below it inherit nothing.
 				</p>
 			)}
-		</div>
+		</Card>
 	);
 }

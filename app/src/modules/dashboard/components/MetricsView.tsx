@@ -28,6 +28,7 @@ import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import { formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
+import { Card } from "@/components/ui/card";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
@@ -255,7 +256,7 @@ function MetricsView({
 
 			{/* Row 2 - Throughput over time */}
 			{chartWindow.length > 1 && (
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Throughput over time
@@ -297,12 +298,12 @@ function MetricsView({
 							)}
 						</div>
 					)}
-				</div>
+				</Card>
 			)}
 
 			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
 			{hasMultiplePoints && (
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency over time
@@ -316,14 +317,14 @@ function MetricsView({
 						anomalies={anomalies}
 						sleeps={hostSleeps}
 					/>
-				</div>
+				</Card>
 			)}
 
 			{/* Row 2.7 - ramp_up shows Response-time-vs-concurrency scatter (A3);
 			    every other mode shows Response-time percentiles over time. */}
 			{derived.mode === "ramp_up"
 				? historicalMetrics.length > 1 && (
-						<div className="bg-card surface-card border border-border rounded-md p-3.5">
+						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
 									Response time vs {CONCURRENCY_UNIT}
@@ -336,11 +337,11 @@ function MetricsView({
 								breakpoint={breakpoint}
 								syncKey={CHART_SYNC.live}
 							/>
-						</div>
+						</Card>
 					)
 				: hasMultiplePoints &&
 					hasPercentileData && (
-						<div className="bg-card surface-card border border-border rounded-md p-3.5">
+						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
 								<h3 className="text-xs font-semibold text-foreground">
 									Response time percentiles over time
@@ -355,12 +356,12 @@ function MetricsView({
 								anomalies={anomalies}
 								sleeps={hostSleeps}
 							/>
-						</div>
+						</Card>
 					)}
 
 			{/* Status codes over time - stacked per-interval class composition */}
 			{hasStatusData && (
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Status codes over time
@@ -394,13 +395,13 @@ function MetricsView({
 						</div>
 					</div>
 					<StatusCodesOverTimeChart history={chartWindow} syncKey={CHART_SYNC.live} />
-				</div>
+				</Card>
 			)}
 
 			{/* Server vitals - only for a run that scraped an endpoint, so a run
 			    without a monitor block keeps the dashboard it always had. */}
 			{monitorSamples.length > 0 && chartWindow.length > 1 && (
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Server vitals
@@ -417,13 +418,13 @@ function MetricsView({
 						anomalies={anomalies}
 						sleeps={hostSleeps}
 					/>
-				</div>
+				</Card>
 			)}
 
 			{/* Custom metrics - only for a run that declared metric.record / pm.metrics
 			    names, so a run that recorded none keeps the dashboard it always had. */}
 			{hasCustomMetricsData && chartWindow.length > 1 && (
-				<div className="bg-card surface-card border border-border rounded-md p-3.5">
+				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Custom metrics
@@ -434,14 +435,14 @@ function MetricsView({
 						</span>
 					</div>
 					<CustomMetricsChart history={chartWindow} syncKey={CHART_SYNC.live} />
-				</div>
+				</Card>
 			)}
 
 			{/* Row 3 - HDR plot + Timing waterfall. Both read the final report, which
 			    replaces this view when it lands, so here they only hold the place. */}
 			<div className="grid grid-cols-1 @3xl:grid-cols-2 gap-3">
 				{/* HDR */}
-				<div className="bg-card surface-card border border-border rounded-md p-3.5 min-w-0">
+				<Card pad="sm" className="min-w-0">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Latency distribution
@@ -460,10 +461,10 @@ function MetricsView({
 							<LatencyStat key={k} k={k} v={undefined} />
 						))}
 					</div>
-				</div>
+				</Card>
 
 				{/* Timing waterfall */}
-				<div className="bg-card surface-card border border-border rounded-md p-3.5 min-w-0">
+				<Card pad="sm" className="min-w-0">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">
 							Avg request timing
@@ -472,7 +473,7 @@ function MetricsView({
 						<span className="text-micro font-mono text-muted-foreground">-</span>
 					</div>
 					<TimingWaterfall report={null} />
-				</div>
+				</Card>
 			</div>
 
 			{/* Row 4 - Bottom stat row */}

@@ -64,6 +64,7 @@ import {
 
 import {
 	Button,
+	Card,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -356,7 +357,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			)}
 
 			{!bound && (
-				<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-3">
+				<Card pad="sm" className="space-y-3">
 					<div className="flex items-center gap-2">
 						<Button
 							variant="outline"
@@ -469,7 +470,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 							Bind this spec
 						</Button>
 					)}
-				</div>
+				</Card>
 			)}
 
 			{bound && <SpecCoverageLine collectionId={collection.id} />}
@@ -620,7 +621,7 @@ function BoundSpec({
 	return (
 		<div>
 			<SectionLabel>Bound spec</SectionLabel>
-			<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-2">
+			<Card pad="sm" className="space-y-2">
 				<div className="flex items-center gap-2 text-xs">
 					{/* The icon is part of the claim - a link icon beside a skeleton would
 					    already be saying the document came from a URL. */}
@@ -715,7 +716,7 @@ function BoundSpec({
 						unknown until the engine answers.
 					</FieldError>
 				)}
-			</div>
+			</Card>
 		</div>
 	);
 }
