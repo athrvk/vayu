@@ -47,7 +47,7 @@ export function RunStatusPill({ status, outcome, className }: RunStatusProps) {
 				className
 			)}
 		>
-			<RunStatusGlyph status={status} outcome={outcome} className="size-3 shrink-0" />
+			<RunStatusGlyph status={status} outcome={outcome} className="size-icon-sm shrink-0" />
 			{label}
 		</Badge>
 	);

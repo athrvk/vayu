@@ -330,7 +330,7 @@ export default function RunItem({
 					<RunStatusGlyph
 						status={run.status}
 						outcome={judgement?.outcome}
-						className="size-3 shrink-0"
+						className="size-icon-sm shrink-0"
 					/>
 					{method ? (
 						<MethodBadge
@@ -381,7 +381,7 @@ export default function RunItem({
 							className="min-w-0 max-w-1/2 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
 							title={pinChipText}
 						>
-							<Pin className="h-2.5 w-2.5 shrink-0" />
+							<Pin className="size-icon-sm shrink-0" />
 							{/* The load run's chip is long; at a narrow drawer it gives way
 							    before the identity does, and the title keeps the full text. */}
 							<span className="truncate">{pinChipText}</span>

@@ -98,7 +98,7 @@ export default function BaselineComparison({ report, runId }: BaselineComparison
 					variant="chip"
 					className="gap-1 bg-primary/15 text-primary px-1.5 py-0 text-micro font-semibold"
 				>
-					<Pin className="w-2.5 h-2.5" />
+					<Pin className="size-icon-sm" />
 					<TimeValue value={baselineRun.startTime} />
 				</Badge>
 				<Button

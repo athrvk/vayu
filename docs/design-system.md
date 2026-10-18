@@ -1214,6 +1214,21 @@ rather than a translation. `size-icon` was wrong for them - each sits beside
 `text-sm` or smaller text, which is why it was written under the default in
 the first place.
 
+**A glyph is `size-icon` or `size-icon-sm`; 12px is the floor** (same test,
+issue #2304). The 3.5 ban read one shape, so glyphs that `--spacing` draws under
+the floor (`size-3` is 9px at Default, `h-2.5 w-2.5` 7.5px) or that spell a
+length by hand (`w-[15px] h-[15px]`) went unflagged. A lucide icon or
+`RunStatusGlyph` whose own `className` carries `size-N`, `h-N` or `w-N` for
+N <= 3 (half steps included), or an arbitrary `w-[Npx]` / `h-[Npx]`, now fails.
+Only the glyph's own className is read: a `<span>` dot, a skeleton bar and a
+solid `fill-current` Circle are shapes the control sizes, not icons. Two glyphs
+stay at 7.5px by design and are listed with their reason in
+`SMALL_GLYPH_ALLOWED`: `InfoChip`'s "i" (inside the chip's own 12px dot) and the
+`ResizableHandle` grip (inside a handle box that carries its own border). The
+entry is a path and an exact tag count, and the test fails when the file stops
+carrying that many, so an entry cannot outlive its glyph. A new exception means
+a new entry with its reason, not a looser regex.
+
 *Superseded decision (issue #1670, kept for history): the shrink applied to
 icons too, with nothing pinned outside the unit - `w-4 h-4` read 12px at
 Default and `w-3 h-3` read 9px, both checked by eye against a live render.
@@ -1320,7 +1335,7 @@ below.
 | `--spacing-control-xs` | `h-control-xs` | 20px | 24px | `Input` `size="xs"`: the inline rename field inside a `target` row |
 | `--spacing-target` | `size-target` | 24px | 28px | Icon buttons, close buttons, `Switch`, checkboxes, `CommandSearchBar`, the in-row tree controls (chevron, row menu), `InfoChip` (as an `after:` hit box behind its 12px dot) |
 | `--spacing-icon` | `size-icon` | 16px | 16px | The app's default icon size (was `w-4 h-4` / `size-4`) |
-| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693) |
+| `--spacing-icon-sm` | `size-icon-sm` | 12px | 12px | The app's small icon size (was `w-3 h-3`, and `h-3.5 w-3.5` / `size-3.5` since #1693; `size-3` and anything smaller on a glyph since #2304) |
 
 `band`, `band-md`, `band-lg`, `banner`, `icon` and `icon-sm` are
 theme-independent, the same way `--titlebar-height` and `--dock-height` are - a
