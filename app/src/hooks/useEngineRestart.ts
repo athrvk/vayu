@@ -80,9 +80,9 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 				// failed poll back on the unreachable path, so the strip cannot sit
 				// on "Starting…" over an engine nobody is starting.
 				closeEngineStartWindow();
-				const reason = result.error ?? "unknown error";
+				const reason = result.error ?? "No reason was given. Quit Vayu and open it again.";
 				showToast({
-					message: `Couldn't restart Vayu's engine: ${reason}`,
+					message: `Couldn't restart Vayu's engine - ${reason}`,
 					variant: "error",
 				});
 				// A restart is slow enough to walk away from, and this is its

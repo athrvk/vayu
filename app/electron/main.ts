@@ -1108,7 +1108,7 @@ async function stopEngine() {
 
 async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 	if (!engineSidecar) {
-		return { success: false, error: "Engine sidecar not initialized" };
+		return { success: false, error: "Vayu is still starting up. Try again in a moment." };
 	}
 
 	// Cleared up front: the renderer reads it to decide an engine is not
@@ -1120,9 +1120,9 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
-		// The error itself, not its text: the sidecar gives up with a sentence
-		// written for the user and attaches the attempt that failed as `cause`,
-		// which the string form drops. The renderer still gets the sentence.
+		// The error itself, not its text: the sidecar attaches the attempt that
+		// failed as `cause`, which the string form drops. The renderer still
+		// gets the message.
 		appLogger().error("main", "Failed to restart engine", { error: String(error) });
 		engineStartFailure = error instanceof EnginePortInUseError ? error.message : null;
 		return { success: false, error: errorMessage };

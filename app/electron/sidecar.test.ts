@@ -411,13 +411,16 @@ describe("EngineSidecar - adoption", () => {
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
-		const failure = await sidecar.restart(0).catch((error: unknown) => error);
+		const failure = await sidecar.restart(1).catch((error: unknown) => error);
 		expect(failure).toBeInstanceOf(Error);
-		expect((failure as Error).message).toMatch(/close the Application/i);
-		// The sentence is written for the user and says nothing about the engine.
-		// Why it would not come back is only recoverable through the cause, so a
-		// restart that gives up carries the attempt's own failure with it.
-		expect((failure as Error).cause).toBeInstanceOf(Error);
+		const { message, cause } = failure as Error;
+		// Two attempts (one retry); the message quotes the last one's failure.
+		expect(cause).toBeInstanceOf(Error);
+		expect(message).toBe(
+			`Nothing answered after 2 attempts (${(cause as Error).message}). Quit Vayu and open it again.`
+		);
+		expect((cause as Error).message).not.toBe("");
+		expect(message).not.toMatch(/please/i);
 	});
 });
 

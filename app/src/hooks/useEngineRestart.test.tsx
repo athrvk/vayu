@@ -98,7 +98,7 @@ describe("useEngineRestart", () => {
 		expect(useEngineStore.getState().engineStartFailure).toBeNull();
 	});
 
-	it("says something even when the failure carries no reason", async () => {
+	it("says what to do even when the failure carries no reason", async () => {
 		stubElectron({ success: false });
 		const { result } = renderHook(() => useEngineRestart(), { wrapper });
 
@@ -108,9 +108,27 @@ describe("useEngineRestart", () => {
 
 		// Pins the shared `reason` fallback: the toast and the notification say
 		// the same thing, rather than one of them reading "undefined".
-		expect(mockNotifyPost).toHaveBeenCalledWith(
-			expect.objectContaining({ body: "unknown error" })
+		const reason = "No reason was given. Quit Vayu and open it again.";
+		expect(mockNotifyPost).toHaveBeenCalledWith(expect.objectContaining({ body: reason }));
+		expect(showToast).toHaveBeenCalledWith(
+			expect.objectContaining({ message: `Couldn't restart Vayu's engine - ${reason}` })
 		);
+	});
+
+	it("shows the sidecar's give-up message once, with no second 'Please'", async () => {
+		const reason = "Nothing answered after 4 attempts (x). Quit Vayu and open it again.";
+		stubElectron({ success: false, error: reason });
+		const { result } = renderHook(() => useEngineRestart(), { wrapper });
+
+		await act(async () => {
+			await result.current.restart();
+		});
+
+		const { message } = showToast.mock.calls[0][0] as { message: string };
+		expect(message).toBe(`Couldn't restart Vayu's engine - ${reason}`);
+		expect(message).not.toMatch(/please/i);
+		// The notification body is the bare reason; the title already names the event.
+		expect(mockNotifyPost).toHaveBeenCalledWith(expect.objectContaining({ body: reason }));
 	});
 
 	it("says nothing to the OS outside the desktop app", async () => {
