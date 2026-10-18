@@ -106,6 +106,7 @@ export function FontPicker({
 			{value === "custom" && (
 				<div className="enter-fade">
 					<Input
+						aria-label={`${label} family`}
 						value={customValue}
 						onChange={(e) => onCustomChange(e.target.value)}
 						placeholder={placeholder}
