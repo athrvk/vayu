@@ -24,6 +24,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::runtime::pm_detail {
@@ -569,9 +570,10 @@ JSValue build_send_error (JSContext* ctx, ErrorCode code, const std::string& mes
  * callback(err, res) inline. The promise-returning overload Postman also
  * offers is deliberately absent; it could only never resolve.
  *
- * Three things are refused by throwing rather than by calling the callback,
+ * Four things are refused by throwing rather than by calling the callback,
  * because they are the script's mistakes and not the network's: the feature
- * being off, the per-script request cap, and an unusable argument. Transport
+ * being off, the per-script request cap, an unusable argument, and a URL
+ * naming Vayu's own engine or MCP port (`http/loopback_guard.hpp`). Transport
  * failures - refused, DNS, timeout - are the network's answer and reach the
  * callback as an error, which is where a Postman script looks for them.
  */
@@ -632,6 +634,15 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     !applied.ok) {
         return JS_ThrowPlainError (ctx,
         "pm.sendRequest could not apply options.auth: %s", applied.message.c_str ());
+    }
+    // The transport refuses this too, but as a network error in the callback;
+    // a script that names Vayu's own port gets a sentence about scripts
+    // (#2355).
+    if (const auto port = vayu::http::reserved_target_port (request.url)) {
+        return JS_ThrowPlainError (ctx,
+        "pm.sendRequest refused: %s. A script may call any other server on "
+        "this machine.",
+        vayu::http::reserved_target_refusal (*port).c_str ());
     }
 
     // The script's wall-clock budget is enforced by a QuickJS interrupt handler
