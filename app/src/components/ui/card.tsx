@@ -9,7 +9,18 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+const CARD_PAD = { sm: "p-3", md: "p-4" } as const;
+
+/**
+ * `pad` is the padding for a card that is its own body (a stat tile). Leave it
+ * off when the card is composed from `CardHeader` / `CardContent`, which carry
+ * their own.
+ */
+function Card({
+	className,
+	pad,
+	...props
+}: React.ComponentProps<"div"> & { pad?: keyof typeof CARD_PAD }) {
 	return (
 		<div
 			data-slot="card"
@@ -18,6 +29,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
 			// is the card's own colour in dark (#2294).
 			className={cn(
 				"rounded-lg border bg-card surface-card text-card-foreground shadow",
+				pad && CARD_PAD[pad],
 				className
 			)}
 			{...props}

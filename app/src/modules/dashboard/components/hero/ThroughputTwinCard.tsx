@@ -6,6 +6,7 @@
  */
 
 import { formatLatency, formatRate } from "@/lib/format-number";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow } from "../shared";
 import { fmtRate } from "../format";
@@ -29,7 +30,7 @@ export function ThroughputTwinCard({
 	const deltaOk = delta !== undefined && delta < 1;
 
 	return (
-		<div className="bg-card surface-card border border-border rounded-md p-4 flex flex-col gap-1.5">
+		<Card pad="md" className="flex flex-col gap-1.5">
 			<Eyebrow>
 				Send · Throughput
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
@@ -83,6 +84,6 @@ export function ThroughputTwinCard({
 					</span>
 				</p>
 			)}
-		</div>
+		</Card>
 	);
 }

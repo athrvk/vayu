@@ -36,6 +36,7 @@ import { FileSpreadsheet, Upload, X } from "lucide-react";
 
 import {
 	Button,
+	Card,
 	Label,
 	Table,
 	TableBody,
@@ -301,7 +302,7 @@ export default function DataFilePicker({
 			)}
 
 			{selected && (
-				<div className="space-y-2 rounded-md border border-rule bg-card surface-card p-3">
+				<Card pad="sm" className="space-y-2">
 					<div className="flex items-center gap-2 text-xs">
 						<FileSpreadsheet className="size-icon-sm shrink-0 text-muted-foreground" />
 						<span className="truncate font-medium">{selected.fileName}</span>
@@ -396,7 +397,7 @@ export default function DataFilePicker({
 							{warning}
 						</p>
 					))}
-				</div>
+				</Card>
 			)}
 		</div>
 	);

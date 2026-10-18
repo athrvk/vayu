@@ -6,6 +6,7 @@
  */
 
 import { type ReactNode } from "react";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { InfoChip, EYEBROW_CLASS } from "../shared";
 
@@ -24,7 +25,7 @@ export function StatCard({
 	infoTip?: ReactNode;
 }) {
 	return (
-		<div className="bg-card surface-card border border-border rounded-md p-3">
+		<Card pad="sm">
 			<p className={cn(EYEBROW_CLASS, "mb-1.5")}>
 				{label}
 				{infoTip && <InfoChip tip={infoTip} />}
@@ -36,6 +37,6 @@ export function StatCard({
 				{unit && <span className="text-xs text-muted-foreground">{unit}</span>}
 			</div>
 			{sub && <div className="mt-1.5 font-mono text-micro text-muted-foreground">{sub}</div>}
-		</div>
+		</Card>
 	);
 }

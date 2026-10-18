@@ -24,6 +24,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, GitCompareArrows } from "lucide-react";
 import {
 	Button,
+	Card,
 	ScrollArea,
 	Select,
 	SelectContent,
@@ -115,7 +116,7 @@ function StatusCodeTable({
 	return (
 		<section className="flex flex-col gap-2" aria-label="Status codes">
 			<h3 className="text-sm font-semibold text-foreground">Status codes</h3>
-			<div className="surface-card border border-border rounded-md bg-card overflow-hidden">
+			<Card className="overflow-hidden">
 				<Table>
 					<TableHeader>
 						<TableRow>
@@ -150,7 +151,7 @@ function StatusCodeTable({
 						})}
 					</TableBody>
 				</Table>
-			</div>
+			</Card>
 		</section>
 	);
 }
@@ -209,7 +210,7 @@ function ComparisonPanel({
 	return (
 		<>
 			<ComparabilityWarnings warnings={comparison.comparability} />
-			<div className="surface-card border border-border rounded-md bg-card overflow-hidden">
+			<Card className="overflow-hidden">
 				<Table>
 					<TableHeader>
 						<TableRow>
@@ -229,7 +230,7 @@ function ComparisonPanel({
 						))}
 					</TableBody>
 				</Table>
-			</div>
+			</Card>
 			<StatusCodeTable statusCodes={comparison.statusCodes} />
 		</>
 	);

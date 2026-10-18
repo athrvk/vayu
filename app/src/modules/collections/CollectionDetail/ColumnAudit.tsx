@@ -45,6 +45,7 @@
 import { useMemo } from "react";
 
 import { Callout } from "@/components/shared";
+import { Card } from "@/components/ui";
 import { useCollectionsQuery } from "@/queries";
 import { collectionsUnderContract } from "@/lib/data-contract";
 import { useColumnAudit } from "@/hooks/useColumnAudit";
@@ -119,7 +120,7 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 	return (
 		<div>
 			<SectionLabel>Referenced columns</SectionLabel>
-			<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-3">
+			<Card pad="sm" className="space-y-3">
 				{isLoading ? (
 					<p className="text-xs text-muted-foreground">Reading the requests…</p>
 				) : (
@@ -155,7 +156,7 @@ export default function ColumnAudit({ collection }: ColumnAuditProps) {
 						</p>
 					</>
 				)}
-			</div>
+			</Card>
 		</div>
 	);
 }
