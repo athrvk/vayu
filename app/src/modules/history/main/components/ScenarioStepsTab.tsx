@@ -114,7 +114,7 @@ export default function ScenarioStepsTab({
 			<div className="overflow-x-auto border rounded-md">
 				<table className="w-full text-sm">
 					<caption className="sr-only">
-						Per-step latency and counts for this scenario load run
+						Per-step latency and counts for this load test
 					</caption>
 					<thead>
 						<tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">

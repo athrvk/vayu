@@ -72,6 +72,6 @@ describe("the run row's status affordance", () => {
 		// status, so a reader hears it once rather than twice.
 		render(<RunItem run={run("failed")} onSelect={noop} onDelete={noop} isDeleting={false} />);
 
-		expect(screen.getByRole("button", { name: /load test run, failed/i })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /Open Load test, failed/ })).toBeInTheDocument();
 	});
 });

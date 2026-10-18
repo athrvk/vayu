@@ -23,6 +23,7 @@ import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import type { Run } from "@/types";
 
 function run(type: Run["type"]): Run {
@@ -64,7 +65,9 @@ describe("RunItem run types", () => {
 		);
 
 		expect(screen.getByText("https://api.example.test/checkout")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: /Open .* run, completed/ })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: /Open Collection run, completed/ })
+		).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Delete run" })).toBeInTheDocument();
 	});
 
@@ -130,7 +133,7 @@ describe("RunItem run types", () => {
 		);
 
 		expect(
-			screen.getByRole("button", { name: /Open collection run, completed/ })
+			screen.getByRole("button", { name: /Open Collection run, completed/ })
 		).toBeInTheDocument();
 	});
 
@@ -138,8 +141,8 @@ describe("RunItem run types", () => {
 		// A collection run announced as a "request run", with no url after it,
 		// was a row a screen-reader user could not tell apart from any other.
 		const labels: Record<string, RegExp> = {
-			load: /Open load test run/,
-			design: /Open request run/,
+			load: /Open Load test, completed/,
+			design: /Open Send, completed/,
 		};
 		for (const [type, pattern] of Object.entries(labels)) {
 			const { unmount } = render(
@@ -164,9 +167,24 @@ describe("RunItem run types", () => {
 			/>
 		);
 		expect(
-			screen.getByRole("button", { name: /Open collection run, completed, Checkout flow/ })
+			screen.getByRole("button", { name: /Open Collection run, completed, Checkout flow/ })
 		).toBeInTheDocument();
 	});
+
+	it.each(["design", "scenario", "load"] as const)(
+		"names a bare %s run by RUN_TYPE_NAME, in its text and its accessible name",
+		(type) => {
+			const bare = { ...run(type), summary: {} } as Run;
+			render(<RunItem run={bare} onSelect={noop} onDelete={vi.fn()} isDeleting={false} />);
+			const name = RUN_TYPE_NAME[type];
+
+			const activator = screen.getByRole("button", { name: `Open ${name}, completed` });
+			expect(screen.getByText(name)).toBeInTheDocument();
+			for (const text of [activator.getAttribute("aria-label") ?? "", name]) {
+				expect(text).not.toMatch(/request|scenario|collection(?! run)/i);
+			}
+		}
+	);
 
 	it("keeps the load badge to load runs", () => {
 		// Counting icons was the old shape of this test and it never meant much;

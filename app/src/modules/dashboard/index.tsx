@@ -24,6 +24,7 @@ import { apiService, loadTestService } from "@/services";
 import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/shared";
 import { Button } from "@/components/ui";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { DashboardHeader, MetricsView } from "./components";
 import { useCollectionRunTarget } from "./hooks/useCollectionRunTarget";
 import { TIMING } from "@/config/timing";
@@ -256,7 +257,7 @@ export default function LoadTestDashboard() {
 		() => [
 			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
 			// The finished run's crumb is the report's own ("Load test run").
-			{ id: "run", label: "Live load test" },
+			{ id: "run", label: `Live ${RUN_TYPE_NAME.load.toLowerCase()}` },
 		],
 		[revealDrawerView]
 	);
