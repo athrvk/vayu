@@ -205,6 +205,21 @@ struct FileRoot {
 };
 
 /**
+ * @brief One file a person picked, which Vayu may send from wherever it lies
+ * (`file_grants` table, schema version 6, #2356).
+ *
+ * `path` is the file's canonical form at the moment it was picked (every
+ * symlink resolved), and a send compares the canonical form of what it is about
+ * to read against it exactly, so a link swapped after the pick names another
+ * file and is refused.
+ */
+struct FileGrant {
+    std::string id;
+    std::string path;
+    std::int64_t created_at = 0;
+};
+
+/**
  * @brief One entry of a form body.
  *
  * Mirrors the renderer's `KeyValueEntry`: a disabled row is stored and

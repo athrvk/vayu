@@ -29,8 +29,10 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -487,10 +489,10 @@ bool fold_table_scripts_into_elements (sqlite3* connection, const char* table, s
 }
 
 // ---------------------------------------------------------------------------
-// Schema version 4: the file-body trust flag fails closed
+// Schema versions 4 and 6: file trust leaves the stored bodies
 // ---------------------------------------------------------------------------
 
-/// One stored value the version-4 step replaces.
+/// One stored value the file-trust step replaces.
 struct RowRewrite {
     const char* table  = "";
     const char* column = "";
@@ -498,35 +500,71 @@ struct RowRewrite {
     std::string text;
 };
 
-/// One allowed folder the version-4 step removes, and the rule that refused it.
+/// One allowed folder the file-trust step removes, and the rule that refused it.
 struct RefusedRoot {
     std::string id;
     std::string path;
     std::string reason;
 };
 
-/// Everything the version-4 step changes, read before anything is written so
+/// Everything the file-trust step changes, read before anything is written so
 /// a database with nothing to change is stamped without a backup or a
 /// transaction.
 struct FileTrustPlan {
     std::vector<RowRewrite> rewrites;
     std::vector<RefusedRoot> refused_roots;
+    /// Canonical, deduplicated: the `file_grants` rows to insert.
+    std::set<std::string> grants;
 
     [[nodiscard]] bool empty () const {
-        return rewrites.empty () && refused_roots.empty ();
+        return rewrites.empty () && refused_roots.empty () && grants.empty ();
     }
 };
 
+/// `file_grants` exactly as `make_vayu_storage` maps it. Created here because
+/// the grants are read out of the bodies before `sync_schema ()` runs; any
+/// difference from the mapping makes `sync_schema ()` rebuild the table empty.
+constexpr const char* FILE_GRANTS_DDL =
+"CREATE TABLE IF NOT EXISTS \"file_grants\" (\"id\" TEXT PRIMARY KEY NOT NULL, "
+"\"path\" TEXT UNIQUE NOT NULL, \"created_at\" INTEGER NOT NULL);";
+
+/// Whether @p ref was chosen in the editor, as the database stored it: an
+/// explicit `false`, or no key at all on a database older than version 4,
+/// whose writes left the key out exactly when the editor wrote the path.
+bool stored_as_chosen (const nlohmann::json& ref, bool absent_means_chosen) {
+    const auto found = ref.find ("unresolved");
+    if (found == ref.end ()) {
+        return absent_means_chosen;
+    }
+    return found->is_boolean () && !found->get<bool> ();
+}
+
+/// Removes the trust key from every file reference of @p body, adding a grant
+/// for each one stored as chosen whose `src` still names a regular file
+/// (`grantable_file_path`: a missing path or one holding `{{` is skipped).
+/// True when the body changed.
+bool settle_body_trust (nlohmann::json& body,
+bool absent_means_chosen,
+std::set<std::string>& grants) {
+    bool changed = false;
+    vayu::json::for_each_file_ref (body, [&] (nlohmann::json& ref) {
+        const auto src = ref.find ("src");
+        if (src != ref.end () && src->is_string () &&
+        stored_as_chosen (ref, absent_means_chosen)) {
+            if (auto path = vayu::http::grantable_file_path (src->get<std::string> ())) {
+                grants.insert (std::move (*path));
+            }
+        }
+        changed = ref.erase ("unresolved") > 0 || changed;
+    });
+    return changed;
+}
+
 /**
- * Plans the rewrite of @p table's @p column: every stored request body there
- * gets an explicit boolean `unresolved` on its binary `file` and on each
- * form-data file part, with an absent key written as `false`.
- *
- * `false`, because every row that exists when this runs was written before the
- * key was always serialized, and the writer that left it out was the editor:
- * importers, curl paste and MCP always wrote `true` on a path they carried.
- * Once every stored body states the key, an absent one means unresolved
- * everywhere (`vayu::json::reads_as_unresolved`), with no storage exception.
+ * Plans the file-trust step over @p table's @p column (#2356): every stored
+ * file reference loses `unresolved`, and one a person chose becomes a grant
+ * (`settle_body_trust`). The engine derives trust from roots and grants from
+ * here on, so nothing stored may still claim it.
  *
  * @p in_snapshot reads the body at the value's `body` member (a run's
  * `config_snapshot`, the payload a history entry is re-opened from) rather
@@ -534,11 +572,12 @@ struct FileTrustPlan {
  * byte-identical and logged, never dropped. Only values with `"file"` in their
  * text are parsed at all.
  */
-void plan_body_restatement (sqlite3* connection,
+void plan_trust_removal (sqlite3* connection,
 const char* table,
 const char* column,
 bool in_snapshot,
-std::vector<RowRewrite>& out) {
+bool absent_means_chosen,
+FileTrustPlan& plan) {
     if (!has_column (table_columns (connection, table), column)) {
         return;
     }
@@ -569,10 +608,8 @@ std::vector<RowRewrite>& out) {
             }
             body = &*member;
         }
-        const nlohmann::json before = *body;
-        vayu::json::state_file_trust (*body, vayu::json::AbsentFileTrust::Chosen);
-        if (*body != before) {
-            out.push_back ({ table, column, id, value.dump () });
+        if (settle_body_trust (*body, absent_means_chosen, plan.grants)) {
+            plan.rewrites.push_back ({ table, column, id, value.dump () });
         }
     }
     sqlite3_finalize (statement);
@@ -612,61 +649,106 @@ void plan_refused_roots (sqlite3* connection, std::vector<RefusedRoot>& out) {
     sqlite3_finalize (statement);
 }
 
-FileTrustPlan plan_file_trust_migration (sqlite3* connection) {
+/**
+ * The file-trust step for a database stamped @p version. Requests (the trash
+ * included, which is the same table) and run snapshots are the two places a
+ * body `FilePlan` sends is stored. `request_examples.body` is a response's
+ * text and `inbox_requests.body` the bytes a listener received: neither is
+ * ever parsed as a request body, so neither is visited.
+ */
+FileTrustPlan plan_file_trust_migration (sqlite3* connection, int64_t version) {
     FileTrustPlan plan;
-    plan_body_restatement (
-    connection, "requests", "body", /*in_snapshot=*/false, plan.rewrites);
-    plan_body_restatement (
-    connection, "runs", "config_snapshot", /*in_snapshot=*/true, plan.rewrites);
+    const bool absent_means_chosen = version < 4;
+    plan_trust_removal (connection, "requests", "body", /*in_snapshot=*/false,
+    absent_means_chosen, plan);
+    plan_trust_removal (connection, "runs", "config_snapshot",
+    /*in_snapshot=*/true, absent_means_chosen, plan);
     plan_refused_roots (connection, plan.refused_roots);
     return plan;
 }
 
-/// Runs one prepared statement per row of @p plan inside the caller's
-/// transaction. False on the first SQLite error, message in @p error.
-bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std::string& error) {
-    const auto run = [&] (const std::string& sql, const std::string& first,
-                     const std::string* second) {
-        sqlite3_stmt* statement = nullptr;
-        bool ok = sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement,
-                  nullptr) == SQLITE_OK;
-        if (ok) {
-            sqlite3_bind_text (statement, 1, first.c_str (), -1, SQLITE_TRANSIENT);
-            if (second != nullptr) {
-                sqlite3_bind_text (statement, 2, second->c_str (), -1, SQLITE_TRANSIENT);
-            }
-            ok = sqlite3_step (statement) == SQLITE_DONE;
-        }
+/// Runs @p sql once with @p texts bound in order, inside the caller's
+/// transaction. False on a SQLite error, message in @p error.
+bool run_bound (sqlite3* connection,
+const std::string& sql,
+std::initializer_list<const std::string*> texts,
+std::string& error) {
+    sqlite3_stmt* statement = nullptr;
+    bool ok = sqlite3_prepare_v2 (connection, sql.c_str (), -1, &statement, nullptr) == SQLITE_OK;
+    int index = 1;
+    for (const std::string* text : texts) {
         if (!ok) {
-            error = sqlite3_errmsg (connection);
+            break;
         }
-        sqlite3_finalize (statement);
-        return ok;
-    };
-    for (const auto& row : plan.rewrites) {
-        const std::string sql = std::string ("UPDATE ") + row.table + " SET " +
-        row.column + " = ?1 WHERE id = ?2;";
-        if (!run (sql, row.text, &row.id)) {
-            return false;
-        }
+        sqlite3_bind_text (statement, index++, text->c_str (), -1, SQLITE_TRANSIENT);
     }
-    for (const auto& root : plan.refused_roots) {
-        if (!run ("DELETE FROM file_roots WHERE id = ?1;", root.id, nullptr)) {
+    ok = ok && sqlite3_step (statement) == SQLITE_DONE;
+    if (!ok) {
+        error = sqlite3_errmsg (connection);
+    }
+    sqlite3_finalize (statement);
+    return ok;
+}
+
+/// Creates `file_grants` if it is not there yet and adds one row per path of
+/// @p grants, skipping a path already granted. False on the first SQLite error.
+bool insert_grants (sqlite3* connection, const std::set<std::string>& grants, std::string& error) {
+    if (grants.empty ()) {
+        return true;
+    }
+    if (sqlite3_exec (connection, FILE_GRANTS_DDL, nullptr, nullptr, nullptr) != SQLITE_OK) {
+        error = sqlite3_errmsg (connection);
+        return false;
+    }
+    const std::string insert_sql = "INSERT OR IGNORE INTO file_grants (id, "
+                                   "path, created_at) VALUES (?1, ?2, " +
+    std::to_string (std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ()) +
+    ");";
+    for (const std::string& path : grants) {
+        const std::string id = vayu::utils::generate_id ("fgrant_");
+        if (!run_bound (connection, insert_sql, { &id, &path }, error)) {
             return false;
         }
     }
     return true;
 }
 
-/// Says, once the removal has committed, which allowed folders are gone and
-/// why, so a user who finds one missing from Settings > Files can see it.
-void log_refused_roots (const FileTrustPlan& plan) {
+/// Applies @p plan inside the caller's transaction. False on the first SQLite
+/// error, message in @p error.
+bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std::string& error) {
+    for (const auto& row : plan.rewrites) {
+        const std::string sql = std::string ("UPDATE ") + row.table + " SET " +
+        row.column + " = ?1 WHERE id = ?2;";
+        if (!run_bound (connection, sql, { &row.text, &row.id }, error)) {
+            return false;
+        }
+    }
+    for (const auto& root : plan.refused_roots) {
+        if (!run_bound (connection, "DELETE FROM file_roots WHERE id = ?1;",
+            { &root.id }, error)) {
+            return false;
+        }
+    }
+    return insert_grants (connection, plan.grants, error);
+}
+
+/// Says, once the step has committed, which allowed folders are gone and why,
+/// so a user who finds one missing from Settings > Files can see it, and how
+/// many picked files the stored bodies were turned into grants for.
+void log_file_trust_plan (const FileTrustPlan& plan) {
     for (const auto& root : plan.refused_roots) {
         vayu::utils::log_warning ("db",
         "Removed an allowed folder for request-body files that is a "
         "filesystem root, the home folder or a folder containing it; "
         "allow a folder inside the home folder instead",
         { { "path", root.path }, { "reason", root.reason } });
+    }
+    if (!plan.grants.empty ()) {
+        vayu::utils::log_info ("db",
+        "Recorded the request-body files chosen in the editor as picked files",
+        { { "count", plan.grants.size () } });
     }
 }
 
@@ -805,12 +887,12 @@ const std::function<bool (const std::string&)>& probe) {
  * @p path, never after - see `engine/CLAUDE.md`'s "Removing a column" rule).
  *
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
- * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`); 1 and 2 are stamped without a fold; anything
- * below 4 also gets the version-4 step (`plan_file_trust_migration`) in the
- * same transaction; already at
- * `SCHEMA_VERSION` is a fast no-op; newer than `SCHEMA_VERSION` refuses to
- * start rather than silently serving - and possibly writing - settings this
- * build does not understand.
+ * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`);
+ * 1 and 2 are stamped without a fold; anything older than this build also
+ * gets the file-trust step (`plan_file_trust_migration`, versions 4 and 6) in
+ * the same transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
+ * than `SCHEMA_VERSION` refuses to start rather than silently serving - and
+ * possibly writing - settings this build does not understand.
  *
  * Once this returns having bumped the version, `sync_schema ()` sees a
  * mapping with no `pre_request_script` / `post_request_script` columns and
@@ -862,26 +944,29 @@ void migrate_before_sync (const std::string& path) {
     const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
     const bool collections_need_fold =
     table_has_script_columns (connection.get (), "collections");
-    // 3 -> 4 (every earlier version passes through it too): state the trust
-    // flag on every stored body and drop the allowed folders the root rule
-    // refuses - see `plan_body_restatement` and `plan_refused_roots`.
-    const FileTrustPlan trust_plan = plan_file_trust_migration (connection.get ());
+    // 5 -> 6 (every earlier version passes through it too): grant the files
+    // a person chose, take the trust key out of every stored body, and drop
+    // the allowed folders the root rule refuses (4) - see `plan_trust_removal`
+    // and `plan_refused_roots`.
+    const FileTrustPlan trust_plan =
+    plan_file_trust_migration (connection.get (), *version);
     if (!requests_need_fold && !collections_need_fold && trust_plan.empty ()) {
         // Nothing to fold or rewrite - a fresh schema with no rows yet, a
-        // database some other path already brought to this shape, or a
-        // version-1 to -3 database with no file reference to state. The
-        // other steps only stamp: 1 -> 2 is
+        // database some other path already brought to this shape, or one
+        // with no file reference to settle. The other steps only stamp:
+        // 1 -> 2 is
         // `request_examples.postman_response` and the four `requests`
         // protocol-setting columns of #1765, nullable or NOT NULL with a
         // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
-        // `file_roots` table, which `sync_schema ()` creates outright.
+        // `file_roots` table and 5 -> 6 the new `file_grants`, which
+        // `sync_schema ()` creates outright.
         stamp_schema_version (connection.get ());
         return;
     }
 
     // Kept until the next successful start (issue #1487's rule) - the one
     // copy of a pre-cutover row's exact script text, and of every body and
-    // allowed folder the version-4 step rewrites, if either were ever found
+    // allowed folder the file-trust step rewrites, if either were ever found
     // to have gone wrong.
     const fs::path db_file (path);
     fs::path pre_migration_backup = db_file;
@@ -902,7 +987,7 @@ void migrate_before_sync (const std::string& path) {
     if (ok) {
         stamp_schema_version (connection.get ());
         sqlite3_exec (connection.get (), "COMMIT;", nullptr, nullptr, nullptr);
-        log_refused_roots (trust_plan);
+        log_file_trust_plan (trust_plan);
     } else {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
         throw std::runtime_error ("Vayu could not migrate the database at " +

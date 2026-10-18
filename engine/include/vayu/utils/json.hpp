@@ -13,6 +13,7 @@
  */
 
 #include <cstdint>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -164,6 +165,12 @@ void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
  * goes through this.
  */
 [[nodiscard]] bool reads_as_unresolved (const Json& ref);
+
+/**
+ * @brief Call @p visit on every file reference in the request body @p body: a
+ * `binary` body's `file` object and each `type: "file"` entry of `fields`.
+ */
+void for_each_file_ref (Json& body, const std::function<void (Json& ref)>& visit);
 
 /// What an absent `unresolved` means where `state_file_trust` writes it.
 enum class AbsentFileTrust : std::uint8_t {

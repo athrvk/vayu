@@ -13,6 +13,7 @@
 #include "vayu/utils/json.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -1207,12 +1208,12 @@ bool is_file_part (const Json& field) {
 
 } // namespace
 
-void state_file_trust (Json& body, AbsentFileTrust absent) {
+void for_each_file_ref (Json& body, const std::function<void (Json& ref)>& visit) {
     if (!body.is_object ()) {
         return;
     }
-    if (const auto file = body.find ("file"); file != body.end ()) {
-        state_ref_trust (*file, absent);
+    if (const auto file = body.find ("file"); file != body.end () && file->is_object ()) {
+        visit (*file);
     }
     const auto fields = body.find ("fields");
     if (fields == body.end () || !fields->is_array ()) {
@@ -1220,9 +1221,14 @@ void state_file_trust (Json& body, AbsentFileTrust absent) {
     }
     for (Json& field : *fields) {
         if (is_file_part (field)) {
-            state_ref_trust (field, absent);
+            visit (field);
         }
     }
+}
+
+void state_file_trust (Json& body, AbsentFileTrust absent) {
+    for_each_file_ref (
+    body, [absent] (Json& ref) { state_ref_trust (ref, absent); });
 }
 
 Result<Request> deserialize_request (const Json& json) {
