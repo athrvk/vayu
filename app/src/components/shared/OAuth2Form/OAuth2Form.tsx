@@ -36,9 +36,9 @@ import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
 const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
-	{ value: "client_credentials", label: "Client Credentials" },
-	{ value: "password", label: "Password Credentials" },
-	{ value: "authorization_code", label: "Authorization Code (PKCE)" },
+	{ value: "client_credentials", label: "Client credentials" },
+	{ value: "password", label: "Password credentials" },
+	{ value: "authorization_code", label: "Authorization code (PKCE)" },
 ];
 
 // A plain-input fallback when the host does not inject a variable-aware input.
@@ -190,7 +190,7 @@ export default function OAuth2Form({
 					/>
 				)}
 				{field(
-					"Client Secret",
+					"Client secret",
 					<TextInput
 						value={value.clientSecret ?? ""}
 						onChange={(v) => set("clientSecret", v)}
@@ -255,7 +255,7 @@ export default function OAuth2Form({
 				<CollapsibleContent className="pt-4 px-1 pb-1 space-y-4">
 					<div className="grid grid-cols-2 gap-4">
 						{field(
-							"Client Authentication",
+							"Client authentication",
 							<Select
 								value={value.credentialsPlacement ?? "basic_auth_header"}
 								onValueChange={(v: "basic_auth_header" | "body") =>
@@ -267,14 +267,14 @@ export default function OAuth2Form({
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="basic_auth_header">
-										Send as Basic Auth header
+										Send as Basic auth header
 									</SelectItem>
 									<SelectItem value="body">Send in body</SelectItem>
 								</SelectContent>
 							</Select>
 						)}
 						{field(
-							"Token Placement",
+							"Token placement",
 							<Select
 								value={value.tokenPlacement ?? "header"}
 								onValueChange={(v: "header" | "query") => set("tokenPlacement", v)}
@@ -293,7 +293,7 @@ export default function OAuth2Form({
 					<div className="grid grid-cols-2 gap-4">
 						{value.tokenPlacement === "query"
 							? field(
-									"Query Param Name",
+									"Query param name",
 									<TextInput
 										value={value.queryParamName ?? ""}
 										onChange={(v) => set("queryParamName", v)}
@@ -301,7 +301,7 @@ export default function OAuth2Form({
 									/>
 								)
 							: field(
-									"Header Prefix",
+									"Header prefix",
 									<TextInput
 										value={value.headerPrefix ?? ""}
 										onChange={(v) => set("headerPrefix", v)}
@@ -339,7 +339,7 @@ export default function OAuth2Form({
 					</div>
 
 					{field(
-						"Refresh Token URL",
+						"Refresh token URL",
 						<TextInput
 							value={value.refreshTokenUrl ?? ""}
 							onChange={(v) => set("refreshTokenUrl", v)}

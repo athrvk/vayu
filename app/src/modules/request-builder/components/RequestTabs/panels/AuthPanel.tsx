@@ -106,7 +106,7 @@ export default function AuthPanel() {
 		<div className="space-y-6">
 			{/* Auth Type Selector */}
 			<div className="space-y-2">
-				<Label>Authentication Type</Label>
+				<Label>Authentication type</Label>
 				<Select value={uneditableLabel ? "" : auth.mode} onValueChange={handleModeChange}>
 					<SelectTrigger className="w-auto">
 						<SelectValue

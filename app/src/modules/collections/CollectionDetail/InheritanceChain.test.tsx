@@ -58,7 +58,7 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="leaf" />);
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.queryByText(new RegExp(JWT.slice(0, 40)))).not.toBeInTheDocument();
 	});
 
@@ -80,8 +80,8 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="b" />);
 
-		expect(screen.getByText("Basic Auth")).toBeInTheDocument();
-		expect(screen.getByText("API Key")).toBeInTheDocument();
+		expect(screen.getByText("Basic auth")).toBeInTheDocument();
+		expect(screen.getByText("API key")).toBeInTheDocument();
 		expect(screen.queryByText(/svc-account-with-a-long-name/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/X-Acme-Very-Long-Header-Name/)).not.toBeInTheDocument();
 	});
@@ -124,7 +124,7 @@ describe("InheritanceChain", () => {
 			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
 		).toBeInTheDocument();
 		// The blocking row names itself distinctly from a plain unset one.
-		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
 	});
 
 	it("still marks the nearest non-none ancestor as the source", () => {
@@ -143,7 +143,7 @@ describe("InheritanceChain", () => {
 
 	it("shows the tab's unsaved pick instead of the stored mode while it is dirty (#1483)", () => {
 		// The leaf is stored as bearer, so without `draftAuth` wired through
-		// `withDraftAuth` this would read "Bearer Token" and mark "root" as
+		// `withDraftAuth` this would read "Bearer token" and mark "root" as
 		// SOURCE - the stale-panel bug the draft prop exists to close.
 		chain.length = 0;
 		chain.push(
@@ -153,7 +153,7 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "noauth" }} />);
 
-		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
 		expect(screen.queryByText("SOURCE")).not.toBeInTheDocument();
 		// Names Payments (the leaf) as the blocker, which only happens once its
 		// row reads the draft's noauth rather than its stored bearer token.

@@ -73,7 +73,7 @@ describe("ProfilePicker with a subset of modes", () => {
 		const { radios } = renderSubset("iterations");
 		expect(radios[1].textContent).toContain("Fixed passes");
 		expect(radios[1].textContent).toContain("Walk it N times.");
-		expect(radios[0].textContent).toContain("Constant Virtual Users");
+		expect(radios[0].textContent).toContain("Constant virtual users");
 		expect(loadTestModeLabel("iterations")).toBe("Fixed request count");
 	});
 });

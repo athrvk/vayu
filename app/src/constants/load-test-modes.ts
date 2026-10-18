@@ -26,7 +26,7 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 
 export interface LoadTestModeInfo {
 	value: LoadTestMode;
-	/** Title-case name. Used wherever a run's mode is shown. */
+	/** Sentence-case name. Used wherever a run's mode is shown. */
 	label: string;
 	/** One line, for pickers. Not shown alongside `label` elsewhere. */
 	description: string;
@@ -40,7 +40,7 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 	},
 	{
 		value: "constant_concurrency",
-		label: "Constant Virtual Users",
+		label: "Constant virtual users",
 		description: "Keep a fixed number of virtual users busy.",
 	},
 	{
@@ -50,12 +50,12 @@ export const LOAD_TEST_MODES: readonly LoadTestModeInfo[] = [
 	},
 	{
 		value: "ramp_up",
-		label: "Ramp-Up",
+		label: "Ramp-up",
 		description: "Climb to the target number of virtual users over a ramp.",
 	},
 	{
 		value: "capacity",
-		label: "Capacity Discovery",
+		label: "Capacity discovery",
 		description: "Step up until latency breaks its budget, then report the limit.",
 	},
 ];

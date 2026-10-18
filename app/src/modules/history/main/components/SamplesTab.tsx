@@ -123,7 +123,7 @@ export default function SamplesTab({
 		<Card>
 			<CardHeader>
 				<div className="flex items-center justify-between">
-					<CardTitle>Sampled Request Details</CardTitle>
+					<CardTitle>Sampled request details</CardTitle>
 					<div className="flex items-center gap-2">
 						<Badge variant="secondary" className="text-xs">
 							{formatNumber(visibleRows.length)} samples shown

@@ -39,7 +39,7 @@ const renderMode = (mode: "ramp_up" | "capacity" | "constant_concurrency") =>
 
 describe("ProfileFields' ramp duration hint", () => {
 	const hint =
-		"One climb up, then hold. For a staircase or a limit search use Capacity Discovery.";
+		"One climb up, then hold. For a staircase or a limit search use Capacity discovery.";
 
 	it("says the ramp is one climb and names the mode that steps", () => {
 		renderMode("ramp_up");

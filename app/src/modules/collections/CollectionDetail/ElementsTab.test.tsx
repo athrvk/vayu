@@ -334,7 +334,7 @@ describe("ElementsTab - the Save button", () => {
 	it("says the fields are saved together, where the editing happens", () => {
 		renderTab(makeCollection([]));
 		expect(
-			screen.getByText(/saved together, when you press Save Elements/i)
+			screen.getByText(/saved together, when you press Save elements/i)
 		).toBeInTheDocument();
 	});
 });
@@ -363,7 +363,7 @@ describe("ElementsTab - a required field an element's config is missing (issue #
 		expect(screen.getByText("Needs Variable name")).toBeInTheDocument();
 	});
 
-	it("re-enables Save Elements once the field is filled in", async () => {
+	it("re-enables Save elements once the field is filled in", async () => {
 		renderTab(makeCollection([]));
 		await addRequiredElement();
 		expect(screen.getByRole("button", { name: /save elements/i })).toBeDisabled();

@@ -27,9 +27,9 @@ import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "./oauth2-fields";
 
 describe("humanizeOAuth2Error over the engine's own messages", () => {
 	it.each([
-		["accessTokenUrl must be an http(s) URL", "Access Token URL must be an http(s) URL"],
+		["accessTokenUrl must be an http(s) URL", "Access token URL must be an http(s) URL"],
 		["clientId is required", "Client ID is required"],
-		["Unsupported grantType: password", "Unsupported Grant Type: password"],
+		["Unsupported grantType: password", "Unsupported Grant type: password"],
 		[
 			"authorizationUrl and clientId are required",
 			"Authorization URL and Client ID are required",

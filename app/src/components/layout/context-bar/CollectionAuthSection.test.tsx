@@ -76,7 +76,7 @@ describe("CollectionAuthSection", () => {
 		collections = [collection("col_leaf", bearer)];
 		render(<CollectionAuthSection tab={TAB} />);
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.getByText("Requests set to Inherit send this.")).toBeInTheDocument();
 	});
 
@@ -88,7 +88,7 @@ describe("CollectionAuthSection", () => {
 		render(<CollectionAuthSection tab={TAB} />);
 
 		expect(
-			screen.getByText("Requests below inherit Bearer Token from Billing.")
+			screen.getByText("Requests below inherit Bearer token from Billing.")
 		).toBeInTheDocument();
 	});
 
@@ -112,7 +112,7 @@ describe("CollectionAuthSection", () => {
 		];
 		render(<CollectionAuthSection tab={TAB} />);
 
-		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
 		expect(
 			screen.getByText("Requests below inherit nothing - the walk stops here.")
 		).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe("CollectionAuthSection", () => {
 
 		render(<CollectionAuthSection tab={TAB} />);
 
-		expect(screen.getByText("No Auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
 		expect(
 			screen.getByText("Requests below inherit nothing - the walk stops here.")
 		).toBeInTheDocument();

@@ -106,8 +106,8 @@ const IDLE_TAB: TabState = { phase: "idle", error: "", entries: [], progress: nu
 const FORMAT_BADGES = [
 	"Postman v2.1",
 	"Postman v2.0",
-	"Postman Env",
-	"Postman Globals",
+	"Postman environment",
+	"Postman globals",
 	"Insomnia v4",
 	"Insomnia v5",
 	"OpenAPI 3.0",

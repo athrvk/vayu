@@ -153,7 +153,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			)}
 
 			<p className="text-label text-muted-foreground">
-				These are saved together, when you press Save Elements - not as you add or edit one.
+				These are saved together, when you press Save elements - not as you add or edit one.
 			</p>
 
 			<EditorVariableTokensProvider support={variableSupport}>
@@ -210,8 +210,8 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 						className="font-semibold"
 					>
 						<LabelSwap
-							label={updateCollection.isPending ? "Saving…" : "Save Elements"}
-							states={["Save Elements", "Saving…"]}
+							label={updateCollection.isPending ? "Saving…" : "Save elements"}
+							states={["Save elements", "Saving…"]}
 						/>
 					</Button>
 				</DisabledHint>

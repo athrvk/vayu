@@ -117,7 +117,7 @@ describe("History Overview - a load run's test outcomes", () => {
 			})
 		);
 
-		expect(screen.getByText("Test Validation")).toBeInTheDocument();
+		expect(screen.getByText("Test validation")).toBeInTheDocument();
 		expect(screen.getByText("Responses tested")).toBeInTheDocument();
 		expect(screen.getByText("100")).toBeInTheDocument();
 		expect(screen.getByText("13")).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe("History Overview - a load run's test outcomes", () => {
 		// before this block existed.
 		renderOverview(makeReport({ results: [CAPTURED_SAMPLE] }));
 
-		expect(screen.queryByText("Test Validation")).not.toBeInTheDocument();
+		expect(screen.queryByText("Test validation")).not.toBeInTheDocument();
 	});
 });
 

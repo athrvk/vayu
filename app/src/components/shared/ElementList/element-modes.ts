@@ -148,7 +148,7 @@ export const ELEMENT_MODES: Record<string, ElementModeSpec> = {
 		detectionOrder: ["everyN", "percent"],
 		modes: [
 			{ id: "percent", label: "Percent", render: "fields" },
-			{ id: "everyN", label: "Every Nth", render: "fields" },
+			{ id: "everyN", label: "Every nth", render: "fields" },
 		],
 	},
 

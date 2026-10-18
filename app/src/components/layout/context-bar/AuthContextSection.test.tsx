@@ -71,7 +71,7 @@ describe("AuthContextSection", () => {
 		requestAuth = { mode: "bearer", token: "t" };
 		renderSection();
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.getByText("Set on this request")).toBeInTheDocument();
 	});
 
@@ -84,7 +84,7 @@ describe("AuthContextSection", () => {
 		];
 		renderSection();
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.getByText("Inherited from leaf")).toBeInTheDocument();
 	});
 

@@ -12,7 +12,7 @@
  *
  * **A `deferred` element is not a skipped one.** A post-request script is not
  * run inline on the load path; the engine replays it against the sampled
- * responses afterwards and reports that in the Test Validation card. Its
+ * responses afterwards and reports that in the Test validation card. Its
  * `passed`/`failed` are therefore zero by construction, and "0 passed" would
  * read as a script that did nothing. `deferred` is absent from a report
  * stored before #2144, which keeps the older rendering.
@@ -40,7 +40,7 @@ export function ElementTally({ element, className }: ElementTallyProps) {
 			{deferred > 0 && (
 				<span className="font-mono text-muted-foreground">
 					{formatNumber(deferred)} {pluralize(deferred, "request")} deferred to a post-run
-					replay of sampled responses - results in Test Validation
+					replay of sampled responses - results in Test validation
 				</span>
 			)}
 			{showPassed && (
