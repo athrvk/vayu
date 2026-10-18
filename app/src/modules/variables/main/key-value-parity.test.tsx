@@ -300,7 +300,7 @@ describe("row-enable checkbox - the rest of the control", () => {
 		// directly (`checked:bg-*`/`checked:border-*`) rather than through the
 		// native `accent-color` a bare checkbox would need - a browser's own
 		// rendering follows neither the theme nor the accent scheme.
-		// `KeyValueRow` takes the primitive's default (`checked:bg-primary`);
+		// `KeyValueRow` takes the primitive's default (`checked:bg-primary-fill`);
 		// this table overrides it with the scope colour.
 		for (const checkbox of [renderVariablesCheckbox(true), renderKeyValueCheckbox()]) {
 			expect(String(checkbox.className)).toMatch(/\bchecked:bg-[a-z-]+\b/);

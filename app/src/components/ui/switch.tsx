@@ -38,7 +38,7 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
 				// and a rhythm-scaled width paired with a fixed-floor height made
 				// the thumb's travel distance a different fraction of the track at
 				// each density; fixed keeps both ends of the transform exact.
-				"peer inline-flex h-target w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
+				"peer inline-flex h-target w-[44px] shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary-fill data-[state=unchecked]:bg-border-strong data-[state=unchecked]:border-subtle-foreground",
 				className
 			)}
 			{...props}
