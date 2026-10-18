@@ -170,7 +170,8 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 							<Label htmlFor="new-issuer-expiry" className="leading-snug">
 								Token lifetime
 								<span className="block text-xs font-normal text-muted-foreground">
-									Seconds. What `exp` is stamped with, and what `expires_in`
+									Seconds. What <code className="font-mono">exp</code> is stamped
+									with, and what <code className="font-mono">expires_in</code>{" "}
 									reports.
 								</span>
 							</Label>
@@ -199,7 +200,8 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 						<Label htmlFor="new-issuer-failure-mode" className="leading-snug">
 							Failure mode
 							<span className="block text-xs font-normal text-muted-foreground">
-								How `/token` answers. Changeable while the issuer runs.
+								How <code className="font-mono">/token</code> answers. Changeable
+								while the issuer runs.
 							</span>
 						</Label>
 						<Select
@@ -265,8 +267,11 @@ export function NewIssuerDialog({ onOpenChange, onStarted }: NewIssuerDialogProp
 						<Label htmlFor="new-issuer-claims" className="leading-snug">
 							Claims
 							<span className="block text-xs font-normal text-muted-foreground">
-								JSON merged into every token. `iss`, `iat`, `exp` and `jti` are the
-								issuer&apos;s own and always win.
+								JSON merged into every token. <code className="font-mono">iss</code>
+								, <code className="font-mono">iat</code>,{" "}
+								<code className="font-mono">exp</code> and{" "}
+								<code className="font-mono">jti</code> are the issuer&apos;s own and
+								always win.
 							</span>
 						</Label>
 						<Textarea
