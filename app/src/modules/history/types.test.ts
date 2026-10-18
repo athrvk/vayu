@@ -7,9 +7,9 @@
 
 /**
  * A run's kind has one name in the UI, `RUN_TYPE_NAME` (docs/ux-writing.md). A
- * second table ("load test" / "request" / "collection") once leaked into
- * accessible names and the palette, so the guard below fails on any second
- * spelling rather than on the one that happened to be found.
+ * second table ("load test" / "request" / "collection") reaches accessible
+ * names and the palette, so the guard below fails on any second spelling
+ * rather than on one known case.
  *
  * Mutation check: re-add a `RUN_KIND_LABEL` export to `types.ts`, or a
  * `run.type === "load" ? "load test" : "request"` ternary to any component, and
@@ -68,8 +68,8 @@ const SCENARIO_LOAD_RUN = /scenario load run/i;
 const KIND_TABLES: Record<string, number> = {
 	// The table itself.
 	"modules/history/types.ts": 3,
-	// Agent vocabulary, not UI copy: `Vayu run "x" (run_1) - collection run, ...` is
-	// pasted into an agent's context and must stay in the words `agent-reference.test.ts` pins.
+	// Agent vocabulary, not UI copy: the run line is pasted into an agent's
+	// context and must stay in the words `agent-reference.test.ts` pins.
 	"lib/agent-reference.ts": 3,
 };
 
