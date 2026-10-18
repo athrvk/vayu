@@ -44,6 +44,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
+import { lucideNames, openingTagAt, ownClassName } from "@/lib/jsx-opening-tags.testkit";
 import { stripComments } from "@/lib/strip-comments.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -61,69 +62,9 @@ const UNTOKENED_GLYPH_SIZE =
 // A lucide `Circle` painted solid is a radio's dot, a shape the control sizes, not an icon.
 const FILLED_DOT = /(?<![\w-])fill-current(?![\w-])/;
 
-const LUCIDE_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']lucide-react["']/g;
-
-/** The local names `code` imports from lucide-react, aliases resolved, plus the app's own glyph. */
-function glyphNames(code: string): string[] {
-	const names = ["RunStatusGlyph"];
-	for (const [, specifiers] of code.matchAll(LUCIDE_IMPORT)) {
-		for (const specifier of specifiers.split(",")) {
-			const local = specifier
-				.trim()
-				.split(/\s+as\s+/)
-				.pop()
-				?.replace(/^type\s+/, "");
-			if (local && /^[A-Z]\w*$/.test(local) && local !== "LucideIcon") names.push(local);
-		}
-	}
-	return names;
-}
-
-/** The opening tag's text from `start`: up to the first `>` outside quotes and braces. */
-function openingTag(code: string, start: number): string {
-	let depth = 0;
-	let quote = "";
-	for (let i = start; i < code.length; i++) {
-		const c = code[i];
-		if (quote) {
-			if (c === quote) quote = "";
-		} else if (c === '"' || c === "'" || c === "`") quote = c;
-		else if (c === "{") depth++;
-		else if (c === "}") depth--;
-		else if (c === ">" && depth === 0) return code.slice(start, i);
-	}
-	return code.slice(start);
-}
-
-/**
- * The value of `tag`'s own `className`, wherever it sits among the attributes. A
- * glyph passed as a prop (`icon={<X className="size-3" />}`) is at brace depth 1
- * and is a different element's box.
- */
-function ownClassName(tag: string): string {
-	let depth = 0;
-	for (let i = 0; i < tag.length; i++) {
-		if (tag[i] === "{") depth++;
-		else if (tag[i] === "}") depth--;
-		else if (depth === 0 && tag.startsWith("className=", i)) {
-			return attributeValue(tag, i + "className=".length);
-		}
-	}
-	return "";
-}
-
-/** The quoted string or balanced `{...}` expression starting at `start`. */
-function attributeValue(tag: string, start: number): string {
-	const open = tag[start];
-	if (open === '"' || open === "'") {
-		return tag.slice(start, tag.indexOf(open, start + 1) + 1);
-	}
-	let depth = 0;
-	for (let i = start; i < tag.length; i++) {
-		if (tag[i] === "{") depth++;
-		else if (tag[i] === "}" && --depth === 0) return tag.slice(start, i + 1);
-	}
-	return tag.slice(start);
+/** The local names `source` may draw a glyph with: lucide's, plus the app's own. */
+function glyphNames(source: string): string[] {
+	return ["RunStatusGlyph", ...lucideNames(source)];
 }
 
 /** One `<Glyph class` entry per glyph in `source` whose own className is not a token. */
@@ -133,7 +74,7 @@ function untokenedGlyphs(source: string): string[] {
 	const open = new RegExp(`<(${names.join("|")})(?=[\\s/>])`, "g");
 	const hits: string[] = [];
 	for (const m of code.matchAll(open)) {
-		const classes = ownClassName(openingTag(code, m.index));
+		const classes = ownClassName(openingTagAt(code, m.index));
 		if (FILLED_DOT.test(classes)) continue;
 		const size = classes.match(UNTOKENED_GLYPH_SIZE)?.[0];
 		if (size) hits.push(`<${m[1]} ${size}`);
