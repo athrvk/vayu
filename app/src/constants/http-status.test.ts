@@ -188,7 +188,7 @@ describe("no component classifies status codes on its own", () => {
 		const RANGE =
 			/(?:code|status|statusCode|\w+\.status|\w+\.statusCode)\s*(?:>=|<=|<|>)\s*[1-6]00/;
 		const BARE_COLOUR =
-			/(?:bg|text|border)-(?:success|warning|destructive)(?![-\w])|hsl\(var\(--(?:success|warning|destructive)\)\)|variant=\{[^}]*["']destructive["']/;
+			/(?:bg|text|border)-(?:success|warning|destructive)(?![-\w])|hsl\(var\(--(?:success|warning|destructive)\)\)|variant=(?:\{[^}]*)?["']destructive["']/;
 		const VOCABULARY = /from ["']@\/constants\/http-status["']/;
 		const offences: string[] = [];
 
