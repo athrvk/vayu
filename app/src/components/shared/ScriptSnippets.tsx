@@ -157,8 +157,8 @@ export function ScriptSnippets({
 			<CollapsibleContent className="mt-2">
 				{/*
 				 * A `Card`, not a sunken slab, because `Command` declares
-				 * `bg-card surface-card` itself (and so does `Card`): a `bg-transparent` override
-				 * would replace the background utility and leave the surface
+				 * `bg-card surface-card` itself (as `Card` does): a `bg-transparent`
+				 * override would replace the background utility and leave the surface
 				 * class standing, so the filter field's own `border-rule`
 				 * would resolve to the card's value inside a sunken box. One
 				 * surface for the box and its contents is the only spelling

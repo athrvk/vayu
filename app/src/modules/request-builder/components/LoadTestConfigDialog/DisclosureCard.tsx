@@ -23,8 +23,7 @@ interface DisclosureCardProps {
  * loose fields rather than as the section that revealed them. The card is the
  * design system's `Card` (docs/design-system.md "Cards"), which the
  * `Collapsible` root renders as (`asChild`) so the open state still lands on the
- * card's own element. `panel-clip` is required by the
- * `overflow-hidden` that keeps the trigger's hover fill inside the rounded
+ * card's own element. `panel-clip` is required by the `overflow-hidden` that keeps the trigger's hover fill inside the rounded
  * corners - it tucks focus rings inward so the clip cannot eat them.
  */
 export function DisclosureCard({
@@ -51,15 +50,15 @@ export function DisclosureCard({
 					</span>
 				</CollapsibleTrigger>
 				{/*
-			    `border-rule`: a divider *inside* the card, so the surface decides
-			    its colour rather than this line doing so. `--border` is tuned for
-			    the canvas and is the same colour as `--card` in dark (1.003), which
-			    is why the divider was not there at all; the Card's `surface-card`
-			    resolves it to 1.278 dark / 1.304 light.
+				 `border-rule`: a divider *inside* the card, so the surface decides
+				 its colour rather than this line doing so. `--border` is tuned for
+				 the canvas and is the same colour as `--card` in dark (1.003), which
+				 is why the divider was not there at all; the Card's `surface-card`
+				 resolves it to 1.278 dark / 1.304 light.
 
-			    The card's own outline stays `border-border` - that edge faces the
-			    dialog background, where the canvas token is correct.
-			 */}
+				 The card's own outline stays `border-border` - that edge faces the
+				 dialog background, where the canvas token is correct.
+				 */}
 				<CollapsibleContent className="space-y-4 border-t border-rule px-3 py-3">
 					{children}
 				</CollapsibleContent>
