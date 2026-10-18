@@ -77,7 +77,7 @@ Top chrome is 32px + 32px, and the split is what makes both halves work:
 
 The title row belongs to the **window** (it is what drags it, and what the macOS traffic lights and the Windows caption overlay are drawn into); the second row belongs to the **content**. Tabs switch the main area and the context bar and never the drawer, so the strip is scoped to that column and its left edge follows the drawer's resize handle - it is the drawer's flex sibling, so there is no width to keep in sync. The drawer's own half of the row is `DrawerPanel`'s header band.
 
-Both rows are tokenized: `--titlebar-height` (mirrored in `electron/constants.ts`, which sizes the real window frame and cannot read CSS) and `--tabstrip-height` (renderer-only - nothing the main process draws is that tall). `titlebar-height.test.ts` holds each token to its readers, and a top-anchored toast subtracts **both** (`constants/toast.ts`).
+Both rows are tokenized: `--titlebar-height` (mirrored in `electron/constants.ts`, which sizes the real window frame and cannot read CSS) and `--tabstrip-height` (renderer-only - nothing the main process draws is that tall). `titlebar-height.test.ts` holds each token to its readers (and `GRAPHQL_PANE_HEADER_HEIGHT`, the JS twin of `--spacing-band`), and a top-anchored toast subtracts **both** (`constants/toast.ts`).
 
 Tabs used to live in the title row. They are content-width and overflow into a dropdown, so every pixel another control took there converted directly into overflowed tabs - which is why a search bar could not simply be added beside them.
 

@@ -1387,7 +1387,11 @@ bands off arbitrary bracketed literals; a band written that way was the one
 piece of chrome in the app that could follow no token at all, and the rows still
 breathe with the density setting because their own padding and gaps ride
 `--spacing`. `header-band.test.ts` fails on any element that paints a band (a
-bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
+bottom rule over a panel fill) and sets its height with a pixel literal, and on
+any file that declares such a band and also writes `style={{ height`. A JS prop
+that has to match a band (the GraphQL Variables pane's `collapsedSize`,
+`GRAPHQL_PANE_HEADER_HEIGHT`) is held to `--spacing-band` by
+`titlebar-height.test.ts` instead. `control`,
 `control-sm`, `control-xs` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at

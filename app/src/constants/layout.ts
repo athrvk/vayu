@@ -188,18 +188,16 @@ export const GRAPHQL_VARIABLES_MAX_SIZE = 75;
  * Height of a GraphQL editor pane's header row (px).
  *
  * The Variables pane collapses to exactly its header, so this is both the
- * header's own height and the panel's `collapsedSize` - one constant, because
- * the two disagreeing is a collapsed pane that clips its own badges or leaves a
- * strip of dead editor under them.
+ * header's own height (`h-band`) and the panel's `collapsedSize` - one value,
+ * because the two disagreeing is a collapsed pane that clips its own badges or
+ * leaves a strip of dead editor under them.
  *
- * Deliberately not the `band` chrome floor (32px, issue #1679, `--spacing-band`
- * in `index.css`): this header sits *inside* a resizable editor stack, not on
- * the window's chrome anchors (the tab strip, the drawer header) that floor
- * exists for, and it is a plain number here rather than a CSS custom property
- * because `ResizablePanelGroup`'s `collapsedSize` is a JS prop with no way to
- * read a CSS variable at layout time.
+ * A plain number here rather than a CSS custom property because
+ * `ResizablePanelGroup`'s `collapsedSize` is a JS prop with no way to read a
+ * CSS variable at layout time. It must equal `--spacing-band` in `index.css`;
+ * `titlebar-height.test.ts` holds the two together.
  */
-export const GRAPHQL_PANE_HEADER_HEIGHT = 28;
+export const GRAPHQL_PANE_HEADER_HEIGHT = 32;
 
 /* ── Script element form: the editor box ─────────────────────────────────── */
 

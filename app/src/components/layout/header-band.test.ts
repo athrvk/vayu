@@ -23,6 +23,13 @@
  * `h-[18px]` keycap) without an allowlist to keep in step, because none of them
  * is a band.
  *
+ * The same band can also be sized by a `style={{ height: ... }}` prop, which
+ * is an arbitrary literal that no class string shows (issue #2316: the GraphQL
+ * pane header was 28px that way, on no step and deaf to density). A file that
+ * declares a band class and also writes an inline `height` is an offence; a
+ * JS-side number that must equal a token (`collapsedSize`) is held to it by a
+ * test of its own (`titlebar-height.test.ts`), not by a style prop.
+ *
  * Source-scanned, not rendered: the claim is about every band in the tree, and
  * jsdom does no layout, so a class string read off disk is the only evidence
  * available. `h-[var(--...)]` is a token reference, not a literal, and passes -
@@ -41,6 +48,9 @@ const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CLASS_STRINGS = /"([^"\n]*)"/g;
 /** `h-[32px]` / `min-h-[52px]`, but not `h-[var(--tabstrip-height)]`. */
 const LITERAL_HEIGHT = /\b(?:min-)?h-\[\d+(?:\.\d+)?px\]/;
+
+/** An inline height prop, however the value is spelled. */
+const INLINE_HEIGHT = /style=\{\{\s*height\b/;
 
 function paintsABand(classes: string): boolean {
 	return /\bborder-b\b/.test(classes) && /\bbg-panel\b/.test(classes);
@@ -77,5 +87,23 @@ describe("chrome bands size themselves with a token", () => {
 			}
 		}
 		expect(offenders, offenders.join("\n")).toEqual([]);
+	});
+
+	it("never sizes a band-painting file's element with an inline height", () => {
+		const offenders = files.filter((file) => {
+			const source = stripComments(readFileSync(join(srcRoot, file), "utf8"));
+			if (!INLINE_HEIGHT.test(source)) return false;
+			return [...source.matchAll(CLASS_STRINGS)].some((m) => paintsABand(m[1]));
+		});
+		expect(offenders, offenders.join("\n")).toEqual([]);
+	});
+
+	it("finds inline heights to tell apart from bands", () => {
+		// Without this the case above passes on a tree the pattern no longer
+		// matches: the code editor and the script form carry real inline heights.
+		const withInline = files.filter((file) =>
+			INLINE_HEIGHT.test(stripComments(readFileSync(join(srcRoot, file), "utf8")))
+		);
+		expect(withInline.length).toBeGreaterThanOrEqual(2);
 	});
 });

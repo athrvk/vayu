@@ -200,22 +200,19 @@ const PLACEMENT_PHRASE: Record<DocumentInsertion["placement"], string> = {
 };
 
 const PANE_HEADER_CLASS =
-	"flex w-full items-center justify-between gap-2 px-3 border-b border-border bg-panel shrink-0";
+	"flex h-band w-full items-center justify-between gap-2 px-3 border-b border-rule bg-panel shrink-0";
 
 /**
- * A pane's header bar, fixed at `GRAPHQL_PANE_HEADER_HEIGHT`.
+ * A pane's header bar, fixed at the `band` step (`h-band`).
  *
- * The height is a constant rather than padding-plus-content because the
- * Variables pane collapses to exactly this bar, and the panel's `collapsedSize`
- * has to be the same number. Padding that happened to add up would drift the
- * first time a control inside changed size.
+ * The height is a token rather than padding-plus-content because the Variables
+ * pane collapses to exactly this bar, and the panel's `collapsedSize`
+ * (`GRAPHQL_PANE_HEADER_HEIGHT`, held equal to `--spacing-band` by
+ * `titlebar-height.test.ts`) has to be the same number. Padding that happened
+ * to add up would drift the first time a control inside changed size.
  */
 function PaneHeader({ children }: { children: React.ReactNode }) {
-	return (
-		<div className={PANE_HEADER_CLASS} style={{ height: GRAPHQL_PANE_HEADER_HEIGHT }}>
-			{children}
-		</div>
-	);
+	return <div className={PANE_HEADER_CLASS}>{children}</div>;
 }
 
 /**
@@ -242,7 +239,6 @@ function CollapsiblePaneHeader({
 			onClick={onToggle}
 			aria-expanded={!collapsed}
 			className={cn(PANE_HEADER_CLASS, "text-left hover:bg-accent transition-colors")}
-			style={{ height: GRAPHQL_PANE_HEADER_HEIGHT }}
 		>
 			{children}
 		</button>
