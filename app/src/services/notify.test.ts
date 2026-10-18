@@ -32,7 +32,7 @@ function stubElectron(): {
 const request = {
 	kind: NOTIFY_KINDS.loadRunFinished,
 	title: "Load test finished",
-	body: "12,400 requests, p95 210 ms, 0.3% errors",
+	body: "12,400 requests, p95 210ms, 0.3% errors",
 	target: { view: "run", runId: "run_7" },
 } as const;
 
@@ -52,7 +52,7 @@ describe("systemNotify.post", () => {
 		expect(showNotification).toHaveBeenCalledWith({
 			kind: NOTIFY_KINDS.loadRunFinished,
 			title: "Load test finished",
-			body: "12,400 requests, p95 210 ms, 0.3% errors",
+			body: "12,400 requests, p95 210ms, 0.3% errors",
 			target: { view: "run", runId: "run_7" },
 		});
 	});

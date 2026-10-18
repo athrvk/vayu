@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import ScenarioRunView from "./ScenarioRunView";
 import { useDataFileStore, useScenarioRunStore, useToastStore } from "@/stores";
+import { formatNumber } from "@/lib/format-number";
 import type { Run, RunReport, StepOutcome } from "@/types";
 
 const reportQuery = {
@@ -267,7 +268,7 @@ describe("outcomes", () => {
 
 		// Tally the rows and this reads "0 passed" beside a header claiming
 		// 6,000 steps.
-		expect(outcomeCount("passed")).toContain("5990");
+		expect(outcomeCount("passed")).toContain(formatNumber(5_990));
 		expect(outcomeCount("failed")).toContain("10");
 	});
 

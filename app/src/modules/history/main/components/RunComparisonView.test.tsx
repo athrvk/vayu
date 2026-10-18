@@ -235,7 +235,7 @@ describe("RunComparisonView", () => {
 		expect(rowCells(/Max latency/).slice(1, 3)).toEqual(["70ms", "90ms"]);
 		expect(rowCells(/^Throughput/).slice(1, 3)).toEqual(["150 rps", "200 rps"]);
 		expect(rowCells(/Response rate/).slice(1, 3)).toEqual(["140 rps", "190 rps"]);
-		expect(rowCells(/Error rate/).slice(1, 3)).toEqual(["1.00%", "2.00%"]);
+		expect(rowCells(/Error rate/).slice(1, 3)).toEqual(["1.0%", "2.0%"]);
 		expect(rowCells(/Total requests/).slice(1, 3)).toEqual(["1,500", "2,000"]);
 	});
 

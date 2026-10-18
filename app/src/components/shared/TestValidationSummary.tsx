@@ -27,7 +27,7 @@
 
 import { XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { formatNumber } from "@/lib/format-number";
+import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import type { RunReport } from "@/types/domain";
@@ -115,7 +115,7 @@ export function TestValidationSummary({
 									Assertion success rate
 								</p>
 								<p className="font-bold">
-									{testValidation.successRate.toFixed(1)}%
+									{formatPercent(testValidation.successRate)}%
 								</p>
 							</div>
 						</div>

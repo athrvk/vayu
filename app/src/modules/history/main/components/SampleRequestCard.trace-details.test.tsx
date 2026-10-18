@@ -110,8 +110,16 @@ describe("SampleRequestCard slow-request callout", () => {
 		renderExpanded({ isSlow: true, totalMs: 612.34, thresholdMs: 500 }, { statusCode: 200 });
 
 		const title = screen.getByText("Slow request");
-		expect(title.parentElement?.textContent).toContain("612.3ms");
+		expect(title.parentElement?.textContent).toContain("612ms");
 		expect(title.parentElement?.textContent).toContain("(threshold: 500ms)");
+	});
+
+	it("prints no elapsed time, not a measured 0, when the trace carries none", () => {
+		renderExpanded({ isSlow: true, thresholdMs: 500 }, { statusCode: 200 });
+
+		const text = screen.getByText("Slow request").parentElement?.textContent ?? "";
+		expect(text).toContain("(threshold: 500ms)");
+		expect(text.match(/ms/g)).toHaveLength(1);
 	});
 
 	it("leaves the threshold out when the trace does not carry one", () => {

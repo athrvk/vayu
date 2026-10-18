@@ -658,7 +658,7 @@ describe("LoadTestService", () => {
 			expect(mockNotifyPost).toHaveBeenCalledWith({
 				kind: NOTIFY_KINDS.loadRunFinished,
 				title: "Load test finished",
-				body: "12,400 requests, p95 210 ms, 0.3% errors",
+				body: "12,400 requests, p95 210ms, 0.3% errors",
 				target: { view: "run", runId: "run_8" },
 			});
 		});
@@ -683,11 +683,11 @@ describe("LoadTestService", () => {
 			await closeStream();
 
 			expect(mockNotifyPost).toHaveBeenCalledWith(
-				expect.objectContaining({ body: "100 requests, p95 50 ms, 15.0% errors" })
+				expect.objectContaining({ body: "100 requests, p95 50ms, 15.0% errors" })
 			);
 		});
 
-		it("does not round a sub-millisecond p95 to 0 ms (issue #2243)", async () => {
+		it("does not round a sub-millisecond p95 to 0ms (issue #2243)", async () => {
 			dashboard.currentRunId = "run_11";
 			vi.mocked(apiService.getRunReport).mockResolvedValueOnce({
 				summary: { totalRequests: 500, errorRate: 0 },
@@ -698,14 +698,14 @@ describe("LoadTestService", () => {
 			await closeStream();
 
 			expect(mockNotifyPost).toHaveBeenCalledWith(
-				expect.objectContaining({ body: "500 requests, p95 0.42 ms, 0.0% errors" })
+				expect.objectContaining({ body: "500 requests, p95 0.42ms, 0.0% errors" })
 			);
 		});
 
 		it("says so plainly when the report cannot supply the numbers", async () => {
 			// The shipped fixture for a report the engine answered with nothing
 			// usable. Reverting `runSummaryLine`'s checks turns this body into
-			// "0 requests, p95 0 ms, 0.0% errors" - numbers the user would read as
+			// "0 requests, p95 0ms, 0.0% errors" - numbers the user would read as
 			// their run's own.
 			dashboard.currentRunId = "run_9";
 			loadTestService.startMonitoring("run_9");

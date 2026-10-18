@@ -179,7 +179,7 @@ describe("detectAnomalies - throughput drops", () => {
 		expect(found).toHaveLength(1);
 		expect(found[0].startSeconds).toBe(25);
 		expect(found[0].endSeconds).toBe(27);
-		expect(found[0].label).toMatch(/throughput 40% of baseline for 2.00s/);
+		expect(found[0].label).toMatch(/throughput 40\.0% of baseline for 2.00s/);
 	});
 
 	it("does not report a ramp winding down, where concurrency fell with it", () => {

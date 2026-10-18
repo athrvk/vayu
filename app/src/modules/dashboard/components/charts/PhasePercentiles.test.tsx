@@ -158,6 +158,6 @@ describe("TimingWaterfall reads the averages half, not the object", () => {
 				})}
 			/>
 		);
-		expect(screen.getByText("15 ms")).toBeTruthy();
+		expect(screen.getByText("15ms")).toBeTruthy();
 	});
 });

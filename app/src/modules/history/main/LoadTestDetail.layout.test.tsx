@@ -226,7 +226,7 @@ describe("the Test config box", () => {
 		expect(screen.getByText("Data:")).toBeVisible();
 		expect(screen.getByText("12 rows · users.csv")).toBeVisible();
 		expect(screen.getByText("Timeout:")).toBeVisible();
-		expect(screen.getByText("5000ms")).toBeVisible();
+		expect(screen.getByText("5.00s")).toBeVisible();
 
 		fireEvent.click(details);
 

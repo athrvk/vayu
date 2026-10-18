@@ -126,11 +126,11 @@ export default function SamplesTab({
 					<CardTitle>Sampled Request Details</CardTitle>
 					<div className="flex items-center gap-2">
 						<Badge variant="secondary" className="text-xs">
-							{visibleRows.length} samples shown
+							{formatNumber(visibleRows.length)} samples shown
 						</Badge>
 						{storedTotal !== null && (
 							<Badge variant="outline" className="text-xs">
-								{`${rows.length} of ${formatNumber(storedTotal)} stored`}
+								{`${formatNumber(rows.length)} of ${formatNumber(storedTotal)} stored`}
 							</Badge>
 						)}
 					</div>

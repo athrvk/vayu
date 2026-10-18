@@ -172,7 +172,7 @@ function detectThroughputDrops(history: LoadTestMetrics[]): Anomaly[] {
 			// trough can be 0 (throughput stopped entirely) - report that as the
 			// worst possible multiple rather than as Infinity.
 			magnitude: share > 0 ? 1 / share : Number.MAX_SAFE_INTEGER,
-			label: `throughput ${Math.round(share * 100)}% of baseline for ${span(history, start, end)}`,
+			label: `throughput ${formatPercent(share * 100)}% of baseline for ${span(history, start, end)}`,
 		};
 	});
 }

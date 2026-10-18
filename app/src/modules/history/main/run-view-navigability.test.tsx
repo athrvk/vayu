@@ -36,6 +36,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 
 import ScenarioRunView from "./ScenarioRunView";
 import { useScenarioRunStore, useTabsStore } from "@/stores";
+import { formatNumber } from "@/lib/format-number";
 import type { Run, RunReport, StepOutcome } from "@/types";
 
 const reportQuery = {
@@ -310,7 +311,7 @@ describe("the count chips as the filter", () => {
 		// The chip is not wrong and the list is not lying - they count different
 		// things, and the empty state is where that is said rather than left as
 		// a contradiction.
-		expect(chip("passed").textContent).toContain("5999 passed");
+		expect(chip("passed").textContent).toContain(`${formatNumber(5_999)} passed`);
 		expect(screen.getByText(/no passed steps in the stored rows/i)).toBeTruthy();
 		expect(screen.getByText(/dropped successes/i)).toBeTruthy();
 	});

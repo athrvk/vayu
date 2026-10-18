@@ -62,13 +62,13 @@ describe("a load run's result line", () => {
 	it("prints throughput, p95 and error rate", () => {
 		renderRow(loadRun({ resultSummary: { ...RESULT, verdict: "passed" } }));
 
-		expect(screen.getByText("485 req/s · p95 42 ms · 0.0% errors")).toBeInTheDocument();
+		expect(screen.getByText("485 req/s · p95 42ms · 0.0% errors")).toBeInTheDocument();
 	});
 
 	it("leaves out a figure the run did not record", () => {
 		renderRow(loadRun({ resultSummary: { p95Ms: 42 } }));
 
-		expect(screen.getByText("p95 42 ms")).toBeInTheDocument();
+		expect(screen.getByText("p95 42ms")).toBeInTheDocument();
 	});
 
 	it("prints no line for a row without a summary, or for a run that is not a load run", () => {

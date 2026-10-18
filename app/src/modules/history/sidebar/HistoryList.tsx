@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatNumber } from "@/lib/format-number";
 import { useEffect, useRef, useState } from "react";
 import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
@@ -282,7 +283,7 @@ export default function HistoryList() {
 			actions={
 				total > 0 ? (
 					<span className="text-xs text-muted-foreground shrink-0">
-						{total} {total === 1 ? "run" : "runs"}
+						{formatNumber(total)} {total === 1 ? "run" : "runs"}
 					</span>
 				) : undefined
 			}

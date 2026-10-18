@@ -19,7 +19,7 @@
 import { useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronDown, Settings2 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
-import { formatNumber, formatRate } from "@/lib/format-number";
+import { formatLatency, formatNumber, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_LABEL, loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -108,7 +108,7 @@ function detailEntries(config: RunConfiguration): ConfigEntry[] {
 		});
 	}
 	if (config.timeout != null && config.timeout > 0) {
-		entries.push({ label: "Timeout", value: `${config.timeout}ms`, mono: true });
+		entries.push({ label: "Timeout", value: formatLatency(config.timeout), mono: true });
 	}
 	return entries;
 }

@@ -33,6 +33,7 @@ import { TimeValue } from "@/components/shared/TimeValue";
 import { CopyForAgentButton } from "@/components/shared/CopyForAgentButton";
 import { Callout } from "@/components/shared";
 import { runSampleReference } from "@/lib/agent-reference";
+import { formatLatency } from "@/lib/format-number";
 import { isSlowSample } from "../sample-filter";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
@@ -106,10 +107,10 @@ export default function SampleRequestCard({
 		>
 			{isSlow && (
 				<Callout severity="warning" title="Slow request">
-					{trace?.totalMs?.toFixed(1)}ms
+					{trace?.totalMs !== undefined && formatLatency(trace.totalMs)}
 					{trace?.thresholdMs !== undefined && (
 						<span className="text-muted-foreground ml-1">
-							(threshold: {trace.thresholdMs}ms)
+							(threshold: {formatLatency(trace.thresholdMs)})
 						</span>
 					)}
 				</Callout>

@@ -22,7 +22,7 @@ import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
-import { formatMs, formatNumber } from "@/lib/format-number";
+import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
 import { isRunInProgress } from "@/lib/run-status";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
 // Engine emits at 10 Hz (100ms cadence - see engine/src/http/routes/metrics.cpp).
@@ -43,13 +43,13 @@ const NOTIFY_TITLES: Record<LoadRunNotifyKind, string> = {
 };
 
 /**
- * "12,400 requests, p95 210 ms, 0.3% errors", or `null` when the report cannot
+ * "12,400 requests, p95 210ms, 0.3% errors", or `null` when the report cannot
  * supply all three.
  *
  * The numbers, not an adjective: a notification that says only "finished"
  * makes the user open the app to learn what a glance should have told them.
  * Checked rather than trusted, because the report crosses a process boundary
- * and a partial one must not turn into "0 requests, p95 0 ms" - a number the
+ * and a partial one must not turn into "0 requests, p95 0ms" - a number the
  * user would read as the run's own.
  */
 function runSummaryLine(report: RunReport): string | null {
@@ -59,7 +59,7 @@ function runSummaryLine(report: RunReport): string | null {
 	if (typeof requests !== "number" || typeof p95 !== "number" || typeof errorRate !== "number") {
 		return null;
 	}
-	return `${formatNumber(requests)} requests, p95 ${formatMs(p95)} ms, ${errorRate.toFixed(1)}% errors`;
+	return `${formatNumber(requests)} requests, p95 ${formatLatency(p95)}, ${formatPercent(errorRate)}% errors`;
 }
 
 /**

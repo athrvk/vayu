@@ -18,6 +18,7 @@
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
+import { formatSeconds } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import type { Anomaly, AnomalyKind } from "@/modules/dashboard/utils/detectAnomalies";
 import { formatSleepDuration } from "@/modules/dashboard/utils/hostSleep";
@@ -35,11 +36,6 @@ const KIND_META: Record<AnomalyKind, { label: string; tone: string }> = {
 	throughput_drop: { label: "Throughput drop", tone: "text-warning-text" },
 	first_5xx: { label: "Server errors began", tone: "text-destructive-text" },
 };
-
-/** "41.2s" - matching the charts' 0.1s hover readout. */
-function at(seconds: number): string {
-	return `${seconds.toFixed(1)}s`;
-}
 
 export interface RunEventsProps {
 	anomalies?: Anomaly[] | null;
@@ -79,7 +75,7 @@ export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
 								run couldn't send during it
 							</span>
 							<span className="font-mono text-xs text-muted-foreground">
-								{at(sleep.startSeconds)}
+								{formatSeconds(sleep.startSeconds)}
 							</span>
 						</li>
 					))}
@@ -94,8 +90,8 @@ export function RunEvents({ anomalies, sleeps, className }: RunEventsProps) {
 							<span className="flex-1 text-muted-foreground">{a.label}</span>
 							<span className="font-mono text-xs text-muted-foreground">
 								{a.endSeconds > a.startSeconds
-									? `${at(a.startSeconds)} - ${at(a.endSeconds)}`
-									: at(a.startSeconds)}
+									? `${formatSeconds(a.startSeconds)} - ${formatSeconds(a.endSeconds)}`
+									: formatSeconds(a.startSeconds)}
 							</span>
 						</li>
 					))}
