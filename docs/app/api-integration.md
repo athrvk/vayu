@@ -1506,7 +1506,7 @@ bodies average more than ~256 KiB reaches the budget at the defaults, so
 absent-as-uniform is the accurate message for nearly every older run.
 The renderer treats a non-zero count as "this list is a
 *sample* of a larger set": `SampleRetentionNote` (shared) renders under the
-dashboard's Sampled Requests, the history Samples tab and the Test Validation
+dashboard's Sampled Requests, the history Samples tab and the Test validation
 card, and the sample-count badges say **shown** rather than *captured*, since
 `results` is capped at 100 for a single-request run by the report route irrespective of retention.
 That cap is a failures-first selection listed by time, not a uniform sample
@@ -1516,7 +1516,7 @@ the array was cut, and the history Samples tab reads the pair as "N of M
 stored". Both are absent from an older engine, which is read as "say nothing",
 not "nothing was cut". The traces note therefore never calls `results` uniform;
 only the tested-response buffer's sentence does.
-The Test Validation card also states the arithmetic from `summary.totalRequests`
+The Test validation card also states the arithmetic from `summary.totalRequests`
 ("Tested N of M requests"), worded so it holds for requests that never got a
 response as well as for displaced ones; `samplesTested` counts responses and
 `testsPassed` / `testsFailed` count assertions, and the card's labels say so

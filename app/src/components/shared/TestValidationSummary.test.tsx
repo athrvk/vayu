@@ -35,7 +35,7 @@ describe("TestValidationSummary", () => {
 	it("shows the four tallies a run's assertions produced", () => {
 		render(<TestValidationSummary testValidation={TALLIES} sampling={undefined} />);
 
-		expect(screen.getByText("Test Validation")).toBeTruthy();
+		expect(screen.getByText("Test validation")).toBeTruthy();
 		// The unit is in the label: responses are tested, assertions pass and fail.
 		for (const label of [
 			"Responses tested",

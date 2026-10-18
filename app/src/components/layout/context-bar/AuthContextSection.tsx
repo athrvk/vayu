@@ -61,7 +61,7 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 		if (inherited.blockedBy) {
 			return {
 				auth: { mode: "none" },
-				origin: `${inherited.blockedBy.name} is set to No Auth, so nothing is inherited past it`,
+				origin: `${inherited.blockedBy.name} is set to No auth, so nothing is inherited past it`,
 			};
 		}
 		return { auth: { mode: "none" }, origin: "No ancestor collection defines auth" };

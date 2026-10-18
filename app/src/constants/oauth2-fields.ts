@@ -12,7 +12,7 @@
  * The engine's messages are written against the JSON contract, which is right
  * for an API - `accessTokenUrl must be an http(s) URL` is exactly what an MCP
  * client or a curl user needs. It is the wrong string to put in front of someone
- * looking at a form field labelled **Access Token URL**, and those messages reach
+ * looking at a form field labelled **Access token URL**, and those messages reach
  * three toasts unaltered: the token action in `TokenStatusRow`, and the
  * `AUTH_FAILED` path in the request builder and `DesignRunView`. So the renderer
  * relabels on the way out, in one place, rather than each toast site paraphrasing.
@@ -30,9 +30,9 @@
  * renders these, so an error and the field it points at cannot drift apart.
  */
 export const OAUTH2_FIELD_LABELS = {
-	grantType: "Grant Type",
+	grantType: "Grant type",
 	authorizationUrl: "Authorization URL",
-	accessTokenUrl: "Access Token URL",
+	accessTokenUrl: "Access token URL",
 	callbackUrl: "Callback URL",
 	clientId: "Client ID",
 } as const;

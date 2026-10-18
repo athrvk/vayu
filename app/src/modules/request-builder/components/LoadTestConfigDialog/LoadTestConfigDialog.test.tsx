@@ -198,9 +198,9 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/^virtual users/i)).not.toBeInTheDocument();
 	});
 
-	it("shows virtual users and duration for Constant Virtual Users", () => {
+	it("shows virtual users and duration for Constant virtual users", () => {
 		open();
-		pickProfile("Constant Virtual Users");
+		pickProfile("Constant virtual users");
 		expect(screen.getByLabelText(/^virtual users/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/^duration/i)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/target rate/i)).not.toBeInTheDocument();
@@ -226,9 +226,9 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
 	});
 
-	it("shows the budget, the step and both bounds for Capacity Discovery", () => {
+	it("shows the budget, the step and both bounds for Capacity discovery", () => {
 		open();
-		pickProfile("Capacity Discovery");
+		pickProfile("Capacity discovery");
 		expect(screen.getByLabelText(/latency budget/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/hold each level for/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/start from/i)).toBeInTheDocument();
@@ -238,9 +238,9 @@ describe("load profile → fields", () => {
 		expect(screen.queryByLabelText(/ramp duration/i)).not.toBeInTheDocument();
 	});
 
-	it("shows target, total and ramp for Ramp-Up", () => {
+	it("shows target, total and ramp for Ramp-up", () => {
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		expect(screen.getByLabelText(/target virtual users/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/total duration/i)).toBeInTheDocument();
 		expect(screen.getByLabelText(/ramp duration/i)).toBeInTheDocument();
@@ -260,7 +260,7 @@ describe("payload", () => {
 	// `it.each`, not a loop with a manual teardown: the dialog renders through a
 	// Radix portal, so removing its node by hand throws and leaves the next
 	// iteration asserting against a half-torn-down DOM.
-	it.each(["Constant RPS", "Constant Virtual Users", "Ramp-Up", "Capacity Discovery"])(
+	it.each(["Constant RPS", "Constant virtual users", "Ramp-up", "Capacity discovery"])(
 		"sends duration_seconds for %s",
 		(profile) => {
 			const { onStart } = open();
@@ -269,9 +269,9 @@ describe("payload", () => {
 		}
 	);
 
-	it("sends the search bounds and budget for Capacity Discovery", () => {
+	it("sends the search bounds and budget for Capacity discovery", () => {
 		const { onStart } = open();
-		pickProfile("Capacity Discovery");
+		pickProfile("Capacity discovery");
 		// The default start (1) is below the default ceiling (10), so the
 		// picked profile starts valid; anything else and Start is disabled and
 		// `started` would fail on the call count rather than on the payload.
@@ -292,7 +292,7 @@ describe("payload", () => {
 		// fields being set unconditionally: a ramp carrying an sloMs would make
 		// its stored config claim a search it never ran.
 		const { onStart } = open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		const config = started(onStart);
 		expect(config).not.toHaveProperty("slo_ms");
 		expect(config).not.toHaveProperty("step_duration_seconds");
@@ -570,7 +570,7 @@ describe("stream caps (issue #576)", () => {
 describe("notices", () => {
 	it("sorts blocking above advisory, since with a stack only order says which blocks", () => {
 		open({ hasPreRequestScript: true });
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		// Force the ramp longer than the total.
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 
@@ -673,7 +673,7 @@ describe("notices", () => {
 
 	it("disables Start while a blocking notice is live", () => {
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/total duration/i), { target: { value: "1" } });
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
 	});
@@ -885,13 +885,13 @@ describe("ramp start concurrency", () => {
 		// report - and nothing ever set it, so every ramp started from 1
 		// whatever the user wanted.
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		expect(screen.getByLabelText(/start from/i)).toBeInTheDocument();
 	});
 
-	it("sends it, and only for Ramp-Up", () => {
+	it("sends it, and only for Ramp-up", () => {
 		const { onStart } = open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "4" } });
 		expect(started(onStart).start_concurrency).toBe(4);
 	});
@@ -903,7 +903,7 @@ describe("ramp start concurrency", () => {
 
 	it("blocks a start above the target, which would ramp downwards", () => {
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "999" } });
 
 		expect(screen.getByText(/Ramp would run downwards/i)).toBeInTheDocument();
@@ -917,12 +917,12 @@ describe("ramp start concurrency", () => {
 	 */
 	it("blocks a start below one virtual user, in both profiles that climb from it", () => {
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "0" } });
 		expect(screen.getByText(/Start is below one virtual user/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
 
-		pickProfile("Capacity Discovery");
+		pickProfile("Capacity discovery");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "" } });
 		expect(screen.getByText(/Start is below one virtual user/i)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
@@ -930,7 +930,7 @@ describe("ramp start concurrency", () => {
 
 	it("says where the ramp begins in the summary", () => {
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/start from/i), { target: { value: "3" } });
 		expect(screen.getByText(/Climbs from 3 to 10 virtual users/i)).toBeInTheDocument();
 	});
@@ -993,7 +993,7 @@ describe("ceilings from Settings", () => {
 	it("offers the raised ceiling on the field it governs", () => {
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
 		open();
-		pickProfile("Constant Virtual Users");
+		pickProfile("Constant virtual users");
 		expect(Number(virtualUsers().max)).toBe(5000);
 	});
 
@@ -1002,7 +1002,7 @@ describe("ceilings from Settings", () => {
 		// climb to a target of 5000 from anywhere sensible.
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 5000 });
 		open();
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		expect(Number((screen.getByLabelText(/start from/i) as HTMLInputElement).max)).toBe(5000);
 	});
 
@@ -1022,7 +1022,7 @@ describe("ceilings from Settings", () => {
 		// "no setting on that screen can compose a rejected run" true.
 		useClientSettingsStore.getState().setLoadTestCeilings({ concurrency: 999_999 });
 		open();
-		pickProfile("Constant Virtual Users");
+		pickProfile("Constant virtual users");
 		expect(Number(virtualUsers().max)).toBe(LOAD_TEST_CEILING_BOUNDS.concurrency.MAX);
 	});
 });
@@ -1847,7 +1847,7 @@ describe("the target (issue #2117)", () => {
 		);
 	});
 
-	it.each(["Constant Virtual Users", "Ramp-Up", "Capacity Discovery"])(
+	it.each(["Constant virtual users", "Ramp-up", "Capacity discovery"])(
 		"does not invent a count for %s",
 		(profile) => {
 			open({ url: "https://api.example.com/" });
@@ -1938,7 +1938,7 @@ describe("the target (issue #2117)", () => {
 
 	it("keeps Start gated by a blocking error while the advisory shows", () => {
 		open({ url: "https://api.example.com/" });
-		pickProfile("Ramp-Up");
+		pickProfile("Ramp-up");
 		fireEvent.change(screen.getByLabelText(/ramp duration/i), { target: { value: "9999" } });
 
 		expect(screen.getByText(ADVISORY)).toBeInTheDocument();

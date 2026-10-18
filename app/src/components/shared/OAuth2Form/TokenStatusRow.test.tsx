@@ -98,11 +98,11 @@ describe("TokenStatusRow with an incomplete config", () => {
 	});
 
 	it("names the missing fields exactly as their labels read", () => {
-		// "Access Token URL" / "Client ID", not the spec's "token endpoint" and
+		// "Access token URL" / "Client ID", not the spec's "token endpoint" and
 		// not a paraphrase - the sentence has to point at controls on screen.
 		renderRow(config());
 
-		expect(screen.getByText(/Access Token URL and Client ID/)).toBeInTheDocument();
+		expect(screen.getByText(/Access token URL and Client ID/)).toBeInTheDocument();
 	});
 
 	it("names only the field still missing once the other is filled", () => {
@@ -110,7 +110,7 @@ describe("TokenStatusRow with an incomplete config", () => {
 
 		const text = screen.getByText(/to fetch a token/i).textContent ?? "";
 		expect(text).toMatch(/Client ID/);
-		expect(text).not.toMatch(/Access Token URL/);
+		expect(text).not.toMatch(/Access token URL/);
 	});
 
 	it("requires the authorization URL for the interactive grant", () => {
@@ -261,7 +261,7 @@ describe("TokenStatusRow with a complete config", () => {
 		renderRow(config({ accessTokenUrl: "idp.example.com/token", clientId: "abc" }));
 		fireEvent.click(getTokenButton());
 
-		expect(showToast).toHaveBeenCalledWith("Access Token URL must be an http(s) URL", "error");
+		expect(showToast).toHaveBeenCalledWith("Access token URL must be an http(s) URL", "error");
 	});
 
 	it("tells the user their sign-in landed, since the browser had them", async () => {

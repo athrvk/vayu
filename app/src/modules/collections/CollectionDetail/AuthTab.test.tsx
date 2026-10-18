@@ -155,7 +155,7 @@ describe("AuthTab with an editable auth mode", () => {
 		renderTab(makeCollection({ mode: "bearer", token: "abc" }));
 
 		fireEvent.click(screen.getByRole("combobox"));
-		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
+		fireEvent.click(screen.getByRole("option", { name: /No auth \(blocks inheriting\)/i }));
 
 		// The comment this tab used to carry claimed none/noauth were "saved by
 		// the picker alone" - they never were, since nothing called mutateAsync
@@ -176,7 +176,7 @@ describe("AuthTab with an editable auth mode", () => {
 		renderTab(makeCollection({ mode: "bearer", token: "abc" }));
 
 		fireEvent.click(screen.getByRole("combobox"));
-		fireEvent.click(screen.getByRole("option", { name: /No Auth \(blocks inheriting\)/i }));
+		fireEvent.click(screen.getByRole("option", { name: /No auth \(blocks inheriting\)/i }));
 
 		expect(screen.getByRole("button", { name: /save auth/i })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /reset/i })).toBeInTheDocument();

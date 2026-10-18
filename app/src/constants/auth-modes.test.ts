@@ -9,7 +9,7 @@
  * The mode registry (issue #105).
  *
  * Four places named the auth modes independently and had drifted - the two
- * pickers said "OAuth 2.0" and "AWS Signature" where `AuthInheritBanner`
+ * pickers said "OAuth 2.0" and "AWS signature" where `AuthInheritBanner`
  * rendered raw `OAUTH2` and `AWS`. These tests pin the properties that keep one
  * list from silently becoming two again: every mode the domain can hold is
  * named here, and the editable subset is exactly the modes the engine can
@@ -107,11 +107,11 @@ describe("auth mode registry", () => {
 	it("keeps inherit out of the shared list - it is request-only", () => {
 		// A collection is always an auth source. The request panel prepends it.
 		expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain("inherit");
-		expect(AUTH_MODE_LABELS.inherit).toBe("Inherit from Collection");
+		expect(AUTH_MODE_LABELS.inherit).toBe("Inherit from collection");
 	});
 
 	it("names an uneditable mode and refuses to name an editable one", () => {
-		expect(uneditableAuthLabel("aws")).toBe("AWS Signature");
+		expect(uneditableAuthLabel("aws")).toBe("AWS signature");
 		expect(uneditableAuthLabel("bearer")).toBeNull();
 	});
 
@@ -119,7 +119,7 @@ describe("auth mode registry", () => {
 		// The banner used to uppercase the raw discriminant. These are the strings
 		// the two auth editors show, so they are the ones every surface must use.
 		expect(AUTH_MODE_LABELS.oauth2).toBe("OAuth 2.0");
-		expect(AUTH_MODE_LABELS.apikey).toBe("API Key");
-		expect(AUTH_MODE_LABELS.aws).toBe("AWS Signature");
+		expect(AUTH_MODE_LABELS.apikey).toBe("API key");
+		expect(AUTH_MODE_LABELS.aws).toBe("AWS signature");
 	});
 });

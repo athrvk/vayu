@@ -56,7 +56,7 @@ export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 				: source
 					? `Requests below inherit ${AUTH_MODE_LABELS[source.auth.mode]} from ${source.name}.`
 					: blockedBy
-						? `${blockedBy.name} is set to No Auth, so nothing is inherited past it.`
+						? `${blockedBy.name} is set to No auth, so nothing is inherited past it.`
 						: "No ancestor collection defines auth either.";
 
 	return (

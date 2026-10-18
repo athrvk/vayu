@@ -96,7 +96,7 @@ describe("how the simulated-user count is worded (#2128)", () => {
 	it("says 'virtual users' in the label, the unit and the mode name", () => {
 		expect(CONCURRENCY_LABEL).toBe("Virtual users");
 		expect(CONCURRENCY_UNIT).toBe("virtual users");
-		expect(loadTestModeLabel("constant_concurrency")).toBe("Constant Virtual Users");
+		expect(loadTestModeLabel("constant_concurrency")).toBe("Constant virtual users");
 	});
 
 	it("pluralises the count: one is singular, zero and many are plural", () => {

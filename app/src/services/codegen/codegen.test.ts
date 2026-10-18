@@ -906,7 +906,7 @@ describe("every target, on the shared rules", () => {
 
 		it(`${target.label} carries the note for an auth mode it cannot reproduce`, () => {
 			const { notes } = target.generate({ ...GET, auth: { mode: "aws", config: {} } });
-			expect(notes.join(" ")).toContain("AWS Signature");
+			expect(notes.join(" ")).toContain("AWS signature");
 		});
 
 		it(`${target.label} applies bearer auth rather than dropping it`, () => {

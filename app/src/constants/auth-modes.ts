@@ -14,7 +14,7 @@
  * `AuthTab` (`AUTH_OPTIONS`), `AuthInheritBanner`'s `describeAuth`, and this
  * file's uneditable subset - and they had already drifted: the banner rendered
  * `OAUTH2` / `AWS` in raw uppercase for modes the pickers called "OAuth 2.0" and
- * "AWS Signature".
+ * "AWS signature".
  *
  * Per-host extras layer *on top* of this base rather than re-listing it: the
  * panel adds an icon per mode, the collection tab adds an inheritance-worded
@@ -33,20 +33,20 @@ import type { AuthMode } from "@/types";
 
 /** Display name for every auth mode, editable or not. */
 export const AUTH_MODE_LABELS: Record<AuthMode, string> = {
-	none: "No Auth",
-	noauth: "No Auth (blocks inheriting)",
-	inherit: "Inherit from Collection",
-	bearer: "Bearer Token",
-	basic: "Basic Auth",
-	apikey: "API Key",
+	none: "No auth",
+	noauth: "No auth (blocks inheriting)",
+	inherit: "Inherit from collection",
+	bearer: "Bearer token",
+	basic: "Basic auth",
+	apikey: "API key",
 	oauth2: "OAuth 2.0",
 	digest: "Digest",
-	aws: "AWS Signature",
+	aws: "AWS signature",
 	ntlm: "NTLM",
 	hawk: "Hawk",
 	oauth1: "OAuth 1.0",
 	edgegrid: "Akamai EdgeGrid",
-	jwt: "JWT Bearer",
+	jwt: "JWT bearer",
 };
 
 /**

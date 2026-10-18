@@ -320,7 +320,7 @@ describe("failure classification", () => {
 
 		const failure = introspectSchema(TARGET);
 		await expect(failure).rejects.toThrow(
-			"Couldn't get an OAuth 2.0 token (AUTH_FAILED). Access Token URL is required"
+			"Couldn't get an OAuth 2.0 token (AUTH_FAILED). Access token URL is required"
 		);
 		expect(await kindOf(failure)).toBe("auth");
 	});

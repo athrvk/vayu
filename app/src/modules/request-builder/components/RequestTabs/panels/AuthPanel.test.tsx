@@ -211,7 +211,7 @@ describe("AuthPanel writes the domain shape", () => {
 		renderPanel({ mode: "none" });
 		fireEvent.click(screen.getByRole("combobox"));
 		expect(
-			screen.getByRole("option", { name: /Inherit from Collection/i })
+			screen.getByRole("option", { name: /Inherit from collection/i })
 		).toBeInTheDocument();
 	});
 });

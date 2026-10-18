@@ -274,7 +274,7 @@ const CAP_FIELDS: CapField[] = [
 	{
 		key: "maxConcurrency",
 		label: "Max virtual users",
-		description: `Ceiling on the virtual users a closed-loop run may hold: what ${loadTestModeLabel("constant_concurrency")} holds, what a Ramp-Up starts from, and the top a Capacity Discovery search climbs to. A Constant RPS run is paced by its rate instead, so this cap does not bound its in-flight requests.`,
+		description: `Ceiling on the virtual users a closed-loop run may hold: what ${loadTestModeLabel("constant_concurrency")} holds, what a Ramp-up starts from, and the top a Capacity discovery search climbs to. A Constant RPS run is paced by its rate instead, so this cap does not bound its in-flight requests.`,
 		ceiling: LOAD_TEST_CEILING_BOUNDS.concurrency.MAX,
 	},
 	{

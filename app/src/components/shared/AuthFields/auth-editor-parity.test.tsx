@@ -105,11 +105,11 @@ const SHARED_CASES: Exclude<RequestAuth, { mode: "inherit" }>[] = [
 describe("the two auth editors render the same fields", () => {
 	it.each(SHARED_CASES)("$mode", (auth) => {
 		const request = renderRequestEditor(auth);
-		// The request panel adds its own "Authentication Type" picker label; the
+		// The request panel adds its own "Authentication type" picker label; the
 		// collection tab labels that control with a SectionLabel instead, so it is
 		// dropped before comparing the credential fields themselves.
 		const requestFields = fieldLabels(request.container).filter(
-			(l) => l !== "Authentication Type"
+			(l) => l !== "Authentication type"
 		);
 		request.unmount();
 
@@ -170,14 +170,14 @@ describe("what the two editors are allowed to differ on", () => {
 		const request = renderRequestEditor({ mode: "none" });
 		fireEvent.click(screen.getAllByRole("combobox")[0]);
 		expect(
-			screen.getByRole("option", { name: /Inherit from Collection/i })
+			screen.getByRole("option", { name: /Inherit from collection/i })
 		).toBeInTheDocument();
 		request.unmount();
 
 		renderCollectionEditor({ mode: "none" });
 		fireEvent.click(screen.getAllByRole("combobox")[0]);
 		expect(
-			screen.queryByRole("option", { name: /Inherit from Collection/i })
+			screen.queryByRole("option", { name: /Inherit from collection/i })
 		).not.toBeInTheDocument();
 	});
 

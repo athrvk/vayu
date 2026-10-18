@@ -71,7 +71,7 @@ describe("AuthContextSection", () => {
 		requestAuth = { mode: "bearer", token: "t" };
 		renderSection();
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.getByText("Set on this request")).toBeInTheDocument();
 	});
 
@@ -84,7 +84,7 @@ describe("AuthContextSection", () => {
 		];
 		renderSection();
 
-		expect(screen.getByText("Bearer Token")).toBeInTheDocument();
+		expect(screen.getByText("Bearer token")).toBeInTheDocument();
 		expect(screen.getByText("Inherited from leaf")).toBeInTheDocument();
 	});
 
@@ -94,7 +94,7 @@ describe("AuthContextSection", () => {
 			collection("leaf", { mode: "noauth" }),
 		];
 		renderSection();
-		expect(screen.getByText(/leaf is set to No Auth/)).toBeInTheDocument();
+		expect(screen.getByText(/leaf is set to No auth/)).toBeInTheDocument();
 
 		ancestors = [collection("root", { mode: "none" })];
 		renderSection();
