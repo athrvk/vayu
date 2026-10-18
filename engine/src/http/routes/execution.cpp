@@ -1611,6 +1611,9 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
  * so a transient execution resolves variables and cookies exactly as a
  * recorded one does.
  *
+ * Only refuses the payload; the create is the route's, because a database
+ * that refuses the row is a 500, not a 400 (#2353).
+ *
  * @return the message to answer 400 with, already logged, or nothing.
  */
 std::optional<std::string> build_design_send (RouteContext& ctx,
@@ -1667,16 +1670,6 @@ DesignSend& send) {
     { "requestId", send.run.request_id.value_or ("none") },
     { "environmentId", send.run.environment_id.value_or ("none") },
     { "elements", send.elements ? send.elements->size () : 0 } });
-
-    if (send.run_id) {
-        try {
-            ctx.db.create_run (send.run);
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "http", "Failed to create run: " + std::string (e.what ()));
-            return "Failed to create run record";
-        }
-    }
 
     // Which jar this execution reads and writes: one per environment, with the
     // no-environment jar for a request sent without one. Resolved once here so
@@ -2205,6 +2198,7 @@ std::chrono::steady_clock::time_point handler_start) {
  * Returns:
  * - 200: Request was processed (check response body for server status/errors)
  * - 400: Invalid request format (malformed JSON, missing required fields)
+ * - 500: The run record could not be written
  */
 void handle_execute_request (RouteContext& ctx,
 const httplib::Request& req,
@@ -2220,6 +2214,17 @@ httplib::Response& res) {
     if (auto rejection = build_design_send (ctx, req, payload, send)) {
         send_error (res, 400, *rejection);
         return;
+    }
+
+    if (send.run_id) {
+        try {
+            ctx.db.create_run (send.run);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("http",
+            "POST /execute - Failed to create run: " + std::string (e.what ()));
+            send_error (res, 500, "Failed to create run record");
+            return;
+        }
     }
 
     // Take the request built above. Auth is already resolved into its

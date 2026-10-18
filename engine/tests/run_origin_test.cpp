@@ -376,4 +376,26 @@ TEST_F (RunOriginRouteTest, ARunRowTheDatabaseRefusesAnswers500) {
     EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
+// The design-send sibling of the case above (#2353): the row is written before
+// anything is sent, so a refusal answers 500 with nothing recorded.
+TEST_F (RunOriginRouteTest, ADesignSendRowTheDatabaseRefusesAnswers500) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
+    char* err                = nullptr;
+    const int rc             = sqlite3_exec (handle,
+                "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
+                            "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
+                nullptr, nullptr, &err);
+    const std::string reason = err ? err : "";
+    sqlite3_free (err);
+    sqlite3_close (handle);
+    ASSERT_EQ (rc, SQLITE_OK) << reason;
+
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post ("/execute", send_to (echo));
+    EXPECT_EQ (status, 500) << body.dump ();
+    EXPECT_TRUE (body.contains ("error")) << body.dump ();
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
 } // namespace

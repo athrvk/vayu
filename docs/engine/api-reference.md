@@ -6418,6 +6418,13 @@ that flag decides whether the *run* is recorded, this one whether the
 *variables* are. MCP's `run_request` sends `false` whenever write access is off
 ([MCP](mcp.md#safety-model)).
 
+**A run row the database cannot write is a `500`.** A recorded send whose run row
+cannot be stored (a busy or locked database, a full disk, an I/O error) answers
+`500` `Failed to create run record` before anything is sent, the same as
+[`POST /runs`](#post-runs). The app retries a `5xx` and treats a `4xx` as a
+verdict, so a momentary lock no longer reads as a refused request (#2353). A
+`transient` send writes no row and is unaffected.
+
 ### POST /runs
 
 Start a load test run (Vayu Mode).
