@@ -141,7 +141,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 
 			{blockedBy && (
 				<p className="mt-2.5 m-0 text-label text-muted-foreground">
-					<span className="font-mono">{blockedBy.name}</span> is set to No Auth, so
+					<span className="font-mono">{blockedBy.name}</span> is set to No auth, so
 					requests below it inherit nothing.
 				</p>
 			)}

@@ -94,7 +94,7 @@ describe("AuthContextSection", () => {
 			collection("leaf", { mode: "noauth" }),
 		];
 		renderSection();
-		expect(screen.getByText(/leaf is set to No Auth/)).toBeInTheDocument();
+		expect(screen.getByText(/leaf is set to No auth/)).toBeInTheDocument();
 
 		ancestors = [collection("root", { mode: "none" })];
 		renderSection();

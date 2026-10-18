@@ -101,7 +101,7 @@ describe("CollectionAuthSection", () => {
 		render(<CollectionAuthSection tab={TAB} />);
 
 		expect(
-			screen.getByText("Sandbox is set to No Auth, so nothing is inherited past it.")
+			screen.getByText("Sandbox is set to No auth, so nothing is inherited past it.")
 		).toBeInTheDocument();
 	});
 

@@ -121,7 +121,7 @@ describe("InheritanceChain", () => {
 
 		expect(screen.queryByText("Source")).not.toBeInTheDocument();
 		expect(
-			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
+			screen.getByText(/is set to No auth, so requests below it inherit nothing/)
 		).toBeInTheDocument();
 		// The blocking row names itself distinctly from a plain unset one.
 		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
@@ -169,7 +169,7 @@ describe("InheritanceChain", () => {
 		// Names Payments (the leaf) as the blocker, which only happens once its
 		// row reads the draft's noauth rather than its stored bearer token.
 		expect(
-			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
+			screen.getByText(/is set to No auth, so requests below it inherit nothing/)
 		).toBeInTheDocument();
 	});
 
