@@ -1202,6 +1202,12 @@ responsive size variant. Each allowlisted file is asserted to still use its
 step, so a file that stops rendering one drops off the list instead of quietly
 licensing a heading there later.
 
+`heading-step.test.tsx` also reads the dialog half, by scanning every non-test
+`.tsx` for a `<DialogTitle>` whose `className` carries a `text-` or `font-`
+class other than `sr-only`. Rendering the primitive cannot find an override,
+because the caller's classes win through `cn()` (Import's title was `text-sm
+font-bold` until #2316).
+
 **The type register is a measurement, not a preference.** Perceived size follows
 x-height, not nominal size, and the six bundled faces differ by 13% at the same
 `font-size`. Ratios are `OS/2.sxHeight / head.unitsPerEm`, read from the bundled

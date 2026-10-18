@@ -132,7 +132,7 @@ function VariableRow({
 						onUpdate(variable.id, "enabled", e.target.checked);
 						onCommitNow();
 					}}
-					className={cn("size-icon", checkboxColor)}
+					className={cn("size-target", checkboxColor)}
 					disabled={variable.isNew && !variable.key}
 					aria-label={variable.key ? `Enable ${variable.key}` : "Enable this row"}
 				/>
