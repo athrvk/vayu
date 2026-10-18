@@ -56,3 +56,32 @@ describe("ClientErrorView heading for INVALID_URL", () => {
 		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
 	});
 });
+
+describe("ClientErrorView glyphs", () => {
+	const glyph = (code: string) => {
+		const { container, unmount } = render(
+			<ClientErrorView errorCode={code} errorMessage="x" />
+		);
+		const cls = container.querySelector("svg.lucide")?.getAttribute("class") ?? "";
+		unmount();
+		return (
+			cls.split(/\s+/).find((c) => /^lucide-(?!lightbulb)/.test(c) && c !== "lucide") ?? ""
+		);
+	};
+
+	it("gives Vayu's own failures a glyph no network failure uses", () => {
+		const network = [
+			"TIMEOUT",
+			"SSL_ERROR",
+			"PROXY_ERROR",
+			"INVALID_URL",
+			"CONNECTION_FAILED",
+			"DNS_ERROR",
+		].map(glyph);
+		const own = ["ENGINE_ERROR", "INTERNAL_ERROR"].map(glyph);
+
+		expect(glyph("CONNECTION_FAILED")).toBe("lucide-server-off");
+		expect(own).toEqual(["lucide-server-crash", "lucide-server-crash"]);
+		for (const g of own) expect(network).not.toContain(g);
+	});
+});
