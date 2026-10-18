@@ -73,11 +73,11 @@ function row(overrides: Partial<Parameters<typeof KeyValueRow>[0]> = {}) {
 describe("the enable checkbox", () => {
 	it("paints in the app's accent, not the browser default", () => {
 		// `Checkbox` (`ui/checkbox.tsx`) paints its checked state itself,
-		// `checked:bg-primary`/`checked:border-primary` - not `accent-color`,
+		// `checked:bg-primary-fill`/`checked:border-primary-fill` - not `accent-color`,
 		// which does nothing once `appearance-none` removes native rendering.
 		const box = row().querySelector<HTMLInputElement>('input[type="checkbox"]');
 		expect(box).toBeTruthy();
-		expect(box!.className).toMatch(/\bchecked:bg-primary\b/);
+		expect(box!.className).toMatch(/\bchecked:bg-primary-fill\b/);
 	});
 
 	it("is appearance-none, so its rounded border actually paints", () => {

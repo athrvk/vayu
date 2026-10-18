@@ -48,6 +48,6 @@ describe("Switch", () => {
 		render(<Switch aria-label="Reduced motion" checked onCheckedChange={() => {}} />);
 		const sw = screen.getByRole("switch", { name: "Reduced motion" });
 		expect(sw).toHaveAttribute("data-state", "checked");
-		expect(sw.className).toContain("data-[state=checked]:bg-primary");
+		expect(sw.className).toContain("data-[state=checked]:bg-primary-fill");
 	});
 });
