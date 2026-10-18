@@ -32,6 +32,7 @@
 
 import { Lock } from "lucide-react";
 import {
+	Card,
 	Input,
 	Label,
 	SecretInput,
@@ -106,10 +107,10 @@ export default function AuthFields({
 	// host's `noAuthDescription` is what tells the two apart.
 	if (value.mode === "none" || value.mode === "noauth") {
 		return (
-			<div className="p-6 text-center bg-card border border-border rounded-md">
+			<Card className="p-6 text-center">
 				<Lock className="w-5 h-5 mx-auto mb-2 text-subtle-foreground" />
 				<div className="text-sm text-muted-foreground">{noAuthDescription}</div>
-			</div>
+			</Card>
 		);
 	}
 

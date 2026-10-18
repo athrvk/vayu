@@ -51,7 +51,7 @@
 import { useState } from "react";
 import { AlertTriangle, Check, Loader2, RefreshCw, Upload } from "lucide-react";
 
-import { Button, Checkbox, DeleteConfirmDialog, ICON_MOTION } from "@/components/ui";
+import { Button, Card, Checkbox, DeleteConfirmDialog, ICON_MOTION } from "@/components/ui";
 import { Callout, CopyForAgentButton } from "@/components/shared";
 import { specOperationReference } from "@/lib/agent-reference";
 import { apiService } from "@/services/api";
@@ -218,7 +218,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 	return (
 		<div>
 			<SectionLabel>Sync</SectionLabel>
-			<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-3">
+			<Card pad="sm" className="space-y-3">
 				<div className="flex items-center gap-2">
 					<Button
 						variant="outline"
@@ -309,7 +309,7 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 				)}
 
 				<SaveFailed mutation={syncSpec} what="this sync" />
-			</div>
+			</Card>
 
 			{/*
 			 * The count-naming confirm every destructive path here uses. A sync can

@@ -45,7 +45,7 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, Trash2 } from "lucide-react";
 
-import { Button } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { Callout } from "@/components/shared";
 import { useDataFileStore } from "@/stores";
 import { DataFileError, describeDataSchemaDiff } from "@/services/data-files";
@@ -185,7 +185,7 @@ export default function DataTab({ collection }: DataTabProps) {
 			<div>
 				<SectionLabel>Declared columns</SectionLabel>
 				{declaredContract ? (
-					<div className="rounded-md border border-rule bg-card surface-card p-3 space-y-2">
+					<Card pad="sm" className="space-y-2">
 						<div className="flex flex-wrap gap-1.5">
 							{declared.map((column) => (
 								<code
@@ -209,7 +209,7 @@ export default function DataTab({ collection }: DataTabProps) {
 								.{readFailure && ` ${readFailure}`}
 							</p>
 						)}
-					</div>
+					</Card>
 				) : (
 					<p className="text-xs text-muted-foreground">
 						No contract yet. Picking a file below declares its columns.

@@ -23,7 +23,7 @@
 
 import { useState } from "react";
 import { FileText, Radio } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel } from "@/components/ui";
+import { Card, Tabs, TabsContent, TabsList, TabsTrigger, TabLabel } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
@@ -59,12 +59,7 @@ export default function UnifiedResponseViewer({
 	}
 
 	return (
-		<div
-			className={cn(
-				"flex flex-col surface-card border border-rule rounded-lg overflow-hidden",
-				className
-			)}
-		>
+		<Card className={cn("flex flex-col overflow-hidden", className)}>
 			{/*
 			 * The app's Tabs primitive, not two hand-rolled Buttons. The old pair
 			 * were their own tab stops with no arrow-key model and no
@@ -151,6 +146,6 @@ export default function UnifiedResponseViewer({
 					</TabsContent>
 				)}
 			</Tabs>
-		</div>
+		</Card>
 	);
 }
