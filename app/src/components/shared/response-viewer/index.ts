@@ -19,6 +19,7 @@ export { default as ResponseBody } from "./ResponseBody";
 export {
 	default as HeadersViewer,
 	CompactHeadersViewer,
+	HeaderValue,
 	ResponseHeadersPanel,
 } from "./HeadersViewer";
 export type { ResponseHeadersPanelProps } from "./HeadersViewer";

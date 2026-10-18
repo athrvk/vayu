@@ -17,7 +17,7 @@
  * away. They have a column now.
  */
 
-import { EmptyState } from "@/components/shared";
+import { EmptyState, HeaderValue } from "@/components/shared";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui";
 import { parseSetCookie } from "./parse-set-cookie";
 
@@ -73,7 +73,7 @@ export default function ResponseCookies({ headers }: ResponseCookiesProps) {
 												key={j}
 												className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-label text-muted-foreground"
 											>
-												{attr}
+												<HeaderValue value={attr} />
 											</span>
 										))}
 									</div>

@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import ResponseCookies from "./ResponseCookies";
 import { parseSetCookie } from "./parse-set-cookie";
 
@@ -86,6 +86,23 @@ describe("what the table shows", () => {
 		expect(container.textContent).toContain("Path=/");
 		expect(container.textContent).toContain("HttpOnly");
 		expect(container.textContent).toContain("SameSite=Strict");
+	});
+
+	it("marks the Expires date with a time, the rest of the attribute text unchanged", () => {
+		// The Headers tab does the same for the same response (#1786); both go
+		// through `HeaderValue`.
+		const container = rendered("id=a3fWa; Expires=Wed, 21 Oct 2026 07:28:00 GMT; Path=/");
+
+		const times = container.querySelectorAll("time");
+		expect(times).toHaveLength(1);
+		expect(times[0].textContent).toBe("Wed, 21 Oct 2026 07:28:00 GMT");
+		const chip = times[0].parentElement;
+		expect(chip?.textContent).toBe("Expires=Wed, 21 Oct 2026 07:28:00 GMT");
+		expect(container.textContent).toContain("Path=/");
+	});
+
+	it("gives an attribute that holds no time no time element", () => {
+		expect(rendered("id=a3fWa; Path=/; HttpOnly").querySelector("time")).toBeNull();
 	});
 
 	it("says so when a cookie carries no attributes", () => {

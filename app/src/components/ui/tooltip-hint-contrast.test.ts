@@ -158,4 +158,19 @@ describe("every tooltip in the app, not only the three this fix touched", () => 
 			.map((b) => `${b.file}: ${CANVAS_FOREGROUND.exec(b.source)?.[0]}`);
 		expect(offenders).toEqual([]);
 	});
+
+	/*
+	 * A hand-rolled hint is the other shape of the same mistake: white at
+	 * `opacity-70` over `--primary-fill` measures 2.50:1 on Sunset, under the bar
+	 * above, and the canvas-foreground scan cannot see it because no colour class
+	 * is involved. The one tint is `TooltipHint`'s, so any alpha written inside a
+	 * tooltip block is a second, unmeasured one.
+	 */
+	it("hand-rolls no alpha: a de-emphasised line is a TooltipHint", () => {
+		const hand = /\bopacity-\d+\b|text-primary-foreground\/\d+/;
+		const offenders = blocks
+			.filter((b) => hand.test(b.source))
+			.map((b) => `${b.file}: ${hand.exec(b.source)?.[0]}`);
+		expect(offenders).toEqual([]);
+	});
 });

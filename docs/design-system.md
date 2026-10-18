@@ -948,7 +948,10 @@ primitive, which holds the one tint; the same argument `surface-sunken` makes
 for its `--rule`, on a filled surface instead of a raised one. The hint cannot
 out-read the label it is secondary to - white on `sunset` is the ceiling at
 3.6:1 - so the bar is 2.5:1 on every scheme, checked in
-`tooltip-hint-contrast.test.ts`.
+`tooltip-hint-contrast.test.ts`. The same file bans an `opacity-N` or a
+hand-written `text-primary-foreground/N` inside a `TooltipContent`: white at
+`opacity-70` on the fill is 2.50:1 on `sunset`, under the bar, and a second
+alpha is a second unmeasured tint.
 
 **A value and the hint that sources it stack; they never share a flex row.**
 `TooltipContent` is capped at `max-w-xs`, a value that wraps on `break-all` has
@@ -1207,6 +1210,12 @@ responsive size variant. Each allowlisted file is asserted to still use its
 step, so a file that stops rendering one drops off the list instead of quietly
 licensing a heading there later.
 
+`heading-step.test.tsx` also reads the dialog half, by scanning every non-test
+`.tsx` for a `<DialogTitle>` whose `className` carries a `text-` or `font-`
+class other than `sr-only`. Rendering the primitive cannot find an override,
+because the caller's classes win through `cn()` (Import's title was `text-sm
+font-bold` until #2316).
+
 **The type register is a measurement, not a preference.** Perceived size follows
 x-height, not nominal size, and the six bundled faces differ by 13% at the same
 `font-size`. Ratios are `OS/2.sxHeight / head.unitsPerEm`, read from the bundled
@@ -1383,7 +1392,11 @@ bands off arbitrary bracketed literals; a band written that way was the one
 piece of chrome in the app that could follow no token at all, and the rows still
 breathe with the density setting because their own padding and gaps ride
 `--spacing`. `header-band.test.ts` fails on any element that paints a band (a
-bottom rule over a panel fill) and sets its height with a pixel literal. `control`,
+bottom rule over a panel fill) and sets its height with a pixel literal, and on
+any file that declares such a band and also writes `style={{ height`. A JS prop
+that has to match a band (the GraphQL Variables pane's `collapsedSize`,
+`GRAPHQL_PANE_HEADER_HEIGHT`) is held to `--spacing-band` by
+`titlebar-height.test.ts` instead. `control`,
 `control-sm`, `control-xs` and `target` scale on their own schedule under
 `[data-density="comfortable"]`, the same mechanism `--spacing` itself uses -
 just a different curve, so a control never drops below its own floor at
@@ -3397,13 +3410,13 @@ Wherever Vayu shows a time, the user's own zone, UTC and how long ago are one ho
 - **The relative phrase comes from the platform** (`Intl.RelativeTimeFormat`), so it reads in the user's language and pluralises as that language does. Nothing hand-wraps it: no `"5m ago"` ladder, and copy never builds a phrase around a count of minutes.
 - **`TimeValue` is the only renderer.** It takes an instant or the raw text and a style (`datetime`, `date`, `time`, `time-ms`, `relative`, or `raw` to keep the string as it came), renders a `<time>` and carries the card through the `Tooltip` primitive. The card's rows are built when it opens, so a list of hundreds of rows pays for the text only. A value that is not a time renders as plain text with no card.
 - **A string that cannot hold an element** - an `aria-label`, a native `title`, a palette subtitle - calls `formatInstant` from `lib/time-value.ts`, the same formatter `TimeValue` uses. That is the only other place a time may be formatted.
-- **API data in a table is decided by `parseTimeValue`, never `new Date()`**, so `1` or `2026` in a field is not a time. A header value wraps each time run it holds in a `TimeValue` and leaves the rest as received: a `Date` value is one run, a `Set-Cookie` has its `Expires=` date marked among its other attributes, `Content-Type` has none. An editable field (a request header or param, a variable) cannot hold an element, so the card hangs off a `TimeMarker` beside it - a clock button in the key-value table's marker column, inside the field in the variables table - rather than off the field, which would open on every focus and cover the autocomplete. **A secret variable never gets one**, saved or not: the card is a tooltip a screen share catches.
+- **API data in a table is decided by `parseTimeValue`, never `new Date()`**, so `1` or `2026` in a field is not a time. A header value wraps each time run it holds in a `TimeValue` and leaves the rest as received: a `Date` value is one run, a `Set-Cookie` has its `Expires=` date marked among its other attributes, `Content-Type` has none. The Cookies tab lists those attributes one chip each and renders every chip through the same `HeaderValue` (exported from `HeadersViewer.tsx`), so an `Expires=` date there carries the card as it does on the Headers tab. An editable field (a request header or param, a variable) cannot hold an element, so the card hangs off a `TimeMarker` beside it - a clock button in the key-value table's marker column, inside the field in the variables table - rather than off the field, which would open on every focus and cover the autocomplete. **A secret variable never gets one**, saved or not: the card is a tooltip a screen share catches.
 - **A surface with no visible time** puts the card on a trigger of its own with `TimeTooltip`: a history row hangs it off the row's stretched activator, with the status and the run's comment as extra rows, in place of the native `title` that used to say the same in one unnamed zone.
 - **No setting.** The OS locale and zone decide, as they always did.
 - **A test that renders a time needs a `TooltipProvider`** above it: `@/test/render-with-tooltips` is Testing Library's `render` inside one.
 - Monaco editors underline a time by the same parser and draw the same rows, the Raw tab's `http` language included; see `docs/app/COMPONENTS.md`.
 
-→ `time-surfaces.test.ts` reads every source file under `app/src` and fails on `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` on a Date, `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` outside `lib/time-value.ts` and `components/shared/TimeValue/`, and on any `CodeEditor` that opts out of the time matcher. `Number#toLocaleString` for counts is untouched.
+→ `time-surfaces.test.ts` reads every source file under `app/src` and fails on `toLocaleDateString`, `toLocaleTimeString`, `toLocaleString` on a Date, `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` outside `lib/time-value.ts` and `components/shared/TimeValue/`, and on any `CodeEditor` that opts out of the time matcher. `Number#toLocaleString` for counts is untouched. It also pins `ResponseCookies.tsx` to `HeaderValue` or `TimeValue`, because a time shown unformatted is invisible to the scan.
 
 ### A disabled control says why: `DisabledHint`
 
