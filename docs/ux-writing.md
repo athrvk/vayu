@@ -52,8 +52,9 @@ the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
 that you would like them to. The app's own text has one breach left, the
 failed engine restart's "Please close the Application and reopen it."
 (`electron/sidecar.ts`, #2292). Beyond it are engine response bodies that the
-app shows after its own "Couldn't ..." prefix (#2295). Both are held by tests
-(see [Enforcement](#enforcement)). Log strings and code comments are a separate
+app shows after its own "Couldn't ..." prefix (#2295). The first is held by the
+voice and casing scan, the second by the engine test #2295 adds (see
+[Enforcement](#enforcement)). Log strings and code comments are a separate
 surface and keep whatever form reads well there.
 
 ## Terminology glossary
@@ -226,12 +227,13 @@ from creeping back in afterward. These hold it:
   of `console.*` and logger calls dropped (logs are exempt, see above). A new
   rule from this page is added to that scan rather than to a file walk of its
   own.
-- **The engine's half** is two tests owned by the issues that add them: a scan
-  of `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
-  "Failed to" (#2295), and `config_seed_test.cpp`
+- **The engine's half** is two tests that do not exist yet, owned by the issues
+  that add them: a scan of `engine/src/http/routes/*.cpp` for response bodies
+  opening "Could not" or "Failed to" (#2295), and `config_seed_test.cpp`
   `EveryEngineSettingLabelIsSentenceCase` over the setting labels the Settings
   page renders verbatim (#2293).
-- **Narrow scanners** hold a rule each and are filed by their own issues: bare
+- **Narrow scanners**, one rule each, are filed by their own issues and not yet
+  written; each adds its rule to the scan above when it lands: bare
   "the engine" (`voice-bare-engine.test.ts`, #2298), hand-built plurals and
   "(s)" (`plural-rule.test.ts`, #2307), and the ASCII ellipsis, `Settings >`
   and "curl" (`user-text-spelling.test.ts`, #2299).
