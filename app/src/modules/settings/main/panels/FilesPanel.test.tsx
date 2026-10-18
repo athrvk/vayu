@@ -41,6 +41,9 @@ vi.mock("@/stores", async (importOriginal) => ({
 
 const { default: FilesPanel } = await import("./FilesPanel");
 
+const FILES_EMPTY_TITLE =
+	"Files from an import, an agent or a data file are sent only from a folder you allow.";
+
 function renderPanel() {
 	return render(
 		<TooltipProvider>
@@ -80,14 +83,18 @@ describe("FilesPanel", () => {
 		rootsFailed = true;
 		renderPanel();
 
-		// "No folders allowed yet" would be a claim the panel cannot make here.
-		expect(screen.queryByText("No folders allowed yet.")).not.toBeInTheDocument();
+		// The empty-state sentence would be a claim the panel cannot make here.
+		expect(screen.queryByText(FILES_EMPTY_TITLE)).not.toBeInTheDocument();
 		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 	});
 
 	it("says so when nothing is allowed", () => {
-		renderPanel();
-		expect(screen.getByText("No folders allowed yet.")).toBeInTheDocument();
+		const { container } = renderPanel();
+		expect(screen.getByText(FILES_EMPTY_TITLE)).toBeInTheDocument();
+		// Through the primitive, not a bare <p> that drifts from the other empty states.
+		expect(container.querySelector('[data-slot="empty-state"]')).toHaveTextContent(
+			FILES_EMPTY_TITLE
+		);
 	});
 
 	it("allows a typed folder by posting its path", async () => {

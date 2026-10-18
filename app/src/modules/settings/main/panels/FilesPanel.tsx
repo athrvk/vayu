@@ -35,6 +35,7 @@ import {
 	CardTitle,
 	Input,
 } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { useDeleteFileRootMutation, useFileRootsQuery } from "@/queries";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
@@ -88,7 +89,10 @@ export default function FilesPanel() {
 						answers.
 					</p>
 				) : isLoading ? null : roots.length === 0 ? (
-					<p className="text-sm text-muted-foreground">No folders allowed yet.</p>
+					<EmptyState
+						variant="inline"
+						title="Files from an import, an agent or a data file are sent only from a folder you allow."
+					/>
 				) : (
 					<ul aria-label="Allowed folders">
 						{roots.map((root) => (

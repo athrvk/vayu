@@ -24,6 +24,8 @@ import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { CookiesCard } from "./CookiesCard";
 
+const COOKIES_EMPTY_TITLE = "Cookies appear here after a response sets one.";
+
 const mutateAsync = vi.fn(() => Promise.resolve({ cleared: 1 }));
 
 const scopes = [
@@ -146,9 +148,9 @@ describe("CookiesCard", () => {
 		queryResult = { isError: true };
 		render(<CookiesCard />);
 
-		// "No cookies stored" would be a claim the app cannot make here, and the
+		// The empty-jar sentence would be a claim the app cannot make here, and the
 		// one that stops someone looking for the session that is still live.
-		expect(screen.queryByText(/no cookies stored/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(COOKIES_EMPTY_TITLE)).not.toBeInTheDocument();
 		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
 	});
 
@@ -156,9 +158,21 @@ describe("CookiesCard", () => {
 		queryResult = { data: undefined, isLoading: true, isError: false };
 		render(<CookiesCard />);
 
-		// The first paint has no data yet, and "No cookies stored" would be a
+		// The first paint has no data yet, and the empty-jar sentence would be a
 		// claim the card cannot make before the engine has answered.
-		expect(screen.queryByText(/no cookies stored/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(COOKIES_EMPTY_TITLE)).not.toBeInTheDocument();
+	});
+
+	it("says the jar is empty, through the empty-state primitive, when it holds no cookie", () => {
+		queryResult = { data: { scopes: [] }, isError: false };
+		const { container } = render(<CookiesCard />);
+
+		expect(screen.getByText(COOKIES_EMPTY_TITLE)).toBeInTheDocument();
+		expect(container.querySelector('[data-slot="empty-state"]')).toHaveTextContent(
+			COOKIES_EMPTY_TITLE
+		);
+		// Nothing to clear, so no Clear all.
+		expect(screen.queryByRole("button", { name: /clear all cookies/i })).toBeNull();
 	});
 
 	it("names each Clear button for the jar it empties", () => {

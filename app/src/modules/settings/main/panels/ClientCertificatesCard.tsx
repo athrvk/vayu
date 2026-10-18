@@ -69,6 +69,7 @@ import {
 	useCreateClientCertificateMutation,
 	useDeleteClientCertificateMutation,
 } from "@/queries";
+import { EmptyState } from "@/components/shared";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { useToastStore } from "@/stores";
 import type { ClientCertificate, ClientCertificateFormat } from "@/types";
@@ -281,6 +282,10 @@ export function ClientCertificatesCard() {
 		}
 	};
 
+	// The empty state carries its own add link; this card's button would be a
+	// second path to the same form.
+	const listIsEmpty = !isError && !isLoading && certificates.length === 0;
+
 	const canSubmit =
 		draft.host.trim() !== "" &&
 		draft.certPath.trim() !== "" &&
@@ -310,8 +315,18 @@ export function ClientCertificatesCard() {
 						{ENGINE_NO_ANSWER} The registered certificates are unknown until Vayu's
 						engine answers.
 					</p>
-				) : isLoading ? null : certificates.length === 0 ? (
-					<p className="text-sm text-muted-foreground">No certificates registered.</p>
+				) : isLoading ? null : listIsEmpty ? (
+					<EmptyState
+						variant="inline"
+						title="Register a certificate for a host that requires mutual TLS."
+						action={
+							adding ? undefined : (
+								<Button variant="link" onClick={() => setAdding(true)}>
+									Add certificate
+								</Button>
+							)
+						}
+					/>
 				) : (
 					<div>
 						{certificates.map((certificate) => (
@@ -513,7 +528,7 @@ export function ClientCertificatesCard() {
 							</Button>
 						</div>
 					</div>
-				) : (
+				) : listIsEmpty ? null : (
 					<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
 						<Plus className="size-icon mr-1.5" />
 						Add certificate
