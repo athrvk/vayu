@@ -50,27 +50,27 @@ describe("describeCounts", () => {
 		[
 			"a Postman collection names no environments or globals",
 			{ requestCount: 1, folderCount: 3 },
-			"1 request · 3 folders · 0 examples",
+			"1 request · 3 nested collections · 0 examples",
 		],
 		[
 			"singular and plural per segment",
 			{ requestCount: 2, folderCount: 1, exampleCount: 1 },
-			"2 requests · 1 folder · 1 example",
+			"2 requests · 1 nested collection · 1 example",
 		],
 		[
 			"zero examples stays an answer",
 			{ requestCount: 5, folderCount: 0, exampleCount: 0 },
-			"5 requests · 0 folders · 0 examples",
+			"5 requests · 0 nested collections · 0 examples",
 		],
 		[
 			"counts get thousands separators",
 			{ requestCount: 1200, folderCount: 2 },
-			"1,200 requests · 2 folders · 0 examples",
+			"1,200 requests · 2 nested collections · 0 examples",
 		],
 		[
 			"a collection that also carries environments names them",
 			{ requestCount: 1, environmentCount: 2, globalCount: 1 },
-			"1 request · 0 folders · 0 examples · 2 environments · 1 global",
+			"1 request · 0 nested collections · 0 examples · 2 environments · 1 global",
 		],
 		["an environment file is only its environment", { environmentCount: 1 }, "1 environment"],
 		["a globals file is only its globals", { globalCount: 4 }, "4 globals"],
@@ -82,17 +82,23 @@ describe("describeCounts", () => {
 		[
 			"an environment file parsed with environments off has nothing to import",
 			{},
-			"0 requests · 0 folders · 0 examples",
+			"0 requests · 0 nested collections · 0 examples",
 		],
 		[
-			"a folder-only file is not an environment file",
+			"a file of only nested collections is not an environment file",
 			{ folderCount: 1, environmentCount: 1 },
-			"0 requests · 1 folder · 0 examples · 1 environment",
+			"0 requests · 1 nested collection · 0 examples · 1 environment",
 		],
 	];
 
 	it.each(cases)("%s", (_name, counts, expected) => {
 		expect(describeCounts(meta(counts))).toBe(expected);
+	});
+
+	it("never calls a nested collection a folder", () => {
+		const line = describeCounts(meta({ requestCount: 1, folderCount: 3 }));
+		expect(line).toContain("nested collection");
+		expect(line).not.toMatch(/folder/i);
 	});
 });
 

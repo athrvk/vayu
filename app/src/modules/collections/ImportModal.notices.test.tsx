@@ -168,7 +168,7 @@ describe("the import preview's notices", () => {
 		stubParse(vendorParse);
 		preview();
 
-		await waitFor(() => expect(screen.getByText(/2 folders/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText(/2 nested collections/i)).toBeInTheDocument());
 		// Path-derived folders are Vayu's doing, not the document's, so the preview
 		// says so before the user accepts the tree.
 		expect(screen.getByText(/Collections grouped by URL path/i)).toBeInTheDocument();
@@ -193,7 +193,7 @@ describe("the import preview's notices", () => {
 		);
 		preview();
 
-		await waitFor(() => expect(screen.getByText(/1 folder\b/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText(/1 nested collection\b/i)).toBeInTheDocument());
 		expect(screen.queryByText(/Collections grouped/i)).not.toBeInTheDocument();
 	});
 });

@@ -84,7 +84,9 @@ describe("the import preview's example count", () => {
 
 		// Beside the other counts, in the one line that summarises the import.
 		await waitFor(() =>
-			expect(screen.getByText("1 request · 0 folders · 2 examples")).toBeInTheDocument()
+			expect(
+				screen.getByText("1 request · 0 nested collections · 2 examples")
+			).toBeInTheDocument()
 		);
 	});
 

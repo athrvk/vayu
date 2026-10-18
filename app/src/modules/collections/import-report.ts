@@ -64,11 +64,11 @@ function thingsToFinish(report: ImportReport): number {
 	);
 }
 
-/** "60 requests, 4 folders": what arrived, leaving out what the file did not carry. */
+/** "60 requests, 4 nested collections": what arrived, leaving out what the file did not carry. */
 function countsPhrase({ counts }: ImportReport): string {
 	const parts = [
 		{ n: counts.requests, one: "request", other: "requests" },
-		{ n: counts.folders, one: "folder", other: "folders" },
+		{ n: counts.folders, one: "nested collection", other: "nested collections" },
 		{ n: counts.environments, one: "environment", other: "environments" },
 		{ n: counts.globals, one: "global", other: "globals" },
 	]
