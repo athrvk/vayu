@@ -331,7 +331,7 @@ export interface ImportMeta {
 	 * `external_ref` - that count reaches it as `ImportSource.unresolvedRefs`,
 	 * because bundling runs before detection and no parser can know it. Read by
 	 * `importNotices` (`modules/collections/import-notices.ts`), which gives
-	 * each kind a tier: red for what the user must finish, muted for what the
+	 * each kind a tier: amber for what the user must finish, muted for what the
 	 * import decided, and nothing for what changes nothing they send.
 	 */
 	skipped: SkippedItem[];

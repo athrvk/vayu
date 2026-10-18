@@ -145,7 +145,7 @@ export default function EditorPanel() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="h-48 overflow-hidden rounded-md border border-border">
+					<div className="h-48 overflow-hidden rounded-md border border-rule">
 						<CodeEditor
 							value={SAMPLE}
 							language="javascript"
