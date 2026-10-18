@@ -2762,7 +2762,7 @@ httplib::Response& res) {
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "http", "POST /runs - Failed to create run: " + std::string (e.what ()));
-        send_error (res, 400, "Failed to create run record");
+        send_error (res, 500, "Failed to create run record");
         return;
     }
 

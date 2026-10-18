@@ -31,6 +31,7 @@
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
@@ -349,6 +350,29 @@ TEST_F (RunOriginRouteTest, LoadRunRefusesAMalformedOriginBeforeAnyRow) {
         EXPECT_NE (error_message_of (body).find ("'origin"), std::string::npos)
         << body.dump ();
     }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+// A run row the database refuses is the engine's failure, not the payload's:
+// the app retries a 5xx and treats a 4xx as a verdict (#2319). A trigger that
+// aborts the insert stands in for a locked database or a full disk.
+TEST_F (RunOriginRouteTest, ARunRowTheDatabaseRefusesAnswers500) {
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (DB_PATH, &handle), SQLITE_OK);
+    char* err                = nullptr;
+    const int rc             = sqlite3_exec (handle,
+                "CREATE TRIGGER refuse_runs BEFORE INSERT ON runs "
+                            "BEGIN SELECT RAISE (ABORT, 'disk I/O error'); END",
+                nullptr, nullptr, &err);
+    const std::string reason = err ? err : "";
+    sqlite3_free (err);
+    sqlite3_close (handle);
+    ASSERT_EQ (rc, SQLITE_OK) << reason;
+
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post ("/runs", load_of (echo));
+    EXPECT_EQ (status, 500) << body.dump ();
+    EXPECT_TRUE (body.contains ("error")) << body.dump ();
     EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
