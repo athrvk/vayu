@@ -7810,6 +7810,12 @@ marked `failed` first, and so is the row of a run that throws while starting
 (answered `500`, naming the error): no answer but a `202` leaves a `pending` row
 behind (#1893).
 
+**A run row the database cannot write is a `500`.** A busy or locked database, a
+full disk or an I/O error while recording the run is the engine's failure, not
+the payload's, so `POST /runs` answers `500` `Failed to create run record`. The
+app retries a `5xx` and treats a `4xx` as a verdict, so a momentary lock no
+longer reads as a refused request (#2319).
+
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
