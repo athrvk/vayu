@@ -282,8 +282,6 @@ const keyOf = (entry: Pick<UiString, "file" | "text">) => `${entry.file} :: ${en
  * deletes its entry in the same commit; the rot test fails until it does.
  */
 const KNOWN_BREACHES: Readonly<Record<string, string>> = {
-	"electron/sidecar.ts :: Please close the Application and reopen it.": "#2292",
-
 	// The native menu: Title Case is right in the macOS menu bar and wrong in the
 	// same template popped from the title bar elsewhere, so the fix is the
 	// per-platform label function `docs/ux-writing.md` ("Case") assigns to the
