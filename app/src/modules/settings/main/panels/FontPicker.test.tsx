@@ -68,6 +68,18 @@ describe("FontPicker", () => {
 		expect(screen.getByRole("radio", { name: /^Custom/, checked: true })).toBeTruthy();
 	});
 
+	it("names the custom family field after the setting it belongs to", () => {
+		renderPicker("custom");
+
+		expect(screen.getByRole("textbox", { name: "Interface font family" })).toBeTruthy();
+	});
+
+	it("shows no family field while a preset is chosen", () => {
+		renderPicker("inter");
+
+		expect(screen.queryByRole("textbox")).toBeNull();
+	});
+
 	it("chooses the next face when an arrow key moves focus to it", async () => {
 		const onChange = renderPicker("inter");
 		const inter = screen.getByRole("radio", { name: /^Inter/ });

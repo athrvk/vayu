@@ -20,6 +20,7 @@ import {
 	Link2Off,
 	Route,
 	ServerOff,
+	ServerCrash,
 	Lightbulb,
 	type LucideIcon,
 } from "lucide-react";
@@ -110,8 +111,11 @@ function getErrorIcon(errorCode?: string) {
 			return ServerOff;
 		case "DNS_ERROR":
 			return WifiOff;
+		// Vayu's own failures get a glyph a target's failure never uses
+		// (docs/ux-writing.md, "Errors have three sources").
 		case "ENGINE_ERROR":
-			return ServerOff;
+		case "INTERNAL_ERROR":
+			return ServerCrash;
 		default:
 			return AlertCircle;
 	}

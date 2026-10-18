@@ -12,7 +12,7 @@
  * never "which construct did the parser meet": the reader is deciding whether
  * to import and what to finish by hand afterwards. Three tiers:
  *
- * - `action` (red): a request will not work as imported, or something the user
+ * - `action` (amber): a request will not work as imported, or something the user
  *   would send is missing.
  * - `note` (muted): the import made a choice or changed a shape; the request
  *   works.

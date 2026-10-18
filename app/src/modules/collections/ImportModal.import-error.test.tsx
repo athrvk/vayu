@@ -84,6 +84,30 @@ describe("ImportModal - failed import", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Import/i }));
 	}
 
+	/**
+	 * A preview carrying a follow-up notice is not an error, so when the apply
+	 * then fails the failure is the only alert in the dialog (#2291).
+	 */
+	it("announces only the failure as an alert, not the preview's notices", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "Sample API", requests: [request({ name: "List users" })] }),
+				],
+				meta: {
+					format: "OpenAPI 3.0",
+					skipped: [{ kind: "unmapped_body", count: 1, requests: ["List users"] }],
+				},
+			})
+		);
+		await failAnImport();
+
+		const alerts = await screen.findAllByRole("alert");
+		expect(alerts).toHaveLength(1);
+		expect(alerts[0]).toHaveTextContent(/import boom/i);
+		expect(screen.getByText(/List users: body not imported/)).toBeInTheDocument();
+	});
+
 	it("surfaces the error when the import rejects (modal stays open)", async () => {
 		await failAnImport();
 		await waitFor(() => expect(screen.getByText(/import boom/i)).toBeInTheDocument());
