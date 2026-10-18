@@ -205,13 +205,7 @@ export default function KeyValueEditor({
 			 * below it. The placeholder is the one that has to name the thing,
 			 * because it is the one still visible once you start typing.
 			 */}
-			<div
-				className={cn(
-					EYEBROW_CLASS,
-					"grid gap-2 px-1 text-subtle-foreground",
-					keyValueGrid(allowFiles)
-				)}
-			>
+			<div className={cn(EYEBROW_CLASS, "grid gap-2 px-1", keyValueGrid(allowFiles))}>
 				<div />
 				<div>Key</div>
 				<div>Value</div>

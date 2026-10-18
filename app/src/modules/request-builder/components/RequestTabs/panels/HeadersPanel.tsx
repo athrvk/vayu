@@ -92,14 +92,14 @@ function DefaultHeaderRow({
 			</span>
 			{storedOff ? (
 				// Wraps rather than truncates: the tab it names is the point.
-				<span className="text-xs italic text-subtle-foreground">
+				<span className="text-xs italic text-muted-foreground">
 					off for this request in Settings
 				</span>
 			) : header.generated ? (
 				// A generated header has no value to print - the engine makes a
 				// fresh one per transfer - so the cell says that rather than
 				// showing a blank the reader would take for "no value".
-				<span className="text-xs italic text-subtle-foreground truncate">
+				<span className="text-xs italic text-muted-foreground truncate">
 					generated per request
 				</span>
 			) : (

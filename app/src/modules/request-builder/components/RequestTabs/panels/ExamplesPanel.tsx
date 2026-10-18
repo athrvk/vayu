@@ -197,7 +197,7 @@ function ExampleRow({
 				<div className="enter-fade flex flex-col gap-3 border-t border-rule px-3 py-3">
 					{example.headers.length > 0 && (
 						<div className="flex flex-col gap-1">
-							<Eyebrow className="text-subtle-foreground">Headers</Eyebrow>
+							<Eyebrow>Headers</Eyebrow>
 							{example.headers.map((header, i) => (
 								<div key={i} className="flex gap-2 font-mono text-label">
 									<span className="text-muted-foreground">{header.key}</span>

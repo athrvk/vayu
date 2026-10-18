@@ -147,7 +147,7 @@ export function readUplotTheme(root: Element = document.documentElement): UplotT
 	return {
 		axis: wrap(raw("--border")),
 		grid: wrap(raw("--border"), 0.5),
-		text: wrap(raw("--subtle-foreground")),
+		text: wrap(raw("--muted-foreground")),
 		// Match the SVG charts' JetBrains Mono tick labels for visual continuity.
 		font: '10px "JetBrains Mono", ui-monospace, monospace',
 		cursor: wrap(raw("--muted-foreground"), 0.55),

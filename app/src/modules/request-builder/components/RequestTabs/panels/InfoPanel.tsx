@@ -69,7 +69,7 @@ export default function InfoPanel() {
 	return (
 		<div className="flex flex-col gap-4 max-w-[76ch]">
 			<div className="flex flex-col gap-2">
-				<Eyebrow className="text-subtle-foreground">Name</Eyebrow>
+				<Eyebrow>Name</Eyebrow>
 				<Input
 					value={request.name}
 					onChange={(e) => updateField("name", e.target.value)}
@@ -81,7 +81,7 @@ export default function InfoPanel() {
 			</div>
 
 			<div className="flex flex-col gap-2">
-				<Eyebrow className="text-subtle-foreground">Description</Eyebrow>
+				<Eyebrow>Description</Eyebrow>
 				<MarkdownEditor
 					value={request.description ?? ""}
 					onChange={(v) => updateField("description", v)}

@@ -260,7 +260,7 @@ export default function ParamsPanel() {
 						</section>
 					)}
 					<div className="flex items-baseline gap-2 text-xs">
-						<span className="shrink-0 uppercase tracking-wide text-subtle-foreground">
+						<span className="shrink-0 uppercase tracking-wide text-muted-foreground">
 							Sends
 						</span>
 						<span className="min-w-0 flex-1 break-all font-mono text-muted-foreground">

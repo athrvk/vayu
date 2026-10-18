@@ -93,7 +93,12 @@ without it: **units** (the `ms` after a number), **dashes and dash
 placeholders**, and decorative icons. Never for a label, a count, a legend, or
 anything the user has to read - a dashboard sweep once found 20 such misuses
 ("dispatched", "4xx 0", "target 10"), all measuring 3.34:1. Those belong on
-`muted-foreground`.
+`muted-foreground`. A chart's axis tick labels and a list's day-group headings
+are labels in this sense: the uPlot theme's `text` and the `Eyebrow` headings
+sit on `muted-foreground`. `subtle-foreground-text.test.ts` keeps it that way -
+every file allowed to write `text-subtle-foreground` is named in its ledger with
+a permitted count, so a new use fails until someone argues it is a unit, a dash
+or a decorative icon.
 
 **Light `muted-foreground` is 42%, not zinc-500's 46%.** It is solved against
 the *darkest* light surface it lands on - `--muted`/`--accent` at 93%, not the
