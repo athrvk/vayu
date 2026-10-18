@@ -1130,15 +1130,14 @@ export class EngineSidecar {
 					throw error;
 				}
 
-				// If this was the last attempt, throw the error. The sentence is
-				// written for the user and says nothing about the engine, so the
-				// attempt's own failure rides along as the cause - without it, why
-				// the engine would not come back is not recoverable from what was
-				// thrown.
+				// The last attempt's failure is named in the message and rides along
+				// as the cause, so the user reads what happened and the log keeps
+				// the original error and its stack.
 				if (attempt === maxRetries) {
-					throw new Error(`Please close the Application and reopen it.`, {
-						cause: error,
-					});
+					throw new Error(
+						`Nothing answered after ${maxRetries + 1} attempts (${lastError.message}). Quit Vayu and open it again.`,
+						{ cause: error }
+					);
 				}
 			}
 		}
