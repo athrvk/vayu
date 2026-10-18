@@ -5,7 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { fmt } from "../format";
+import { formatNumber, formatPercent, formatSeconds } from "@/lib/format-number";
+import { orDash } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
@@ -30,13 +31,18 @@ export function CurrentConcurrencyCard({
 			<HeroValue value={currentConcurrency} unit="active" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				targeting{" "}
-				<span className="text-foreground font-semibold">{fmt(targetConcurrency, 0)}</span>{" "}
+				<span className="text-foreground font-semibold">
+					{orDash(targetConcurrency, formatNumber)}
+				</span>{" "}
 				over{" "}
 				<span className="text-foreground font-semibold">
-					{fmt(rampUpDurationSeconds, 0)}
+					{orDash(rampUpDurationSeconds, formatSeconds)}
+				</span>{" "}
+				ramp · lag{" "}
+				<span className="text-foreground font-semibold">
+					{orDash(rampDeviationPct, formatPercent)}
 				</span>
-				s ramp · lag{" "}
-				<span className="text-foreground font-semibold">{fmt(rampDeviationPct, 0)}</span>%
+				%
 			</p>
 		</HeroCardShell>
 	);

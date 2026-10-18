@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatNumber } from "@/lib/format-number";
+import { formatNumber, formatPercent } from "@/lib/format-number";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
@@ -38,7 +38,8 @@ export function DroppedRequestsCard({
 			<HeroValue value={formatNumber(dropped)} color="hsl(var(--destructive-text))" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				of <span className="text-foreground font-semibold">{formatNumber(scheduled)}</span>{" "}
-				scheduled · <span className="text-foreground font-semibold">{pct.toFixed(1)}</span>%
+				scheduled ·{" "}
+				<span className="text-foreground font-semibold">{formatPercent(pct)}</span>%
 			</p>
 			<p className="text-label mt-2 text-warning-text">
 				Server saturating - try lowering target RPS

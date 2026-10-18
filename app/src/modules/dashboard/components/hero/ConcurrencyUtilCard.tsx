@@ -5,7 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { fmt } from "../format";
+import { formatNumber, formatPercent } from "@/lib/format-number";
+import { orDash } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
 
@@ -35,14 +36,15 @@ export function ConcurrencyUtilCard({
 					<>
 						of{" "}
 						<span className="text-foreground font-semibold">
-							{fmt(configuredConcurrency, 0)}
+							{orDash(configuredConcurrency, formatNumber)}
 						</span>{" "}
 						active
 					</>
 				}
 			/>
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
-				<span className="text-foreground font-semibold">{fmt(util, 0)}</span>% utilisation
+				<span className="text-foreground font-semibold">{orDash(util, formatPercent)}</span>
+				% utilisation
 			</p>
 			{util !== undefined && (
 				<MiniBar

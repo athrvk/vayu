@@ -12,16 +12,15 @@
 
 import { formatRate } from "@/lib/format-number";
 
-/** Format a possibly-undefined number, falling back to a dash. */
-export function fmt(v: number | undefined, digits = 1): string {
-	return v !== undefined ? v.toFixed(digits) : "-";
+/**
+ * A possibly-missing number through one of the shared formatters. A missing
+ * value draws "-" here because the formatters print it as "0", a measured zero.
+ */
+export function orDash(v: number | undefined, format: (n: number) => string): string {
+	return v !== undefined ? format(v) : "-";
 }
 
-/**
- * A per-second rate through `formatRate` (grouped, locale-aware). A missing
- * value draws "-" here because `formatRate` would print it as "0", a measured
- * zero.
- */
+/** A per-second rate through `formatRate` (grouped, locale-aware); "-" when missing. */
 export function fmtRate(v: number | undefined): string {
-	return v !== undefined ? formatRate(v) : "-";
+	return orDash(v, formatRate);
 }

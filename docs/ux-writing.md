@@ -129,13 +129,18 @@ scattered strings land the same way.
   unit in a slot of its own renders both halves from it, never a literal "ms"
   beside `formatMs`: 1234 ms reads `1.23 s` on every tile. `formatLatency` is
   the same pair joined for a surface with no slot of its own (`999ms`, then
-  `1.23s` once it rounds to 1000 ms). A chart axis labels its ticks
+  `1.23s` once it rounds to 1000 ms). `formatSeconds` is the same rule for a
+  span measured in seconds (an ETA, a ramp, a test's duration, an anomaly's
+  length): under a minute it is `formatLatency` (0.4 reads `400ms`, 4.2 reads
+  `4.20s`), from a minute up grouped whole seconds (`75s`, `3,600s`), so a clock
+  and a latency never print the same span two ways, and the unit comes with it.
+  A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
   (`1.2k`), which take their decimals from the tick spacing so no two
   neighbouring ticks print alike (1200, 1210, 1220 read `1.2k/s`, `1.21k/s`,
   `1.22k/s`) and move the whole axis to one magnitude, never `0` beside `1k`. Do not `toFixed` a new
-  latency, rate or percentage for display, and do not declare a `formatMs` of
-  your own: a source scan fails on it. The screen-reader announcer takes the
+  latency, rate or percentage for display, and do not declare a `formatMs` or
+  `formatSeconds` of your own: a source scan fails on it. The screen-reader announcer takes the
   same digits and speaks the unit as a word (`2.40 seconds`). Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare

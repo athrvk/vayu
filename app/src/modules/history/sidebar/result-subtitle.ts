@@ -6,7 +6,8 @@
  */
 
 import { formatResponseTime } from "@/components/shared";
-import { formatErrorRate, formatRps } from "@/components/shared/run-outcome";
+import { formatErrorRate } from "@/components/shared/run-outcome";
+import { formatRate } from "@/lib/format-number";
 import type { LoadResultSummary } from "@/types";
 
 /**
@@ -17,7 +18,7 @@ import type { LoadResultSummary } from "@/types";
 export function resultSubtitle(summary: LoadResultSummary): string | null {
 	const { rps, p95Ms, errorRate } = summary;
 	const parts: string[] = [];
-	if (rps !== undefined) parts.push(`${formatRps(rps)} req/s`);
+	if (rps !== undefined) parts.push(`${formatRate(rps)} req/s`);
 	if (p95Ms !== undefined) parts.push(`p95 ${formatResponseTime(p95Ms)}`);
 	if (errorRate !== undefined) parts.push(`${formatErrorRate(errorRate)} errors`);
 	return parts.length > 0 ? parts.join(" · ") : null;

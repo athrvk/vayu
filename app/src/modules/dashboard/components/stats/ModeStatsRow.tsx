@@ -26,8 +26,8 @@
 
 import { cn } from "@/lib/utils";
 import { CONCURRENCY_UNIT, isClosedLoopMode } from "@/constants/load-test-modes";
-import { formatNumber } from "@/lib/format-number";
-import { fmt } from "../format";
+import { formatNumber, formatSeconds } from "@/lib/format-number";
+import { orDash } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import type { DashboardDerived } from "../../types";
 import { StatCard } from "./StatCard";
@@ -97,13 +97,14 @@ function DurationStat({ d }: { d: DashboardDerived }) {
 	return (
 		<StatCard
 			label="Duration"
-			value={fmt(d.testDuration, 2)}
-			unit="s"
+			value={orDash(d.testDuration, formatSeconds)}
 			sub={
 				<>
 					cleanup overhead{" "}
 					{d.setupOverhead !== undefined ? (
-						<span className="text-muted-foreground">{d.setupOverhead.toFixed(2)}s</span>
+						<span className="text-muted-foreground">
+							{formatSeconds(d.setupOverhead)}
+						</span>
 					) : (
 						<span className="text-subtle-foreground">-</span>
 					)}

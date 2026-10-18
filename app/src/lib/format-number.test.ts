@@ -30,6 +30,7 @@ import {
 	formatMs,
 	formatPercent,
 	formatRate,
+	formatSeconds,
 } from "./format-number";
 
 describe("formatMs and formatRate: two decimals under 10, whole numbers above", () => {
@@ -125,5 +126,30 @@ describe("formatLatencyParts: the value and its unit for a tile with a slot of i
 			const { value, unit } = formatLatencyParts(input);
 			expect(formatLatency(input)).toBe(`${value}${unit}`);
 		}
+	});
+});
+
+describe("formatSeconds: formatLatency under a minute, grouped whole seconds above", () => {
+	it("prints a sub-second span in milliseconds", () => {
+		expect(formatSeconds(0.4)).toBe("400ms");
+	});
+
+	it("reads a span under a minute exactly as formatLatency reads it", () => {
+		expect(formatSeconds(4.2)).toBe(formatLatency(4200));
+		expect(formatSeconds(4.2)).toBe("4.20s");
+		expect(formatSeconds(59)).toBe(formatLatency(59000));
+	});
+
+	it("switches to whole seconds at a minute", () => {
+		expect(formatSeconds(60)).toBe("60s");
+		expect(formatSeconds(75.4)).toBe("75s");
+		expect(formatSeconds(3600)).toBe("3,600s");
+	});
+
+	it("reads a missing value as formatLatency does", () => {
+		for (const missing of [undefined, null, NaN, Infinity]) {
+			expect(formatSeconds(missing)).toBe(formatLatency(missing));
+		}
+		expect(formatSeconds(0)).toBe("0ms");
 	});
 });

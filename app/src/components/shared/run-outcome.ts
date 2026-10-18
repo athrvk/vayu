@@ -67,12 +67,6 @@ export interface RunOutcomeInput {
 	errorRate?: number;
 }
 
-/** Requests per second, thousands separated: `12,400`; one decimal below 10 so a slow run is not `0`. */
-export function formatRps(value: number): string {
-	if (value > 0 && value < 10) return value.toFixed(1);
-	return Math.round(value).toLocaleString("en-US");
-}
-
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
 export function formatErrorRate(percent: number): string {
 	return `${formatErrorPercent(percent)}%`;

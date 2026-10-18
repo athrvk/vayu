@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatMs, formatRate } from "@/lib/format-number";
+import { formatLatency, formatRate } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow } from "../shared";
 import { fmtRate } from "../format";
@@ -35,7 +35,7 @@ export function ThroughputTwinCard({
 				<InfoChip tip={TOOLTIPS.sendThroughput} />
 				{showQueueChip && (
 					<span className="ml-2 inline-flex items-center normal-case tracking-normal font-mono text-micro font-semibold px-1.5 py-px rounded-sm bg-warning/10 text-warning-text">
-						queue {formatMs(avgQueueWaitMs)}ms
+						queue {formatLatency(avgQueueWaitMs)}
 						<InfoChip tip={TOOLTIPS.queueChip} />
 					</span>
 				)}

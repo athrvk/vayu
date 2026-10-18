@@ -6,7 +6,8 @@
  */
 
 import { CONCURRENCY_UNIT_SINGULAR, concurrencyUnit } from "@/constants/load-test-modes";
-import { fmt, fmtRate } from "../format";
+import { formatNumber } from "@/lib/format-number";
+import { fmtRate, orDash } from "../format";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
@@ -33,7 +34,7 @@ export function AchievedThroughputCard({
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				from{" "}
 				<span className="text-foreground font-semibold">
-					{fmt(configuredConcurrency, 0)}
+					{orDash(configuredConcurrency, formatNumber)}
 				</span>{" "}
 				{concurrencyUnit(configuredConcurrency ?? 0)} ·{" "}
 				<span className="text-foreground font-semibold">{fmtRate(perUser)}</span> req/s per{" "}

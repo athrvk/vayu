@@ -26,13 +26,12 @@
 
 import { memo, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
-import { formatNumber, formatRate } from "@/lib/format-number";
+import { formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
 import { InfoChip } from "./shared";
-import { fmt } from "./format";
 import { TOOLTIPS } from "./tooltips";
 import { STATUS_CLASS_SERIES, STATUS_CLASS_CSS_VAR } from "@/constants/http-status";
 import { useMode } from "../hooks/useMode";
@@ -279,7 +278,7 @@ function MetricsView({
 							<span>
 								<span className="text-muted-foreground">ramp deviation </span>
 								<span className="text-foreground font-semibold">
-									{rampOverlay.rampDeviationPct.toFixed(1)}%
+									{formatPercent(rampOverlay.rampDeviationPct)}%
 								</span>
 								<InfoChip tip={TOOLTIPS.rampDeviation} />
 							</span>
@@ -388,7 +387,7 @@ function MetricsView({
 							))}
 							{liveMbps > 0 && (
 								<span className="text-foreground">
-									{fmt(liveMbps, 2)}
+									{formatRate(liveMbps)}
 									<span className="text-muted-foreground"> MB/s in</span>
 								</span>
 							)}
