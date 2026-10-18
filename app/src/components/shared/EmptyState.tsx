@@ -18,8 +18,7 @@
  * Two variants, because there are genuinely two shapes:
  *
  * - `pane` - owns a whole region (a detail view with nothing selected, a list
- *   with no items). Centred on both axes, icon-led, and the only variant that
- *   takes an action.
+ *   with no items). Centred on both axes and icon-led.
  * - `inline` - a small panel inside something else (a response tab, a card, a
  *   drawer group). One muted line and no icon; an icon here would out-weigh
  *   the panel. It does take an `action` (issue #1693): the drawer's group

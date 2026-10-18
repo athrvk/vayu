@@ -315,11 +315,10 @@ export function ClientCertificatesCard() {
 						{ENGINE_NO_ANSWER} The registered certificates are unknown until Vayu's
 						engine answers.
 					</p>
-				) : isLoading ? null : certificates.length === 0 ? (
+				) : isLoading ? null : listIsEmpty ? (
 					<EmptyState
 						variant="inline"
 						title="Register a certificate for a host that requires mutual TLS."
-						// Once the form is open it is the way forward; the link would repeat it.
 						action={
 							adding ? undefined : (
 								<Button variant="link" onClick={() => setAdding(true)}>
