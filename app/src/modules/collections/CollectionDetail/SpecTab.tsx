@@ -250,7 +250,7 @@ export default function SpecTab({ collection }: SpecTabProps) {
 			setPickError({
 				title: "Couldn't read that file",
 				message: reason
-					? `The browser said: ${reason}. Pick the file again.`
+					? `The browser said: ${reason.replace(/\.$/, "")}. Pick the file again.`
 					: "Pick the file again.",
 			});
 		};

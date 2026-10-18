@@ -84,7 +84,8 @@ export default function FilesPanel() {
 			<CardContent className="space-y-4">
 				{isError ? (
 					<p className="text-sm text-muted-foreground">
-						{ENGINE_NO_ANSWER} The allowed folders are unknown until it does.
+						{ENGINE_NO_ANSWER} The allowed folders are unknown until Vayu's engine
+						answers.
 					</p>
 				) : isLoading ? null : roots.length === 0 ? (
 					<p className="text-sm text-muted-foreground">No folders allowed yet.</p>

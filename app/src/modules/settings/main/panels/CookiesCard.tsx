@@ -112,7 +112,8 @@ export function CookiesCard() {
 			<CardContent className="space-y-4">
 				{isError ? (
 					<p className="text-sm text-muted-foreground">
-						{ENGINE_NO_ANSWER} What the jar holds is unknown until it does.
+						{ENGINE_NO_ANSWER} What the jar holds is unknown until Vayu's engine
+						answers.
 					</p>
 				) : isLoading ? null : total === 0 ? (
 					<p className="text-sm text-muted-foreground">No cookies stored.</p>

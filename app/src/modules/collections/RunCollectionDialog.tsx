@@ -836,7 +836,7 @@ export default function RunCollectionDialog({
 						<Callout severity="blocking" title="Couldn't start the run">
 							{error instanceof Error
 								? error.message
-								: "Vayu's engine refused the run without saying why. Try again; if it keeps happening, restart Vayu."}
+								: "Vayu's engine refused the run and gave no reason. Try again, or restart Vayu."}
 						</Callout>
 					)}
 				</DialogBody>
