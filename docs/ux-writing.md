@@ -49,12 +49,13 @@ isn't the same:
 `Please` are banned in UI text. The first two are the passive, formal register
 the voice section rules out; `Please` is the apology's softer cousin and breaks
 the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
-that you would like them to. The renderer is clean today
-(`rg -n -i "failed to|could not" app/src app/electron --glob '!*.test.*' -g '*.{ts,tsx}'`
-finds nothing in a rendered string). What remains are engine response bodies
-that the app shows after its own "Couldn't ..." prefix; a test holds both
-surfaces (the voice and casing scan, #2300). Log strings and code
-comments are a separate surface and keep whatever form reads well there.
+that you would like them to. The app's own text has one breach left, the
+failed engine restart's "Please close the Application and reopen it."
+(`electron/sidecar.ts`, #2292). Beyond it are engine response bodies that the
+app shows after its own "Couldn't ..." prefix (#2295). The first is held by the
+voice and casing scan, the second by the engine test #2295 adds (see
+[Enforcement](#enforcement)). Log strings and code comments are a separate
+surface and keep whatever form reads well there.
 
 ## Terminology glossary
 
@@ -209,7 +210,41 @@ scattered strings land the same way.
 ## Enforcement
 
 A sweep against this guide is only as durable as the test that keeps drift
-from creeping back in afterward. Add a source-scanning test (same pattern as
-`app/src/components/a11y-suppressions.test.ts`) that fails on "Failed to",
-"Could not", "Oops", "!" in UI strings, and on title-cased button labels,
-before considering the sweep done.
+from creeping back in afterward. These hold it:
+
+- **`app/src/voice-casing.test.ts`** reads every string in the app's sources
+  and fails on a banned opener ("Failed to", "Could not", "Oops", "Please",
+  "Something went wrong") at the start of a sentence, on an exclamation mark
+  after a word, and on Title Case where the case rule says label: the text of
+  `Button`, `DropdownMenuItem`, `ContextMenuItem`, `SelectItem`, `TabsTrigger`,
+  `DialogTitle`, `CardTitle` and `Label`; a `label` or `title` property or
+  prop; a `*_LABELS` record under `constants/`; and the label argument of
+  OAuth2Form's `field()`. Proper nouns, acronyms and product names keep their
+  capitals through a named list in the test, each entry with its reason.
+- **`app/src/lib/ui-strings.testkit.ts`** is what it reads: every string
+  literal, template-literal segment and JSX text node under `app/src` and
+  `app/electron`, with its file and line, comments excluded and the arguments
+  of `console.*` and logger calls dropped (logs are exempt, see above). A new
+  rule from this page is added to that scan rather than to a file walk of its
+  own.
+- **The engine's half** is two tests that do not exist yet, owned by the issues
+  that add them: a scan of `engine/src/http/routes/*.cpp` for response bodies
+  opening "Could not" or "Failed to" (#2295), and `config_seed_test.cpp`
+  `EveryEngineSettingLabelIsSentenceCase` over the setting labels the Settings
+  page renders verbatim (#2293).
+- **Narrow scanners**, one rule each, are filed by their own issues and not yet
+  written; each adds its rule to the scan above when it lands: bare
+  "the engine" (`voice-bare-engine.test.ts`, #2298), hand-built plurals and
+  "(s)" (`plural-rule.test.ts`, #2307), and the ASCII ellipsis, `Settings >`
+  and "curl" (`user-text-spelling.test.ts`, #2299).
+
+What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
+`file :: literal`, each entry naming the open issue that retires it. The commit
+that fixes a string deletes its entry: a test fails on an entry whose literal
+the sources no longer carry, so a fix cannot land with its entry left behind.
+Text the rules match that is not interface copy (a line of a code sample) is
+listed apart, with its reason instead of an issue.
+
+`app/electron/mcp/**` is not scanned: its text is written for agents, not
+people. The "Could not" strings in `electron/mcp/safety.ts` and
+`electron/mcp/tools/kit.ts` are therefore unguarded by this scan.
