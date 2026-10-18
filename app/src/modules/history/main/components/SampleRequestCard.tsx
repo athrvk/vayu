@@ -101,7 +101,7 @@ export default function SampleRequestCard({
 			// radius needed, the "square on purpose" exception a full-bleed
 			// divider strip gets. Status rides the `StatusIcon` tint alone, not
 			// a second, redundant colour on the border. `border-rule` reads the
-			// `surface-card` the parent `CardContent` declares (issue #1650).
+			// `surface-card` the enclosing `Card` declares (issue #1650).
 			className="border-b border-rule last:border-b-0"
 		>
 			{isSlow && (

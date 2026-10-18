@@ -479,6 +479,7 @@ export function ClientCertificatesCard() {
 									: "Bundle password (optional)"}
 							</Label>
 							<SecretInput
+								id="client-cert-passphrase"
 								value={draft.passphrase}
 								onChange={(value) => setDraft((d) => ({ ...d, passphrase: value }))}
 								placeholder="Leave empty if the key has none"

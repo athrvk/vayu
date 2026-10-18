@@ -159,8 +159,16 @@ export function DeleteConfirmDialog({
 						onClick={() => onOpenChange(false)}
 						disabled={isDeleting}
 					/>
-					<Button variant={confirmVariant} onClick={onConfirm} disabled={isDeleting}>
-						{isDeleting ? <Loader2 className="size-icon animate-spin" /> : confirmLabel}
+					<Button
+						variant={confirmVariant}
+						onClick={onConfirm}
+						disabled={isDeleting}
+						aria-busy={isDeleting}
+					>
+						{isDeleting && (
+							<Loader2 className="size-icon animate-spin" aria-hidden="true" />
+						)}
+						{confirmLabel}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

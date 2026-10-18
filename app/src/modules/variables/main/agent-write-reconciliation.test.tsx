@@ -372,7 +372,7 @@ describe("variables editor - a write that lands while the table is dirty", () =>
 		expect(screen.getByText(/changed elsewhere: host/i)).toBeTruthy();
 
 		// The user deletes the row instead of choosing a side.
-		fireEvent.click(screen.getByRole("button", { name: /delete variable/i }));
+		fireEvent.click(screen.getByRole("button", { name: "Delete host" }));
 
 		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
 		expect(pendingSave.payload.variables.host).toBeUndefined();

@@ -187,4 +187,20 @@ describe("CapacitySummary", () => {
 		expect(chip.className).toContain("text-warning-text");
 		cleanup();
 	});
+
+	it("declares the surface its table dividers read", () => {
+		const { container } = render(<CapacitySummary capacity={capacity()} />);
+		const rules = Array.from(container.querySelectorAll(".border-rule"));
+
+		// The header row and one row per level.
+		// A render that reached no divider would pass the loop below having
+		// checked nothing.
+		expect(rules.length).toBeGreaterThanOrEqual(3);
+		for (const rule of rules) {
+			expect(
+				rule.closest(".surface-card, .surface-sunken"),
+				`border-rule under no surface: ${rule.getAttribute("class")}`
+			).not.toBeNull();
+		}
+	});
 });

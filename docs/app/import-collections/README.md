@@ -457,7 +457,7 @@ Surfaces work Vayu can't represent so the Preview can warn instead of silently d
 `requests` names the requests a count applies to, when the walk had one in hand (every
 per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
 resources it cannot import), so the Preview can say which request to finish rather than only
-how many. How the Preview words and ranks each kind - red for what the user must finish, muted
+how many. How the Preview words and ranks each kind - amber for what the user must finish, muted
 for what the import decided, not shown for what changes nothing sent - is
 `app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
