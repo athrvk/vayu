@@ -31,7 +31,7 @@ export function ConcurrencyUtilCard({
 	return (
 		<HeroCardShell label="Virtual user utilisation" tip={TOOLTIPS.concurrencyUtil}>
 			<HeroValue
-				value={currentConcurrency}
+				value={formatNumber(currentConcurrency)}
 				unit={
 					<>
 						of{" "}

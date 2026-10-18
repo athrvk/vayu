@@ -254,6 +254,15 @@ describe("hero cards print counts, percents and spans through the shared formatt
 		).toContain("from 10,000 virtual users");
 	});
 
+	it("groups the headline virtual-user count too", () => {
+		expect(text(<CurrentConcurrencyCard currentConcurrency={10000} />)).toContain(
+			"10,000active"
+		);
+		expect(
+			text(<ConcurrencyUtilCard currentConcurrency={9400} configuredConcurrency={10000} />)
+		).toContain("9,400of 10,000 active");
+	});
+
 	it("draws a dash, not a measured zero, for a ramp the run did not declare", () => {
 		const out = text(<CurrentConcurrencyCard currentConcurrency={3} />);
 		expect(out).toContain("targeting - over - ramp");

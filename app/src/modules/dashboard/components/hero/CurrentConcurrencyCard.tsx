@@ -28,7 +28,7 @@ export function CurrentConcurrencyCard({
 }) {
 	return (
 		<HeroCardShell label="Active virtual users" tip={TOOLTIPS.currentConcurrency}>
-			<HeroValue value={currentConcurrency} unit="active" />
+			<HeroValue value={formatNumber(currentConcurrency)} unit="active" />
 			<p className="text-label text-muted-foreground font-mono mt-0.5">
 				targeting{" "}
 				<span className="text-foreground font-semibold">
