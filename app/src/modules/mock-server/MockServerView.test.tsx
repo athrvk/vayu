@@ -159,6 +159,25 @@ describe("MockServerView", () => {
 		expect(screen.getByText("unmatched")).toBeInTheDocument();
 	});
 
+	it("gives a 200, a 404 and a 503 three different status chips", () => {
+		vi.mocked(useMockActivityQuery).mockReturnValue({
+			data: [
+				{ ...ENTRY, at: 1, path: "/ok", status: 200 },
+				{ ...ENTRY, at: 2, path: "/missing", status: 404 },
+				{ ...ENTRY, at: 3, path: "/boom", status: 503 },
+			],
+			isError: false,
+		} as ReturnType<typeof useMockActivityQuery>);
+		render(<MockServerView />);
+		const activity = within(screen.getByText("Activity").closest("section")!);
+		const chipFill = (code: string) =>
+			activity.getByText(code).className.match(/bg-status-[\w-]+-fill/)?.[0];
+
+		expect(chipFill("200")).toBe("bg-status-success-fill");
+		expect(chipFill("404")).toBe("bg-status-warning-fill");
+		expect(chipFill("503")).toBe("bg-status-error-fill");
+	});
+
 	// Issue #1928: both lists default to `[]`, so a query in flight read as a
 	// mock with no routes and nothing served.
 	describe("while the first fetch is in flight", () => {

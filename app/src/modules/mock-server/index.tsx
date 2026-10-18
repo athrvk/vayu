@@ -30,7 +30,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui";
-import { EmptyState, ErrorState, ListSkeleton, TruncatedText } from "@/components/shared";
+import {
+	EmptyState,
+	ErrorState,
+	ListSkeleton,
+	StatusCodeBadge,
+	TruncatedText,
+} from "@/components/shared";
 import {
 	useMockActivityQuery,
 	useMockServerRoutesQuery,
@@ -248,12 +254,7 @@ export default function MockServerView() {
 											: (entry.exampleName ??
 												(entry.requestId ? "no example" : "unmatched"))}
 									</span>
-									<Badge
-										variant={entry.status >= 500 ? "destructive" : "outline"}
-										className="shrink-0"
-									>
-										{entry.status}
-									</Badge>
+									<StatusCodeBadge status={entry.status} className="shrink-0" />
 									<span className="shrink-0 text-label text-muted-foreground tabular-nums">
 										<TimeValue value={entry.at} style="time" />
 									</span>

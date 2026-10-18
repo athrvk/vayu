@@ -77,7 +77,7 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							type="button"
 							variant="listRow"
 							onClick={() => openTab({ type: "run", entityId: run.id })}
-							aria-label={`Open ${run.type === "load" ? "load test" : "request"} run${
+							aria-label={`Open ${RUN_TYPE_NAME[run.type]}${
 								url ? `, ${url}` : ""
 							}${status ? `, ${status.text.toLowerCase()}` : ""}`}
 							// `justify-between` overrides the variant's `justify-start`:

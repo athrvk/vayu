@@ -8,28 +8,37 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
+import {
+	httpStatusClass,
+	isErrorStatus,
+	STATUS_CLASS_CSS_VAR,
+	STATUS_CLASS_STYLE,
+	type HttpStatusClass,
+} from "@/constants/http-status";
 import { formatErrorPercent } from "../../utils/format";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { HeroCardShell } from "./HeroCardShell";
 
-/** Status-code buckets: stack-bar fill + legend entry share one definition. */
+/**
+ * Status-code buckets: stack-bar fill + legend entry share one definition. Each
+ * bucket draws in the colour of the status class it represents, so the bar
+ * agrees with the status-code chart beneath it.
+ */
 interface StatusSegment {
 	key: "ok" | "s4" | "s5" | "none";
 	label: string;
-	bg: string; // Tailwind bg-* class for the stack bar
-	color: string; // CSS color for the legend swatch
+	cls: HttpStatusClass;
 	infoTip?: React.ReactNode;
 }
 const STATUS_SEGMENTS: readonly StatusSegment[] = [
-	{ key: "ok", label: "2xx/3xx", bg: "bg-success", color: "hsl(var(--success))" },
-	{ key: "s4", label: "4xx", bg: "bg-warning", color: "hsl(var(--warning))" },
-	{ key: "s5", label: "5xx", bg: "bg-destructive", color: "hsl(var(--destructive))" },
+	{ key: "ok", label: "2xx/3xx", cls: "success" },
+	{ key: "s4", label: "4xx", cls: "client-error" },
+	{ key: "s5", label: "5xx", cls: "server-error" },
 	{
 		key: "none",
 		label: "No response",
-		bg: "bg-subtle-foreground",
-		color: "hsl(var(--subtle-foreground))",
+		cls: "no-response",
 		infoTip: TOOLTIPS.errorRateNoResponse,
 	},
 ];
@@ -37,14 +46,13 @@ const STATUS_SEGMENTS: readonly StatusSegment[] = [
 /**
  * The bucket a status code draws in. The engine counts 200-399 as success
  * (3xx included) and status 0 as no response; anything else it counts as an
- * HTTP error, so a code outside the 4xx and 5xx classes lands with 5xx rather
- * than being dropped from the bar.
+ * HTTP error (`isErrorStatus`), so a code outside the 4xx and 5xx classes (a
+ * 1xx, a 600) lands with 5xx rather than being dropped from the bar.
  */
 function bucketFor(code: number): StatusSegment["key"] {
 	if (code === 0) return "none";
-	if (code >= 200 && code < 400) return "ok";
-	if (code >= 400 && code < 500) return "s4";
-	return "s5";
+	if (!isErrorStatus(code)) return "ok";
+	return httpStatusClass(code) === "client-error" ? "s4" : "s5";
 }
 
 /**
@@ -71,8 +79,8 @@ export function ErrorRateCard({
 	// the colour follows the printed digits: red means errors happened, and the
 	// number beside it must say so (a request cancelled by Stop is in neither).
 	const digits = formatErrorPercent(errorRate, errorRate > 0 && errorRate < 0.1 ? 2 : 1);
-	// -text variants: this is the card's large number. The STATUS entries above
-	// keep the fill tokens - those paint legend swatches, not text.
+	// -text variants: this is the card's large number. The segments above paint
+	// fills and swatches, not text.
 	const valueColor = errorRate > 0 ? "hsl(var(--destructive-text))" : "hsl(var(--success-text))";
 
 	// Bucket status codes by class
@@ -108,7 +116,10 @@ export function ErrorRateCard({
 				{STATUS_SEGMENTS.map((s) => (
 					<span
 						key={s.key}
-						className={cn("block h-full transition-[width] duration-300", s.bg)}
+						className={cn(
+							"block h-full transition-[width] duration-300",
+							STATUS_CLASS_STYLE[s.cls].fill
+						)}
 						style={{ width: widthFor(buckets[s.key]) }}
 					/>
 				))}
@@ -117,7 +128,7 @@ export function ErrorRateCard({
 				{STATUS_SEGMENTS.map((s) => (
 					<StatusLegend
 						key={s.key}
-						color={s.color}
+						color={`hsl(var(${STATUS_CLASS_CSS_VAR[s.cls]}))`}
 						label={s.label}
 						count={s.key === "none" ? noResponse : buckets[s.key]}
 						infoTip={s.infoTip}

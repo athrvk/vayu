@@ -245,13 +245,27 @@ near-black.
 Split per theme rather than mode-consistent, because charts re-read their tokens
 on a light/dark flip (`currentThemeKey`), so neither end has to compromise.
 `--warning` and `--destructive` keep their banner and button values and are no
-longer painted onto a plot.
+longer painted onto a plot or a bar fill on a card: the Rate fidelity card's
+bar is `--series-*` for the same reason, while its number is the `-text` tier.
 
 `status-token-contrast.test.ts` derives what it checks from `ROLE_TOKEN` itself,
 so repointing a chart role at a token that fails is caught. A first version
 listed the token names by hand and was decorative: pointing the roles back at the
 button tokens left it green, since it went on checking the `--series-*` values
 that still existed.
+
+**A legend is built from the series' roles, never written by hand** (#2311).
+`ChartLegend` (`dashboard/components/charts/`) takes `{ label, role, shape }`
+entries and paints each swatch through `ROLE_TOKEN`, the table the canvas
+resolves its strokes through; a band swatch uses the same `BAND_FILL_ALPHA` as
+the chart's band fill. The entries are declared once in `charts/uplot/legend.ts`
+(`THROUGHPUT_LEGEND`, `LATENCY_LEGEND`, `PERCENTILE_LEGEND`, `SCATTER_LEGEND`);
+the chart modules build their series and markers from them, so the key and the
+plot read one object. A hand-written `hsl(var(--x))` swatch is how thirteen legends came to
+disagree with their charts, nine of them in hue. `MetricsView.legend.test.tsx`
+renders the dashboard and checks each entry against the series and markers its
+card's chart was given. The status-code legend is the one exception: it is
+driven by `STATUS_CLASS_CSS_VAR`, the same table its bands resolve through.
 
 **`-text` variants for legible text.** The base `--success` / `--warning` /
 `--destructive` tokens are tuned as *fills and indicators*; as small text on a
@@ -605,9 +619,17 @@ since those map onto the same hues.
 **HTTP status classes have their own vocabulary**, in
 `constants/http-status.ts`. Never re-derive it: `httpStatusClass(code)` gives
 the class, `STATUS_CLASS_STYLE[class]` gives the utility for the surface role
-you need (`fill` / `text` / `tint` / `indicator`). Guarded by
-`http-status.test.ts`, which fails if a component classifies a code and picks a
-colour inline.
+you need (`fill` / `text` / `tint`; there is deliberately no `indicator`), and
+`STATUS_CLASS_CSS_VAR[class]` gives the custom property for an inline swatch.
+A bar that buckets codes (the Error rate card) keeps the engine's error tally
+through `isErrorStatus`, not `httpStatusClass` alone, and paints each bucket
+from the class it represents. Guarded by `http-status.test.ts`, which fails if
+a component classifies a code and picks a colour inline, in two shapes: a
+status branch with a colour class or a `variant=` prop within three lines, and
+a file that holds a status range comparison (`status >= 500`) and anywhere
+paints a bare `--success` / `--warning` / `--destructive` colour (a class, an
+`hsl(var(...))` or `variant="destructive"`) without importing
+`@/constants/http-status`.
 
 | Class | Codes | Family |
 |-------|-------|--------|
@@ -887,7 +909,8 @@ the ring (38 -> 172), 67 degrees from its nearest neighbour.
 
 **A series never takes `--primary` or `--chart-1`.** Both move with the user's
 accent, so either can drift onto a neighbouring series in one scheme and not
-another - which is invisible when you are looking at the scheme it works in.
+another - which is invisible when you are looking at the scheme it works in. Its legend swatch
+takes the series' role too (`ChartLegend`), never a token typed beside it.
 
 ---
 

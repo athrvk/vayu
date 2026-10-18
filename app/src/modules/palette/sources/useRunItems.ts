@@ -37,7 +37,8 @@ import { Clock, FolderTree, Search, Zap } from "lucide-react";
 import { useLayoutStore, useTabsStore } from "@/stores";
 import { useCollectionsQuery, useRunSearchQuery } from "@/queries";
 import { useHistoryStore } from "@/modules/history/history-store";
-import { RUN_KIND_LABEL, RUN_TYPE_NAME } from "@/modules/history/types";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
+import { RUN_STATUS } from "@/components/shared/run-status";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { formatInstant } from "@/lib/time-value";
 import type { Collection, Run } from "@/types";
@@ -66,7 +67,7 @@ function runTitle(run: Run, collectionsById: Map<string, Collection>): string {
 		return name ?? RUN_TYPE_NAME.scenario;
 	}
 	const url = run.summary?.url;
-	return url ?? RUN_KIND_LABEL[run.type];
+	return url ?? RUN_TYPE_NAME[run.type];
 }
 
 export function useRunItems(query: string): PaletteItem[] {
@@ -100,7 +101,7 @@ export function useRunItems(query: string): PaletteItem[] {
 			// prints - see `PaletteItem.preMatched`.
 			preMatched: true,
 			title: runTitle(run, collectionsById),
-			subtitle: `${RUN_KIND_LABEL[run.type]} · ${run.status} · ${formatInstant(run.startTime, "relative")}`,
+			subtitle: `${RUN_TYPE_NAME[run.type]} · ${RUN_STATUS[run.status].label} · ${formatInstant(run.startTime, "relative")}`,
 			// The query itself used to be first in this list, so cmdk's second
 			// filter could not drop a row the engine had matched on snapshot
 			// text no row prints. That is `ranking.ts`'s job now, and carrying

@@ -50,34 +50,10 @@ interface InheritanceChainProps {
  * chain row, with the credential shown separately and truncated.
  */
 function describeAuth(c: Collection): string {
-	const auth = c.auth;
-	switch (auth.mode) {
-		case "none":
-			return AUTH_MODE_LABELS.none;
-		// Named from the registry rather than restated, because the point of the
-		// row is that this label differs from plain "No Auth": it blocks inheriting.
-		case "noauth":
-			return AUTH_MODE_LABELS.noauth;
-		case "bearer":
-			return "Bearer Token";
-		case "basic":
-			return "Basic Auth";
-		case "apikey":
-			return "API Key";
-		case "oauth2":
-			return "OAuth 2.0";
-		case "digest":
-		case "aws":
-		case "ntlm":
-			return auth.mode.toUpperCase();
-		case "hawk":
-		case "oauth1":
-		case "edgegrid":
-		case "jwt":
-			return AUTH_MODE_LABELS[auth.mode];
-		default:
-			return AUTH_MODE_LABELS.none;
-	}
+	// A stored mode the registry does not know (a newer engine, a hand-edited
+	// file) reads as No Auth rather than printing `undefined`. `noauth` keeps its
+	// own registry label because the row exists to show that it blocks inheriting.
+	return AUTH_MODE_LABELS[c.auth.mode] ?? AUTH_MODE_LABELS.none;
 }
 
 export default function InheritanceChain({ collectionId, draftAuth }: InheritanceChainProps) {

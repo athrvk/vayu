@@ -14,22 +14,11 @@ import type { DashboardDerived } from "@/modules/dashboard/types";
 import type { Anomaly } from "@/modules/dashboard/utils/detectAnomalies";
 
 /**
- * How each run type is announced in words.
- *
- * Module-level rather than inside `RunItem` because the command palette's Runs
- * group names them too, and a run that is a "collection" run in the sidebar and
- * a "scenario" run in the palette is two answers to one question.
- */
-export const RUN_KIND_LABEL: Record<Run["type"], string> = {
-	load: "load test",
-	design: "request",
-	scenario: "collection",
-};
-
-/**
- * The title-case name a run type goes by wherever it heads a surface (a header,
- * a filter option, a tab title). `design` is the wire value for a single send
- * and stays so; the user never sees that word.
+ * The sentence-case name a run type goes by wherever the app says it: a header,
+ * a filter option, a tab title, an accessible name, the palette subtitle, the
+ * History breadcrumb. The one table - `types.test.ts` fails on a second one.
+ * `design` is the wire value for a single send and stays so; the user never sees
+ * that word.
  */
 export const RUN_TYPE_NAME: Record<Run["type"], string> = {
 	design: "Send",

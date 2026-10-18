@@ -343,7 +343,7 @@ export function describeCounts(meta: ImportMeta): string {
 	if (environmentOnly) return environmentSegments.join(" · ");
 	return [
 		count(meta.requestCount, "request"),
-		count(meta.folderCount, "folder"),
+		count(meta.folderCount, "nested collection"),
 		count(meta.exampleCount, "example"),
 		...environmentSegments,
 	].join(" · ");

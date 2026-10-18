@@ -43,7 +43,7 @@ function run(summary: Run["summary"], type: Run["type"] = "load"): Run {
 
 async function openCard(r: Run): Promise<string> {
 	render(<RunItem run={r} onSelect={() => {}} onDelete={() => {}} isDeleting={false} />);
-	fireEvent.focus(screen.getByRole("button", { name: /^Open .* run, completed/ }));
+	fireEvent.focus(screen.getByRole("button", { name: /^Open .*, completed/ }));
 	return (await screen.findByTestId("time-hover-card")).textContent ?? "";
 }
 

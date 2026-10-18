@@ -114,7 +114,7 @@ describe("RunItem request name", () => {
 		);
 
 		expect(
-			screen.getByRole("button", { name: /Open load test run, completed, Checkout/ })
+			screen.getByRole("button", { name: /Open Load test, completed, Checkout/ })
 		).toBeInTheDocument();
 	});
 });

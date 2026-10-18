@@ -210,7 +210,7 @@ describe("WelcomeScreen", () => {
 
 		it("has no Load test action - a load test needs an existing request", () => {
 			renderScreen();
-			// Anchored: a recent-run row is named "Open load test run, …", which a
+			// Anchored: a recent-run row is named "Open Load test, …", which a
 			// loose /Load test/ matches. The claim here is about the action tiles.
 			expect(screen.queryByRole("button", { name: /^Load test$/i })).not.toBeInTheDocument();
 		});

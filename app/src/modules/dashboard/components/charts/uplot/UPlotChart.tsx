@@ -43,6 +43,9 @@ export type { Marker, Annotation } from "./plugins";
 
 export type ScaleKey = "y" | "y2";
 
+/** Opacity of a series' band fill; the legend's band swatch paints the same. */
+export const BAND_FILL_ALPHA = 0.22;
+
 export interface UPlotSeriesSpec {
 	label: string;
 	role: ColorRole;
@@ -263,7 +266,7 @@ export function UPlotChart({
 				if (s.bandTo != null) {
 					bands.push({
 						series: [i + 1, s.bandTo],
-						fill: theme.color(s.bandRole ?? s.role, 0.22),
+						fill: theme.color(s.bandRole ?? s.role, BAND_FILL_ALPHA),
 					});
 				}
 			});
