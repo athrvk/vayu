@@ -245,7 +245,8 @@ near-black.
 Split per theme rather than mode-consistent, because charts re-read their tokens
 on a light/dark flip (`currentThemeKey`), so neither end has to compromise.
 `--warning` and `--destructive` keep their banner and button values and are no
-longer painted onto a plot.
+longer painted onto a plot or a bar fill on a card: the Rate fidelity card's
+bar is `--series-*` for the same reason, while its number is the `-text` tier.
 
 `status-token-contrast.test.ts` derives what it checks from `ROLE_TOKEN` itself,
 so repointing a chart role at a token that fails is caught. A first version
@@ -618,9 +619,17 @@ since those map onto the same hues.
 **HTTP status classes have their own vocabulary**, in
 `constants/http-status.ts`. Never re-derive it: `httpStatusClass(code)` gives
 the class, `STATUS_CLASS_STYLE[class]` gives the utility for the surface role
-you need (`fill` / `text` / `tint` / `indicator`). Guarded by
-`http-status.test.ts`, which fails if a component classifies a code and picks a
-colour inline.
+you need (`fill` / `text` / `tint`; there is deliberately no `indicator`), and
+`STATUS_CLASS_CSS_VAR[class]` gives the custom property for an inline swatch.
+A bar that buckets codes (the Error rate card) keeps the engine's error tally
+through `isErrorStatus`, not `httpStatusClass` alone, and paints each bucket
+from the class it represents. Guarded by `http-status.test.ts`, which fails if
+a component classifies a code and picks a colour inline, in two shapes: a
+status branch with a colour class or a `variant=` prop within three lines, and
+a file that holds a status range comparison (`status >= 500`) and anywhere
+paints a bare `--success` / `--warning` / `--destructive` colour (a class, an
+`hsl(var(...))` or `variant="destructive"`) without importing
+`@/constants/http-status`.
 
 | Class | Codes | Family |
 |-------|-------|--------|

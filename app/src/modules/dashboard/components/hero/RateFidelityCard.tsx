@@ -14,8 +14,9 @@ import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
  *
  * Two variants, because the same tier drives both the number and the MiniBar.
  * The number is text - the fill tokens measured 2.13:1 on the light card, under
- * even the 3:1 large-text bar - while the bar is a solid fill, where the fill
- * token is the right, more saturated value.
+ * even the 3:1 large-text bar - while the bar is a fill on `--card`, which is
+ * what the `--series-*` tier is tuned for (the bare `--destructive` measures
+ * 1.73:1 there in dark).
  */
 function fidelityTextColor(achievement: number | undefined): string {
 	if (achievement === undefined) return "hsl(var(--muted-foreground))";
@@ -26,9 +27,9 @@ function fidelityTextColor(achievement: number | undefined): string {
 
 function fidelityFillColor(achievement: number | undefined): string {
 	if (achievement === undefined) return "hsl(var(--muted-foreground))";
-	if (achievement >= 95) return "hsl(var(--success))";
-	if (achievement >= 80) return "hsl(var(--warning))";
-	return "hsl(var(--destructive))";
+	if (achievement >= 95) return "hsl(var(--series-success))";
+	if (achievement >= 80) return "hsl(var(--series-warning))";
+	return "hsl(var(--series-danger))";
 }
 
 /** constant_rps hero card #1 - how closely throughput tracked the target RPS. */

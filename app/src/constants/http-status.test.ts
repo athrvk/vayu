@@ -154,7 +154,7 @@ describe("no component classifies status codes on its own", () => {
 
 	it("finds no hand-rolled status branch paired with a colour", () => {
 		const BRANCH = /startsWith\(["']([2-5])["']\)|status(?:Code)?\s*(?:>=|===)\s*[0-9]{1,3}/;
-		const COLOUR = /(?:text|bg|border)-(?:status-|warning|destructive|success)/;
+		const COLOUR = /(?:text|bg|border)-(?:status-|warning|destructive|success)|variant=/;
 		const offences: string[] = [];
 
 		for (const file of files) {
@@ -173,6 +173,36 @@ describe("no component classifies status codes on its own", () => {
 			});
 		}
 
+		expect(offences.join("\n")).toBe("");
+	});
+
+	it("finds no file that both ranges over a status and paints a bare family colour", () => {
+		/*
+		 * The three-line window above misses a branch and its colour set far apart
+		 * (a segment table can sit dozens of lines from the bucketing) and
+		 * a colour that arrives as a prop. A file that compares a status against a
+		 * class boundary and anywhere paints with `--success`, `--warning` or
+		 * `--destructive` is classifying and colouring on its own; only a file
+		 * that imports the vocabulary may do both.
+		 */
+		const RANGE =
+			/(?:code|status|statusCode|\w+\.status|\w+\.statusCode)\s*(?:>=|<=|<|>)\s*[1-6]00/;
+		const BARE_COLOUR =
+			/(?:bg|text|border)-(?:success|warning|destructive)(?![-\w])|hsl\(var\(--(?:success|warning|destructive)\)\)|variant=(?:\{[^}]*)?["']destructive["']/;
+		const VOCABULARY = /from ["']@\/constants\/http-status["']/;
+		const offences: string[] = [];
+
+		for (const file of files) {
+			const source = readFileSync(join(srcRoot, file), "utf8");
+			if (VOCABULARY.test(source)) continue;
+			if (!RANGE.test(source) || !BARE_COLOUR.test(source)) continue;
+			offences.push(
+				`${file}  compares a status against a class boundary and paints a bare family ` +
+					`colour. Use httpStatusClass + STATUS_CLASS_STYLE.`
+			);
+		}
+
+		expect(files.length).toBeGreaterThan(100);
 		expect(offences.join("\n")).toBe("");
 	});
 });
