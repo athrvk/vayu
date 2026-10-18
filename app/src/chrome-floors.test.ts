@@ -22,6 +22,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, sep } from "node:path";
+import { lucideNames, openingTagAt, ownClassName } from "@/lib/jsx-opening-tags.testkit";
 import { stripComments } from "@/lib/strip-comments.testkit";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,22 +30,6 @@ const srcRoot = here;
 
 function read(relPath: string): string {
 	return readFileSync(join(srcRoot, relPath), "utf8");
-}
-
-/** The opening tag's text: up to the first `>` outside quotes and braces. */
-function openingTag(code: string, start: number): string {
-	let depth = 0;
-	let quote = "";
-	for (let i = start; i < code.length; i++) {
-		const c = code[i];
-		if (quote) {
-			if (c === quote) quote = "";
-		} else if (c === '"' || c === "'" || c === "`") quote = c;
-		else if (c === "{") depth++;
-		else if (c === "}") depth--;
-		else if (c === ">" && depth === 0) return code.slice(start, i);
-	}
-	return code.slice(start);
 }
 
 function files(): string[] {
@@ -227,12 +212,22 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// arbitrary `h-[18px]` / `size-[1rem]` is checked against 24px with a 16px
 	// rem. Use `h-control-sm` / `size-target` instead.
 	//
-	// The second bound is a bare `h-8`, on height only (#1912). It is 24px, so
-	// it clears the floor, but it is the pre-density literal #1679 retired from
-	// controls: a control states `h-control` / `h-control-sm`, which are the
-	// same 24px at Default and 32px at Comfortable. `w-8` and `size-8` stay
-	// legitimate boxes. The drawer row's `h-8` is normally a `<div>`, outside the
-	// tag set; the hand-rolled `<button>` rows are counted in DRAWER_ROW_BUTTONS.
+	// The second bound is a bare `h-8` or `h-9`, on height only (#1912, #2304).
+	// `h-8` is 24px, so it clears the floor, but it is the pre-density literal
+	// #1679 retired from controls: a control states `h-control` /
+	// `h-control-sm`, which are the same 24px at Default and 32px at Comfortable.
+	// `h-9` is the 27px `Button` default #1679 replaced, and a `SelectTrigger`
+	// carrying it sits proud of the `h-control` Input beside it. `w-8` and
+	// `size-8` stay legitimate boxes. The drawer row's `h-8` is normally a
+	// `<div>`, outside the tag set; the hand-rolled `<button>` rows are counted
+	// in DRAWER_ROW_BUTTONS.
+	//
+	// The third rule is shape, not a number: a plain `<button>` whose only
+	// content is a glyph is as wide as the glyph (12px or 16px) unless its own
+	// className states a box (#2304). The scan reads the tag's className and its
+	// children; a box that arrives in a variable is invisible to it, so state the
+	// class inline. The schema tree's two in-row controls are counted in
+	// BOXLESS_GLYPH_BUTTONS.
 	const OPEN =
 		/<(?:Button|button|TooltipIconButton|TimeMarker|SelectTrigger|DialogCancelButton)\b/g;
 	// The lookbehind keeps `min-w-0` and `max-h-6` out (a floor or a cap, not
@@ -241,8 +236,9 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// shrinking a target.
 	const BOX_SIZE =
 		/(?<![\w-])(?:h|w|size)-(?:(0\.\d+|[1-7](?:\.\d+)?)(?![\w./])|\[(\d+(?:\.\d+)?)(px|rem)\])/g;
-	// A height of exactly 8 (not `h-80`, `h-8.5`, `min-h-8` or `h-8/12`).
-	const RETIRED_HEIGHT = /(?<![\w-])h-8(?![\w./-])/;
+	// A height of exactly 8 or 9 (not `h-80`, `h-8.5`, `min-h-8` or `h-8/12`).
+	const RETIRED_HEIGHT = /(?<![\w-])h-(?:8|9)(?![\w./-])/;
+	const DRAWER_ROW_HEIGHT = "h-8";
 	// The icon steps are glyph sizes, not target sizes (12px / 16px). On the tag
 	// itself, unprefixed, one is the element's box - and on a `Button` it also
 	// replaces the `size-target` variant (tailwind-merge). A `[&_svg]:size-icon`
@@ -264,37 +260,6 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		return undefined;
 	}
 
-	/**
-	 * The value of `tag`'s own `className` attribute. A glyph passed as a prop
-	 * (`icon={<X className="size-icon-sm" />}`) sits inside braces, at depth 1,
-	 * and is not the element's box.
-	 */
-	function ownClassName(tag: string): string {
-		let depth = 0;
-		for (let i = 0; i < tag.length; i++) {
-			if (tag[i] === "{") depth++;
-			else if (tag[i] === "}") depth--;
-			else if (depth === 0 && tag.startsWith("className=", i)) {
-				return attributeValue(tag, i + "className=".length);
-			}
-		}
-		return "";
-	}
-
-	/** The quoted string or balanced `{...}` expression starting at `start`. */
-	function attributeValue(tag: string, start: number): string {
-		const open = tag[start];
-		if (open === '"' || open === "'") {
-			return tag.slice(start, tag.indexOf(open, start + 1) + 1);
-		}
-		let depth = 0;
-		for (let i = start; i < tag.length; i++) {
-			if (tag[i] === "{") depth++;
-			else if (tag[i] === "}" && --depth === 0) return tag.slice(start, i + 1);
-		}
-		return tag.slice(start);
-	}
-
 	/** A bare icon-step box on `tag` with no pseudo-element hit area behind it. */
 	function iconBoxWithoutFloor(tag: string): string | undefined {
 		const classes = ownClassName(tag);
@@ -304,6 +269,55 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 
 	function retiredHeight(tag: string): string | undefined {
 		return tag.match(RETIRED_HEIGHT)?.[0];
+	}
+
+	// A box needs both axes. `size-target` and a pseudo-element hit area state
+	// both; otherwise one class from each list. `self-stretch` is a height only
+	// by the row's grace, so it does not count.
+	const SQUARE_BOX = /(?<![\w:-])(?:size-target|size-full)(?![\w-])/;
+	const HEIGHT_BOX =
+		/(?<![\w:-])(?:h-target|min-h-target|h-full|h-control(?:-[a-z]+)?|h-band(?:-[a-z]+)?)(?![\w-])/;
+	const WIDTH_BOX = /(?<![\w:-])(?:w-target|min-w-target|w-full)(?![\w-])/;
+
+	/** Whether `tag`'s own className states a box at least 24px on both axes. */
+	function statesTargetBox(tag: string): boolean {
+		const classes = ownClassName(tag);
+		if (SQUARE_BOX.test(classes) || PSEUDO_TARGET_FLOOR.test(classes)) return true;
+		return HEIGHT_BOX.test(classes) && WIDTH_BOX.test(classes);
+	}
+
+	/**
+	 * Whether `body` (a button's children) is a glyph and nothing else: a glyph
+	 * is a self-closing tag of a name the file imports from lucide-react, and an
+	 * `sr-only` span or a `{...}` that only chooses between glyphs does not make
+	 * it a labelled button.
+	 */
+	function isGlyphOnly(body: string, glyphNames: ReadonlySet<string>): boolean {
+		let rest = body.replace(/<span className="sr-only">[^<]*<\/span>/g, "");
+		let glyphs = 0;
+		for (let m = /<[A-Z]\w*\b/.exec(rest); m; m = /<[A-Z]\w*\b/.exec(rest)) {
+			const tag = openingTagAt(rest, m.index);
+			if (!tag.endsWith("/") || !glyphNames.has(m[0].slice(1))) return false;
+			rest = `${rest.slice(0, m.index)}GLYPH${rest.slice(m.index + tag.length + 1)}`;
+			glyphs++;
+		}
+		rest = rest.replace(/\{[^{}]*GLYPH[^{}]*\}/g, "GLYPH").replace(/GLYPH|\s/g, "");
+		return glyphs > 0 && rest === "";
+	}
+
+	/** Whether `tag`, a plain `<button>` opening at `start` in `code`, holds only a glyph. */
+	function holdsOnlyGlyph(code: string, start: number, tag: string): boolean {
+		if (tag.endsWith("/")) return false;
+		const bodyStart = start + tag.length + 1;
+		const bodyEnd = code.indexOf("</button>", bodyStart);
+		return bodyEnd !== -1 && isGlyphOnly(code.slice(bodyStart, bodyEnd), lucideNames(code));
+	}
+
+	/** A finding for a plain `<button>` at `start` that holds only a glyph and states no box. */
+	function boxlessGlyphButton(code: string, start: number, tag: string): string | undefined {
+		if (!code.startsWith("<button", start) || !holdsOnlyGlyph(code, start, tag))
+			return undefined;
+		return statesTargetBox(tag) ? undefined : "glyph-only button without a stated 24px box";
 	}
 
 	/** The first class in `tag` that sizes a control with a bound this scan rejects. */
@@ -318,25 +332,55 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	// allowed: a further `h-8` in the same file is an offence, and the rot test
 	// below fails when the file stops carrying exactly that many, so an entry
 	// cannot outlive its row.
-	const DRAWER_ROW_BUTTONS: Record<string, { tags: number; reason: string }> = {
+	type ExemptionTable = Record<string, { tags: number; reason: string }>;
+	const DRAWER_ROW_BUTTONS: ExemptionTable = {
 		"modules/settings/sidebar/SettingsCategoryTree.tsx": {
 			tags: 1,
 			reason: "a category row of the Settings drawer, beside the other single-line drawer rows",
 		},
 	};
 
+	// A glyph-only `<button>` that stays as wide as its glyph, counted per file
+	// the same way. Both are the GraphQL schema tree's in-row controls: the row is
+	// a dense 18px (`min-h-6`) line, so a 24px box would grow every expandable row
+	// by 6px and shift its label against the leaf rows. Each is a mouse affordance
+	// beside a keyboard path (the roving treeview's arrow keys and its row-actions
+	// chord), `tabIndex={-1}`, and the row itself is the larger target.
+	const BOXLESS_GLYPH_BUTTONS: ExemptionTable = {
+		"modules/request-builder/components/RequestTabs/panels/body/graphql-explorer/SchemaExplorer.tsx":
+			{
+				tags: 2,
+				reason: "the expand chevron and the 'Show in the tree' control of a dense 18px tree row",
+			},
+	};
+
+	interface Exemptions {
+		readonly drawerRows?: ExemptionTable;
+		readonly boxlessGlyphButtons?: ExemptionTable;
+	}
+
+	/** A counter for `path`'s allowance in `table`: true while an exemption is left to spend. */
+	function allowanceFor(table: ExemptionTable | undefined, path: string): () => boolean {
+		let left = table?.[path]?.tags ?? 0;
+		return () => left-- > 0;
+	}
+
 	/** One line per interactive tag in `code` that breaks a bound, exemptions spent first-come. */
-	function offencesIn(
-		path: string,
-		code: string,
-		exemptions: typeof DRAWER_ROW_BUTTONS
-	): string[] {
-		let allowance = exemptions[path]?.tags ?? 0;
+	function offencesIn(path: string, code: string, exemptions: Exemptions): string[] {
+		const spendDrawerRow = allowanceFor(exemptions.drawerRows, path);
+		const spendBoxless = allowanceFor(exemptions.boxlessGlyphButtons, path);
 		const offences: string[] = [];
 		for (const m of code.matchAll(OPEN)) {
-			const tag = openingTag(code, m.index);
-			let hit = undersizedClass(tag) ?? iconBoxWithoutFloor(tag);
-			if (!hit && retiredHeight(tag) && allowance-- <= 0) hit = retiredHeight(tag);
+			const tag = openingTagAt(code, m.index);
+			const retired = retiredHeight(tag);
+			const boxless = boxlessGlyphButton(code, m.index, tag);
+			const allowedRow = retired === DRAWER_ROW_HEIGHT && spendDrawerRow();
+			const allowedBoxless = boxless !== undefined && spendBoxless();
+			const hit =
+				undersizedClass(tag) ??
+				iconBoxWithoutFloor(tag) ??
+				(allowedRow ? undefined : retired) ??
+				(allowedBoxless ? undefined : boxless);
 			if (hit) offences.push(`${path}: ${m[0]} ${hit}`);
 		}
 		return offences;
@@ -347,10 +391,30 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 	}
 
 	/** How many interactive tags in `file` carry a bare `h-8`. */
-	function retiredHeightTags(file: string): number {
+	function drawerRowHeightTags(file: string): number {
 		const code = stripComments(readFileSync(file, "utf8"));
-		return [...code.matchAll(OPEN)].filter((m) => retiredHeight(openingTag(code, m.index)))
-			.length;
+		return [...code.matchAll(OPEN)].filter(
+			(m) => retiredHeight(openingTagAt(code, m.index)) === DRAWER_ROW_HEIGHT
+		).length;
+	}
+
+	/** How many plain `<button>`s in `file` hold only a glyph and state no 24px box. */
+	function boxlessGlyphButtonTags(file: string): number {
+		const code = stripComments(readFileSync(file, "utf8"));
+		return [...code.matchAll(/<button\b/g)].filter(
+			(m) => boxlessGlyphButton(code, m.index, openingTagAt(code, m.index)) !== undefined
+		).length;
+	}
+
+	/** How many plain `<button>`s across the tree hold nothing but a glyph. */
+	function glyphOnlyButtonCount(): number {
+		return files().reduce((total, file) => {
+			const code = stripComments(readFileSync(file, "utf8"));
+			const buttons = [...code.matchAll(/<button\b/g)].filter((m) =>
+				holdsOnlyGlyph(code, m.index, openingTagAt(code, m.index))
+			);
+			return total + buttons.length;
+		}, 0);
 	}
 
 	it.each([
@@ -363,6 +427,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["an arbitrary rem size", "size-[1rem]", "size-[1rem]"],
 		["an svg descendant override", "[&_svg]:size-3", "size-3"],
 		["a bare h-8", "h-8 w-auto", "h-8"],
+		["a bare h-9", "h-9 text-sm", "h-9"],
 		["a bare size-icon-sm box", "size-icon-sm rounded-full", "size-icon-sm"],
 		["a bare size-icon box", "flex size-icon", "size-icon"],
 		["a variant-prefixed h-8", "sm:h-8 px-3", "h-8"],
@@ -385,7 +450,7 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		["a container-size width", "w-3xs"],
 		["a min-height at the retired step", "min-h-8"],
 		["a max-height at the retired step", "max-h-8"],
-		["a taller step", "h-80 h-8.5"],
+		["a taller step", "h-80 h-8.5 h-90 h-9.5 min-h-9"],
 		["a control token", "h-control-sm"],
 	])("does not flag %s", (_label, classes) => {
 		expect(offendingClass(`<Button className="${classes}"`)).toBeUndefined();
@@ -402,6 +467,73 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(offencesIn("a.tsx", quoted, {})).toEqual(["a.tsx: <button size-icon-sm"]);
 	});
 
+	const LUCIDE_IMPORT = 'import { X, ChevronDown, ChevronRight } from "lucide-react";\n';
+	const glyphButton = (classes: string, children = "<X />") =>
+		`${LUCIDE_IMPORT}<button type="button" className="${classes}" onClick={go}>${children}</button>`;
+
+	it.each([
+		["no className at all", `${LUCIDE_IMPORT}<button onClick={go}><X /></button>`],
+		["a colour only", glyphButton("p-1 text-muted-foreground")],
+		[
+			"a colour and a margin",
+			glyphButton("ml-auto text-muted-foreground hover:text-foreground"),
+		],
+		["a height with no width", glyphButton("h-target")],
+		["a width with no height", glyphButton("min-w-target")],
+		["a self-stretch height and a width", glyphButton("self-stretch min-w-target")],
+		["a prefixed floor that is not the element's own box", glyphButton("sm:size-target")],
+		[
+			"a glyph with an sr-only label",
+			glyphButton("p-1", '<X /><span className="sr-only">Close</span>'),
+		],
+		[
+			"a ternary between two glyphs",
+			glyphButton("self-stretch", "{open ? (<ChevronDown />) : (<ChevronRight />)}"),
+		],
+		[
+			"a glyph whose props hold a size box",
+			glyphButton("flex", '<X className="size-target" />'),
+		],
+	])("flags a glyph-only button with %s", (_label, source) => {
+		expect(offencesIn("a.tsx", source, {})).toEqual([
+			"a.tsx: <button glyph-only button without a stated 24px box",
+		]);
+	});
+
+	it.each([
+		["a square target box", glyphButton("size-target rounded-md")],
+		["a height and a width token", glyphButton("h-target min-w-target")],
+		["a control height and a full width", glyphButton("h-control w-full")],
+		["a band height and a target width", glyphButton("h-band-lg w-target")],
+		["a stretched height stated as a minimum", glyphButton("min-h-target min-w-target -ml-2")],
+		[
+			"a glyph with a pseudo-element hit area",
+			glyphButton("relative size-icon-sm after:size-target"),
+		],
+		[
+			"a box in an expression",
+			`${LUCIDE_IMPORT}<button className={cn("size-target", extra)}><X /></button>`,
+		],
+		[
+			"a self-closing component that is not a lucide glyph",
+			glyphButton("flex", "<TimeValue />"),
+		],
+		["a label beside the glyph", glyphButton("flex gap-1", "<X />Dismiss")],
+		["a wrapping element around the glyph", glyphButton("flex", "<span><X /></span>")],
+		["a non-self-closing capitalised child", glyphButton("flex", "<Tooltip><X /></Tooltip>")],
+		["no glyph at all", glyphButton("flex", "Close")],
+		["a self-closing button", `${LUCIDE_IMPORT}<button className="flex" />`],
+	])("does not flag a glyph-only button rule on %s", (_label, source) => {
+		expect(offencesIn("a.tsx", source, {})).toEqual([]);
+	});
+
+	it("flags a retired h-9 and keeps the drawer-row exemption to h-8 alone", () => {
+		const exemptions = { drawerRows: { "a.tsx": { tags: 1, reason: "test" } } };
+		expect(offencesIn("a.tsx", '<SelectTrigger className="h-9 text-sm">', exemptions)).toEqual([
+			"a.tsx: <SelectTrigger h-9",
+		]);
+	});
+
 	it("scans a non-empty set of files and tags", () => {
 		expect(files().length).toBeGreaterThan(200);
 		const tags = files().flatMap((f) =>
@@ -414,30 +546,55 @@ describe("no interactive element anywhere carries a sub-24px box override", () =
 		expect(tags).toContain("<DialogCancelButton");
 	});
 
-	it("finds no undersized h / w / size or bare h-8 in an interactive element's own tag", () => {
+	it("scans a non-empty set of glyph-only buttons", () => {
+		expect(glyphOnlyButtonCount()).toBeGreaterThan(5);
+	});
+
+	it("finds no undersized h / w / size, bare h-8 or h-9, or boxless glyph-only button in an interactive element's own tag", () => {
 		const offences = files().flatMap((file) =>
-			offencesIn(
-				sourcePath(file),
-				stripComments(readFileSync(file, "utf8")),
-				DRAWER_ROW_BUTTONS
-			)
+			offencesIn(sourcePath(file), stripComments(readFileSync(file, "utf8")), {
+				drawerRows: DRAWER_ROW_BUTTONS,
+				boxlessGlyphButtons: BOXLESS_GLYPH_BUTTONS,
+			})
 		);
 		expect(offences.join("\n")).toBe("");
 	});
 
 	it("spends an exemption on its allowed count and flags a further h-8 in the same file", () => {
 		const row = '<button className="h-8 flex">';
-		const exemptions = { "a.tsx": { tags: 1, reason: "test" } };
+		const exemptions = { drawerRows: { "a.tsx": { tags: 1, reason: "test" } } };
 		expect(offencesIn("a.tsx", row, exemptions)).toEqual([]);
 		expect(offencesIn("a.tsx", `${row}${row}`, exemptions)).toEqual(["a.tsx: <button h-8"]);
 		expect(offencesIn("b.tsx", row, exemptions)).toEqual(["b.tsx: <button h-8"]);
+	});
+
+	it("spends a glyph-button exemption on its allowed count and flags a further one in the same file", () => {
+		const tag = glyphButton("flex").slice(LUCIDE_IMPORT.length);
+		const button = `${LUCIDE_IMPORT}${tag}`;
+		const twice = `${button}${tag}`;
+		const exemptions = { boxlessGlyphButtons: { "a.tsx": { tags: 1, reason: "test" } } };
+		const finding = "glyph-only button without a stated 24px box";
+		expect(offencesIn("a.tsx", button, exemptions)).toEqual([]);
+		expect(offencesIn("a.tsx", twice, exemptions)).toEqual([`a.tsx: <button ${finding}`]);
+		expect(offencesIn("b.tsx", button, exemptions)).toEqual([`b.tsx: <button ${finding}`]);
+	});
+
+	it("keeps every glyph-button exemption pointing at exactly its boxless glyph-only buttons", () => {
+		const entries = Object.entries(BOXLESS_GLYPH_BUTTONS);
+		expect(entries.length).toBeGreaterThan(0);
+		for (const [path, { tags }] of entries) {
+			expect(
+				boxlessGlyphButtonTags(join(srcRoot, path)),
+				`${path} boxless glyph-only buttons`
+			).toBe(tags);
+		}
 	});
 
 	it("keeps every drawer-row exemption pointing at exactly its h-8 control tags", () => {
 		const entries = Object.entries(DRAWER_ROW_BUTTONS);
 		expect(entries.length).toBeGreaterThan(0);
 		for (const [path, { tags }] of entries) {
-			expect(retiredHeightTags(join(srcRoot, path)), `${path} h-8 tag count`).toBe(tags);
+			expect(drawerRowHeightTags(join(srcRoot, path)), `${path} h-8 tag count`).toBe(tags);
 		}
 	});
 });
@@ -533,7 +690,7 @@ describe("a text field states its size, never its height", () => {
 		const code = stripComments(
 			'<Input placeholder="https://example.test/spec.json" className="flex-1" /><div className="h-4" />'
 		);
-		expect(heightClass(openingTag(code, 0))).toBeUndefined();
+		expect(heightClass(openingTagAt(code, 0))).toBeUndefined();
 	});
 
 	it("scans a non-empty set of text-field tags, every kind, and leaves UrlInput out", () => {
@@ -553,7 +710,7 @@ describe("a text field states its size, never its height", () => {
 		for (const file of files()) {
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
-				const hit = heightClass(openingTag(code, m.index));
+				const hit = heightClass(openingTagAt(code, m.index));
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} ${hit}`);
 			}
 		}
@@ -566,7 +723,7 @@ describe("a text field states its size, never its height", () => {
 		for (const file of files()) {
 			const code = stripComments(readFileSync(file, "utf8"));
 			for (const m of code.matchAll(OPEN)) {
-				const tag = openingTag(code, m.index);
+				const tag = openingTagAt(code, m.index);
 				if (/\bsize="xs"/.test(tag)) xsFields++;
 				const hit = xsOverride(tag);
 				if (hit) offences.push(`${relative(srcRoot, file)}: ${m[0]} size="xs" ${hit}`);

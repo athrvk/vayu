@@ -61,10 +61,35 @@ import {
 	CHART_SYNC,
 } from "./charts/uplot";
 import { SkeletonHdrPlot } from "./charts/HdrPercentilePlot";
+import { ChartLegend } from "./charts/ChartLegend";
+import {
+	THROUGHPUT_LEGEND,
+	LATENCY_LEGEND,
+	PERCENTILE_LEGEND,
+	SCATTER_LEGEND,
+	type LegendEntry,
+} from "./charts/uplot/legend";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 
 /** The HDR card's footer figures, drawn as dashes until the report has them. */
 const HDR_FOOTER_STATS = ["min", "mean", "p50", "p95", "p99", "max"] as const;
+
+const LATENCY_ENTRIES: readonly LegendEntry[] = Object.values(LATENCY_LEGEND);
+const PERCENTILE_ENTRIES: readonly LegendEntry[] = Object.values(PERCENTILE_LEGEND);
+const SCATTER_ENTRIES: readonly LegendEntry[] = Object.values(SCATTER_LEGEND);
+
+/** The throughput card's key: the target line only when the chart draws one, the ramp pair only on a ramp. */
+function throughputLegend(targetRps: number | undefined, hasRamp: boolean): LegendEntry[] {
+	const { throughput, sendRate, target, configured, achieved } = THROUGHPUT_LEGEND;
+	return [
+		throughput,
+		sendRate,
+		...(targetRps && targetRps > 0
+			? [{ ...target, label: `target ${formatRate(targetRps)} req/s` }]
+			: []),
+		...(hasRamp ? [configured, achieved] : []),
+	];
+}
 
 function MetricsView({
 	metrics,
@@ -237,49 +262,7 @@ function MetricsView({
 							Throughput over time
 							<InfoChip tip={TOOLTIPS.throughputOverTime} />
 						</h3>
-						<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--primary))" }}
-								/>
-								throughput
-							</span>
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--info))" }}
-								/>
-								send rate
-							</span>
-							{targetRps !== undefined && (
-								<span className="text-muted-foreground">
-									<span
-										className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-										style={{ background: "hsl(var(--subtle-foreground))" }}
-									/>
-									target {formatRate(targetRps)} req/s
-								</span>
-							)}
-							{rampOverlay && (
-								<>
-									<span className="text-muted-foreground">
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--subtle-foreground))" }}
-										/>
-										configured
-									</span>
-									<span>
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--success))" }}
-										/>
-										achieved
-									</span>
-								</>
-							)}
-						</div>
+						<ChartLegend entries={throughputLegend(targetRps, rampOverlay != null)} />
 					</div>
 					<RequestRateChart
 						history={chartWindow}
@@ -326,29 +309,7 @@ function MetricsView({
 							Latency over time
 							<InfoChip tip={TOOLTIPS.latencyOverTime} />
 						</h3>
-						<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--primary))" }}
-								/>
-								average latency (incl. queue wait)
-							</span>
-							<span>
-								<span
-									className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-									style={{ background: "hsl(var(--info))" }}
-								/>
-								wire time
-							</span>
-							<span>
-								<span
-									className="inline-block w-2.5 h-2 mr-1.5 align-middle rounded-sm"
-									style={{ background: "hsl(var(--warning) / 0.5)" }}
-								/>
-								queue wait
-							</span>
-						</div>
+						<ChartLegend entries={LATENCY_ENTRIES} />
 					</div>
 					<LatencyBreakdownChart
 						history={chartWindow}
@@ -369,22 +330,7 @@ function MetricsView({
 									Response time vs {CONCURRENCY_UNIT}
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
 								</h3>
-								<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
-									<span>
-										<span
-											className="inline-block w-2 h-2 mr-1.5 rounded-full align-middle"
-											style={{ background: "hsl(var(--primary))" }}
-										/>
-										p99
-									</span>
-									<span>
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--warning))" }}
-										/>
-										SLO
-									</span>
-								</div>
+								<ChartLegend entries={SCATTER_ENTRIES} />
 							</div>
 							<ResponseTimeVsConcurrencyChart
 								history={historicalMetrics}
@@ -401,29 +347,7 @@ function MetricsView({
 									Response time percentiles over time
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
 								</h3>
-								<div className="flex gap-3.5 text-label font-mono text-muted-foreground">
-									<span>
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--success))" }}
-										/>
-										p50
-									</span>
-									<span>
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--warning))" }}
-										/>
-										p95
-									</span>
-									<span>
-										<span
-											className="inline-block w-2.5 h-0.5 mr-1.5 align-middle"
-											style={{ background: "hsl(var(--destructive))" }}
-										/>
-										p99
-									</span>
-								</div>
+								<ChartLegend entries={PERCENTILE_ENTRIES} />
 							</div>
 							<LatencyPercentilesChart
 								history={chartWindow}

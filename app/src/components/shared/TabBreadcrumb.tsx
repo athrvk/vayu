@@ -98,7 +98,7 @@ export function TabBreadcrumb({ label, crumbs, className }: TabBreadcrumbProps) 
 							)}
 							<ChevronRight
 								aria-hidden="true"
-								className="size-3 shrink-0 opacity-60"
+								className="size-icon-sm shrink-0 opacity-60"
 							/>
 						</span>
 					))}

@@ -308,7 +308,7 @@ it, so what the user would otherwise have to finish by hand is kept:
   collection's real id. A file with nothing to report stores nothing.
 - Every new root is expanded in the sidebar and the first one opens as the
   active tab.
-- One toast says what arrived: `Imported "Pet Store" - 60 requests, 4 folders`,
+- One toast says what arrived: `Imported "Pet Store" - 60 requests, 4 nested collections`,
   or `Imported 3 files` for a batch, with `; N things to finish` appended when
   a report has action-tier lines or file references to relink. When there is a
   report, the toast's one action opens the collection on its Info tab, even

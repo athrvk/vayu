@@ -53,7 +53,7 @@ const noop = () => {};
 describe("the history row's time card", () => {
 	it("opens from the row with the start time and the status, and leaves the comment to the row", async () => {
 		render(<RunItem run={run()} onSelect={noop} onDelete={noop} isDeleting={false} />);
-		fireEvent.focus(screen.getByRole("button", { name: /^Open .* run, completed/ }));
+		fireEvent.focus(screen.getByRole("button", { name: /^Open .*, completed/ }));
 		const card = await screen.findByTestId("time-hover-card");
 		expect(card.textContent).toContain("UTC");
 		expect(card.textContent).toContain("StatusCompleted");

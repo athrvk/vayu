@@ -58,11 +58,12 @@ import {
 } from "./components";
 import { authRefreshNote } from "./auth-refresh-note";
 import type { SampleDestination, SampleFilter } from "./sample-filter";
-import type {
-	LoadTestDetailProps,
-	MonitorSeriesResponse,
-	SeriesFailure,
-	TimeSeriesResponse,
+import {
+	RUN_TYPE_NAME,
+	type LoadTestDetailProps,
+	type MonitorSeriesResponse,
+	type SeriesFailure,
+	type TimeSeriesResponse,
 } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
@@ -255,9 +256,9 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 	const crumbs = useMemo(
 		() => [
 			{ id: "history", label: "History", onSelect: () => revealDrawerView("history") },
-			{ id: "run", label: isScenarioLoad ? "Scenario load run" : "Load test run" },
+			{ id: "run", label: `${RUN_TYPE_NAME.load} run` },
 		],
-		[isScenarioLoad, revealDrawerView]
+		[revealDrawerView]
 	);
 
 	/*

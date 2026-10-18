@@ -30,8 +30,9 @@ function renderCard(props: CardProps) {
 		</TooltipProvider>
 	);
 	const bar = container.querySelector<HTMLElement>(".h-2")!;
-	const widths = Array.from(bar.children).map((c) => parseFloat((c as HTMLElement).style.width));
-	return { container, widths };
+	const segments = Array.from(bar.children) as HTMLElement[];
+	const widths = segments.map((c) => parseFloat(c.style.width));
+	return { container, widths, segments };
 }
 
 /** The bar's four segments in order: 2xx/3xx, 4xx, 5xx, no response. */
@@ -153,5 +154,50 @@ describe("ErrorRateCard", () => {
 
 		expect(screen.getByText("0.0")).toBeTruthy();
 		expect(widths).toEqual([0, 0, 0, 0]);
+	});
+
+	it("draws a 1xx and a code of 600 or more with 5xx, as the engine tallies them", () => {
+		// `httpStatusClass` groups 1xx with redirect and 600+ with no-response, but
+		// the engine counts both as HTTP errors, so the bar must not drop them
+		// into a quieter bucket than the rate above it.
+		const { widths } = renderCard({
+			totalRequests: 100,
+			failedRequests: 10,
+			httpErrors: 10,
+			noResponse: 0,
+			statusCodes: { "200": 90, "101": 4, "600": 6 },
+		});
+
+		expect(widths[S5]).toBeCloseTo(10);
+		expect(widths[OK]).toBeCloseTo(90);
+		expect(widths[S4]).toBe(0);
+		expect(widths[NONE]).toBe(0);
+	});
+
+	it("paints the four segments and their swatches from the status tokens", () => {
+		const { container, segments } = renderCard({
+			totalRequests: 4,
+			failedRequests: 3,
+			httpErrors: 2,
+			noResponse: 1,
+			statusCodes: { "200": 1, "404": 1, "503": 1, "0": 1 },
+		});
+
+		expect(segments.map((c) => c.className)).toEqual([
+			expect.stringContaining("bg-status-success-fill"),
+			expect.stringContaining("bg-status-warning-fill"),
+			expect.stringContaining("bg-status-error-fill"),
+			expect.stringContaining("bg-status-no-response-fill"),
+		]);
+
+		const swatches = Array.from(
+			container.querySelectorAll<HTMLElement>("span.inline-block")
+		).map((c) => c.style.background);
+		expect(swatches).toEqual([
+			"hsl(var(--status-success))",
+			"hsl(var(--status-warning))",
+			"hsl(var(--status-error))",
+			"hsl(var(--status-no-response))",
+		]);
 	});
 });

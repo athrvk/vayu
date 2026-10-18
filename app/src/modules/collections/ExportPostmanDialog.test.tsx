@@ -155,7 +155,7 @@ describe("ExportPostmanDialog", () => {
 
 		expect(summaryLines()).toEqual([
 			"3 requests exported",
-			"1 folder exported",
+			"1 nested collection exported",
 			"2 secrets written empty",
 		]);
 		const notCarried = screen.getByRole("list", { name: "Not carried" });
@@ -196,7 +196,7 @@ describe("ExportPostmanDialog", () => {
 		open();
 		await screen.findByText("Postman Collection");
 
-		expect(summaryLines()).toEqual(["3 requests exported", "1 folder exported"]);
+		expect(summaryLines()).toEqual(["3 requests exported", "1 nested collection exported"]);
 		expect(screen.queryByRole("list", { name: "Not carried" })).toBeNull();
 	});
 
@@ -219,7 +219,7 @@ describe("ExportPostmanDialog", () => {
 		// #1311), but its secrets count belongs to the switch's old position,
 		// and neither button may hand out the text that was read without them.
 		await waitFor(() => expect(assembling()).not.toBeNull());
-		expect(summaryLines()).toEqual(["3 requests exported", "1 folder exported"]);
+		expect(summaryLines()).toEqual(["3 requests exported", "1 nested collection exported"]);
 		expect(screen.getByRole("button", { name: "Download" }).hasAttribute("disabled")).toBe(
 			true
 		);
@@ -232,7 +232,7 @@ describe("ExportPostmanDialog", () => {
 			})
 		);
 		await waitFor(() => expect(assembling()).toBeNull());
-		expect(summaryLines()).toEqual(["3 requests exported", "1 folder exported"]);
+		expect(summaryLines()).toEqual(["3 requests exported", "1 nested collection exported"]);
 	});
 
 	it("downloads the engine's text under the engine's file name, and closes", async () => {

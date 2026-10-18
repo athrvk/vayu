@@ -8,7 +8,7 @@
 import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
-import { RUN_KIND_LABEL } from "@/modules/history/types";
+import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
@@ -257,7 +257,7 @@ export default function RunItem({
 	// A bare fallback identity for the rare row with neither a url nor a
 	// scenario descriptor (a run recorded before either existed, or one still
 	// pending). Never a blank line where the method/name would be.
-	const fallbackIdentity = RUN_KIND_LABEL[run.type];
+	const fallbackIdentity = RUN_TYPE_NAME[run.type];
 
 	// The row's identity text, in priority order: a proper request name, else
 	// the url, else the collection a scenario ran, else the bare fallback.
@@ -330,7 +330,7 @@ export default function RunItem({
 					<RunStatusGlyph
 						status={run.status}
 						outcome={judgement?.outcome}
-						className="size-3 shrink-0"
+						className="size-icon-sm shrink-0"
 					/>
 					{method ? (
 						<MethodBadge
@@ -381,7 +381,7 @@ export default function RunItem({
 							className="min-w-0 max-w-1/2 gap-1 bg-primary/15 px-1.5 py-0 text-micro font-semibold text-primary"
 							title={pinChipText}
 						>
-							<Pin className="h-2.5 w-2.5 shrink-0" />
+							<Pin className="size-icon-sm shrink-0" />
 							{/* The load run's chip is long; at a narrow drawer it gives way
 							    before the identity does, and the title keeps the full text. */}
 							<span className="truncate">{pinChipText}</span>
@@ -573,10 +573,10 @@ export default function RunItem({
 					<button
 						type="button"
 						onClick={() => onSelect(run.id)}
-						// Named by what it is. A collection run announced as a "request run"
-						// with no url after it was a row a screen-reader user could not tell
-						// apart from any other row in the list.
-						aria-label={`Open ${RUN_KIND_LABEL[run.type]} run, ${run.status}${verdictName}${
+						// Named by what it is, in the same words as the row's visible kind.
+						// A collection run announced as a "request run" with no url after it
+						// was a row a screen-reader user could not tell apart from the rest.
+						aria-label={`Open ${RUN_TYPE_NAME[run.type]}, ${run.status}${verdictName}${
 							identitySuffix ? `, ${identitySuffix}` : ""
 						}${mcpClientLabel ? `, started by ${mcpClientLabel}` : ""}`}
 						className="absolute inset-0 z-0 cursor-pointer"

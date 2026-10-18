@@ -521,7 +521,7 @@ export function VariablePopover({
 										"gap-1 border-warning-text/40 text-warning-text"
 									)}
 								>
-									<KeyRound className="h-2.5 w-2.5" />
+									<KeyRound className="size-icon-sm" />
 									Secret
 								</Badge>
 							)}

@@ -181,7 +181,9 @@ describe("after a successful import", () => {
 		await importFiles(file("petstore.json", petStore));
 
 		await waitFor(() => expect(toasts()).toHaveLength(1));
-		expect(toasts()[0].message).toBe('Imported "Pet Store" - 60 requests, 4 folders.');
+		expect(toasts()[0].message).toBe(
+			'Imported "Pet Store" - 60 requests, 4 nested collections.'
+		);
 		expect(toasts()[0].variant).toBe("success");
 		expect(useImportModalStore.getState().isOpen).toBe(false);
 	});
@@ -211,7 +213,7 @@ describe("after a successful import", () => {
 
 		await waitFor(() => expect(toasts()).toHaveLength(1));
 		expect(toasts()[0].message).toBe(
-			'Imported "Pet Store" - 60 requests, 4 folders; 1 thing to finish.'
+			'Imported "Pet Store" - 60 requests, 4 nested collections; 1 thing to finish.'
 		);
 		expect(
 			useImportReportStore.getState().reports["col_Pet Store"]?.notices.map((n) => n.tier)

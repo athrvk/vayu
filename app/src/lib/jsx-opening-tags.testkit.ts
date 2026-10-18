@@ -127,6 +127,85 @@ function tagRanges(source: string, name: string): TagRange[] {
 	return ranges;
 }
 
+/**
+ * The opening tag that starts at `start` in `code`, without its closing `>` (a
+ * self-closing tag therefore ends in `/`).
+ *
+ * `openingTags` finds tags by name; this is for a caller that already holds an
+ * offset, typically a `matchAll` over several component names at once. Quotes
+ * are tracked from `start`, not from the top of the file, so an apostrophe in
+ * JSX text earlier on cannot swallow the tag; the cost is that `code` must have
+ * its comments stripped first (`stripComments`).
+ */
+export function openingTagAt(code: string, start: number): string {
+	let depth = 0;
+	let quote = "";
+	for (let i = start; i < code.length; i++) {
+		const c = code[i];
+		if (quote) {
+			if (c === quote) quote = "";
+		} else if (c === '"' || c === "'" || c === "`") quote = c;
+		else if (c === "{") depth++;
+		else if (c === "}") depth--;
+		else if (c === ">" && depth === 0) return code.slice(start, i);
+	}
+	return code.slice(start);
+}
+
+/**
+ * The value of `tag`'s own `className`: the quoted string or the balanced
+ * `{...}` expression, wherever the attribute sits among the others. A glyph
+ * passed as a prop (`icon={<X className="size-3" />}`) is at brace depth 1 and
+ * is a different element's box, so it is not read.
+ */
+export function ownClassName(tag: string): string {
+	let depth = 0;
+	for (let i = 0; i < tag.length; i++) {
+		if (tag[i] === "{") depth++;
+		else if (tag[i] === "}") depth--;
+		else if (depth === 0 && tag.startsWith("className=", i)) {
+			return attributeValue(tag, i + "className=".length);
+		}
+	}
+	return "";
+}
+
+/** The quoted string or balanced `{...}` expression starting at `start`. */
+function attributeValue(tag: string, start: number): string {
+	const open = tag[start];
+	if (open === '"' || open === "'") {
+		return tag.slice(start, tag.indexOf(open, start + 1) + 1);
+	}
+	let depth = 0;
+	for (let i = start; i < tag.length; i++) {
+		if (tag[i] === "{") depth++;
+		else if (tag[i] === "}" && --depth === 0) return tag.slice(start, i + 1);
+	}
+	return tag.slice(start);
+}
+
+const LUCIDE_IMPORT = /import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']lucide-react["']/g;
+
+/**
+ * The local names `source` imports from lucide-react: an `as` alias takes the
+ * alias, a `type` specifier or `import type` is read the same, and `LucideIcon`
+ * (a type, never a tag) is left out.
+ */
+export function lucideNames(source: string): Set<string> {
+	const names = new Set<string>();
+	for (const [, specifiers] of source.matchAll(LUCIDE_IMPORT)) {
+		for (const specifier of specifiers.split(",")) {
+			const local = specifier
+				.trim()
+				.split(/\s+as\s+/)
+				.pop()
+				?.replace(/^type\s+/, "");
+			if (local && /^[A-Z]\w*$/.test(local) && local !== "LucideIcon") names.add(local);
+		}
+	}
+	return names;
+}
+
 /** An element: its opening tag, and the source between that tag and its close. */
 export interface JsxElement {
 	readonly tag: string;
