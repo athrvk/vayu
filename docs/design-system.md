@@ -3186,6 +3186,11 @@ pattern to copy. `Card` carries the `bg-card surface-card` pair itself, so a
 divider inside one writes `border-rule` only; its own outline stays
 `border`, which faces the canvas.
 
+`Card` names no padding by default, because `CardHeader` and `CardContent`
+carry their own. A card that is its own body (a stat tile) takes `pad="sm"`
+(`p-3`) or `pad="md"` (`p-4`) instead of a hand-typed `p-*`; extras such as
+`flex flex-col gap-1.5` or `min-w-0` go in `className`.
+
 Never use hardcoded background colors like `bg-gray-50`, `bg-blue-50`, `bg-zinc-900` for card surfaces. Always `bg-card`.
 
 ### Section Eyebrow Label
@@ -3553,7 +3558,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 ### Hero Metric Card
 
 The reference is `app/src/modules/dashboard/components/hero/HeroCardShell.tsx`,
-which every hero card is built on: a `surface-card` box with an eyebrow label, a
+which every hero card is built on: a `Card pad="md"` with an eyebrow label, a
 `text-hero` mono value with an optional unit beside it, an optional sub-label,
 and an optional `Sparkline` below.
 
@@ -3562,7 +3567,8 @@ Note: sparkline renders **below** the value row, not beside it.
 ### Secondary Stat Card
 
 The reference is `app/src/modules/dashboard/components/stats/StatCard.tsx`: the
-same anatomy as the hero card at the `p-3` tier, with a `text-metric` value.
+same anatomy as the hero card at the `Card pad="sm"` (`p-3`) tier, with a
+`text-metric` value.
 
 ### Latency Distribution Bar
 

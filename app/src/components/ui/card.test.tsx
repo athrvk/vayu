@@ -81,6 +81,28 @@ describe("Card declares its surface", () => {
 	});
 });
 
+describe("Card pad", () => {
+	const root = (ui: React.ReactElement) => render(ui).container.firstElementChild as HTMLElement;
+
+	it("sm pads p-3 and md pads p-4", () => {
+		expect(root(<Card pad="sm" />).classList.contains("p-3")).toBe(true);
+		expect(root(<Card pad="md" />).classList.contains("p-4")).toBe(true);
+	});
+
+	it("names no padding without pad, so CardHeader and CardContent keep theirs", () => {
+		const classes = Array.from(root(<Card />).classList);
+		expect(classes.filter((c) => /^p[xytrbl]?-/.test(c))).toEqual([]);
+	});
+
+	it("does not forward pad to the DOM", () => {
+		expect(root(<Card pad="sm" />).hasAttribute("pad")).toBe(false);
+	});
+
+	it("lets a caller class override the pad", () => {
+		expect(root(<Card pad="md" className="p-6" />).className).not.toContain("p-4");
+	});
+});
+
 describe("no divider inside a Card reads a canvas border token", () => {
 	const files = Object.entries(sources).filter(([path]) => !path.includes(".test."));
 	const withCards = files.filter(([, src]) => new RegExp(CARD_TOKEN.source).test(src));

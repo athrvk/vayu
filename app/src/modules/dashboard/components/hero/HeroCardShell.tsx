@@ -16,6 +16,7 @@
  */
 
 import { type ReactNode } from "react";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { InfoChip, Eyebrow } from "../shared";
 
@@ -30,13 +31,13 @@ export function HeroCardShell({
 	children: ReactNode;
 }) {
 	return (
-		<div className="bg-card surface-card border border-border rounded-md p-4 flex flex-col gap-1.5">
+		<Card pad="md" className="flex flex-col gap-1.5">
 			<Eyebrow>
 				{label}
 				<InfoChip tip={tip} />
 			</Eyebrow>
 			{children}
-		</div>
+		</Card>
 	);
 }
 
