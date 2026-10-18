@@ -409,7 +409,7 @@ export default function SendWithRowDialog({
 								// is visibly shorter than Send and Load Test on either side
 								// of it, and it only shows up once a collection's data file
 								// is bound, which is why it survived unnoticed.
-								"h-control px-2 inline-flex items-center shrink-0",
+								"h-control min-w-target px-2 inline-flex items-center shrink-0",
 								// Send's own fill and border - this is Send's caret, not a
 								// control beside it - with the shared edge transparent so the
 								// two do not draw a 2px line between them.

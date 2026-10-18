@@ -850,13 +850,15 @@ export default function McpSettingsPanel() {
 										className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
 									>
 										{host}
-										<button
+										<Button
+											size="icon"
+											variant="rowActionDestructive"
+											className="-my-1"
 											onClick={() => removeHost(host)}
-											className="rounded-md p-0.5 hover:bg-destructive/10 hover:text-destructive-text transition-colors"
 											aria-label={`Remove ${host}`}
 										>
 											<X className="size-icon-sm" />
-										</button>
+										</Button>
 									</span>
 								))}
 							</div>

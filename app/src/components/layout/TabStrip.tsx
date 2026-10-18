@@ -332,7 +332,7 @@ export function TabStrip() {
 				// (tab-focus.ts), the way the tree's hidden controls are reached.
 				data-tab-new
 				style={{ width: TAB_NEW_BUTTON_WIDTH }}
-				className="group flex shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
+				className="group flex h-full min-w-target shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground active:scale-[0.98]"
 			>
 				<Plus className="size-icon-sm" data-icon-motion={ICON_MOTION.rotate90} />
 			</button>

@@ -605,7 +605,7 @@ function ExplorerRow({
 					tabIndex={-1}
 					aria-label={`Show ${node.name} in the tree`}
 					onClick={() => onReveal(reveal)}
-					className="shrink-0 self-stretch flex items-center text-muted-foreground"
+					className="-mx-1.5 flex min-h-target min-w-target shrink-0 items-center justify-center self-stretch text-muted-foreground"
 				>
 					<ListTree className="size-icon-sm" />
 				</button>
@@ -616,7 +616,7 @@ function ExplorerRow({
 					tabIndex={-1}
 					aria-hidden="true"
 					onClick={onToggle}
-					className="shrink-0 self-stretch flex items-center text-muted-foreground"
+					className="-mx-1.5 flex min-h-target min-w-target shrink-0 items-center justify-center self-stretch text-muted-foreground"
 				>
 					{expanded ? (
 						<ChevronDown className="size-icon-sm" />

@@ -1363,15 +1363,27 @@ glyph step is 12-16px, and on a `Button` it replaces `size-target`. A glyph
 passed in an `icon={...}` prop or a `[&_svg]:size-icon-sm` descendant is not the
 box; a small visible dot keeps its size and states the floor as an
 `after:size-target` hit area, as `InfoChip` and `TabItem`'s close button do. It
-also flags a bare `h-8` on those tags (#1912): 24px clears the floor, but it is
-the pre-density literal a control no longer states (`w-8` and `size-8` are
-fine). The one place `h-8` stays is a single-line drawer row (see "Drawer Row
-Metric" below): those are `<div>`s outside the tag set, plus the Settings
+also flags a bare `h-8` or `h-9` on those tags (#1912, #2304): `h-8` is 24px and
+clears the floor, but it is the pre-density literal a control no longer states;
+`h-9` is the 27px `Button` default `h-control` replaced, and a `SelectTrigger`
+carrying it sits proud of the `Input` beside it (`w-8` and `size-8` are fine).
+A third rule is about shape, not a number (#2304): **a plain `<button>` whose
+only content is a lucide glyph states a 24px box on its own `className`**, since
+otherwise it is as wide as the 12px or 16px glyph. The accepted statements are
+`size-target`, an `after:size-target` hit area, or one height token (`h-target`,
+`min-h-target`, `h-control*`, `h-band*`, `h-full`) beside one width token
+(`w-target`, `min-w-target`, `w-full`); an `sr-only` label or a ternary between
+two glyphs still counts as glyph-only. Use `Button size="icon"` or
+`TooltipIconButton` where the control is a real button; the tree's in-row
+chevron and reveal controls keep their 12px glyph and take `-mx-1.5
+min-w-target` so the hit box grows without moving the label. A box that arrives
+in a variable is invisible to the scan, so state it inline. The one place `h-8`
+stays is a single-line drawer row (see "Drawer Row Metric" below): those are `<div>`s outside the tag set, plus the Settings
 drawer's category rows, which are hand-rolled `<button>`s. The test counts them
-per file in `DRAWER_ROW_BUTTONS` (one tag in `SettingsCategoryTree.tsx`): a
-further `h-8` in that file is an offence, and an entry that stops matching
-exactly that many tags fails the test. A compact text button or select trigger
-states `h-control-sm`, an icon button `size-target`, or `size-control-sm` when
+per file in `DRAWER_ROW_BUTTONS` (one tag in `SettingsCategoryTree.tsx`; the
+exemption covers `h-8` only, never `h-9`): a further `h-8` in that file is an
+offence, and an entry that stops matching exactly that many tags fails the test.
+A compact text button or select trigger states `h-control-sm`, an icon button `size-target`, or `size-control-sm` when
 it sits beside a `control-sm` field and has to span it (the variables table's
 row buttons, the popover's reveal eye; `lib/utils.ts` teaches `cn()` that it
 replaces `size-target`). The text fields are scanned too, by a rule of their own
