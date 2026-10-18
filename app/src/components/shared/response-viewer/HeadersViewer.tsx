@@ -57,9 +57,10 @@ import type { HeadersViewerProps } from "./types";
  * otherwise exactly as received. Runs rather than the whole value, because a
  * `Set-Cookie` holds its `Expires=` date among other attributes; they are the
  * Raw tab's own runs (`proseTimeRuns`), so the table and the raw exchange mark
- * the same times.
+ * the same times. Exported for the Cookies tab, which shows each `Set-Cookie`
+ * attribute on its own and so needs the same `Expires=` treatment.
  */
-function HeaderValue({ value }: { value: string }) {
+export function HeaderValue({ value }: { value: string }) {
 	const parts: ReactNode[] = [];
 	let cursor = 0;
 	for (const run of proseTimeRuns(value)) {

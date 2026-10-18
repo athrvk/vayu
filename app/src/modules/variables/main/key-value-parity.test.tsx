@@ -289,10 +289,16 @@ describe("row-enable checkbox - the rest of the control", () => {
 		const boxSize = (el: Element) =>
 			String(el.className)
 				.split(/\s+/)
-				.filter((c) => /^[hw]-\d/.test(c))
+				.filter((c) => /^(?:[hw]|size)-/.test(c))
 				.sort()
 				.join(" ");
-		expect(boxSize(renderVariablesCheckbox(true))).toBe(boxSize(renderKeyValueCheckbox()));
+		// Both are asserted non-empty: a filter that matches neither table's
+		// class reduces both sides to "" and "" === "" compares nothing.
+		const variables = boxSize(renderVariablesCheckbox(true));
+		const keyValue = boxSize(renderKeyValueCheckbox());
+		expect(variables).not.toBe("");
+		expect(keyValue).not.toBe("");
+		expect(variables).toBe(keyValue);
 	});
 
 	it("paints in an app colour in both tables, never the browser default", () => {

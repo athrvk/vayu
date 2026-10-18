@@ -92,6 +92,19 @@ describe("time-surfaces: no surface formats a time itself", () => {
 	});
 });
 
+describe("time-surfaces: a surface that shows API times marks them", () => {
+	// The scan above cannot see a time shown unformatted, so the surfaces that
+	// hold one by name are pinned: the Cookies tab lists each `Set-Cookie`
+	// attribute on its own, an `Expires=` date among them (#2316).
+	const MARKED = ["modules/request-builder/components/ResponseViewer/ResponseCookies.tsx"];
+
+	it.each(MARKED)("%s renders its values through HeaderValue or TimeValue", (file) => {
+		const source = sources.find((s) => s.file === file);
+		expect(source?.code.length).toBeGreaterThan(0);
+		expect(source?.code).toMatch(/<(?:HeaderValue|TimeValue)\b/);
+	});
+});
+
 describe("time-surfaces: no editor opts out of the time card", () => {
 	const codeEditor = join(srcRoot, "components/ui/code-editor.tsx");
 

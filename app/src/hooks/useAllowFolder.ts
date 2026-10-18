@@ -19,6 +19,7 @@
  */
 
 import { useCallback } from "react";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { useCreateFileRootMutation } from "@/queries";
 import { ApiError } from "@/services/http-client";
 import { useToastStore } from "@/stores";
@@ -50,9 +51,7 @@ export function useAllowFolder(): AllowFolder {
 					return true;
 				}
 				const detail =
-					error instanceof ApiError && error.message
-						? error.message
-						: "The engine didn't answer.";
+					error instanceof ApiError && error.message ? error.message : ENGINE_NO_ANSWER;
 				showToast(`Couldn't allow ${path}: ${detail}`, "error");
 				return false;
 			}

@@ -245,8 +245,15 @@ export default function SpecTab({ collection }: SpecTabProps) {
 				path: window.electronAPI?.getFilePath(file) ?? "",
 			});
 		};
-		reader.onerror = () =>
-			setPickError({ title: "Couldn't read that file", message: "Couldn't read that file." });
+		reader.onerror = () => {
+			const reason = reader.error?.message;
+			setPickError({
+				title: "Couldn't read that file",
+				message: reason
+					? `The browser said: ${reason.replace(/\.$/, "")}. Pick the file again.`
+					: "Pick the file again.",
+			});
+		};
 		reader.readAsText(file);
 	};
 

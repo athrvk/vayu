@@ -1034,9 +1034,7 @@ export function ImportModal() {
 				aria-describedby={undefined}
 			>
 				<DialogHeader className="flex-row items-center justify-between space-y-0 border-b border-rule px-5 py-4">
-					<DialogTitle className="text-sm font-bold tracking-tight">
-						Import collection
-					</DialogTitle>
+					<DialogTitle>Import collection</DialogTitle>
 				</DialogHeader>
 
 				{/*

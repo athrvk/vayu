@@ -753,9 +753,7 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 		<div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
 			{row && (
 				<>
-					<Eyebrow size="xs" className="text-subtle-foreground">
-						bound data row
-					</Eyebrow>
+					<Eyebrow size="xs">bound data row</Eyebrow>
 					<OriginRow origin={row} beaten={false} />
 				</>
 			)}
@@ -765,9 +763,7 @@ function ShadowedBy({ origins }: { origins?: VariableOrigin[] }) {
 			 * and an off definition is not shadowed by anything. The row block above
 			 * already says which answer wins.
 			 */}
-			<Eyebrow size="xs" className="text-subtle-foreground">
-				also defined
-			</Eyebrow>
+			<Eyebrow size="xs">also defined</Eyebrow>
 			{others.map((o, i) => (
 				<OriginRow key={`${o.scope}-${o.sourceId ?? "global"}-${i}`} origin={o} beaten />
 			))}

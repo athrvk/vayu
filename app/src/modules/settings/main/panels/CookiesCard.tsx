@@ -33,6 +33,7 @@ import {
 	CardTitle,
 	DeleteConfirmDialog,
 } from "@/components/ui";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useCookiesQuery, useClearCookiesMutation, useEnvironmentsQuery } from "@/queries";
@@ -111,7 +112,8 @@ export function CookiesCard() {
 			<CardContent className="space-y-4">
 				{isError ? (
 					<p className="text-sm text-muted-foreground">
-						The engine did not answer, so what it is holding is unknown.
+						{ENGINE_NO_ANSWER} What the jar holds is unknown until Vayu's engine
+						answers.
 					</p>
 				) : isLoading ? null : total === 0 ? (
 					<p className="text-sm text-muted-foreground">No cookies stored.</p>

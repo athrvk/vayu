@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 import { withQueryClient } from "@/test/query-wrapper";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import type {
 	Collection,
 	PostmanExportNotes,
@@ -293,5 +294,13 @@ describe("ExportPostmanDialog", () => {
 			true
 		);
 		expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("disabled")).toBe(true);
+	});
+
+	it("names Vayu's engine and a next step when the failure carries no sentence", async () => {
+		exportPostman.mockRejectedValue(new Error(""));
+		open();
+
+		expect(await screen.findByText("Couldn't assemble the collection")).toBeTruthy();
+		expect(screen.getByText(new RegExp(ENGINE_NO_ANSWER))).toBeTruthy();
 	});
 });

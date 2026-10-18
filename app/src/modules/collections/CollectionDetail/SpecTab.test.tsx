@@ -25,7 +25,7 @@
  *    the file is; its contents live on the engine, hashed there.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { useSpecFileStore } from "@/stores";
@@ -697,4 +697,49 @@ describe("a bound collection", () => {
 	 * there is no half-applied state left to describe - a bind that failed
 	 * wrote nothing, and `SaveFailed` above says so like every other mutation.
 	 */
+});
+
+describe("a spec file the browser cannot read", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	/** A FileReader that fails the moment it is asked to read, with `error` set as the browser would. */
+	function stubFailingReader(error: { message: string } | null) {
+		class FailingReader {
+			error = error;
+			onerror: (() => void) | null = null;
+			readAsText() {
+				queueMicrotask(() => this.onerror?.());
+			}
+		}
+		vi.stubGlobal("FileReader", FailingReader);
+	}
+
+	async function pickUnreadableFile() {
+		render(<SpecTab collection={collection()} />);
+		const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+		fireEvent.change(input, { target: { files: [new File(["x"], "petstore.json")] } });
+		return screen.findAllByText(/Couldn't read that file/);
+	}
+
+	it("says what the browser reported and what to do, with the title once", async () => {
+		stubFailingReader({ message: "The requested file could not be found" });
+
+		const found = await pickUnreadableFile();
+
+		expect(found).toHaveLength(1);
+		expect(found[0].closest("div")?.textContent).toContain(
+			"The browser said: The requested file could not be found. Pick the file again."
+		);
+	});
+
+	it("falls back to the next step alone when the browser gave no reason", async () => {
+		stubFailingReader(null);
+
+		const found = await pickUnreadableFile();
+
+		expect(found).toHaveLength(1);
+		const text = found[0].closest("div")?.textContent ?? "";
+		expect(text).toContain("Pick the file again.");
+		expect(text).not.toContain("The browser said");
+	});
 });

@@ -35,12 +35,16 @@
  * Electron mirror, and that absence is asserted rather than left to be noticed:
  * nothing the main process draws is that tall, so a constant there would be one
  * more value written and never read.
+ *
+ * The same band token has a JS-side twin: `GRAPHQL_PANE_HEADER_HEIGHT`, the
+ * Variables pane's `collapsedSize`, which cannot read a CSS variable (#2316).
  */
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { GRAPHQL_PANE_HEADER_HEIGHT } from "@/constants/layout";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Read from disk rather than importing: vitest stubs CSS to "", and electron/
@@ -165,6 +169,17 @@ describe("title bar height", () => {
 		expect(tabStrip).toContain("h-[var(--tabstrip-height)]");
 		expect(drawerPanel).toContain("h-[var(--tabstrip-height)]");
 		expect(drawerPanel).not.toMatch(/className="flex h-10\b/);
+	});
+
+	it("holds the GraphQL pane header's JS height to the band token", () => {
+		// The Variables pane collapses to its header, so `collapsedSize` (a JS prop
+		// that cannot read a CSS variable) and the header's `h-band` have to be one
+		// number. `--spacing-band` is declared once and does not follow density.
+		const declarations = [...css.matchAll(/--spacing-band:\s*(\d+)px;/g)].map((m) =>
+			Number(m[1])
+		);
+		expect(declarations).toHaveLength(1);
+		expect(GRAPHQL_PANE_HEADER_HEIGHT).toBe(declarations[0]);
 	});
 
 	it("reserves the same inset in both files", () => {

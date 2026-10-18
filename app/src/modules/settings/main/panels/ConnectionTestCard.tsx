@@ -39,6 +39,7 @@ import {
 	Input,
 	Label,
 } from "@/components/ui";
+import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { apiService } from "@/services/api";
 import type { ConnectionTestOutcome, ConnectionTestResult } from "@/types";
 import { cn } from "@/lib/utils";
@@ -115,9 +116,7 @@ export function ConnectionTestCard() {
 			// Distinct from a failed connection, which comes back as a result:
 			// this is the test itself not happening, and telling the user their
 			// proxy is broken would be a lie.
-			setFailure(
-				error instanceof Error ? error.message : "The engine did not answer the test"
-			);
+			setFailure(error instanceof Error && error.message ? error.message : ENGINE_NO_ANSWER);
 		} finally {
 			setTesting(false);
 		}

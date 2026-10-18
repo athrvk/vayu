@@ -503,7 +503,7 @@ export default function HistoryList() {
 									 * runs said nothing after the first row) - see
 									 * `group-runs-by-day.ts`.
 									 */}
-									<Eyebrow className="px-1 pt-1 text-subtle-foreground first:pt-0">
+									<Eyebrow className="px-1 pt-1 first:pt-0">
 										{group.label}
 									</Eyebrow>
 									{group.runs.map((run) => (

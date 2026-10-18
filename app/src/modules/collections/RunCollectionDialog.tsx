@@ -811,7 +811,7 @@ export default function RunCollectionDialog({
 
 					{writer.isError && (
 						<Callout severity="warning" title="Couldn't update the data contract">
-							{writer.error?.message ?? "The engine did not accept the change."}
+							{writer.error?.message ?? "Vayu's engine didn't accept the change."}
 							<span className="block">
 								The run is unaffected. Pick the file again to retry.
 							</span>
@@ -834,7 +834,9 @@ export default function RunCollectionDialog({
 
 					{error && (
 						<Callout severity="blocking" title="Couldn't start the run">
-							{error instanceof Error ? error.message : "The engine refused it."}
+							{error instanceof Error
+								? error.message
+								: "Vayu's engine refused the run and gave no reason. Try again, or restart Vayu."}
 						</Callout>
 					)}
 				</DialogBody>

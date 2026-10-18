@@ -207,8 +207,9 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   `TooltipContent` paints `bg-primary-fill`, where the canvas-tuned
   `--muted-foreground` measures 1.04-2.27:1, a disappearance rather than a
   de-emphasis. Secondary lines use the `TooltipHint` primitive, which holds the
-  one tint. → `tooltip-hint-contrast.test.ts` (ratios per scheme, plus a scan of
-  every tooltip block in `src`), `tooltip-icon-button.test.tsx` (the rendered
+  one tint, and a tooltip block writes no `opacity-N` of its own.
+  → `tooltip-hint-contrast.test.ts` (ratios per scheme, plus a scan of every
+  tooltip block in `src`), `tooltip-icon-button.test.tsx` (the rendered
   class, which the scan cannot see)
 - **A tooltip's value and the hint sourcing it stack; they never share a flex
   row.** `TooltipContent` is capped at `max-w-xs`, a `break-all` value has a
@@ -242,6 +243,12 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   means adding it there, with its reason, and raising the ceiling (#1282).
   → `focus-indicator.test.ts`, `icon-button-labels.test.tsx`,
   `a11y-suppressions.test.ts`, plus the lint itself
+- **UI text follows `docs/ux-writing.md`'s voice and case rules**: no "Failed
+  to" / "Could not" / "Please" opener, no exclamation mark, sentence case on
+  every label surface. The scan reads every string through
+  `lib/ui-strings.testkit.ts` (logs, comments, tests and `electron/mcp/**` left
+  out); a breach an open issue owns goes in its `KNOWN_BREACHES` with that
+  number, and the fix deletes the entry. → `voice-casing.test.ts`
 
 ## Borders: what a rule sits _on_, never what it is
 
