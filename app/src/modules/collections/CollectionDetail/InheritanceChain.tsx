@@ -16,12 +16,12 @@
  *   - The nearest ancestor (inclusive of this collection) that defines auth is
  *     the resolved source, unless an ancestor explicitly set to No Auth
  *     (`noauth`) blocks inheriting first - see `resolveAuthSource`.
- *   - The current collection is tagged THIS.
+ *   - The current collection is tagged This.
  *   - If a request explicitly overrides auth, that's noted in the row.
  */
 
 import { Folder } from "lucide-react";
-import { Eyebrow } from "@/components/ui";
+import { Badge, Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,9 @@ interface InheritanceChainProps {
 	/** The Auth tab's live draft, when one is open and dirty - see `withDraftAuth`. */
 	draftAuth?: Collection["auth"];
 }
+
+/** The "This" / "Source" tag beside a row. `chip` leaves the fill to the caller, with no hover. */
+const TAG_CLASS = "text-micro bg-primary/10 text-primary px-1.5 py-px shrink-0";
 
 /**
  * The auth *type*, never its value.
@@ -123,14 +126,14 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 						</span>
 
 						{isThis && (
-							<span className="text-micro font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
-								THIS
-							</span>
+							<Badge variant="chip" className={TAG_CLASS}>
+								This
+							</Badge>
 						)}
 						{isSource && !isThis && (
-							<span className="text-micro font-semibold bg-primary/10 text-primary px-1.5 py-px rounded-sm shrink-0">
-								SOURCE
-							</span>
+							<Badge variant="chip" className={TAG_CLASS}>
+								Source
+							</Badge>
 						)}
 					</div>
 				);

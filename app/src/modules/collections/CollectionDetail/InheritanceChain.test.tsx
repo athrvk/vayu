@@ -119,7 +119,7 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="leaf" />);
 
-		expect(screen.queryByText("SOURCE")).not.toBeInTheDocument();
+		expect(screen.queryByText("Source")).not.toBeInTheDocument();
 		expect(
 			screen.getByText(/is set to No Auth, so requests below it inherit nothing/)
 		).toBeInTheDocument();
@@ -137,8 +137,19 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="leaf" />);
 
-		expect(screen.getByText("SOURCE")).toBeInTheDocument();
-		expect(screen.getByText("THIS")).toBeInTheDocument();
+		expect(screen.getByText("Source")).toBeInTheDocument();
+		expect(screen.getByText("This")).toBeInTheDocument();
+	});
+
+	it("draws the tags as chip badges, in the casing the guide sets", () => {
+		chain.length = 0;
+		chain.push(collection("root", "Acme", { mode: "bearer", token: "t" }));
+
+		render(<InheritanceChain collectionId="root" />);
+
+		const tag = screen.getByText("This");
+		expect(tag.getAttribute("data-slot")).toBe("badge");
+		expect(tag.className).not.toMatch(/hover:bg-/);
 	});
 
 	it("shows the tab's unsaved pick instead of the stored mode while it is dirty (#1483)", () => {
@@ -154,7 +165,7 @@ describe("InheritanceChain", () => {
 		render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "noauth" }} />);
 
 		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
-		expect(screen.queryByText("SOURCE")).not.toBeInTheDocument();
+		expect(screen.queryByText("Source")).not.toBeInTheDocument();
 		// Names Payments (the leaf) as the blocker, which only happens once its
 		// row reads the draft's noauth rather than its stored bearer token.
 		expect(
