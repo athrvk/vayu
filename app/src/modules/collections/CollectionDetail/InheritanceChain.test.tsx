@@ -22,7 +22,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { Collection } from "@/types";
+import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import type { AuthMode, Collection } from "@/types";
 import InheritanceChain from "./InheritanceChain";
 
 const chain: Collection[] = [];
@@ -83,6 +84,26 @@ describe("InheritanceChain", () => {
 		expect(screen.getByText("API Key")).toBeInTheDocument();
 		expect(screen.queryByText(/svc-account-with-a-long-name/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/X-Acme-Very-Long-Header-Name/)).not.toBeInTheDocument();
+	});
+
+	it("names every mode a collection can hold from the registry", () => {
+		// `inherit` is a request-only mode; a collection is always a source.
+		const modes = (Object.keys(AUTH_MODE_LABELS) as AuthMode[]).filter(
+			(mode) => mode !== "inherit"
+		);
+		expect(modes.length).toBeGreaterThan(0);
+
+		for (const mode of modes) {
+			chain.length = 0;
+			chain.push(collection("only", "Solo", { mode } as Collection["auth"]));
+
+			const { container, unmount } = render(<InheritanceChain collectionId="only" />);
+
+			// The mode cell is the row's one `shrink-0` mono span that is not a badge.
+			const cell = container.querySelector("span.font-mono.shrink-0");
+			expect(cell?.textContent, mode).toBe(AUTH_MODE_LABELS[mode]);
+			unmount();
+		}
 	});
 
 	it("marks no source, and says why, when an ancestor blocks inheriting", () => {
