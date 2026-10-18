@@ -94,6 +94,13 @@ function VariableRow({
 	 * never the row, so the value cannot ride along.
 	 */
 	const referenceScope = !variable.secret && !variable.isNew && variable.key ? scope : null;
+	/*
+	 * Every control in the row is named by the variable it edits, with a
+	 * generic fallback for the unnamed blank row: a screen reader walking the
+	 * table otherwise hears a column of identical anonymous controls. A
+	 * placeholder is not a name (#2284).
+	 */
+	const valueLabel = variable.key ? `Value of ${variable.key}` : "Variable value";
 
 	return (
 		/*
@@ -127,6 +134,7 @@ function VariableRow({
 					}}
 					className={cn("size-icon", checkboxColor)}
 					disabled={variable.isNew && !variable.key}
+					aria-label={variable.key ? `Enable ${variable.key}` : "Enable this row"}
 				/>
 			</td>
 			<td className="py-1 px-2">
@@ -137,6 +145,7 @@ function VariableRow({
 					onChange={(e) => onUpdate(variable.id, "key", e.target.value)}
 					onBlur={onBlur}
 					placeholder="variable_name"
+					aria-label="Variable name"
 					className={cn(
 						"text-primary",
 						!variable.enabled && !variable.isNew && "text-muted-foreground bg-muted"
@@ -163,6 +172,7 @@ function VariableRow({
 						onChange={(v) => onUpdate(variable.id, "value", v)}
 						onBlur={onBlur}
 						placeholder="value"
+						aria-label={valueLabel}
 						className={cn(!variable.enabled && "text-muted-foreground bg-muted")}
 					/>
 				) : (
@@ -176,6 +186,7 @@ function VariableRow({
 							onChange={(e) => onUpdate(variable.id, "value", e.target.value)}
 							onBlur={onBlur}
 							placeholder="value"
+							aria-label={valueLabel}
 							className={cn(
 								!variable.enabled &&
 									!variable.isNew &&
@@ -205,6 +216,7 @@ function VariableRow({
 					}}
 				>
 					<SelectTrigger
+						aria-label={variable.key ? `Type of ${variable.key}` : "Variable type"}
 						className={cn(
 							"h-control-sm text-xs px-2",
 							!variable.enabled && !variable.isNew && "opacity-60"
@@ -294,7 +306,7 @@ function VariableRow({
 							variant="rowActionDestructive"
 							size="icon"
 							onClick={() => onRemove(variable.id)}
-							aria-label="Delete variable"
+							aria-label={variable.key ? `Delete ${variable.key}` : "Delete variable"}
 							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						>
 							<Trash2 className="size-icon" />
