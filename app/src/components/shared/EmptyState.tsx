@@ -55,8 +55,13 @@ interface EmptyStateBaseProps {
 
 interface PaneEmptyStateProps extends EmptyStateBaseProps {
 	variant?: "pane";
-	/** What to do about it. One sentence, with a period. */
-	description?: string;
+	/**
+	 * What to do about it. One sentence, with a period. It renders inside a
+	 * `<p>`, so a node here is phrasing content only (text, `Kbd`, `span`): a
+	 * `div` would be invalid HTML. The response pane's "Press ⌘ ↵ or click
+	 * Send" is the one caller that passes more than a string.
+	 */
+	description?: ReactNode;
 	/** Decorative, so it is hidden from assistive tech. */
 	icon?: LucideIcon;
 	/**
@@ -92,6 +97,7 @@ export function EmptyState({
 	if (variant === "inline") {
 		return (
 			<div
+				data-slot="empty-state"
 				className={cn(
 					"enter-fade p-8 text-center text-sm text-muted-foreground",
 					className
@@ -105,6 +111,7 @@ export function EmptyState({
 
 	return (
 		<div
+			data-slot="empty-state"
 			className={cn(
 				// `flex-1` so it fills a flex column parent; `min-h-0` so it can
 				// shrink inside one rather than forcing the parent to scroll.

@@ -28,6 +28,33 @@ describe("EmptyState", () => {
 		expect(screen.getByRole("button", { name: "Add one" })).toBeInTheDocument();
 	});
 
+	it("takes a node as the pane description, inside one paragraph", () => {
+		// The response pane's "Press ⌘ ↵ or click Send" is keys, not a string.
+		// A <p> may only hold phrasing content, so the node must not bring a block
+		// element into it and the pane still has exactly title + description.
+		const { container } = render(
+			<EmptyState
+				title="No response yet"
+				description={
+					<span>
+						Press <kbd>Ctrl</kbd> or click Send.
+					</span>
+				}
+			/>
+		);
+		const paragraphs = container.querySelectorAll("p");
+		expect(paragraphs).toHaveLength(2);
+		expect(paragraphs[1].querySelector("kbd")).toHaveTextContent("Ctrl");
+		expect(paragraphs[1].querySelector("div")).toBeNull();
+	});
+
+	it("marks both variants so a caller can find the primitive", () => {
+		const { container, rerender } = render(<EmptyState title="Pane" />);
+		expect(container.querySelector('[data-slot="empty-state"]')).toHaveTextContent("Pane");
+		rerender(<EmptyState variant="inline" title="Line" />);
+		expect(container.querySelector('[data-slot="empty-state"]')).toHaveTextContent("Line");
+	});
+
 	it("draws the icon without announcing it", () => {
 		const { container } = render(<EmptyState icon={Inbox} title="No collections yet" />);
 		// Decorative: the title already says what the icon says, so it must not

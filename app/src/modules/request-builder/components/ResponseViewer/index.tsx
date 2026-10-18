@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { BookmarkPlus, Loader2 } from "lucide-react";
+import { BookmarkPlus, Loader2, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
 	Tabs,
@@ -314,33 +314,20 @@ export default function ResponseViewer() {
 	// Empty state
 	if (!shown) {
 		return (
-			<div className="flex-1 flex items-center justify-center bg-panel">
-				<div className="flex flex-col items-center text-center">
-					<svg
-						width="64"
-						height="64"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="1.5"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						className="text-primary mb-5"
-					>
-						<line x1="22" y1="2" x2="11" y2="13" />
-						<polygon points="22 2 15 22 11 13 2 9 22 2" />
-					</svg>
-
-					<p className="text-md font-medium text-foreground mb-1.5">No response yet</p>
-					<div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+			<EmptyState
+				className="bg-panel"
+				icon={Send}
+				title="No response yet"
+				description={
+					<span className="inline-flex items-center justify-center gap-1.5">
 						<span>Press</span>
 						{chordKeys(SEND_CHORD).map((cap) => (
 							<Kbd key={cap}>{cap}</Kbd>
 						))}
-						<span>or click Send</span>
-					</div>
-				</div>
-			</div>
+						<span>or click Send.</span>
+					</span>
+				}
+			/>
 		);
 	}
 

@@ -3025,7 +3025,7 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 
 | State | Component | Notes |
 |-------|-----------|-------|
-| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` |
+| Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title`. A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320) |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
