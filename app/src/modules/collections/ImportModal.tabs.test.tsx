@@ -328,7 +328,9 @@ describe("a toggle supersedes the re-parse already running", () => {
 
 		second.resolve();
 		await waitFor(() =>
-			expect(screen.getByText("0 requests · 0 folders · 0 examples")).toBeInTheDocument()
+			expect(
+				screen.getByText("0 requests · 0 nested collections · 0 examples")
+			).toBeInTheDocument()
 		);
 
 		// The loser lands last. Sharing one generation, its patch passes
@@ -341,7 +343,9 @@ describe("a toggle supersedes the re-parse already running", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 		});
 
-		expect(screen.getByText("0 requests · 0 folders · 0 examples")).toBeInTheDocument();
+		expect(
+			screen.getByText("0 requests · 0 nested collections · 0 examples")
+		).toBeInTheDocument();
 		expect(screen.queryByText("1 environment")).not.toBeInTheDocument();
 	});
 

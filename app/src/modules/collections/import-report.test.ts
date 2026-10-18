@@ -17,8 +17,14 @@ function report(overrides: Partial<ImportReport> = {}): ImportReport {
 describe("importToastMessage", () => {
 	it("names the collection with the counts it arrived with", () => {
 		expect(importToastMessage([report()])).toBe(
-			'Imported "Pet Store" - 60 requests, 4 folders.'
+			'Imported "Pet Store" - 60 requests, 4 nested collections.'
 		);
+	});
+
+	it("never calls a nested collection a folder", () => {
+		const message = importToastMessage([report()]);
+		expect(message).toContain("nested collection");
+		expect(message).not.toMatch(/folder/i);
 	});
 
 	it("uses the singular and leaves out what the file did not carry", () => {
@@ -45,7 +51,7 @@ describe("importToastMessage", () => {
 			fileNeeds: { folders: [{ folder: "/f", count: 1 }], bodiesWithoutFile: 2 },
 		});
 		expect(importToastMessage([lossy])).toBe(
-			'Imported "Pet Store" - 60 requests, 4 folders; 4 things to finish.'
+			'Imported "Pet Store" - 60 requests, 4 nested collections; 4 things to finish.'
 		);
 	});
 
@@ -59,7 +65,7 @@ describe("importToastMessage", () => {
 	it("joins what became of the active environment to the same sentence", () => {
 		const lossy = report({ notices: [{ tier: "action", text: "a" }] });
 		expect(importToastMessage([lossy], { kind: "activated", name: "Staging" })).toBe(
-			'Imported "Pet Store" - 60 requests, 4 folders; 1 thing to finish; "Staging" is now the active environment.'
+			'Imported "Pet Store" - 60 requests, 4 nested collections; 1 thing to finish; "Staging" is now the active environment.'
 		);
 	});
 

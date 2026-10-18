@@ -37,7 +37,7 @@ function renderModal() {
 	);
 }
 
-const POSTMAN_FILE_LINE = "1 request · 3 folders · 0 examples";
+const POSTMAN_FILE_LINE = "1 request · 3 nested collections · 0 examples";
 
 function stubPostmanFile() {
 	stubParse(() =>

@@ -228,7 +228,12 @@ function ExportSummary({
 			</p>
 			<ul className="text-label text-muted-foreground space-y-0.5">
 				<Line always count={notes.requestsExported} label="request" suffix="exported" />
-				<Line always count={notes.foldersExported} label="folder" suffix="exported" />
+				<Line
+					always
+					count={notes.foldersExported}
+					label="nested collection"
+					suffix="exported"
+				/>
 				{!includeSecrets && (
 					<Line count={notes.secretsOmitted} label="secret" suffix="written empty" />
 				)}
