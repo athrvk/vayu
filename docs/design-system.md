@@ -943,7 +943,10 @@ primitive, which holds the one tint; the same argument `surface-sunken` makes
 for its `--rule`, on a filled surface instead of a raised one. The hint cannot
 out-read the label it is secondary to - white on `sunset` is the ceiling at
 3.6:1 - so the bar is 2.5:1 on every scheme, checked in
-`tooltip-hint-contrast.test.ts`.
+`tooltip-hint-contrast.test.ts`. The same file bans an `opacity-N` or a
+hand-written `text-primary-foreground/N` inside a `TooltipContent`: white at
+`opacity-70` on the fill is 2.50:1 on `sunset`, under the bar, and a second
+alpha is a second unmeasured tint.
 
 **A value and the hint that sources it stack; they never share a flex row.**
 `TooltipContent` is capped at `max-w-xs`, a value that wraps on `break-all` has
