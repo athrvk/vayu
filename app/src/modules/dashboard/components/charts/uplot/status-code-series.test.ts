@@ -56,6 +56,7 @@ const CHART_FILES = [
 	"ScatterAndDistribution.tsx",
 	"CustomMetricsChart.tsx",
 	"RunTrendCharts.tsx",
+	"legend.ts",
 ];
 
 describe("chart series colours", () => {
@@ -134,6 +135,20 @@ describe("chart series colours", () => {
 		// And that those are the same tokens the badges and tiles use.
 		expect(ROLE_TOKEN["status-redirect"]).toBe(STATUS_CLASS_CSS_VAR.redirect);
 		expect(ROLE_TOKEN["status-no-response"]).toBe(STATUS_CLASS_CSS_VAR["no-response"]);
+	});
+
+	/**
+	 * A legend is `ChartLegend`, built from the series' roles (#2311). The
+	 * swatches in `MetricsView` were hand-written `hsl(var(--primary))` and kin,
+	 * which is how nine of them came to disagree with the series they labelled;
+	 * `MetricsView.legend.test.tsx` checks the rendered result, and this catches
+	 * the literal coming back before a render would reach it.
+	 */
+	it("leaves no hand-written series colour in the dashboard's legends", () => {
+		const view = read("../../MetricsView.tsx").replace(/\/\*[\s\S]*?\*\//g, "");
+		// An empty read would pass the assertion below having scanned nothing.
+		expect(view).toContain("<ChartLegend");
+		expect(view).not.toMatch(/hsl\(var\(--(?:primary|success|warning|destructive)\b/);
 	});
 
 	it("resolves the categorical role to a token that does not follow the accent", () => {

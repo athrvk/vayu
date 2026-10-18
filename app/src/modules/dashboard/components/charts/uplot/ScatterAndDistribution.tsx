@@ -18,6 +18,7 @@ import { type Breakpoint } from "../../../utils/computeBreakpoint";
 import { formatConcurrency } from "@/constants/load-test-modes";
 import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
+import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
 import { axisMs, fmtMs } from "./formatters";
 import { hdrPercentileMarkers, pctToX } from "./hdrMarkers";
@@ -55,10 +56,12 @@ export function ResponseTimeVsConcurrencyChart({
 	}, [history, bucketSeconds]);
 
 	const series: UPlotSeriesSpec[] = [
-		// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
-		// so this series changed hue per scheme and could land on a neighbouring
-		// semantic one. On `forest` the accent is 3% lightness from `--success`.
-		{ label: "p99", role: "categorical", kind: "scatter", format: fmtMs },
+		{
+			label: SCATTER_LEGEND.p99.label,
+			role: SCATTER_LEGEND.p99.role,
+			kind: "scatter",
+			format: fmtMs,
+		},
 	];
 
 	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
@@ -67,7 +70,7 @@ export function ResponseTimeVsConcurrencyChart({
 			{
 				orient: "horizontal",
 				value: sloMs,
-				role: "subtle",
+				role: SCATTER_LEGEND.slo.role,
 				label: `SLO ${sloMs}ms`,
 			},
 		];
