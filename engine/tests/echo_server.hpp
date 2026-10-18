@@ -16,6 +16,7 @@
 
 #include <httplib.h>
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -86,6 +87,13 @@ class EchoServer {
             res.set_redirect (req.get_param_value ("to"), 302);
         });
 
+        // Every request, routed or not, so a test can say nothing arrived
+        // at all - not merely nothing at a route this server records.
+        svr_.set_pre_routing_handler ([this] (const httplib::Request&, httplib::Response&) {
+            requests_seen_.fetch_add (1);
+            return httplib::Server::HandlerResponse::Unhandled;
+        });
+
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();
@@ -104,6 +112,15 @@ class EchoServer {
 
     std::string url () const {
         return "http://127.0.0.1:" + std::to_string (port_) + "/echo";
+    }
+
+    int port () const {
+        return port_;
+    }
+
+    /// How many requests reached this server, on any path.
+    int requests_seen () const {
+        return requests_seen_.load ();
     }
 
     /// A URL this server answers with a redirect to @p location, which is
@@ -170,6 +187,7 @@ class EchoServer {
     httplib::Server svr_;
     std::thread thread_;
     int port_ = 0;
+    std::atomic<int> requests_seen_{ 0 };
     mutable std::mutex mutex_;
     std::string method_;
     std::string path_;

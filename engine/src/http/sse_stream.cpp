@@ -521,12 +521,14 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     }
 
     SseEndReason reason = SseEndReason::Completed;
-    if (result == CURLE_ABORTED_BY_CALLBACK ||
-    (result == CURLE_WRITE_ERROR && state.abort_reason)) {
+    if (state.abort_reason &&
+    (result == CURLE_ABORTED_BY_CALLBACK || result == CURLE_WRITE_ERROR)) {
         // Both spellings of "we ended it": the progress callback's abort and
         // the write callback's short return. Either way the transfer did what
         // it was asked to, so it is not an error - the reason says which rule.
-        reason = state.abort_reason.value_or (SseEndReason::Stopped);
+        // An abort with no reason is the transport's pre-request refusal
+        // (#2355), an error like any other.
+        reason = *state.abort_reason;
     } else if (result == CURLE_OPERATION_TIMEDOUT) {
         // The only timeout configured is the low-speed one, so this is silence
         // rather than a deadline on a healthy stream.

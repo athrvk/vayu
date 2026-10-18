@@ -808,6 +808,17 @@ logged as a warning: it means a client skipped composition.
   never a list of codes, consulted only after every mapping more specific than
   "the target failed the exchange". An unresolvable target host is
   `DnsError`, never `ConnectionFailed`.
+- **No transfer reaches Vayu's own ports** (#2355): `include/vayu/http/loopback_guard.hpp`
+  is the one predicate (loopback in any spelling, on the engine port the
+  daemon registers with the set-once `set_engine_port` before it listens, or on
+  `MCP_PORT`). It runs twice per transfer: `validate_transferable` refuses a URL
+  that names such a target, proxy or not, and `apply_transport_policy`'s
+  `CURLOPT_PREREQFUNCTION` (its one set site) refuses the address a connection
+  reached, which is what catches a redirect or a name resolving to loopback;
+  `curl_to_error` reports that abort as the same `InvalidUrl` sentence. A new
+  driver gets both by going through those two functions, never a check of
+  its own. Tests share one registered stand-in (`tests/engine_port_stand_in.hpp`)
+  because the registry is set once per process.
 - **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
   `openssl` feature with `default-features: false`. That does not make Windows
   a single-backend build: the port's `http2` feature depends on `curl[ssl]`,
