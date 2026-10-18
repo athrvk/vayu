@@ -29,6 +29,7 @@ import type { HostSleep } from "@/stores/host-sleep-store";
 import { runAnnotations } from "./annotations";
 import { joinMonitorToTimeline } from "../../../utils/monitorSeries";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
+import { THROUGHPUT_LEGEND, LATENCY_LEGEND, PERCENTILE_LEGEND } from "./legend";
 import {
 	bucketColumns,
 	rebucket,
@@ -105,13 +106,11 @@ export function LatencyPercentilesChart({
 			bucketSeconds
 		);
 		const aligned: uPlot.AlignedData = [times, ...cols];
-		// Which percentile a line is carries no verdict, so none of these takes a
-		// status role: a healthy 3 ms p99 drawn red reads as failing (#2245).
-		// p99 keeps the violet it has on the scatter.
+		const { p50, p95, p99 } = PERCENTILE_LEGEND;
 		const spec: UPlotSeriesSpec[] = [
-			{ label: "p50", role: "muted", format: fmtMs },
-			{ label: "p95", role: "categorical-2", format: fmtMs },
-			{ label: "p99", role: "categorical", width: 1.8, format: fmtMs },
+			{ label: p50.label, role: p50.role, format: fmtMs },
+			{ label: p95.label, role: p95.role, format: fmtMs },
+			{ label: p99.label, role: p99.role, width: 1.8, format: fmtMs },
 		];
 		return { data: aligned, series: spec };
 	}, [history, bucketSeconds]);
@@ -152,16 +151,17 @@ export function LatencyBreakdownChart({
 		);
 		const aligned: uPlot.AlignedData = [times, ...cols];
 		// Band between average latency (idx 1) and wire time (idx 2) = the generator queue-wait gap.
+		const { average, wire, queueWait } = LATENCY_LEGEND;
 		const spec: UPlotSeriesSpec[] = [
 			{
-				label: "average latency (incl. queue wait)",
-				role: "categorical",
+				label: average.label,
+				role: average.role,
 				width: 1.8,
 				format: fmtMs,
 				bandTo: 2,
-				bandRole: "warning",
+				bandRole: queueWait.role,
 			},
-			{ label: "wire time", role: "info", format: fmtMs },
+			{ label: wire.label, role: wire.role, format: fmtMs },
 		];
 		return { data: aligned, series: spec };
 	}, [history, bucketSeconds]);
@@ -206,12 +206,21 @@ export function RequestRateChart({
 			[pickThroughput, pickSendRate],
 			bucketSeconds
 		);
+		const {
+			throughput,
+			sendRate,
+			configured: configuredLine,
+			achieved: achievedLine,
+		} = THROUGHPUT_LEGEND;
 		const spec: UPlotSeriesSpec[] = [
-			// `categorical`, not `primary`: `--primary` tracks the user's accent theme,
-			// so this series changed hue per scheme and could land on a neighbouring
-			// semantic one. On `forest` the accent is 3% lightness from `--success`.
-			{ label: "throughput", role: "categorical", kind: "area", width: 1.8, format: fmtRate },
-			{ label: "send rate", role: "info", format: fmtRate },
+			{
+				label: throughput.label,
+				role: throughput.role,
+				kind: "area",
+				width: 1.8,
+				format: fmtRate,
+			},
+			{ label: sendRate.label, role: sendRate.role, format: fmtRate },
 		];
 		const columns: number[][] = [cols[0], cols[1]];
 
@@ -231,15 +240,21 @@ export function RequestRateChart({
 			columns.push(configured as number[], achieved as number[]);
 			spec.push(
 				{
-					label: "configured",
-					role: "subtle",
+					label: configuredLine.label,
+					role: configuredLine.role,
 					scale: "y2",
 					dash: [4, 4],
 					format: fmtCount,
 					bandTo: 4,
 					bandRole: "warning",
 				},
-				{ label: "achieved", role: "success", scale: "y2", width: 1.8, format: fmtCount }
+				{
+					label: achievedLine.label,
+					role: achievedLine.role,
+					scale: "y2",
+					width: 1.8,
+					format: fmtCount,
+				}
 			);
 		}
 		const aligned: uPlot.AlignedData = [times, ...columns];
@@ -252,7 +267,7 @@ export function RequestRateChart({
 			m.push({
 				orient: "horizontal",
 				value: targetRps,
-				role: "subtle",
+				role: THROUGHPUT_LEGEND.target.role,
 				label: `target ${targetRps} req/s`,
 			});
 		m.push(...breakpointMarker(breakpoint));

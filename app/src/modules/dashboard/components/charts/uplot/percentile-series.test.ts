@@ -45,9 +45,13 @@ const STATUS_TOKENS = new Set<string>(
 	[...STATUS_ROLES].map((role) => ROLE_TOKEN[role as ColorRole])
 );
 
-const source = readFileSync(join(here, "TimeSeriesCharts.tsx"), "utf8")
-	.replace(/\/\*[\s\S]*?\*\//g, "")
-	.replace(/\/\/.*$/gm, "");
+// The chart builds its three series from `PERCENTILE_LEGEND` (the legend renders
+// the same entries), so that table is where the roles are declared.
+const source =
+	readFileSync(join(here, "legend.ts"), "utf8")
+		.replace(/\/\*[\s\S]*?\*\//g, "")
+		.replace(/\/\/.*$/gm, "")
+		.match(/PERCENTILE_LEGEND = \{[\s\S]*?\} as const/)?.[0] ?? "";
 
 /** `{ label: "p50", role: "muted", ... }` -> the role each percentile is declared with. */
 const percentileRoles = [...source.matchAll(/label:\s*"(p\d+)",\s*role:\s*"([\w-]+)"/g)].map(
