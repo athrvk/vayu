@@ -33,6 +33,7 @@ import {
 	CardTitle,
 	DeleteConfirmDialog,
 } from "@/components/ui";
+import { EmptyState } from "@/components/shared";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -116,7 +117,10 @@ export function CookiesCard() {
 						answers.
 					</p>
 				) : isLoading ? null : total === 0 ? (
-					<p className="text-sm text-muted-foreground">No cookies stored.</p>
+					<EmptyState
+						variant="inline"
+						title="Cookies appear here after a response sets one."
+					/>
 				) : (
 					<>
 						<div className="flex items-center justify-between gap-4">

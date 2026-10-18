@@ -39,6 +39,8 @@ function renderCard() {
 	);
 }
 
+const CERTIFICATES_EMPTY_TITLE = "Register a certificate for a host that requires mutual TLS.";
+
 const createMutate = vi.fn(() => Promise.resolve({}));
 const deleteMutate = vi.fn(() => Promise.resolve());
 const showToast = vi.fn();
@@ -309,19 +311,40 @@ describe("ClientCertificatesCard", () => {
 		queryResult = { data: undefined, isError: true };
 		renderCard();
 
-		// "No certificates registered" here would be a claim the card cannot
+		// The empty-registry sentence here would be a claim the card cannot
 		// make - an unreachable engine holds whatever it holds.
 		expect(screen.getByText(/didn't answer/i)).toHaveTextContent("Restart Vayu");
-		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(CERTIFICATES_EMPTY_TITLE)).not.toBeInTheDocument();
+		// Only the empty list moves the add button into the empty state.
+		expect(screen.getByRole("button", { name: "Add certificate" })).toBeInTheDocument();
 	});
 
 	it("renders no verdict until the query settles", () => {
 		queryResult = { data: undefined, isLoading: true, isError: false };
 		renderCard();
 
-		// The first paint has no data yet, so "No certificates registered" would
+		// The first paint has no data yet, so the empty-registry sentence would
 		// flash a claim the card cannot make before the engine has answered.
-		expect(screen.queryByText(/no certificates registered/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(CERTIFICATES_EMPTY_TITLE)).not.toBeInTheDocument();
+	});
+
+	it("offers one way to add, inside the empty state, when nothing is registered", () => {
+		queryResult = { data: [], isError: false };
+		const { container } = renderCard();
+
+		expect(container.querySelector('[data-slot="empty-state"]')).toHaveTextContent(
+			CERTIFICATES_EMPTY_TITLE
+		);
+		// One button, not the empty state's link plus the card's outline button.
+		const add = screen.getByRole("button", { name: "Add certificate" });
+		expect(screen.getAllByRole("button", { name: /add certificate/i })).toHaveLength(1);
+
+		fireEvent.click(add);
+		expect(screen.getByLabelText("Host")).toBeInTheDocument();
+		// With the form open the link would only repeat it: the one remaining
+		// "Add certificate" is the form's submit.
+		expect(screen.getAllByRole("button", { name: /add certificate/i })).toHaveLength(1);
+		expect(screen.getByRole("button", { name: /add certificate/i })).toBeDisabled();
 	});
 
 	it("swaps the submit glyph for a spinner in place rather than mounting one", () => {
