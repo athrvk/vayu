@@ -242,6 +242,12 @@ is the settings pane's) and scroll it directly with `scrollWithin`
   means adding it there, with its reason, and raising the ceiling (#1282).
   → `focus-indicator.test.ts`, `icon-button-labels.test.tsx`,
   `a11y-suppressions.test.ts`, plus the lint itself
+- **UI text follows `docs/ux-writing.md`'s voice and case rules**: no "Failed
+  to" / "Could not" / "Please" opener, no exclamation mark, sentence case on
+  every label surface. The scan reads every string through
+  `lib/ui-strings.testkit.ts` (logs, comments, tests and `electron/mcp/**` left
+  out); a breach an open issue owns goes in its `KNOWN_BREACHES` with that
+  number, and the fix deletes the entry. → `voice-casing.test.ts`
 
 ## Borders: what a rule sits _on_, never what it is
 
