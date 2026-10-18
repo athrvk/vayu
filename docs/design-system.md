@@ -3181,8 +3181,13 @@ string is sentence case; the rule and its exceptions are in
 
 Use `Card` / `CardHeader` / `CardContent` (`app/src/components/ui/card.tsx`),
 which own the surface, radius, shadow and padding. A hand-rolled
-`bg-card border rounded-md` box is drift that the drift sweep removes, not a
-pattern to copy. `Card` carries the `bg-card surface-card` pair itself, so a
+`bg-card border rounded-md` box is drift, not a pattern to copy:
+`card-primitive.test.ts` fails on any element whose own `className` names a
+card surface (`bg-card` or `surface-card`), a `border` and an `md`/`lg` radius.
+The boxes that wear the surface without being a card - an interactive tile, a
+row repeated down a list, a joined control, a status strip - are listed in that
+test's `NOT_A_CARD` with the reason each differs; a new one is added there, not
+by loosening the rule. `Card` carries the `bg-card surface-card` pair itself, so a
 divider inside one writes `border-rule` only; its own outline stays
 `border`, which faces the canvas.
 
