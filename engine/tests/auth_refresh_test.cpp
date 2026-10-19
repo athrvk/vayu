@@ -595,33 +595,59 @@ TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
 }
 
 // #2395: `atSeconds` is measured from load start, the report's origin, not from
-// when the run was registered. The token is minted while the request is built,
-// before a 1.5 s `script.setup`, and renewed 4 s after minting (5 s tokens, 1 s
-// lead), so the refresh lands about 2.5 s into load (less by however long the
-// request build took) and about 4 s after registration. The bounds leave a slow
-// runner a second and a half of build time. Mutation check: stamp `at_seconds`
-// off the registration instant again and this reads about 4.
-TEST_F (MidRunRefreshTest, ARefreshIsStampedRelativeToLoadStartNotSetup) {
-    MockTarget target;
+// when the refresh thread (or the run) began. Load is stamped ten seconds back
+// and the watchdog starts now, so the first refresh reads about ten seconds on
+// the load clock and a few tens of milliseconds on any clock that starts with
+// the thread. Mutation check: stamp `at_seconds` from the thread's own start
+// and this reads about 0.05.
+TEST_F (MidRunRefreshTest, ARefreshIsStampedFromLoadStartNotFromTheWatchdogStart) {
     vayu::http::MockIssuerManager issuers;
-    const auto issuer = issuers.start (json{ { "expiresInSeconds", 5 } });
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3600 } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const json config = oauth2_config (issuer.token_url);
 
-    json config = run_config (target.api_url (), oauth2_config (issuer.token_url));
-    config["duration"]          = "5s";
-    config["lifecycleElements"] = json::array (
-    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
-    { "config", { { "script", "const until = Date.now () + 1500; while (Date.now () < until) {}" } } } } });
+    vayu::db::OAuthToken token;
+    token.cache_key     = vayu::http::oauth::cache_key (config);
+    token.access_token  = "AT1";
+    token.token_type    = "Bearer";
+    token.refresh_token = "RT1";
+    token.expires_in    = 1;
+    token.created_at    = now_ms ();
+    db->save_oauth_token (token);
 
-    const json summary = execute ("run-auth-refresh-setup", config);
+    vayu::Request request;
+    request.url                      = "https://example.test/api";
+    request.headers["Authorization"] = "Bearer AT1";
+    auto plan                        = vayu::http::plan_auth_refresh (
+    request, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    ASSERT_HAS_VALUE (plan);
 
-    ASSERT_TRUE (summary.contains ("auth")) << summary.dump ();
-    const auto& refreshes = summary["auth"]["refreshes"];
-    ASSERT_TRUE (refreshes.is_array () && !refreshes.empty ()) << summary.dump ();
-    const double at_seconds = refreshes[0]["atSeconds"].get<double> ();
-    EXPECT_GT (at_seconds, 0.0) << summary.dump ();
-    EXPECT_LT (at_seconds, 3.2)
-    << "the refresh was stamped on the setup-inclusive clock";
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-auth-load-start", json::object ());
+    context->is_running = true;
+    context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+    context->load_start_steady_ms.store (
+    std::chrono::duration_cast<std::chrono::milliseconds> (Clock::now ().time_since_epoch ())
+    .count () -
+    10'000);
+
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms          = 0;
+    tuning.min_interval_ms  = 20;
+    tuning.poll_interval_ms = 10;
+    std::thread watchdog (
+    [&] () { vayu::core::run_auth_refresh (context, db.get (), tuning); });
+
+    json refreshes = json::array ();
+    for (int i = 0; i < 1000 && refreshes.empty (); ++i) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        refreshes = context->auth_refresh->summary ()["refreshes"];
+    }
+    context->is_running = false;
+    watchdog.join ();
+
+    ASSERT_FALSE (refreshes.empty ()) << "the watchdog never refreshed";
+    EXPECT_GT (refreshes[0]["atSeconds"].get<double> (), 9.0);
 }
 
 // A token endpoint that stops answering must not fail the run: the target's own
