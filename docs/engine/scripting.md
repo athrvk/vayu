@@ -1274,7 +1274,8 @@ report's `lifecycle.teardown`, exactly as a passing one does, just with an
 
 **Neither script's own time counts toward the run's duration figures.** Setup
 runs, and is timed out of the way, before either run mode captures its own
-`test_start`; teardown runs after the load path's `test_end` is already
+`test_start`, which is also where a load run's live `elapsedSeconds` starts
+counting (it reads `0` while setup runs); teardown runs after the load path's `test_end` is already
 captured, and after the sequential run's own step loop has finished.
 
 **`pm.sendRequest` follows the run's own gate, with no separate toggle.**

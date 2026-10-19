@@ -914,6 +914,16 @@ void RunContext::join_aux_threads () {
     }
 }
 
+double RunContext::seconds_since_load_start (int64_t now_steady_ms) const {
+    const int64_t start = load_start_steady_ms.load ();
+    if (start == 0) {
+        return 0.0;
+    }
+    // A tick can take its clock reading just before the worker stamps the
+    // start and read the stamp just after, which would be a few ms negative.
+    return static_cast<double> (std::max<int64_t> (now_steady_ms - start, 0)) / 1000.0;
+}
+
 void RunManager::register_run (const std::string& run_id, std::shared_ptr<RunContext> context) {
     std::lock_guard<std::mutex> lock (mutex_);
     active_runs_[run_id] = std::move (context);
@@ -1210,9 +1220,7 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
 
         // IMPORTANT: Set is_running BEFORE spawning threads to avoid race condition
         // where metrics_thread exits immediately because is_running is still false
-        context->is_running      = true;
-        context->start_time_ms   = now_ms ();
-        context->start_steady_ms = steady_now_ms ();
+        context->is_running = true;
 
         // The handle is kept - not detached - so shutdown can join the worker
         // before `db` and this manager go out of scope from under the
@@ -2051,8 +2059,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 RunManager& manager) {
-    // Note: is_running and both start stamps are set in start_run() before
-    // threads spawn to avoid race condition with metrics_thread
+    // Note: is_running is set in spawn_run() before threads spawn to avoid a
+    // race with metrics_thread; the load-start stamp is set below.
 
     // This is the pacing thread for every load strategy (constant_rps's
     // wait_for_next_tick included) - never pinned, only nudged above the
@@ -2114,8 +2122,12 @@ RunManager& manager) {
             return;
         }
 
-        // Execute Load Strategy
+        // Execute Load Strategy. One instant for both clocks: the report's
+        // duration below and every elapsed figure the other threads publish.
         auto test_start = std::chrono::steady_clock::now ();
+        context->load_start_steady_ms.store (
+        std::chrono::duration_cast<std::chrono::milliseconds> (test_start.time_since_epoch ())
+        .count ());
         std::shared_ptr<ScenarioLoadState> scenario_state;
 
         try {
@@ -2207,12 +2219,11 @@ RunManager& manager) {
         // summary still being written and get the empty-run answer instead.
         try {
             RunSummaryInputs inputs;
-            auto& mc                       = *context->metrics_collector;
-            inputs.total_requests          = mc.total_requests ();
-            inputs.cancelled               = mc.cancelled ();
-            const double elapsed_s         = context->start_time_ms > 0 ?
-                    static_cast<double> (steady_now_ms () - context->start_steady_ms) / 1000.0 :
-                    0.0;
+            auto& mc              = *context->metrics_collector;
+            inputs.total_requests = mc.total_requests ();
+            inputs.cancelled      = mc.cancelled ();
+            const double elapsed_s =
+            context->seconds_since_load_start (steady_now_ms ());
             inputs.rps                     = elapsed_s > 0 ?
                                 static_cast<double> (inputs.total_requests) / elapsed_s :
                                 0.0;
@@ -2513,8 +2524,7 @@ int64_t& first_tick_steady_ms) {
 
     // Calculate send rate (requests dispatched per second) and throughput (responses per second)
     size_t requests_sent = context->requests_sent.load ();
-    double run_elapsed_s =
-    (static_cast<double> (tick_steady_ms - context->start_steady_ms)) / 1000.0;
+    const double run_elapsed_s = context->seconds_since_load_start (tick_steady_ms);
     double send_rate =
     run_elapsed_s > 0 ? static_cast<double> (requests_sent) / run_elapsed_s : 0.0;
     double throughput =
@@ -2552,9 +2562,10 @@ int64_t& first_tick_steady_ms) {
     // reassembled from ~18 EAV rows by every reader.
     try {
         // elapsed_seconds is measured from the *first persisted*
-        // tick, not from the run's start: the 1 Hz gate means the
-        // first stored tick lands ~1s in, and a series that starts
-        // at 0 is what the charts have always drawn.
+        // tick, not from load start (which the cumulative rates
+        // above divide by): the 1 Hz gate means the first stored
+        // tick lands ~1s in, and a series that starts at 0 is what
+        // the charts have always drawn.
         if (first_tick_steady_ms == 0) {
             first_tick_steady_ms = tick_steady_ms;
         }
@@ -2643,9 +2654,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         size_t active_count      = context->active_transfer_count ();
         size_t requests_sent     = context->requests_sent.load ();
         size_t requests_expected = context->requests_expected.load ();
-        double elapsed_seconds   = context->start_time_ms > 0 ?
-          static_cast<double> (now_steady_ms - context->start_steady_ms) / 1000.0 :
-          0.0;
+        double elapsed_seconds = context->seconds_since_load_start (now_steady_ms);
 
         // Sample the rolling window exactly once per tick (it resets on read) and
         // carry the values out for the 1 Hz persistence below.

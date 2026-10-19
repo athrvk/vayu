@@ -206,6 +206,18 @@ describe("deriveRunProgress", () => {
 		).toBeNull();
 	});
 
+	/*
+	 * Every live tick of a `script.setup` carries elapsed 0 and nothing sent
+	 * (#2395), and the strategy has not yet published its expected count.
+	 */
+	it("reads 0, not NaN, for a tick from before load started", () => {
+		const setupTick = { ...tick(0), requests_sent: 0, requests_expected: 0 };
+		expect(deriveRunProgress({ duration: "60s" }, setupTick)).toBe(0);
+		expect(
+			deriveRunProgress({ duration: "60s" }, { ...setupTick, requests_expected: 500 })
+		).toBe(0);
+	});
+
 	it("refuses a duration it cannot read rather than guessing at one", () => {
 		expect(deriveRunProgress({ duration: "soon" }, tick(30))).toBeNull();
 		expect(deriveRunProgress({ duration: "0s" }, tick(30))).toBeNull();

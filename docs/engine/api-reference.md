@@ -6907,7 +6907,8 @@ sources of truth for the same run boundary.
 
 `script.setup` runs once, before the run's first submission (before
 `test_start` is captured, so its own time is never folded into the run's
-duration figures); a throwing setup fails the run - `Failed`, nothing sent -
+duration figures, live or stored: the live stream's `elapsedSeconds` reads `0`
+until it ends); a throwing setup fails the run - `Failed`, nothing sent -
 the same as a collection-backed run. `script.teardown` runs once, after the
 last submission settles, and sees `pm.info.run` (`requestsSent`,
 `errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
@@ -8139,6 +8140,16 @@ after the last tick was sent (`LIVE_SETTLE_TIMEOUT_MS`), or the status write
 itself failed. A client must read that as "ask the report", never as success:
 the field is absent on that frame, not `null`, and a client older than it saw
 no `status` at all.
+
+`elapsedSeconds` is the time since **load started**, the instant the report's
+`testDuration` is measured from: after the request is built and any
+`script.setup` has run, immediately before the first submission (issue #2395).
+Until then the run is still setting up, and every frame carries
+`elapsedSeconds: 0` with `sendRate` and `throughput` at `0`, because both divide
+by it. The last frame, published just after load ends, therefore reads within
+a fraction of a second of the report's `testDuration`. An engine older than that issue
+counted from when the run was registered, so a slow setup ran its live clock
+ahead of the report and dragged the rates down.
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so

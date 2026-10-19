@@ -387,15 +387,21 @@ struct RunContext {
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
     nlohmann::json config;
-    // Wall-clock stamp of the run's start. Its remaining job is the sentinel
-    // for "this run has started" - every duration is measured on the monotonic
-    // base below, because wall time can step under a running load test.
-    int64_t start_time_ms = 0;
-    // Monotonic base for every elapsed figure the run reports: the final
-    // report's duration and rates, each persisted tick's elapsed_seconds, the
-    // live SSE tick, and when a mid-run auth refresh landed. Meaningful only
-    // against another reading of the same clock.
-    int64_t start_steady_ms = 0;
+    // Monotonic reading (`steady_clock`, milliseconds) at the instant load
+    // began: stamped by the worker beside the final report's `test_start`,
+    // after the request is built and `script.setup` has run (#2395), so the
+    // live tick, each persisted tick's cumulative rates, the crash-path
+    // summary and a mid-run auth refresh's `atSeconds` share the report's
+    // origin. 0 means load has not started (still setting up, or failed
+    // first); a real reading is never 0 because every platform's steady clock
+    // counts from boot. Atomic because the metrics and refresh threads are
+    // already reading when the worker writes it. Read through
+    // @ref seconds_since_load_start.
+    std::atomic<int64_t> load_start_steady_ms{ 0 };
+
+    /// Seconds from load start to @p now_steady_ms, a reading of the same
+    /// clock; 0 while load has not started, and never negative.
+    [[nodiscard]] double seconds_since_load_start (int64_t now_steady_ms) const;
 
     // Test script for deferred validation
     std::string test_script;

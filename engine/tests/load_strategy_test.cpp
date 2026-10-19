@@ -1190,9 +1190,10 @@ vayu::db::Database& db) {
     request.timeout_ms = 30000;
 
     context->is_running = true;
-    context->start_time_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::system_clock::now ().time_since_epoch ())
-                             .count ();
+    // What execute_load_test stamps immediately before the strategy runs.
+    context->load_start_steady_ms = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now ().time_since_epoch ())
+                                    .count ();
     std::thread metrics (
     [context, &db] () { vayu::core::collect_metrics (context, &db); });
 
@@ -1970,8 +1971,7 @@ TEST_F (LoadStrategyTest, ThinkReservationsCountInTheLiveAndStoredBackpressureAl
     }
     ASSERT_EQ (context->in_flight (), SENT + THINKING);
 
-    context->start_time_ms = 1;
-    context->is_running    = true;
+    context->is_running = true;
     std::thread metrics (
     [context, &db] () { vayu::core::collect_metrics (context, &db); });
 

@@ -594,6 +594,35 @@ TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
     EXPECT_FALSE (auth.contains ("lastError"));
 }
 
+// #2395: `atSeconds` is measured from load start, the report's origin, not from
+// when the run was registered. The token is minted while the request is built,
+// before a 1.5 s `script.setup`, and renewed 2 s after minting (3 s tokens, 1 s
+// lead), so the refresh lands about 0.5 s into load and about 2 s after
+// registration. Mutation check: stamp `at_seconds` off the registration instant
+// again and this reads about 2.
+TEST_F (MidRunRefreshTest, ARefreshIsStampedRelativeToLoadStartNotSetup) {
+    MockTarget target;
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+
+    json config = run_config (target.api_url (), oauth2_config (issuer.token_url));
+    config["duration"]          = "3s";
+    config["lifecycleElements"] = json::array (
+    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
+    { "config", { { "script", "const until = Date.now () + 1500; while (Date.now () < until) {}" } } } } });
+
+    const json summary = execute ("run-auth-refresh-setup", config);
+
+    ASSERT_TRUE (summary.contains ("auth")) << summary.dump ();
+    const auto& refreshes = summary["auth"]["refreshes"];
+    ASSERT_TRUE (refreshes.is_array () && !refreshes.empty ()) << summary.dump ();
+    const double at_seconds = refreshes[0]["atSeconds"].get<double> ();
+    EXPECT_GT (at_seconds, 0.0) << summary.dump ();
+    EXPECT_LT (at_seconds, 1.25)
+    << "the refresh was stamped on the setup-inclusive clock";
+}
+
 // A token endpoint that stops answering must not fail the run: the target's own
 // status codes plus this section are the honest report.
 TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {
