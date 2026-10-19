@@ -1604,9 +1604,10 @@ nlohmann::json build_report_results (const std::vector<vayu::db::Result>& result
  *
  * The whole-run aggregates come from `runs.summary` - the values the run itself
  * computed at completion - laid over a report calculated from the run's sampled
- * `results`. A run with no summary never reached a terminal status (the engine
- * died mid-run), and reports from those sampled results alone rather than
- * erroring. Either way a report is one run row plus its sampled results.
+ * `results`. A run with no summary is still pending or running, or never
+ * reached a terminal status because the engine died (#2436), and reports from
+ * those sampled results alone rather than erroring. Either way a report is one
+ * run row plus its sampled results.
  *
  * Extracted so the wiring is covered without an in-process HTTP server - see
  * runs_route_test.cpp. Exceptions propagate to the route's try/catch (500).
@@ -1629,10 +1630,11 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
     auto report =
     vayu::utils::MetricsHelper::calculate_detailed_report (results, duration_s);
 
-    // No usable summary now means one thing only: the engine died before this
-    // run reached a terminal status, so it never wrote one. The report then
-    // stands on the sampled `results` alone - `calculate_detailed_report`
-    // above - rather than erroring.
+    // `summary` is written only at terminal status (#2436), so no usable one
+    // means the run is still pending/running or the engine died before it got
+    // there. The report then stands on the sampled `results` alone -
+    // `calculate_detailed_report` above - and `metadata.status` is how a
+    // reader tells the two apart.
     ReportExtras extras;
     apply_run_summary (run->summary, report, extras);
 

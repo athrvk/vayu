@@ -1584,9 +1584,9 @@ struct Run {
     // via seed_run_times (execution.cpp).
     int64_t end_time = 0;
     // Whole-run results, written once when the run reaches a terminal status.
-    // JSON object; `""` means "not written", which now means only one thing -
-    // the engine died before the run reached a terminal status - so the report
-    // route reports from the sampled `results` alone. NOT NULL with a `""`
+    // JSON object; `""` means "not written": the run is still pending/running
+    // or the engine died before a terminal status (#2436), so the report route
+    // reports from the sampled `results` alone. NOT NULL with a `""`
     // default so sync_schema can ALTER TABLE ADD COLUMN it onto an existing
     // runs table (same pattern as requests.follow_redirects).
     std::string summary; // TEXT NOT NULL DEFAULT ''
