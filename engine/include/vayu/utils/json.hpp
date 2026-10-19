@@ -12,6 +12,7 @@
  * @brief JSON utilities for request/response serialization
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <nlohmann/json.hpp>
@@ -245,6 +246,18 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
 void serialize_to_stream (const vayu::db::Request& request,
 std::ostream& out,
 const vayu::http::FileAccessPolicy& files);
+
+/**
+ * @brief True when @p value nests deeper than @p max_depth levels (#2362).
+ *
+ * A scalar has depth 0 and an array or object has 1 plus its deepest child's,
+ * so `[[1]]` is 2 and `[]` is 1. Walks with an explicit stack and stops at the
+ * first container past the bound, which is the point: nlohmann parses
+ * iteratively, but `dump ()` and the copy constructor recurse, so a payload
+ * nested far past any real document must be refused before either runs on it.
+ * This is the only probe that is safe on such a value.
+ */
+[[nodiscard]] bool exceeds_depth (const Json& value, size_t max_depth);
 
 /**
  * @brief Sanitize a run's config snapshot before persistence: the composed

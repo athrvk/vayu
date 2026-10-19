@@ -35,6 +35,7 @@
  * precisely so this module stays pure.
  */
 
+import { DATA_FILE_MAX_NESTING } from "@/constants/data-files";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DataFileError } from "./errors";
 import { isBlankRow, parseDelimited } from "./tabular";
@@ -167,12 +168,41 @@ function parseTabular(text: string, delimiter: string, warnings: string[]): Pars
 	return { format, columns, rows, warnings };
 }
 
-/** A JSON row is only a row if it is an object of name/value pairs. */
+/**
+ * Whether a parsed JSON value nests more than `limit` levels, a scalar being
+ * depth 0 and each array or object one more than its deepest child - the
+ * engine's `vayu::json::exceeds_depth`, so both sides refuse the same cells.
+ *
+ * Iterative on purpose: the input is a file someone else wrote, and a recursive
+ * walk of a 100000-level cell is a stack overflow the user sees as a crash.
+ */
+function exceedsNesting(value: unknown, limit: number): boolean {
+	const pending: Array<[unknown, number]> = [[value, 0]];
+	while (pending.length > 0) {
+		const [node, depth] = pending.pop()!;
+		if (node === null || typeof node !== "object") continue;
+		if (depth + 1 > limit) return true;
+		for (const child of Object.values(node)) pending.push([child, depth + 1]);
+	}
+	return false;
+}
+
+/**
+ * A JSON row is only a row if it is an object of name/value pairs, and a cell of
+ * it is only bindable if the engine's reader will walk it (#2362).
+ */
 function assertRowObject(value: unknown, where: string): DataFileRow {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
 		throw new DataFileError(
 			`${where} is ${Array.isArray(value) ? "an array" : value === null ? "null" : typeof value}, not an object of name/value pairs.`
 		);
+	}
+	for (const [column, cell] of Object.entries(value)) {
+		if (exceedsNesting(cell, DATA_FILE_MAX_NESTING)) {
+			throw new DataFileError(
+				`${where}, column "${column}" is nested more than ${DATA_FILE_MAX_NESTING} levels deep.`
+			);
+		}
 	}
 	return value as DataFileRow;
 }

@@ -1441,8 +1441,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `recursive: true` walks sub-collections in the sidebar's order (each
     subtree before that level's own requests, mirroring `collect_requests`).
   - **Rows are inline** - the engine never opens a file - and its
-    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals are surfaced
-    verbatim rather than re-derived in the schema. `dataFileName` and
+    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals, and the depth
+    refusal (a cell nested deeper than 100 levels, `400` `invalid_run_config`
+    or `invalid_scenario`), are surfaced verbatim rather than re-derived in the
+    schema. `dataFileName` and
     `dataFileHash` (issue #2051) name the file the rows came from - a display
     name and the SHA-256 of its bytes as 64 lowercase hex, which the schema
     checks, refusing a name holding a `/` or `\` as a path - and are forwarded

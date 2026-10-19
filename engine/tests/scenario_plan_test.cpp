@@ -38,6 +38,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -915,6 +916,118 @@ TEST_F (ScenarioPlanTest, ANonObjectDataRowIsRejectedByIndex) {
     const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
     EXPECT_FALSE (resolved.ok);
     EXPECT_NE (resolved.error.find ("row 1"), std::string::npos) << resolved.error;
+}
+
+// A cell nested past MAX_READ_DEPTH is refused before the row is dumped or
+// copied, both of which recurse (#2362). The deep value is built by moving, and
+// only the short refusal is ever streamed.
+TEST_F (ScenarioPlanTest, ADataCellNestedPastTheDepthBoundIsRejectedNamingRowAndColumn) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+    constexpr size_t bound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+
+    json bad_row   = { { "user", "bob" } };
+    bad_row["tag"] = vayu::tests::nested_array (bound + 1);
+    json scenario  = block ("col");
+    scenario["data"] =
+    json::array ({ json{ { "user", "alice" } }, std::move (bad_row) });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    EXPECT_FALSE (resolved.ok);
+    EXPECT_EQ (resolved.error,
+    "'scenario.data' row 1 column 'tag' is nested deeper than " +
+    std::to_string (bound) + " levels");
+    // Nothing of the rows before the bad one survives.
+    EXPECT_TRUE (resolved.data_rows.empty ());
+    EXPECT_TRUE (resolved.plan.steps.empty ());
+}
+
+TEST_F (ScenarioPlanTest, ADataCellNestedExactlyAtTheDepthBoundResolves) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+    constexpr size_t bound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+
+    json row         = { { "tag", vayu::tests::nested_array (bound) } };
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ std::move (row) });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_EQ (resolved.data_rows.size (), 1u);
+}
+
+// `refuse_overdeep_data` is what `POST /runs` asks before it snapshots the body,
+// so it has to answer for every shape `data` can take, not only an array of
+// objects (#2362). Each too-deep value is moved into place: a copy recurses.
+namespace {
+
+constexpr size_t kDepthBound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+
+std::string overdeep_message (const std::string& where) {
+    return where + " is nested deeper than " + std::to_string (kDepthBound) + " levels";
+}
+
+} // namespace
+
+TEST (RefuseOverdeepData, ANonArrayDataTooDeepIsRefusedAsAWhole) {
+    json object = json::object ();
+    object["a"] = vayu::tests::nested_array (kDepthBound + 1);
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (object, "data"),
+    overdeep_message ("'data'"));
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (object, "scenario.data"),
+    overdeep_message ("'scenario.data'"));
+}
+
+TEST (RefuseOverdeepData, ANonObjectRowTooDeepIsRefusedByIndexAndRowsBeforeItAreSkipped) {
+    json data = json::array ();
+    data.push_back (1);
+    data.push_back (json{ { "ok", 1 } });
+    data.push_back (vayu::tests::nested_array (kDepthBound + 1));
+
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (data, "scenario.data"),
+    overdeep_message ("'scenario.data' row 2"));
+}
+
+TEST (RefuseOverdeepData, ANonObjectRowDoesNotStopTheWalkBeforeALaterDeepCell) {
+    json deep_row   = json::object ();
+    deep_row["tag"] = vayu::tests::nested_array (kDepthBound + 1);
+    json data       = json::array ();
+    data.push_back (1);
+    data.push_back (std::move (deep_row));
+
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (data, "data"),
+    overdeep_message ("'data' row 1 column 'tag'"));
+}
+
+TEST (RefuseOverdeepData, WrongShapesWithinTheBoundAreLeftToReadDataRows) {
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json{ { "a", 1 } }, "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json ("text"), "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json::array ({ 1, "bob" }), "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json::array (), "data"));
+
+    json at_bound = json::array ();
+    at_bound.push_back (vayu::tests::nested_array (kDepthBound));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (at_bound, "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (
+    json{ { "a", vayu::tests::nested_array (kDepthBound - 1) } }, "data"));
+}
+
+TEST_F (ScenarioPlanTest, SmallObjectAndArrayCellsStillResolveAndBindAsCompactJson) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array (
+    { json{ { "profile", { { "id", 7 } } }, { "ids", json::array ({ 1, 2 }) } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.data_rows.size (), 1u);
+    EXPECT_EQ (resolved.data_rows[0]["profile"].dump (), R"({"id":7})");
+    EXPECT_EQ (resolved.data_rows[0]["ids"].dump (), "[1,2]");
 }
 
 TEST_F (ScenarioPlanTest, AnOversizedDataBlockIsRejectedByItsByteBound) {
