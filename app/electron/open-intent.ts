@@ -32,6 +32,10 @@
  * extension allowlist is `spec-file.ts`'s own, imported rather than restated -
  * and the renderer reads it through the gated `specFile:read` channel that
  * already exists, so nothing here becomes a second door onto the file system.
+ * What it does do is record the path as one a person chose (`grant`, the
+ * `file-grants.ts` registry, #2356): the OS handed it over on the user's
+ * gesture, which is the one fact a main-process reader of a renderer-named path
+ * can trust it by.
  */
 
 import path from "path";
@@ -126,6 +130,8 @@ export interface OpenIntentDeps {
 	send: (intent: OpenIntent) => boolean;
 	/** Bring the window forward, because a launch that opens nothing looks broken. */
 	focus: () => void;
+	/** Record a document's path as picked (`FileGrants.record`), as it is offered. */
+	grant: (filePath: string) => void;
 }
 
 export interface OpenIntents {
@@ -153,6 +159,9 @@ export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 	}
 
 	function offer(intent: OpenIntent): void {
+		// At the offer, not the delivery: the grant is about the gesture, and the
+		// renderer may read the document the moment it is told.
+		if (intent.kind === "import") deps.grant(intent.path);
 		deps.focus();
 		if (loaded) deliver(intent);
 		else pending.push(intent);

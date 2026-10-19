@@ -32,10 +32,12 @@
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/parse.hpp"
 
 #include <algorithm>
@@ -95,12 +97,11 @@ postman_raw_body (const std::string& content, const std::string* language) {
  * `importedFilePart(entry, src, contentType?)`: a multipart part that uploads a
  * file.
  *
- * The path is kept exactly as the source wrote it and a row that has one is
- * marked **unresolved**, because it names a file on the exporting machine.
- * A part declared *without* a path - an OpenAPI document names the upload,
- * never the file (#425) - is not unresolved: the flag warns that something
- * which looks filled in cannot be sent, and a row showing "Choose file" makes
- * no such claim.
+ * The path is kept exactly as the source wrote it; it names a file on the
+ * exporting machine, which the send rule (`vayu/http/file_ref.hpp`) refuses
+ * until the user picks it again or allows its folder. A part declared
+ * *without* a path - an OpenAPI document names the upload, never the file
+ * (#425) - is a row showing "Choose file".
  *
  * Not anonymous-namespace-local: `jmeter_import.cpp` reuses this shape
  * verbatim for `HTTPsampler.Files` (#1657) rather than building a second one.
@@ -117,9 +118,6 @@ const std::string* content_type) {
     if (content_type != nullptr) {
         entry["contentType"] = *content_type;
     }
-    if (!src.empty ()) {
-        entry["unresolved"] = true;
-    }
     return entry;
 }
 
@@ -131,9 +129,6 @@ imported_body_file (const std::string& src, const std::string* content_type) {
     }
     if (content_type != nullptr && !content_type->empty ()) {
         file["contentType"] = *content_type;
-    }
-    if (!src.empty ()) {
-        file["unresolved"] = true;
     }
     return nlohmann::ordered_json{ { "mode", "binary" }, { "file", std::move (file) } };
 }
@@ -312,11 +307,12 @@ json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_
 
 /// Depth-first over a draft tree's requests, for the two counts the preview
 /// promises - read off the drafts rather than tallied as they are built, so the
-/// number and the rows cannot disagree.
-template <typename Visit>
-void walk_requests (const json& collections, Visit visit) {
-    for (const json& collection : collections) {
-        for (const json& request : collection.at ("requests")) {
+/// number and the rows cannot disagree - and for the trust the parse route
+/// derives onto them. @p Tree is `json` or `const json`.
+template <typename Tree, typename Visit>
+void walk_requests (Tree& collections, Visit visit) {
+    for (auto& collection : collections) {
+        for (auto& request : collection.at ("requests")) {
             visit (request);
         }
         walk_requests (collection.at ("children"), visit);
@@ -3360,7 +3356,7 @@ namespace ext = vayu::core::vayu_ext;
 
 /// A form body's file parts as an import writes one: named, and with no file
 /// attached yet - the export never carries the path it was read from. A path a
-/// hand-edited document carries is kept, unresolved (`imported_file_part`).
+/// hand-edited document carries is kept, as `imported_file_part` keeps one.
 json with_unattached_files (json body) {
     const auto fields = body.find ("fields");
     if (fields == body.end () || !fields->is_array ()) {
@@ -3368,8 +3364,7 @@ json with_unattached_files (json body) {
     }
     for (json& field : *fields) {
         if (field.value ("type", "") == "file") {
-            // A file part carries no text value; `ext::body_of` has already
-            // marked a carried path unresolved.
+            // A file part carries no text value.
             field["value"] = "";
         }
     }
@@ -4385,6 +4380,15 @@ nlohmann::ordered_json import_apply_payload (const nlohmann::ordered_json& resul
         { "requests", std::move (requests) },
         { "environments", std::move (environments) }, { "specs", std::move (specs) },
         { "clientCertificates", std::move (client_certificates) } };
+}
+
+void derive_import_file_trust (nlohmann::json& result,
+const vayu::http::FileAccessPolicy& files) {
+    walk_requests (result.at ("collections"), [&files] (nlohmann::json& request) {
+        if (const auto body = request.find ("body"); body != request.end ()) {
+            vayu::json::derive_file_trust (*body, files);
+        }
+    });
 }
 
 } // namespace vayu::core

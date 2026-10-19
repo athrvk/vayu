@@ -850,7 +850,7 @@ TEST (SkeletonExport, FilesTheBodyUnderTheMediaTypeItsContentTypeRowNames) {
  * file's own content type, else what its extension implies, else
  * `application/octet-stream`. The path is one
  * machine's and never leaves it; `x-vayu-request.body` keeps the file's name and
- * type, without `src` or `unresolved`.
+ * type, without `src`.
  */
 TEST (SkeletonExport, DescribesABinaryBodyAsOneFilesBytesUnderItsMediaType) {
     const auto binary = [] (const std::string& path, const std::string& stored) {
@@ -860,7 +860,7 @@ TEST (SkeletonExport, DescribesABinaryBodyAsOneFilesBytesUnderItsMediaType) {
         return put;
     };
     ExportRequest typed = binary ("/typed",
-    R"({"mode":"binary","file":{"src":"/home/me/a.png","fileName":"a.png","contentType":"image/png","unresolved":true}})");
+    R"({"mode":"binary","file":{"src":"/home/me/a.png","fileName":"a.png","contentType":"image/png"}})");
     ExportRequest plain =
     binary ("/plain", R"({"mode":"binary","file":{"src":"/home/me/a.bin"}})");
     ExportRequest headed = binary ("/headed",

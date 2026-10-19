@@ -115,7 +115,7 @@ constexpr auto HTTP_VERSIONS =
 std::to_array<std::string_view> ({ "auto", "http1.1", "http2" });
 
 /// A form-data part's optional members besides the row's own. `src` is kept
-/// only on a file part, and always as unresolved - see `body_of`.
+/// only on a file part - see `body_of`.
 constexpr auto FORM_PART_KEYS =
 std::to_array<std::string_view> ({ "type", "src", "fileName", "contentType" });
 
@@ -565,7 +565,6 @@ Json portable_body (const Json& body) {
     Json out = body;
     if (const auto file = out.find ("file"); file != out.end () && file->is_object ()) {
         file->erase ("src");
-        file->erase ("unresolved");
     }
     const auto fields = out.find ("fields");
     if (fields == out.end () || !fields->is_array ()) {
@@ -574,7 +573,6 @@ Json portable_body (const Json& body) {
     for (Json& field : *fields) {
         if (field.is_object ()) {
             field.erase ("src");
-            field.erase ("unresolved");
         }
     }
     return out;
@@ -586,18 +584,8 @@ std::optional<Json> rows_of (const Json& value) {
 
 namespace {
 
-/// @p ref (a form file part, or a binary body's `file`) as an import may store
-/// it: a path is one nobody chose in this editor, so it is marked unresolved.
-void mark_imported_path (Json& ref) {
-    const auto src = ref.find ("src");
-    if (src != ref.end () && src->is_string () &&
-    !src->get_ref<const std::string&> ().empty ()) {
-        ref["unresolved"] = true;
-    }
-}
-
 /// A `binary` body: its `file` object's string members (`src`, `fileName`,
-/// `contentType`), `src` marked as an import's. A missing `file` is a body with
+/// `contentType`). A missing `file` is a body with
 /// no file chosen; a `file` of another type, or a member that is not a string,
 /// is refused.
 std::optional<Json> file_body_of (const Json& value) {
@@ -618,7 +606,6 @@ std::optional<Json> file_body_of (const Json& value) {
             file[key] = *member;
         }
     }
-    mark_imported_path (file);
     return std::make_optional (Json{ { "mode", "binary" }, { "file", std::move (file) } });
 }
 
@@ -666,9 +653,7 @@ std::optional<Json> body_of (const Json& value) {
         }
         for (Json& row : *rows) {
             // A text part never carries a path: the write routes refuse one.
-            if (row.value ("type", "") == "file") {
-                mark_imported_path (row);
-            } else {
+            if (row.value ("type", "") != "file") {
                 row.erase ("src");
             }
         }

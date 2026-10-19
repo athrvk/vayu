@@ -102,7 +102,7 @@ export {
 // Allowed folders for request-body files
 export {
 	useFileRootsQuery,
-	useCreateFileRootMutation,
+	useAllowChosenFolderMutation,
 	useDeleteFileRootMutation,
 } from "./file-roots";
 

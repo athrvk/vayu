@@ -1268,11 +1268,11 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   fetched live on every call.
 - **File bodies** - `create_request` and `update_request` store a `binary`
   body, one file sent as the whole body: `file: {src, contentType?, fileName?}`
-  in place of `body` (a lone `file` implies `bodyType: "binary"`). Every file
-  reference an MCP tool writes is stored `unresolved: true`, whatever the
-  arguments say, so the engine sends it only once the user picks the file
-  again in the request editor or it lives under a folder they allowed in
-  Settings > Files: an agent can name a path, never choose one for the user.
+  in place of `body` (a lone `file` implies `bodyType: "binary"`). The engine
+  sends a stored path only once the user picks the file in the request editor
+  or it lives under a folder they allowed in Settings > Files, whatever the
+  arguments or the body say (#2356): an agent can name a path, never choose
+  one for the user.
   The tools that send an ad-hoc request (`run_request`, `start_load_run`)
   refuse a body that names a file (`bodyType: "binary"` or any `file`
   argument) before composing anything, and say to run the saved request by id
@@ -1469,8 +1469,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `recursive: true` walks sub-collections in the sidebar's order (each
     subtree before that level's own requests, mirroring `collect_requests`).
   - **Rows are inline** - the engine never opens a file - and its
-    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals are surfaced
-    verbatim rather than re-derived in the schema. `dataFileName` and
+    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals, and the depth
+    refusal (a cell nested deeper than 100 levels, `400` `invalid_run_config`
+    or `invalid_scenario`), are surfaced verbatim rather than re-derived in the
+    schema. `dataFileName` and
     `dataFileHash` (issue #2051) name the file the rows came from - a display
     name and the SHA-256 of its bytes as 64 lowercase hex, which the schema
     checks, refusing a name holding a `/` or `\` as a path - and are forwarded

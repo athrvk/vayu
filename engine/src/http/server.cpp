@@ -128,8 +128,8 @@ refuse_unbounded_body (const httplib::Request& req, httplib::Response& res) {
 
 } // namespace
 
-Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port)
-: db_ (db), run_manager_ (run_manager), port_ (port) {
+Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, GrantSecret grant_secret)
+: db_ (db), run_manager_ (run_manager), port_ (port), grant_secret_ (grant_secret) {
     setup_routes ();
 }
 
@@ -289,7 +289,7 @@ void Server::setup_routes () {
     route_ctx_ = std::make_unique<routes::RouteContext> (
     routes::RouteContext{ server_, db_, run_manager_, shutdown_callback_,
     oauth_authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
-    mock_server_manager_, sse_manager_, run_summary_cache_ });
+    mock_server_manager_, sse_manager_, run_summary_cache_, grant_secret_ });
 
     routes::register_health_routes (*route_ctx_);
     routes::register_config_routes (*route_ctx_);
@@ -311,6 +311,7 @@ void Server::setup_routes () {
     routes::register_environment_routes (*route_ctx_);
     routes::register_client_certificate_routes (*route_ctx_);
     routes::register_file_root_routes (*route_ctx_);
+    routes::register_file_grant_routes (*route_ctx_);
     routes::register_globals_routes (*route_ctx_);
     routes::register_run_routes (*route_ctx_);
     routes::register_execution_routes (*route_ctx_);

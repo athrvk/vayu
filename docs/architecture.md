@@ -354,28 +354,39 @@ which case the app picks a fallback (below).
   at sign-in is focused, not duplicated. So is the relaunch Windows makes after
   a restart (`--restarted-after-reboot`, registered by `restart-registration.ts`):
   an ordinary launch that takes the lock, with nothing special-cased.
-- **Spawned or adopted, the running instance owns the engine.** Normally the app
-  spawns it. If an engine is already answering on one of its ports at startup -
-  an orphan left by a crashed session, or in development one started by hand -
-  the app *adopts* it: it is tracked by the PID in the lock file (`vayu.lock` in the
-  data directory), reported as running, restarted for real when Settings asks,
-  and shut down on quit like any engine the app spawned itself. What identifies
-  an engine is its `/health` body (issue #2153): `status: "ok"` plus a string
-  `version` and a numeric `workers`. Another program answering only
-  `{"status":"ok"}` is a held port - never adopted, never sent `/shutdown`.
-  Adoption checks
-  the running engine's `/health.version` against this app's own first (issue
-  #1492): a mismatch is stopped rather than adopted, and this instance starts
-  its own build instead - see `docs/lock-file-handling.md`. A lock PID that is
-  a live Vayu engine but never answers `/health` is waited for on the same
-  budget a spawned engine gets, adopted if it answers, and otherwise stopped by
-  PID and replaced (issue #1905); a port the lock does not explain is held by
-  another program, and the app moves on to its next port (next bullet).
+- **The app talks only to the engine it spawned this launch, and hands it a
+  secret** (issue #2356). Each spawn mints a grant secret (32 random bytes, as
+  hex) and passes it in the child's environment as `VAYU_GRANT_SECRET`, never
+  on the command line, which process listings show; it is not logged. The
+  engine takes it out of its environment at start and requires it, as the
+  `X-Vayu-Grant-Secret` header, on every write to file trust (allowed folders
+  and picked files, see the [API reference](engine/api-reference.md#who-may-call-the-api)).
+  The main process holds it in `file-trust-client.ts`, the only module that
+  sends it; the renderer and the MCP server never see it. A restart spawns a
+  new engine and a new secret.
+- **An engine already running at startup is replaced, never adopted.** If an
+  engine answers on one of the app's ports at startup - an orphan left by a
+  crashed session, or in development one started by hand - it was given another
+  launch's secret or none, and nothing can hand it this one, so adopting it
+  would leave every allowed-folder and picked-file write refused for the
+  session. The app asks it to `POST /shutdown`, waits for it by the PID in the
+  lock file (`vayu.lock` in the data directory), kills it by that PID if it
+  outstays the grace period, and spawns its own on the same port. The same
+  stop covers an engine built for another Vayu version (issue #1492), which no
+  longer needs a check of its own. What identifies an engine is its `/health`
+  body (issue #2153): `status: "ok"` plus a string `version` and a numeric
+  `workers`. Another program answering only `{"status":"ok"}` is a held port -
+  never sent `/shutdown`. A lock PID that is a live Vayu engine but never
+  answers `/health` is waited for on the same budget a spawned engine gets,
+  asked to shut down if it answers, and otherwise killed by PID and replaced
+  (issue #1905); a port the lock does not explain is held by another program,
+  and the app moves on to its next port (next bullet). See
+  `docs/lock-file-handling.md`.
 - **Another program on 9876 moves the engine, it does not stop the app** (issue
   #2118). The sidecar walks an ordered list: 9876, then 9880-9889 (a fixed list
   rather than an OS-assigned port, because the renderer's CSP names its
   `connect-src` origins at build time, and clear of the MCP port 9877). A port
-  answering `/health` goes through the adopt-or-replace flow above, a free one is
+  answering `/health` has its engine replaced there (above), a free one is
   taken, a held one is skipped. The first start fixes the choice for the life of
   the app: the main process passes it to the renderer once, as
   `electronAPI.enginePort`, and the renderer's `ENGINE_BASE_URL`, the `Origin`

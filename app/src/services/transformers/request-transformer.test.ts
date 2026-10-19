@@ -302,28 +302,19 @@ describe("RequestTransformer Postman protocol switches (#1765)", () => {
 });
 
 /**
- * The engine reads an absent `unresolved` as `true`, and a row stored before
- * every writer sent the key comes back without it. The transformer states it,
- * so a Duplicate or any other forwarder of the row carries the flag the engine
- * would read, and the editor's warning agrees with the engine's refusal.
+ * `unresolved` on a file reference is the engine's answer for this machine,
+ * derived on the read (#2356). The transformer keeps it exactly as read - the
+ * editor's warning displays it - and invents none: a reference the engine
+ * answered nothing for (an empty path) stays without the key.
  */
 describe("RequestTransformer file trust flag", () => {
-	it.each([
-		[undefined, true],
-		[true, true],
-		[false, false],
-	])("a binary file stored with %s reads as %s", (stored, read) => {
-		const req = RequestTransformer.toFrontend({
-			...base,
-			body: { mode: "binary", file: { src: "/a.bin", unresolved: stored } },
-		});
-		expect(req.body).toEqual({ mode: "binary", file: { src: "/a.bin", unresolved: read } });
+	it.each([[undefined], [true], [false]])("a binary file read with %s keeps it", (derived) => {
+		const file = derived === undefined ? { src: "" } : { src: "/a.bin", unresolved: derived };
+		const req = RequestTransformer.toFrontend({ ...base, body: { mode: "binary", file } });
+		expect(req.body).toEqual({ mode: "binary", file });
 	});
 
-	it.each([
-		[undefined, true],
-		[false, false],
-	])("a form-data file part stored with %s reads as %s", (stored, read) => {
+	it.each([[true], [false]])("a form-data file part read with %s keeps it", (derived) => {
 		const req = RequestTransformer.toFrontend({
 			...base,
 			body: {
@@ -336,14 +327,14 @@ describe("RequestTransformer file trust flag", () => {
 						enabled: true,
 						type: "file",
 						src: "/a",
-						unresolved: stored,
+						unresolved: derived,
 					},
 				],
 			},
 		});
 		const body = req.body as unknown as { fields: Record<string, unknown>[] };
 		expect(body.fields[0]).not.toHaveProperty("unresolved");
-		expect(body.fields[1]).toHaveProperty("unresolved", read);
+		expect(body.fields[1]).toHaveProperty("unresolved", derived);
 	});
 
 	it("leaves a body with no file alone", () => {

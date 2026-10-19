@@ -19,9 +19,10 @@
  * time, so only its path has to survive. A **form file part**
  * (`-F field=@file`) imports as a file row (issue #393), and a **whole-body
  * file** (`--data-binary @file`, `-d @file`, `-T file`) as a `binary` body.
- * Both are marked unresolved: the path names a file on whoever's machine the
- * command came from, and the engine sends it only once it is picked again in
- * the editor or lives under a folder allowed in Settings > Files.
+ * Neither was picked on this machine: the path names a file on whoever's
+ * machine the command came from, and the engine sends it only once it is
+ * picked again in the editor or lives under a folder allowed in Settings >
+ * Files.
  */
 
 import type { HttpMethod, SettingsCategory } from "@/types";
@@ -408,8 +409,8 @@ interface FormPart {
  * Before issue #393 this was skipped as unreadable and the row landed as the
  * literal text `@path`: a command that uploaded a file imported as one that
  * posts a path string. The path is kept as written - it names a file on
- * whoever's machine the command came from - and the row is marked unresolved so
- * the editor says so.
+ * whoever's machine the command came from - and carries no trust flag, so the
+ * editor marks it until the engine answers for it (`lib/file-trust.ts`).
  *
  * `<path` (curl's "read the file as the value" form) is deliberately NOT a file
  * part: it means the file's *contents* become the field value, which is a text
@@ -448,7 +449,6 @@ function toFormItems(parts: FormPart[]): KeyValueItem[] {
 					src: part.src,
 					fileName: part.fileName,
 					...(part.contentType ? { contentType: part.contentType } : {}),
-					unresolved: true,
 				}
 			: {}),
 	}));
@@ -605,7 +605,7 @@ function resolve(b: Builder): CommandImport {
 		// The Content-Type a `-H` declared stays a header row, which outranks
 		// anything the file itself could declare, so the file carries none.
 		bodyMode = "binary";
-		binaryFile = { src: bodyFile, fileName: fileBaseName(bodyFile), unresolved: true };
+		binaryFile = { src: bodyFile, fileName: fileBaseName(bodyFile) };
 	} else if (hasForm) {
 		bodyMode = "form-data";
 		formData = toFormItems(b.formParts);

@@ -179,7 +179,7 @@ UrlOmitted& omitted);
  * A stored body as another machine can use it: a file part, or a binary body's
  * `file`, keeps its type, declared file name and content type, never the local
  * path (`src`) it was read from - one machine's filesystem, which can carry a
- * user name - nor `unresolved`, which describes that path.
+ * user name.
  */
 [[nodiscard]] Json portable_body (const Json& body);
 
@@ -202,7 +202,9 @@ UrlOmitted& omitted);
 
 /// A request body in one of Vayu's own modes, or nothing. A file path it
 /// carries (a form file part's or a binary body's `src`, which a hand-edited
-/// document may hold) is kept and marked `unresolved`: no one chose it here.
+/// document may hold) is kept, and is sent only once picked here or under an
+/// allowed folder (`vayu/http/file_ref.hpp`); a stated `unresolved` is
+/// dropped like any member this reader does not know.
 [[nodiscard]] std::optional<Json> body_of (const Json& value);
 
 /// An auth object naming one of Vayu's modes, or nothing. @p collection

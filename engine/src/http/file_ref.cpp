@@ -131,9 +131,8 @@ std::optional<std::string> refuse_shape (const FileRef& file, std::string_view l
 
 std::string untrusted_message (const FileRef& file, std::string_view label) {
     return std::string (label) + " '" + file.src +
-    "' was not chosen in the editor and is not under an allowed folder - pick "
-    "it "
-    "again in the request, or allow its folder in Settings > Files";
+    "' was not picked on this machine and is not under an allowed folder - "
+    "pick it again in the request, or allow its folder in Settings > Files";
 }
 
 std::string unreadable_message (const FileRef& file, std::string_view label, int error) {
@@ -244,7 +243,6 @@ FileRef file_ref_of (const FormField& field) {
     ref.src          = field.src;
     ref.file_name    = field.file_name;
     ref.content_type = field.content_type;
-    ref.unresolved   = field.unresolved;
     return ref;
 }
 
@@ -277,14 +275,9 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
     if (auto refusal = refuse_shape (file, label)) {
         return refusal;
     }
-    auto found = by_src_.find (file.src);
-    if (found != by_src_.end ()) {
-        if (file.unresolved && !found->second.under_root) {
-            return untrusted_message (file, label);
-        }
-        if (!needs_bytes || found->second.read) {
-            return std::nullopt;
-        }
+    const auto found = by_src_.find (file.src);
+    if (found != by_src_.end () && (!needs_bytes || found->second.read)) {
+        return std::nullopt;
     }
 
     std::error_code ec;
@@ -292,10 +285,9 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
     if (ec || !fs::exists (status)) {
         return unreadable_message (file, label, ec ? ec.value () : ENOENT);
     }
-    // Decided before the file is opened: a path nobody chose is not read at
-    // all unless it lies under an allowed folder.
-    const bool under_root = policy_.allows (file.src);
-    if (file.unresolved && !under_root) {
+    // Decided before the file is opened: a path the policy does not allow is
+    // never read at all.
+    if (!policy_.allows (file.src)) {
         return untrusted_message (file, label);
     }
     if (!fs::is_regular_file (status)) {
@@ -308,7 +300,6 @@ FilePlan::check_locked (const FileRef& file, std::string_view label, bool needs_
         return unreadable_message (file, label, errno);
     }
     Checked checked;
-    checked.under_root = under_root;
     if (needs_bytes) {
         if (!read_contents (
             handle.get (), checked.inline_bytes, checked.sha256, checked.size)) {
@@ -340,9 +331,6 @@ FilePlan::fill_one (FileRef& file, std::string_view label, bool needs_bytes) con
         return std::string (label) + " '" + file.src +
         "' was not checked when the run started - a file path may take a data "
         "column, but not a value that changes per iteration";
-    }
-    if (file.unresolved && !found->second.under_root) {
-        return untrusted_message (file, label);
     }
     if (needs_bytes) {
         file.inline_bytes = found->second.inline_bytes;

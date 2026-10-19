@@ -53,6 +53,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
@@ -234,9 +235,15 @@ TEST (ImportConformance, MatchesTheParsersItReplaced) {
         options_of (entry.at ("options")), source_of (entry));
         ASSERT_TRUE (parsed.ok ()) << name << ": " << parsed.error;
 
+        // The fixture records what `POST /import/parse` answers, which derives
+        // each file reference's `unresolved` (#2356); with no folder allowed
+        // and no file picked, every path the corpus names reads as unresolved.
+        json answered = parsed.result;
+        vayu::core::derive_import_file_trust (answered, vayu::http::FileAccessPolicy{});
         const json expected =
         comparable (nlohmann::ordered_json::parse (entry.at ("expected").dump ()));
-        EXPECT_EQ (comparable (parsed.result), expected) << "case: " << name;
+        EXPECT_EQ (comparable (nlohmann::ordered_json::parse (answered.dump ())), expected)
+        << "case: " << name;
     }
 }
 
@@ -337,10 +344,10 @@ TEST (InsomniaImport, KeepsAPathParameterAsTheRequestsOwnPathRow) {
 /**
  * An Insomnia binary body keeps the path in `fileName` and its media type in
  * `mimeType`: it imports as a `binary` body sending that file under that type,
- * unresolved and counted, where it used to be dropped. A multipart file param
- * with no path imports as a part with no file chosen.
+ * counted, where it used to be dropped. A multipart file param with no path
+ * imports as a part with no file chosen.
  */
-TEST (InsomniaImport, ABinaryBodyImportsAsAnUnresolvedBinaryBody) {
+TEST (InsomniaImport, ABinaryBodyImportsAsABinaryBodyNamingThePath) {
     const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
         {"_id":"wrk","_type":"workspace","name":"W"},
         {"_id":"req","_type":"request","parentId":"wrk","name":"Put","method":"PUT",
@@ -353,7 +360,7 @@ TEST (InsomniaImport, ABinaryBodyImportsAsAnUnresolvedBinaryBody) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const auto& requests = parsed.result.at ("collections")[0].at ("requests");
     EXPECT_EQ (requests[0].at ("body").dump (),
-    R"({"mode":"binary","file":{"src":"C:\\data\\a.bin","fileName":"a.bin","contentType":"application/octet-stream","unresolved":true}})");
+    R"({"mode":"binary","file":{"src":"C:\\data\\a.bin","fileName":"a.bin","contentType":"application/octet-stream"}})");
     EXPECT_EQ (requests[1].at ("body").dump (),
     R"({"mode":"form-data","fields":[{"key":"doc","value":"","enabled":true,"type":"file","src":""}]})");
     EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("file_body"), 1);
@@ -1438,9 +1445,10 @@ TEST (ImportParse, ReadsASwagger20BinaryBodyParameterAsTheBinaryMode) {
  * An `x-vayu-request` binary body round-trips its file's name and content
  * type; the export never writes the path, so none comes back. A path a
  * hand-edited document does carry - on the binary body or a form file part -
- * is kept and marked unresolved: nobody chose it in this editor.
+ * is kept, and whatever the document says about its trust is dropped: the
+ * engine derives that from this machine's roots and grants (#2356).
  */
-TEST (ImportParse, ReadsAnXVayuBinaryBodyAndMarksACarriedPathUnresolved) {
+TEST (ImportParse, ReadsAnXVayuBinaryBodyAndKeepsACarriedPathWithoutTrust) {
     const auto body_of = [] (const std::string& stated) {
         const ImportParse parsed = parse_import (R"({"openapi":"3.1.0","info":{"title":"T"},
             "paths":{"/up":{"put":{"responses":{},"x-vayu-request":{"body":)" +
@@ -1452,10 +1460,10 @@ TEST (ImportParse, ReadsAnXVayuBinaryBodyAndMarksACarriedPathUnresolved) {
     EXPECT_EQ (body_of (R"({"mode":"binary","file":{"fileName":"a.png","contentType":"image/png"}})"),
     R"({"mode":"binary","file":{"src":"","fileName":"a.png","contentType":"image/png"}})");
     EXPECT_EQ (body_of (R"({"mode":"binary","file":{"src":"/x/a.png","unresolved":false}})"),
-    R"({"mode":"binary","file":{"src":"/x/a.png","unresolved":true}})");
+    R"({"mode":"binary","file":{"src":"/x/a.png"}})");
     EXPECT_EQ (body_of (R"({"mode":"form-data","fields":[{"key":"f","type":"file","src":"/x/a.png"},
         {"key":"t","value":"v","src":"/x/b.png"}]})"),
-    R"({"mode":"form-data","fields":[{"key":"f","value":"","enabled":true,"type":"file","src":"/x/a.png","unresolved":true},{"key":"t","value":"v","enabled":true}]})");
+    R"({"mode":"form-data","fields":[{"key":"f","value":"","enabled":true,"type":"file","src":"/x/a.png"},{"key":"t","value":"v","enabled":true}]})");
 }
 
 /// An `x-vayu-request` piece that fails its check is dropped and counted, and
@@ -1600,14 +1608,13 @@ TEST (PostmanImport, ADisabledBodyImportsAsNoneAndIsCounted) {
 
 /**
  * Postman's `file` mode imports as a `binary` body naming the file, not as no
- * body: the path as written, its base name, and **unresolved**, because it is
- * a path on the exporting machine that the engine sends only once the user
- * picks it again or allows its folder. Postman writes `src: null` (or no
- * `file` at all) until a file is chosen; that imports as no file chosen,
- * which claims nothing and so is not unresolved. Each is counted, by request,
- * as a file reference to relink.
+ * body: the path as written and its base name. It is a path on the exporting
+ * machine, which the engine sends only once the user picks it again or allows
+ * its folder; the parse states no trust of its own. Postman writes `src: null`
+ * (or no `file` at all) until a file is chosen; that imports as no file
+ * chosen. Each is counted, by request, as a file reference to relink.
  */
-TEST (PostmanImport, AFileBodyImportsAsAnUnresolvedBinaryBody) {
+TEST (PostmanImport, AFileBodyImportsAsABinaryBodyNamingThePath) {
     const ImportParse parsed =
     parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
         {"name":"Upload","request":{"method":"PUT","url":"https://x.com/a",
@@ -1621,7 +1628,7 @@ TEST (PostmanImport, AFileBodyImportsAsAnUnresolvedBinaryBody) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const auto& requests = parsed.result.at ("collections")[0].at ("requests");
     EXPECT_EQ (requests[0].at ("body").dump (),
-    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png","unresolved":true}})");
+    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png"}})");
     EXPECT_EQ (requests[1].at ("body").dump (), R"({"mode":"binary","file":{"src":""}})");
     EXPECT_EQ (requests[2].at ("body").dump (), R"({"mode":"binary","file":{"src":""}})");
     const json skipped = parsed.result.at ("meta").at ("skipped");
@@ -2413,6 +2420,40 @@ class ImportParseRoute : public ::testing::Test {
     std::unique_ptr<vayu::db::Database> db_;
 };
 
+// The preview reads each imported path's `unresolved` as this machine's roots
+// and grants decide it (#2356), to offer "Allow folder" for the ones it would
+// not send. Mutation check: drop the `derive_import_file_trust` call in
+// `import_parse_response` and neither body carries the key.
+TEST_F (ImportParseRoute, DerivesEachImportedPathsTrust) {
+    const std::filesystem::path dir = std::filesystem::current_path () / "import-trust";
+    std::filesystem::create_directories (dir);
+    std::ofstream (dir / "picked.bin") << "picked";
+    const std::string picked = std::filesystem::canonical (dir / "picked.bin").string ();
+    vayu::FileGrant grant;
+    grant.id   = "fgrant_1";
+    grant.path = picked;
+    db_->save_file_grant (grant);
+
+    const auto upload = [] (const std::string& name, const std::string& src) {
+        return json{ { "name", name },
+            { "request",
+            { { "method", "PUT" }, { "url", "https://x/" + name },
+            { "body", { { "mode", "file" }, { "file", { { "src", src } } } } } } } };
+    };
+    const json document = { { "info", { { "name", "C" }, { "schema", "v2.1.0" } } },
+        { "item", json::array ({ upload ("picked", picked), upload ("elsewhere", "/no/such/b.bin") }) } };
+    auto [status, body] = vayu::http::routes::import_parse_response (
+    *db_, json{ { "content", document.dump () } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const json& requests = body.at ("collections").at (0).at ("requests");
+    ASSERT_EQ (requests.size (), 2u) << body.dump ();
+    EXPECT_EQ (requests.at (0).at ("body").at ("file").at ("unresolved"), false)
+    << body.dump ();
+    EXPECT_EQ (requests.at (1).at ("body").at ("file").at ("unresolved"), true)
+    << body.dump ();
+    std::filesystem::remove_all (dir);
+}
+
 TEST_F (ImportParseRoute, AnswersTheWholeImportResult) {
     auto [status, body] = vayu::http::routes::import_parse_response (*db_,
     json{ { "content", R"({"info":{"name":"C","schema":"v2.1.0"},"item":[]})" } });
@@ -2493,7 +2534,7 @@ TEST_F (ImportParseRoute, PersistsAnImportedBinaryBody) {
     const auto requests = db_->get_requests_in_collection (collections[0].id);
     ASSERT_EQ (requests.size (), 1U);
     EXPECT_EQ (json::parse (requests[0].body),
-    json::parse (R"({"mode":"binary","file":{"src":"/data/a.bin","fileName":"a.bin","unresolved":true}})"));
+    json::parse (R"({"mode":"binary","file":{"src":"/data/a.bin","fileName":"a.bin"}})"));
 }
 
 /**

@@ -27,15 +27,23 @@ export function useFileRootsQuery() {
 	});
 }
 
-export function useCreateFileRootMutation() {
+/**
+ * Open the folder picker and allow what the user chooses (#2356): the main
+ * process makes the write, so this takes where the picker opens, never a
+ * folder. Resolves with the engine's answer, `cancelled` included.
+ */
+export function useAllowChosenFolderMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (path: string) => apiService.createFileRoot({ path }),
-		onSuccess: () => {
+		mutationFn: (options?: { defaultPath?: string; title?: string }) =>
+			apiService.allowChosenFolder(options),
+		onSuccess: (reply) => {
 			// Refetched rather than appended: the engine stores the canonical
 			// path, so the row it keeps can differ from the one the user picked.
-			void queryClient.invalidateQueries({ queryKey: queryKeys.fileRoots.all });
+			if (reply.outcome === "done") {
+				void queryClient.invalidateQueries({ queryKey: queryKeys.fileRoots.all });
+			}
 		},
 	});
 }

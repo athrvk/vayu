@@ -533,7 +533,18 @@ inline auto make_vayu_storage (const std::string& path) {
     // row and the route's 409 is backed by the schema.
     make_table ("file_roots", make_column ("id", &FileRoot::id, primary_key ()),
     make_column ("path", &FileRoot::path, unique ()),
-    make_column ("created_at", &FileRoot::created_at)));
+    make_column ("created_at", &FileRoot::created_at)),
+
+    // Files a person picked (schema version 6, #2356), the per-file half of the
+    // trust rule beside `file_roots`. `path` is canonical and UNIQUE, like a
+    // root's. The version-6 migration creates this table before `sync_schema ()`
+    // runs, to hold the grants it reads out of stored bodies, so its DDL in
+    // `db_maintenance.cpp` (`FILE_GRANTS_DDL`) must stay exactly what this
+    // mapping generates: a mismatch makes `sync_schema ()` rebuild the table
+    // and lose every grant in it.
+    make_table ("file_grants", make_column ("id", &FileGrant::id, primary_key ()),
+    make_column ("path", &FileGrant::path, unique ()),
+    make_column ("created_at", &FileGrant::created_at)));
 }
 
 using Storage = decltype (make_vayu_storage (std::string{}));

@@ -52,6 +52,10 @@
 #include <string>
 #include <vector>
 
+namespace vayu::http {
+class FileAccessPolicy;
+}
+
 namespace vayu::core {
 
 /// `fileBaseName(path)`: the last segment of @p path, for either platform's
@@ -63,10 +67,11 @@ namespace vayu::core {
  * `key`/`value`/`enabled`/`description`) turned into a multipart part that
  * uploads a file at @p src.
  *
- * @p src is kept exactly as the source wrote it and a row that has one is
- * marked **unresolved**, because it names a file on the exporting machine, not
- * one Vayu can read: the engine sends it only once the user picks it again or
- * it lies under an allowed folder (`FileRef::unresolved`). Shared by every
+ * @p src is kept exactly as the source wrote it. It names a file on the
+ * exporting machine, which the engine sends only once the user picks it again
+ * or it lies under an allowed folder (`vayu/http/file_ref.hpp`); the import
+ * states no trust of its own, and the parse route derives `unresolved` for the
+ * preview (`derive_import_file_trust`). Shared by every
  * importer that has to turn a source-machine file reference into a formdata
  * part - Postman/Insomnia (`import_document.cpp`) and a JMeter
  * `HTTPsampler.Files` upload (`jmeter_import.cpp`, issue #1657) - so the row
@@ -78,8 +83,8 @@ const std::string* content_type);
 
 /**
  * A `binary` body that sends the file at @p src, under the same rule as
- * `imported_file_part`: the path kept as written, its base name as `fileName`,
- * **unresolved** whenever there is a path. @p src may be empty - a document
+ * `imported_file_part`: the path kept as written, its base name as `fileName`.
+ * @p src may be empty - a document
  * that declares a file upload without naming the file - and the body then
  * imports as "no file chosen" rather than being dropped.
  */
@@ -253,5 +258,17 @@ const ImportSource& source);
  */
 [[nodiscard]] nlohmann::ordered_json import_apply_payload (
 const nlohmann::ordered_json& result);
+
+/**
+ * @brief Write the derived `unresolved` (`vayu::json::derive_file_trust`) onto
+ * every request body in the parsed import @p result, as `POST /import/parse`
+ * answers it (#2356).
+ *
+ * The preview reads it to offer "Allow folder" for the imported paths this
+ * machine would not send; nothing reads it back, because a stored body never
+ * keeps the key.
+ */
+void derive_import_file_trust (nlohmann::json& result,
+const vayu::http::FileAccessPolicy& files);
 
 } // namespace vayu::core

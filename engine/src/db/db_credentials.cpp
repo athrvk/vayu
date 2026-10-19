@@ -7,8 +7,9 @@
 
 /**
  * @file db_credentials.cpp
- * @brief Client-certificate registry (issue #707), the allowed folders for
- * request-body files (`file_roots`) and the OAuth token cache (issue #1614).
+ * @brief Client-certificate registry (issue #707), the allowed folders and
+ * picked files for request bodies (`file_roots`, `file_grants`) and the OAuth
+ * token cache (issue #1614).
  */
 
 #include "database_impl.hpp"
@@ -95,6 +96,36 @@ void Database::delete_file_root (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Deleting allowed folder", { { "id", id } });
     impl_->storage.remove_all<FileRoot> (where (c (&FileRoot::id) == id));
+}
+
+// ---------------------------------------------------------------------------
+// Files a person picked (`file_grants`, schema version 6, #2356)
+// ---------------------------------------------------------------------------
+
+void Database::save_file_grant (const FileGrant& grant) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("db", "Saving file grant", { { "id", grant.id } });
+    impl_->storage.replace (grant);
+}
+
+std::vector<FileGrant> Database::get_file_grants () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.get_all<FileGrant> (order_by (&FileGrant::path));
+}
+
+std::optional<FileGrant> Database::get_file_grant (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.get_all<FileGrant> (where (c (&FileGrant::id) == id));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    return rows.front ();
+}
+
+void Database::delete_file_grant (const std::string& id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    vayu::utils::log_debug ("db", "Deleting file grant", { { "id", id } });
+    impl_->storage.remove_all<FileGrant> (where (c (&FileGrant::id) == id));
 }
 
 // ============================================================================

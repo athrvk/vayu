@@ -200,15 +200,17 @@ TEST (ErrnoMessage, AnswersForACodeNoPlatformHasAMessageFor) {
 }
 
 /// Every C call `concurrency-mt-unsafe` reports that this engine makes or has
-/// made. The environment writers are here even though `src` has never had one:
-/// a `setenv` anywhere in the engine is what would make the one exempted
-/// `getenv` below unsafe, so the guard is what keeps its reason true.
+/// made. The environment writers are here because a write is what would make
+/// the exempted `getenv` reads below unsafe; the one write `src` makes is the
+/// start-up removal of the grant secret (`grant_secret.cpp`), before any
+/// thread exists, so the guard is what keeps every other write out.
 /// `exit` earns its place for a second reason: `daemon.cpp`'s force-shutdown
 /// branch runs inside a signal handler, where `exit` runs every static
 /// destructor while the worker threads are still using what they destroy.
 /// `_Exit` is the spelling that stops now, and does not match this name.
-constexpr std::array<std::string_view, 10> kUnsafeCalls = { "localtime", "strerror",
-    "getenv", "setenv", "putenv", "gmtime", "asctime", "ctime", "rand", "exit" };
+constexpr std::array<std::string_view, 12> kUnsafeCalls = { "localtime",
+    "strerror", "getenv", "setenv", "unsetenv", "putenv", "_putenv_s", "gmtime",
+    "asctime", "ctime", "rand", "exit" };
 
 /// One file, one call: `cert-err58-cpp` is why these are `constexpr` arrays of
 /// views rather than the `std::vector<std::string>` they read more naturally
@@ -219,12 +221,14 @@ struct ExemptSite {
     std::string_view call;
 };
 
-/// The single site where one of them stays, silenced at the line with its
-/// reason: reading `CURL_CA_BUNDLE` has no reentrant spelling to move to. Per
+/// The sites where one of them stays, each silenced at the line with its
+/// reason: reading `CURL_CA_BUNDLE` has no reentrant spelling to move to, and
+/// the grant secret is read and removed once at start (#2356). Per
 /// (file, call) rather than per file, so exempting the read does not also
 /// exempt a write nobody noticed being added beside it.
-constexpr std::array<ExemptSite, 1> kExempt = {
-    { { "src/http/transport_policy.cpp", "getenv" } }
+constexpr std::array<ExemptSite, 4> kExempt = {
+    { { "src/http/transport_policy.cpp", "getenv" }, { "src/http/grant_secret.cpp", "getenv" },
+    { "src/http/grant_secret.cpp", "unsetenv" }, { "src/http/grant_secret.cpp", "_putenv_s" } }
 };
 
 bool is_exempt (std::string_view file, std::string_view call) {
@@ -302,6 +306,12 @@ TEST (MtUnsafeCalls, TheGuardSeesACallAndNotALongerName) {
     EXPECT_FALSE (tests::names_call ("localtime_r (&now, &out);", "localtime"));
     EXPECT_FALSE (tests::names_call ("curl_easy_strerror (result)", "strerror"));
     EXPECT_FALSE (tests::names_call ("int localtime = 0;", "localtime"));
+    // The environment writers are listed under each spelling, because the
+    // boundary rule that keeps `localtime_r` out keeps `unsetenv` out of
+    // `setenv` too.
+    EXPECT_TRUE (tests::names_call ("unsetenv (name);", "unsetenv"));
+    EXPECT_FALSE (tests::names_call ("unsetenv (name);", "setenv"));
+    EXPECT_FALSE (tests::names_call ("_putenv_s (name, \"\");", "putenv"));
 
     // And the stripper really does blank prose, which is the whole reason the
     // exemption list is as short as it is.
