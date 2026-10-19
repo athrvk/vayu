@@ -231,10 +231,11 @@ export default function AuthFields({
 	}
 
 	/*
-	 * digest/aws/ntlm. The engine cannot resolve them, so there are no fields to
-	 * render - but they are never collapsed to "none" either: the host names the
-	 * stored mode and warns that it is still what runs, and the config rides
-	 * along untouched in `value` so a save returns exactly what was loaded.
+	 * digest/aws/ntlm/hawk/oauth1/edgegrid/jwt. The engine cannot resolve them, so
+	 * there are no fields to render and the request goes out without auth - but
+	 * they are never collapsed to "none" either: the host names the stored mode
+	 * and warns that Vayu does not send it, and the config rides along untouched
+	 * in `value` so a save returns exactly what was loaded.
 	 */
 	return null;
 }

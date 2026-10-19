@@ -909,6 +909,14 @@ describe("every target, on the shared rules", () => {
 			expect(notes.join(" ")).toContain("AWS signature");
 		});
 
+		it(`${target.label} names an unsent mode by its label and says Vayu does not send it`, () => {
+			const { notes } = target.generate({ ...GET, auth: { mode: "hawk", config: {} } });
+			const note = notes.join(" ");
+			expect(note).toContain("Hawk - Vayu does not send this auth type");
+			expect(note).toContain("so the snippet carries no credentials");
+			expect(note).not.toContain("hawk auth");
+		});
+
 		it(`${target.label} applies bearer auth rather than dropping it`, () => {
 			const { code } = target.generate({ ...GET, auth: { mode: "bearer", token: "t0ken" } });
 			expect(code).toContain("Authorization");

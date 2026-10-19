@@ -5318,6 +5318,7 @@ hits the wire:
 | `basic` | `Authorization: Basic <base64(user:pass)>` |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
+| any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
@@ -6633,6 +6634,22 @@ before the field; the values beside them stay raw. A streaming send answers
 `202` before any of this exists, so only its stored trace carries them. A
 pre-request script that retargets the URL can leave `authQueryParam` naming a
 parameter the final URL no longer carries.
+
+**And they say when auth was not sent at all** (#2474): `authNotice`, a plain
+string, appears when the request's `auth.mode` is one the engine stores but does
+not execute (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`; an
+import can bring any of them in). The request is still sent, without
+authentication, and the notice says so, naming the mode:
+
+```json
+"authNotice": "auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication"
+```
+
+It follows the same rules as the two keys above: one writer for both homes,
+**absent** when empty (every executed mode, and no auth), absent on rows
+written before the field, and on a streaming send only in the stored trace.
+A collection run's stored step traces carry it through the same trace writer;
+a load run sends such a request the same way and raises no run warning for it.
 
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,

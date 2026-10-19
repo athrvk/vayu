@@ -391,6 +391,17 @@ struct Request {
      * wrote: a reader that masks credentials needs the name.
      */
     std::string auth_query_param;
+    /**
+     * @brief Why the request's auth block put nothing on the wire, empty when
+     *        it was sent or there was none.
+     *
+     * Set by `apply_auth` for a mode Vayu stores but does not execute (digest,
+     * AWS Signature, NTLM, ...), which sends the request unauthenticated rather
+     * than refusing it. Recorded as `authNotice` on the live `/execute` answer
+     * and the stored trace (#2474), so the send says what the user could not
+     * otherwise tell from a 401.
+     */
+    std::string auth_notice;
     Body body;
 
     // Options
