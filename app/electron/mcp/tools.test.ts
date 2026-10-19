@@ -13673,7 +13673,11 @@ describe("get_graphql_schema", () => {
 	const STORED = {
 		method: "GET",
 		url: ENDPOINT,
-		headers: { "X-Tenant": "acme" },
+		headers: [
+			{ name: "X-Tenant", value: "acme" },
+			{ name: "x-tenant", value: "beta" },
+			{ name: "content-type", value: "text/plain" },
+		],
 		body: { mode: "graphql", content: "{ order(id: 1) { id } }" },
 		auth: { mode: "bearer", token: "t0k3n" },
 	};
@@ -13724,7 +13728,13 @@ describe("get_graphql_schema", () => {
 			transient: true,
 			environmentId: "env_1",
 			auth: STORED.auth,
-			headers: { "X-Tenant": "acme", "Content-Type": "application/json" },
+			// The composed lines, a repeat kept, with the one Content-Type this
+			// request needs in place of the composed one.
+			headers: [
+				{ name: "X-Tenant", value: "acme" },
+				{ name: "x-tenant", value: "beta" },
+				{ name: "Content-Type", value: "application/json" },
+			],
 		});
 		const body = payload.body as { mode: string; content: string };
 		expect(body.mode).toBe("json");

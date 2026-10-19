@@ -1414,6 +1414,14 @@ export interface RunResultTrace {
 		 */
 		sentHeaders?: Record<string, string>;
 		/**
+		 * `sentHeaders` as lines in wire order (issue #2466): a repeated name is
+		 * repeated lines, in the spelling the author typed. Written whenever the
+		 * transfer sent any; absent on rows stored before the key, which keep
+		 * the folded `sentHeaders` alone (`HttpResponse.requestHeaderLines` is
+		 * the live spelling).
+		 */
+		sentHeaderLines?: HeaderLine[];
+		/**
 		 * What a `binary` body sent: the file's name, size in bytes and
 		 * sha256, recorded at send time - never the bytes and never the path.
 		 * `unknown` because a stored row is whatever its engine wrote;
@@ -2043,10 +2051,10 @@ export interface ResponseTiming {
 }
 
 /**
- * One response header line as the server sent it (issue #2460): the name in
- * its received case, the value trimmed by the engine and nothing else. A
- * repeated header is repeated lines, which the folded `headers` map beside it
- * cannot hold.
+ * One header line, name and value, in the case it was written: a response line
+ * as the server sent it (issue #2460, the value trimmed by the engine and
+ * nothing else) or a request line as it goes out (issue #2466). A repeated
+ * header is repeated lines, which a folded `headers` map beside it cannot hold.
  */
 export interface HeaderLine {
 	name: string;
@@ -2069,6 +2077,16 @@ export interface HttpResponse {
 	 */
 	headerLines?: HeaderLine[];
 	requestHeaders?: Record<string, string>;
+	/**
+	 * The request's header lines as the transfer sent them, in wire order
+	 * (issue #2466) - `requestHeaders` above is the same headers folded (a
+	 * repeat joined with ", ", `Cookie` with "; "), which loses a repeated name
+	 * and the spelling typed. Absent from an engine that predates the key.
+	 *
+	 * `responseFromExecuteResult` passes it through `sentHeaderLines`
+	 * (`lib/header-lines.ts`), which reads an empty list as an absent one.
+	 */
+	requestHeaderLines?: HeaderLine[];
 	rawRequest?: string;
 	body: unknown;
 	bodyRaw: string;

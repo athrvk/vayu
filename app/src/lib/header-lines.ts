@@ -40,3 +40,30 @@ export function resolveHeaderLines(
 		Object.entries(headers ?? {}).map(([name, value]) => ({ name, value }))
 	);
 }
+
+/**
+ * The request's lines as the engine sent them, or `undefined` when it sent none
+ * (issue #2466) - the request-side twin of {@link receivedHeaderLines}, with the
+ * same reason for reading an empty list as an absent one. A live `/execute`
+ * answer always carries `requestHeaderLines` (`[]` when nothing was recorded), a
+ * stored trace omits the key, and an engine or row from before it has neither;
+ * both funnels run their input through here so one exchange builds one
+ * `ResponseState` live and restored.
+ */
+export function sentHeaderLines(lines: HeaderLine[] | undefined): HeaderLine[] | undefined {
+	return receivedHeaderLines(lines);
+}
+
+/**
+ * A `headers` payload field as lines, whichever shape it arrived in: the
+ * ordered `[{ name, value }]` list `POST /compose` returns and a recorded run
+ * snapshot may hold (issue #2466), or the older single-valued record, read in
+ * its key order. The one place that says both are the same thing.
+ */
+export function headerLinesOf(
+	headers: HeaderLine[] | Record<string, string> | undefined
+): HeaderLine[] {
+	if (!headers) return [];
+	if (Array.isArray(headers)) return headers;
+	return Object.entries(headers).map(([name, value]) => ({ name, value }));
+}

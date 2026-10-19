@@ -1442,10 +1442,11 @@ resolves and what is sent are unchanged (#1806). The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
 the Postman exporter only: `GET /requests` returns it as the stored JSON text,
 which the app keeps as a string and never parses, so an import and a Duplicate
-carry it byte for byte, and nothing sends it. The flat `headers` record every
-inline compose sends loses each row's `source`, so beside it goes
+carry it byte for byte, and nothing sends it. The ordered `headers` lines every
+inline compose sends (`toHeaderRows`: enabled rows with a key, in row order, a
+repeated name repeated, issue #2466) lose each row's `source`, so beside them goes
 `bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):
-the names whose row the body mode wrote, which a `content-type` opt-out removes
+the names whose last row the body mode wrote (names compared without case), which a `content-type` opt-out removes
 on the wire while a Content-Type the user typed is always sent. A History
 replay puts the run's recorded list back on its seeded rows.
 

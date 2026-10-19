@@ -31,6 +31,7 @@ import {
 	encodeAtUrlComponent,
 	encodeQueryComponent,
 } from "@/modules/request-builder/utils/query-encoding";
+import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
@@ -296,6 +297,45 @@ function carriesHeader(headers: Array<[string, string]>, name: string): boolean 
 	return headers.some(([key]) => key.toLowerCase() === folded);
 }
 
+/** The request's header lines in the order they were given, a repeat repeated (issue #2466). */
+function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]> {
+	return headerLinesOf(headers).map(({ name, value }): [string, string] => [name, value]);
+}
+
+/**
+ * Fold every header a client with one value per name cannot repeat into a single
+ * entry, and say so. The entry sits where the name first appeared, keeps that
+ * row's spelling and joins the values with ", " - `Cookie` with "; ", as the
+ * engine's own folded record does - and the note names each name that was
+ * joined, because Vayu sends those rows as separate lines.
+ *
+ * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
+ * dictionary. curl and HTTPie repeat a header and never call this.
+ */
+export function foldRepeatedHeaders(
+	headers: ReadonlyArray<[string, string]>,
+	client: string
+): { headers: Array<[string, string]>; notes: string[] } {
+	const folded = new Map<string, { name: string; values: string[] }>();
+	for (const [name, value] of headers) {
+		const key = name.toLowerCase();
+		const entry = folded.get(key);
+		if (entry) entry.values.push(value);
+		else folded.set(key, { name, values: [value] });
+	}
+
+	const notes: string[] = [];
+	const out = [...folded].map(([key, { name, values }]): [string, string] => {
+		if (values.length === 1) return [name, values[0]];
+		const separator = key === "cookie" ? "; " : ", ";
+		notes.push(
+			`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; Vayu sends them as separate lines.`
+		);
+		return [name, values.join(separator)];
+	});
+	return { headers: out, notes };
+}
+
 /**
  * Flatten a request into what a static client has to send, with auth applied
  * and secrets already hidden.
@@ -320,7 +360,7 @@ export function prepareRequest(
 	let url = substitutePathVariables(request.url ?? "", request.params ?? [], undefined, {
 		encode,
 	});
-	const headers: Array<[string, string]> = Object.entries(request.headers ?? {});
+	const headers = headerPairs(request.headers);
 	let basicAuth: { username: string; password: string } | null = null;
 
 	const auth = request.auth;

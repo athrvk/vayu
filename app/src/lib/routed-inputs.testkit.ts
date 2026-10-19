@@ -316,6 +316,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/services/codegen/prepare.conformance.test.ts",
 		paths: ["engine/tests/fixtures/auth-header-precedence.json"],
 	},
+	headerRows: {
+		reader: "app/src/modules/request-builder/utils/header-rows.conformance.test.ts",
+		paths: ["engine/tests/fixtures/header-rows-conformance.json"],
+	},
 	impliedContentType: {
 		reader: "app/src/modules/request-builder/utils/implied-content-type.conformance.test.ts",
 		paths: ["engine/tests/fixtures/implied-content-type-conformance.json"],

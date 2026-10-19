@@ -82,6 +82,22 @@ export function schemaComposeBody(
 }
 
 /**
+ * A composed payload's `headers` as `{ name, value }` lines: the ordered array
+ * `POST /compose` returns (issue #2466), or the older single-valued record. The
+ * main-process twin of `headerLinesOf` (`src/lib/header-lines.ts`).
+ */
+function headerLinesOf(headers: unknown): Array<{ name: string; value: string }> {
+	if (Array.isArray(headers)) {
+		return headers.filter(isRecord).map((line) => ({
+			name: String(line.name),
+			value: String(line.value),
+		}));
+	}
+	if (!isRecord(headers)) return [];
+	return Object.entries(headers).map(([name, value]) => ({ name, value: String(value) }));
+}
+
+/**
  * The introspection query overlaid onto a composed payload: the main-process
  * twin of the renderer's `buildIntrospectionRequest`
  * (`src/lib/graphql/introspect.ts`), which this tree cannot import.
@@ -100,10 +116,12 @@ export async function introspectionPayload(
 	const payload: Record<string, unknown> = {
 		method: "POST",
 		url: composed.url,
-		headers: {
-			...(isRecord(composed.headers) ? composed.headers : {}),
-			"Content-Type": "application/json",
-		},
+		headers: [
+			...headerLinesOf(composed.headers).filter(
+				(line) => line.name.toLowerCase() !== "content-type"
+			),
+			{ name: "Content-Type", value: "application/json" },
+		],
 		body: { mode: "json", content: JSON.stringify({ query: getIntrospectionQuery() }) },
 		transient: true,
 		...(environmentId ? { environmentId } : {}),
