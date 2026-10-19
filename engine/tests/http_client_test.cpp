@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -19,6 +20,7 @@
 
 #include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/default_headers.hpp"
 
 namespace vayu::http {
 namespace {
@@ -42,6 +44,10 @@ constexpr size_t DRIBBLE_BYTES = size_t{ 40 } * 1024;
 static_assert ((DRIBBLE_BYTES / DRIBBLE_CHUNK) * 120 > 300,
 "the dribble must outlast the 300ms total bound the tests set, or they prove "
 "nothing");
+
+/// The redirect statuses the raw-request view is checked against: the three
+/// that turn a POST into a body-less GET, and the two that keep the method.
+constexpr std::array<int, 5> REDIRECT_CODES = { 301, 302, 303, 307, 308 };
 
 class MockHttpBin {
     public:
@@ -155,6 +161,43 @@ class MockHttpBin {
                 return sink.write (chunk.data (), chunk.size ());
             });
         });
+
+        // /loop - redirects to itself: a chain no maxRedirects can outlast.
+        svr_.Get ("/loop", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect ("/loop", 302);
+        });
+
+        // A body that claims an encoding it is not in (gzip), and one in an
+        // encoding this libcurl has no decoder for (br). Either way the target
+        // answered; it is the body that cannot be read.
+        svr_.Get ("/bad-gzip", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Content-Encoding", "gzip");
+            res.set_content ("this is not gzip", "text/plain");
+        });
+        svr_.Get ("/unsupported-br", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Content-Encoding", "br");
+            res.set_content ("this is not brotli either", "text/plain");
+        });
+
+        // /landing answers either method, so a redirect that keeps the method
+        // (307/308) and one that turns a POST into a GET both end in a 200.
+        svr_.Get ("/landing", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("landed", "text/plain");
+        });
+        svr_.Post ("/landing", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("landed", "text/plain");
+        });
+
+        // /redirect-from/<code> answers GET and POST with that redirect to
+        // /landing.
+        for (const int code : REDIRECT_CODES) {
+            const std::string path = "/redirect-from/" + std::to_string (code);
+            const auto redirect = [code] (const httplib::Request&, httplib::Response& res) {
+                res.set_redirect ("/landing", code);
+            };
+            svr_.Get (path, redirect);
+            svr_.Post (path, redirect);
+        }
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -350,6 +393,152 @@ TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
     EXPECT_TRUE (raw.ends_with ("\r\n\r\n"
                                 R"({"name": "test"})"))
     << raw;
+}
+
+// What the final hop sent is what the view shows (issue #2462). A 301, 302 or
+// 303 answer to a POST makes libcurl re-send as a body-less GET, so the view
+// ends at the header block; appending the composed body there showed a body no
+// hop had carried. Mutation-check: append the body unconditionally and the
+// three body-less rows fail while 307 and 308 still pass.
+TEST_F (HttpClientTest, RawRequestOfAPostRedirectedToAGetEndsAtTheHeaderBlock) {
+    for (const int code : { 301, 302, 303 }) {
+        Request request;
+        request.method = HttpMethod::POST;
+        request.url    = mock_->url ("/redirect-from/" + std::to_string (code));
+        request.body.mode    = BodyMode::Text;
+        request.body.content = "secret-payload";
+        request.timeout_ms   = 5000;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << code << ": " << result.error ().message;
+        const auto& response = result.value ();
+        EXPECT_EQ (response.status_code, 200) << code;
+        EXPECT_TRUE (
+        response.raw_request.starts_with ("GET /landing HTTP/1.1\r\n"))
+        << code << ":\n"
+        << response.raw_request;
+        EXPECT_TRUE (response.raw_request.ends_with ("\r\n\r\n")) << code;
+        EXPECT_EQ (response.raw_request.find ("secret-payload"), std::string::npos)
+        << code << ":\n"
+        << response.raw_request;
+    }
+}
+
+// 307 and 308 keep the method and the body, so the final hop did send it.
+TEST_F (HttpClientTest, RawRequestOfAMethodKeepingRedirectStillShowsTheBody) {
+    for (const int code : { 307, 308 }) {
+        Request request;
+        request.method = HttpMethod::POST;
+        request.url    = mock_->url ("/redirect-from/" + std::to_string (code));
+        request.body.mode    = BodyMode::Text;
+        request.body.content = "secret-payload";
+        request.timeout_ms   = 5000;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << code << ": " << result.error ().message;
+        const auto& response = result.value ();
+        EXPECT_TRUE (
+        response.raw_request.starts_with ("POST /landing HTTP/1.1\r\n"))
+        << code << ":\n"
+        << response.raw_request;
+        EXPECT_TRUE (response.raw_request.ends_with ("\r\n\r\nsecret-payload"))
+        << code << ":\n"
+        << response.raw_request;
+    }
+}
+
+// A GET that carries a body is re-sent after a 302 as the same body-less GET
+// it would have been had the body never been composed.
+TEST_F (HttpClientTest, RawRequestOfAGetWithABodyRedirectedByA302EndsAtTheHeaderBlock) {
+    Request request;
+    request.method       = HttpMethod::GET;
+    request.url          = mock_->url ("/redirect-from/302");
+    request.body.mode    = BodyMode::Text;
+    request.body.content = "secret-payload";
+    request.timeout_ms   = 5000;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& raw = result.value ().raw_request;
+    EXPECT_TRUE (raw.starts_with ("GET /landing HTTP/1.1\r\n")) << raw;
+    EXPECT_TRUE (raw.ends_with ("\r\n\r\n")) << raw;
+    EXPECT_EQ (raw.find ("secret-payload"), std::string::npos) << raw;
+}
+
+// A redirect loop is the server's answer, not a connection that failed
+// (issue #2462). Mutation-check: put CURLE_TOO_MANY_REDIRECTS back under the
+// connection-failed group and the code reads CONNECTION_FAILED.
+TEST_F (HttpClientTest, ARedirectLoopIsTooManyRedirectsAndNamesTheLimit) {
+    for (const int limit : { 0, 2 }) {
+        Request request;
+        request.method           = HttpMethod::GET;
+        request.url              = mock_->url ("/loop");
+        request.follow_redirects = true;
+        request.max_redirects    = limit;
+        request.timeout_ms       = 5000;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        const auto& response = result.value ();
+        EXPECT_EQ (response.error_code, ErrorCode::TooManyRedirects) << limit;
+        EXPECT_EQ (response.status_code, 0) << limit;
+        EXPECT_TRUE (
+        response.error_message.starts_with ("Too many redirects: the server "
+                                            "redirected more than " +
+        std::to_string (limit) + " times"))
+        << limit << ": " << response.error_message;
+        // libcurl's own text follows the plain statement.
+        EXPECT_NE (response.error_message.find ("redirect"), std::string::npos);
+    }
+}
+
+// A body its own Content-Encoding cannot decode: bytes that are not gzip, and
+// an encoding this libcurl has no decoder for. Mutation-check: as above for
+// CURLE_BAD_CONTENT_ENCODING.
+TEST_F (HttpClientTest, AnUndecodableBodyIsBadContentEncodingAndNamesTheEncoding) {
+    const auto cases = std::to_array<std::pair<const char*, const char*>> (
+    { { "/bad-gzip", "gzip" }, { "/unsupported-br", "br" } });
+    // A bare Client negotiates nothing, and libcurl decodes only what was
+    // negotiated; the daemon's routes always hand it this policy.
+    ClientConfig config;
+    config.default_headers.accept_encoding = supported_accept_encodings ();
+    Client negotiating (config);
+    for (const auto& [path, encoding] : cases) {
+        Request request;
+        request.method     = HttpMethod::GET;
+        request.url        = mock_->url (path);
+        request.timeout_ms = 5000;
+
+        auto result = negotiating.send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        const auto& response = result.value ();
+        EXPECT_EQ (response.error_code, ErrorCode::BadContentEncoding) << path;
+        EXPECT_EQ (response.status_code, 0) << path;
+        EXPECT_TRUE (response.error_message.starts_with (
+        std::string ("The response could not be decoded: the server sent "
+                     "Content-Encoding ") +
+        encoding + ". "))
+        << path << ": " << response.error_message;
+    }
+}
+
+// The neighbours keep their meaning: a refused connection is still a connection
+// failure.
+TEST_F (HttpClientTest, ARefusedConnectionIsStillConnectionFailed) {
+    Request request;
+    request.method     = HttpMethod::GET;
+    request.url        = "http://127.0.0.1:1/";
+    request.timeout_ms = 2000;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().error_code, ErrorCode::ConnectionFailed);
 }
 
 TEST_F (HttpClientTest, SendsPostRequest) {

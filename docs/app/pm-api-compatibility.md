@@ -555,7 +555,7 @@ the transfer failed, two fields naming why:
 | `responseTime` | What the caller waited - submission to completion, queue wait included. The one a ported Postman script reads, since it is the one carrying Postman's name |
 | `responseTimeWire` | `CURLINFO_TOTAL_TIME`: DNS, connect, TLS, send and receive. What the server and the network cost, with none of Vayu's own queue in it |
 | `responseTimeQueueWait` | `responseTime` minus `responseTimeWire`, clamped at zero - the generator-side overhead. Near zero on a single send, which has no generator queue to wait in |
-| `errorCode` | The transport failure's code (`TIMEOUT`, `CONNECTION_FAILED`, …), as `pm.sendRequest`'s `err.code` spells it |
+| `errorCode` | The transport failure's code (`TIMEOUT`, `CONNECTION_FAILED`, `TOO_MANY_REDIRECTS`, …), as `pm.sendRequest`'s `err.code` spells it |
 | `errorMessage` | That failure's message |
 
 The two error fields are **absent** on a transfer that completed, rather than

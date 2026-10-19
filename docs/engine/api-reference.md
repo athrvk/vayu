@@ -988,6 +988,22 @@ reports as a generic receive error and which previously surfaced as
 `INTERNAL_ERROR`. The code is **appended** to the error enumeration, so the
 numeric values stored in existing traces are unchanged.
 
+Two more failures of the *target's answer* have their own codes
+(issue #2462): `TOO_MANY_REDIRECTS`, when the server redirected past the
+request's `maxRedirects` (usually a loop), and `BAD_CONTENT_ENCODING`, when the
+response declares a `Content-Encoding` that its bytes are not in or that this
+libcurl has no decoder for. Both previously came back as `CONNECTION_FAILED`,
+which sent people looking for a network fault when every hop had been answered.
+`errorMessage` opens with a plain statement - `Too many redirects: the server
+redirected more than N times (see Maximum redirects).` or `The response could
+not be decoded: the server sent Content-Encoding X.` - followed by libcurl's own
+text. The codes are **appended** to the enumeration like `PROXY_ERROR`, so
+stored numeric values are unchanged, but a script that tested
+`err.code === 'CONNECTION_FAILED'` (`pm.sendRequest`) or
+`pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees
+the new spelling. A load run records them under the error types
+`too_many_redirects` and `bad_content_encoding`.
+
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
 
@@ -6236,7 +6252,9 @@ is reported as `preScriptError`. See
 
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
 follows every 3xx and only the final response is returned - send
-`followRedirects: false` to see the 3xx status and its `Location` header. Both
+`followRedirects: false` to see the 3xx status and its `Location` header. A
+chain longer than `maxRedirects` (default 10) fails the send with
+`TOO_MANY_REDIRECTS` rather than returning the last 3xx. Both
 clients send these explicitly for exactly that reason (see
 [api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
@@ -6474,17 +6492,25 @@ for the response headers stored on a design run's `trace_data.response` and on
 captured load-run samples, which come off the same parse.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
-transfer's last outbound header frame and followed by the request body. So it
-carries what libcurl added on its own - the `Cookie` line the
+transfer's last outbound header frame and followed by the request body *when
+that frame declares one* (`Content-Length` above zero, or `Transfer-Encoding:
+chunked`). So it carries what libcurl added on its own - the `Cookie` line the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
 `requestHeaders`. The app's Headers tab lists the sent request from this block,
 line by line in wire order, so the tab shows the whole wire while the
-script-visible record stays the engine's.
+script-visible record stays the engine's. When the final hop sent no body, the
+string ends at the blank line that closes the header block: a `POST` answered
+`301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started
+with is not shown on a request that never carried it (issue #2462). `307` and
+`308` keep the method and the body, and so does the view.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
-issued them. It carries what the engine derives at send time - the body-implied
-`Content-Type` (`text/plain` for a `text` body since issue #2464), and every [default header](#default-request-headers) this send
+issued them on its **first hop**. After a followed redirect that changes the
+request (a `POST` answered `303`, which becomes a `GET`) the final hop's own
+header block is `rawRequest`'s. It carries what the engine derives at send
+time - the body-implied `Content-Type` (`text/plain` for a `text` body since
+issue #2464), and every [default header](#default-request-headers) this send
 adds (the `User-Agent`, the negotiated `Accept-Encoding`, an enabled
 correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
 itself with the boundary. It
@@ -6523,7 +6549,8 @@ throws away.
 
 Values in `rawRequest` are not redacted:
 this field exists to say exactly what went out. On a followed redirect it is the
-final hop, matching the response beside it. A transfer that failed before
+final hop - its method, its headers and the body that hop carried, if any -
+matching the response beside it. A transfer that failed before
 sending anything (DNS failure, connection refused) has no frame to read, and
 falls back to a request synthesized from what was composed.
 

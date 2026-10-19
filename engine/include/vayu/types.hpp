@@ -528,7 +528,17 @@ enum class ErrorCode : std::uint8_t {
     /// depends on why it stopped, which only the run knows - a user Stop is
     /// not one, a natural-end drain deadline is (issue #2136,
     /// `is_stop_cancellation`). Appended for the same reason `ProxyError` was.
-    Cancelled
+    Cancelled,
+    /// The server redirected past the request's `maxRedirects` (issue #2462) -
+    /// usually a loop. Distinct because the target answered every hop, so
+    /// `ConnectionFailed` sent users looking for a network fault. Appended for
+    /// the same reason `ProxyError` was.
+    TooManyRedirects,
+    /// The response declared a `Content-Encoding` libcurl could not decode:
+    /// bytes that are not that encoding, or an encoding this build has no
+    /// decoder for (issue #2462). Appended for the same reason `ProxyError`
+    /// was.
+    BadContentEncoding
 };
 
 /**
@@ -551,6 +561,8 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::ProxyError: return "PROXY_ERROR";
     case ErrorCode::ResponseTooLarge: return "RESPONSE_TOO_LARGE";
     case ErrorCode::Cancelled: return "CANCELLED";
+    case ErrorCode::TooManyRedirects: return "TOO_MANY_REDIRECTS";
+    case ErrorCode::BadContentEncoding: return "BAD_CONTENT_ENCODING";
     }
     return "UNKNOWN";
 }
