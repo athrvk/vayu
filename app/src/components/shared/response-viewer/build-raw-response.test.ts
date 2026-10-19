@@ -47,4 +47,38 @@ describe("buildRawResponse", () => {
 	it("falls back to HTTP/1.1 when the empty string says nothing was negotiated", () => {
 		expect(buildRawResponse(0, "", {}, "", "")).toMatch(/^HTTP\/1\.1 0 \r\n/);
 	});
+
+	describe("header lines as received (issue #2460)", () => {
+		const LINES = [
+			{ name: "Content-Type", value: "text/plain" },
+			{ name: "X-Dup", value: "one" },
+			{ name: "x-dup", value: "two" },
+			{ name: "Set-Cookie", value: "a=1" },
+			{ name: "Set-Cookie", value: "b=2" },
+		];
+
+		it("prints one line per header in wire order, names in the received case", () => {
+			expect(buildRawResponse(200, "OK", LINES, "hi")).toBe(
+				"HTTP/1.1 200 OK\r\n" +
+					"Content-Type: text/plain\r\n" +
+					"X-Dup: one\r\n" +
+					"x-dup: two\r\n" +
+					"Set-Cookie: a=1\r\n" +
+					"Set-Cookie: b=2\r\n" +
+					"\r\nhi"
+			);
+		});
+
+		it("prints the folded map's entries when given a map", () => {
+			const raw = buildRawResponse(200, "OK", { "x-dup": "one, two" }, "");
+
+			expect(raw).toBe("HTTP/1.1 200 OK\r\nx-dup: one, two\r\n\r\n");
+		});
+
+		it("prints no header lines for an empty list", () => {
+			expect(buildRawResponse(204, "No Content", [], "")).toBe(
+				"HTTP/1.1 204 No Content\r\n\r\n"
+			);
+		});
+	});
 });

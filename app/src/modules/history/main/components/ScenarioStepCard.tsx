@@ -317,6 +317,7 @@ function ScenarioStepCard({
 							bodyRaw: response.bodyRaw,
 							rawBytes: response.rawBytes,
 							headers: response.headers,
+							headerLines: response.headerLines,
 							status: response.status,
 							statusText: response.statusText,
 						}}

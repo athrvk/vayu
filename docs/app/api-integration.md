@@ -1441,6 +1441,7 @@ replay puts the run's recorded list back on its seeded rows.
   httpVersionDowngraded: false,
   clientCertificate: "",
   bodyCapped: false,
+  headerLines: [{ name: "Content-Type", value: "application/json" }],
   timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
@@ -1518,6 +1519,24 @@ absent means an engine too old to say, not "not capped" - and the stored trace
 carries the same key under `trace.response.bodyCapped`, written only when it
 happened, so `responseFromExecuteResult` normalises its `false` to `undefined`
 and the two funnels agree (`body-capped-funnels.test.ts`).
+
+`headerLines` is the response's headers as received (issue #2460): one
+`{ name, value }` per wire line, in order, the name in the server's case and the
+value trimmed by the engine, so a `Set-Cookie` sent twice is two entries and a
+comma inside one cookie's value is not mistaken for the boundary between two.
+`headers` beside it is the same headers folded (lowercased, repeats joined with
+`", "`) and is unchanged. The live body always carries the key (`[]` when there
+were none); the stored trace writes `trace.response.headerLines` only when there
+were lines, and a load sample, a stream's `open` frame and any row stored before
+the key have none. Both funnels pass it through `receivedHeaderLines`
+(`lib/header-lines.ts`), which reads an empty list as an absent one, so the live
+and the restored `ResponseState.headerLines` agree
+(`header-lines-funnels.test.ts`). Absent is **not** filled in from `headers`: it
+is how the Cookies tab knows the `set-cookie` it holds is folded and must be
+split by the legacy `parseSetCookie` rather than read one cookie per line. The
+Headers and Raw tabs and the History step pane show the lines when there are
+some and `headers` when there are not (`resolveHeaderLines`); Save as example
+stores the folded map.
 
 The renderer keeps it strictly apart from `bodyTruncated`, which is
 `maxTraceBodyBytes` shortening a *stored* body after the whole of it was read:

@@ -686,7 +686,8 @@ Three divergences worth knowing before porting a script:
   which is the one a browser's jar would keep, while the array still lists both.
 
 The parse is shared with the response Cookies tab in the UI through
-`engine/tests/fixtures/set-cookie-conformance.json`, so a cookie cannot read one
+`engine/tests/fixtures/set-cookie-conformance.json` (the tab parses each
+received line with `parseSetCookieLine`, #2460), so a cookie cannot read one
 way on screen and another in a script.
 
 ### The cookie jar (`pm.cookies`)

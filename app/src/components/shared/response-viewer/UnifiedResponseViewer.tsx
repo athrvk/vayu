@@ -126,6 +126,7 @@ export default function UnifiedResponseViewer({
 						{response?.headers && Object.keys(response.headers).length > 0 && (
 							<CompactHeadersViewer
 								headers={response.headers}
+								headerLines={response.headerLines}
 								title="Response headers"
 							/>
 						)}

@@ -18,7 +18,7 @@
  * cell and the `Date` and `Set-Cookie` cases fail.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import HeadersViewer, { CompactHeadersViewer } from "./HeadersViewer";
@@ -79,5 +79,63 @@ describe("HeadersViewer: times in header values", () => {
 		const { container } = render(<CompactHeadersViewer headers={HEADERS} />);
 		const times = Array.from(container.querySelectorAll("time")).map((t) => t.textContent);
 		expect(times).toEqual([DATE, COOKIE_EXPIRES]);
+	});
+});
+
+describe("HeadersViewer: header lines as received (issue #2460)", () => {
+	const LINES = [
+		{ name: "X-Dup", value: "one" },
+		{ name: "x-dup", value: "two" },
+		{ name: "Set-Cookie", value: "a=1; Path=/" },
+		{ name: "Set-Cookie", value: "b=2" },
+	];
+	const FOLDED = { "x-dup": "one, two", "set-cookie": "a=1; Path=/, b=2" };
+
+	const rowTexts = (container: HTMLElement) =>
+		Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+			Array.from(tr.querySelectorAll("td")).map((td) => td.textContent)
+		);
+
+	it("renders one row per line in the case received, repeats kept", () => {
+		const { container } = render(<HeadersViewer headers={FOLDED} headerLines={LINES} />);
+
+		expect(rowTexts(container)).toEqual([
+			["X-Dup", "one"],
+			["x-dup", "two"],
+			["Set-Cookie", "a=1; Path=/"],
+			["Set-Cookie", "b=2"],
+		]);
+		expect(screen.getByText("4")).toBeInTheDocument();
+	});
+
+	it("builds the table from the folded map when there are no lines", () => {
+		const { container } = render(<HeadersViewer headers={FOLDED} />);
+
+		expect(rowTexts(container)).toEqual([
+			["x-dup", "one, two"],
+			["set-cookie", "a=1; Path=/, b=2"],
+		]);
+	});
+
+	it("gives the compact variant the same rows", () => {
+		const { container } = render(<CompactHeadersViewer headers={FOLDED} headerLines={LINES} />);
+
+		const names = Array.from(container.querySelectorAll("span.font-medium")).map(
+			(n) => n.textContent
+		);
+		expect(names).toEqual(["X-Dup:", "x-dup:", "Set-Cookie:", "Set-Cookie:"]);
+	});
+
+	it.each([
+		["table", HeadersViewer],
+		["compact", CompactHeadersViewer],
+	] as const)("keeps the %s rows of a repeated name under distinct keys", (_name, Viewer) => {
+		// Two rows keyed by name alone share a key, which React reports.
+		const errors: unknown[] = [];
+		const spy = vi.spyOn(console, "error").mockImplementation((...a) => void errors.push(a));
+		render(<Viewer headers={FOLDED} headerLines={LINES} />);
+		spy.mockRestore();
+
+		expect(errors).toEqual([]);
 	});
 });

@@ -8,7 +8,8 @@
 /**
  * ResponseCookies Component
  *
- * Displays cookies extracted from Set-Cookie headers.
+ * Displays cookies extracted from Set-Cookie headers: one per received line,
+ * or, for a response with no lines, from the folded header.
  *
  * Parsing lives in `parse-set-cookie.ts`; the three defects it fixes are
  * documented there. The visible consequence was that `attrs` had always been
@@ -19,16 +20,35 @@
 
 import { EmptyState, HeaderValue } from "@/components/shared";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui";
-import { parseSetCookie } from "./parse-set-cookie";
+import type { HeaderLine } from "@/types/domain";
+import { parseSetCookie, parseSetCookieLine, type ParsedCookie } from "./parse-set-cookie";
 
 export interface ResponseCookiesProps {
 	headers: Record<string, string>;
+	/** The lines as received (issue #2460); absent for a response that has none. */
+	headerLines?: HeaderLine[];
 }
 
-export default function ResponseCookies({ headers }: ResponseCookiesProps) {
+/**
+ * One cookie per received `Set-Cookie` line. Names are case-insensitive and the
+ * engine keeps the server's spelling in the lines.
+ */
+function cookiesFromLines(lines: HeaderLine[]): ParsedCookie[] {
+	return lines
+		.filter((line) => line.name.toLowerCase() === "set-cookie")
+		.map((line) => parseSetCookieLine(line.value))
+		.filter((cookie): cookie is ParsedCookie => cookie !== null);
+}
+
+/** The folded map entry, for a response that carries no lines. */
+function cookiesFromFolded(headers: Record<string, string>): ParsedCookie[] {
 	// Header names are case-insensitive; the engine has sent both spellings.
 	const setCookie = headers["set-cookie"] || headers["Set-Cookie"];
-	const cookies = setCookie ? parseSetCookie(setCookie) : [];
+	return setCookie ? parseSetCookie(setCookie) : [];
+}
+
+export default function ResponseCookies({ headers, headerLines }: ResponseCookiesProps) {
+	const cookies = headerLines ? cookiesFromLines(headerLines) : cookiesFromFolded(headers);
 
 	if (cookies.length === 0) {
 		return <EmptyState variant="inline" title="No cookies in response" />;

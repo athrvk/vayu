@@ -110,4 +110,35 @@ describe("RawRequestResponse", () => {
 
 		expect(screen.getByTestId("raw-content").textContent).toContain("< café");
 	});
+
+	it("prints the header lines as received, a repeated one on each of its lines (#2460)", () => {
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={response({
+					headers: { "set-cookie": "a=1, b=2" },
+					headerLines: [
+						{ name: "Set-Cookie", value: "a=1" },
+						{ name: "Set-Cookie", value: "b=2" },
+					],
+				})}
+			/>
+		);
+
+		const text = screen.getByTestId("raw-content").textContent ?? "";
+		expect(text).toContain("< Set-Cookie: a=1");
+		expect(text).toContain("< Set-Cookie: b=2");
+		expect(text).not.toContain("set-cookie: a=1, b=2");
+	});
+
+	it("prints the folded map for a response with no lines (#2460)", () => {
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={response({ headers: { "set-cookie": "a=1, b=2" } })}
+			/>
+		);
+
+		expect(screen.getByTestId("raw-content").textContent).toContain("< set-cookie: a=1, b=2");
+	});
 });

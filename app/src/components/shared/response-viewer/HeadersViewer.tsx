@@ -47,6 +47,8 @@ import {
 	TableRow,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { resolveHeaderLines } from "@/lib/header-lines";
+import type { HeaderLine } from "@/types/domain";
 import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
 import { TimeValue } from "../TimeValue";
@@ -75,15 +77,16 @@ export function HeaderValue({ value }: { value: string }) {
 
 export default function HeadersViewer({
 	headers,
+	headerLines,
 	title,
 	defaultOpen = true,
 	variant = "response",
 	className,
 }: HeadersViewerProps) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
-	const entries = Object.entries(headers);
+	const lines = resolveHeaderLines(headers, headerLines);
 
-	if (entries.length === 0) {
+	if (lines.length === 0) {
 		return null;
 	}
 
@@ -124,7 +127,7 @@ export default function HeadersViewer({
 					{title || (variant === "response" ? "Response headers" : "Request headers")}
 				</h3>
 				<Badge variant="outline" className="ml-auto text-xs">
-					{entries.length}
+					{lines.length}
 				</Badge>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="mt-2">
@@ -136,8 +139,9 @@ export default function HeadersViewer({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{entries.map(([name, value]) => (
-							<TableRow key={name}>
+						{/* Index-composite: a repeated name is two rows with one name. */}
+						{lines.map(({ name, value }, i) => (
+							<TableRow key={`${i}:${name}`}>
 								<TableCell className="font-mono text-muted-foreground">
 									{name}
 								</TableCell>
@@ -158,16 +162,18 @@ export default function HeadersViewer({
  */
 export function CompactHeadersViewer({
 	headers,
+	headerLines,
 	title,
 	className,
 }: {
 	headers: Record<string, string>;
+	headerLines?: HeaderLine[];
 	title?: string;
 	className?: string;
 }) {
-	const entries = Object.entries(headers);
+	const lines = resolveHeaderLines(headers, headerLines);
 
-	if (entries.length === 0) {
+	if (lines.length === 0) {
 		return null;
 	}
 
@@ -175,7 +181,7 @@ export function CompactHeadersViewer({
 		<div className={className}>
 			{title && <h4 className={cn(EYEBROW_CLASS, "mb-2")}>{title}</h4>}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
-				{entries.map(([key, value]) => (
+				{lines.map(({ name, value }, i) => (
 					// Same `border-rule` as the table above, resolving differently
 					// because `surface-sunken` re-declares it. That slab is `--muted`,
 					// the one surface where no border token works in both themes:
@@ -183,9 +189,12 @@ export function CompactHeadersViewer({
 					// `--muted` sits between them, and the pair inverts in light. The
 					// surface class supplies an alpha of `--foreground` instead, which
 					// flips with the theme - 1.356 light / 1.343 dark.
-					<div key={key} className="flex gap-2 py-1 border-b border-rule last:border-0">
+					<div
+						key={`${i}:${name}`}
+						className="flex gap-2 py-1 border-b border-rule last:border-0"
+					>
 						<span className="text-xs font-medium text-muted-foreground shrink-0">
-							{key}:
+							{name}:
 						</span>
 						<span className="text-xs text-foreground break-all">
 							<HeaderValue value={value} />
@@ -202,6 +211,8 @@ export interface ResponseHeadersPanelProps {
 	requestHeaders?: Record<string, string>;
 	/** Headers that came back. Open by default. */
 	responseHeaders?: Record<string, string>;
+	/** The response's lines as received (issue #2460); `responseHeaders` when absent. */
+	responseHeaderLines?: HeaderLine[];
 }
 
 /**
@@ -228,8 +239,10 @@ export interface ResponseHeadersPanelProps {
 export function ResponseHeadersPanel({
 	requestHeaders,
 	responseHeaders,
+	responseHeaderLines,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
+	const responseLineCount = resolveHeaderLines(response, responseHeaderLines).length;
 	const hasRequestHeaders = requestHeaders && Object.keys(requestHeaders).length > 0;
 
 	return (
@@ -238,9 +251,14 @@ export function ResponseHeadersPanel({
 				<HeadersViewer headers={requestHeaders} variant="request" defaultOpen={false} />
 			)}
 
-			<HeadersViewer headers={response} variant="response" defaultOpen={true} />
+			<HeadersViewer
+				headers={response}
+				headerLines={responseHeaderLines}
+				variant="response"
+				defaultOpen={true}
+			/>
 
-			{Object.keys(response).length === 0 && (
+			{responseLineCount === 0 && (
 				<EmptyState variant="inline" title="No headers in response" />
 			)}
 		</div>
