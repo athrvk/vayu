@@ -113,10 +113,10 @@ export { MAX_SPEC_DIFF_ENTRIES } from "./tools/spec-bindings.js";
  * {@link toolListSignature}).
  *
  * A write tool that cannot succeed does not ship its schema (#1429): writes are
- * off by default, and on a default install those tools were ~40% of a
- * `tools/list` an agent could do nothing with. The handler check stays
- * (`writesDisabled`), so a client holding a list from a session where writes
- * were on still gets the actionable error.
+ * off by default, and on a default install those tools were 66,077 of the
+ * 181,447 bytes (36%) of a `tools/list` an agent could do nothing with. The
+ * handler check stays (`writesDisabled`), so a client holding a list from a
+ * session where writes were on still gets the actionable error.
  */
 export function isListed(tool: McpTool, config: ToolContext["config"]): boolean {
 	if (config.disabledTools.includes(tool.name)) return false;

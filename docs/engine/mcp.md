@@ -175,7 +175,10 @@ Electron-hosted transport each leave a `src: "mcp"` record; see
 
 Two things need the person or the client to hear from the server mid-session:
 a confirmation question before a destructive tool runs (elicitation), and word
-that `tools/list` changed when a Settings change alters it.
+that `tools/list` changed when a Settings change alters it. That is any change
+to what the list answers, not only to which tools it names: the Reveal secrets
+toggle lists the same tools and rewrites their descriptions (a tool's
+withholding pointer is dropped with it, #2441), so it fires the notice too.
 
 | Client | Confirmation question | `tools/list` changed |
 | ------ | --------------------- | -------------------- |
@@ -1663,7 +1666,10 @@ variable-writing or -listing tool - `get_globals`, `update_globals`,
 `create_collection`, `update_collection` - carries one shared sentence
 (`VARIABLE_PRECEDENCE_SENTENCE`) plus that tier's own position in the order and
 a pointer to the resource; `precedenceNote()` builds both pieces from one
-place. A table-driven scan in `tools.test.ts` runs over every variable tool's
+place. The sentence is shorter than the budget guard's repetition limit on
+purpose (see [The size of `tools/list` is
+budgeted](#the-size-of-toolslist-is-budgeted)): it is the one rule restated in
+every one of those tools. A table-driven scan in `tools.test.ts` runs over every variable tool's
 description and fails on one that omits the sentence, so a new variable tool
 cannot ship silent about where its tier sits.
 
@@ -1884,9 +1890,14 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
 error definition in their text, from `error-definition.ts`'s
-`RUN_ERROR_DEFINITION_SENTENCE` (issue #2124); so do the descriptions of
-`get_live_metrics`, `compare_runs`, `get_run_report`, `get_run_timeseries`,
-`export_run_report` and the `vayu://run/{runId}/report` resource. An agent reading `errorRate` is told
+`RUN_ERROR_DEFINITION_SENTENCE` (issue #2124), and so does the
+`vayu://run/{runId}/report` resource. Of the tool descriptions only
+`get_run_report` carries the whole sentence; `get_live_metrics`,
+`compare_runs`, `get_run_timeseries` and `export_run_report` carry
+`RUN_ERROR_DEFINITION_POINTER`, one line giving the two halves of the
+definition and naming `get_run_report` for the rest, because the sentence
+repeated in five descriptions was most of what `tools/list` spent on it
+(#2441). An agent reading `errorRate` is told
 what counts: a status outside 2xx/3xx or no response, a 3xx being a success, with
 the `httpErrors` / `noResponse` split beside the count. The fields themselves are
 the engine's, passed through unchanged (see [What counts as an
@@ -1995,8 +2006,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   that to the SDK across an upgrade. The
   server instructions say the same thing up front, in the sessions where the
   toggle is off. Withholding the schema rather than only the call is what makes
-  the toggle free: those tools are ~40% of the tool payload
-  an agent is sent, and on a default install none of them could have succeeded.
+  the toggle free: those tools are 66,077 of the 181,447 bytes (36%) of the
+  `tools/list` an agent is sent (app host, reveal off, measured at #2441), and
+  on a default install none of them could have succeeded.
   Write access is a separate grant from reveal: a script stored by a write tool
   (`create_request` / `update_request` / `create_collection` /
   `update_collection`, or an import) is not refused while reveal is off, and
@@ -2231,10 +2243,18 @@ carrying a withheld marker (a `<member>Withheld` member, top level, under
 `config` or in its `postman` source, or a `valueWithheld` row in that source)
 is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
-authenticate with nothing. The server instructions state the withholding in
-every session where reveal is off, beside the write gate's sentence and for the
-same reason, and each tool that carries one of the rows above says so in its
-own description. The projection lives in `withhold.ts`.
+authenticate with nothing. The server instructions state the withholding rules
+once, in full, in every session where reveal is off, beside the write gate's
+sentence and for the same reason, and the run and config resources repeat the
+rule for their own output. Each tool that carries one of the rows above gets
+one line in its own description (`withheldPointer(config, kind)` in
+`withhold.ts`: what its result reads in place of a secret, and that the
+instructions give the rules), so an agent that never reads the instructions
+still learns that the marker means "withheld", not "missing". The line is
+empty when reveal is on, and so are the instructions' rules: a session gets
+the rules exactly when its tools carry the pointer, and with reveal on no
+description says `Withheld` or `<redacted>`. The projection lives in
+`withhold.ts`.
 
 A script an agent sends is not a path: it is refused while reveal is off
 (see *Scripts an agent supplies are refused*, above). A script an agent
@@ -2289,14 +2309,14 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | ------------------ | ---------------------------------------------------------------------------- |
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing. Each takes the session's `host` so its refusal names that host's remedy. |
-| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a static description per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
+| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a description's tokens per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
@@ -2468,9 +2488,11 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | What `sync_spec`'s safe policy declined              | no setting: a person ticks it under Collection -> Spec -> Sync in the desktop app | Collection -> Spec -> Sync |
 
 The server instructions' write and reveal gate sentences read the host the same
-way, and so do the tool, resource and prompt descriptions. A description is a
-static string built at module load, so it names its remedy with a token from
-`remedy.ts` (`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
+way, and so do the tool, resource and prompt descriptions. A description is
+built at module load or, for a tool whose wording depends on the session (the
+withholding pointer, #2441), from the config at registration; either way it
+does not know the host, so it names its remedy with a token from `remedy.ts`
+(`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
 `REVEAL_SETTING_TOKEN` ends each withheld-output sentence in `withhold.ts`, and
 the Files, authority, data-file, proxy and Sync remedies above have one each).
 `server.ts` fills the tokens in per session: the whole `tools/list` answer (a
@@ -2539,6 +2561,22 @@ serves both eras from one factory, so a 2025-era client keeps what it had and a
 [What is live on each transport](#what-is-live-on-each-transport)). A stateful
 2025-era server - real sessions, a GET stream each, servers mutated on toggle -
 is not built: it would grow the mechanism the spec retired.
+
+### The size of `tools/list` is budgeted
+
+Every session pays for the whole `tools/list` answer before it does anything,
+so its size is held by `tool-list-budget.test.ts`, which builds the real
+registry through the real server (app host) for each writes-off/on and
+reveal-off/on pair. Measured at #2441 (reveal off): 115,370 bytes with writes
+off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
+5% above the measured sizes. The same file fails on a sentence of 150 or more
+characters that more than three descriptions repeat (a rule that long belongs
+in the server instructions, with a one-line pointer in the tool: the
+withholding rules and the error definition moved that way, and
+`VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its deliberate repetition
+passes), and on any `Withheld` or `<redacted>` in a description of a session
+with reveal on. A tool that adds output schemas (#2445) or a long description
+lands under the caps or raises them in its own diff.
 
 ## Deferred
 
