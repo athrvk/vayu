@@ -84,7 +84,7 @@ export const inlineFileInput = z
  * every tool that sends an ad-hoc request, so the advice cannot drift.
  */
 export const INLINE_FILE_REFUSAL =
-	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. A file must be chosen in the editor or live under an allowed folder in Settings > Files before the engine sends it.';
+	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - run_request with `requestId` and no `url`, start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. A file must be chosen in the editor or live under an allowed folder in Settings > Files before the engine sends it.';
 
 /**
  * The body a write tool stores, from the `body` / `bodyType` / `file`

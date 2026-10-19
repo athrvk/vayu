@@ -160,7 +160,12 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			openWorldHint: true,
 		},
 		inputSchema: {
-			method: z.string().optional().describe("HTTP method (default GET)."),
+			method: z
+				.string()
+				.optional()
+				.describe(
+					"HTTP method (default GET; with `requestId` and no `url`, the stored method)."
+				),
 			url: z
 				.string()
 				.optional()
