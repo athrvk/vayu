@@ -541,10 +541,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   typed `Auth` variant with an exhaustive per-mode handler: bearer/basic/api-key
   are injected inline; `oauth2` delegates to the token client. A user-supplied
   `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
-  `{{$vu}}` / `{{$iteration}}` token are the one case auth is *not* resolved
-  into the plan: the value has to be bound before the credential is encoded, so
+  `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
+  into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
-  (`bind_step_auth`, see [Scenario runs](api-reference.md#scenario-runs)).
+  (`bind_step_iteration`, see [Scenario runs](api-reference.md#scenario-runs)).
   **What is deferred is decided by the credentials, not by the run's shape**
   (issue #1055): a build defers because these credentials carry a token, so a
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config

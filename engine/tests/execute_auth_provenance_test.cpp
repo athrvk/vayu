@@ -34,12 +34,12 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <thread>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
 #include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
@@ -50,11 +50,11 @@
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/types.hpp"
-#include "vayu/utils/encoding.hpp"
 
 namespace {
 
 using nlohmann::json;
+using vayu::tests::basic_pair_of;
 
 constexpr const char* TOKEN = "live-token-5d1e";
 
@@ -177,17 +177,6 @@ TEST_F (ExecuteAuthProvenanceTest, ABearerTokenRecordsNoProvenance) {
 // A credential still holding a name no scope defined at compose waits for the
 // pre-request script, as Postman's auth does. Asserted on the wire: the defect
 // was a basic pair encoded before the script ran, which only the server sees.
-
-/// The `user:password` pair a basic `Authorization` value carries, decoded, so
-/// a failure prints the credential that went out rather than its base64.
-std::string basic_pair_of (const std::string& header) {
-    constexpr std::string_view prefix = "Basic ";
-    if (header.rfind (prefix, 0) != 0) {
-        return "<not basic: " + header + ">";
-    }
-    return vayu::utils::base64_decode (std::string_view (header).substr (prefix.size ()))
-    .value_or ("<not base64: " + header + ">");
-}
 
 /// A GET to @p echo carrying @p auth, with @p script as its pre-request script.
 json scripted_payload (const vayu::tests::EchoServer& echo,
