@@ -41,6 +41,10 @@
  * an invalid URL). Every other response still renders both halves with or
  * without a recorded request: restored traces omit `rawRequest`.
  *
+ * **The body is printed as received** (`bodyRaw`, issue #2459), not the indented
+ * copy the Pretty view reads: this tab is the exchange, and indentation the
+ * server never sent does not belong in it.
+ *
  * **A body with no text view is one line saying so** (issue #2458): its
  * bytes are `rawBytes`, and neither their base64 nor a lossy decoding is what
  * the server sent.
@@ -53,7 +57,7 @@
 import { CodeEditor } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { buildRawResponse, formatSize } from "@/components/shared/response-viewer";
-import type { ResponseBytes } from "../../utils/response-bytes";
+import { receivedBody, type ResponseBytes } from "../../utils/response-bytes";
 import { markLines, SENT_MARKER, RECEIVED_MARKER } from "@/lib/http-language";
 
 export interface RawRequestResponseProps {
@@ -63,6 +67,8 @@ export interface RawRequestResponseProps {
 		statusText: string;
 		headers: Record<string, string>;
 		body: string;
+		/** `ResponseState.bodyRaw`: the body as received, which the received half prints. */
+		bodyRaw?: string;
 		/**
 		 * The negotiated protocol - `ResponseState.httpVersion`. See
 		 * `buildRawResponse`'s doc comment for the display-string contract and
@@ -89,7 +95,7 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 		response.headers,
 		response.rawBytes && !response.rawBytes.isText
 			? `[${formatSize(response.rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`
-			: response.body,
+			: receivedBody(response),
 		response.httpVersion
 	);
 

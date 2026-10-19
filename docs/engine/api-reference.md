@@ -6334,6 +6334,11 @@ declared charset: a body that is valid UTF-8 is `"utf8"` whatever its
 for the client to decode by the declared charset. A header value that is not
 UTF-8 has no such field and is answered with U+FFFD in place of each bad byte.
 
+`bodyRaw` of a `"utf8"` answer is the byte-exact text received; `body` is the
+parsed convenience copy, whose member order is unspecified and in which a
+duplicate key collapses to the last value. A client that shows or re-saves the
+body should use `bodyRaw`, as the app does (issue #2459).
+
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.
 

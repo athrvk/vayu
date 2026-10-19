@@ -54,8 +54,33 @@ describe("formatBody", () => {
 		expect(formatBody("{oops", "json")).toBe("{oops");
 	});
 
-	it("stringifies an already-parsed object", () => {
-		expect(formatBody({ a: 1 }, "json")).toBe('{\n  "a": 1\n}');
+	// Mutation check: put `JSON.parse` / `JSON.stringify` back in the JSON
+	// branch and the digits, the order and the duplicate all change.
+	it.each(["json", undefined] as const)(
+		"formats the received JSON text, not a parse of it (%s)",
+		(bodyType) => {
+			const received = '{"b":1,"2":{"id":9007199254740993},"a":2,"a":3}';
+			const out = formatBody(received, bodyType);
+
+			expect(out).toBe(
+				[
+					"{",
+					'  "b": 1,',
+					'  "2": {',
+					'    "id": 9007199254740993',
+					"  },",
+					'  "a": 2,',
+					'  "a": 3',
+					"}",
+				].join("\n")
+			);
+		}
+	);
+
+	it("formats JSON only for the json and undeclared types", () => {
+		const received = '{"a":1}';
+		expect(formatBody(received, "text")).toBe(received);
+		expect(formatBody(received, "html")).toBe(received);
 	});
 
 	it("answers empty for nothing at all", () => {

@@ -218,11 +218,25 @@ export function responseBodyType(
 }
 
 /**
+ * The body text exactly as it was received, for everything that takes the body
+ * out of the pane: Copy, Download, Save as example and the Raw tab.
+ *
+ * `bodyRaw`, not `body`, which is that text with indentation added for Pretty
+ * (issue #2459). `body` only stands in where no `bodyRaw` was recorded - the
+ * error response a failed send restores, which holds its message there.
+ */
+export function receivedBody(response: Pick<ResponseState, "body" | "bodyRaw">): string {
+	return response.bodyRaw || response.body;
+}
+
+/**
  * How much body this response holds, for a notice that says "the first N".
  * The bytes when there are some: a base64 body's text is a decoding, or empty.
  */
-export function heldBodySize(response: Pick<ResponseState, "body" | "rawBytes">): number {
-	return response.rawBytes?.data.length ?? response.body.length;
+export function heldBodySize(
+	response: Pick<ResponseState, "body" | "bodyRaw" | "rawBytes">
+): number {
+	return response.rawBytes?.data.length ?? receivedBody(response).length;
 }
 
 const EXTENSION_BY_SUBTYPE: Record<string, string> = {

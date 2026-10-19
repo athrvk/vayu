@@ -26,6 +26,7 @@
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
 import type { ResponseState } from "../../types";
+import { receivedBody } from "../../utils/response-bytes";
 
 /**
  * The name a save starts with: the status line, which is what a saved response
@@ -89,7 +90,9 @@ export function exampleFromResponse(
 		name,
 		status: response.status,
 		headers,
-		body: response.body,
+		// The text as received, not the indented pane copy: a mock server serves
+		// this verbatim, so it must keep the server's key order and number digits.
+		body: receivedBody(response),
 		contentType: headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "",
 		// Always `user`: this is the field a spec sync reads to know it must
 		// leave the row alone (#627). An app-saved example is never a spec's.
