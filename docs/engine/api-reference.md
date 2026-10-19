@@ -5376,6 +5376,13 @@ and it always exchanges the code and overwrites the cached row, whatever `force`
 says and whether the cached token is fresh, expired or refreshable (the old
 refresh token is not carried over).
 
+Client credentials sent in the `Authorization: Basic` header are form-encoded
+before they are base64-encoded, as RFC 6749 section 2.3.1 specifies, so a secret
+holding `+`, `/` or `=` travels as `%2B`, `%2F`, `%3D`. A provider that expects
+them raw (as Postman and `curl -u` send them) needs `credentialsPlacement:
+"body"`, which puts `client_id` and `client_secret` in the form instead. The
+default is `basic_auth_header`.
+
 **Response (`200`):**
 ```json
 {
