@@ -159,8 +159,8 @@ export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
  *
  * A spawned engine reports its own exit through the child's `exit` event; one
  * found running at start is not our child, so the only way to learn it is gone
- * is to keep asking the OS. Kept well under the graceful ceiling so the verified kill that
- * follows a stuck engine still happens inside the same quit.
+ * is to keep asking the OS. Kept well under the graceful ceiling so the
+ * verified kill that follows a stuck engine still happens inside the same quit.
  */
 export const ENGINE_EXIT_POLL_INTERVAL_MS = 100;
 /**

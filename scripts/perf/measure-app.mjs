@@ -25,8 +25,8 @@
  *     #1146/#1147's bundle work moves and the one this program's history is
  *     recorded in; read that file's header for what it therefore excludes.
  *   - tasklistSpawn: on Windows only, times the synchronous `tasklist` spawn
- *     `app/electron/sidecar.ts` pays on every boot to verify an adopted
- *     engine's PID - issue #1148's missing number.
+ *     `app/electron/sidecar.ts` pays on every boot to verify the lock file's
+ *     engine PID - issue #1148's missing number.
  *
  * Deliberately does not:
  *   - Measure an installer's own cost (NSIS, dmg, AppImage's FUSE mount). The
@@ -69,8 +69,9 @@ const PACKAGED_MARKER = "[vayu] startup";
 // What the packaged app asks for that line with.
 const PACKAGED_MEASURE_ENV = "VAYU_MEASURE_STARTUP";
 // ENGINE_PORT in `app/electron/constants.ts`, held to it by the same guard.
-// Between packaged launches the engine has to be gone: the sidecar adopts one
-// that is still listening here, and an adopted engine is not a cold start.
+// Between packaged launches the engine has to be gone: the sidecar stops and
+// replaces one that is still listening here, and a launch that first waits out
+// that shutdown is not a cold start.
 const ENGINE_PORT = 9876;
 const ENGINE_EXIT_TIMEOUT_MS = 15_000;
 const ENGINE_EXIT_POLL_MS = 200;
@@ -206,7 +207,7 @@ function resolveElectronBinary(repoRoot) {
  * app's own quit path stops it. On POSIX `SIGTERM` reaches that path
  * (`quit-signals.ts`). On Windows there is no such signal - `kill` is
  * `TerminateProcess`, which takes the app and leaves the engine listening for
- * the next launch to adopt - so the tree is killed explicitly there instead.
+ * the next launch to replace - so the tree is killed explicitly there instead.
  */
 async function terminateAndWait(child, exited) {
 	if (child.exitCode !== null || child.signalCode !== null) return;
@@ -341,8 +342,8 @@ async function launchOnce(spec, repoRoot) {
  * Launch `STARTUP_LAUNCH_COUNT` times, collecting one marker payload each.
  *
  * `between` runs after each teardown and may veto the run - it is how the
- * packaged leg refuses to measure a launch that would adopt the previous
- * launch's engine instead of starting one.
+ * packaged leg refuses to measure a launch that would first have to stop the
+ * previous launch's engine.
  */
 async function timeLaunches(spec, repoRoot, label, between = null) {
 	const payloads = [];
@@ -550,9 +551,9 @@ function enginePortAnswers() {
 /**
  * Wait for the engine the launch just started to be gone.
  *
- * The sidecar adopts an engine already listening on the port instead of
- * spawning one (`sidecar.ts`), so a leftover engine would make the second and
- * third launches measure an adoption - faster, and not a cold start. Refusing
+ * The sidecar stops an engine already listening on the port before it spawns
+ * its own (`sidecar.ts`), so a leftover engine would make the second and third
+ * launches measure that shutdown wait too - slower, and not a cold start. Refusing
  * to measure that is the point: the reason travels into `note` rather than into
  * a number nobody can tell apart from a good one.
  */
@@ -564,7 +565,7 @@ async function waitForEngineToExit() {
 	}
 	return {
 		ok: false,
-		reason: `an engine was still listening on ${ENGINE_PORT} ${ENGINE_EXIT_TIMEOUT_MS}ms after the app was told to quit - the next launch would have adopted it rather than starting one`,
+		reason: `an engine was still listening on ${ENGINE_PORT} ${ENGINE_EXIT_TIMEOUT_MS}ms after the app was told to quit - the next launch would have had to stop it before starting its own`,
 	};
 }
 
@@ -641,7 +642,7 @@ async function measurePackagedStartup(repoRoot, packagedDir) {
 
 /**
  * Time the exact `tasklist` spawn `app/electron/sidecar.ts` (lines ~120-122)
- * makes to verify an adopted engine's PID. Mirrored command and options, this
+ * makes to verify the lock file's engine PID. Mirrored command and options, this
  * process's own pid standing in for the engine's - the number that matters is
  * what a synchronous `execSync` spawn costs on this machine, not which PID it
  * asks about.

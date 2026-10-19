@@ -9,12 +9,10 @@
  * The engine the app talks to is the one it spawned this session.
  *
  * `start()` has two paths that find an engine already on the port - the lock
- * file and the health probe. Both used to adopt it, and each version of that
- * had its defect: an adopted engine reported `isRunning() === false` and
- * outlived quit (#270), one built for another version ran this session's
- * requests (#1492). Since #2356 there is no adoption to get right: an engine
- * found running lacks this session's grant secret, so it is stopped and
- * replaced on every path.
+ * file and the health probe. An engine found running lacks this session's
+ * grant secret, so both stop and replace it (#2356), and a quit landing during
+ * the replacement still stops it (#270). A build for another version is
+ * replaced the same way (#1492).
  *
  * The lifecycle is driven through a fake `SidecarSystem` rather than real
  * processes and ports: replacement, shutdown and the restart/quit race are
@@ -24,9 +22,9 @@
  * would have "passed" against.
  *
  * The same harness covers the other end of `start()`: an engine that dies at
- * spawn. That path used to poll a dead port for the full 45-second ceiling with
- * no window on screen, so the assertions there are about *when* the failure
- * arrives and what it says, not only that it arrives.
+ * spawn. It must not poll a dead port for the full 45-second ceiling, so the
+ * assertions there are about *when* the failure arrives and what it says, not
+ * only that it arrives.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

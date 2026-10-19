@@ -347,7 +347,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// its bytes. Empty when the object is not a real file (a drag-and-drop of
 	// remote content), which the caller reports rather than sending a phantom
 	// path. A path is also reported to main as picked (#2356) - see
-	// `pathOfPickedFile` below for why that cannot be used to name one.
+	// `pathOfPickedFile` above for why that cannot be used to name one.
 	getFilePath: (file: File): string => pathOfPickedFile(file),
 
 	// The system folder picker, for Settings > Files, the body editor's "Allow

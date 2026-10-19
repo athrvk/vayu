@@ -133,8 +133,7 @@ file) needs the grant secret the app passes the engine it spawns, and that
 engine was given another launch's secret or none, so `EngineSidecar` stops it
 (`POST /shutdown`, then the same PID kill the graceful path already falls back
 to) and spawns its own on the same port. That also covers an engine built for a
-different Vayu release (issue #1492), which used to be the one case stopped
-rather than adopted.
+different Vayu release (issue #1492).
 
 **A live lock PID that does not answer `/health` is waited for, then replaced**
 (issue #1905). Between "stale" and "healthy" there is a third case: the PID is
