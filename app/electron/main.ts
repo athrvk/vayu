@@ -93,6 +93,7 @@ import {
 } from "./app-log.js";
 import { registerLogIpc } from "./log-ipc.js";
 import { registerFileIpc } from "./file-ipc.js";
+import { createFileTrustClient } from "./file-trust-client.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
@@ -218,6 +219,11 @@ let mcpService: VayuMcpService | null = null;
 const dataFileLocations = new DataFileLocations();
 /** The tab and environment the renderer has open, published over `app:focus` (#2045). */
 const appFocus = new AppFocusStore();
+/**
+ * The holder of the engine's grant secret and the one sender of it (#2356).
+ * The sidecar hands it each spawned engine's secret; see file-trust-client.ts.
+ */
+const fileTrust = createFileTrustClient({ origin: engineOrigin });
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -896,12 +902,18 @@ function publishEnginePort(port: number): void {
 	appLogger().info("main", "Engine endpoint for this session", { url: engineOrigin() });
 }
 
+/** A spawned engine's grant secret, for the one module that sends it (#2356). */
+function receiveGrantSecret(secret: string): void {
+	fileTrust.setSecret(secret);
+}
+
 async function startEngine() {
 	try {
 		engineSidecar = new EngineSidecar(
 			ENGINE_PORT_CANDIDATES,
 			defaultSidecarSystem,
-			publishEnginePort
+			publishEnginePort,
+			receiveGrantSecret
 		);
 		await engineSidecar.start();
 		appLogger().info("main", "Engine started successfully", { url: engineSidecar.getApiUrl() });

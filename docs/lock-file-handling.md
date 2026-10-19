@@ -125,18 +125,16 @@ This ensures that:
 - Reinstalls work correctly
 - No manual intervention needed
 
-**A live engine is adopted only when its version matches this app's** (issue
-#1492). The lock file can point at a PID that is alive and answering `/health`
-but was built for a different Vayu release - a crash-then-relaunch across an
-upgrade, or two installed builds sharing a data directory. Adopting it
-silently would run every request through a sidecar the renderer was not built
-against, so `EngineSidecar` compares the running engine's `/health.version`
-against `app.getVersion()` before attaching to it: a match adopts as before,
-and a mismatch stops the daemon (`POST /shutdown`, then the same PID kill the
-graceful path already falls back to) and starts this build's own instead,
-logging both versions. A version that could not be read at all (the probe
-answered but the field was missing or malformed) adopts rather than disrupts
-a healthy engine on an ambiguous answer.
+**A live engine is replaced, never adopted** (issue #2356). The lock file can
+point at a PID that is alive and answering `/health`: an orphan from a crashed
+session, two installed builds sharing a data directory, or in development an
+engine started by hand. Every write to file trust (an allowed folder, a picked
+file) needs the grant secret the app passes the engine it spawns, and that
+engine was given another launch's secret or none, so `EngineSidecar` stops it
+(`POST /shutdown`, then the same PID kill the graceful path already falls back
+to) and spawns its own on the same port. That also covers an engine built for a
+different Vayu release (issue #1492), which used to be the one case stopped
+rather than adopted.
 
 **A live lock PID that does not answer `/health` is waited for, then replaced**
 (issue #1905). Between "stale" and "healthy" there is a third case: the PID is
@@ -146,8 +144,8 @@ migrations before it listens - or hung. Spawning beside it loses the flock, and
 reporting the port as held would blame another program for Vayu's own engine.
 So `EngineSidecar` polls `/health` on the same ramped
 budget a freshly spawned engine gets (`ENGINE_HEALTH_POLL_BUDGET_MS`). An
-engine that answers in time goes through the version check above and is
-adopted. One that does not is stopped by PID (the name-verified kill, so a
+engine that answers in time is asked to shut down and replaced like any other
+(above). One that does not is stopped by PID (the name-verified kill, so a
 recycled PID is left alone), the port is given `ENGINE_PORT_RELEASE_DELAY_MS`
 to clear, the replaced PID is logged, and this instance spawns its own. The
 port-in-use error (`EnginePortInUseError`) is left for ports held when the lock
@@ -156,7 +154,7 @@ file names no live Vayu engine.
 **A live lock is looked for on every candidate port** (issue #2118). The engine
 may run on 9876 or a fallback (`ENGINE_PORT_CANDIDATES`), so with a live lock
 PID every candidate is asked for `/health` before any free port is taken: an
-orphan left on a fallback port is adopted even after 9876 has come free. When
+orphan left on a fallback port is replaced there even after 9876 has come free. When
 it answers on none, the wait above watches the first free candidate (where a
 still-starting engine, not yet listening, would be), or 9876 when none is free.
 
@@ -196,8 +194,8 @@ rm ~/Library/Application\ Support/Vayu/vayu.lock
 ### Electron Sidecar
 - Function: `checkLockFile()` - checks lock file and verifies PID
 - Function: `isVayuEngineRunning()` - cross-platform process check with process name verification. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse
-- Method: `adoptIfVersionMatches()` - the version gate above, called wherever `start()` finds a healthy engine already on the port
-- Method: `adoptLockedEngine()` - settles a live lock PID: adopts it, or waits on `pollHealthWithinBudget()` and replaces it if it stays silent
+- Method: `replaceAnsweringEngine()` - stops a healthy engine `start()` finds already on the port, so it can spawn its own
+- Method: `replaceLockedEngine()` - settles a live lock PID: waits on `pollHealthWithinBudget()`, then asks it to shut down if it answered or kills it if it stayed silent
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 

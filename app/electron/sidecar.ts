@@ -11,6 +11,7 @@
  */
 
 import { spawn, ChildProcess, execSync } from "child_process";
+import { randomBytes } from "crypto";
 import { app } from "electron";
 import path from "path";
 import fs from "fs";
@@ -18,6 +19,8 @@ import net from "net";
 import {
 	ENGINE_PORT_CANDIDATES,
 	ENGINE_LOCK_FILE,
+	ENGINE_GRANT_SECRET_BYTES,
+	ENGINE_GRANT_SECRET_ENV,
 	ENGINE_HEALTH_POLL_BUDGET_MS,
 	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
 	ENGINE_HEALTH_POLL_MAX_INTERVAL_MS,
@@ -88,8 +91,8 @@ async function fetchHealth(
 
 /**
  * Does a Vayu engine answer on this port (#2153)? `status: "ok"` alone is what
- * any service's health route says, and a positive answer here puts the port
- * through adoption, which stops a version mismatch with `POST /shutdown`. The
+ * any service's health route says, and a positive answer here stops whatever
+ * answered with `POST /shutdown`, to replace it with this session's engine. The
  * engine's `/health` also carries a string `version` and a numeric `workers`;
  * a reply without both is another program, treated as a held port.
  */
@@ -103,13 +106,11 @@ async function isEngineRunning(port: number): Promise<boolean> {
 }
 
 /**
- * The running engine's own `version` (issue #1492), or null when the probe
- * failed or answered with no readable version - callers read null as "could
- * not tell", not as "no engine here"; `isEngineRunning` already answers that.
+ * A fresh grant secret (#2356): what a write to file trust must present, and
+ * only the engine spawned with it and this process ever hold it.
  */
-async function probeEngineVersion(port: number): Promise<string | null> {
-	const data = await fetchHealth(port);
-	return typeof data?.version === "string" ? data.version : null;
+function newGrantSecret(): string {
+	return randomBytes(ENGINE_GRANT_SECRET_BYTES).toString("hex");
 }
 
 /**
@@ -295,16 +296,18 @@ function checkLockFile(
  * passes `defaultSidecarSystem`, which is the code that used to be inline.
  */
 export interface SidecarSystem {
-	/** Spawn the engine binary. Stdio is piped; the caller drains it. */
-	spawnEngine(binaryPath: string, args: string[]): ChildProcess;
+	/**
+	 * Spawn the engine binary with `env` as its whole environment. Stdio is
+	 * piped; the caller drains it. The grant secret travels in `env` and never
+	 * in `args`, which any process listing shows.
+	 */
+	spawnEngine(binaryPath: string, args: string[], env: NodeJS.ProcessEnv): ChildProcess;
 	/** Is this PID alive *and* still vayu-engine? (PID reuse is real.) */
 	isEngineProcessAlive(pid: number): boolean;
 	/** Force-kill a name-verified engine PID. Returns whether a kill was issued. */
 	killEngineProcess(pid: number): boolean;
 	/** Does a Vayu engine answer `/health` on this port: `status: ok` plus its `version` and `workers`? */
 	probeHealth(port: number): Promise<boolean>;
-	/** The `version` a healthy engine on this port answers with, or null. */
-	probeVersion(port: number): Promise<string | null>;
 	/** `POST /shutdown`. True means accepted, not that the process has gone. */
 	requestShutdown(port: number): Promise<boolean>;
 	/** Can we bind this port, i.e. is nothing at all listening? */
@@ -313,15 +316,15 @@ export interface SidecarSystem {
 }
 
 export const defaultSidecarSystem: SidecarSystem = {
-	spawnEngine: (binaryPath, args) =>
+	spawnEngine: (binaryPath, args, env) =>
 		spawn(binaryPath, args, {
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: false,
+			env,
 		}),
 	isEngineProcessAlive: isVayuEngineRunning,
 	killEngineProcess: killVayuEngineProcess,
 	probeHealth: isEngineRunning,
-	probeVersion: probeEngineVersion,
 	requestShutdown: requestEngineShutdown,
 	isPortFree: isPortAvailable,
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -330,14 +333,13 @@ export const defaultSidecarSystem: SidecarSystem = {
 /**
  * How this instance came to be attached to the engine it is talking to.
  *
- * `spawned` is the ordinary case. `adopted` is an engine that was already up on
- * the port when we started - after the single-instance lock in main.ts, that
- * can only be an orphan of a crashed session (or, in development, an engine
- * started by hand), never a second Vayu. Either way this instance owns it: it
- * is stopped on quit and really restarted on request, which is what the three
- * defects in issue #270 were about. Every method that used to key off
- * `this.process` alone reported "no engine" for an adopted one and quietly did
- * nothing.
+ * `spawned` is the ordinary case and, once `start()` returns, the only one.
+ * `adopted` is an engine that was already up when we started - after the
+ * single-instance lock in main.ts, an orphan of a crashed session or, in
+ * development, an engine started by hand - held only while it is being
+ * stopped: it does not hold this session's grant secret, so it is replaced and
+ * never used (#2356). It is ownership all the same, so a quit landing during
+ * the replacement still stops it (#270).
  */
 type Ownership =
 	| { kind: "none" }
@@ -434,6 +436,7 @@ export class EngineSidecar {
 	private port: number;
 	private portFixed = false;
 	private onPortFixed: (port: number) => void;
+	private onGrantSecret: (secret: string) => void;
 	private dataDir: string;
 	private binaryPath: string;
 	private system: SidecarSystem;
@@ -450,11 +453,14 @@ export class EngineSidecar {
 	 * @param onPortFixed called once, when the first start settles the port, and
 	 *        also when every candidate was held (with the first, which the error
 	 *        names and a Retry tries again).
+	 * @param onGrantSecret called with each spawned engine's grant secret, at
+	 *        the spawn: the one way this process learns it (#2356).
 	 */
 	constructor(
 		candidates: readonly number[] = ENGINE_PORT_CANDIDATES,
 		system: SidecarSystem = defaultSidecarSystem,
-		onPortFixed: (port: number) => void = () => {}
+		onPortFixed: (port: number) => void = () => {},
+		onGrantSecret: (secret: string) => void = () => {}
 	) {
 		if (candidates.length === 0) {
 			throw new Error("EngineSidecar needs at least one candidate port");
@@ -462,6 +468,7 @@ export class EngineSidecar {
 		this.candidates = candidates;
 		this.port = candidates[0];
 		this.onPortFixed = onPortFixed;
+		this.onGrantSecret = onGrantSecret;
 		this.system = system;
 		this.dataDir = engineDataDirectory();
 		this.binaryPath = this.getEngineBinaryPath();
@@ -524,72 +531,51 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Decide whether a healthy engine already on the port is safe to adopt,
-	 * and stop it instead when it is not (issue #1492).
+	 * Stop a healthy engine this session did not spawn, so the caller can spawn
+	 * one in its place (#2356).
 	 *
-	 * A crash-then-relaunch, or two installed builds sharing a data
-	 * directory, can land this instance next to a daemon built for a
-	 * different Vayu version - a `/request-defaults` shape this renderer was
-	 * not built against, a config key this build cannot validate, a database
-	 * schema this build refuses to open (`Database::migrate_before_sync`
-	 * already refuses the *file* on that mismatch; nothing stopped the app
-	 * from talking to a live *process* built for a different one). Adopting
-	 * it silently would run every request through a sidecar this session
-	 * never agreed to. `probeVersion` returning null - the engine answered
-	 * `probeHealth` but the version could not be read a moment later - adopts
-	 * rather than disrupts a healthy engine on an ambiguous answer, the same
-	 * direction `isPidCertainlyDead` takes for its own unclear case.
-	 *
-	 * @returns whether the engine on the port was adopted. `false` means it
-	 *          was stopped instead, and the caller falls through to spawning.
+	 * Every write to file trust - a picked file, an allowed folder - needs the
+	 * grant secret the engine was spawned with, and an engine already running was
+	 * given another session's secret or none. Nothing writes the secret where it
+	 * could be read back, so it cannot be handed one now: adopting it would leave
+	 * every such write refused for the whole session. The same stop retires
+	 * #1492's version mismatch, a daemon built for another Vayu version, which no
+	 * longer needs a probe of its own.
 	 */
-	private async adoptIfVersionMatches(pid: number | null): Promise<boolean> {
-		const runningVersion = await this.system.probeVersion(this.port);
-		if (runningVersion === null || runningVersion === app.getVersion()) {
-			appLogger().info("sidecar", "Adopting the engine already running on this port", {
-				port: this.port,
-				pid,
-			});
-			this.ownership = { kind: "adopted", pid };
-			return true;
-		}
-
+	private async replaceAnsweringEngine(pid: number | null): Promise<void> {
 		appLogger().warn(
 			"sidecar",
-			"Engine on this port is a different version - stopping it instead of adopting a mismatched daemon",
-			{ port: this.port, runningVersion, appVersion: app.getVersion() }
+			"An engine this session did not start is running - stopping it to start one that holds this session's grant secret",
+			{ port: this.port, pid }
 		);
 		this.ownership = { kind: "adopted", pid };
 		await this.system.requestShutdown(this.port);
 		await this.stopAdopted(pid);
 		// Same gap `restart()` waits out between a stop and the spawn that follows.
 		await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
-		return false;
 	}
 
 	/**
-	 * Settle a live process the lock file names that did not answer `/health`
-	 * (issue #1905).
+	 * Stop a live process the lock file names that did not answer `/health`
+	 * (issue #1905), so the caller can spawn one in its place.
 	 *
 	 * The lock PID is verified to be a Vayu engine, so a missing `/health`
 	 * answer means that engine is either still starting - an orphan from a
 	 * crashed session reads its database and runs migrations before it listens -
 	 * or hung. Spawning beside it loses the flock, and reporting the port as
 	 * held would blame another program for our own engine. So it is given the
-	 * budget a freshly spawned engine gets, adopted if it answers, and stopped
-	 * and replaced if it does not.
-	 *
-	 * @returns whether the engine was adopted. `false` means it was stopped
-	 *          instead, and the caller falls through to spawning.
+	 * budget a freshly spawned engine gets: one that answers is asked to shut
+	 * down like any other engine found running, and one that does not is killed.
 	 */
-	private async adoptLockedEngine(pid: number): Promise<boolean> {
+	private async replaceLockedEngine(pid: number): Promise<void> {
 		appLogger().warn(
 			"sidecar",
 			"Lock file indicates the process is running, but the engine is not responding on this port - waiting for it",
 			{ pid, port: this.port }
 		);
 		if (await this.pollHealthWithinBudget(() => null)) {
-			return this.adoptIfVersionMatches(pid);
+			await this.replaceAnsweringEngine(pid);
+			return;
 		}
 
 		appLogger().warn(
@@ -606,7 +592,6 @@ export class EngineSidecar {
 		// Same gap `restart()` waits out between a stop and the spawn that follows.
 		await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
 		appLogger().info("sidecar", "Replaced an unresponsive engine", { pid });
-		return false;
 	}
 
 	/**
@@ -642,14 +627,14 @@ export class EngineSidecar {
 	 * Pick the candidate this start uses (#2118).
 	 *
 	 * With no live lock, each candidate in turn: one answering `/health` is
-	 * offered for adoption, a free one is taken, a held one is skipped. A live
-	 * lock means our own engine is up somewhere, so every candidate is asked
-	 * for `/health` before any free port is taken: a crash orphan on a fallback
-	 * port is adopted even once the default has come free. When it answers
-	 * nowhere it is starting (not listening, so its port reads free) or hung
-	 * (holding a port no probe can tell from another program's), and the wait
-	 * in `adoptLockedEngine` watches the first free candidate, or the first
-	 * candidate when none is free.
+	 * taken over (its engine replaced on that port), a free one is taken, a held
+	 * one is skipped. A live lock means our own engine is up somewhere, so every
+	 * candidate is asked for `/health` before any free port is taken: a crash
+	 * orphan on a fallback port is replaced there even once the default has come
+	 * free. When it answers nowhere it is starting (not listening, so its port
+	 * reads free) or hung (holding a port no probe can tell from another
+	 * program's), and the wait in `replaceLockedEngine` watches the first free
+	 * candidate, or the first candidate when none is free.
 	 */
 	private async choosePort(lockedPid: number | null): Promise<PortChoice> {
 		if (lockedPid !== null) {
@@ -698,27 +683,22 @@ export class EngineSidecar {
 		this.onPortFixed(port);
 	}
 
-	/**
-	 * Attach to the engine `choice` found, or to the one the lock names.
-	 *
-	 * @returns whether an engine was adopted. `false` means there was none, or
-	 *          it was stopped instead, and the caller spawns.
-	 */
-	private async adoptRunningEngine(
+	/** Stop the engine `choice` found, or the one the lock names, if there is one. */
+	private async replaceRunningEngine(
 		choice: PortChoice,
 		lockedPid: number | null,
 		lockPath: string
-	): Promise<boolean> {
+	): Promise<void> {
 		if (lockedPid !== null) {
-			return choice.answering
-				? this.adoptIfVersionMatches(lockedPid)
-				: this.adoptLockedEngine(lockedPid);
+			await (choice.answering
+				? this.replaceAnsweringEngine(lockedPid)
+				: this.replaceLockedEngine(lockedPid));
+			return;
 		}
 		// An engine from a previous session or crash with no live lock to read a
-		// PID from, so ownership is by port only - stop() falls back to watching
+		// PID from, so it is watched by port only - `stopAdopted` falls back to
 		// health for the exit.
-		if (choice.answering) return this.adoptIfVersionMatches(readPidFromLock(lockPath));
-		return false;
+		if (choice.answering) await this.replaceAnsweringEngine(readPidFromLock(lockPath));
 	}
 
 	/**
@@ -736,12 +716,10 @@ export class EngineSidecar {
 		const lockPath = this.getLockFilePath();
 		const lockedPid = this.liveLockPid(lockPath);
 		const choice = await this.claimPort(lockedPid);
-		if (await this.adoptRunningEngine(choice, lockedPid, lockPath)) {
-			return;
-		}
+		await this.replaceRunningEngine(choice, lockedPid, lockPath);
 
-		// Free when chosen, but an engine stopped instead of adopted may not have
-		// let go of it, and something else may have taken it since.
+		// Free when chosen, but an engine stopped there may not have let go of
+		// it, and something else may have taken it since.
 		if (!(await this.system.isPortFree(this.port))) {
 			throw new EnginePortInUseError([this.port]);
 		}
@@ -775,16 +753,24 @@ export class EngineSidecar {
 		// Spawn the engine process. `--verbose 0` in production: the engine writes
 		// its own structured records to `engine_<stamp>.log` (#1557) regardless,
 		// so nothing here reads its console text any more (#1558) - dev keeps `2`
-		// for a developer watching a terminal.
-		this.process = this.system.spawnEngine(this.binaryPath, [
-			"--port",
-			this.port.toString(),
-			"--data-dir",
-			this.dataDir,
-			"--verbose",
-			`${isDevelopmentBuild() ? "2" : "0"}`,
-		]);
+		// for a developer watching a terminal. A fresh grant secret per spawn: the
+		// engine takes it out of its own environment at start, so a restart
+		// cannot reuse the last one and does not need to.
+		const grantSecret = newGrantSecret();
+		this.process = this.system.spawnEngine(
+			this.binaryPath,
+			[
+				"--port",
+				this.port.toString(),
+				"--data-dir",
+				this.dataDir,
+				"--verbose",
+				`${isDevelopmentBuild() ? "2" : "0"}`,
+			],
+			{ ...process.env, [ENGINE_GRANT_SECRET_ENV]: grantSecret }
+		);
 		this.ownership = { kind: "spawned" };
+		this.onGrantSecret(grantSecret);
 
 		// Drain stdout without re-printing it - the engine's own file is the
 		// record now (#1557, #1558). Still read eagerly: on Linux an unread pipe

@@ -84,6 +84,17 @@ export const ENGINE_LOCK_FILE = "vayu.lock";
 export const ENGINE_LOGS_DIR = "logs";
 export const ENGINE_DB_DIR = "db";
 /**
+ * The per-start secret that gates every write to file trust (#2356): the
+ * environment variable the engine reads it from, the header a write carries it
+ * in, and its size in random bytes (sent as hex). The engine's halves are
+ * `GRANT_SECRET_ENV`, `GRANT_SECRET_HEADER` and `GRANT_SECRET_MIN_LENGTH` in
+ * `engine/include/vayu/http/grant_secret.hpp`; `file-trust-client.test.ts`
+ * holds the two sides together.
+ */
+export const ENGINE_GRANT_SECRET_ENV = "VAYU_GRANT_SECRET";
+export const ENGINE_GRANT_SECRET_HEADER = "X-Vayu-Grant-Secret";
+export const ENGINE_GRANT_SECRET_BYTES = 32;
+/**
  * The app log file's own rotation and retention, mirroring the engine's
  * `maxLogFileBytes` default and `RETAINED_FILES`
  * (`engine/include/vayu/core/constants.hpp`) so `app_<stamp>.log` behaves the
@@ -144,11 +155,11 @@ export const ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
 export const ENGINE_CONFIG_REQUEST_TIMEOUT_MS = 5000;
 export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
 /**
- * Poll interval while waiting for an *adopted* engine to exit.
+ * Poll interval while waiting for an engine this session did not spawn to exit.
  *
- * A spawned engine reports its own exit through the child's `exit` event; an
- * adopted one is not our child, so the only way to learn it is gone is to keep
- * asking the OS. Kept well under the graceful ceiling so the verified kill that
+ * A spawned engine reports its own exit through the child's `exit` event; one
+ * found running at start is not our child, so the only way to learn it is gone
+ * is to keep asking the OS. Kept well under the graceful ceiling so the verified kill that
  * follows a stuck engine still happens inside the same quit.
  */
 export const ENGINE_EXIT_POLL_INTERVAL_MS = 100;
