@@ -910,6 +910,47 @@ bool tls_connection_never_answered (CURL* curl) {
     return response_code == 0;
 }
 
+/**
+ * The sentence that opens a redirect-limit failure, ahead of libcurl's own text.
+ *
+ * The limit is read off the handle (`CURLINFO_REDIRECT_COUNT`) rather than the
+ * request, which this function never sees: libcurl raises
+ * `CURLE_TOO_MANY_REDIRECTS` exactly when the hops followed reach
+ * `CURLOPT_MAXREDIRS`, so the count at failure is the limit. When the handle
+ * cannot say, the sentence names no number rather than guess one.
+ */
+std::string too_many_redirects_message (CURL* curl, const std::string& curl_text) {
+    long followed    = -1;
+    const bool known = curl &&
+    get_info<CURLINFO_REDIRECT_COUNT> (curl, &followed) == CURLE_OK && followed >= 0;
+    std::string text = "Too many redirects: the server redirected more than ";
+    text += known ? std::to_string (followed) + " times" : "the allowed number of times";
+    return text + " (see Maximum redirects). " + curl_text;
+}
+
+/// The `Content-Encoding` value of the last response libcurl received, or
+/// empty. Only the last request's headers: a redirect hop's are not the body
+/// that failed to decode.
+std::string received_content_encoding (CURL* curl) {
+    constexpr size_t MAX_SHOWN = 64;
+    curl_header* header        = nullptr;
+    if (!curl ||
+    curl_easy_header (curl, "Content-Encoding", 0, CURLH_HEADER, -1, &header) != CURLHE_OK ||
+    header == nullptr || header->value == nullptr) {
+        return {};
+    }
+    return std::string (header->value).substr (0, MAX_SHOWN);
+}
+
+/// The sentence that opens a decode failure, ahead of libcurl's own text.
+std::string bad_content_encoding_message (CURL* curl, const std::string& curl_text) {
+    const std::string encoding = received_content_encoding (curl);
+    std::string text = "The response could not be decoded: the server sent ";
+    text += encoding.empty () ? "a Content-Encoding this client cannot decode" :
+                                "Content-Encoding " + encoding;
+    return text + ". " + curl_text;
+}
+
 } // namespace
 
 Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
@@ -950,19 +991,28 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     case CURLE_COULDNT_RESOLVE_HOST: error.code = ErrorCode::DnsError; break;
     case CURLE_COULDNT_CONNECT: error.code = ErrorCode::ConnectionFailed; break;
     // The target was reached and then failed the exchange: an empty reply, a
-    // reset mid-transfer, a redirect loop, a body its own `Content-Encoding`
-    // cannot decode, a reply that is not HTTP. The target's or the network's
-    // doing, never this engine's, so not `InternalError`. The TLS shape still
-    // wins here: a client-certificate refusal under TLS 1.3 arrives as
-    // `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802).
+    // reset mid-transfer, a reply that is not HTTP. The target's or the
+    // network's doing, never this engine's, so not `InternalError`. The TLS
+    // shape still wins here: a client-certificate refusal under TLS 1.3 arrives
+    // as `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802).
     case CURLE_GOT_NOTHING:
     case CURLE_SEND_ERROR:
     case CURLE_RECV_ERROR:
-    case CURLE_TOO_MANY_REDIRECTS:
-    case CURLE_BAD_CONTENT_ENCODING:
     case CURLE_WEIRD_SERVER_REPLY:
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::ConnectionFailed;
+        break;
+    // The two below are the target's answer being unusable, not a connection
+    // that failed: every hop was answered. Their own codes, because reading
+    // "couldn't connect" sent users to the network for a redirect loop or a
+    // mislabelled body (issue #2462).
+    case CURLE_TOO_MANY_REDIRECTS:
+        error.code    = ErrorCode::TooManyRedirects;
+        error.message = too_many_redirects_message (curl, error.message);
+        break;
+    case CURLE_BAD_CONTENT_ENCODING:
+        error.code    = ErrorCode::BadContentEncoding;
+        error.message = bad_content_encoding_message (curl, error.message);
         break;
     case CURLE_SSL_CONNECT_ERROR:
     case CURLE_SSL_CERTPROBLEM:

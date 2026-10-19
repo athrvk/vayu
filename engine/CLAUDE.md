@@ -805,8 +805,10 @@ logged as a warning: it means a client skipped composition.
   remembers a proxy's 407. The handle answers a second question (#802): an
   https transfer that failed for an unmapped code, or for one of the
   target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, otherwise
-  `ConnectionFailed`), with no response line is an `SslError`, which is where
-  every client-certificate refusal lands under TLS 1.3. The rule is the shape,
+  `ConnectionFailed`; a redirect loop and an undecodable body are not among
+  them, they are `TooManyRedirects` and `BadContentEncoding`, #2462), with no
+  response line is an `SslError`, which is where every client-certificate
+  refusal lands under TLS 1.3. The rule is the shape,
   never a list of codes, consulted only after every mapping more specific than
   "the target failed the exchange". An unresolvable target host is
   `DnsError`, never `ConnectionFailed`.

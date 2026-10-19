@@ -405,11 +405,43 @@ TEST (CurlToError, AnUnresolvableProxyHostIsStillAProxyError) {
 // of them reads INTERNAL_ERROR again.
 TEST (CurlToError, ATargetThatFailedTheExchangeIsNotAnInternalError) {
     const vayu::http::CurlErrorBuffer errors;
-    for (const CURLcode code : { CURLE_GOT_NOTHING, CURLE_SEND_ERROR, CURLE_RECV_ERROR,
-         CURLE_TOO_MANY_REDIRECTS, CURLE_BAD_CONTENT_ENCODING, CURLE_WEIRD_SERVER_REPLY }) {
+    for (const CURLcode code : { CURLE_GOT_NOTHING, CURLE_SEND_ERROR,
+         CURLE_RECV_ERROR, CURLE_WEIRD_SERVER_REPLY }) {
         EXPECT_EQ (curl_to_error (nullptr, code, errors).code, vayu::ErrorCode::ConnectionFailed)
         << curl_easy_strerror (code);
     }
+}
+
+// A redirect loop is the target answering every hop, not a connection that
+// failed (#2462). Mutation-check: put CURLE_TOO_MANY_REDIRECTS back in the
+// connection-failed group and this reads CONNECTION_FAILED.
+TEST (CurlToError, ARedirectLoopIsTooManyRedirects) {
+    const vayu::http::CurlErrorBuffer errors;
+    const vayu::Error error = curl_to_error (nullptr, CURLE_TOO_MANY_REDIRECTS, errors);
+    EXPECT_EQ (error.code, vayu::ErrorCode::TooManyRedirects);
+    EXPECT_TRUE (error.message.starts_with ("Too many redirects: "));
+    EXPECT_NE (error.message.find (curl_easy_strerror (CURLE_TOO_MANY_REDIRECTS)),
+    std::string::npos)
+    << "libcurl's own text must travel with the plain statement: " << error.message;
+}
+
+// A body its Content-Encoding cannot decode, likewise (#2462). Mutation-check:
+// put CURLE_BAD_CONTENT_ENCODING back in the connection-failed group.
+TEST (CurlToError, AnUndecodableBodyIsBadContentEncoding) {
+    const vayu::http::CurlErrorBuffer errors;
+    const vayu::Error error = curl_to_error (nullptr, CURLE_BAD_CONTENT_ENCODING, errors);
+    EXPECT_EQ (error.code, vayu::ErrorCode::BadContentEncoding);
+    EXPECT_TRUE (
+    error.message.starts_with ("The response could not be decoded: "));
+    EXPECT_NE (error.message.find (curl_easy_strerror (CURLE_BAD_CONTENT_ENCODING)),
+    std::string::npos)
+    << "libcurl's own text must travel with the plain statement: " << error.message;
+}
+
+// The new codes spell themselves the way the API and a script's err.code do.
+TEST (CurlToError, TheNewCodesKeepTheirWireSpelling) {
+    EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::TooManyRedirects), "TOO_MANY_REDIRECTS");
+    EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::BadContentEncoding), "BAD_CONTENT_ENCODING");
 }
 
 // A scheme the handle's allowlist refuses - a redirect's, or one libcurl

@@ -36,6 +36,12 @@ class DnsCache;
  *             indistinguishable from an upstream one without it. May be null
  *             where no handle is available; the mapping then falls back to the
  *             code alone.
+ *
+ * A redirect loop and an undecodable body get their own codes
+ * (`TooManyRedirects`, `BadContentEncoding`, issue #2462) and a message that
+ * opens with a plain statement of the cause, then libcurl's text. The redirect
+ * limit and the `Content-Encoding` are read off @p curl, so without a handle
+ * the sentence names neither.
  */
 Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
 

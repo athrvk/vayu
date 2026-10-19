@@ -38,11 +38,15 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 #include "vayu/version.hpp"
 
 namespace vayu::http {
@@ -308,19 +312,6 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 }
 
 /**
- * @brief The raw-request view, built from the header block libcurl actually sent.
- *
- * @p header_frame is a whole CURLINFO_HEADER_OUT frame - request line included,
- * terminated by its own blank line - so the body is all that has to be added.
- * Being the wire's own bytes, it carries what libcurl added on our behalf
- * (`Cookie` from the jar, `Accept`, `Content-Length`, and the h2 pseudo-headers
- * rendered in HTTP/1 form) rather than what we composed and hoped matched.
- *
- * The terminator is re-normalized rather than trusted: whether a frame ends in
- * one CRLF or two is libcurl's business, and the body must not run into the
- * last header line.
- */
-/**
  * @brief The body the raw-request view shows: the wire bytes, or for a binary
  * body the file's placeholder (`<file a.bin, 1234 bytes>`) - a view never
  * carries a file's contents, however small.
@@ -332,13 +323,83 @@ std::string raw_view_body (const Request& request) {
     return vayu::http::wire_body_bytes (request);
 }
 
+/// @p text without the spaces and tabs around it (an HTTP field value's
+/// optional whitespace).
+std::string_view trim_field_whitespace (std::string_view text) {
+    constexpr std::string_view WHITESPACE = " \t";
+    const size_t first                    = text.find_first_not_of (WHITESPACE);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr (first, text.find_last_not_of (WHITESPACE) - first + 1);
+}
+
+/// Whether one header line says a body follows: `Content-Length` above zero or
+/// `Transfer-Encoding` naming `chunked`. Names compare case-insensitively.
+bool header_declares_body (std::string_view name, std::string_view value) {
+    if (vayu::utils::ascii_lower_equal (name, "content-length")) {
+        const auto length = vayu::utils::parse_number<unsigned long long> (value);
+        return length && *length > 0;
+    }
+    return vayu::utils::ascii_lower_equal (name, "transfer-encoding") &&
+    vayu::utils::ascii_lower (value).find ("chunked") != std::string::npos;
+}
+
+/**
+ * @brief Whether an outbound header frame declares a body behind it.
+ *
+ * Read from the frame because that is the request that was last sent: a
+ * 301/302/303 answer to a POST makes libcurl re-send as a body-less GET (and a
+ * `GET` carrying a body is re-sent without it), so the composed request's body
+ * is not what the final hop carried (issue #2462). HTTP/2 frames spell the
+ * names lower-case, which `header_declares_body` does not mind.
+ */
+bool frame_declares_body (std::string_view frame) {
+    bool request_line = true;
+    while (!frame.empty ()) {
+        const size_t eol      = frame.find ('\n');
+        std::string_view line = frame.substr (0, eol);
+        frame = eol == std::string_view::npos ? std::string_view{} :
+                                                frame.substr (eol + 1);
+        if (!line.empty () && line.back () == '\r') {
+            line.remove_suffix (1);
+        }
+        const size_t colon = line.find (':');
+        if (std::exchange (request_line, false) || colon == std::string_view::npos) {
+            continue;
+        }
+        if (header_declares_body (line.substr (0, colon),
+            trim_field_whitespace (line.substr (colon + 1)))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief The raw-request view, built from the header block libcurl actually sent.
+ *
+ * @p header_frame is a whole CURLINFO_HEADER_OUT frame - request line included,
+ * terminated by its own blank line - so the body is all that has to be added,
+ * and only when that frame declares one (`frame_declares_body`).
+ * Being the wire's own bytes, it carries what libcurl added on our behalf
+ * (`Cookie` from the jar, `Accept`, `Content-Length`, and the h2 pseudo-headers
+ * rendered in HTTP/1 form) rather than what we composed and hoped matched.
+ *
+ * The terminator is re-normalized rather than trusted: whether a frame ends in
+ * one CRLF or two is libcurl's business, and the body must not run into the
+ * last header line.
+ */
 std::string raw_request_from_wire (std::string header_frame, const std::string& body) {
+    const bool has_body = frame_declares_body (header_frame);
     while (!header_frame.empty () &&
     (header_frame.back () == '\r' || header_frame.back () == '\n')) {
         header_frame.pop_back ();
     }
     header_frame += "\r\n\r\n";
-    header_frame += body;
+    if (has_body) {
+        header_frame += body;
+    }
     return header_frame;
 }
 

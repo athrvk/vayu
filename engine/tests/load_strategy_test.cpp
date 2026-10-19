@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -699,6 +700,43 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
     EXPECT_NE (errors.front ().trace_data.find ("internal_error"), std::string::npos);
     EXPECT_NE (errors.front ().trace_data.find ("Failed to create curl handle"),
     std::string::npos);
+}
+
+// #2462: a redirect loop and an undecodable body are stored under their own
+// error_type, on both ways a failure arrives (a transport Error, and a
+// Response the event loop completed with an error code). Mutation-check: drop
+// either case from error_type_name and its row reads "unknown".
+TEST_F (LoadStrategyTest, RedirectAndContentEncodingFailuresKeepTheirOwnErrorType) {
+    const auto cases = std::to_array<std::pair<vayu::ErrorCode, const char*>> ({
+    { vayu::ErrorCode::TooManyRedirects, "too_many_redirects" },
+    { vayu::ErrorCode::BadContentEncoding, "bad_content_encoding" },
+    });
+    for (const auto& [code, type_name] : cases) {
+        const auto error_types_after = [&] (const vayu::Result<vayu::Response>& result) {
+            auto context = std::make_shared<vayu::core::RunContext> (
+            "test-error-type", nlohmann::json{ { "mode", "constant_rps" } });
+            vayu::db::Database db (TEST_DB_PATH);
+            context->requests_sent++;
+            vayu::core::handle_result (context, db, result);
+            const auto& errors = context->metrics_collector->errors ();
+            return errors.empty () ? std::string () : errors.front ().trace_data;
+        };
+
+        const std::string from_error =
+        error_types_after (vayu::Result<vayu::Response> (vayu::Error{ code, "m" }));
+        EXPECT_NE (from_error.find (std::string ("\"error_type\":\"") + type_name + "\""),
+        std::string::npos)
+        << from_error;
+
+        vayu::Response response;
+        response.error_code    = code;
+        response.error_message = "m";
+        const std::string from_response =
+        error_types_after (vayu::Result<vayu::Response> (response));
+        EXPECT_NE (from_response.find (std::string ("\"error_type\":\"") + type_name + "\""),
+        std::string::npos)
+        << from_response;
+    }
 }
 
 // #2124: an HTTP 500 is a completed response, so handle_result records it as

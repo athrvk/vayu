@@ -52,6 +52,8 @@ const char* error_type_name (vayu::ErrorCode code) {
     // Only a natural-end drain cancellation reaches a stored trace; a Stop's
     // is never recorded as an error (`is_stop_cancellation`).
     case vayu::ErrorCode::Cancelled: return "cancelled";
+    case vayu::ErrorCode::TooManyRedirects: return "too_many_redirects";
+    case vayu::ErrorCode::BadContentEncoding: return "bad_content_encoding";
     default: return "unknown";
     }
 }
