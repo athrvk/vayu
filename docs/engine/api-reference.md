@@ -933,7 +933,7 @@ reuses a pooled connection only when its proxy configuration matches.
 | Key | Default | Values | Effect |
 |-----|---------|--------|--------|
 | `proxyMode` | `environment` | `environment`, `system`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `system` uses `proxySystemUrl`, which the app resolves from the operating system. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
-| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. |
+| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. An `https` proxy is verified against the same trust as the target (the platform's anchors plus `customCaCertificates`) and the request's `verifySSL` - see [TLS trust settings](#tls-trust-settings). |
 | `proxySystemUrl` | `""` | curl-shaped URL | The proxy for `system` mode, **written by the app, not typed by the user**. The Electron main process resolves the OS proxy through Chromium and stores the answer here at startup, when the machine wakes, and when the renderer sees the network change. Empty means nothing resolved - see the fallback below. Validated exactly as `proxyUrl` is, under every mode. |
 | `proxyBypass` | `""` | comma-separated hosts | Hosts that skip the proxy, passed to curl's `NOPROXY` verbatim: a leading dot matches a domain and everything under it, a single `*` bypasses everything. |
 
@@ -1133,6 +1133,18 @@ all keep the code they had (issue #802).
 Per-request, `verifySSL: false` turns verification off for one endpoint
 entirely (see [POST /execute](#post-execute)); trusting the authority here is
 the answer that keeps verification on everywhere else.
+
+**An `https://` proxy is a second TLS handshake with the same trust.** libcurl
+decides the proxy's certificate with options of its own
+(`CURLOPT_PROXY_CAINFO`, `CURLOPT_PROXY_SSL_OPTIONS`,
+`CURLOPT_PROXY_SSL_VERIFYPEER` / `_VERIFYHOST`) that do not inherit what the
+target's handshake was given, so the engine writes each of them from the same
+values as its target-side twin: a proxy whose certificate a pasted authority
+signed verifies, and `verifySSL: false` covers the proxy leg as well as the
+target. No client certificate from the registry is ever offered to a proxy - an
+entry names a host the user trusts with that identity, and a proxy is not it. A
+proxy certificate that is refused is an `SSL_ERROR` whose message says the
+*proxy's* certificate was not accepted, so the target's is not blamed.
 
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
