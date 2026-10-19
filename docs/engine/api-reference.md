@@ -8976,9 +8976,16 @@ one).
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
 rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
-first - see "`results[]` is not a uniform sample" below). A run with no summary never reached a
-terminal status - the engine died mid-run - and its report is built from those sampled `results`
-alone rather than erroring. **The response shape is the same either way.**
+first - see "`results[]` is not a uniform sample" below). A run with no summary has either not
+reached a terminal status yet (`metadata.status` is `pending` or `running`) or never will because
+the engine died mid-run; its report is built from those sampled `results` alone rather than
+erroring. **The response shape is the same either way.**
+
+A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
+come from whatever results have been sampled so far, `metadata.status` says the run is still in
+flight, and `thresholdValidation` is absent even when the run declared budgets, because the
+verdict is computed from the summary written at the end. Read `metadata.status` before treating a
+report as final.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is

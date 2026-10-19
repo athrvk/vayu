@@ -1370,6 +1370,34 @@ TEST_F (RunsRouteTest, ReportCarriesTheThresholdVerdict) {
     body["summary"]["errorRate"].get<double> ());
 }
 
+// #2436: `summary` is written only at terminal status, so a report read while
+// the run is still going stands on its sampled results alone. `metadata.status`
+// is what tells a reader it is partial; the verdict, which needs the summary, is
+// absent until the same run completes.
+TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
+    seed ({ .id = "run_live", .status = vayu::RunStatus::Running, .start_time = 1000 });
+    seed_result ("run_live", 200, 12.0);
+
+    auto [live_status, live] = vayu::http::routes::run_report_response (*db_, "run_live");
+    ASSERT_EQ (live_status, 200);
+    EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
+    EXPECT_EQ (live["resultsStored"].get<size_t> (), 1u);
+    EXPECT_FALSE (live.contains ("thresholdValidation"));
+
+    auto inputs       = summary_inputs ();
+    inputs.thresholds = vayu::core::evaluate_thresholds (
+    nlohmann::json{ { "thresholds", { { "latencyP99Ms", 50 } } } }, inputs);
+    db_->update_run_summary (
+    "run_live", vayu::core::build_run_summary_payload (inputs).dump ());
+    db_->update_run_status ("run_live", vayu::RunStatus::Completed);
+
+    auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_live");
+    ASSERT_EQ (done_status, 200);
+    EXPECT_EQ (done["metadata"]["status"].get<std::string> (), "completed");
+    ASSERT_TRUE (done.contains ("thresholdValidation"));
+    EXPECT_EQ (done["thresholdValidation"]["verdict"].get<std::string> (), "passed");
+}
+
 // This run's custom trends, counters and rates (issue #1500), round-tripped
 // through the stored summary the same way `thresholdValidation` is.
 TEST_F (RunsRouteTest, ReportCarriesCustomMetrics) {

@@ -177,7 +177,7 @@ export async function runStreamingRequest(
 	const budgetMs = optionalPositiveInt(args, "streamBudgetMs", DEFAULT_STREAM_BUDGET_MS);
 	if (budgetMs > MAX_STREAM_BUDGET_MS) {
 		return errorResult(
-			`"streamBudgetMs" must be ${MAX_STREAM_BUDGET_MS} or less - a tool call cannot hold the session longer. Start the stream, then follow it with get_run_report.`
+			`"streamBudgetMs" must be ${MAX_STREAM_BUDGET_MS} or less - a tool call cannot hold the session longer. Start the stream, then follow it with get_run and read it with get_run_report.`
 		);
 	}
 
@@ -226,7 +226,7 @@ export async function runStreamingRequest(
 		events: withhold(consumed.events),
 		nextStep: consumed.completed
 			? "The stream has ended. get_run_report has the stored events and any test results."
-			: "The run is still streaming engine-side. Read more with get_run_report, or end it with stop_run.",
+			: "The run is still streaming engine-side. get_run says whether it is done and get_run_report reads the events stored so far; end it with stop_run.",
 	});
 }
 

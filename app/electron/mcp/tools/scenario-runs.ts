@@ -24,12 +24,12 @@ import {
 	confirmDestructive,
 	engineErrorResult,
 	errorResult,
-	jsonResult,
 	str,
 	ToolArgError,
 	watchedRun,
 	withCaveat,
 } from "./kit.js";
+import { startedRunResult } from "./run-status.js";
 import {
 	applyRecordingKnobs,
 	composeViaEngine,
@@ -416,9 +416,9 @@ export async function startScenarioLoadRun(
 	}
 	return watchedRun(
 		withCaveat(
-			jsonResult(started),
-			`\n\nThe plan is ${plannedSteps} step(s) per iteration. Follow the run with ` +
-				`get_run_report: its \`scenario\` section carries the virtual-user, iteration and ` +
+			startedRunResult(started, payload.mode, payload.duration),
+			`\n\nThe plan is ${plannedSteps} step(s) per iteration. Once the run is terminal, ` +
+				`get_run_report's \`scenario\` section carries the virtual-user, iteration and ` +
 				`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +
 				`user walks the plan the way the design runner does.`
 		),

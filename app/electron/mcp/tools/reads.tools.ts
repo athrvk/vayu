@@ -12,7 +12,11 @@
  */
 
 import { z } from "zod";
-import { DEFAULT_RUN_PAGE_LIMIT, MAX_ENGINE_PAGE_LIMIT } from "../engine-client.js";
+import {
+	DEFAULT_RUN_PAGE_LIMIT,
+	EngineRequestError,
+	MAX_ENGINE_PAGE_LIMIT,
+} from "../engine-client.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "../error-definition.js";
 import { precedenceNote } from "../variable-origins.js";
 import {
@@ -33,7 +37,7 @@ import {
 	withholdRowListSecrets,
 	withholdRowSecrets,
 } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
 	callEngineForRunOutput,
@@ -58,7 +62,26 @@ import {
 	RUN_TYPES,
 	runListQuery,
 } from "./run-housekeeping.js";
+import { markPartialReport, projectRunStatus } from "./run-status.js";
 import { engineHealthSchema, isEngineHealthShape } from "./output-schemas.js";
+
+/**
+ * One run's row, with the engine's bare "Run not found" 404 made to name the id
+ * the caller asked for: an agent polling several runs cannot tell which one the
+ * answer is about otherwise.
+ */
+async function readRunRow(
+	ctx: ToolContext,
+	runId: string,
+	signal: AbortSignal | undefined
+): Promise<unknown> {
+	try {
+		return await ctx.client.getRun(runId, signal);
+	} catch (err) {
+		if (!(err instanceof EngineRequestError) || err.status !== 404) throw err;
+		throw new EngineRequestError(err.message, 404, `No run with id "${runId}".`);
+	}
+}
 
 export const READ_TOOLS: McpTool[] = [
 	{
@@ -313,7 +336,7 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Get the full report for a completed run: summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown. Ideal input for analyzing performance. " +
+			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. `metadata.status` is the run's state; while it is `pending` or `running`, the report also carries `partial: true` and a `note`, `summary` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. Read get_run(runId) for whether it is done. " +
 			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 			"A run may also carry `warnings`: what it did not do, even though it finished and its numbers look fine - a request sent with an unresolved `{{token}}`, or a step whose pre-request script load mode never runs. Each entry carries `code`, a human-readable `message`, and either `count`/`names` or `steps`. Absent for a run with nothing to report. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
@@ -331,7 +354,29 @@ export const READ_TOOLS: McpTool[] = [
 		handler: (args, ctx, signal) => {
 			const runId = requireStr(args, "runId");
 			return callEngineForRunOutput(ctx, () => ctx.client.getRunReport(runId, signal), {
-				bound: boundRunReport,
+				bound: (report) => markPartialReport(boundRunReport(report)),
+				signal,
+			});
+		},
+	},
+	{
+		name: "get_run",
+		category: "read",
+		invalidates: [],
+		description:
+			"Read a run's state: whether it is still going, how far along it is, and what to do next. Returns `id`, `type`, `status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped), `startTime`, `endTime` (null while the run is not terminal), `elapsedMs`, `mode`, `concurrency`, `targetRps`, `duration`, `requestId`, `baseline` and `nextStep`. A duration-bound run also carries `plannedDurationMs` and `progress` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. `nextStep` names the poll interval for a run in progress. A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it. " +
+			WITHHELD_RUN_OUTPUT_SENTENCE,
+		annotations: {
+			title: "Get run status",
+			readOnlyHint: true,
+			idempotentHint: true,
+			openWorldHint: false,
+		},
+		inputSchema: { runId: z.string().describe("Run ID to read, as a start tool returned it.") },
+		handler: (args, ctx, signal) => {
+			const runId = requireStr(args, "runId");
+			return callEngineForRunOutput(ctx, () => readRunRow(ctx, runId, signal), {
+				bound: (row) => projectRunStatus(row),
 				signal,
 			});
 		},
