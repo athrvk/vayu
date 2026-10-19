@@ -85,8 +85,6 @@ std::size_t check_rows (const json& section, std::set<vayu::BodyMode>* modes) {
     return section.size ();
 }
 
-// Mutation check: return "" for Text from `implied_content_type`, or flip a
-// row's `expected`, and the row's assertion fails.
 TEST (ImpliedContentTypeConformance, EveryModeImpliesTheTypeTheTableNames) {
     const json fixture = load_fixture ();
     std::set<vayu::BodyMode> modes;

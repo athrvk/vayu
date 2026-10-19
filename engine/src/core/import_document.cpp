@@ -74,9 +74,8 @@ std::string file_base_name (const std::string& path) {
 nlohmann::ordered_json
 postman_raw_body (const std::string& content, const std::string* language) {
     if (language != nullptr) {
-        // `xml` is what gets an imported SOAP request its `application/xml`:
-        // `text` requires no Content-Type, so before this the envelope went out
-        // as libcurl's `x-www-form-urlencoded`.
+        // `xml` is what gets an imported SOAP request its `application/xml`;
+        // `text` would send the envelope as `text/plain`.
         for (const std::string_view mode : postman::RAW_LANGUAGES) {
             if (*language == mode) {
                 return nlohmann::ordered_json{ { "mode", std::string (mode) },
