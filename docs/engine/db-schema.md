@@ -274,7 +274,12 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    migration without a duplicate), and write the row back. A database neither table needs folding
    for (a fresh install, or one some other path already brought to this shape) skips the backup and
    the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
-   that caused it.
+   that caused it. A refused `BEGIN IMMEDIATE` (another writer holds the lock), a refused stamp and
+   a failed `COMMIT` are treated the same way: each throws that message through the same
+   `exec_or_throw` helper, a failed `COMMIT` after a `ROLLBACK`, and the stamp-only path throws on a
+   failed stamp too. The file is left as it was, scripts still in their columns and `user_version`
+   unmoved, so the next start runs the migration again; none of it is caught by the constructor's
+   probe, which would read any exception as an invalid database.
 3. **Stamp `user_version = SCHEMA_VERSION`.** Both writes (the no-fold path and the fold's
    commit) go through one helper, `stamp_schema_version`, so a bump of the constant is a bump of
    every stamp. Only after this returns does `sync_schema ()` see a mapping with no

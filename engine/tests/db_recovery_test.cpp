@@ -570,6 +570,16 @@ constexpr std::chrono::milliseconds SHORT_WAIT{ 100 };
 
 TEST_F (DbRecoveryTest, ALockedDatabaseIsRefusedAndLeftExactlyAsItWas) {
     write_database_needing_a_column (DB_PATH);
+    {
+        // At the current version the migration has nothing to stamp, so the
+        // lock is met by the probe's schema sync, the path this test pins. A
+        // lock met by the migration's own writes is refused by
+        // `migrate_before_sync` itself (db_test.cpp).
+        const RawConnection connection = open_raw (DB_PATH);
+        ASSERT_EQ (exec_sql (connection.get (),
+                   "PRAGMA user_version = " + std::to_string (vayu::db::SCHEMA_VERSION)),
+        "");
+    }
     const std::string backup = std::string (DB_PATH) + ".bak";
     write_corrupt_file (backup, "-backup-evidence");
     const std::string database_bytes = read_file (DB_PATH);

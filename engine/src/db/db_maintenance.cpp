@@ -318,13 +318,31 @@ void log_reclaim_outcome (const ReclaimOutcome& outcome) {
     std::to_string (outcome.after_bytes / 1024) + " KB)");
 }
 
+/// The refusal every failed step of `migrate_before_sync` ends in, so a row
+/// failure, a refused `BEGIN`, a failed stamp and a failed `COMMIT` read alike.
+[[noreturn]] void throw_migration_failure (const std::string& path, const std::string& detail) {
+    throw std::runtime_error ("Vayu could not migrate the database at " + path +
+    " to schema version " + std::to_string (SCHEMA_VERSION) + ": " + detail);
+}
+
+/// Runs one statement of the migration and throws when SQLite refuses it. A
+/// step whose result is dropped leaves the file half migrated with the version
+/// unmoved, and `sync_schema ()` then drops the columns the rows were to be
+/// folded out of.
+void exec_or_throw (sqlite3* connection, const std::string& sql, const std::string& path) {
+    if (sqlite3_exec (connection, sql.c_str (), nullptr, nullptr, nullptr) == SQLITE_OK) {
+        return;
+    }
+    throw_migration_failure (path, sqlite3_errmsg (connection));
+}
+
 /// Stamps @p connection with this build's `SCHEMA_VERSION` (`database.hpp`).
 /// The one spelling of the write, so a bump of the constant is a bump of
 /// every path that marks a database migrated.
-void stamp_schema_version (sqlite3* connection) {
-    const std::string sql =
-    "PRAGMA user_version = " + std::to_string (SCHEMA_VERSION) + ";";
-    sqlite3_exec (connection, sql.c_str (), nullptr, nullptr, nullptr);
+/// @throws std::runtime_error when SQLite refuses the write.
+void stamp_schema_version (sqlite3* connection, const std::string& path) {
+    exec_or_throw (connection,
+    "PRAGMA user_version = " + std::to_string (SCHEMA_VERSION) + ";", path);
 }
 
 /// @p table's current column names, read fresh so a caller never assumes a
@@ -930,6 +948,34 @@ const std::function<ProbeResult (const std::string&)>& probe) {
     }
 }
 
+namespace {
+
+/// The writes of `migrate_before_sync`'s transaction: the script fold, the
+/// file-trust rewrite, the stamp and the `COMMIT`. The caller has opened the
+/// transaction and rolls it back on a throw.
+void apply_migration_rows (sqlite3* connection,
+const std::string& path,
+bool requests_need_fold,
+bool collections_need_fold,
+const FileTrustPlan& trust_plan) {
+    bool ok = true;
+    std::string fold_error;
+    if (requests_need_fold) {
+        ok = ok && fold_table_scripts_into_elements (connection, "requests", fold_error);
+    }
+    if (collections_need_fold) {
+        ok = ok && fold_table_scripts_into_elements (connection, "collections", fold_error);
+    }
+    ok = ok && apply_file_trust_plan (connection, trust_plan, fold_error);
+    if (!ok) {
+        throw_migration_failure (path, fold_error.empty () ? "unknown error" : fold_error);
+    }
+    stamp_schema_version (connection, path);
+    exec_or_throw (connection, "COMMIT;", path);
+}
+
+} // namespace
+
 /**
  * The one-shot migration issue #1514's cut-over describes, run on the raw
  * file with its own `sqlite3` connection, strictly ahead of the constructor's
@@ -950,12 +996,19 @@ const std::function<ProbeResult (const std::string&)>& probe) {
  * `DROP COLUMN`s them; that is what makes the fold's timing load-bearing
  * rather than cosmetic.
  *
+ * @param on_connection told the connection once it is open, before anything
+ *        is read from it; a test installs a `sqlite3_commit_hook` here. Empty
+ *        in production.
+ *
  * @throws std::runtime_error naming both versions if @p path was written by
- *         a newer engine, or if the fold itself failed partway (the
- *         transaction is rolled back first, so a throw here never leaves a
- *         half-migrated file).
+ *         a newer engine, or if a step of the migration failed - a row of the
+ *         fold, the `BEGIN`, the stamp or the `COMMIT` (the transaction is
+ *         rolled back first, so a throw here never leaves a half-migrated
+ *         file and the next start runs the migration again).
  */
-void migrate_before_sync (const std::string& path, std::chrono::milliseconds busy_timeout) {
+void migrate_before_sync (const std::string& path,
+std::chrono::milliseconds busy_timeout,
+const std::function<void (sqlite3*)>& on_connection) {
     if (!fs::exists (path)) {
         return; // A fresh install: sync_schema creates the new mapping outright.
     }
@@ -980,6 +1033,9 @@ void migrate_before_sync (const std::string& path, std::chrono::milliseconds bus
     }
     std::unique_ptr<sqlite3, decltype (&sqlite3_close)> connection (
     raw_connection, &sqlite3_close);
+    if (on_connection) {
+        on_connection (connection.get ());
+    }
 
     const auto version =
     read_pragma_int (connection.get (), "PRAGMA user_version;", error);
@@ -1012,7 +1068,7 @@ void migrate_before_sync (const std::string& path, std::chrono::milliseconds bus
         // `file_roots` table and 5 -> 6 the new `file_grants`, which
         // `sync_schema ()` creates outright. A chosen file that is gone
         // changes nothing stored, but is still reported.
-        stamp_schema_version (connection.get ());
+        stamp_schema_version (connection.get (), path);
         log_file_trust_plan (trust_plan);
         return;
     }
@@ -1026,27 +1082,15 @@ void migrate_before_sync (const std::string& path, std::chrono::milliseconds bus
     pre_migration_backup += ".pre-migration.bak";
     copy_db_files (db_file, pre_migration_backup);
 
-    sqlite3_exec (connection.get (), "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
-    bool ok = true;
-    std::string fold_error;
-    if (requests_need_fold) {
-        ok = ok && fold_table_scripts_into_elements (connection.get (), "requests", fold_error);
-    }
-    if (collections_need_fold) {
-        ok = ok &&
-        fold_table_scripts_into_elements (connection.get (), "collections", fold_error);
-    }
-    ok = ok && apply_file_trust_plan (connection.get (), trust_plan, fold_error);
-    if (ok) {
-        stamp_schema_version (connection.get ());
-        sqlite3_exec (connection.get (), "COMMIT;", nullptr, nullptr, nullptr);
-        log_file_trust_plan (trust_plan);
-    } else {
+    exec_or_throw (connection.get (), "BEGIN IMMEDIATE;", path);
+    try {
+        apply_migration_rows (connection.get (), path, requests_need_fold,
+        collections_need_fold, trust_plan);
+    } catch (...) {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
-        throw std::runtime_error ("Vayu could not migrate the database at " +
-        path + " to schema version " + std::to_string (SCHEMA_VERSION) + ": " +
-        (fold_error.empty () ? "unknown error" : fold_error));
+        throw;
     }
+    log_file_trust_plan (trust_plan);
 }
 
 const std::optional<RecoveryRecord>& Database::recovery () const {
