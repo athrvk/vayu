@@ -8,25 +8,11 @@
 #include "vayu/core/query_encoding.hpp"
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_encode_sets.hpp"
 
 namespace vayu::core {
 
 namespace {
-
-bool in_postman_query_encode_set (unsigned char byte) {
-    if (byte < 0x20 || byte > 0x7E) {
-        return true;
-    }
-    switch (byte) {
-    case ' ':
-    case '"':
-    case '#':
-    case '\'':
-    case '<':
-    case '>': return true;
-    default: return false;
-    }
-}
 
 bool in_query_value_set (unsigned char byte) {
     return byte == '&' || in_postman_query_encode_set (byte);
