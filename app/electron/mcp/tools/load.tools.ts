@@ -154,7 +154,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe(
-					`Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by \`targetRps\`. Default ${statedDefaults("concurrency")}; none when a \`targetRps\` paces the run, and a capacity search's ceiling is the engine's own. A scenario run's default is ${SCENARIO_LOAD_DEFAULTS.constant_concurrency.concurrency} virtual users in each of its modes.`
+					`Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by \`targetRps\`. Default ${statedDefaults("concurrency")}; none when a \`targetRps\` paces the run. A scenario run's default is ${SCENARIO_LOAD_DEFAULTS.constant_concurrency.concurrency} virtual users in each of its modes.`
 				),
 			// Positive for the same reason `concurrency` is: the ramp is seeded
 			// with this count, so a negative casts to ~1.8e19 engine-side and a

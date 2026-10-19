@@ -1949,7 +1949,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
     - An **omitted** field is judged as the default the tool sends for it
       ([Load defaults](#load-defaults)), not as "unbounded": an omitted
       `concurrency` on a constant run is 100 virtual users, so a **Max virtual
-      users** under 100 refuses it with the same message a stated 100 gets. An
+      users** under 100 refuses it with the same message a stated 100 gets, and
+      so does an omitted `concurrency` on a `capacity` run, whose search climbs
+      to 100 (#2493). An
       omitted `duration` is the mode's default (60s, or 300s for `capacity`)
       unless `maxDurationSeconds` is shorter, in which case the cap is sent in
       its place and the run is bounded by it.
@@ -2111,7 +2113,7 @@ takes the strategies' defaults, named in `run_config` and `capacity` in
 | `constant_concurrency`, `constant_rps` | 100, none when `targetRps` paces the run | - | 60s | - | - |
 | `ramp_up` | 100 | 1 | 60s | 10s | - |
 | `iterations` | 10 | - | none (never read) | - | 1000 |
-| `capacity` | the engine's own search ceiling | the engine's own | 300s | - | - |
+| `capacity` | 100, the search ceiling | the engine's own | 300s | - | - |
 
 A scenario run (`scenario`) takes its executor's own defaults
 (`execute_scenario_load`, `engine/src/core/scenario_load.cpp`): 10 virtual
