@@ -254,11 +254,10 @@ export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHea
  * The string the pane's `body` holds, given the text the server sent: that text
  * indented when it is JSON (`lib/json-format.ts`), else as received.
  *
- * It is built from @p bodyRaw and never from the engine's parsed `body`: that
- * copy is key-sorted, collapses a repeated key to its last value and has
- * rounded any integer past 2^53, so formatting it showed a document the server
- * did not send (issue #2459). Formatting the text keeps all three, and a JSON
- * `null` or scalar needs no case of its own - its text is its own formatting.
+ * It is built from @p bodyRaw and never from the engine's parsed `body`, which
+ * is key-sorted, collapses a repeated key to its last value and rounds any
+ * integer past 2^53 (issue #2459). A JSON `null` or scalar needs no case of its
+ * own: its text is its own formatting.
  *
  * Above `LARGE_BODY_BYTES` the pane never calls `formatBody` (`ResponseBody`
  * shows a raw prefix instead), so there the raw text is handed back unindented

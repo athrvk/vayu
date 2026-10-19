@@ -8,13 +8,11 @@
 /**
  * Indent a JSON document for reading, without ever reading its values.
  *
- * The response pane used to format by `JSON.parse` then `JSON.stringify(v, null,
- * 2)`, and that round trip rewrites the document (issue #2459): integer-like
- * keys jump ahead of the others, a repeated key keeps only its last value, and
- * an integer past 2^53 loses digits, so Pretty, Copy, Download, Save as example
- * and the Raw tab all showed or stored something the server never sent. This is
- * a single pass over the text that copies every token through and decides only
- * where the line breaks go, the same job `lib/xml-format.ts` does for XML.
+ * A `JSON.parse` / `JSON.stringify` round trip rewrites the document (issue
+ * #2459): integer-like keys jump ahead of the others, a repeated key keeps only
+ * its last value, and an integer past 2^53 loses digits. This is a single pass
+ * over the text that copies every token through and decides only where the line
+ * breaks go, the same job `lib/xml-format.ts` does for XML.
  *
  * Output matches `JSON.stringify(v, null, 2)` for a document that survives the
  * round trip: two-space indent, `"k": v`, and `{}` / `[]` for an empty
