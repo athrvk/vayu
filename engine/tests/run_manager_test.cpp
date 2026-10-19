@@ -2,11 +2,14 @@
 #include "vayu/core/run_manager.hpp"
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "mock_server.hpp"
 #include "temp_database.hpp"
@@ -426,9 +429,8 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     auto ctx = std::make_shared<RunContext> ("drain_run", cfg);
     // collect_metrics reads active_count() from the loop on the 1 Hz DB path.
     vayu::http::EventLoopConfig loop_config;
-    ctx->event_loop    = std::make_unique<vayu::http::EventLoop> (loop_config);
-    ctx->start_time_ms = 1;
-    ctx->is_running    = true;
+    ctx->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    ctx->is_running = true;
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
 
@@ -479,9 +481,8 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     nlohmann::json cfg;
     auto ctx = std::make_shared<RunContext> ("window_run", cfg);
     vayu::http::EventLoopConfig loop_config;
-    ctx->event_loop    = std::make_unique<vayu::http::EventLoop> (loop_config);
-    ctx->start_time_ms = 1;
-    ctx->is_running    = true;
+    ctx->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
+    ctx->is_running = true;
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     std::this_thread::sleep_for (std::chrono::milliseconds (150));
@@ -513,8 +514,7 @@ TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
     auto ctx = std::make_shared<RunContext> ("unpublished_run", cfg);
     // Deliberately never set event_loop - this is the window where the runner
     // thread is still in its config reads (or failed before building a loop).
-    ctx->start_time_ms = 1;
-    ctx->is_running    = true;
+    ctx->is_running = true;
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
     std::this_thread::sleep_for (std::chrono::milliseconds (1300));
@@ -567,8 +567,7 @@ TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
     for (int i = 0; i < 5; ++i) {
         mc.record_error (vayu::ErrorCode::Timeout, "timed out");
     }
-    ctx->start_time_ms = 1;
-    ctx->is_running    = true;
+    ctx->is_running = true;
 
     // Held past one second so the DB-gated branch persists at least one tick.
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
@@ -601,6 +600,120 @@ TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
     EXPECT_DOUBLE_EQ (
     live["errorRate"].get<double> (), stored["error_rate"].get<double> ());
 
+    vayu::tests::remove_database_files (db_path);
+}
+
+namespace {
+
+/// The JSON of one SSE-framed live tick: its single `data:` line.
+nlohmann::json live_frame_json (std::string_view frame) {
+    constexpr std::string_view data_field = "data: ";
+    const auto data_at                    = frame.find (data_field);
+    if (data_at == std::string_view::npos) {
+        ADD_FAILURE () << "not an SSE data frame: " << frame;
+        return nlohmann::json::object ();
+    }
+    const auto json_at = data_at + data_field.size ();
+    return nlohmann::json::parse (
+    frame.substr (json_at, frame.find ('\n', json_at) - json_at));
+}
+
+} // namespace
+
+// #2395: the live clock starts where the report's does, after `script.setup`.
+// It used to start when the run was registered, so a 1.5 s setup put every
+// live frame 1.5 s ahead of `testDuration` and divided its rates by time no
+// request could have been sent in. Mutation check: read the registration
+// instant in `emit_live_tick` again and the first-request and last-frame
+// assertions fail by about the setup's length.
+TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
+    const std::string db_path = "test_load_clock_setup.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        constexpr int SETUP_MS         = 1500;
+        const std::string setup_script = "const until = Date.now () + " +
+        std::to_string (SETUP_MS) + "; while (Date.now () < until) {}";
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.fast_url () },
+            { "mode", "constant_rps" }, { "duration", "1s" },
+            { "targetRps", 20.0 }, { "timeout", 5000 }, { "workers", 1 },
+            { "lifecycleElements",
+            nlohmann::json::array ({ { { "id", "el_setup" }, { "kind", "script.setup" },
+            { "enabled", true }, { "config", { { "script", setup_script } } } } }) } };
+
+        const std::string run_id = "run_load_clock";
+        vayu::db::Run run;
+        run.id              = run_id;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Pending;
+        run.config_snapshot = config.dump ();
+        // An epoch-dated run is pruned, row and all, the moment it finishes.
+        run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        db.create_run (run);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto deadline =
+        std::chrono::steady_clock::now () + std::chrono::seconds (20);
+        std::optional<vayu::db::Run> stored;
+        while (std::chrono::steady_clock::now () < deadline) {
+            stored = db.get_run (run_id);
+            if (stored && stored->status != vayu::RunStatus::Pending &&
+            stored->status != vayu::RunStatus::Running) {
+                break;
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+        const auto summary = nlohmann::json::parse (stored->summary);
+        const double test_duration = summary.at ("test_duration").get<double> ();
+
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        const auto batch = context->ticks_since (0);
+        std::vector<nlohmann::json> frames;
+        frames.reserve (batch.payloads.size ());
+        for (const auto& payload : batch.payloads) {
+            frames.push_back (live_frame_json (payload));
+        }
+        ASSERT_FALSE (frames.empty ());
+
+        // While setup runs, nothing has elapsed and nothing has a rate.
+        size_t setup_frames = 0;
+        while (setup_frames < frames.size () &&
+        frames[setup_frames]["elapsedSeconds"].get<double> () == 0.0 &&
+        frames[setup_frames]["requestsSent"].get<size_t> () == 0) {
+            const auto& frame = frames[setup_frames];
+            EXPECT_EQ (frame["requestsSent"].get<size_t> (), 0u) << frame.dump ();
+            EXPECT_DOUBLE_EQ (frame["sendRate"].get<double> (), 0.0) << frame.dump ();
+            EXPECT_DOUBLE_EQ (frame["throughput"].get<double> (), 0.0) << frame.dump ();
+            ++setup_frames;
+        }
+        // At the default 100 ms cadence a 1.5 s setup spans about 15 ticks.
+        EXPECT_GE (setup_frames, 5u) << "the live clock ran during setup";
+
+        const auto first_sent =
+        std::ranges::find_if (frames, [] (const nlohmann::json& f) {
+            return f["requestsSent"].get<size_t> () > 0;
+        });
+        ASSERT_NE (first_sent, frames.end ()) << "no frame saw a request sent";
+        EXPECT_LT ((*first_sent)["elapsedSeconds"].get<double> (), 0.8)
+        << first_sent->dump ();
+
+        EXPECT_NEAR (frames.back ()["elapsedSeconds"].get<double> (), test_duration, 0.5)
+        << "the last live frame and the report disagree about how long load "
+           "ran";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
     vayu::tests::remove_database_files (db_path);
 }
 

@@ -594,6 +594,62 @@ TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
     EXPECT_FALSE (auth.contains ("lastError"));
 }
 
+// #2395: `atSeconds` is measured from load start, the report's origin, not from
+// when the refresh thread (or the run) began. Load is stamped ten seconds back
+// and the watchdog starts now, so the first refresh reads about ten seconds on
+// the load clock and a few tens of milliseconds on any clock that starts with
+// the thread. Mutation check: stamp `at_seconds` from the thread's own start
+// and this reads about 0.05.
+TEST_F (MidRunRefreshTest, ARefreshIsStampedFromLoadStartNotFromTheWatchdogStart) {
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3600 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const json config = oauth2_config (issuer.token_url);
+
+    vayu::db::OAuthToken token;
+    token.cache_key     = vayu::http::oauth::cache_key (config);
+    token.access_token  = "AT1";
+    token.token_type    = "Bearer";
+    token.refresh_token = "RT1";
+    token.expires_in    = 1;
+    token.created_at    = now_ms ();
+    db->save_oauth_token (token);
+
+    vayu::Request request;
+    request.url                      = "https://example.test/api";
+    request.headers["Authorization"] = "Bearer AT1";
+    auto plan                        = vayu::http::plan_auth_refresh (
+    request, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+    ASSERT_HAS_VALUE (plan);
+
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run-auth-load-start", json::object ());
+    context->is_running = true;
+    context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+    context->load_start_steady_ms.store (
+    std::chrono::duration_cast<std::chrono::milliseconds> (Clock::now ().time_since_epoch ())
+    .count () -
+    10'000);
+
+    vayu::core::AuthRefreshTuning tuning;
+    tuning.lead_ms          = 0;
+    tuning.min_interval_ms  = 20;
+    tuning.poll_interval_ms = 10;
+    std::thread watchdog (
+    [&] () { vayu::core::run_auth_refresh (context, db.get (), tuning); });
+
+    json refreshes = json::array ();
+    for (int i = 0; i < 1000 && refreshes.empty (); ++i) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        refreshes = context->auth_refresh->summary ()["refreshes"];
+    }
+    context->is_running = false;
+    watchdog.join ();
+
+    ASSERT_FALSE (refreshes.empty ()) << "the watchdog never refreshed";
+    EXPECT_GT (refreshes[0]["atSeconds"].get<double> (), 9.0);
+}
+
 // A token endpoint that stops answering must not fail the run: the target's own
 // status codes plus this section are the honest report.
 TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {

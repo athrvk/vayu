@@ -1518,6 +1518,14 @@ Two consequences of the row being the tick:
 - **`elapsed_seconds` is measured from the run's first persisted tick**, at write time, so it
   keeps counting across page boundaries instead of restarting at 0 on each page.
 
+The stored series has its own origin: the 1 Hz gate puts the first persisted tick about one
+second into the run, and that tick is `elapsed_seconds: 0`. It is not the live stream's origin.
+The cumulative rates in the same row, `send_rate` and `throughput`, divide by the time since
+**load start**, the instant the report's `test_duration` is measured from, after the request is
+built and any `script.setup` has run (issue #2395). A tick written while setup is still running
+stores both as `0`. Ticks an engine older than that issue stored divided by the time since the
+run was registered, so a run with a slow setup understated both in its early rows.
+
 Latency percentiles in a tick are the **windowed** (rolling) values sampled from the
 `hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
 [`runs.summary`](#runs), never here.
