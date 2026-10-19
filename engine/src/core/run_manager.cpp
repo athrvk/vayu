@@ -2210,8 +2210,9 @@ RunManager& manager) {
         { { "runId", context->run_id } });
 
         // A crashed run still gets a summary, with whatever the collector holds
-        // and a wall-clock duration - without one the report route would take
-        // the legacy path and find nothing, reporting an empty run.
+        // and a duration from load start (0 if load never began) - without
+        // one the report route would take the legacy path and find nothing,
+        // reporting an empty run.
         //
         // Written *before* the status flips to Failed, matching the success
         // path: the terminal status is what tells a polling client the report
