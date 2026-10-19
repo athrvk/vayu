@@ -32,7 +32,27 @@ export interface ParsedCookie {
 }
 
 /**
- * Where one cookie ends and the next begins.
+ * One received `Set-Cookie` line: a single cookie, its attributes after the
+ * first `;`. Does not split on a comma - a line is one cookie by construction,
+ * so a comma in the value or in `Expires=` belongs to it
+ * (`prefs=a=1, theme=dark` is one cookie whose value holds a comma). Null for a
+ * line with no displayable name.
+ */
+export function parseSetCookieLine(line: string): ParsedCookie | null {
+	const [pair, ...rest] = line.split(";");
+	const at = pair.indexOf("=");
+	// `at === 0` is an unnamed cookie; neither that nor `-1` is displayable.
+	if (at <= 0) return null;
+	return {
+		name: pair.slice(0, at).trim(),
+		// slice, not split - the value may legally contain "=".
+		value: pair.slice(at + 1).trim(),
+		attrs: rest.map((a) => a.trim()).filter(Boolean),
+	};
+}
+
+/**
+ * Where one cookie ends and the next begins, in a folded header.
  *
  * Multiple Set-Cookie headers arrive joined by ", ". A new cookie only starts
  * where a comma is followed by `name=`; the remainder of a date
@@ -40,20 +60,18 @@ export interface ParsedCookie {
  */
 const COOKIE_BOUNDARY = /,\s*(?=[^;,\s=]+=)/;
 
+/**
+ * Cookies out of the engine's folded `set-cookie` map entry.
+ *
+ * **Legacy only (issue #2460).** The Cookies tab reads the received lines and
+ * calls `parseSetCookieLine` per line; this guesses where one cookie ends from
+ * the joined text, and is wrong for a value like `prefs=a=1, theme=dark`. It
+ * stays for what has no lines: a response stored before the engine kept them,
+ * a stream's `open` frame, and an engine that predates the key.
+ */
 export function parseSetCookie(header: string): ParsedCookie[] {
 	return header
 		.split(COOKIE_BOUNDARY)
-		.map((chunk): ParsedCookie | null => {
-			const [pair, ...rest] = chunk.split(";");
-			const at = pair.indexOf("=");
-			// `at === 0` is an unnamed cookie; neither that nor `-1` is displayable.
-			if (at <= 0) return null;
-			return {
-				name: pair.slice(0, at).trim(),
-				// slice, not split - the value may legally contain "=".
-				value: pair.slice(at + 1).trim(),
-				attrs: rest.map((a) => a.trim()).filter(Boolean),
-			};
-		})
+		.map(parseSetCookieLine)
 		.filter((c): c is ParsedCookie => c !== null);
 }

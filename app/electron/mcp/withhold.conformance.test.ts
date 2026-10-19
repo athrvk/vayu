@@ -32,6 +32,7 @@ import {
 	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
 	SENSITIVE_PARAM_NAMES,
 	withholdRowSecrets,
+	withholdRunOutput,
 } from "./withhold";
 
 /** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
@@ -60,6 +61,33 @@ describe("MCP sensitive header conformance", () => {
 		for (const key of [name, name.toUpperCase()]) {
 			expect(withholdRowSecrets({ headers: [{ key, value: "v", enabled: true }] })).toEqual({
 				headers: [{ key, enabled: true, valueWithheld: true }],
+			});
+		}
+	});
+});
+
+describe("MCP sensitive header conformance in run output's headerLines (#2460)", () => {
+	it("read a non-empty fixture", () => {
+		expect(fixture.sensitiveHeaderNames.length).toBeGreaterThan(0);
+	});
+
+	it.each(fixture.sensitiveHeaderNames)("withholds a %s row's value in any case", (name) => {
+		for (const spelled of [name, name.toUpperCase()]) {
+			expect(
+				withholdRunOutput(
+					{
+						headerLines: [
+							{ name: spelled, value: "v" },
+							{ name: "X-Plain", value: "kept" },
+						],
+					},
+					{ forms: [], apiKeyHeaders: [] }
+				)
+			).toEqual({
+				headerLines: [
+					{ name: spelled, value: "<redacted>" },
+					{ name: "X-Plain", value: "kept" },
+				],
 			});
 		}
 	});

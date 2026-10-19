@@ -270,7 +270,9 @@ std::string too_large_message (const Headers& headers, size_t max_bytes) {
  * so overwriting each time leaves status_text reflecting the final hop.
  *
  * A header name that arrives more than once in the same block keeps every
- * value, folded with ", " - see ingest_header_line for why.
+ * value, folded with ", " - see ingest_header_line for why. The lossless list
+ * `Response::header_lines` is filled beside the map (issue #2460), and cleared
+ * with it between hops.
  */
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
     auto* response    = static_cast<Response*> (userdata);
@@ -301,12 +303,13 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         }
         // Also clear headers between redirect hops so we don't accumulate them.
         response->headers.clear ();
+        response->header_lines.clear ();
         return total_size;
     }
 
     // Parse header: "Key: Value". A repeated name folds rather than replaces -
     // see ingest_header_line.
-    vayu::http::detail::ingest_header_line (line, response->headers);
+    vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
 
     return total_size;
 }

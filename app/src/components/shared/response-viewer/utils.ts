@@ -11,6 +11,8 @@
 
 import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
+import { resolveHeaderLines } from "@/lib/header-lines";
+import type { HeaderLine } from "@/types/domain";
 import { mediaTypeOf, type MediaType } from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
 
@@ -331,20 +333,27 @@ export function buildRawRequest(
  * `""` (the engine's "nothing negotiated" convention) collapses to the same
  * `"HTTP/1.1"` default as an omitted argument rather than trying to recover
  * the requested protocol.
+ *
+ * `headers` is the lines as received (issue #2460) - one line each, in wire
+ * order, the name in the server's case - or, for a caller with only the folded
+ * map, that map's entries. The lines are what the tab should print: it is the
+ * exchange as the server sent it, and the map has lowercased every name and
+ * joined every repeat into one.
  */
 export function buildRawResponse(
 	status: number,
 	statusText: string,
-	headers: Record<string, string>,
+	headers: Record<string, string> | HeaderLine[],
 	body: string,
 	httpVersion: string = "HTTP/1.1"
 ): string {
 	const versionLabel = httpVersion || "HTTP/1.1";
 	let raw = `${versionLabel} ${status} ${statusText}\r\n`;
 
-	// Add response headers
-	for (const [key, value] of Object.entries(headers)) {
-		raw += `${key}: ${value}\r\n`;
+	for (const { name, value } of Array.isArray(headers)
+		? headers
+		: resolveHeaderLines(headers, undefined)) {
+		raw += `${name}: ${value}\r\n`;
 	}
 
 	// Empty line between headers and body

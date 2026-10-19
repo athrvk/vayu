@@ -89,6 +89,14 @@ bool parse_chunk (std::string_view chunk, SetCookie& out) {
 
 } // namespace
 
+std::optional<SetCookie> parse_set_cookie_line (std::string_view line) {
+    SetCookie cookie;
+    if (!parse_chunk (line, cookie)) {
+        return std::nullopt;
+    }
+    return cookie;
+}
+
 std::vector<SetCookie> parse_set_cookie (std::string_view header) {
     std::vector<SetCookie> cookies;
 

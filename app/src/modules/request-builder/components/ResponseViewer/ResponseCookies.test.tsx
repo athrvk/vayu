@@ -22,7 +22,7 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@/test/render-with-tooltips";
 import ResponseCookies from "./ResponseCookies";
-import { parseSetCookie } from "./parse-set-cookie";
+import { parseSetCookie, parseSetCookieLine } from "./parse-set-cookie";
 
 describe("splitting one header into cookies", () => {
 	it("does not break an Expires date at its comma", () => {
@@ -119,5 +119,67 @@ describe("what the table shows", () => {
 	it("reads the header under either spelling", () => {
 		const container = render(<ResponseCookies headers={{ "Set-Cookie": "id=1" }} />).container;
 		expect(container.textContent).toContain("id");
+	});
+});
+
+describe("one cookie per received line (issue #2460)", () => {
+	const LINES = [
+		{ name: "Set-Cookie", value: "a=1; Path=/" },
+		{ name: "set-cookie", value: "b=2; Expires=Wed, 21 Oct 2026 07:28:00 GMT" },
+		{ name: "SET-COOKIE", value: "prefs=a=1, theme=dark; Path=/" },
+		{ name: "Content-Type", value: "text/plain" },
+	];
+	// What the engine folds the same three lines into.
+	const FOLDED = {
+		"set-cookie":
+			"a=1; Path=/, b=2; Expires=Wed, 21 Oct 2026 07:28:00 GMT, prefs=a=1, theme=dark; Path=/",
+		"content-type": "text/plain",
+	};
+
+	const rows = (container: HTMLElement) =>
+		Array.from(container.querySelectorAll("tbody tr")).map(
+			(tr) => tr.querySelectorAll("td")[0].textContent
+		);
+
+	it("shows three rows for three lines, a comma in a value included", () => {
+		// The folded text splits into four here: "prefs=a=1, theme=dark" reads as
+		// two cookies, the second named "theme".
+		const { container } = render(<ResponseCookies headers={FOLDED} headerLines={LINES} />);
+
+		expect(rows(container)).toEqual(["a", "b", "prefs"]);
+		expect(container.textContent).toContain("a=1, theme=dark");
+	});
+
+	it("matches the name without regard to case and ignores other headers", () => {
+		const { container } = render(
+			<ResponseCookies
+				headers={{}}
+				headerLines={[{ name: "X-Set-Cookie-Like", value: "z=9" }, ...LINES.slice(0, 1)]}
+			/>
+		);
+
+		expect(rows(container)).toEqual(["a"]);
+	});
+
+	it("trusts the lines over the folded map when they hold no cookie", () => {
+		const { container } = render(<ResponseCookies headers={FOLDED} headerLines={[LINES[3]]} />);
+
+		expect(container.textContent).toContain("No cookies in response");
+	});
+
+	it("splits the folded header only when there are no lines", () => {
+		const { container } = render(<ResponseCookies headers={FOLDED} />);
+
+		// The legacy guess: four rows, the fourth the phantom "theme".
+		expect(rows(container)).toEqual(["a", "b", "prefs", "theme"]);
+	});
+
+	it("parses a line without splitting it", () => {
+		expect(parseSetCookieLine("prefs=a=1, theme=dark; Path=/")).toEqual({
+			name: "prefs",
+			value: "a=1, theme=dark",
+			attrs: ["Path=/"],
+		});
+		expect(parseSetCookieLine("garbage")).toBeNull();
 	});
 });

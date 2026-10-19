@@ -47,11 +47,13 @@ import {
 	TableRow,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { resolveHeaderLines } from "@/lib/header-lines";
+import type { HeaderLine } from "@/types/domain";
 import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
 import { TimeValue } from "../TimeValue";
 import type { HeadersViewerProps } from "./types";
-import type { HeaderLine } from "./wire-headers";
+import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 
 /**
  * A header value with each time in it carrying the time card (#1786), the text
@@ -74,19 +76,31 @@ export function HeaderValue({ value }: { value: string }) {
 	return <>{parts}</>;
 }
 
+function isWireLines(headers: HeadersViewerProps["headers"]): headers is readonly WireHeaderLine[] {
+	return Array.isArray(headers);
+}
+
+/** The rows to list: wire lines as given, a map through the lines as received. */
+function viewerLines(
+	headers: HeadersViewerProps["headers"],
+	headerLines: HeaderLine[] | undefined
+): HeaderLine[] {
+	if (isWireLines(headers)) return headers.map(([name, value]) => ({ name, value }));
+	return resolveHeaderLines(headers, headerLines);
+}
+
 export default function HeadersViewer({
 	headers,
+	headerLines,
 	title,
 	defaultOpen = true,
 	variant = "response",
 	className,
 }: HeadersViewerProps) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
-	const entries: readonly HeaderLine[] = Array.isArray(headers)
-		? headers
-		: Object.entries(headers);
+	const lines = viewerLines(headers, headerLines);
 
-	if (entries.length === 0) {
+	if (lines.length === 0) {
 		return null;
 	}
 
@@ -127,7 +141,7 @@ export default function HeadersViewer({
 					{title || (variant === "response" ? "Response headers" : "Request headers")}
 				</h3>
 				<Badge variant="outline" className="ml-auto text-xs">
-					{entries.length}
+					{lines.length}
 				</Badge>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="mt-2">
@@ -139,10 +153,9 @@ export default function HeadersViewer({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{entries.map(([name, value], index) => (
-							// A name may repeat in a list of wire lines, so the position is
-							// part of the key.
-							<TableRow key={`${index}:${name}`}>
+						{/* Index-composite: a repeated name is two rows with one name. */}
+						{lines.map(({ name, value }, i) => (
+							<TableRow key={`${i}:${name}`}>
 								<TableCell className="font-mono text-muted-foreground">
 									{name}
 								</TableCell>
@@ -163,16 +176,18 @@ export default function HeadersViewer({
  */
 export function CompactHeadersViewer({
 	headers,
+	headerLines,
 	title,
 	className,
 }: {
 	headers: Record<string, string>;
+	headerLines?: HeaderLine[];
 	title?: string;
 	className?: string;
 }) {
-	const entries = Object.entries(headers);
+	const lines = resolveHeaderLines(headers, headerLines);
 
-	if (entries.length === 0) {
+	if (lines.length === 0) {
 		return null;
 	}
 
@@ -180,7 +195,7 @@ export function CompactHeadersViewer({
 		<div className={className}>
 			{title && <h4 className={cn(EYEBROW_CLASS, "mb-2")}>{title}</h4>}
 			<div className="surface-sunken p-3 rounded-md space-y-1">
-				{entries.map(([key, value]) => (
+				{lines.map(({ name, value }, i) => (
 					// Same `border-rule` as the table above, resolving differently
 					// because `surface-sunken` re-declares it. That slab is `--muted`,
 					// the one surface where no border token works in both themes:
@@ -188,9 +203,12 @@ export function CompactHeadersViewer({
 					// `--muted` sits between them, and the pair inverts in light. The
 					// surface class supplies an alpha of `--foreground` instead, which
 					// flips with the theme - 1.356 light / 1.343 dark.
-					<div key={key} className="flex gap-2 py-1 border-b border-rule last:border-0">
+					<div
+						key={`${i}:${name}`}
+						className="flex gap-2 py-1 border-b border-rule last:border-0"
+					>
 						<span className="text-xs font-medium text-muted-foreground shrink-0">
-							{key}:
+							{name}:
 						</span>
 						<span className="text-xs text-foreground break-all">
 							<HeaderValue value={value} />
@@ -210,9 +228,11 @@ export interface ResponseHeadersPanelProps {
 	 * Listed in place of `requestHeaders` when present: the sent record lacks the
 	 * lines the transport wrote itself.
 	 */
-	wireRequestHeaders?: readonly HeaderLine[];
+	wireRequestHeaders?: readonly WireHeaderLine[];
 	/** Headers that came back. Open by default. */
 	responseHeaders?: Record<string, string>;
+	/** The response's lines as received (issue #2460); `responseHeaders` when absent. */
+	responseHeaderLines?: HeaderLine[];
 }
 
 /**
@@ -245,17 +265,24 @@ export function ResponseHeadersPanel({
 	requestHeaders,
 	wireRequestHeaders,
 	responseHeaders,
+	responseHeaderLines,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
+	const responseLineCount = resolveHeaderLines(response, responseHeaderLines).length;
 	const request = wireRequestHeaders?.length ? wireRequestHeaders : requestHeaders;
 
 	return (
 		<div className="p-4 overflow-auto h-full space-y-4">
 			{request && <HeadersViewer headers={request} variant="request" defaultOpen={false} />}
 
-			<HeadersViewer headers={response} variant="response" defaultOpen={true} />
+			<HeadersViewer
+				headers={response}
+				headerLines={responseHeaderLines}
+				variant="response"
+				defaultOpen={true}
+			/>
 
-			{Object.keys(response).length === 0 && (
+			{responseLineCount === 0 && (
 				<EmptyState variant="inline" title="No headers in response" />
 			)}
 		</div>

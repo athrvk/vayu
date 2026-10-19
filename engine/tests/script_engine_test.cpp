@@ -4374,6 +4374,46 @@ TEST_F (ScriptEngineTest, ResponseCookiesExposeNameValueAndAttributes) {
     EXPECT_EQ (env["flat"].value, R"({"session":"dGhpcyBpcyBhIHRlc3Q=","tracker":"t1"})");
 }
 
+// With the received lines in hand each `Set-Cookie` line is one cookie and a
+// comma inside a value is not a boundary (issue #2460); the folded map entry,
+// which still holds the comma-joined text, is not consulted. Mutation-check:
+// read `headers["set-cookie"]` again in cookies_from_context and the prefs line
+// splits in two.
+TEST_F (ScriptEngineTest, ResponseCookiesReadEachReceivedSetCookieLine) {
+    response.headers["set-cookie"] =
+    "a=1; Path=/, b=2; Path=/; HttpOnly, prefs=a=1, theme=dark; Path=/";
+    response.header_lines = { { "Content-Type", "text/plain" },
+        { "Set-Cookie", "a=1; Path=/" }, { "set-cookie", "b=2; Path=/; HttpOnly" },
+        { "SET-COOKIE", "prefs=a=1, theme=dark; Path=/" } };
+
+    auto result = engine.execute_test (R"JS(
+        var cookies = pm.response.cookies;
+        pm.environment.set('count', String(cookies.length));
+        pm.environment.set('names', cookies.map(function (c) { return c.name; }).join(','));
+        pm.environment.set('prefs', String(cookies.get('prefs')));
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "3");
+    EXPECT_EQ (env["names"].value, "a,b,prefs");
+    EXPECT_EQ (env["prefs"].value, "a=1, theme=dark");
+}
+
+// A response carrying lines but no Set-Cookie among them has no cookies,
+// whatever a stale folded entry says.
+TEST_F (ScriptEngineTest, ResponseCookiesAreEmptyWhenTheReceivedLinesSetNone) {
+    response.headers["set-cookie"] = "stale=1";
+    response.header_lines          = { { "Content-Type", "text/plain" } };
+
+    auto result = engine.execute_test (
+    "pm.environment.set('count', String(pm.response.cookies.length));", request,
+    response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["count"].value, "0");
+}
+
 // A response that set nothing still has to answer `.length` and `.get()` -
 // `if (pm.response.cookies.has('session'))` is the first line anyone writes,
 // and it cannot throw on the common case.

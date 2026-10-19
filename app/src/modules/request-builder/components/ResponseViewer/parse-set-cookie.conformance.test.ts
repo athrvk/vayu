@@ -22,7 +22,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { parseSetCookie, type ParsedCookie } from "./parse-set-cookie";
+import { parseSetCookie, parseSetCookieLine, type ParsedCookie } from "./parse-set-cookie";
 
 /** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
 const [fixturePath] = ENGINE_READING_GUARDS.setCookie.paths.map(fromRepoRoot);
@@ -30,6 +30,8 @@ const [fixturePath] = ENGINE_READING_GUARDS.setCookie.paths.map(fromRepoRoot);
 interface ConformanceCase {
 	name: string;
 	header: string;
+	/** One received line for the single-line parser (#2460), not a folded header. */
+	singleLine?: boolean;
 	expected: ParsedCookie[];
 }
 
@@ -42,7 +44,21 @@ describe("set-cookie conformance fixture", () => {
 		expect(fixture.cases.length).toBeGreaterThan(10);
 	});
 
-	it.each(fixture.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
-		expect(parseSetCookie(c.header)).toEqual(c.expected);
+	it.each(fixture.cases.filter((c) => !c.singleLine).map((c) => [c.name, c] as const))(
+		"%s",
+		(_name, c) => {
+			expect(parseSetCookie(c.header)).toEqual(c.expected);
+		}
+	);
+
+	it("holds a case only the line parser answers (guards the filter)", () => {
+		expect(fixture.cases.filter((c) => c.singleLine).length).toBeGreaterThan(0);
 	});
+
+	it.each(fixture.cases.filter((c) => c.singleLine).map((c) => [c.name, c] as const))(
+		"%s (one received line)",
+		(_name, c) => {
+			expect(parseSetCookieLine(c.header)).toEqual(c.expected[0] ?? null);
+		}
+	);
 });

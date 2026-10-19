@@ -20,7 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
-import type { HeaderLine } from "@/components/shared/response-viewer/wire-headers";
+import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-viewer/wire-headers";
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
@@ -28,6 +28,7 @@ import type {
 	ConsoleLogEntry,
 	FileRef,
 	ExampleSentRequest,
+	HeaderLine,
 	DataContractScope,
 	ElementDef,
 	ElementOutcome,
@@ -245,6 +246,22 @@ export interface ResponseState {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	/**
+	 * The response's header lines as received - name in the server's case, one
+	 * entry per line, repeats kept (issue #2460). The Headers, Cookies and Raw
+	 * tabs read this; `headers` stays the folded map for everything that looks a
+	 * header up by name.
+	 *
+	 * Both funnels set it through `receivedHeaderLines`
+	 * (`responseFromExecuteResult` from `/execute`'s `headerLines`,
+	 * `responseFromRunResult` from `trace.response.headerLines`), and an empty
+	 * list becomes absent in both, so a live and a restored response build the
+	 * same state. Absent means no lines were received - an engine or a stored
+	 * row from before the key, a stream's `open` frame, a response with no
+	 * headers - never "derive them": the tabs show `headers` then, and the
+	 * Cookies tab splits its folded `set-cookie`.
+	 */
+	headerLines?: HeaderLine[];
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	/**
@@ -258,7 +275,7 @@ export interface ResponseState {
 	 * absent on a failed send, and on a restored row with no recorded frame,
 	 * where `buildRawRequest` fabricates one the engine never reported.
 	 */
-	wireRequestHeaders?: HeaderLine[];
+	wireRequestHeaders?: WireHeaderLine[];
 	body: string;
 	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";

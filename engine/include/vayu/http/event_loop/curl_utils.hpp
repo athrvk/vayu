@@ -300,6 +300,18 @@ const DefaultHeaderPolicy& policy);
 void ingest_header_line (std::string_view line, Headers& headers);
 
 /**
+ * @brief The same ingest, also appending the line as received to @p lines.
+ *
+ * `headers` is updated exactly as the two-argument form does. When @p lines is
+ * not null the line is appended to it as well (issue #2460): name with its case
+ * kept, value trimmed of leading and trailing space and tab, one entry per
+ * received line in wire order, so a repeated `Set-Cookie` stays repeated. The
+ * two-argument form is this one with `nullptr`; the load callback uses it and
+ * pays nothing for the lossless list.
+ */
+void ingest_header_line (std::string_view line, Headers& headers, std::vector<HeaderLine>* lines);
+
+/**
  * @brief Hand a scope's stored cookies to libcurl's cookie engine.
  *
  * Three steps, in this order: enable the engine (`CURLOPT_COOKIEFILE` with an

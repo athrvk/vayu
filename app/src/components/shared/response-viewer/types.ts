@@ -11,8 +11,8 @@
  * Common types for response display components used across the application.
  */
 
-import type { RunResultStreamEvents } from "@/types/domain";
-import type { HeaderLine } from "./wire-headers";
+import type { HeaderLine, RunResultStreamEvents } from "@/types/domain";
+import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
 
 // Extended body type to support more response formats
@@ -38,6 +38,8 @@ export interface ResponseData {
 	/** `ResponseState.rawBytes`: the exact bytes of a body the engine sent as base64. */
 	rawBytes?: ResponseBytes;
 	headers: Record<string, string>;
+	/** `ResponseState.headerLines`. Absent for a sample that kept the folded map only. */
+	headerLines?: HeaderLine[];
 	status?: number;
 	statusText?: string;
 	time?: number;
@@ -67,8 +69,15 @@ export interface ResponseBodyProps {
 
 // Props for headers viewer component
 export interface HeadersViewerProps {
-	/** A map, or the lines in order when a name may repeat (`HeaderLine`). */
-	headers: Record<string, string> | readonly HeaderLine[];
+	/** A map, or the lines in order when a name may repeat (`WireHeaderLine`). */
+	headers: Record<string, string> | readonly WireHeaderLine[];
+	/**
+	 * The lines as received (issue #2460): repeats kept, names in the server's
+	 * case. Read only beside a map `headers`; absent or empty, the table is built
+	 * from the map, one row per name - which is all a load-run sample, an inbox
+	 * capture and a request's own headers have.
+	 */
+	headerLines?: HeaderLine[];
 	title?: string;
 	defaultOpen?: boolean;
 	variant?: "response" | "request";

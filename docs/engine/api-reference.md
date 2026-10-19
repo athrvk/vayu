@@ -6312,6 +6312,9 @@ run-shaped way of stating the same field, not a second store.
   "headers": {
     "content-type": "application/json"
   },
+  "headerLines": [
+    { "name": "Content-Type", "value": "application/json" }
+  ],
   "requestHeaders": { "accept": "*/*" },
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
   "authQueryParam": "access_token",
@@ -6486,10 +6489,27 @@ narrower than it looks rather than wrong.
 sent more than once holds every value folded with `", "`** - the RFC 7230 §3.2.2
 equivalence for comma-list headers. So two `Set-Cookie` lines read back as one
 `"session=abc; Path=/, csrf=xyz; Path=/"` entry rather than the last one alone.
-A client splitting a folded `Set-Cookie` must split on a comma followed by
-`name=`, since an `Expires=` value contains a comma of its own. The same holds
-for the response headers stored on a design run's `trace_data.response` and on
-captured load-run samples, which come off the same parse.
+**`headerLines` is the lossless form of the same headers** (issue #2460): one
+`{name, value}` object per line the final response sent, in wire order, with the
+name in the case it arrived in and the value trimmed of the optional whitespace
+around it (RFC 9110 §5.5). A name sent twice is two entries, and a `Set-Cookie`
+is always its own entry, so a client lists headers as received and reads each
+cookie from its own line. It is always present on a design answer, an empty
+array when no headers arrived, so a client can tell "none" from "an engine too
+old to say" - the same rule as `httpVersion`. A streaming send (`stream: true`)
+reports it on the completed trace, while its `open` frame carries the folded
+`headers` map only. The map is unchanged and stays what assertions and the
+MCP `headers` member read; `pm.response.cookies` and MCP's `headerLines`
+read the lines. Splitting a folded `Set-Cookie` out of `headers` is now
+needed only for a row stored before this field and an answer from an older
+engine, and it must split on a comma followed by `name=`, since an `Expires=`
+value contains a comma of its own (a cookie value that holds one is
+indistinguishable from a boundary there, which is why `headerLines` exists).
+The same `headers` fold holds for the response headers stored on a design run's
+`trace_data.response` and on captured load-run samples, which come off the same
+parse. The stored `trace_data.response` also carries `headerLines`, written only
+when non-empty; a load-run sample keeps the folded map alone, because the load
+path is the hot path and records no lines.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

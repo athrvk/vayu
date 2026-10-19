@@ -665,7 +665,9 @@ pm.response.cookies[0].attrs;         // ['Path=/', 'HttpOnly'] - raw chunks
 ```
 
 An array of `{ name, value, attrs }` in wire order, parsed from that one
-response's `Set-Cookie`. It is **not** Postman's `CookieList` and its entries
+response's `Set-Cookie`, one received line per cookie (a comma inside a value
+does not split it, #2460; a response that kept no lines falls back to splitting
+the folded header). It is **not** Postman's `CookieList` and its entries
 are not `postman-collection` `Cookie` objects: there is no `key`, no `path`,
 no `secure`, no `expires`, because those fields would restate the attribute
 string rather than report what the engine holds - the jar itself is
@@ -684,7 +686,8 @@ Three divergences worth knowing before porting a script:
   which is the one a browser's jar would keep, while the array still lists both.
 
 The parse is shared with the response Cookies tab in the UI through
-`engine/tests/fixtures/set-cookie-conformance.json`, so a cookie cannot read one
+`engine/tests/fixtures/set-cookie-conformance.json` (the tab parses each
+received line with `parseSetCookieLine`, #2460), so a cookie cannot read one
 way on screen and another in a script.
 
 ### The cookie jar (`pm.cookies`)

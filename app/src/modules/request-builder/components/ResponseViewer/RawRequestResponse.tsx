@@ -45,6 +45,10 @@
  * copy the Pretty view reads: this tab is the exchange, and indentation the
  * server never sent does not belong in it.
  *
+ * **The headers are the lines as received** (issue #2460): `Set-Cookie` twice
+ * is two lines, and a name keeps the case the server wrote it in. A response
+ * restored from before the lines were stored prints the folded map instead.
+ *
  * **A body with no text view is one line saying so** (issue #2458): its
  * bytes are `rawBytes`, and neither their base64 nor a lossy decoding is what
  * the server sent.
@@ -58,6 +62,7 @@ import { CodeEditor } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { buildRawResponse, formatSize } from "@/components/shared/response-viewer";
 import { receivedBody, type ResponseBytes } from "../../utils/response-bytes";
+import type { HeaderLine } from "@/types/domain";
 import { markLines, SENT_MARKER, RECEIVED_MARKER } from "@/lib/http-language";
 
 export interface RawRequestResponseProps {
@@ -66,6 +71,11 @@ export interface RawRequestResponseProps {
 		status: number;
 		statusText: string;
 		headers: Record<string, string>;
+		/**
+		 * `ResponseState.headerLines`: printed as received, one line each. The
+		 * folded `headers` is the fallback for a response that has none.
+		 */
+		headerLines?: HeaderLine[];
 		body: string;
 		/** `ResponseState.bodyRaw`: the body as received, which the received half prints. */
 		bodyRaw?: string;
@@ -92,7 +102,7 @@ export default function RawRequestResponse({ rawRequest, response }: RawRequestR
 	const rawResponse = buildRawResponse(
 		response.status,
 		response.statusText,
-		response.headers,
+		response.headerLines ?? response.headers,
 		response.rawBytes && !response.rawBytes.isText
 			? `[${formatSize(response.rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`
 			: receivedBody(response),

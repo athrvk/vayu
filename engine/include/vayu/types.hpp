@@ -135,6 +135,18 @@ struct CaseInsensitiveLess {
 using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
 /**
+ * @brief One response header line as it arrived (issue #2460).
+ *
+ * `Headers` folds a repeated name into one lower-cased entry; this keeps what
+ * the fold throws away. `name` is as received, case kept. `value` has the
+ * leading and trailing space and tab of RFC 9110 section 5.5 removed.
+ */
+struct HeaderLine {
+    std::string name;
+    std::string value;
+};
+
+/**
  * @brief Request body content types
  *
  * `Form` is `x-www-form-urlencoded` and `FormData` is `multipart/form-data`.
@@ -644,6 +656,20 @@ struct Response {
     int status_code = 0;
     std::string status_text;
     Headers headers;
+
+    /**
+     * @brief Every response header line in wire order, a repeated name
+     *        repeated (issue #2460).
+     *
+     * `headers` stays the folded, lower-cased map scripts and assertions read.
+     * This is the lossless form, which a display or a `Set-Cookie` parser
+     * needs, since a cookie line is the one header that cannot be folded back
+     * apart. Filled only where a caller asks - `Client::send` and the SSE
+     * reader - and left empty on the load path, which is the hot path.
+     * Holds the final redirect hop only, like `headers`.
+     */
+    std::vector<HeaderLine> header_lines;
+
     Headers request_headers; // Headers that were sent in the request
     std::string raw_request; // Complete raw HTTP request
     std::string body;

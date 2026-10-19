@@ -63,6 +63,37 @@ describe("ResponseHeadersPanel", () => {
 		expect(screen.queryByText("No headers in response")).toBeNull();
 		expect(screen.getByText("nginx")).toBeInTheDocument();
 	});
+
+	it("renders the response lines as received when it is given them (issue #2460)", () => {
+		render(
+			<ResponseHeadersPanel
+				responseHeaders={{ "x-dup": "one, two" }}
+				responseHeaderLines={[
+					{ name: "X-Dup", value: "one" },
+					{ name: "x-dup", value: "two" },
+				]}
+			/>
+		);
+
+		expect(screen.getByText("X-Dup")).toBeInTheDocument();
+		expect(screen.getByText("x-dup")).toBeInTheDocument();
+		expect(screen.getByText("one")).toBeInTheDocument();
+		expect(screen.getByText("two")).toBeInTheDocument();
+		expect(screen.queryByText("one, two")).toBeNull();
+		expect(screen.queryByText("No headers in response")).toBeNull();
+	});
+
+	it("takes its empty state from what it renders, not from the folded map (#2460)", () => {
+		render(
+			<ResponseHeadersPanel
+				responseHeaders={{}}
+				responseHeaderLines={[{ name: "Server", value: "nginx" }]}
+			/>
+		);
+
+		expect(screen.queryByText("No headers in response")).toBeNull();
+		expect(screen.getByText("Server")).toBeInTheDocument();
+	});
 });
 
 describe("ResponseHeadersPanel, the request as sent (issue #2464)", () => {

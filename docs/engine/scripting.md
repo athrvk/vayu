@@ -612,7 +612,11 @@ pm.response.cookies[0].attrs;          // ['Path=/', 'HttpOnly'] - raw chunks
 ```
 
 `cookies` is what the response's `Set-Cookie` header carried, parsed - an array
-of `{ name, value, attrs }` with `get()` / `has()` / `toObject()` over it.
+of `{ name, value, attrs }` with `get()` / `has()` / `toObject()` over it. Each
+received `Set-Cookie` line is parsed on its own, so a comma inside a value
+(`prefs=a=1, theme=dark`) stays in that cookie's value (#2460); the folded
+`", "` string is parsed only for a response that kept no lines, such as a
+load-run sample replayed into a script.
 Attributes are the raw `;`-separated chunks in wire order; there are no
 `path` / `secure` / `expires` fields, because that is the header restated, and
 what the engine actually *holds* is [`pm.cookies`](#the-cookie-jar-pmcookies).
@@ -633,7 +637,8 @@ The parse is shared with the app's response Cookies tab through a conformance
 fixture (`engine/tests/fixtures/set-cookie-conformance.json`), so the value a
 script asserts on and the value shown in the UI cannot drift. It handles the two
 cases a naive split corrupts: a comma inside `Expires=Wed, 21 Oct ...` is not a
-cookie boundary, and the `=` padding on a base64 value stays in the value.
+cookie boundary, and the `=` padding on a base64 value stays in the value. The
+fixture's `singleLine` cases are the per-line parse.
 
 ### Response Assertions
 

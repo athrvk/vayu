@@ -67,6 +67,7 @@ import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
 import { contentTypeOf, heldBodySize, receivedBody } from "../../utils/response-bytes";
 import { exampleRefusal } from "./save-as-example";
+import { resolveHeaderLines } from "@/lib/header-lines";
 
 /**
  * The eight sub-tabs, in strip order. One list: the fit measures these labels
@@ -272,6 +273,8 @@ export default function ResponseViewer() {
 			status: liveOpen.statusCode,
 			statusText: liveOpen.statusText,
 			headers: liveOpen.headers,
+			// No `headerLines`: the `open` frame carries the folded map alone, and
+			// absence is what the tabs read as "show the map" (`resolveHeaderLines`).
 			body: "",
 			bodyType: "text" as const,
 			size: 0,
@@ -455,7 +458,9 @@ export default function ResponseViewer() {
 	 * Each mark is one node, handed to its trigger when the tab is on the strip
 	 * and to its "+N" menu item when it is not, so the two cannot disagree.
 	 */
-	const headersMark = <TabCount value={Object.keys(shown.headers).length} />;
+	const headersMark = (
+		<TabCount value={resolveHeaderLines(shown.headers, shown.headerLines).length} />
+	);
 	const consoleMark = hasScriptError ? (
 		// A script error that logged nothing must still be flagged (issue #111).
 		// A dot rather than a count, so a future `count="none"` cannot silently
@@ -740,10 +745,11 @@ export default function ResponseViewer() {
 						requestHeaders={shown.requestHeaders}
 						wireRequestHeaders={shown.wireRequestHeaders}
 						responseHeaders={shown.headers}
+						responseHeaderLines={shown.headerLines}
 					/>
 				</TabsContent>
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
-					<ResponseCookies headers={shown.headers} />
+					<ResponseCookies headers={shown.headers} headerLines={shown.headerLines} />
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 					{shown.timing ? (

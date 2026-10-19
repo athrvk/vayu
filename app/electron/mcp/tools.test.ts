@@ -12272,6 +12272,7 @@ describe("secret withholding", () => {
 		"col-secret-9",
 		"typed-bearer-token",
 		"resp-cookie-value",
+		"theme=dark",
 		"req-typed-key",
 		"tenant-typed-key",
 	];
@@ -12333,6 +12334,12 @@ describe("secret withholding", () => {
 				"Set-Cookie": "sid=resp-cookie-value; HttpOnly",
 				"Content-Type": "application/json",
 			},
+			// The rows as received (#2460): the Set-Cookie the map folds is a row each.
+			headerLines: [
+				{ name: "Set-Cookie", value: "sid=resp-cookie-value; HttpOnly" },
+				{ name: "Content-Type", value: "application/json" },
+				{ name: "set-cookie", value: "theme=dark" },
+			],
 			body: JSON.stringify({ echo: RUN_SECRET }),
 			bodyBytes: 4321,
 		},
@@ -12368,6 +12375,11 @@ describe("secret withholding", () => {
 			"Set-Cookie": "<redacted>",
 			"Content-Type": "application/json",
 		});
+		expect(trace.response.headerLines).toEqual([
+			{ name: "Set-Cookie", value: "<redacted>" },
+			{ name: "Content-Type", value: "application/json" },
+			{ name: "set-cookie", value: "<redacted>" },
+		]);
 		expect(JSON.parse(trace.response.body)).toEqual({ echo: "<redacted>" });
 		expect(trace.response.bodyBytes).toBe(4321);
 	}
@@ -12375,6 +12387,7 @@ describe("secret withholding", () => {
 	const EXECUTE_ANSWER = {
 		status: 200,
 		headers: RUN_TRACE.response.headers,
+		headerLines: RUN_TRACE.response.headerLines,
 		requestHeaders: RUN_TRACE.request.headers,
 		rawRequest: RUN_TRACE.request.rawRequest,
 		body: { echo: RUN_SECRET },
@@ -12400,6 +12413,11 @@ describe("secret withholding", () => {
 		expect(body).toEqual({
 			status: 200,
 			headers: { "Set-Cookie": "<redacted>", "Content-Type": "application/json" },
+			headerLines: [
+				{ name: "Set-Cookie", value: "<redacted>" },
+				{ name: "Content-Type", value: "application/json" },
+				{ name: "set-cookie", value: "<redacted>" },
+			],
 			requestHeaders: {
 				Authorization: "<redacted>",
 				"X-Tenant-Key": "<redacted>",

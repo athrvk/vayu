@@ -73,7 +73,7 @@ export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password
 export const REDACTED_MARKER = "<redacted>";
 
 /** What a read of run output says about the secrets the run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map, a header row list (\`headerLines\`) and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
 /** What `get_mock_activity` says about the paths a mock server logged. */
 export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
@@ -1066,8 +1066,12 @@ function withholdHeaderSet(headers: unknown, apiKeyHeaders: readonly string[]): 
 	);
 }
 
-/** A member holding a header set: `headers`, a trace's `sentHeaders`, a response's `requestHeaders`. */
-const HEADER_SET_MEMBER = /headers$/i;
+/**
+ * A member holding a header set: `headers`, a trace's `sentHeaders`, a
+ * response's `requestHeaders`, or a response's `headerLines` (the `{name,
+ * value}` rows as received, which carry each `Set-Cookie` the map folds).
+ */
+const HEADER_SET_MEMBER = /headers$|^headerLines$/i;
 
 /**
  * The name of the credential @p pair carries, or undefined: one of @p authNames
