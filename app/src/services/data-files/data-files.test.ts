@@ -11,6 +11,8 @@
  * The grammar cases are the ones that separate a real RFC 4180 tokenizer from
  * a `split(",")`: quoted delimiters, embedded newlines, doubled quotes, CRLF.
  * Revert the quote handling in `tabular.ts` and the first four of them fail.
+ * Remove the `exceedsNesting` loop from `assertRowObject` in `index.ts` and the
+ * nesting cases fail (#2362).
  */
 
 import { describe, it, expect } from "vitest";
@@ -250,6 +252,74 @@ describe("parseDataFile - JSON and JSONL", () => {
 	it("does not blame JSON Lines for JSON that is merely broken", () => {
 		expect(() => parseDataFile('[{"a":1},', "rows.json")).toThrow(/not valid JSON/);
 		expect(() => parseDataFile('[{"a":1},', "rows.json")).not.toThrow(/JSON Lines/);
+	});
+});
+
+/** `depth` levels of array around a scalar: `nested(2)` is `[[1]]`. */
+function nested(depth: number): string {
+	return "[".repeat(depth) + "1" + "]".repeat(depth);
+}
+
+describe("parseDataFile - nested cells (#2362)", () => {
+	it("refuses a JSON cell nested past 100 levels, naming the row and column", () => {
+		const text = `[{"tag":1},{"tag":2},{"tag":3},{"tag":4},{"tag":5,"address":${nested(101)}}]`;
+		const error = (() => {
+			try {
+				parseDataFile(text, "rows.json");
+			} catch (e) {
+				return e;
+			}
+		})();
+		expect(error).toBeInstanceOf(DataFileError);
+		expect((error as Error).message).toBe(
+			'Row 4, column "address" is nested more than 100 levels deep.'
+		);
+	});
+
+	it("refuses a JSONL cell nested past 100 levels, naming the line and column", () => {
+		const text = `{"a":1}\n\n{"a":{"b":${nested(100)}}}`;
+		const error = (() => {
+			try {
+				parseDataFile(text, "rows.jsonl");
+			} catch (e) {
+				return e;
+			}
+		})();
+		expect(error).toBeInstanceOf(DataFileError);
+		expect((error as Error).message).toBe(
+			'Line 3, column "a" is nested more than 100 levels deep.'
+		);
+	});
+
+	it("counts through objects as well as arrays", () => {
+		const deep = '{"k":'.repeat(101) + "1" + "}".repeat(101);
+		expect(() => parseDataFile(`[{"c":${deep}}]`, "rows.json")).toThrow(/column "c"/);
+	});
+
+	it("accepts a cell nested exactly 100 levels", () => {
+		const json = parseDataFile(`[{"c":${nested(100)}}]`, "rows.json");
+		expect(json.rows).toHaveLength(1);
+		const jsonl = parseDataFile(`{"c":${nested(100)}}`, "rows.jsonl");
+		expect(jsonl.rows).toHaveLength(1);
+	});
+
+	it("keeps shallow object and array cells with their value", () => {
+		const text = '[{"id":1,"address":{"city":"Pune","geo":[18.5,73.8]},"tags":["a",["b"]]}]';
+		expect(parseDataFile(text, "rows.json").rows).toEqual([
+			{ id: 1, address: { city: "Pune", geo: [18.5, 73.8] }, tags: ["a", ["b"]] },
+		]);
+		expect(parseDataFile(text.slice(1, -1), "rows.jsonl").rows).toEqual([
+			{ id: 1, address: { city: "Pune", geo: [18.5, 73.8] }, tags: ["a", ["b"]] },
+		]);
+	});
+
+	it("refuses a 100000-level cell without overflowing the stack", () => {
+		// A recursive walk dies here with a RangeError rather than a DataFileError.
+		const text = `[{"c":${nested(100_000)}}]`;
+		expect(() => parseDataFile(text, "rows.json")).toThrow(DataFileError);
+		expect(() => parseDataFile(text, "rows.json")).toThrow(
+			/column "c" is nested more than 100/
+		);
 	});
 });
 

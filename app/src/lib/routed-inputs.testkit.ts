@@ -208,6 +208,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/constants/import.engine-parity.test.ts",
 		paths: ["engine/include/vayu/core/constants.hpp"],
 	},
+	dataFileNesting: {
+		reader: "app/src/constants/data-files.engine-parity.test.ts",
+		paths: ["engine/include/vayu/core/constants.hpp"],
+	},
 	settingsShelves: {
 		reader: "app/src/modules/settings/engine-categories.test.ts",
 		// One file per category (#1611) - `seed_default_config` in
