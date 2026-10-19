@@ -143,7 +143,11 @@ int pid) {
     if (record.fields.is_object ()) {
         line.update (record.fields);
     }
-    const std::string log_message = line.dump ();
+    // `replace`, because a field can carry bytes off the wire that are not
+    // UTF-8 (a response header line in the curl exchange), and a strict dump
+    // would throw out of the caller's code path over a log line (#2458).
+    const std::string log_message =
+    line.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
 
     const auto line_bytes = static_cast<int64_t> (log_message.size ()) + 1;
     // Rotate *before* the line that would cross the cap rather than after, so
@@ -167,7 +171,9 @@ void Logger::write_to_console_locked (const LogRecord& record, const std::string
         for (const auto& [key, value] : record.fields.items ()) {
             console_line
             << ' ' << key << '='
-            << (value.is_string () ? value.get<std::string> () : value.dump ());
+            << (value.is_string () ?
+               value.get<std::string> () :
+               value.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
         }
     }
     const std::string console_text = console_line.str ();

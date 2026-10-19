@@ -1397,6 +1397,42 @@ const std::function<bool ()>& start) {
     return refusal;
 }
 
+/**
+ * Run @p send, everything a design send does once its run row exists, so that
+ * a throw out of it fails that row and answers a JSON error (#2458). Without
+ * this the exception reached httplib, which answers a bodiless 500, and the
+ * row stayed `running` whenever the throw came before `record_design_result`.
+ * The row is failed even when the result was already recorded: the caller
+ * got no response, and a row saying `completed` would contradict that.
+ *
+ * Non-static: execute_binary_body_test.cpp drives it with a send that throws,
+ * because no payload reaches a throw past the fixes #2458 made. The catch is
+ * the net under them, on the `start_created_run` precedent.
+ */
+void guard_recorded_send (vayu::db::Database& db,
+httplib::Response& res,
+const std::optional<std::string>& run_id,
+const std::function<void ()>& send) {
+    std::string reason;
+    try {
+        send ();
+        return;
+    } catch (const std::exception& e) {
+        reason = e.what ();
+    }
+    vayu::utils::log_error ("http", "POST /execute failed after its run was recorded",
+    { { "runId", run_id.value_or ("none (transient)") }, { "error", reason } });
+    if (run_id) {
+        try {
+            db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
+        } catch (const std::exception& e) {
+            vayu::utils::log_error ("http", "Failed to fail a send that threw",
+            { { "runId", *run_id }, { "error", e.what () } });
+        }
+    }
+    send_error (res, 500, "Execution failed: " + reason);
+}
+
 namespace {
 /** What `POST /execute` accepted off the wire, before any run row exists. */
 struct ExecutePayload {
@@ -2188,7 +2224,48 @@ std::chrono::steady_clock::time_point handler_start) {
     // What auth wrote, so a reader that masks the answer (the MCP server) can
     // tell the credential in `rawRequest` from any other query parameter (#1845).
     record_auth_provenance (body, exchange.request);
-    res.set_content (body.dump (2), "application/json");
+    // `replace`: the body is UTF-8 or base64 by now, but a header value off
+    // the wire can still carry a byte that is not (#2458).
+    res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
+    "application/json");
+}
+
+/**
+ * Everything a design send does once its run row exists: answer an auth
+ * failure, hand a stream to its worker, or run the buffered exchange.
+ */
+void dispatch_design_send (RouteContext& ctx,
+httplib::Response& res,
+const vayu::http::RequestBuild& built,
+DesignSend& send,
+std::chrono::steady_clock::time_point handler_start) {
+    // Auth failure: record a failed result against the run and return the
+    // error in the body (engine returns 200; the status lives in the body).
+    if (!built.ok) {
+        vayu::Response auth_resp;
+        auth_resp.status_code   = 0;
+        auth_resp.status_text   = vayu::http::status_text (0);
+        auth_resp.error_code    = built.error_code;
+        auth_resp.error_message = built.error_message;
+        record_design_result (ctx.db, send.run_id, send.request, auth_resp);
+        nlohmann::json body   = vayu::json::serialize (auth_resp);
+        body["authErrorCode"] = built.detail_code;
+        res.status            = 200;
+        res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
+        return;
+    }
+
+    // A streaming request diverges here: there is no synchronous exchange to
+    // run. The transfer moves to a managed consumer worker and the route
+    // answers at once with the run and the URL its events arrive on
+    // (issue #573). `stream` and `transient` are mutually exclusive, so
+    // `run_id` is always set on that path.
+    if (send.stream.value) {
+        run_streaming_execution (ctx, res, send);
+        return;
+    }
+    run_buffered_execution (ctx, res, send, handler_start);
 }
 
 /**
@@ -2198,7 +2275,8 @@ std::chrono::steady_clock::time_point handler_start) {
  * Returns:
  * - 200: Request was processed (check response body for server status/errors)
  * - 400: Invalid request format (malformed JSON, missing required fields)
- * - 500: The run record could not be written
+ * - 500: The run record could not be written, or the send threw after it was
+ *        (`guard_recorded_send` fails the row and names the error)
  */
 void handle_execute_request (RouteContext& ctx,
 const httplib::Request& req,
@@ -2235,32 +2313,9 @@ httplib::Response& res) {
     send.request       = std::move (payload.built.request);
     send.auth_fetch_ms = payload.built.auth_fetch_ms;
 
-    // Auth failure: record a failed result against the run and return the
-    // error in the body (engine returns 200; the status lives in the body).
-    if (!payload.built.ok) {
-        vayu::Response auth_resp;
-        auth_resp.status_code   = 0;
-        auth_resp.status_text   = vayu::http::status_text (0);
-        auth_resp.error_code    = payload.built.error_code;
-        auth_resp.error_message = payload.built.error_message;
-        record_design_result (ctx.db, send.run_id, send.request, auth_resp);
-        nlohmann::json body   = vayu::json::serialize (auth_resp);
-        body["authErrorCode"] = payload.built.detail_code;
-        res.status            = 200;
-        res.set_content (body.dump (2), "application/json");
-        return;
-    }
-
-    // A streaming request diverges here: there is no synchronous exchange to
-    // run. The transfer moves to a managed consumer worker and the route
-    // answers at once with the run and the URL its events arrive on
-    // (issue #573). `stream` and `transient` are mutually exclusive, so
-    // `run_id` is always set on that path.
-    if (send.stream.value) {
-        run_streaming_execution (ctx, res, send);
-        return;
-    }
-    run_buffered_execution (ctx, res, send, handler_start);
+    guard_recorded_send (ctx.db, res, send.run_id, [&] () {
+        dispatch_design_send (ctx, res, payload.built, send, handler_start);
+    });
 }
 
 

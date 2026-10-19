@@ -132,6 +132,7 @@ add_executable(vayu_tests
     config_snapshot_test.cpp
     run_origin_test.cpp
     execute_auth_provenance_test.cpp
+    execute_binary_body_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
@@ -361,6 +362,8 @@ set(vayu_scratch_database_suites
     ConfigSeedTest
     ConfigSnapshotExecuteTest
     ExecuteAuthProvenanceTest
+    ExecuteBinaryBodyTest
+    ExecuteByteRowTest
     CustomCaVerificationTest
     DatabaseConcurrencyTest
     DefaultHeaderConfigTest

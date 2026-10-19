@@ -238,11 +238,32 @@ const std::vector<vayu::db::Result>& results) {
 
 namespace {
 
+// Cap a base64 `body` by the bytes it decodes to. Four characters carry three
+// bytes, so keeping a whole number of groups needs no decode: the prefix of the
+// text *is* the encoding of the prefix of the bytes. Every character before the
+// padding carries six bits, which is the whole of the decoded-length sum.
+void cap_base64_node_body (nlohmann::json& node, size_t max_body_bytes) {
+    const auto& text      = node["body"].get_ref<const std::string&> ();
+    const size_t unpadded = text.find_last_not_of ('=') + 1; // npos + 1 is 0
+    const size_t decoded_bytes = (unpadded * 3) / 4;
+    if (decoded_bytes <= max_body_bytes) {
+        return;
+    }
+    const size_t kept_groups = max_body_bytes / 3;
+    node["body"]             = text.substr (0, kept_groups * 4);
+    node["bodyTruncated"]    = true;
+    node["bodyBytes"]        = decoded_bytes;
+}
+
 // Cap a single trace node's `body` string in place. Records bodyTruncated +
 // bodyBytes (the original length) when the body is cut so a reader can tell a
 // stored slice from the whole body.
 void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
     if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
+        return;
+    }
+    if (node.value ("bodyEncoding", "") == BODY_ENCODING_BASE64) {
+        cap_base64_node_body (node, max_body_bytes);
         return;
     }
     const std::string body = node["body"].get<std::string> ();
@@ -1316,13 +1337,20 @@ Json serialize (const Response& response) {
     // the live pane and a restored one read one field.
     json["clientCertificate"] = response.client_certificate;
 
-    // Try to parse body as JSON
-    if (auto parsed = try_parse_body (response.body)) {
-        json["body"] = *parsed;
+    // Decided once, over the whole body (issue #2458): a JSON string holds only
+    // UTF-8, so bytes that are not text travel as base64 rather than making the
+    // route's dump throw. Always present, like the fields above, so a reader
+    // never has to guess which spelling `bodyRaw` is in.
+    if (vayu::utils::is_valid_utf8_text (response.body)) {
+        auto parsed          = try_parse_body (response.body);
+        json["body"]         = parsed ? std::move (*parsed) : Json (nullptr);
+        json["bodyRaw"]      = response.body;
+        json["bodyEncoding"] = BODY_ENCODING_UTF8;
     } else {
-        json["body"] = nullptr;
+        json["body"]         = nullptr;
+        json["bodyRaw"]      = vayu::utils::base64_encode (response.body);
+        json["bodyEncoding"] = BODY_ENCODING_BASE64;
     }
-    json["bodyRaw"] = response.body;
 
     // Whether `body`/`bodyRaw` are a prefix, because the read stopped at
     // `maxDesignResponseBodyBytes` (issue #1157). Always present, like the
@@ -1358,8 +1386,22 @@ Json serialize (const Response& response) {
     return json;
 }
 
+std::optional<std::string> response_body_bytes (const Json& answer) {
+    std::string raw = answer.value ("bodyRaw", "");
+    const std::string encoding =
+    answer.value ("bodyEncoding", std::string (BODY_ENCODING_UTF8));
+    if (encoding == BODY_ENCODING_UTF8) {
+        return raw;
+    }
+    if (encoding == BODY_ENCODING_BASE64) {
+        return vayu::utils::base64_decode (raw);
+    }
+    return std::nullopt;
+}
+
 std::string serialize_string (const Response& response, int indent) {
-    return serialize (response).dump (indent);
+    // A header value may still carry a byte that is not UTF-8; the body cannot.
+    return serialize (response).dump (indent, ' ', false, Json::error_handler_t::replace);
 }
 
 // ============================================================================

@@ -14,7 +14,9 @@
 
 #include <cstdint>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -145,7 +147,10 @@ const std::vector<vayu::db::Result>& results);
  * gains `bodyTruncated: true` and `bodyBytes` (the original byte length) so a
  * reader can tell a stored slice from the whole body. The cut is on a raw byte
  * boundary - the body is an opaque string - so the caller must dump with
- * `error_handler_t::replace` in case the slice splits a UTF-8 sequence.
+ * `error_handler_t::replace` in case the slice splits a UTF-8 sequence. A node
+ * whose `bodyEncoding` is `base64` is capped by its decoded bytes instead, cut
+ * at a multiple of three so the slice is still whole base64, and `bodyBytes`
+ * counts decoded bytes too (issue #2458).
  *
  * The request node's `rawRequest` ends with that same body, so it is capped to
  * the same limit - body half only, header block kept whole, since the headers
@@ -198,9 +203,33 @@ void state_file_trust (Json& body, AbsentFileTrust absent);
 [[nodiscard]] Result<Request> deserialize_request (const std::string& str);
 
 /**
+ * How a response body's JSON string is to be read (issue #2458): `bodyRaw` on
+ * the `POST /execute` answer, `body` on a stored trace's `response` node. A
+ * JSON string holds only UTF-8, so a body that is not text
+ * (`vayu::utils::is_valid_utf8_text`) travels as its base64 instead of failing
+ * the serializer.
+ */
+inline constexpr std::string_view BODY_ENCODING_UTF8   = "utf8";
+inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
+
+/**
  * @brief Serialize a Response to JSON
+ *
+ * `bodyEncoding` is always present. A text body is `bodyRaw` as it arrived and
+ * `body` its parse (or `null`); any other body is `bodyRaw` in base64 with
+ * `body` `null`. `bodySize` counts the bytes either way.
  */
 [[nodiscard]] Json serialize (const Response& response);
+
+/**
+ * @brief The body bytes of a serialized Response: `bodyRaw`, decoded when
+ *        `bodyEncoding` says base64.
+ *
+ * An absent `bodyEncoding` reads as `utf8`, which is what every answer meant
+ * before the field existed. `std::nullopt` for an encoding this engine does not
+ * write, or a `base64` body that does not decode.
+ */
+[[nodiscard]] std::optional<std::string> response_body_bytes (const Json& answer);
 
 /**
  * @brief Serialize a Response to JSON string
