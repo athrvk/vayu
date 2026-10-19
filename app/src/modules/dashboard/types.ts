@@ -90,6 +90,8 @@ export interface MetricsViewProps {
 	/** Configured concurrency for closed-loop modes (constant_concurrency). */
 	concurrency?: number;
 	mode?: string;
+	/** The configured run duration in seconds; absent for an open-ended run. */
+	runDurationSeconds?: number;
 	rampConfig?: {
 		rampUpDurationSeconds?: number;
 		startConcurrency?: number;
@@ -109,7 +111,10 @@ export interface DashboardDerived {
 	isCompleted: boolean;
 	// Rates
 	targetRps?: number;
+	/** Requests sent over the sending window, req/s (#2392) - not completions over wall time. */
 	actualRps?: number;
+	/** Percent of the requests owed over that window that were sent; the Rate fidelity card's value. */
+	rateAchievementPct?: number;
 	sendRate?: number;
 	throughput?: number;
 	currentRps: number;

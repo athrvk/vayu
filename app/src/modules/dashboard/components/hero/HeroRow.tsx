@@ -129,7 +129,11 @@ function renderModeCards(d: DashboardDerived) {
 							completed={d.totalRequests}
 						/>
 					) : (
-						<RateFidelityCard targetRps={d.targetRps} actualRps={d.actualRps} />
+						<RateFidelityCard
+							targetRps={d.targetRps}
+							actualRps={d.actualRps}
+							achievement={d.rateAchievementPct}
+						/>
 					)}
 					<ThroughputTwinCard
 						sendRate={d.sendRate}

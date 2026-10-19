@@ -32,18 +32,21 @@ function fidelityFillColor(achievement: number | undefined): string {
 	return "hsl(var(--series-danger))";
 }
 
-/** constant_rps hero card #1 - how closely throughput tracked the target RPS. */
+/**
+ * constant_rps hero card #1 - how closely the requests sent tracked the target
+ * RPS over the sending window. The percentage arrives derived (live from
+ * `liveRateFidelity`, finished from the report), so a run's drain never reads
+ * as a missed rate.
+ */
 export function RateFidelityCard({
 	targetRps,
 	actualRps,
+	achievement,
 }: {
 	targetRps?: number;
 	actualRps?: number;
+	achievement?: number;
 }) {
-	const achievement =
-		targetRps && targetRps > 0 && actualRps !== undefined
-			? (actualRps / targetRps) * 100
-			: undefined;
 	const textColor = fidelityTextColor(achievement);
 	const fillColor = fidelityFillColor(achievement);
 
