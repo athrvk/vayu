@@ -7703,7 +7703,7 @@ describe("start_load_run resolves and states the load shape", () => {
 			{ concurrency: 100, startConcurrency: 1, duration: "60s", rampUpDuration: "10s" },
 		],
 		["iterations", {}, { iterations: 1000, concurrency: 10 }],
-		["capacity", {}, { duration: "300s" }],
+		["capacity", {}, { concurrency: 100, duration: "300s" }],
 	])("a %s run sends its row of defaults", async (mode, extra, row) => {
 		const sent = await sentShape({ url: "https://api.example.com", mode, ...extra });
 		expect(sent).toEqual({ mode, ...row });
@@ -7786,6 +7786,18 @@ describe("start_load_run resolves and states the load shape", () => {
 		const res = await dispatchTool(
 			"start_load_run",
 			{ url: "https://api.example.com", confirmed: true },
+			ctxWith(client, { ...allowed, maxConcurrency: 50 })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/concurrency 100 exceeds the MCP cap of 50 virtual users/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("an omitted capacity concurrency is judged on the engine's search ceiling", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com", mode: "capacity", confirmed: true },
 			ctxWith(client, { ...allowed, maxConcurrency: 50 })
 		);
 		expect(res.isError).toBe(true);
