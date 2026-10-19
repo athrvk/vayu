@@ -42,8 +42,17 @@ class DnsCache;
  * opens with a plain statement of the cause, then libcurl's text. The redirect
  * limit and the `Content-Encoding` are read off @p curl, so without a handle
  * the sentence names neither.
+ *
+ * @param request The request the transfer sent, read only to say *why* a URL
+ *                libcurl refused as malformed was: a space or control byte in
+ *                it is named, and the toggle that would send it as typed is
+ *                suggested only while `disableUrlEncoding` is off. May be null,
+ *                and then libcurl's own text stands.
  */
-Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
+Error curl_to_error (CURL* curl,
+CURLcode code,
+const CurlErrorBuffer& errors,
+const Request* request = nullptr);
 
 /**
  * @brief Put the transport policy on a handle: the protocols it may speak, TLS

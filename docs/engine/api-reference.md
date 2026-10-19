@@ -1667,8 +1667,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   their rules, and the literal text keeps its spaces and non-ASCII bytes
   ([Query encoding](#query-encoding)), so `a"b` goes out as `a"b`, not
   `a%22b`, as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
-  the toggle on libcurl refuses a raw space; with it off the space is sent
-  as `%20`.
+  the toggle on libcurl refuses a raw space, and the send fails with a
+  message that names it ([URL schemes](#url-schemes)); with it off the space
+  is sent as `%20`.
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the
@@ -5615,7 +5616,11 @@ escape such as `%41`), so a URL that sent before sends the same bytes, and a
 non-ASCII host is still dialled by its punycode name. The rule is applied
 where every driver takes its URL (`wire_url`) and by composition, so
 `POST /compose` answers the URL that will be sent. With `disableUrlEncoding`
-on the URL goes out exactly as typed, and libcurl refuses a raw space.
+on the URL goes out exactly as typed, and libcurl refuses a raw space: the
+send fails with status `0` and error code `INVALID_URL`, and a message that
+names the space and the toggle
+(`Cannot send this request: the URL contains a space or control character; percent-encode it, or turn Send URL without encoding off`),
+derived from scanning the URL and not from libcurl's wording.
 
 Where the engine itself writes a query pair into a URL, it uses Postman's
 rule (issue #1771,
@@ -5711,6 +5716,16 @@ status `0` with error code `INVALID_URL` and libcurl's own message
 and nothing is read. The libcurl the engine links carries every protocol curl
 builds by default, so these two options, set on every handle, are what restrict
 each transfer to `http` and `https`; the build does not.
+
+A URL libcurl cannot parse is also status `0` with error code `INVALID_URL`.
+When the URL the transfer was handed holds a space, a C0 control character or
+DEL, which is how one reaches libcurl once `disableUrlEncoding` is on (or a
+space sits in the host), the message says so instead of repeating libcurl's
+component wording (`URL rejected: Bad query`): `Cannot send this request: the
+URL contains a space or control character; percent-encode it, or turn Send URL
+without encoding off`. The last clause is left out when the toggle is already
+off, because it is no remedy. The scan is of the bytes, not of libcurl's text,
+and a malformed URL with none of them keeps libcurl's message.
 
 #### Non-ASCII hosts
 

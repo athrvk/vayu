@@ -288,7 +288,25 @@ TEST_F (PostmanQueryOnTheWire, DisableUrlEncodingSendsALiteralSpaceAsTyped) {
     EXPECT_EQ (result.value ().status_code, 0);
     EXPECT_EQ (result.value ().error_code, vayu::ErrorCode::InvalidUrl)
     << result.value ().error_message;
+    // The message names the cause and the remedy, not libcurl's "Bad query".
+    EXPECT_EQ (result.value ().error_message,
+    "Cannot send this request: the URL contains a space or control character; "
+    "percent-encode it, or turn Send URL without encoding off");
     EXPECT_EQ (server_->requests_seen (), 0);
+}
+
+// The load driver reports the same sentence.
+TEST_F (PostmanQueryOnTheWire, TheLoadDriverNamesTheSpaceTheToggleLeftInTheUrl) {
+    vayu::http::EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (wire_get (server_->url () + "/a b", true)).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().error_code, vayu::ErrorCode::InvalidUrl);
+    EXPECT_NE (
+    result.value ().error_message.find ("space or control character"), std::string::npos)
+    << result.value ().error_message;
 }
 
 // ---------------------------------------------------------------------------

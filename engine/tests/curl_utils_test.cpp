@@ -453,6 +453,75 @@ TEST (CurlToError, AnUnsupportedProtocolIsAnInvalidUrl) {
     vayu::ErrorCode::InvalidUrl);
 }
 
+// libcurl words a refused space as the component it sat in ("Bad query"), which
+// says nothing about the byte; the engine names the byte by scanning the URL
+// (#2465). Mutation-check: drop the scan in `malformed_url_message` and the
+// first two assertions read libcurl's text.
+TEST (CurlToError, AMalformedUrlWithASpaceNamesTheSpaceAndTheToggle) {
+    const vayu::http::CurlErrorBuffer errors;
+    vayu::Request request;
+    request.url                  = "http://h/a b?q=c\x01d";
+    request.disable_url_encoding = true;
+
+    const vayu::Error error =
+    curl_to_error (nullptr, CURLE_URL_MALFORMAT, errors, &request);
+    EXPECT_EQ (error.code, vayu::ErrorCode::InvalidUrl);
+    EXPECT_NE (error.message.find ("space or control character"), std::string::npos)
+    << error.message;
+    EXPECT_NE (error.message.find ("turn Send URL without encoding off"), std::string::npos)
+    << error.message;
+    EXPECT_NE (error.message.find ("percent-encode"), std::string::npos)
+    << error.message;
+}
+
+// With encoding on a space survives only in the authority, where the toggle is
+// no remedy, so the message does not point at it.
+TEST (CurlToError, ASpaceThatSurvivesEncodingDoesNotSuggestTheToggle) {
+    const vayu::http::CurlErrorBuffer errors;
+    vayu::Request request;
+    request.url = "http://a b/x";
+
+    const vayu::Error error =
+    curl_to_error (nullptr, CURLE_URL_MALFORMAT, errors, &request);
+    EXPECT_EQ (error.code, vayu::ErrorCode::InvalidUrl);
+    EXPECT_NE (error.message.find ("space or control character"), std::string::npos)
+    << error.message;
+    EXPECT_EQ (error.message.find ("without encoding"), std::string::npos)
+    << error.message;
+}
+
+// A malformed URL with no such byte, or a caller with no request, keeps
+// libcurl's own text: the scan names a cause it found and guesses nothing.
+TEST (CurlToError, AMalformedUrlWithNoSpaceKeepsLibcurlsText) {
+    const vayu::http::CurlErrorBuffer errors;
+    vayu::Request request;
+    request.url                  = "http://[::1/x";
+    request.disable_url_encoding = true;
+
+    const vayu::Request* const none = nullptr;
+    for (const vayu::Request* given :
+    { static_cast<const vayu::Request*> (&request), none }) {
+        const vayu::Error error =
+        curl_to_error (nullptr, CURLE_URL_MALFORMAT, errors, given);
+        EXPECT_EQ (error.code, vayu::ErrorCode::InvalidUrl);
+        EXPECT_EQ (error.message, curl_easy_strerror (CURLE_URL_MALFORMAT));
+    }
+}
+
+// The scheme refusal shares the code and keeps its own message even when the
+// URL holds a space.
+TEST (CurlToError, AnUnsupportedProtocolKeepsItsSchemeMessageWhateverTheUrlHolds) {
+    const vayu::http::CurlErrorBuffer errors;
+    vayu::Request request;
+    request.url                  = "ftp://h/a b";
+    request.disable_url_encoding = true;
+
+    const vayu::Error error =
+    curl_to_error (nullptr, CURLE_UNSUPPORTED_PROTOCOL, errors, &request);
+    EXPECT_EQ (error.code, vayu::ErrorCode::InvalidUrl);
+    EXPECT_EQ (error.message, curl_easy_strerror (CURLE_UNSUPPORTED_PROTOCOL));
+}
+
 // The fallback is untouched: a code with no meaning of its own is still ours.
 TEST (CurlToError, AnUnclassifiableCodeIsStillAnInternalError) {
     const vayu::http::CurlErrorBuffer errors;

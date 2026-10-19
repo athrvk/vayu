@@ -447,8 +447,9 @@ struct Request {
      * exactly as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
      * it clear, the literal text has its space, controls and non-ASCII bytes
      * encoded (`wire_url`, issue #2465). libcurl's own URL handling is
-     * untouched either way: with it set a raw space is still refused, and
-     * dot-segments are still normalised.
+     * untouched either way: with it set a raw space is still refused, with a
+     * message that names it (`curl_to_error`), and dot-segments are still
+     * normalised.
      */
     bool disable_url_encoding = false;
 
