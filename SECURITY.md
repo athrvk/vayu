@@ -100,7 +100,8 @@ While reveal is off, an agent also cannot send a script of its own with
 script, or a script element): a script reads every variable, secret ones
 included, so the call is refused before anything is sent. A script stored on a
 request or collection, which the write tools can create, is not covered and
-still runs with your secrets, so leave write access off unless you want an
+still runs with your secrets (`run_request` sends a saved request, scripts
+included, when given its `requestId` and no `url`), so leave write access off unless you want an
 agent to author them.
 
 While write access is off, nothing a `run_request` sets is saved: an extractor
