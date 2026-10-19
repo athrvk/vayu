@@ -63,6 +63,31 @@ describe("ErrorSummary", () => {
 		expect(screen.queryByText("By status code")).toBeNull();
 	});
 
+	// The `error_type_name` keys for a redirect loop and an undecodable body
+	// (#2462). The sentence-cased fallback spells both the same way, so this pins
+	// the wording, not the table lookup.
+	// Mutation-check: change either label's wording in ERROR_TYPE_LABELS and this
+	// fails; deleting the entry alone does not, the fallback renders it identically.
+	it("labels the redirect-loop and content-encoding types", () => {
+		render(
+			<ErrorSummary
+				{...props({
+					errors: {
+						total: 5,
+						withDetails: 5,
+						types: { too_many_redirects: 3, bad_content_encoding: 2 },
+					},
+					noResponse: 5,
+				})}
+			/>
+		);
+
+		expect(screen.getByText("Too many redirects").nextSibling?.textContent).toBe("3");
+		expect(screen.getByText("Bad content encoding").nextSibling?.textContent).toBe("2");
+		expect(screen.queryByText("too_many_redirects")).toBeNull();
+		expect(screen.queryByText("bad_content_encoding")).toBeNull();
+	});
+
 	it("falls back to a sentence-cased label for a type it has no entry for", () => {
 		render(
 			<ErrorSummary

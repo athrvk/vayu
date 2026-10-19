@@ -103,3 +103,37 @@ describe("the response pane", () => {
 		expect(screen.getByText(/Verify TLS certificate/)).toBeInTheDocument();
 	});
 });
+
+// The redirect-loop and content-encoding codes (#2462) take the same two
+// routes as PROXY_ERROR, and a pane that mapped them live but not restored
+// would show History a different heading than the send showed.
+// Mutation-check: delete a code's ErrorTitles entry and its heading check fails.
+describe.each([
+	["TOO_MANY_REDIRECTS", "Too many redirects"],
+	["BAD_CONTENT_ENCODING", "Couldn't decode the response"],
+])("%s through both funnels", (code, title) => {
+	it("reaches the same heading live and restored", () => {
+		const live = responseFromExecuteResult({
+			...executeResult(),
+			errorCode: code,
+		} as unknown as SanityResult);
+		const restored = responseFromRunResult({
+			...runResult(),
+			trace: { ...runResult().trace, error_type: code },
+		} as unknown as RunResultSample);
+
+		expect(live.errorCode).toBe(code);
+		expect(restored?.errorCode).toBe(code);
+
+		for (const response of [live, restored]) {
+			const { unmount } = render(
+				<ClientErrorView
+					errorCode={response?.errorCode}
+					errorMessage={response?.errorMessage}
+				/>
+			);
+			expect(screen.getByText(title)).toBeInTheDocument();
+			unmount();
+		}
+	});
+});

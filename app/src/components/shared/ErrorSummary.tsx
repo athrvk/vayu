@@ -50,6 +50,8 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
 	script_error: "Script error",
 	data_binding_failed: "Data binding failed",
 	proxy_error: "Proxy error",
+	too_many_redirects: "Too many redirects",
+	bad_content_encoding: "Bad content encoding",
 	internal_error: "Internal error",
 	unknown: "Unknown",
 };
