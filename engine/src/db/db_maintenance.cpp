@@ -1590,6 +1590,18 @@ std::chrono::milliseconds busy_timeout) {
 }
 
 namespace {
+/// Says so when a snapshot could not be flushed to disk. Never an error: the
+/// file is whole and validated, and failing here would delete a good backup to
+/// report a durability gap the next refresh closes.
+void warn_unless_flushed (bool flushed, std::string_view what, const fs::path& path) {
+    if (flushed) {
+        return;
+    }
+    vayu::utils::log_warning ("db",
+    "Could not flush " + std::string (what) + " to disk; it may not survive a power loss",
+    { { "path", path.string () } });
+}
+
 /// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
 /// every caller is clearing a path it is about to write, or one it has just
 /// decided is not a snapshot, and a leftover is the next attempt's to clear.
@@ -1651,14 +1663,20 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
         std::error_code ec;
         fs::remove (fs::path (backup.string () + "-wal"), ec);
         fs::remove (fs::path (backup.string () + "-shm"), ec);
+        // Flushed ahead of the rename: a power loss between the two would
+        // otherwise leave the backup path naming a file of zeros.
+        warn_unless_flushed (vayu::platform::fsync_file (snapshot.string ()),
+        "the recovery backup snapshot", snapshot);
         // One rename, so the backup path always names a whole database: the
         // previous one until this returns, this one after.
-        fs::rename (snapshot, backup, ec);
-        if (ec) {
+        const auto replaced =
+        vayu::platform::replace_file_durably (snapshot.string (), backup.string ());
+        if (replaced.error) {
             remove_db_file_set (snapshot);
             return std::unexpected (
-            "the snapshot could not replace the backup: " + ec.message ());
+            "the snapshot could not replace the backup: " + replaced.error.message ());
         }
+        warn_unless_flushed (replaced.durable, "the recovery backup rename", backup);
     } catch (const std::exception& e) {
         remove_db_file_set (snapshot);
         return std::unexpected (std::string (e.what ()));
@@ -1781,6 +1799,13 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
         return std::unexpected (BackupFailure{ false,
         "Could not write the backup to " + destination.string () + ": " + refusal });
     }
+
+    // The file, then the entry that names it: the user is told the backup
+    // exists, so it must not vanish with the next power loss.
+    warn_unless_flushed (vayu::platform::fsync_file (destination.string ()),
+    "the workspace backup", destination);
+    warn_unless_flushed (vayu::platform::fsync_directory (directory.string ()),
+    "the backup directory entry", directory);
 
     std::error_code size_ec;
     const auto size = fs::file_size (destination, size_ec);

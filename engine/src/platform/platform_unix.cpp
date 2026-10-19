@@ -229,6 +229,43 @@ void ensure_private_directory (const std::string& path) {
     }
 }
 
+namespace {
+/// `fsync` on a descriptor opened for @p path with @p flags; false when either
+/// step fails.
+bool fsync_opened (const std::string& path, int flags) {
+    // POSIX declares `open` variadic; the mode is only read with `O_CREAT`,
+    // which is never passed here.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    const int descriptor = open (path.c_str (), flags | O_CLOEXEC);
+    if (descriptor < 0) {
+        return false;
+    }
+    const bool flushed = fsync (descriptor) == 0;
+    close (descriptor);
+    return flushed;
+}
+} // namespace
+
+bool fsync_file (const std::string& path) {
+    return fsync_opened (path, O_RDONLY);
+}
+
+bool fsync_directory (const std::string& path) {
+    return fsync_opened (path, O_RDONLY | O_DIRECTORY);
+}
+
+FileReplacement replace_file_durably (const std::string& from, const std::string& to) {
+    FileReplacement replacement;
+    std::filesystem::rename (from, to, replacement.error);
+    if (replacement.error) {
+        return replacement;
+    }
+    // The rename is in effect whatever the flush says, so a failure here only
+    // withholds `durable`.
+    replacement.durable = fsync_directory (directory_containing (to));
+    return replacement;
+}
+
 void restrict_new_files_to_owner () {
     umask (S_IRWXG | S_IRWXO);
 }

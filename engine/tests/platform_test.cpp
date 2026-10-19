@@ -21,6 +21,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
@@ -380,6 +381,104 @@ TEST (PrivateDirectory, ModeBitsAreNotReadableOnWindows) {
     GTEST_SKIP () << "owner-only is a protected DACL on Windows, not mode bits";
 }
 #endif
+
+// ============================================================================
+// Durable file writes (#2421)
+//
+// What a test can observe is the return value and the file contents; that the
+// kernel flushed the pages is not observable from user space, so nothing here
+// claims to cover the syscall itself. These pin the contract callers rely on:
+// a flush of something that is not there says so, and the durable rename
+// still replaces.
+// ============================================================================
+
+namespace {
+namespace fs = std::filesystem;
+
+class DurableFilesTest : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        // Per test and per process, like `PrivateDirectoryTest`: ctest runs
+        // these in parallel.
+        root_ = fs::temp_directory_path () /
+        ("vayu-durable-files-" + std::to_string (get_process_id ()) + "-" +
+        ::testing::UnitTest::GetInstance ()->current_test_info ()->name ());
+        fs::remove_all (root_);
+        fs::create_directories (root_);
+    }
+    void TearDown () override {
+        fs::remove_all (root_);
+    }
+    [[nodiscard]] fs::path
+    write_file (const std::string& name, const std::string& content) const {
+        const fs::path file = root_ / name;
+        std::ofstream (file, std::ios::binary) << content;
+        return file;
+    }
+    [[nodiscard]] static std::string read_file (const fs::path& file) {
+        std::ifstream in (file, std::ios::binary);
+        return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char> () };
+    }
+    fs::path root_;
+};
+
+TEST_F (DurableFilesTest, FsyncFileSucceedsOnAnExistingFile) {
+    const auto file = write_file ("snapshot.db", "pages");
+    EXPECT_TRUE (fsync_file (file.string ()));
+}
+
+TEST_F (DurableFilesTest, FsyncFileFailsOnAMissingPath) {
+    EXPECT_FALSE (fsync_file ((root_ / "absent.db").string ()));
+}
+
+TEST_F (DurableFilesTest, FsyncDirectorySucceedsOnADirectory) {
+    EXPECT_TRUE (fsync_directory (root_.string ()));
+}
+
+TEST_F (DurableFilesTest, FsyncDirectoryFailsOnAMissingPath) {
+    EXPECT_FALSE (fsync_directory ((root_ / "absent").string ()));
+}
+
+TEST_F (DurableFilesTest, FsyncDirectoryFailsOnAFile) {
+    const auto file = write_file ("not-a-directory", "x");
+    EXPECT_FALSE (fsync_directory (file.string ()));
+}
+
+TEST_F (DurableFilesTest, ReplaceFileDurablyReplacesAnExistingDestination) {
+    const auto from = write_file ("snapshot.tmp", "new");
+    const auto to   = write_file ("snapshot.bak", "old");
+
+    const FileReplacement replaced = replace_file_durably (from.string (), to.string ());
+
+    EXPECT_FALSE (replaced.error) << replaced.error.message ();
+    EXPECT_EQ (read_file (to), "new");
+    EXPECT_FALSE (fs::exists (from));
+}
+
+TEST_F (DurableFilesTest, ReplaceFileDurablyCreatesAMissingDestination) {
+    const auto from = write_file ("snapshot.tmp", "first");
+    const auto to   = root_ / "snapshot.bak";
+
+    const FileReplacement replaced = replace_file_durably (from.string (), to.string ());
+
+    EXPECT_FALSE (replaced.error) << replaced.error.message ();
+    EXPECT_EQ (read_file (to), "first");
+}
+
+// The failure leaves both sides alone: the backup it was going to replace
+// stands, which is what the caller's error path relies on.
+TEST_F (DurableFilesTest, ReplaceFileDurablyReportsAMissingSourceAndKeepsTheDestination) {
+    const auto to = write_file ("snapshot.bak", "old");
+
+    const FileReplacement replaced =
+    replace_file_durably ((root_ / "absent.tmp").string (), to.string ());
+
+    EXPECT_TRUE (replaced.error);
+    EXPECT_FALSE (replaced.durable);
+    EXPECT_EQ (read_file (to), "old");
+}
+
+} // namespace
 
 // A source scan, because a daemon that never calls the function passes every
 // behavioural test above.
