@@ -224,8 +224,15 @@ export interface ResponseHeadersPanelProps {
 	/** Headers that were sent. Collapsed by default - usually not the question. */
 	requestHeaders?: Record<string, string>;
 	/**
+	 * The request's own lines as sent (`ResponseState.requestHeaderLines`, issue
+	 * #2466): a repeated name is a row each, in the spelling typed. Listed in
+	 * place of `requestHeaders`, which folds them, whenever there is no wire
+	 * frame to list instead.
+	 */
+	requestHeaderLines?: HeaderLine[];
+	/**
 	 * The request as it went out, line by line (`ResponseState.wireRequestHeaders`).
-	 * Listed in place of `requestHeaders` when present: the sent record lacks the
+	 * Listed in place of the other two when present: the sent record lacks the
 	 * lines the transport wrote itself.
 	 */
 	wireRequestHeaders?: readonly WireHeaderLine[];
@@ -252,9 +259,12 @@ export interface ResponseHeadersPanelProps {
  * width the compact pane does not have.
  *
  * The request section is one list. It shows the request as it went out
- * (`wireRequestHeaders`, issue #2464) when the engine recorded one, and the
- * sent record otherwise - a failed send, or a stored row from before the frame
- * was kept. A display of the frame, never an input: nothing here reaches a send.
+ * (`wireRequestHeaders`, issue #2464) when the engine recorded one; otherwise
+ * the request's own lines (`requestHeaderLines`, issue #2466), a repeated name
+ * a row each; and only for an answer that predates both, the folded sent
+ * record. So a failed send, or a stored row from before the frame was kept,
+ * still lists every header row the request carried. A display, never an input:
+ * nothing here reaches a send.
  *
  * The empty-state fallback is the one piece of behaviour that is this panel's
  * own. `HeadersViewer` renders `null` with no entries, so without it a response
@@ -263,17 +273,26 @@ export interface ResponseHeadersPanelProps {
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
+	requestHeaderLines,
 	wireRequestHeaders,
 	responseHeaders,
 	responseHeaderLines,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
 	const responseLineCount = resolveHeaderLines(response, responseHeaderLines).length;
-	const request = wireRequestHeaders?.length ? wireRequestHeaders : requestHeaders;
+	// `HeadersViewer` reads `headerLines` only for a map, so the wire list needs
+	// no special case: it is the request when there is one, and the lines
+	// stand in front of the folded map otherwise.
+	const request = wireRequestHeaders?.length ? wireRequestHeaders : (requestHeaders ?? {});
 
 	return (
 		<div className="p-4 overflow-auto h-full space-y-4">
-			{request && <HeadersViewer headers={request} variant="request" defaultOpen={false} />}
+			<HeadersViewer
+				headers={request}
+				headerLines={requestHeaderLines}
+				variant="request"
+				defaultOpen={false}
+			/>
 
 			<HeadersViewer
 				headers={response}

@@ -743,6 +743,7 @@ export default function ResponseViewer() {
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 					<ResponseHeadersPanel
 						requestHeaders={shown.requestHeaders}
+						requestHeaderLines={shown.requestHeaderLines}
 						wireRequestHeaders={shown.wireRequestHeaders}
 						responseHeaders={shown.headers}
 						responseHeaderLines={shown.headerLines}

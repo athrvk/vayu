@@ -21,7 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
-import { receivedHeaderLines } from "@/lib/header-lines";
+import { receivedHeaderLines, sentHeaderLines } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { paneBody } from "./execute-mapping";
 import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
@@ -202,6 +202,9 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 
 	return {
 		requestHeaders,
+		// Same rule as the live funnel; a row stored before the key has none, and
+		// the folded record above is what the tab then lists.
+		requestHeaderLines: sentHeaderLines(request.sentHeaderLines),
 		// Only the engine's own frame is parsed, and only for an exchange that got
 		// a response: the fallback below is fabricated, and a failed send's frame
 		// may be too (`wireRequestHeadersField`).

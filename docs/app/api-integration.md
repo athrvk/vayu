@@ -194,10 +194,17 @@ transport's alike, and a repeated name as separate rows. The renderer reads it
 off that block and carries it as `ResponseState.wireRequestHeaders`, set by
 `responseFromExecuteResult` and `responseFromRunResult` alike. It is a display
 of what went out: nothing in it is sent, stored on the request or visible to
-`pm.request.headers`. A restored row with no recorded frame shows `requestHeaders`
-instead, because the Raw tab's fallback frame is fabricated from the composed
-request, and so does a send that failed, whose frame the engine may have
-synthesized because nothing was sent.
+`pm.request.headers`. A restored row with no recorded frame lists
+`requestHeaderLines` instead, because the Raw tab's fallback frame is fabricated
+from the composed request, and so does a send that failed, whose frame the
+engine may have synthesized because nothing was sent. `requestHeaderLines` is
+the request's own lines as the transfer sent them (issue #2466): the answer's
+`requestHeaderLines`, or a stored trace's `request.sentHeaderLines`, in wire
+order, a repeated name repeated and each in the spelling typed.
+`requestHeaders` beside it is the same set folded to one value per name (a repeat
+joined with `", "`, `Cookie` with `"; "`) and is what the section falls back to
+only for an answer from before the lines existed. Both funnels set it, an empty
+list reading as absent in each.
 
 The *stored* counterpart is a different field (issue #1765):
 `disabledSystemHeaders`, Postman's per-request list, kept on the request as
@@ -1351,12 +1358,20 @@ non-interactive OAuth 2.0 token can't be obtained, the response carries an
 `errorCode` of `AUTH_REQUIRED` (interactive sign-in needed) or `AUTH_FAILED`, and
 the request builder surfaces a toast pointing the user at the Auth tab.
 
+`headers` is an ordered array of `{ name, value }` lines (issue #2466): the
+Headers table's enabled rows with a key, in row order, a repeated name repeated
+and each row in the spelling typed (`toHeaderRows`), and `POST /compose` answers
+the same shape, so a repeat survives compose to execute. The older single-valued
+record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
+longer sends it: a record keeps one value per key and sends a different header
+from the one its table shows. The same holds for `POST /runs`.
+
 **Example Request:**
 ```typescript
 await apiService.executeRequest({
   method: "GET",
   url: "https://api.example.com/users",
-  headers: { "Authorization": "Bearer {{token}}" },
+  headers: [{ name: "Authorization", value: "Bearer {{token}}" }],
   elements: [
     {
       id: "el_1",
@@ -1696,7 +1711,7 @@ await apiService.startLoadTest({
   request: {
     method: "POST",
     url: "https://api.example.com/data",
-    headers: { "Content-Type": "application/json" },
+    headers: [{ name: "Content-Type", value: "application/json" }],
     body: { mode: "json", content: '{"key": "value"}' }
   },
   followRedirects: true,
