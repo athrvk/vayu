@@ -429,12 +429,13 @@ machine, so the engine sends it only when it lies under a folder allowed in Sett
 is a file picked here. `POST /import/parse` answers each with the `unresolved` the engine derives
 from those (#2356), `true` for a path this machine would refuse; no stored body keeps the key. The Preview reads the drafts (`fileReferenceNeeds` in
 `app/src/modules/collections/import-notices.ts`) and lists each distinct parent folder once,
-with how many files it holds and an **Allow folder** action (`ImportFileFolders.tsx`, through
-`hooks/useAllowFolder.ts`), so a collection exported on this same machine is one click per
-folder rather than a relink per request; a folder already allowed reads *Allowed*. A batch
-lists the folders of every file it will import, once. A folder that does not exist here is
-refused by the engine with its own message, and those files are relinked in their requests
-instead. A path whose folder is still a `{{variable}}` names no folder and is left out. A
+with how many files it holds and an **Allow folder...** action (`ImportFileFolders.tsx`, through
+`hooks/useAllowFolder.ts`) that opens the system folder picker there, inside Electron only:
+main allows the folder the user confirms, since the renderer cannot name one. A collection
+exported on this same machine is one choice per folder rather than a relink per request; a
+folder already allowed reads *Allowed*. A batch lists the folders of every file it will import,
+once. A folder that does not exist here cannot be chosen, so those files are relinked in their
+requests instead. A path whose folder is still a `{{variable}}` names no folder and is left out. A
 `binary` body that arrived with no path at all is counted beside `unattachedFileParts` as
 "N file bodies need files", the whole-body counterpart of that line.
 
