@@ -1243,7 +1243,8 @@ export class EngineClient {
 	 * Start a mock: `POST /mock/start`. `collectionId` is required; the engine
 	 * assigns the id and, for `port: 0`, the port. The reply is the mock record
 	 * (`mockId`, `collectionId`, `collectionName`, `url`, `port`, `latencyMs`,
-	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `createdAt`).
+	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `createdAt`,
+	 * `allowedOrigins`).
 	 */
 	startMockServer(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/mock/start", payload, signal);
@@ -1299,7 +1300,7 @@ export class EngineClient {
 	 * Start an inbox: `POST /inbox/start`. Every field of the body is optional;
 	 * the engine assigns the id and, for `port: 0` or no port at all, the port.
 	 * The reply is the inbox record (`inboxId`, `url`, `bind`, `port`,
-	 * `running`, `loopback`, `captureCount`, `response`).
+	 * `running`, `loopback`, `captureCount`, `allowedOrigins`, `response`).
 	 */
 	startInbox(payload: unknown, signal?: AbortSignal): Promise<unknown> {
 		return this.request("POST", "/inbox/start", payload, signal);

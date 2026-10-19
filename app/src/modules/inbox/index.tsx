@@ -47,6 +47,7 @@ import {
 	ErrorState,
 	ListSkeleton,
 	NonLoopbackBadge,
+	TruncatedText,
 } from "@/components/shared";
 import {
 	useClearInboxCapturesMutation,
@@ -62,12 +63,14 @@ import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
 import { inboxReference } from "@/lib/agent-reference";
+import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
 import { CaptureDetail } from "./CaptureDetail";
 import { DeleteInboxDialog } from "./DeleteInboxDialog";
+import { InboxStartOptions } from "./InboxStartOptions";
 import { capturesAtRisk, useInboxDeletion } from "./useInboxDeletion";
 import { useInboxLive } from "./useInboxLive";
 import { cannedResponseKey } from "./utils";
@@ -275,11 +278,13 @@ export default function InboxView() {
 			"error"
 		);
 
+	const onStarted = (started: Inbox) => show(started.inboxId);
+
 	const start = () => {
 		startInbox.mutate(
 			{},
 			{
-				onSuccess: (started) => show(started.inboxId),
+				onSuccess: onStarted,
 				onError: reportFailure("Couldn't start the inbox"),
 			}
 		);
@@ -311,14 +316,17 @@ export default function InboxView() {
 				title="No inbox running."
 				description="Start one to get a local URL that records every request sent to it - no tunnel, no third party."
 				action={
-					<Button onClick={start} disabled={startInbox.isPending}>
-						<Play
-							className="mr-2 size-icon"
-							aria-hidden="true"
-							data-icon-motion={ICON_MOTION.scale}
-						/>
-						Start inbox
-					</Button>
+					<div className="flex items-center gap-1">
+						<Button onClick={start} disabled={startInbox.isPending}>
+							<Play
+								className="mr-2 size-icon"
+								aria-hidden="true"
+								data-icon-motion={ICON_MOTION.scale}
+							/>
+							Start inbox
+						</Button>
+						<InboxStartOptions onStarted={onStarted} disabled={startInbox.isPending} />
+					</div>
 				}
 			/>
 		);
@@ -355,6 +363,12 @@ export default function InboxView() {
 				<Badge variant="outline">
 					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
+				{/* Always said, the default included: "Any" is the answer to whether
+				    a page in the browser can read this, which an absent line would
+				    leave the reader to infer (#2367). */}
+				<TruncatedText className="max-w-xs text-xs text-muted-foreground">
+					{describeOriginPolicy(inbox.allowedOrigins)}
+				</TruncatedText>
 				<NotifyOnCaptureToggle inboxId={inbox.inboxId} />
 
 				{/* The tab's multi-inbox story, which it never had: with several
@@ -426,14 +440,20 @@ export default function InboxView() {
 							Stop
 						</Button>
 					) : (
-						<Button size="sm" onClick={start} disabled={startInbox.isPending}>
-							<Play
-								className="mr-2 size-icon-sm"
-								aria-hidden="true"
-								data-icon-motion={ICON_MOTION.scale}
+						<>
+							<Button size="sm" onClick={start} disabled={startInbox.isPending}>
+								<Play
+									className="mr-2 size-icon-sm"
+									aria-hidden="true"
+									data-icon-motion={ICON_MOTION.scale}
+								/>
+								Start new
+							</Button>
+							<InboxStartOptions
+								onStarted={onStarted}
+								disabled={startInbox.isPending}
 							/>
-							Start new
-						</Button>
+						</>
 					)}
 					{/* Last, and the only control here that ends the record rather than
 					    the listener. Before it, a stopped inbox could only be left

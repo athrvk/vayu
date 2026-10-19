@@ -48,10 +48,16 @@ export function inboxResponsePayload(response: Record<string, unknown>): Record<
  * than in a schema an agent could be tempted to route around. With no `bind`
  * the engine uses its loopback default, and its non-loopback refusal never
  * comes into play.
+ *
+ * `allowedOrigins` (#2367) is CORS policy, which names which browser pages may
+ * read the answers and widens nothing about who can connect, so it is forwarded
+ * as given and left to the engine to validate; see {@link mockServerStartPayload}
+ * for why the schema does not restate the bounds.
  */
 export function inboxStartPayload(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = {};
 	if (typeof args.port === "number") payload.port = args.port;
+	if (args.allowedOrigins !== undefined) payload.allowedOrigins = args.allowedOrigins;
 	if (isRecord(args.response)) payload.response = inboxResponsePayload(args.response);
 	return payload;
 }

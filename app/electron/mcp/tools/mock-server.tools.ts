@@ -22,7 +22,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["service"],
 		description:
-			"Start a local mock server that answers a collection's saved examples, and return its id and base URL. Use it to stand up the API a client under test expects without that API existing: point the client at the returned url and every request whose method and path match a saved request in the collection gets that request's example back - status, headers and body. A route whose request has no saved example answers 501, and a path that matches nothing answers 404, so the returned routeCount and routesWithoutExample are what say whether the mock is usable; get_mock_routes lists them. latencyMs and errorRatePct are how a client's timeout and retry handling get exercised - errorRatePct injects synthesized 500s at that rate. It needs no allowlist entry: the engine binds every mock to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. Stop it with stop_mock_server when you are done; a mock keeps its port until then.",
+			"Start a local mock server that answers a collection's saved examples, and return its id and base URL. Use it to stand up the API a client under test expects without that API existing: point the client at the returned url and every request whose method and path match a saved request in the collection gets that request's example back - status, headers and body. A route whose request has no saved example answers 501, and a path that matches nothing answers 404, so the returned routeCount and routesWithoutExample are what say whether the mock is usable; get_mock_routes lists them. latencyMs and errorRatePct are how a client's timeout and retry handling get exercised - errorRatePct injects synthesized 500s at that rate. It needs no allowlist entry: the engine binds every mock to 127.0.0.1 and takes no host for it, so it is unreachable off this machine. Which browser pages may read its answers is separate: by default any page can, without credentials, and allowedOrigins narrows that to the listed origins, with credentials. Stop it with stop_mock_server when you are done; a mock keeps its port until then.",
 		annotations: {
 			title: "Start mock server",
 			readOnlyHint: false,
@@ -62,6 +62,12 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 				.describe(
 					"Percentage of answers replaced with a synthesized 500 (default 0). 0 and 100 are exact; in between it is a per-request roll."
 				),
+			allowedOrigins: z
+				.array(z.string())
+				.optional()
+				.describe(
+					'Browser origins allowed to read the mock\'s answers, e.g. ["https://app.example.com"]: only those pages get CORS headers, with credentials. Omit or leave empty (the default) for any origin, without credentials. Each is http:// or https:// plus a host and optional port - no path, trailing slash, wildcard or "null" - at most 32 of them. A bad entry is refused by name. Fixed for the mock\'s life.'
+				),
 		},
 		handler: async (args, ctx, signal) => {
 			const payload = mockServerStartPayload(args);
@@ -84,7 +90,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List the mock servers running right now, each with its id, the collection it serves and that collection's name, its base URL and port, its latency and error-rate knobs, and how many routes it has. A stopped mock is gone rather than listed - its record dies with its listener - so this is also how to confirm one stopped.",
+			"List the mock servers running right now, each with its id, the collection it serves and that collection's name, its base URL and port, its latency and error-rate knobs, its allowedOrigins, and how many routes it has. A stopped mock is gone rather than listed - its record dies with its listener - so this is also how to confirm one stopped.",
 		annotations: {
 			title: "List mock servers",
 			readOnlyHint: true,

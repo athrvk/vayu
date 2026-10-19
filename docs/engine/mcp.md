@@ -311,12 +311,12 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_mock_issuers`    | read     | `GET /mock-issuer`                           | -                          |
 | `stop_mock_issuer`     | execute  | `POST /mock-issuer/:id/stop`                 | - (unknown id is a `404`, surfaced as a tool error) |
 | `update_mock_issuer`   | execute  | `PUT /mock-issuer/:id` (merge-patch)         | - (live edit of `failureMode` / `slowMs`; an empty patch is refused before the engine sees it) |
-| `start_mock_server`    | execute  | `POST /mock/start`                           | - (loopback-only listener, so no allowlist entry applies); the `latencyMs` ceiling is the engine's |
+| `start_mock_server`    | execute  | `POST /mock/start`                           | - (loopback-only listener, so no allowlist entry applies); the `latencyMs` ceiling and the `allowedOrigins` rules are the engine's |
 | `list_mock_servers`    | read     | `GET /mock`                                  | - (running mocks only - a stopped one has no record) |
 | `get_mock_routes`      | read     | `GET /mock/:id/routes`                       | - (a start-time snapshot, constant under a running mock, except each row's `hits` count) |
 | `get_mock_activity`    | read     | `GET /mock/:id/activity?limit=`              | - (newest first, 50 rows by default, 200 max; discarded when the mock stops, and re-fetched to see new entries rather than pushed; secret values read `<redacted>` unless revealed) |
 | `stop_mock_server`     | execute  | `POST /mock/:id/stop`                        | - (unknown id is a `404`, surfaced as a tool error) |
-| `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent) |
+| `start_webhook_inbox`  | execute  | `POST /inbox/start`                          | - (loopback-only listener; `bind` / `confirmNonLoopback` are never sent; the `allowedOrigins` rules are the engine's) |
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
 | `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
 | `delete_webhook_inbox` | write    | `GET /inbox` + `DELETE /inbox/:id`           | write toggle + confirm (the prompt names the capture count) |
@@ -907,6 +907,15 @@ Notes:
   which is worth fetching only once. It is capped at 200 rows per call (50 by
   default) and, like the route table, is discarded outright on
   `stop_mock_server` rather than kept the way an inbox keeps its captures.
+  **`allowedOrigins`** (issue #2367) is which browser pages may read the mock's
+  answers, the half of reach that "loopback-only" does not decide: a page open
+  in the user's browser is on this machine. Absent or `[]` is the engine's
+  default, any origin and never credentials; a list admits only those origins,
+  with credentials. The schema says "array of strings" and no more - the count
+  and length ceilings and what makes an entry an origin are the engine's, and a
+  bad entry comes back as a `400` naming it (`allowedOrigins[1]`) - and the
+  start result and `list_mock_servers` echo the canonical list. Fixed for the
+  mock's life, like `latencyMs`.
 - **The webhook-inbox tools** are the assertion half an agent testing a webhook
   needs (issue #756): `start_webhook_inbox` stands up a
   [local inbox](api-reference.md#webhook-inbox) and returns its URL,
@@ -930,7 +939,11 @@ Notes:
   `get_live_metrics` takes. Capture bodies are cut to 32 KB for the result with
   the engine's own `bodyTruncated` / `bodyBytes` disclosure kept intact, since
   `inboxMaxBodyBytes` reaches 8 MB and a webhook payload is whatever the sender
-  sent.
+  sent. **`allowedOrigins`** (issue #2367) is forwarded the same way as the
+  mock's - an array of strings, validated by the engine, echoed canonical by the
+  start result and `list_webhook_inboxes`. It is CORS policy, which browser pages
+  may read the canned answer, and does not touch who can connect, so it sits
+  beside the loopback guarantee rather than loosening it.
 - **Cancellation:** the `AbortSignal` the SDK fires on `notifications/cancelled`
   is threaded into the engine `fetch` for every tool call, resource read,
   template list and prompt, so a client cancelling an in-flight call actually
