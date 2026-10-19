@@ -641,8 +641,8 @@ const vayu::http::VariableValues& vars) {
         if (!holds_a_token (*text)) {
             continue;
         }
-        // The URL by its own rule: a value landing in the query is encoded
-        // the way composition encodes one (issue #1773).
+        // The URL by its own rule: a value is encoded by the component it
+        // lands in, the way composition encodes one (issues #1773, #2465).
         *text = text == &request.url ?
         vayu::http::resolve_url_template (*text, vars, !request.disable_url_encoding) :
         vayu::http::resolve_template (*text, vars);

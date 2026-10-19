@@ -9,6 +9,7 @@
 
 #include <curl/curl.h>
 
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
@@ -266,7 +267,13 @@ std::string wire_url (const Request& request) {
     // any driver asks for this URL; a caller that did not ask that gate (the
     // raw-request view of a refused send) is shown the host as typed.
     (void)to_ascii_host (url);
-    return url;
+    if (request.disable_url_encoding) {
+        return url;
+    }
+    // Here and not only at composition: a raw `POST /execute` or `POST /runs`
+    // URL, and one with no token, never passes through a substitution.
+    auto where = vayu::core::UrlComponent::Head;
+    return vayu::core::encode_literal_at_url_component (url, where);
 }
 
 bool content_type_is_engine_owned (const Body& body) {

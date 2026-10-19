@@ -530,16 +530,15 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
 
 std::string substitute_url_tokens (const std::string& input,
 const std::function<std::optional<std::string> (const std::string& name)>& resolve,
-bool encode_query) {
-    if (!encode_query) {
+bool encode) {
+    if (!encode) {
         return substitute_tokens (input, resolve);
     }
     std::string out;
     out.reserve (input.size ());
     auto where       = vayu::core::UrlComponent::Head;
     const auto write = [&out, &where] (std::string_view text) {
-        where = vayu::core::advance_url_component (text, where);
-        out += text;
+        out += vayu::core::encode_literal_at_url_component (text, where);
     };
     std::vector<std::string> expanding;
     auto it = std::sregex_iterator (input.begin (), input.end (), token_pattern ());
@@ -691,7 +690,7 @@ const std::optional<IterationIdentity>& identity) {
 
 std::string resolve_url_template (const std::string& input,
 const VariableValues& vars,
-bool encode_query,
+bool encode,
 const BoundColumnNames& bound_columns,
 DynamicResolution dynamic) {
     return substitute_url_tokens (
@@ -699,7 +698,7 @@ DynamicResolution dynamic) {
     [&vars, &bound_columns, dynamic] (const std::string& name) {
         return lookup_variable (name, vars, bound_columns, dynamic);
     },
-    encode_query);
+    encode);
 }
 
 std::string render_data_value (const nlohmann::json& value) {

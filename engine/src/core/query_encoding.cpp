@@ -31,12 +31,84 @@ std::string encode_query_component (std::string_view text, QueryPart part) {
 
 namespace {
 
-/// Where a `?` or `#` read at @p where moves the URL; every other byte stays.
+bool in_head (UrlComponent where) {
+    return where == UrlComponent::Head || where == UrlComponent::HeadSeparator;
+}
+
+/// Where reading @p c at @p where moves the URL.
 UrlComponent after_url_byte (char c, UrlComponent where) {
     if (c == '#') {
         return UrlComponent::Fragment;
     }
-    return c == '?' && where == UrlComponent::Head ? UrlComponent::Query : where;
+    if (where == UrlComponent::Query || where == UrlComponent::Fragment) {
+        return where;
+    }
+    if (c == '?') {
+        return UrlComponent::Query;
+    }
+    if (where == UrlComponent::Path) {
+        return where;
+    }
+    if (c == ':') {
+        return UrlComponent::HeadSeparator;
+    }
+    if (c == '/') {
+        return where == UrlComponent::HeadSeparator ? where : UrlComponent::Path;
+    }
+    return UrlComponent::Head;
+}
+
+/// A kept `{{...}}` token reads as head text, a scheme or a host: a `/` after
+/// `http://{{host}}` opens the path.
+UrlComponent after_url_token (UrlComponent where) {
+    return where == UrlComponent::HeadSeparator ? UrlComponent::Head : where;
+}
+
+using ComponentSet = bool (*) (unsigned char byte, UrlComponent where);
+
+/// @p text with each byte @p in_set answers true for at the component it is
+/// read in written as `%XX`, every whole `{{...}}` token kept verbatim, and
+/// @p where advanced past it. The component moves *before* a byte is judged,
+/// so a `?` or `#` is always structure, never encoded.
+std::string encode_by_component (std::string_view text, UrlComponent& where, ComponentSet in_set) {
+    static constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve (text.size ());
+    for (std::size_t at = 0; at < text.size ();) {
+        if (const std::size_t end = template_token_end (text, at);
+        end != std::string_view::npos) {
+            out += text.substr (at, end - at);
+            where = after_url_token (where);
+            at    = end;
+            continue;
+        }
+        const char ch   = text[at++];
+        where           = after_url_byte (ch, where);
+        const auto byte = static_cast<unsigned char> (ch);
+        if (in_set (byte, where)) {
+            out += '%';
+            out += hex[byte >> 4U];
+            out += hex[byte & 0x0FU];
+        } else {
+            out += ch;
+        }
+    }
+    return out;
+}
+
+bool in_substituted_set (unsigned char byte, UrlComponent where) {
+    switch (where) {
+    case UrlComponent::Path: return in_postman_path_encode_set (byte);
+    case UrlComponent::Query: return in_postman_query_encode_set (byte);
+    case UrlComponent::Fragment: return in_postman_fragment_encode_set (byte);
+    case UrlComponent::Head:
+    case UrlComponent::HeadSeparator: return false;
+    }
+    return false;
+}
+
+bool in_literal_set (unsigned char byte, UrlComponent where) {
+    return !in_head (where) && is_unsendable_url_byte (byte);
 }
 
 } // namespace
@@ -46,7 +118,8 @@ UrlComponent advance_url_component (std::string_view text, UrlComponent from) {
     for (std::size_t at = 0; at < text.size () && where != UrlComponent::Fragment;) {
         if (const std::size_t end = template_token_end (text, at);
         end != std::string_view::npos) {
-            at = end;
+            where = after_url_token (where);
+            at    = end;
             continue;
         }
         where = after_url_byte (text[at++], where);
@@ -55,28 +128,11 @@ UrlComponent advance_url_component (std::string_view text, UrlComponent from) {
 }
 
 std::string encode_at_url_component (std::string_view value, UrlComponent& where) {
-    static constexpr std::string_view hex = "0123456789ABCDEF";
-    std::string out;
-    out.reserve (value.size ());
-    for (std::size_t at = 0; at < value.size ();) {
-        if (const std::size_t end = template_token_end (value, at);
-        end != std::string_view::npos) {
-            out += value.substr (at, end - at);
-            at = end;
-            continue;
-        }
-        const char ch   = value[at++];
-        where           = after_url_byte (ch, where);
-        const auto byte = static_cast<unsigned char> (ch);
-        if (where == UrlComponent::Query && in_postman_query_encode_set (byte)) {
-            out += '%';
-            out += hex[byte >> 4U];
-            out += hex[byte & 0x0FU];
-        } else {
-            out += ch;
-        }
-    }
-    return out;
+    return encode_by_component (value, where, in_substituted_set);
+}
+
+std::string encode_literal_at_url_component (std::string_view text, UrlComponent& where) {
+    return encode_by_component (text, where, in_literal_set);
 }
 
 } // namespace vayu::core

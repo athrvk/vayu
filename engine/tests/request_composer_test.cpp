@@ -1209,9 +1209,10 @@ TEST_F (RequestComposerTest, AVariableCarryingANulIntoAHeaderIsRefusedToo) {
 
 // The refusal is scoped to the field that has a line terminator: the same
 // variable is ordinary text in a URL, a body and a form field, and composing
-// it there must stay a 200 carrying the bytes unchanged. This is the twin of
-// PR #737's `TheSameCellIsFineEverywhereElse` - the two paths agree on where
-// the rule applies, not just on what it refuses.
+// it there must stay a 200 carrying the bytes (in the URL's path, by the path
+// set, issue #2465). This is the twin of PR #737's
+// `TheSameCellIsFineEverywhereElse` - the two paths agree on where the rule
+// applies, not just on what it refuses.
 TEST_F (RequestComposerTest, TheSameVariableIsFineEverywhereElse) {
     seed_environment ("env_1", R"({"note":{"value":"ok\r\nX-Admin: true","enabled":true}})");
     const json body = {
@@ -1225,7 +1226,7 @@ TEST_F (RequestComposerTest, TheSameVariableIsFineEverywhereElse) {
 
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["url"], "https://x.test/ok\r\nX-Admin: true");
+    EXPECT_EQ (payload["url"], "https://x.test/ok%0D%0AX-Admin:%20true");
     EXPECT_EQ (payload["body"]["fields"][0]["value"], "ok\r\nX-Admin: true");
 }
 
@@ -1453,6 +1454,93 @@ TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
 }
 
 } // namespace
+
+// --- URL text by component (issue #2465) -------------------------------------
+
+namespace {
+
+/// The URL `POST /compose` answers for an inline request at @p url, with
+/// @p globals as the workspace's globals.
+std::string composed_url (vayu::db::Database& db,
+const std::string& url,
+const json& globals,
+bool disable_url_encoding = false) {
+    vayu::db::Globals stored;
+    stored.id        = "globals";
+    stored.variables = globals.dump ();
+    db.save_globals (stored);
+    json request = { { "method", "GET" }, { "url", url } };
+    if (disable_url_encoding) {
+        request["disableUrlEncoding"] = true;
+    }
+    auto [status, payload] =
+    vayu::http::compose_request_core (db, json{ { "request", request } });
+    if (status != 200) {
+        ADD_FAILURE () << payload.dump ();
+        return {};
+    }
+    return payload.at ("url").get<std::string> ();
+}
+
+json global (const std::string& value) {
+    return json{ { "value", value }, { "enabled", true } };
+}
+
+} // namespace
+
+// The issue's acceptance case. Mutation check: make the `Path` arm of
+// `in_substituted_set` (query_encoding.cpp) answer false and this sends a raw
+// space.
+TEST_F (RequestComposerTest, AVariableInThePathIsEncodedByThePathSet) {
+    EXPECT_EQ (composed_url (*db_, "http://h/users/{{name}}",
+               { { "name", global ("John Doe") } }),
+    "http://h/users/John%20Doe");
+}
+
+// A value is URL text: its `/` makes segments, its `?` opens the query and
+// its `#` the fragment, and each component encodes the rest by its own set.
+TEST_F (RequestComposerTest, AValuesSeparatorsAreStructureInEveryComponent) {
+    const json globals = { { "v", global ("a/b?c d#e f\"") } };
+    EXPECT_EQ (composed_url (*db_, "http://h/p/{{v}}", globals), "http://h/p/a/b?c%20d#e%20f%22");
+    EXPECT_EQ (composed_url (*db_, "http://h/p?q={{v}}", globals),
+    "http://h/p?q=a/b?c%20d#e%20f%22");
+    EXPECT_EQ (composed_url (*db_, "http://h/p?q=1#{{v}}", globals),
+    "http://h/p?q=1#a/b?c%20d#e%20f%22");
+}
+
+// The scheme and the authority take a value as it stands: a non-ASCII host is
+// dialled by its punycode name, which `%C3%BC` would defeat.
+TEST_F (RequestComposerTest, TheAuthorityTakesAValueAsItStands) {
+    EXPECT_EQ (composed_url (*db_, "http://{{host}}/{{p}}",
+               { { "host", global ("bücher.de") }, { "p", global ("a b") } }),
+    "http://bücher.de/a%20b");
+}
+
+// Mutation check: make `in_literal_set` (query_encoding.cpp) answer false
+// and both spaces reach the composed URL raw.
+TEST_F (RequestComposerTest, ALiteralSpaceIsEncodedInThePathAndTheQuery) {
+    EXPECT_EQ (composed_url (*db_, "http://h/a b?q=c d", json::object ()),
+    "http://h/a%20b?q=c%20d");
+    EXPECT_EQ (composed_url (*db_, "http://h/a b/{{v}}?q=c d", { { "v", global ("x") } }),
+    "http://h/a%20b/x?q=c%20d");
+}
+
+// Only what libcurl refuses or sends raw against RFC 9112 is encoded, so every
+// URL that sent before composes to the same bytes.
+TEST_F (RequestComposerTest, ALiteralByteLibcurlAcceptsIsKept) {
+    for (const std::string url : { "http://h/a\"b?q=a\"b", "http://h/{a}?q={}", "http://h/a\\b?q=a\\b",
+         "http://h/%41?q=%41%20", "http://h/a+b?q=a+b", "http://h/p?q=1#a\"{}" }) {
+        EXPECT_EQ (composed_url (*db_, url, json::object ()), url);
+    }
+}
+
+// The toggle keeps every byte as typed, a literal space and a substituted one
+// alike; the send then refuses it.
+TEST_F (RequestComposerTest, DisableUrlEncodingLeavesTheSpace) {
+    EXPECT_EQ (composed_url (*db_, "http://h/a b/{{name}}?q=c d",
+               { { "name", global ("John Doe") } }, /*disable_url_encoding=*/true),
+    "http://h/a b/John Doe?q=c d");
+}
 
 // --- Path variables (issue #1764) --------------------------------------------
 

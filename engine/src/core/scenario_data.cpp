@@ -76,8 +76,9 @@ enum class FieldContext : std::uint8_t {
     /// A form field, a text body, a URL sent as typed: no quoting rule of its
     /// own.
     Plain,
-    /// A URL whose query is encoded (issue #1773): a token in a query key or
-    /// value is written by Postman's query rule, anywhere else as @ref Plain.
+    /// A URL sent encoded (issues #1773, #2465): a token is written by
+    /// Postman's rule for the path, query or fragment it lands in, and as
+    /// @ref Plain in the scheme and authority.
     Url,
     /// A header name or value, or a credential `apply_auth` writes into a
     /// header line. Plain text like @ref Plain - a header has no quoting rule -
