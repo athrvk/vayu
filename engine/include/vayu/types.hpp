@@ -167,14 +167,11 @@ enum class FormFieldType : std::uint8_t { Text, File };
  * `binary` request, or one `form-data` file part (whose members `FormField`
  * mirrors).
  *
- * `src` is an absolute path, stored as written. `unresolved` marks a path no
- * human chose in the editor - an import, a curl paste or an MCP agent wrote it,
- * or composition filled a `{{variable}}` into it - and such a path is sent only
- * when it resolves under a folder the user allowed (`file_roots`,
- * `vayu::http::FileAccessPolicy`). See `vayu/http/file_ref.hpp` for the rule.
- * It fails closed: a reference is unresolved unless whoever built it said a
- * person chose it, so the default here and an absent key in a payload
- * (`vayu::json::reads_as_unresolved`) both mean `true`.
+ * `src` is an absolute path, stored as written. Whether it may be sent is a
+ * property of the path on this machine, never of the reference: it must lie
+ * under a folder the user allowed (`file_roots`) or be a file a person picked
+ * (`file_grants`), both read by `vayu::http::FileAccessPolicy` (#2356). See
+ * `vayu/http/file_ref.hpp` for the rule.
  *
  * The last three members are filled once per send or run by the plan step, never
  * stored: a file at or under `INLINE_FILE_LIMIT` is read once into
@@ -184,7 +181,6 @@ struct FileRef {
     std::string src;
     std::string file_name;    // declared filename; empty = basename of `src`
     std::string content_type; // empty = derived (see `implied_content_type`)
-    bool unresolved = true;
     std::shared_ptr<const std::string> inline_bytes;
     std::string sha256;
     std::uint64_t size = 0;
@@ -251,7 +247,6 @@ struct FormField {
     std::string src;          // file parts only - a path on this machine
     std::string file_name;    // declared filename; empty = basename of `src`
     std::string content_type; // per-part Content-Type; empty = libcurl's guess
-    bool unresolved = true;   // see `FileRef::unresolved`
 };
 
 /**

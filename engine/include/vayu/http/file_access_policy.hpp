@@ -14,8 +14,8 @@
  * The trust rule is one sentence: Vayu sends a file you picked, or any file
  * under a folder you allowed in Settings. This type holds both halves - the
  * allowed folders (`file_roots`) and the picked files (`file_grants`, #2356) -
- * and `file_ref.hpp` applies it to every reference no human chose
- * (`FileRef::unresolved`).
+ * and `file_ref.hpp` applies it. Nothing a request body says changes the
+ * answer: trust is a property of the path on this machine.
  *
  * Containment is decided on **canonical** paths, compared component by
  * component: `canonical` resolves every symlink, so a link inside a root that

@@ -14,6 +14,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
 
 namespace vayu::json {
 namespace {
@@ -340,7 +341,7 @@ TEST (JsonRequestListSerializer, MarksAnOversizedColumnTruncatedInsteadOfSubstit
     r.auth = R"({"mode":"inherit"})";
 
     std::ostringstream out;
-    serialize_to_stream (r, out);
+    serialize_to_stream (r, out, vayu::http::FileAccessPolicy{});
     const auto parsed = nlohmann::json::parse (out.str ());
 
     EXPECT_EQ (parsed["body"], nlohmann::json::parse (R"({"mode":"none"})"))
@@ -362,7 +363,7 @@ TEST (JsonRequestListSerializer, OmitsTruncatedFieldsWhenEveryColumnFitsTheCap) 
     r.auth          = R"({"mode":"inherit"})";
 
     std::ostringstream out;
-    serialize_to_stream (r, out);
+    serialize_to_stream (r, out, vayu::http::FileAccessPolicy{});
     const auto parsed = nlohmann::json::parse (out.str ());
 
     EXPECT_FALSE (parsed.contains ("truncatedFields"))

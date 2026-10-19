@@ -419,7 +419,6 @@ TEST (PostmanExport, FormDataFilePartsNameTheirPath) {
     file["src"]                = "/home/ada/report.pdf";
     file["fileName"]           = "report.pdf";
     file["contentType"]        = "application/pdf";
-    file["unresolved"]         = true;
     file["description"]        = "The PDF";
     ordered renamed            = row ("thumb", "");
     renamed["type"]            = "file";
@@ -458,7 +457,7 @@ TEST (PostmanExport, UnknownBodyModeIsANote) {
 /// what Postman itself writes and what its importer reads back as empty.
 TEST (PostmanExport, ABinaryBodyIsPostmansFileModeNamingItsPath) {
     const ordered chosen = body_of (ordered::parse (
-    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png","unresolved":true}})"));
+    R"({"mode":"binary","file":{"src":"/home/ada/photo.png","fileName":"photo.png"}})"));
     EXPECT_EQ (chosen.dump (), R"({"mode":"file","file":{"src":"/home/ada/photo.png"}})");
     const ordered unpicked =
     body_of (ordered::parse (R"({"mode":"binary","file":{"src":""}})"));

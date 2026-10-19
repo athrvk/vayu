@@ -544,18 +544,17 @@ query row's boolean `equals`.
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
-{"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png","unresolved":true}}
+{"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
 same file members a binary body's `file` does: `src` (an absolute path, stored
-as written), `fileName` and `contentType` (both optional, omitted when empty) and
-`unresolved` (`true` when no person chose the path in the editor - an import,
-a curl paste, an MCP agent - so it is sent only from under an allowed folder,
-see [`file_roots`](#file_roots)). Every write states it (`apply_request_fields`,
-absent in the payload stored as `true`), and the
-[schema version 4 migration](#the-file-trust-restatement-schema-version-4)
-stated it on every row written before, absent as `false`. No row lacks it, so
-an absent key is read as `true` like any payload's. A text part may also carry
+as written) and `fileName` and `contentType` (both optional, omitted when
+empty). No trust is stored: whether `src` may be sent is decided by the
+[`file_roots`](#file_roots) and [`file_grants`](#file_grants) at each send, and
+the `unresolved` a read answers is derived then (#2356). Every write drops the
+key an older client sends (`apply_request_fields`), and the
+[schema version 6 migration](#the-file-grants-migration-schema-version-6)
+removed it from every row written before. A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:

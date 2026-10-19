@@ -18,9 +18,11 @@
  *  1. `src` is not empty ("no file selected");
  *  2. `src` holds no `{{` - composition resolves a path once and the residual
  *     pass never does, so a token left here is an unresolved variable;
- *  3. **trust**: `!unresolved || policy.allows (src)` - a path a person chose in
- *     the editor is sent, and any other path only when it resolves under a
- *     folder the user allowed (`FileAccessPolicy`, `file_roots`);
+ *  3. **trust**: `policy.allows (src)` - the path resolves under a folder the
+ *     user allowed (`file_roots`) or to a file a person picked (`file_grants`),
+ *     both held by `FileAccessPolicy` (#2356). Nothing in the request decides
+ *     this: a body's `unresolved` member is ignored on the way in and derived
+ *     on the way out (`vayu::json::derive_file_trust`);
  *  4. it is a regular file - a directory, a FIFO or `/dev/zero` is refused;
  *  5. this process can open it.
  *
@@ -146,9 +148,10 @@ class FilePlan {
     }
 
     private:
+    /// A path that passed the whole rule; one the policy refused is never
+    /// cached, so a hit needs no second trust check.
     struct Checked {
-        bool under_root = false;
-        bool read       = false; // bytes or hash taken (a binary body's need)
+        bool read = false; // bytes or hash taken (a binary body's need)
         std::shared_ptr<const std::string> inline_bytes;
         std::string sha256;
         std::uint64_t size = 0;

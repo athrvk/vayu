@@ -492,8 +492,7 @@ A **`binary`** body is one whole file:
   "file": {
     "src": "/home/ada/fixtures/avatar.png",
     "fileName": "avatar.png",
-    "contentType": "image/png",
-    "unresolved": true
+    "contentType": "image/png"
   }
 }
 ```
@@ -523,7 +522,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
 | `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
-| `unresolved` | `false` only when a person chose `src` in the editor. Fails closed: absent, `null` or any non-boolean is `true`, so a caller that means "chosen" says `false`. |
+| `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
 
@@ -535,27 +534,34 @@ Shape refusals (`400`):
 - A `src` on a part that is not `"type": "file"`: it names a file nothing would
   send.
 
-**The trust rule.** Vayu sends a file you chose in the editor, or any file under
-a folder you allowed in Settings ([Allowed folders](#allowed-folders-file-roots)).
-A reference is sendable when `!unresolved || allowed(canonical(src))`:
-containment is decided on canonical paths, component by component, so a
-symlink inside an allowed folder that points outside it is outside, and
-`/data/fixtures-old` is not under `/data/fixtures`. Every writer that is not a
-person in the editor writes `unresolved: true` - importers, curl paste, MCP -
-and so does every payload that omits the key; **composition sets it too** whenever `src` held a `{{` before resolution
-(`POST /compose`, and a data row bound into the path by a run), so a path a
-variable or a data set chose is sent only from under an allowed folder. The
-flag rides the wire, which is how it survives compose -> app -> execute.
-**Scripts can never choose a path**: the residual pass after the pre-request
-script resolves a reference's `fileName` and `contentType` but never `src`.
+**The trust rule.** Vayu sends a file under a folder you allowed in Settings
+([Allowed folders](#allowed-folders-file-roots)), or a file a person picked
+(`file_grants`, #2356). A reference is sendable when its canonical path lies
+under an allowed folder or equals a picked file's: containment is decided on
+canonical paths, component by component, so a symlink inside an allowed folder
+that points outside it is outside, and `/data/fixtures-old` is not under
+`/data/fixtures`; a picked file is the canonical path recorded when it was
+picked, matched exactly, so a link re-pointed after the pick names another file
+and is refused. **What a request body says about trust is ignored**: the
+`unresolved` member an older client sends is accepted and dropped, on
+`POST /execute`, `POST /runs`, `POST /compose` and every write, so no caller can
+claim a file was chosen. A path composition or a data row fills in is held to
+the same rule as a literal one. **Scripts can never choose a path**: the
+residual pass after the pre-request script resolves a reference's `fileName`
+and `contentType` but never `src`.
 
-**A stored request states it.** `POST`/`PUT /requests` and `POST /import/apply`
-store every file reference of a body they write with an explicit `unresolved`,
-absent read as `true`, and the
-[schema version 4 migration](db-schema.md#the-file-trust-restatement-schema-version-4)
-stated it on every body stored before. So a saved request composed by id
-(`POST /compose` with `requestId`, and every collection run) carries the key
-as stored, and an absent key means `true` there as everywhere else.
+**`unresolved` is derived on read.** No stored body carries the key: the
+request writes (`POST`/`PUT /requests`, `POST /import/apply`, `POST /specs/sync`)
+and a run's `configSnapshot` drop it, and the
+[schema version 6 migration](db-schema.md#the-file-grants-migration-schema-version-6)
+removed it from every body stored before. Every read that hands a body to an
+editor writes it back as the engine's answer for this machine now:
+`GET /requests`, `GET /requests/:id`, the `POST`/`PUT /requests` responses,
+`POST /reorder`'s request rows, `GET /runs/:id`'s `configSnapshot.body` and
+`POST /import/parse`. `true` means a concrete path that is neither under an
+allowed folder nor picked, which the send would refuse; `false` means an
+allowed path or one still holding `{{` (decided after composition). A
+reference with no path carries no `unresolved` at all.
 
 Every enabled reference is checked, in this order, and the first failure
 refuses the send:
@@ -564,7 +570,7 @@ refuses the send:
    `"Form field 'avatar' has no file selected - ..."`).
 2. `src` still holds `{{`: an unresolved variable.
 3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
-4. Untrusted: `"Body file '<path>' was not chosen in the editor and is not
+4. Untrusted: `"Body file '<path>' was not picked on this machine and is not
    under an allowed folder - pick it again in the request, or allow its folder
    in Settings > Files"`.
 5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
@@ -2885,9 +2891,10 @@ operation declares was never going to be written, so it is not counted
 (`rowsNotDeclared` still counts it).
 
 A form's file part, and a binary body's `file`, keep their name, declared file
-name and content type, never the local path they were read from (`src`) nor
-`unresolved`. A path a hand-edited `x-vayu-request` does carry is read back
-marked `unresolved`.
+name and content type, never the local path they were read from (`src`). A
+path a hand-edited `x-vayu-request` does carry is read back as written, and
+sent only once picked or under an allowed folder; an `unresolved` it states is
+dropped.
 
 **`x-vayu-elements`** carries a request's or the collection's whole `elements`
 array verbatim, the same vendor-extension convention `x-vayu-enabled` already
@@ -3388,12 +3395,13 @@ whole-file body (Postman `file`, Insomnia binary, an OpenAPI
 `application/octet-stream` or `format: binary` body) imports as a `binary` body
 naming the file, and the count, with its `requests`, says which bodies have a
 file to relink or choose. **Every file reference an import writes** - a binary
-body's `file`, a form-data file part - carries the path the document named, and
-`"unresolved": true` whenever that path is non-empty: the engine sends it only
-once the file is chosen again in the editor or lies under an allowed folder.
-A reference with no path (`"src": ""`) imports as no file chosen and claims
-nothing, so it is not marked; form parts in that state are counted in
-`meta.unattachedFileParts`. An import that loses something and
+body's `file`, a form-data file part - carries the path the document named,
+which the engine sends only once the file is picked again or lies under an
+allowed folder. `POST /import/parse` answers each with the derived
+`unresolved` ([the trust rule](#file-references-binary-bodies-and-file-parts)):
+`true` for a path this machine would refuse, so the preview can offer to allow
+its folder. A reference with no path (`"src": ""`) imports as no file chosen;
+form parts in that state are counted in `meta.unattachedFileParts`. An import that loses something and
 says nothing is the defect this list exists to prevent, so a format with
 nothing to report answers `[]` rather than omitting the field. **A JMeter
 import's `kind` is not limited to this list** (issue #1518): a `.jmx` class
@@ -4603,8 +4611,9 @@ them.
 
 ## Allowed folders (file roots)
 
-The folders a request-body file may be read from without a person having chosen
-it in the editor - the second half of the [trust rule](#file-references-binary-bodies-and-file-parts).
+The folders a request-body file may be read from without being picked file by
+file - one half of the [trust rule](#file-references-binary-bodies-and-file-parts),
+beside the picked files (`file_grants`).
 Stored in `file_roots` (schema version 3); read once per design send and once
 per run, so a change applies to the next send.
 

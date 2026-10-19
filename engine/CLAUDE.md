@@ -873,19 +873,26 @@ logged as a warning: it means a client skipped composition.
   `POST /import/apply` section.
 - **A file a request body names is sent under one trust rule**
   (`http/file_ref.hpp`, `http/file_access_policy.hpp`): a `binary` body's
-  `file` and a `form-data` file part are sendable iff `!unresolved ||
-  allowed(canonical(src))` against the `file_roots` folders (schema version 3,
+  `file` and a `form-data` file part are sendable iff `FileAccessPolicy::allows
+  (src)`: `canonical(src)` lies under a `file_roots` folder (schema version 3,
   `/file-roots`, which refuses a filesystem root, the home folder and any
-  folder containing it - `refused_root_reason`), compared component-wise on canonical paths so a
-  symlink escaping a root is outside. Every non-editor writer forces `unresolved`, and
-  so does composition (and a data-row bind) whenever `src` held `{{`; the
-  residual pass never resolves `src`, so a script cannot choose a file. The
-  flag fails closed: `FileRef`/`FormField` default it to `true`, a payload
-  that omits it parses as `true` (`vayu::json::reads_as_unresolved`), and
-  `apply_request_fields` stores every written body with the key stated
-  (`state_file_trust`); the schema-version-4 migration stated it, as
-  `false`, on every body stored before. An absent key means `true`
-  everywhere, storage included.
+  folder containing it - `refused_root_reason`), compared component-wise so a
+  symlink escaping a root is outside, or equals a `file_grants` row (schema
+  version 6, #2356), the canonical path recorded when a person picked the
+  file and never resolved again, so a link re-pointed after the pick is
+  refused. **Trust is derived, never read**: a body's `unresolved` is ignored
+  when a payload is parsed (an older client still sends it), dropped from
+  every stored body (`erase_file_trust` in `apply_request_fields` and
+  `sanitize_config_snapshot`) and written back on every read as the policy's
+  answer (`derive_file_trust`, a required parameter of both request
+  serializers, plus `GET /runs/:id`'s snapshot and `POST /import/parse`):
+  `true` for a concrete path neither allowed nor granted, `false` for an
+  allowed one and one still holding `{{`, no key for an empty one. A `src` holding `{{`
+  is refused at send whatever the policy says, and `grantable_file_path`
+  refuses it, so no grant names a template; the residual pass never resolves
+  `src`, so a script cannot choose a file. The schema-version-6 migration
+  granted every existing regular file a stored body marked `false` (or, on a
+  database older than version 4, left unmarked) and removed the key.
   `FilePlan` applies the rule once per design send (`execute_exchange`, the
   stream branch) and once per run at plan time (`plan_load_files`,
   `plan_step_files`), reading a file of at most `INLINE_FILE_LIMIT` once and

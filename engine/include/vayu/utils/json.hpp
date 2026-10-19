@@ -22,6 +22,10 @@
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
+namespace vayu::http {
+class FileAccessPolicy;
+}
+
 namespace vayu::json {
 
 using Json = nlohmann::json;
@@ -45,9 +49,14 @@ using Json = nlohmann::json;
 [[nodiscard]] Json serialize (const vayu::db::Collection& collection);
 
 /**
- * @brief Serialize a Request (db) to JSON
+ * @brief Serialize a Request (db) to JSON, its body's file references carrying
+ * the `unresolved` @p files derives for them (`derive_file_trust`).
+ *
+ * The policy is a parameter rather than something a caller adds afterwards, so
+ * no route can answer a stored body without the derived value the editor reads.
  */
-[[nodiscard]] Json serialize (const vayu::db::Request& request);
+[[nodiscard]] Json serialize (const vayu::db::Request& request,
+const vayu::http::FileAccessPolicy& files);
 
 /**
  * @brief Serialize a saved example response to JSON (issue #481)
@@ -156,43 +165,33 @@ const std::vector<vayu::db::Result>& results);
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
 
 /**
- * @brief True unless @p ref (a `binary` body's `file`, or a form-data file
- * part) says `"unresolved": false` in so many words.
- *
- * The trust flag fails closed: an absent key, `null` or any other non-boolean
- * reads as a path no person chose, sent only from under an allowed folder
- * (`vayu/http/file_ref.hpp`). Every parse of a file reference from a payload
- * goes through this.
- */
-[[nodiscard]] bool reads_as_unresolved (const Json& ref);
-
-/**
  * @brief Call @p visit on every file reference in the request body @p body: a
  * `binary` body's `file` object and each `type: "file"` entry of `fields`.
  */
 void for_each_file_ref (Json& body, const std::function<void (Json& ref)>& visit);
 
-/// What an absent `unresolved` means where `state_file_trust` writes it.
-enum class AbsentFileTrust : std::uint8_t {
-    /// A payload: nobody said a person chose the path, so nobody did.
-    Unresolved,
-    /// A body stored before every write stated the key: the editor wrote it.
-    /// Read only by the schema-version-4 migration (`db_maintenance.cpp`).
-    Chosen,
-};
+/**
+ * @brief Remove `unresolved` from every file reference in @p body.
+ *
+ * Trust is never stored (#2356): a client older than that rule still sends the
+ * key, and every write of a request body or a run's snapshot drops it here, so
+ * no stored value can be mistaken for a decision the engine made.
+ */
+void erase_file_trust (Json& body);
 
 /**
- * @brief Give every file reference in the request body @p body an explicit
- * boolean `unresolved`: a `binary` body's `file` and each `type: "file"` entry
- * of `fields`.
+ * @brief Write the derived `unresolved` onto every file reference in @p body,
+ * for a reader to display.
  *
- * A boolean already there is kept, an absent key becomes what @p absent says,
- * and any other value becomes `true`. Every stored body goes through this on
- * write (`apply_request_fields`), and the schema-version-4 migration ran every
- * body stored before through it, so no row lacks the key and an absent one
- * means unresolved everywhere.
+ * `true` when `src` names a concrete path @p files does not allow - not under
+ * an allowed folder and not a picked file - so the editor can say "not chosen
+ * on this machine". `false` for an allowed path and for one holding `{{`
+ * (decided after composition; the editor says that with its own line). A
+ * reference with no path carries no key: there is nothing to doubt, which is
+ * how an import has always written one. Output only: a request body's
+ * `unresolved` is ignored when it is parsed.
  */
-void state_file_trust (Json& body, AbsentFileTrust absent);
+void derive_file_trust (Json& body, const vayu::http::FileAccessPolicy& files);
 
 /**
  * @brief Deserialize a Request from JSON
@@ -240,8 +239,12 @@ int indent = vayu::core::constants::json::DEFAULT_INDENT);
  * This is used for streaming responses to avoid loading all data into memory.
  * @param request The request to serialize
  * @param out Output stream to write JSON to
+ * @param files What the body's derived `unresolved` is read from, as for
+ *        `serialize`
  */
-void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
+void serialize_to_stream (const vayu::db::Request& request,
+std::ostream& out,
+const vayu::http::FileAccessPolicy& files);
 
 /**
  * @brief Sanitize a run's config snapshot before persistence: the composed
@@ -264,8 +267,9 @@ void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
  *   `body.fields`. A value shorter than four characters is left alone.
  *
  * Everything else is kept, except the top-level `origin` (#1817), which the
- * run row stores in its own columns. If `body` is not valid JSON it is
- * returned unchanged.
+ * run row stores in its own columns, and a file reference's `unresolved`,
+ * which is derived on read and never stored (`erase_file_trust`). If `body`
+ * is not valid JSON it is returned unchanged.
  *
  * `body.content` (the request body being tested, not `body` itself) is capped
  * at `max_body_bytes`, the same limit `cap_trace_bodies` applies to a stored

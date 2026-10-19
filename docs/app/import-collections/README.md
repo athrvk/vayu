@@ -424,9 +424,10 @@ import complete-but-empty and the user picks the file. Every parser gets it from
 than tallying while building them, so the number and the rows cannot disagree.
 
 **Imported file paths, and the folders they sit in.** Every path an import carries - a
-`binary` body's `file.src`, a form-data file part's `src` - arrives `unresolved`: nobody chose
-it on this machine, so the engine sends it only when it lies under a folder allowed in
-Settings > Files. The Preview reads the drafts (`fileReferenceNeeds` in
+`binary` body's `file.src`, a form-data file part's `src` - names a file on the exporting
+machine, so the engine sends it only when it lies under a folder allowed in Settings > Files or
+is a file picked here. `POST /import/parse` answers each with the `unresolved` the engine derives
+from those (#2356), `true` for a path this machine would refuse; no stored body keeps the key. The Preview reads the drafts (`fileReferenceNeeds` in
 `app/src/modules/collections/import-notices.ts`) and lists each distinct parent folder once,
 with how many files it holds and an **Allow folder** action (`ImportFileFolders.tsx`, through
 `hooks/useAllowFolder.ts`), so a collection exported on this same machine is one click per
