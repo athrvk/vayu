@@ -83,6 +83,10 @@ inline constexpr std::array<const char*, 13> kRetiredConfigKeys = {
     "sseMaxRetry", "sseSendLastEventId", "dbTempStore", "dbMmapSize", "dbWalAutocheckpoint"
 };
 
+/// Tag for `ConfigSeeder::operator() (entry, adopt_new_default)`.
+struct AdoptNewDefault {};
+inline constexpr AdoptNewDefault adopt_new_default{};
+
 /**
  * @brief Everything `Database::seed_default_config` used to do before it
  * became the seven per-category calls: delete the retired-key rows, index
@@ -120,30 +124,21 @@ class ConfigSeeder {
         }
     }
 
+    /// Seeds one entry. A stored value is always the user's and is kept, even
+    /// when this build changes the entry's default.
     void operator() (const ConfigEntry& new_entry) {
-        if (!known_keys_.insert (new_entry.key).second) {
-            throw std::runtime_error (
-            "Database: config key seeded twice: " + new_entry.key);
-        }
-        seeded_[new_entry.key] = new_entry;
-        auto it                = existing_.find (new_entry.key);
-        if (it != existing_.end ()) {
-            // Preserve the user's value but update metadata (description,
-            // label, etc.)
-            ConfigEntry updated = new_entry;
-            updated.value       = it->second.value;     // Keep user's value
-            updated.updated_at = it->second.updated_at; // Keep original timestamp
-            // Only an entry whose metadata changed is written. Every start
-            // reseeds, so rewriting all ~65 rows made each one a database
-            // write, before the engine listened, for a catalogue that changes
-            // only when an engine upgrade does.
-            if (updated != it->second) {
-                replace_ (updated);
-            }
-        } else {
-            // New entry - use defaults
-            replace_ (new_entry);
-        }
+        seed_entry (new_entry, false);
+    }
+
+    /// As above, but a stored value that equals the *stored* default - the
+    /// user never moved off what the previous build shipped - follows this
+    /// build's new default once (#2419). Opt-in per entry: a machine-dependent
+    /// default (`workers`) differs between machines without any build having
+    /// changed it, and a row that travels with a workspace file must not be
+    /// rewritten by moving it. The row records the new default as it adopts
+    /// it, so the next start sees value == default and writes nothing.
+    void operator() (const ConfigEntry& new_entry, AdoptNewDefault) {
+        seed_entry (new_entry, true);
     }
 
     // Refuses a `dependsOn` naming a key nothing seeded, a key in a different
@@ -180,6 +175,38 @@ class ConfigSeeder {
     }
 
     private:
+    void seed_entry (const ConfigEntry& new_entry, bool follow_new_default) {
+        if (!known_keys_.insert (new_entry.key).second) {
+            throw std::runtime_error (
+            "Database: config key seeded twice: " + new_entry.key);
+        }
+        seeded_[new_entry.key] = new_entry;
+        auto it                = existing_.find (new_entry.key);
+        if (it == existing_.end ()) {
+            // New entry - use defaults
+            replace_ (new_entry);
+            return;
+        }
+        // Preserve the user's value but update metadata (description,
+        // label, etc.)
+        ConfigEntry updated = new_entry;
+        updated.value       = it->second.value;      // Keep user's value
+        updated.updated_at  = it->second.updated_at; // Keep original timestamp
+        const bool default_moved = it->second.default_value != new_entry.default_value;
+        if (follow_new_default && default_moved &&
+        it->second.value == it->second.default_value) {
+            updated.value      = new_entry.default_value;
+            updated.updated_at = new_entry.updated_at;
+        }
+        // Only an entry whose metadata changed is written. Every start
+        // reseeds, so rewriting all ~65 rows made each one a database
+        // write, before the engine listened, for a catalogue that changes
+        // only when an engine upgrade does.
+        if (updated != it->second) {
+            replace_ (updated);
+        }
+    }
+
     std::unordered_map<std::string, ConfigEntry> existing_;
     std::unordered_map<std::string, ConfigEntry> seeded_;
     std::unordered_set<std::string>& known_keys_;

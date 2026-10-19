@@ -1175,8 +1175,13 @@ constexpr size_t MMAP_SIZE_BYTES = 268435456;
 constexpr int WAL_AUTOCHECKPOINT = 1000;
 /// SQLite busy timeout in milliseconds (10 seconds)
 constexpr int BUSY_TIMEOUT_MS = 10000;
-/// SQLite synchronous mode (0=OFF, 1=NORMAL, 2=FULL) - 0 is safe with WAL
-constexpr int SYNCHRONOUS = 0;
+/// SQLite synchronous mode (0=OFF, 1=NORMAL, 2=FULL), the default for
+/// `dbSynchronous` (#2419). In WAL, NORMAL syncs the WAL only at a checkpoint,
+/// so a commit costs no fsync and the throughput matches OFF. It cannot
+/// corrupt the file on power loss, but the last transactions since the final
+/// checkpoint may be lost. FULL adds a sync per commit and loses nothing. OFF
+/// hands the file to the OS and can corrupt it on power loss or an OS crash.
+constexpr int SYNCHRONOUS = 1;
 /// Run retention: keep at most N most-recent runs (0 = unlimited).
 constexpr int MAX_RUNS_RETAINED = 200;
 /// Run retention: delete runs older than N days (0 = unlimited).

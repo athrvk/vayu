@@ -696,9 +696,9 @@ struct Database::Impl {
         // ~66 separate commits `seed_default_config` used to write, so every
         // database this engine has ever opened paid a full fsync barrier per
         // statement for the whole of its startup, at settings its own
-        // `dbSynchronous` entry says should be `OFF`. Nothing chose that; it
-        // was the gap between opening the file and reading the row that says
-        // how to open it.
+        // `dbSynchronous` entry did not ask for. Nothing chose that; it was
+        // the gap between opening the file and reading the row that says how
+        // to open it.
         //
         // The compile-time constant is used because the configured value lives
         // in a table this connection has not created yet. `init` re-applies
