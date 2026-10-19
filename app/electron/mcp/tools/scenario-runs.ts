@@ -16,8 +16,7 @@ import {
 	checkAllowlist,
 	checkLoadCaps,
 	checkMonitorHost,
-	defaultDurationUnderCap,
-	type LoadRunParams,
+	type EngineLoadDefaults,
 } from "../safety.js";
 import type { ToolContext, ToolResult } from "./contract.js";
 import {
@@ -34,6 +33,10 @@ import {
 	applyRecordingKnobs,
 	composeViaEngine,
 	DEFAULT_LOAD_MODE,
+	describeLoadShape,
+	loadShapePayload,
+	readLoadParams,
+	resolveLoadShape,
 	withMcpOrigin,
 } from "./compose.js";
 
@@ -263,6 +266,23 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 const SCENARIO_LOAD_MODES = ["constant_concurrency", "ramp_up", "iterations"] as const;
 
 /**
+ * The scenario executor's defaults (`execute_scenario_load`, `scenario_load.cpp`),
+ * which are not the single-target strategies': every mode drives 10 virtual
+ * users when `concurrency` is absent. `safety.test.ts` reads that file to keep
+ * these in step.
+ */
+export const SCENARIO_LOAD_DEFAULTS = {
+	constant_concurrency: { concurrency: 10, durationSeconds: 60 },
+	ramp_up: {
+		concurrency: 10,
+		startConcurrency: 1,
+		durationSeconds: 60,
+		rampUpDurationSeconds: 10,
+	},
+	iterations: { concurrency: 10, iterations: 1000 },
+} as const satisfies Record<(typeof SCENARIO_LOAD_MODES)[number], EngineLoadDefaults>;
+
+/**
  * Why the engine refuses the other two modes, in its own reasoning rather than a
  * bare "unsupported": an agent told *why* `constant_rps` cannot drive a sequence
  * picks `constant_concurrency`, and one told only "no" tries again.
@@ -295,9 +315,10 @@ function scenarioModeRefusal(mode: string): string | null {
  * because the two share only their gates: there is no request to compose here
  * (every step composes engine-side at plan time), no url to check (the
  * pre-flight walk checks every step's), and a different set of load fields
- * applies. What they do share - the allowlist, `checkLoadCaps`, the duration
- * default under the cap, and the confirmation - runs through the same helpers,
- * so a cap raised in Settings binds both paths identically.
+ * applies. What they do share - the allowlist, the load shape resolved against
+ * the caps (each executor with its own defaults), `checkLoadCaps` and the
+ * confirmation - runs through the same helpers, so a cap raised in Settings
+ * binds both paths identically.
  */
 export async function startScenarioLoadRun(
 	args: Record<string, unknown>,
@@ -334,16 +355,14 @@ export async function startScenarioLoadRun(
 		if (!monitorGate.ok) return errorResult(monitorGate.error!);
 	}
 
-	const loadParams: LoadRunParams = {
-		mode,
-		concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
-		startConcurrency:
-			typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
-		iterations: typeof args.iterations === "number" ? args.iterations : undefined,
-		duration: (args.duration as string | number | undefined) ?? undefined,
-		rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
-	};
-	const caps = checkLoadCaps(loadParams, ctx.config);
+	// No `targetRps`: refused above, so the run is closed-loop at whatever
+	// width the shape resolves.
+	const shape = resolveLoadShape(
+		{ ...readLoadParams(args), mode },
+		ctx.config,
+		SCENARIO_LOAD_DEFAULTS
+	);
+	const caps = checkLoadCaps(shape, ctx.config);
 	if (!caps.ok) return errorResult(caps.error!);
 
 	const environmentId = str(args, "environmentId");
@@ -361,17 +380,10 @@ export async function startScenarioLoadRun(
 	}
 
 	const payload: Record<string, unknown> = {
-		mode,
+		...loadShapePayload(shape),
 		scenario: scenarioBlock(scenario, recursive),
 		...(environmentId !== undefined ? { environmentId } : {}),
 	};
-	for (const key of ["concurrency", "startConcurrency", "iterations"]) {
-		if (typeof args[key] === "number") payload[key] = args[key];
-	}
-	for (const key of ["duration", "rampUpDuration"]) {
-		const v = str(args, key);
-		if (v !== undefined) payload[key] = v;
-	}
 	// Both travel verbatim for the same reason they do on the single-target
 	// path: the keys are the engine's own and it is what judges the values.
 	// Neither is executor-specific - a scenario load run is a load run, with the
@@ -387,19 +399,18 @@ export async function startScenarioLoadRun(
 	// `RunContext` both executors share, so a scenario run keeps traces on the
 	// terms an agent stated exactly as a single-target run does.
 	applyRecordingKnobs(args, payload);
-	const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
-	if (cappedDuration !== null) payload.duration = cappedDuration;
 
+	const summary =
+		`Start a scenario load test over collection ${scenario.collectionId} ` +
+		`(${plannedSteps} step(s) per iteration, ${describeLoadShape(shape)})?`;
 	const unconfirmed = await confirmDestructive(args, ctx, {
-		message:
-			`Start a scenario load test over collection ${scenario.collectionId} ` +
-			`(${plannedSteps} step(s) per iteration, mode: ${mode})?\n\n` +
-			`This generates real traffic within Vayu's caps.`,
+		message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
 		acceptTitle: "Start the load test",
 		acceptDescription: "Confirm to generate load now.",
 		declined: "Load run not started - the user declined.",
 		preview:
 			"AWAITING CONFIRMATION - no run was started.\n\n" +
+			`${summary}\n\n` +
 			"This is a preview. To start the load test, call start_load_run again with " +
 			"confirmed: true and the same arguments.\n\n" +
 			`Planned run (${plannedSteps} step(s) per iteration):\n${JSON.stringify(payload, null, 2)}`,
@@ -416,7 +427,7 @@ export async function startScenarioLoadRun(
 	}
 	return watchedRun(
 		withCaveat(
-			startedRunResult(started, payload.mode, payload.duration),
+			startedRunResult(started, shape),
 			`\n\nThe plan is ${plannedSteps} step(s) per iteration. Once the run is terminal, ` +
 				`get_run_report's \`scenario\` section carries the virtual-user, iteration and ` +
 				`per-step breakdown. Pre-request scripts DO run on a scenario load run - each virtual ` +

@@ -303,7 +303,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `mode` accepts `constant_rps` \| `constant_concurrency` \| `ramp_up` \| `iterations` \| `capacity`, narrowed to the middle three for a scenario; the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -334,10 +334,13 @@ Notes:
   search's *ceiling* (`concurrency`) and its starting level
   (`startConcurrency`), which is what stops an adaptive run from outgrowing it;
   `sloMs` and `stepDuration` are that mode's own two fields, and
-  `get_run_report` returns the search's findings under `capacity`. The duration
-  cap accounts for the mode's own engine-side default deadline (5 minutes, not
-  the 60s other modes fall back to), so a cap between those two values still
-  injects an explicit `duration` when the agent omits one. `get_live_metrics` is a **bounded snapshot** (SSE
+  `get_run_report` returns the search's findings under `capacity`. Every shape
+  field the agent leaves out is sent as the engine's default for the mode
+  ([Load defaults](#load-defaults)), so the caps judge the run that will start,
+  the confirmation preview states it in words ("constant_concurrency, 100
+  virtual users, closed loop, 60 s") with the resolved fields in its planned
+  payload, and the started result's `shape` object carries the same fields.
+  `get_live_metrics` is a **bounded snapshot** (SSE
   read with a time budget), not a stream - `tools/call` stays request/response.
 - **What a load run *keeps* is settable too** (issue #760), which is what the
   MCP surface was missing rather than any part of the load shape:
@@ -1901,13 +1904,18 @@ configurable in **Settings → MCP** and persisted.
       where it starts.
     - An **iterations** run stops on a request count and never reads `duration`,
       so no duration cap can bound it. **Max iterations** is its own setting for
-      that reason (10000 by default). An omitted `iterations` is compared as the
-      engine's own default of 1000, and an unrecognised `mode` carrying an
-      `iterations` field is capped the same way, because the engine runs that as
-      an iterations run too.
-    - An **omitted** `duration` is 60s engine-side, not "unbounded" and not
-      "capped". When `maxDurationSeconds` is under 60, the tool sends the cap as
-      an explicit duration so the run is actually bounded by it.
+      that reason (10000 by default). An omitted `iterations` is sent and
+      compared as the engine's own default of 1000. The schema refuses an
+      unrecognised `mode`, and the guard still reads one carrying an
+      `iterations` field as an iterations run, because the engine runs it as
+      one.
+    - An **omitted** field is judged as the default the tool sends for it
+      ([Load defaults](#load-defaults)), not as "unbounded": an omitted
+      `concurrency` on a constant run is 100 virtual users, so a **Max virtual
+      users** under 100 refuses it with the same message a stated 100 gets. An
+      omitted `duration` is the mode's default (60s, or 300s for `capacity`)
+      unless `maxDurationSeconds` is shorter, in which case the cap is sent in
+      its place and the run is bounded by it.
   `concurrency`, `startConcurrency`, `iterations` and `maxInFlight` are
   additionally constrained to positive integers by the tool's own schema, because
   "unlimited" is an obvious guess to spell `-1` or `0` and the engine reads them
@@ -2050,6 +2058,33 @@ configurable in **Settings → MCP** and persisted.
 engine's REST API on `:9876` (or its fallback); the MCP endpoint proxies the same capability behind
 _more_ guards and adds DNS-rebinding protection. It grants no capability a local
 process did not already have.
+
+### Load defaults
+
+`start_load_run` resolves every load-shape field the agent leaves out to the
+value the engine would otherwise use, and sends it explicitly, so the caps, the
+confirmation preview, the stored run (`list_runs` rows,
+`get_run_report`'s `metadata.configuration`) and `compare_runs` all read the
+same numbers (#2437). A stated value is never replaced. A single-target run
+takes the strategies' defaults, named in `run_config` and `capacity` in
+`engine/include/vayu/core/constants.hpp`:
+
+| Mode | `concurrency` | `startConcurrency` | `duration` | `rampUpDuration` | `iterations` |
+|------|---------------|--------------------|------------|------------------|--------------|
+| `constant_concurrency`, `constant_rps` | 100, none when `targetRps` paces the run | - | 60s | - | - |
+| `ramp_up` | 100 | 1 | 60s | 10s | - |
+| `iterations` | 10 | - | none (never read) | - | 1000 |
+| `capacity` | the engine's own search ceiling | the engine's own | 300s | - | - |
+
+A scenario run (`scenario`) takes its executor's own defaults
+(`execute_scenario_load`, `engine/src/core/scenario_load.cpp`): 10 virtual
+users in each of its three modes, with the same duration, ramp, start and
+iteration defaults as the table. In every mode an omitted `duration` is the
+cap instead when **Max duration** is shorter. A constant run with no
+`targetRps` is closed loop at its virtual users; with one it is open loop and
+no `concurrency` is sent. `capacity`'s `sloMs` and `stepDuration` stay
+engine-side. `safety.test.ts` reads both engine files, so a changed default
+fails the app suite until the table above and the tool's follow it.
 
 ### Secret values
 

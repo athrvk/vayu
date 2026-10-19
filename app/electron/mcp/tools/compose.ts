@@ -12,7 +12,16 @@
  *        the load-run payload with its bounds.
  */
 
+import type { McpSafetyConfig } from "../config.js";
 import { type EngineClient, EngineRequestError } from "../engine-client.js";
+import {
+	ENGINE_LOAD_DEFAULTS,
+	engineLoadMode,
+	type LoadDefaultsTable,
+	type LoadMode,
+	type LoadRunParams,
+	parseDurationSeconds,
+} from "../safety.js";
 import { REVEAL_SETTING, runOutputShape, withheldAuthMembers } from "../withhold.js";
 import type { ToolContext, ToolResult } from "./contract.js";
 import {
@@ -20,6 +29,7 @@ import {
 	errorResult,
 	isRecord,
 	jsonResult,
+	num,
 	optionalPositiveInt,
 	requireStr,
 	str,
@@ -581,7 +591,121 @@ export async function composeLoadRunRequest(
  * Mode `start_load_run` sends when the agent names none. Closed-loop and
  * duration-bounded, so an unspecified run is one the duration cap can hold.
  */
-export const DEFAULT_LOAD_MODE = "constant_concurrency";
+export const DEFAULT_LOAD_MODE: LoadMode = "constant_concurrency";
+
+/**
+ * The run `start_load_run` will start: the stated load fields, plus every one
+ * the engine would otherwise default for this mode, written out (#2437).
+ * `closedLoop` is false only when a `targetRps` paces a constant run.
+ */
+export interface LoadShape extends LoadRunParams {
+	mode: string;
+	closedLoop: boolean;
+}
+
+/**
+ * The load fields an agent stated, as both load paths read them. `targetRps` is
+ * the single-target path's to add: a scenario run refuses a rate outright.
+ */
+export function readLoadParams(args: Record<string, unknown>): LoadRunParams {
+	return {
+		mode: str(args, "mode"),
+		concurrency: num(args, "concurrency"),
+		startConcurrency: num(args, "startConcurrency"),
+		iterations: num(args, "iterations"),
+		duration: str(args, "duration"),
+		rampUpDuration: str(args, "rampUpDuration"),
+		stepDuration: str(args, "stepDuration"),
+	};
+}
+
+/** Seconds as the duration text `POST /runs` reads, or undefined for none. */
+function durationText(seconds: number | undefined): string | undefined {
+	return seconds === undefined ? undefined : `${seconds}s`;
+}
+
+/**
+ * Resolve the effective load shape from the stated params, so the caps, the
+ * preview, the payload and the stored run all read the same values (#2437).
+ * A stated value is never replaced. An omitted `duration` is the engine's
+ * default for the mode, or the duration cap when that is shorter: sent
+ * explicitly, the cap is what bounds a run that said nothing.
+ *
+ * @p defaults is the executor's table: the single-target strategies' unless a
+ * scenario run passes its own.
+ */
+export function resolveLoadShape(
+	params: LoadRunParams,
+	config: McpSafetyConfig,
+	defaults: LoadDefaultsTable = ENGINE_LOAD_DEFAULTS
+): LoadShape {
+	const mode = params.mode ?? DEFAULT_LOAD_MODE;
+	const stated = { ...params, mode };
+	const row = defaults[engineLoadMode(stated)] ?? {};
+	const paced = row.ratePaced === true && (params.targetRps ?? 0) > 0;
+	const durationSeconds =
+		row.durationSeconds === undefined
+			? undefined
+			: Math.min(row.durationSeconds, config.maxDurationSeconds);
+	const resolved: LoadRunParams = {
+		...stated,
+		// A paced run never reads `concurrency`, so none is invented for it.
+		concurrency: params.concurrency ?? (paced ? undefined : row.concurrency),
+		startConcurrency: params.startConcurrency ?? row.startConcurrency,
+		iterations: params.iterations ?? row.iterations,
+		duration: params.duration ?? durationText(durationSeconds),
+		rampUpDuration: params.rampUpDuration ?? durationText(row.rampUpDurationSeconds),
+	};
+	const present = Object.entries(resolved).filter(([, value]) => value !== undefined);
+	return {
+		...(Object.fromEntries(present) as LoadRunParams),
+		mode,
+		closedLoop: !paced,
+	};
+}
+
+/** The `POST /runs` fields of a shape: all of it but `closedLoop`, which is derived. */
+export function loadShapePayload(shape: LoadShape): Record<string, unknown> {
+	const { closedLoop: _closedLoop, ...fields } = shape;
+	return fields;
+}
+
+/** A duration as words for the preview, "60 s"; the text as given if it does not parse. */
+function durationWords(value: string | number | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	const seconds = parseDurationSeconds(value);
+	return seconds === null ? String(value) : `${seconds} s`;
+}
+
+/** How many virtual users the shape runs, or the rate that paces it, as words. */
+function loadWidthWords(shape: LoadShape, mode: LoadMode): string | undefined {
+	if (!shape.closedLoop) return `${shape.targetRps} requests/s`;
+	if (shape.concurrency === undefined) return undefined;
+	if (mode === "ramp_up") {
+		return `${shape.startConcurrency} to ${shape.concurrency} virtual users over ${durationWords(shape.rampUpDuration)}`;
+	}
+	if (mode === "capacity") return `up to ${shape.concurrency} virtual users`;
+	return `${shape.concurrency} virtual users`;
+}
+
+/**
+ * The shape in words for a confirmation summary: "constant_concurrency, 100
+ * virtual users, closed loop, 60 s". An iterations run states its count, since
+ * it never reads a duration.
+ */
+export function describeLoadShape(shape: LoadShape): string {
+	const mode = engineLoadMode(shape);
+	const length =
+		mode === "iterations" ? `${shape.iterations} iterations` : durationWords(shape.duration);
+	return [
+		shape.mode,
+		loadWidthWords(shape, mode),
+		shape.closedLoop ? "closed loop" : "open loop",
+		length,
+	]
+		.filter((part) => part !== undefined)
+		.join(", ");
+}
 
 /**
  * The engine's `maxInFlight` guard (`run_config::MAX_IN_FLIGHT` in

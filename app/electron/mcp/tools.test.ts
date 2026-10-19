@@ -35,6 +35,7 @@ import {
 } from "./tools.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
+import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
 import {
 	DEFAULT_RUN_PAGE_LIMIT,
@@ -6550,7 +6551,7 @@ describe("dispatchTool", () => {
 		expect(payload.duration).toBe("30s");
 	});
 
-	test("start_load_run leaves the duration alone when the cap is above the engine default", async () => {
+	test("start_load_run sends the engine default duration when the cap is above it", async () => {
 		const client = fakeClient();
 		await dispatchTool(
 			"start_load_run",
@@ -6562,7 +6563,7 @@ describe("dispatchTool", () => {
 			ctxWith(client, { allowlist: ["api.example.com"], maxDurationSeconds: 300 })
 		);
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
-		expect(payload.duration).toBeUndefined();
+		expect(payload.duration).toBe("60s");
 	});
 
 	test("start_load_run forwards the stream flag and both caps", async () => {
@@ -7472,6 +7473,221 @@ describe("start_load_run rejects an unusable concurrency at the schema", () => {
 	test("accepts an ordinary concurrency, and its absence", () => {
 		expect(concurrencySchema().safeParse(50).success).toBe(true);
 		expect(concurrencySchema().safeParse(undefined).success).toBe(true);
+	});
+});
+
+/**
+ * A field the agent leaves out is the engine's default for the mode, and the
+ * tool sends it explicitly (#2437): the caps judge the run that will start, the
+ * preview and the result say what it is, and the stored run records it.
+ */
+describe("start_load_run resolves and states the load shape", () => {
+	const allowed = { allowlist: ["api.example.com"] };
+	const SHAPE_FIELDS = [
+		"mode",
+		"concurrency",
+		"startConcurrency",
+		"duration",
+		"rampUpDuration",
+		"iterations",
+		"targetRps",
+	];
+
+	const parseArgs = (args: Record<string, unknown>) =>
+		z
+			.object(
+				TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+					string,
+					z.ZodType
+				>
+			)
+			.parse(args);
+
+	/** The `POST /runs` payload's load-shape fields, and nothing else. */
+	async function sentShape(
+		args: Record<string, unknown>,
+		safety: Partial<McpSafetyConfig> = allowed,
+		client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/login" }),
+		})
+	) {
+		const res = await dispatchTool(
+			"start_load_run",
+			{ ...args, confirmed: true },
+			ctxWith(client, safety)
+		);
+		expect(res.isError, firstText(res)).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		return Object.fromEntries(
+			SHAPE_FIELDS.filter((k) => k in payload).map((k) => [k, payload[k]])
+		);
+	}
+
+	test("an unconfigured run sends concurrency: 100 and duration: 60s", async () => {
+		expect(await sentShape(parseArgs({ url: "https://api.example.com" }))).toEqual({
+			mode: "constant_concurrency",
+			concurrency: 100,
+			duration: "60s",
+		});
+	});
+
+	test.each([
+		["constant_concurrency", {}, { concurrency: 100, duration: "60s" }],
+		["constant_rps", { targetRps: 50 }, { targetRps: 50, duration: "60s" }],
+		[
+			"ramp_up",
+			{},
+			{ concurrency: 100, startConcurrency: 1, duration: "60s", rampUpDuration: "10s" },
+		],
+		["iterations", {}, { iterations: 1000, concurrency: 10 }],
+		["capacity", {}, { duration: "300s" }],
+	])("a %s run sends its row of defaults", async (mode, extra, row) => {
+		const sent = await sentShape({ url: "https://api.example.com", mode, ...extra });
+		expect(sent).toEqual({ mode, ...row });
+	});
+
+	test.each([
+		["constant_concurrency", { concurrency: 10, duration: "60s" }],
+		[
+			"ramp_up",
+			{ concurrency: 10, startConcurrency: 1, duration: "60s", rampUpDuration: "10s" },
+		],
+		["iterations", { iterations: 1000, concurrency: 10 }],
+	])("a scenario %s run sends the scenario executor's row", async (mode, row) => {
+		const sent = await sentShape({ scenario: { collectionId: "c1" }, mode });
+		expect(sent).toEqual({ mode, ...row });
+	});
+
+	test("a stated value is never overridden", async () => {
+		const ramp = {
+			mode: "ramp_up",
+			concurrency: 7,
+			startConcurrency: 3,
+			duration: "45s",
+			rampUpDuration: "5s",
+		};
+		expect(await sentShape({ url: "https://api.example.com", ...ramp })).toEqual(ramp);
+		const iterations = { mode: "iterations", iterations: 20, concurrency: 2 };
+		expect(await sentShape({ url: "https://api.example.com", ...iterations })).toEqual(
+			iterations
+		);
+	});
+
+	test("a targetRps that paces the run sends no concurrency", async () => {
+		const sent = await sentShape({ url: "https://api.example.com", targetRps: 100 });
+		expect(sent).toEqual({ mode: "constant_concurrency", targetRps: 100, duration: "60s" });
+	});
+
+	test("the preview states the shape in words and plans the resolved fields", async () => {
+		const client = fakeClient();
+		const preview = firstText(
+			await dispatchTool(
+				"start_load_run",
+				{ url: "https://api.example.com" },
+				ctxWith(client, allowed)
+			)
+		);
+		expect(preview).toContain("(constant_concurrency, 100 virtual users, closed loop, 60 s)?");
+		expect(preview).toContain('"concurrency": 100');
+		expect(preview).toContain('"duration": "60s"');
+		expect(client.startRun).not.toHaveBeenCalled();
+
+		const paced = firstText(
+			await dispatchTool(
+				"start_load_run",
+				{ url: "https://api.example.com", targetRps: 25, duration: "2m" },
+				ctxWith(client, allowed)
+			)
+		);
+		expect(paced).toContain("(constant_concurrency, 25 requests/s, open loop, 120 s)?");
+	});
+
+	test("the started result carries the shape beside nextStep", async () => {
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com", confirmed: true },
+			ctxWith(fakeClient(), allowed)
+		);
+		const structured = res.structuredContent as Record<string, unknown>;
+		expect(structured.shape).toEqual({
+			mode: "constant_concurrency",
+			concurrency: 100,
+			duration: "60s",
+			closedLoop: true,
+		});
+		expect(structured.nextStep).toContain("every 6 s");
+	});
+
+	test("an omitted concurrency is judged on the default it resolves to", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com", confirmed: true },
+			ctxWith(client, { ...allowed, maxConcurrency: 50 })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/concurrency 100 exceeds the MCP cap of 50 virtual users/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("a duration cap under the default is sent in its place", async () => {
+		const sent = await sentShape(
+			{ url: "https://api.example.com" },
+			{
+				...allowed,
+				maxDurationSeconds: 30,
+			}
+		);
+		expect(sent.duration).toBe("30s");
+	});
+
+	test("a misspelt mode is a schema refusal naming the five modes", () => {
+		const result = z
+			.object(
+				TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+					string,
+					z.ZodType
+				>
+			)
+			.safeParse({ url: "https://api.example.com", mode: "constant-rps" });
+		expect(result.success).toBe(false);
+		const message = result.error!.issues.map((issue) => issue.message).join("\n");
+		expect(LOAD_MODES).toHaveLength(5);
+		for (const mode of LOAD_MODES) expect(message).toContain(`"${mode}"`);
+	});
+
+	test("every input with an engine default states it in its description", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		// Table field -> the input it fills, and how the value is written there.
+		const inputs: Record<string, [string, (value: number) => string]> = {
+			concurrency: ["concurrency", String],
+			startConcurrency: ["startConcurrency", String],
+			iterations: ["iterations", String],
+			durationSeconds: ["duration", (value) => `${value}s`],
+			rampUpDurationSeconds: ["rampUpDuration", (value) => `${value}s`],
+		};
+		let checked = 0;
+		for (const mode of LOAD_MODES) {
+			for (const [field, value] of Object.entries(ENGINE_LOAD_DEFAULTS[mode])) {
+				if (typeof value !== "number") continue;
+				const [input, written] = inputs[field];
+				expect(shape[input].description, `${input} for ${mode}`).toMatch(
+					new RegExp(`\\b${written(value)} \\([^)]*\\b${mode}\\b`)
+				);
+				checked++;
+			}
+		}
+		expect(checked).toBeGreaterThan(0);
+		expect(shape.mode.description).toMatch(/default constant_concurrency/);
 	});
 });
 

@@ -301,6 +301,7 @@ jobs:
               - 'engine/src/daemon.cpp'
               - 'engine/include/vayu/http/grant_secret.hpp'
               - 'engine/src/http/routes/execution.cpp'
+              - 'engine/src/core/scenario_load.cpp'
               - 'engine/src/db/config_seeds/general.cpp'
               - 'engine/src/db/config_seeds/network.cpp'
               - 'engine/src/db/config_seeds/services.cpp'
