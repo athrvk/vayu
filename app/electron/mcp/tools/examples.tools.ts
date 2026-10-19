@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { secretsShape, WITHHELD_HEADER_SENTENCE, withholdRowListSecrets } from "../withhold.js";
+import { secretsShape, withholdRowListSecrets, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -38,10 +38,10 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		name: "list_request_examples",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			"List a request's saved example responses - the responses stored beside it, in the order a mock server would serve them (the first match answers). Every row carries its name, status, headers, content type, `order` and `origin` (`import` for what an importer or an OpenAPI sync wrote, `user` for what was saved from a live response). " +
-			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured. ` +
-			WITHHELD_HEADER_SENTENCE,
+			`Bodies are bounded: one over ${MAX_INLINE_BODY_BYTES} bytes comes back cut with \`bodyClipped: true\` and its stored size in \`bodyBytes\`, and once the list has spent ${MAX_EXAMPLES_BODY_BYTES} bytes the remaining bodies are dropped with \`bodyOmitted: true\` (the row's scalars are always kept). \`bodiesOmitted\` counts them. The engine's own \`bodyTruncated\` is a different fact - it says the response was already cut when it was captured.` +
+			withheldPointer(config),
 		annotations: {
 			title: "List saved examples",
 			readOnlyHint: true,
@@ -63,12 +63,11 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		name: "create_request_example",
 		category: "write",
 		invalidates: ["request"],
-		description:
+		description: (config) =>
 			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. " +
 			GUARDED_WRITE_SENTENCE +
 			". Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
-			" " +
-			WITHHELD_HEADER_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Create saved example",
 			readOnlyHint: false,
@@ -118,12 +117,11 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		name: "update_request_example",
 		category: "write",
 		invalidates: ["request"],
-		description:
+		description: (config) =>
 			"Correct a saved example: its name, status, headers, body or content type. " +
 			GUARDED_WRITE_SENTENCE +
 			". Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
-			" " +
-			WITHHELD_HEADER_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Update saved example",
 			readOnlyHint: false,

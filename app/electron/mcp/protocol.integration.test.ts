@@ -1401,6 +1401,18 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		// One stream, in order: a notice for the first change would have come
 		// before the one just counted.
 		expect(changed).toBe(1);
+
+		// Same names, different descriptions: revealing drops each withheld
+		// pointer from them (#2441), and a client holding the old list reads
+		// rules that no longer apply.
+		const before = await c.listTools();
+		service.updateSafety({ revealSecretsToAgents: true });
+		await vi.waitFor(() => expect(changed).toBe(2));
+		const after = await c.listTools();
+		expect(after.tools.map((t) => t.name)).toEqual(before.tools.map((t) => t.name));
+		expect(after.tools.map((t) => t.description)).not.toEqual(
+			before.tools.map((t) => t.description)
+		);
 		await subscription.close();
 	});
 

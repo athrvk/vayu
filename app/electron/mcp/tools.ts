@@ -28,7 +28,15 @@
 
 import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
 import { MaskingIncompleteError } from "./withhold.js";
-import type { McpHost, McpTool, McpToolInfo, ToolContext, ToolResult } from "./tools/contract.js";
+import { DEFAULT_MCP_SAFETY_CONFIG } from "./config.js";
+import {
+	resolveDescription,
+	type McpHost,
+	type McpTool,
+	type McpToolInfo,
+	type ToolContext,
+	type ToolResult,
+} from "./tools/contract.js";
 import {
 	errorResult,
 	NOTHING_CHANGED,
@@ -70,7 +78,7 @@ export type {
 	McpTool,
 	McpToolInfo,
 } from "./tools/contract.js";
-export { MCP_DATA_ENTITIES } from "./tools/contract.js";
+export { MCP_DATA_ENTITIES, resolveDescription } from "./tools/contract.js";
 export { MAX_INLINE_BODY_BYTES, MAX_REPORT_TRACE_BYTES } from "./tools/inline-body-bounds.js";
 export {
 	DEFAULT_RUN_SAMPLE_LIMIT,
@@ -101,7 +109,8 @@ export { MAX_SPEC_DIFF_ENTRIES } from "./tools/spec-bindings.js";
 /**
  * Whether a session under @p config lists @p tool. One predicate for the two
  * readers that must agree: registration (`server.ts`) and the check that tells
- * clients the list changed when Settings do (`index.ts`).
+ * clients the list changed when Settings do (`index.ts`, via
+ * {@link toolListSignature}).
  *
  * A write tool that cannot succeed does not ship its schema (#1429): writes are
  * off by default, and on a default install those tools were ~40% of a
@@ -114,9 +123,16 @@ export function isListed(tool: McpTool, config: ToolContext["config"]): boolean 
 	return tool.category !== "write" || config.allowWrites;
 }
 
-/** The names a session under @p config lists, in registry order. */
-export function listedToolNames(config: ToolContext["config"]): string[] {
-	return TOOLS.filter((tool) => isListed(tool, config)).map((tool) => tool.name);
+/**
+ * What a session under @p config lists, as one comparable string: each listed
+ * tool's name and description, in registry order. Descriptions are in it
+ * because some are built from the config (#2441), so a change can leave every
+ * name in place and still alter what `tools/list` answers.
+ */
+export function toolListSignature(config: ToolContext["config"]): string {
+	return TOOLS.filter((tool) => isListed(tool, config))
+		.map((tool) => `${tool.name}\n${resolveDescription(tool, config)}`)
+		.join("\n\n");
 }
 
 /**
@@ -177,7 +193,9 @@ export function toolCatalog(): McpToolInfo[] {
 	return TOOLS.map((t) => ({
 		name: t.name,
 		// Settings is an app screen, so the catalog is always the app's wording.
-		description: resolveRemedyTokens(t.description, "app"),
+		// It answers outside any session, so a description built from the config
+		// reads as it would under the defaults (reveal off).
+		description: resolveRemedyTokens(resolveDescription(t, DEFAULT_MCP_SAFETY_CONFIG), "app"),
 		category: t.category,
 	}));
 }

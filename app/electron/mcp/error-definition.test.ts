@@ -15,11 +15,11 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
+import { RUN_ERROR_DEFINITION_POINTER, RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
 import { PROMPTS } from "./prompts.js";
 import { RUN_REPORT_RESOURCE } from "./resources.js";
 import { resolveSafetyConfig } from "./config.js";
-import { TOOLS } from "./tools.js";
+import { resolveDescription, TOOLS } from "./tools.js";
 import type { ToolContext } from "./tools.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -28,7 +28,7 @@ const REPORT = { latency: { p99: 120 }, summary: { avgRps: 500 }, statusCodes: {
 function toolDescription(name: string): string {
 	const tool = TOOLS.find((t) => t.name === name);
 	if (!tool) throw new Error(`tool "${name}" is not registered`);
-	return tool.description;
+	return resolveDescription(tool, resolveSafetyConfig());
 }
 
 describe("the error definition sentence", () => {
@@ -58,14 +58,24 @@ describe("the error definition sentence", () => {
 });
 
 describe("tools and resources that return an error count", () => {
-	test.each([
-		"get_live_metrics",
-		"compare_runs",
-		"get_run_report",
-		"get_run_timeseries",
-		"export_run_report",
-	])("%s carries the definition", (name) => {
-		expect(toolDescription(name)).toContain(RUN_ERROR_DEFINITION_SENTENCE);
+	test("get_run_report carries the definition", () => {
+		expect(toolDescription("get_run_report")).toContain(RUN_ERROR_DEFINITION_SENTENCE);
+	});
+
+	// One full copy in `tools/list` (#2441); the others state its two halves.
+	test.each(["get_live_metrics", "compare_runs", "get_run_timeseries", "export_run_report"])(
+		"%s carries the pointer to it",
+		(name) => {
+			expect(toolDescription(name)).toContain(RUN_ERROR_DEFINITION_POINTER);
+			expect(toolDescription(name)).not.toContain(RUN_ERROR_DEFINITION_SENTENCE);
+		}
+	);
+
+	test("the pointer states both halves, the Stop rule and where the rest is", () => {
+		expect(RUN_ERROR_DEFINITION_POINTER).toContain("outside 2xx/3xx");
+		expect(RUN_ERROR_DEFINITION_POINTER).toContain("no response");
+		expect(RUN_ERROR_DEFINITION_POINTER).toContain("Stop-cancelled");
+		expect(RUN_ERROR_DEFINITION_POINTER).toContain("get_run_report");
 	});
 
 	test("the run report resource carries the definition", () => {

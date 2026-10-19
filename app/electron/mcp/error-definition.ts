@@ -21,3 +21,11 @@ export const RUN_ERROR_DEFINITION_SENTENCE =
 	"`no_response` on a stored tick, `httpErrorRequests` / `noResponseRequests` in a report's `summary`. " +
 	"A request cancelled by a user Stop is not an error: it is in no error count or rate, nor in the " +
 	"totals, and is reported apart as `cancelledRequests` in the report's `summary`.";
+
+/**
+ * What a tool that hands back an error count says in place of the sentence
+ * above (#2441): the definition's two halves and where the whole of it is.
+ * `get_run_report` and the run report resource carry the sentence itself.
+ */
+export const RUN_ERROR_DEFINITION_POINTER =
+	"An error is a status outside 2xx/3xx or no response, never a Stop-cancelled request; get_run_report states the full definition.";
