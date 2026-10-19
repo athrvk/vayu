@@ -29,6 +29,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/grant_secret.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
@@ -134,6 +135,11 @@ int run_daemon (std::span<char* const> args) {
     // Initialize logger
     vayu::utils::Logger::instance ().init (log_dir, "engine");
 
+    // Taken while this is the only thread, because it writes the environment,
+    // and early, so nothing the engine reads or starts afterwards sees it.
+    const vayu::http::GrantSecret grant_secret =
+    vayu::http::take_grant_secret_from_environment ();
+
     // Check for single instance
     std::string lock_path = vayu::platform::path_join (data_dir, "vayu.lock");
     if (!acquire_lock (lock_path)) {
@@ -202,7 +208,7 @@ int run_daemon (std::span<char* const> args) {
     [&db] () -> int64_t { return db.get_config_int ("liveRetentionMs", 60000); });
 
     // Create and start HTTP server
-    vayu::http::Server server (db, run_manager, port);
+    vayu::http::Server server (db, run_manager, port, grant_secret);
 
     // Set shutdown callback for /shutdown endpoint
     // This callback is invoked before the server stops, allowing us to

@@ -64,8 +64,10 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   force-shutdown branch is `std::_Exit`: it runs inside the signal handler,
   where `exit` would run every static destructor under live worker threads.
   Guard: `tests/reentrant_test.cpp` scans `src` and `include` for the classic
-  names and for `setenv`/`putenv`, which would make the single exempted
-  `getenv` (`transport_policy.cpp`) unsafe.
+  names and for `setenv`/`unsetenv`/`putenv`/`_putenv_s`, which would make the
+  exempted `getenv` reads (`transport_policy.cpp`, `grant_secret.cpp`) unsafe.
+  The one write exempted, per (file, call), is `grant_secret.cpp` removing
+  `VAYU_GRANT_SECRET` once at start, before any thread exists (#2356).
 - **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`).
   A constant is `constexpr` (`std::string_view`, `std::array`, `const char*`);
   an object that cannot be one (`std::regex`, `nlohmann::json`, `std::mt19937`,
@@ -880,7 +882,17 @@ logged as a warning: it means a client skipped composition.
   symlink escaping a root is outside, or equals a `file_grants` row (schema
   version 6, #2356), the canonical path recorded when a person picked the
   file and never resolved again, so a link re-pointed after the pick is
-  refused. **Trust is derived, never read**: a body's `unresolved` is ignored
+  refused (`/file-grants`, `routes/file_grants.cpp`). **Both tables change only
+  with the grant secret**: `POST`/`DELETE` on `/file-roots` and `/file-grants`
+  call `admit_file_trust_write` (`routes.hpp`) first and answer `403`
+  `grant_secret_required` unless `X-Vayu-Grant-Secret` matches the per-start
+  `GrantSecret` (`http/grant_secret.hpp`: SHA-256 digests compared with
+  `sodium_memcmp`, at least 32 characters). `daemon.cpp` takes it from
+  `VAYU_GRANT_SECRET`, which the app's main process sets, and removes the
+  variable before any thread starts; it reaches the routes through `Server`'s
+  constructor and `RouteContext::grant_secret`, so a test hands one in without
+  the environment. An engine with no
+  secret refuses all four writes. **Trust is derived, never read**: a body's `unresolved` is ignored
   when a payload is parsed (an older client still sends it), dropped from
   every stored body (`erase_file_trust` in `apply_request_fields` and
   `sanitize_config_snapshot`) and written back on every read as the policy's

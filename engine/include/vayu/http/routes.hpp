@@ -33,6 +33,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/grant_secret.hpp"
 #include "vayu/http/request_builder.hpp"
 // The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - now
 // shared with the scenario runner and therefore declared where `vayu_core` can
@@ -218,6 +219,37 @@ const std::string& message,
 std::string_view code = {}) {
     res.status = status;
     res.set_content (error_body (status, message, code).dump (), "application/json");
+}
+
+/**
+ * @brief Admit a write to file trust (`/file-grants`, `/file-roots`) only
+ * when @p req carries the grant secret (`grant_secret.hpp`, #2356); otherwise
+ * answer it 403 and return false.
+ *
+ * Runs before the body is parsed, so a refused write changes nothing. Neither
+ * message names the secret or echoes the header.
+ */
+[[nodiscard]] inline bool admit_file_trust_write (const vayu::http::GrantSecret& secret,
+const httplib::Request& req,
+httplib::Response& res) {
+    if (!secret.configured ()) {
+        send_error (res, 403,
+        "Refused: this engine was started without a grant secret, so picked "
+        "files and allowed folders can be changed only by the Vayu app that "
+        "starts the engine",
+        "grant_secret_required");
+        return false;
+    }
+    if (!secret.admits (
+        req.get_header_value (std::string (vayu::http::GRANT_SECRET_HEADER)))) {
+        send_error (res, 403,
+        "Refused: a missing or wrong " + std::string (vayu::http::GRANT_SECRET_HEADER) +
+        " header. Picked files and allowed folders are changed only by the "
+        "Vayu app that starts the engine",
+        "grant_secret_required");
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -1428,6 +1460,10 @@ struct RouteContext {
     /// `/runs` alone, which is the one endpoint a visible history surface
     /// polls. See run_summary_cache.hpp for why a run id keys it exactly.
     vayu::http::RunSummaryCache& run_summary_cache;
+    /// The secret every write to `/file-grants` and `/file-roots` must carry
+    /// (#2356). Owned by Server; read through `admit_file_trust_write`. A
+    /// context built without one refuses those writes.
+    const vayu::http::GrantSecret& grant_secret = vayu::http::no_grant_secret ();
 };
 
 // Route registration functions (implemented in separate files)
@@ -1451,6 +1487,7 @@ void register_reorder_routes (RouteContext& ctx);
 void register_environment_routes (RouteContext& ctx);
 void register_client_certificate_routes (RouteContext& ctx);
 void register_file_root_routes (RouteContext& ctx);
+void register_file_grant_routes (RouteContext& ctx);
 void register_globals_routes (RouteContext& ctx);
 void register_run_routes (RouteContext& ctx);
 void register_execution_routes (RouteContext& ctx);

@@ -28,6 +28,14 @@ vayu-cli run <file.json>
 
 The CLI automatically detects whether the JSON file contains a single request or a load test configuration based on the presence of `mode`, `duration`, or `iterations` fields.
 
+A request body that names a file on disk (a `binary` body or a `form-data` file
+part) is sent only when the file lies under an
+[allowed folder](api-reference.md#allowed-folders-file-roots) or was picked in
+the app ([trust rule](api-reference.md#file-references-binary-bodies-and-file-parts)).
+An engine you start yourself has no grant secret, so neither the CLI nor any
+other caller can allow a folder or pick a file through it; allow the folder in
+the app's Settings once, and every engine on that workspace honours it.
+
 **Examples:**
 
 ```bash

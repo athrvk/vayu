@@ -25,6 +25,11 @@ which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
 The page gets an opaque response it cannot read, and no `GET` route changes
 anything.
 
+Which files a request body may send from disk (the folders you allow and the
+files you pick) changes only through the app: those writes need a secret the
+app hands the engine at start and keeps from its UI window, so another local
+caller of the API, the CLI or an MCP agent included, cannot widen them.
+
 ## Renderer posture
 
 The UI window runs with `nodeIntegration` off, `contextIsolation` and the

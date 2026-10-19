@@ -50,7 +50,7 @@ can read an older engine, but the engine no longer produces it.
 ## Who may call the API
 
 The engine serves no browser. No response carries a CORS header, and the
-request gate in `server.cpp` refuses, before any route runs:
+request gate in `server.cpp` refuses, before any route runs, for every route:
 
 - a request whose `Host` is not exactly `127.0.0.1:<port>`, `localhost:<port>`
   or `[::1]:<port>` (the port this engine bound) - `403`, message naming the
@@ -74,6 +74,32 @@ is opaque to the page (no CORS header, and the browser's CORB/ORB keeps a JSON
 body out of a `<script>`), and **no `GET` route has a side effect**. A page
 can therefore neither read the engine nor change it, though it can make the
 engine run any `GET` handler.
+
+**Writes to file trust need one more thing: the grant secret.** Host and
+Origin decide who reaches the API at all; they cannot tell the Vayu app from
+any other local caller (a script, the CLI, the MCP server, another process).
+What a request body may send from disk is decided by the allowed folders and
+the picked files, so the four routes that change those -
+[`POST`/`DELETE /file-roots`](#allowed-folders-file-roots) and
+[`POST`/`DELETE /file-grants`](#picked-files-file-grants) - also require the
+header `X-Vayu-Grant-Secret` to carry the engine's per-start secret, and answer
+`403` with code `grant_secret_required` otherwise:
+
+- The app's main process generates the secret and passes it in the engine's
+  environment as `VAYU_GRANT_SECRET`. The engine reads it once at start,
+  before any thread exists, and removes it from its own environment, so
+  nothing it later reads or starts sees it. A value shorter than 32 characters
+  is ignored with a warning that does not print it.
+- The header is compared in constant time (both sides hashed with SHA-256, the
+  digests compared with `sodium_memcmp`). A missing header, an empty one and a
+  wrong one are the same `403`. The secret is never logged (the request log
+  records method, path, status, time and size, never a header) and no
+  response carries it, a refusal included.
+- **An engine started without a secret refuses all four writes**, whatever the
+  header says. That is every engine the app did not start: `vayu-engine` run
+  by hand, or one the CLI or a CI job starts. Folders allowed and files picked
+  before then still apply to every send, and `GET /file-roots` and
+  `GET /file-grants` answer as usual.
 
 ## Request bodies
 
@@ -536,7 +562,7 @@ Shape refusals (`400`):
 
 **The trust rule.** Vayu sends a file under a folder you allowed in Settings
 ([Allowed folders](#allowed-folders-file-roots)), or a file a person picked
-(`file_grants`, #2356). A reference is sendable when its canonical path lies
+([Picked files](#picked-files-file-grants), #2356). A reference is sendable when its canonical path lies
 under an allowed folder or equals a picked file's: containment is decided on
 canonical paths, component by component, so a symlink inside an allowed folder
 that points outside it is outside, and `/data/fixtures-old` is not under
@@ -4613,9 +4639,12 @@ them.
 
 The folders a request-body file may be read from without being picked file by
 file - one half of the [trust rule](#file-references-binary-bodies-and-file-parts),
-beside the picked files (`file_grants`).
+beside the [picked files](#picked-files-file-grants).
 Stored in `file_roots` (schema version 3); read once per design send and once
-per run, so a change applies to the next send.
+per run, so a change applies to the next send. `POST` and `DELETE` need the
+[grant secret](#who-may-call-the-api) in `X-Vayu-Grant-Secret` and answer `403`
+(`grant_secret_required`) without it, before the body is parsed; an engine
+started without a secret refuses both. `GET` needs nothing.
 
 ### GET /file-roots
 
@@ -4645,6 +4674,45 @@ the id, so a body `id` is a `400`.
 
 Stops allowing a folder; the folder and its files are untouched.
 `{"success": true}`, or `404` when no such row exists.
+
+## Picked files (file grants)
+
+The files a person picked, each sendable from wherever it lies - the other
+half of the [trust rule](#file-references-binary-bodies-and-file-parts),
+beside the [allowed folders](#allowed-folders-file-roots) (#2356). Stored in
+`file_grants` (schema version 6); read once per design send and once per run,
+like the folders. A grant is matched exactly against a reference's canonical
+path, so it covers that one file and nothing beside it. `POST` and `DELETE`
+need the [grant secret](#who-may-call-the-api) in `X-Vayu-Grant-Secret` and
+answer `403` (`grant_secret_required`) without it, before the body is parsed; an
+engine started without a secret refuses both. `GET` needs nothing.
+
+### GET /file-grants
+
+Every picked file, ordered by path, as a bare array:
+
+```json
+[{ "id": "fgrant_...", "path": "/home/ada/Downloads/body.bin", "createdAt": 1764000000000 }]
+```
+
+### POST /file-grants
+
+Records a picked file. Body: `{ "path": "/abs/file" }`. Create only; the
+engine owns the id, so a body `id` is a `400`.
+
+- `201` with the row. `path` is stored canonical (every symlink resolved, `.`
+  and `..` folded), so a link re-pointed after the pick no longer matches.
+- `400` when `path` is missing, not a string, empty, holds a `{{variable}}`
+  (a grant names one file, never a template), is not absolute, or is not an
+  existing regular file - a directory, a device or a pipe is never granted.
+- `409` when the canonical path is already granted, naming the existing row's
+  id, as a second spelling of an allowed folder is.
+
+### DELETE /file-grants/:id
+
+Forgets a picked file; the file itself is untouched, and a body naming it is
+refused from then on unless an allowed folder holds it. `{"success": true}`,
+or `404` when no such row exists.
 
 ## Transport diagnostics
 

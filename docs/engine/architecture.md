@@ -1374,7 +1374,10 @@ record shape, the category list, the redaction rule and the file layout
   parsed, never stored, and derived on every read for the editor to show. A
   `src` still holding `{{` is refused, and no grant can name one. Scripts can
   never set a path: the residual pass does not
-  resolve `src`. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
+  resolve `src`. Both tables change only through `POST`/`DELETE` on
+  `/file-roots` and `/file-grants`, which need the per-start grant secret the
+  app passes as `VAYU_GRANT_SECRET` (`http/grant_secret.hpp`); an engine
+  started without one refuses those writes and still honours the rows. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
   `http/file_access_policy.hpp`, runs once per design send after the residual
   pass and once per run at plan time (every distinct data-bound path
   included), and refuses before any transfer; the send gate

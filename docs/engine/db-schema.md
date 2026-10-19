@@ -1113,7 +1113,9 @@ resolved, never a `{{` template), and a send compares the canonical form of what
 read with it exactly, never resolving the stored path again: a link re-pointed after the pick
 resolves to another file and is refused. The
 [schema version 6 migration](#the-file-grants-migration-schema-version-6) wrote the first rows,
-one per file a stored body marked chosen.
+one per file a stored body marked chosen. See
+[api-reference.md](api-reference.md#picked-files-file-grants) for the routes; like `file_roots`,
+this table is written only by a caller holding the engine's grant secret.
 
 ---
 
