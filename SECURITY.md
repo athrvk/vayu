@@ -23,7 +23,9 @@ engine does not answer to. What a page can still do is a scriptless `GET` - an
 `<img>`, `<script>` or `<link>`, a `no-cors` `fetch`, a top-level navigation -
 which carries a loopback `Host` and no `Origin` and so reaches a `GET` route.
 The page gets an opaque response it cannot read, and no `GET` route changes
-anything.
+anything. A request the engine itself sends - a Send, a run, a script's
+`pm.sendRequest`, a redirect it follows - never reaches the engine's own port
+or the MCP port, whatever spelling, redirect or DNS name leads there.
 
 Which files a request body may send from disk (the folders you allow and the
 files you pick) changes only through the app: those writes need a secret the

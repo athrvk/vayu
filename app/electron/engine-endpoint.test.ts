@@ -12,7 +12,9 @@
  * The module holds the port as state, so each case imports a fresh copy.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { ENGINE_PORT, ENGINE_PORT_CANDIDATES, MCP_PORT } from "./constants.js";
 
 async function freshEndpoint() {
@@ -26,6 +28,22 @@ describe("the candidate ports", () => {
 		expect(ENGINE_PORT_CANDIDATES.length).toBeGreaterThan(1);
 		expect(ENGINE_PORT_CANDIDATES).not.toContain(MCP_PORT);
 		expect(new Set(ENGINE_PORT_CANDIDATES).size).toBe(ENGINE_PORT_CANDIDATES.length);
+	});
+});
+
+describe("the MCP port", () => {
+	it("is the number the engine refuses to send a request to (#2355)", () => {
+		// The engine's loopback guard keeps its own copy of `MCP_PORT`; nothing but
+		// this test connects it to the server's, so a move of either side alone
+		// would leave the engine dialling the MCP server.
+		const [constantsHpp] = ENGINE_READING_GUARDS.mcpPort.paths.map(fromRepoRoot);
+		const header = readFileSync(constantsHpp, "utf8");
+		// A source scan reading "" passes, so prove it read something.
+		expect(header.length).toBeGreaterThan(0);
+
+		const match = header.match(/constexpr\s+int\s+MCP_PORT\s*=\s*(\d+);/);
+		expect(match, "MCP_PORT not found in constants.hpp").not.toBeNull();
+		expect(Number(match![1])).toBe(MCP_PORT);
 	});
 });
 

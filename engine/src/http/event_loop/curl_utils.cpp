@@ -28,6 +28,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -202,6 +203,14 @@ std::optional<Error> validate_transferable (const Request& request) {
     // such name has nothing to send to.
     if (auto problem = vayu::http::unsendable_host (request.url)) {
         return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
+    }
+    // The literal half of the loopback guard (#2355): a URL naming Vayu's own
+    // port is refused before anything is dialled, proxy or not. Redirects and
+    // names that resolve there are the pre-request callback's
+    // (`apply_transport_policy`).
+    if (const auto port = vayu::http::reserved_target_port (request.url)) {
+        return Error{ ErrorCode::InvalidUrl,
+            "Cannot send this request: " + vayu::http::reserved_target_refusal (*port) };
     }
     return std::nullopt;
 }
@@ -790,7 +799,64 @@ const std::string& url) {
     return matched;
 }
 
+/**
+ * libcurl's pre-request callback: refuse the connection about to carry the
+ * request when its peer is one of Vayu's own ports (#2355).
+ *
+ * It runs for every connection a transfer uses, reused ones included, after
+ * the connect and before a byte of the request is written - so a redirect hop
+ * and a name that resolves to loopback are judged by the address libcurl
+ * actually reached. The abort surfaces as `CURLE_ABORTED_BY_CALLBACK`, which
+ * `curl_to_error` recognises by asking the predicate the same question.
+ *
+ * Fails closed: an exception must not cross libcurl's C frames, and a
+ * predicate that could not answer is no reason to send.
+ */
+int refuse_reserved_peer (void* /*clientp*/,
+// `curl_prereq_callback` fixes the type: libcurl reads the pointer back
+// through a vararg, so a `const char*` parameter would be a different
+// function type, not a safer one.
+// NOLINTNEXTLINE(readability-non-const-parameter)
+char* conn_primary_ip,
+char* /*conn_local_ip*/,
+int conn_primary_port,
+int /*conn_local_port*/) {
+    try {
+        return conn_primary_ip != nullptr &&
+        vayu::http::is_reserved_loopback_target (conn_primary_ip, conn_primary_port) ?
+        CURL_PREREQFUNC_ABORT :
+        CURL_PREREQFUNC_OK;
+    } catch (...) {
+        return CURL_PREREQFUNC_ABORT;
+    }
+}
+
 } // namespace
+
+/**
+ * The reserved port this handle's last connection reached, or nullopt.
+ *
+ * What tells `refuse_reserved_peer`'s abort apart from every other
+ * `CURLE_ABORTED_BY_CALLBACK` (a stream's own cap, a stop): the peer it was
+ * judged on is still the handle's primary address, so the same predicate
+ * gives the same answer.
+ */
+std::optional<int> reserved_peer_port (CURL* curl) {
+    if (!curl) {
+        return std::nullopt;
+    }
+    char* ip  = nullptr;
+    long port = 0;
+    if (get_info<CURLINFO_PRIMARY_IP> (curl, &ip) != CURLE_OK ||
+    ip == nullptr || get_info<CURLINFO_PRIMARY_PORT> (curl, &port) != CURLE_OK) {
+        return std::nullopt;
+    }
+    const int peer_port = static_cast<int> (port);
+    if (!vayu::http::is_reserved_loopback_target (ip, peer_port)) {
+        return std::nullopt;
+    }
+    return peer_port;
+}
 
 /**
  * Whether a failure with no mapping of its own happened on a TLS connection
@@ -850,6 +916,17 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     Error error;
     const std::string_view message = errors.message ();
     error.message = message.empty () ? curl_easy_strerror (code) : std::string (message);
+
+    // Ahead of every fallback below, so an https transfer whose connection was
+    // refused before the request reads as the refusal and not as `SslError`.
+    if (code == CURLE_ABORTED_BY_CALLBACK) {
+        if (const auto port = reserved_peer_port (curl)) {
+            error.code    = ErrorCode::InvalidUrl;
+            error.message = "Cannot send this request: " +
+            vayu::http::reserved_target_refusal (*port);
+            return error;
+        }
+    }
 
     // Checked before the code, not as a fallback under it: a proxy that
     // answered the CONNECT with a 4xx is a proxy failure whatever CURLcode
@@ -914,6 +991,9 @@ const std::string& url) {
     set_opt<CURLOPT_REDIR_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
+    // Set on every handle, like the proxy: a pooled handle must never be
+    // without it. No `CURLOPT_PREREQDATA`; the registry is process-wide.
+    set_opt<CURLOPT_PREREQFUNCTION> (curl, refuse_reserved_peer);
 
     apply_ca_options (curl, policy);
     apply_proxy_options (curl, policy);

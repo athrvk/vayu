@@ -30,6 +30,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/grant_secret.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/logger.hpp"
@@ -206,6 +207,11 @@ int run_daemon (std::span<char* const> args) {
     vayu::core::RunManager run_manager;
     run_manager.start_sweeper (
     [&db] () -> int64_t { return db.get_config_int ("liveRetentionMs", 60000); });
+
+    // Before the listener starts, so no request is served while an outbound
+    // transfer could still reach this port (#2355). A port that cannot be
+    // bound ends the process below, so the requested port is the bound one.
+    vayu::http::set_engine_port (port);
 
     // Create and start HTTP server
     vayu::http::Server server (db, run_manager, port, grant_secret);

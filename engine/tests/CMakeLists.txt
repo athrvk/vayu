@@ -70,6 +70,7 @@ add_executable(vayu_tests
     worker_count_test.cpp
     argument_rules_test.cpp
     transport_policy_test.cpp
+    loopback_guard_test.cpp
     tls_verification_test.cpp
     client_certificates_test.cpp
     mutual_tls_test.cpp
