@@ -65,14 +65,16 @@ only ever one member for `all()` to report for it.
 
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
-on a variable that already exists updates only its value - the existing `secret` flag,
-`enabled` flag and `type` are preserved. A `set` on a new name creates it with the defaults
-(not secret, enabled, `type: "string"`). `unset(name)` removes it outright, which is not
-the same as setting it to `""`: an emptied variable is still an enabled row that
-`{{name}}` resolves to.
+on a variable that already exists updates its value and keeps the existing `secret` flag and
+`type`, but makes the row **enabled**: a script that sets a name means to use it, so a row
+unticked in the variables editor is ticked again by the `set` (and persisted that way). A
+`set` on a new name creates it with the defaults (not secret, enabled, `type: "string"`).
+`unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
+variable is still an enabled row that `{{name}}` resolves to.
 
 `get`, `has` and `toObject` read only **enabled** variables, so a row unticked in the
-variables editor is invisible to a script; `unset` and `clear` remove it regardless.
+variables editor is invisible to a script until a script sets it; `unset` and `clear`
+remove it regardless.
 
 `pm.variables` resolves a name across the scopes - environment, then collection, then
 global - the same order `{{name}}` uses. **While a data row is bound, that row's bare

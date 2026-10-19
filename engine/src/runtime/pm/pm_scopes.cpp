@@ -222,10 +222,18 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     return JS_UNDEFINED;
 }
 
-// Update a variable's value while preserving an existing key's secret, enabled
-// and type fields; a brand-new key gets the current defaults. Shared by every
-// scope's set() so a script that re-sets an existing (e.g. secret) variable
-// does not silently strip its flag or reset its type.
+// Update a variable's value while preserving an existing key's secret and type
+// fields; a brand-new key gets the current defaults. Shared by every scope's
+// set() so a script that re-sets an existing (e.g. secret) variable does not
+// silently strip its flag or reset its type.
+//
+// `enabled` is the one field a set deliberately turns on (#2479). A set is a
+// write of a value the script intends to use, so leaving the row unticked would
+// make the script's own get/has/replaceIn and the execute-time residual pass
+// look past it and send `{{name}}` literally, and the row would be persisted
+// unticked. A run-local override instead would need a second layer in every
+// scope map, `scope_maps`/`lookup_variable`, `build_variable_values` and
+// `apply_scope_delta`.
 //
 // A brand-new key is also stamped with its creation time, the app's ordering
 // key for the variables editor (issue #135). This is the one place the engine
@@ -235,7 +243,8 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
     auto it = map.find (key);
     if (it != map.end ()) {
-        it->second.value = std::move (value); // preserve secret, enabled, type, created_at
+        it->second.value   = std::move (value);
+        it->second.enabled = true; // keeps secret, type and created_at
     } else {
         Variable created{ std::move (value), false, true }; // new var: current defaults
         created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (

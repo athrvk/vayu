@@ -1299,8 +1299,11 @@ const token = pm.environment.get('auth_token');
 pm.environment.set('auth_token', 'new_token_value');
 ```
 
-`set()` on an existing name replaces only its value - the variable's `secret`,
-`enabled`, `type` and creation time are kept. A name that does not exist yet is
+`set()` on an existing name replaces its value and keeps the variable's `secret`,
+`type` and creation time. It also turns `enabled` on (#2479): a set is a write of a
+value the script means to use, so a row unticked in the variables editor is ticked
+again, and the script's own `get`, `has` and `replaceIn` and the `{{name}}` pass
+before the send all see it. A name that does not exist yet is
 created with the defaults and stamped with its creation time, so it appears at
 the bottom of that scope in the variables editor rather than above the rows
 that were already there.
@@ -1315,8 +1318,9 @@ one database lock:
   included;
 - a name whose value alone changed gets that value, and keeps whatever
   `enabled`, `secret` or `type` the row holds now; a name whose other fields
-  changed too (an `extract.*` element writes a whole variable) is written
-  whole;
+  changed too is written whole - an `extract.*` element writes a whole
+  variable, and a `set()` that re-enabled an unticked row changed `enabled`
+  as well as the value;
 - a name the run loaded and no longer holds (`unset()`, `clear()`) is removed.
 
 Everything else on the row is left as it is now, so an edit made in the
@@ -1330,7 +1334,7 @@ recreated.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value, cast by its declared type, or `undefined` | a disabled variable reads as `undefined` |
-| `set(name, value)` | `undefined` | keeps `secret` / `enabled` / `type` / creation time |
+| `set(name, value)` | `undefined` | keeps `secret` / `type` / creation time; turns `enabled` on |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
