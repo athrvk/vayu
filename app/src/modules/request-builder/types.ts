@@ -245,6 +245,17 @@ export interface ResponseState {
 	headers: Record<string, string>;
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
+	/**
+	 * The request header lines libcurl wrote on its own and `requestHeaders` does
+	 * not hold (`Host`, `Accept`, `Content-Length`, the jar's `Cookie`), read off
+	 * the engine's recorded `rawRequest` (issue #2464). Shown read-only as "Added
+	 * by libcurl" on the Headers tab; never sent and never in `pm.request.headers`.
+	 *
+	 * Set by **both** funnels, and only for an exchange that got a response:
+	 * absent on a failed send, and on a restored row with no recorded frame,
+	 * where `buildRawRequest` fabricates one the engine never reported.
+	 */
+	libcurlHeaders?: Record<string, string>;
 	body: string;
 	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";

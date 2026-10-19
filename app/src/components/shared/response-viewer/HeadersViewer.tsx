@@ -200,6 +200,12 @@ export function CompactHeadersViewer({
 export interface ResponseHeadersPanelProps {
 	/** Headers that were sent. Collapsed by default - usually not the question. */
 	requestHeaders?: Record<string, string>;
+	/**
+	 * Request lines libcurl added on the wire that `requestHeaders` does not hold
+	 * (`ResponseState.libcurlHeaders`). Read-only and collapsed, beside the sent
+	 * headers it completes.
+	 */
+	libcurlHeaders?: Record<string, string>;
 	/** Headers that came back. Open by default. */
 	responseHeaders?: Record<string, string>;
 }
@@ -220,6 +226,11 @@ export interface ResponseHeadersPanelProps {
  * The two treatments are a deliberate difference, not drift: a table needs
  * width the compact pane does not have.
  *
+ * "Added by libcurl" is the wire's half of the request side (issue #2464): the
+ * lines libcurl wrote itself, which the sent record cannot hold. It is a second
+ * `HeadersViewer` so it reads as the table above it, and it is a display of
+ * the frame, never an input - nothing here reaches a send.
+ *
  * The empty-state fallback is the one piece of behaviour that is this panel's
  * own. `HeadersViewer` renders `null` with no entries, so without it a response
  * carrying no headers showed a blank pane with nothing explaining why - which is
@@ -227,6 +238,7 @@ export interface ResponseHeadersPanelProps {
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
+	libcurlHeaders,
 	responseHeaders,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
@@ -236,6 +248,15 @@ export function ResponseHeadersPanel({
 		<div className="p-4 overflow-auto h-full space-y-4">
 			{hasRequestHeaders && (
 				<HeadersViewer headers={requestHeaders} variant="request" defaultOpen={false} />
+			)}
+
+			{libcurlHeaders && (
+				<HeadersViewer
+					headers={libcurlHeaders}
+					title="Added by libcurl"
+					variant="request"
+					defaultOpen={false}
+				/>
 			)}
 
 			<HeadersViewer headers={response} variant="response" defaultOpen={true} />

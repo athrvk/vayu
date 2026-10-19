@@ -33,6 +33,7 @@ import type {
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
+import { libcurlHeadersField } from "@/components/shared/response-viewer/libcurl-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -318,12 +319,15 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 
 	const body = paneBody(result.body, bodyRaw);
 
+	const status = result.status !== undefined && result.status !== null ? result.status : 200;
+
 	return {
-		status: result.status !== undefined && result.status !== null ? result.status : 200,
+		status,
 		statusText: result.statusText || "",
 		headers: result.headers || {},
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
+		...libcurlHeadersField(status !== 0, result.rawRequest, result.requestHeaders),
 		httpVersion: result.httpVersion,
 		httpVersionDowngraded: result.httpVersionDowngraded,
 		// `""` means no certificate matched, and the pane has nothing to show

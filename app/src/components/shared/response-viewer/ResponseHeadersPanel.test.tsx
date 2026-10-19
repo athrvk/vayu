@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ResponseHeadersPanel } from "./HeadersViewer";
 
@@ -62,5 +62,61 @@ describe("ResponseHeadersPanel", () => {
 
 		expect(screen.queryByText("No headers in response")).toBeNull();
 		expect(screen.getByText("nginx")).toBeInTheDocument();
+	});
+});
+
+describe("ResponseHeadersPanel, the libcurl group (issue #2464)", () => {
+	it("lists what libcurl added under its own collapsed title", () => {
+		render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "application/json" }}
+				libcurlHeaders={{ Host: "api.example.com", "Content-Length": "5" }}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		expect(screen.getByText("Added by libcurl")).toBeInTheDocument();
+		// Collapsed like the sent group: the response is the question.
+		expect(screen.queryByText("Host")).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /added by libcurl/i }));
+		expect(screen.getByText("Host")).toBeInTheDocument();
+		expect(screen.getByText("api.example.com")).toBeInTheDocument();
+		expect(screen.getByText("Content-Length")).toBeInTheDocument();
+	});
+
+	it("is absent when libcurl added nothing, or the field is not set", () => {
+		const { rerender } = render(<ResponseHeadersPanel responseHeaders={{ server: "nginx" }} />);
+		expect(screen.queryByText("Added by libcurl")).toBeNull();
+
+		rerender(
+			<ResponseHeadersPanel libcurlHeaders={{}} responseHeaders={{ server: "nginx" }} />
+		);
+		expect(screen.queryByText("Added by libcurl")).toBeNull();
+	});
+
+	it("shows the group without a sent-headers section", () => {
+		render(
+			<ResponseHeadersPanel
+				libcurlHeaders={{ Host: "a.test" }}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		expect(screen.queryByText("Request headers")).toBeNull();
+		expect(screen.getByText("Added by libcurl")).toBeInTheDocument();
+	});
+
+	it("keeps the group between the sent headers and the response", () => {
+		render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "x" }}
+				libcurlHeaders={{ Host: "a.test" }}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+		expect(titles).toEqual(["Request headers", "Added by libcurl", "Response headers"]);
 	});
 });

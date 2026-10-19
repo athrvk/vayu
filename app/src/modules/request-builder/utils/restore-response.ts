@@ -21,6 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
+import { libcurlHeadersField } from "@/components/shared/response-viewer/libcurl-headers";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
@@ -206,8 +207,14 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 	const request = trace.request;
 	if (!request) return { requestHeaders: {}, rawRequest: undefined };
 
+	const requestHeaders = request.sentHeaders || request.headers || {};
+
 	return {
-		requestHeaders: request.sentHeaders || request.headers || {},
+		requestHeaders,
+		// Only the engine's own frame is parsed, and only for an exchange that got
+		// a response: the fallback below is fabricated, and a failed send's frame
+		// may be too (`libcurlHeadersField`).
+		...libcurlHeadersField(!!trace.response, request.rawRequest, requestHeaders),
 		rawRequest:
 			request.rawRequest ||
 			buildRawRequest(
