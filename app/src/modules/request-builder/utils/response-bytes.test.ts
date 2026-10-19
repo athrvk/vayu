@@ -140,6 +140,51 @@ describe("decodeResponseBody", () => {
 		expect(decoded.text).toBe("<svg/>\0");
 	});
 
+	// A zip's bytes include NUL and stray high bytes, which is why the engine
+	// sent it as base64; the type is what must keep it bytes.
+	const ZIP = [0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00, 0x08, 0x00, 0xff];
+
+	it.each([
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		"application/vnd.ms-excel",
+	])("keeps %s as bytes, whatever its subtype spells", (contentType) => {
+		const decoded = decodeResponseBody({
+			bodyRaw: base64(ZIP),
+			bodyEncoding: "base64",
+			headers: typed(contentType),
+		});
+
+		expect(decoded.text).toBe("");
+		expect(decoded.bytes?.isText).toBe(false);
+		expect(Array.from(decoded.bytes?.data ?? [])).toEqual(ZIP);
+		expect(responseBodyType(typed(contentType), decoded.bytes)).toBe("binary");
+	});
+
+	it.each([
+		"application/atom+xml",
+		"application/ld+json",
+		"application/vnd.api+json; charset=utf-8",
+		"application/openapi+yaml",
+		"text/x-yaml",
+		"application/x-yaml",
+		"application/yaml",
+		"application/x-www-form-urlencoded",
+		"application/x-javascript",
+		"application/graphql",
+		"application/x-ndjson",
+	])("reads %s as text", (contentType) => {
+		const decoded = decodeResponseBody({
+			bodyRaw: base64([...ascii("a: "), 0xe9]),
+			bodyEncoding: "base64",
+			headers: typed(contentType),
+		});
+
+		expect(decoded.bytes?.isText).toBe(true);
+		expect(decoded.text.startsWith("a: ")).toBe(true);
+	});
+
 	it("refuses a body that is not base64, and an encoding it does not know", () => {
 		expect(() => decodeResponseBody({ bodyRaw: "%%%", bodyEncoding: "base64" })).toThrow(
 			/does not decode/
@@ -159,6 +204,21 @@ describe("responseBodyType", () => {
 		);
 		expect(responseBodyType({ "Content-Type": "application/json" }, undefined)).toBe("json");
 		expect(responseBodyType(undefined, undefined)).toBe("text");
+	});
+
+	it("reads the type by whole token, never by a substring of it", () => {
+		const data = new Uint8Array([1]);
+		const asText = (contentType: string) =>
+			responseBodyType(typed(contentType), { data, isText: true });
+
+		expect(asText("application/problem+json")).toBe("json");
+		expect(asText("application/xhtml+xml")).toBe("html");
+		expect(asText("application/atom+xml")).toBe("xml");
+		expect(asText("text/xml; charset=latin1")).toBe("xml");
+		expect(asText("text/plain; charset=x-json-ish")).toBe("text");
+		expect(asText("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).toBe(
+			"text"
+		);
 	});
 });
 

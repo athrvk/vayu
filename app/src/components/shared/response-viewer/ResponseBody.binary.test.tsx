@@ -19,7 +19,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
+import {
+	decodeResponseBody,
+	type ResponseBytes,
+} from "@/modules/request-builder/utils/response-bytes";
 
 const editorProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock("@/components/ui/code-editor", () => ({
@@ -146,6 +149,27 @@ describe("bytes with no text view", () => {
 
 		expect(screen.getByText("Binary data, 2 B")).toBeInTheDocument();
 		expect(screen.queryByText(/Download/)).toBeNull();
+	});
+
+	it("keeps an Office document as bytes to download, though its subtype spells xml", () => {
+		const contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+		const { text, bytes } = decodeResponseBody({
+			bodyRaw: btoa(String.fromCharCode(0x50, 0x4b, 0x03, 0x04, 0x00, 0xff)),
+			bodyEncoding: "base64",
+			headers: { "content-type": contentType },
+		});
+		render(
+			<ResponseBody
+				body={text}
+				rawBytes={bytes}
+				headers={{ "content-type": contentType }}
+				actions={<button type="button">Download response</button>}
+			/>
+		);
+
+		expect(screen.getByText("Binary data, 6 B")).toBeInTheDocument();
+		expect(screen.getByText(/Download saves it/)).toBeInTheDocument();
+		expect(editorProps.current).toBeNull();
 	});
 
 	it("names a PDF and its size", () => {

@@ -56,6 +56,53 @@ export function contentTypeOf(headers: Record<string, string> | undefined): stri
 	return key ? headers[key] : "";
 }
 
+/** A Content-Type split into the parts a type decision reads, lowercased. */
+export interface MediaType {
+	/** `application` in `application/vnd.api+json`. */
+	type: string;
+	/** `vnd.api+json`, the whole subtype. */
+	subtype: string;
+	/** `vnd.api`, the subtype before any `+suffix`, with a leading `x-` dropped. */
+	name: string;
+	/** `json`, the structured-syntax suffix (RFC 6839), or `""` when there is none. */
+	suffix: string;
+}
+
+/**
+ * The parts of a Content-Type, so a decision compares whole tokens. A
+ * substring test answers for the wrong type: `xml` occurs inside
+ * `vnd.openxmlformats-officedocument.spreadsheetml.sheet`, which is a zip.
+ */
+export function mediaTypeOf(contentType: string): MediaType {
+	const essence = contentType.split(";")[0].trim().toLowerCase();
+	const slash = essence.indexOf("/");
+	const type = slash < 0 ? essence : essence.slice(0, slash);
+	const subtype = slash < 0 ? "" : essence.slice(slash + 1);
+	const plus = subtype.lastIndexOf("+");
+	const base = plus < 0 ? subtype : subtype.slice(0, plus);
+	return {
+		type,
+		subtype,
+		name: base.replace(/^x-/, ""),
+		suffix: plus < 0 ? "" : subtype.slice(plus + 1),
+	};
+}
+
+/** Subtype names (after `x-`) that are text under any top-level type. */
+const TEXT_SUBTYPE_NAMES: ReadonlySet<string> = new Set([
+	"json",
+	"ndjson",
+	"xml",
+	"javascript",
+	"ecmascript",
+	"www-form-urlencoded",
+	"yaml",
+	"graphql",
+]);
+
+/** Structured-syntax suffixes that are text: `atom+xml`, `ld+json`, `openapi+yaml`. */
+const TEXT_SUFFIXES: ReadonlySet<string> = new Set(["json", "xml", "yaml"]);
+
 /**
  * Whether a body of this type is text to read rather than bytes to keep. A
  * declared charset counts on its own: the parameter means nothing on anything
@@ -63,11 +110,12 @@ export function contentTypeOf(headers: Record<string, string> | undefined): stri
  * UTF-8, and guessing a charset for an unlabelled body would show noise.
  */
 function isTextContentType(contentType: string): boolean {
-	const type = contentType.toLowerCase();
+	const { type, name, suffix } = mediaTypeOf(contentType);
 	return (
-		/^\s*text\//.test(type) ||
-		/json|xml|javascript|ecmascript|x-www-form-urlencoded|yaml|graphql/.test(type) ||
-		charsetLabel(type) !== undefined
+		type === "text" ||
+		TEXT_SUBTYPE_NAMES.has(name) ||
+		TEXT_SUFFIXES.has(suffix) ||
+		charsetLabel(contentType) !== undefined
 	);
 }
 
@@ -162,10 +210,10 @@ export function responseBodyType(
 	bytes: ResponseBytes | undefined
 ): ResponseState["bodyType"] {
 	if (bytes && !bytes.isText) return "binary";
-	const contentType = contentTypeOf(headers).toLowerCase();
-	if (contentType.includes("json")) return "json";
-	if (contentType.includes("html")) return "html";
-	if (contentType.includes("xml")) return "xml";
+	const { name, suffix } = mediaTypeOf(contentTypeOf(headers));
+	if (name === "json" || suffix === "json") return "json";
+	if (name === "html" || name === "xhtml") return "html";
+	if (name === "xml" || suffix === "xml") return "xml";
 	return "text";
 }
 
@@ -193,7 +241,7 @@ const EXTENSION_BY_SUBTYPE: Record<string, string> = {
  * and `bin` for anything else.
  */
 export function extensionForContentType(contentType: string): string {
-	const subtype = contentType.split(";")[0].trim().toLowerCase().split("/")[1] ?? "";
+	const { subtype } = mediaTypeOf(contentType);
 	const mapped = EXTENSION_BY_SUBTYPE[subtype] ?? subtype.replace(/^x-/, "");
 	return /^[a-z0-9]{1,8}$/.test(mapped) ? mapped : "bin";
 }

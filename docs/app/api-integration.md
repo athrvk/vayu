@@ -1514,7 +1514,13 @@ text, as on every older row. Both funnels hand the body to one decoder,
 and the restored pane hold the same state: the bytes go to
 `ResponseState.rawBytes`, and `body` / `bodyRaw` get their decoding - by the
 byte-order mark, else the declared `charset`, else UTF-8, through
-`TextDecoder` - for a text Content-Type, and nothing for any other. A label the
+`TextDecoder` - for a text Content-Type, and nothing for any other. A text type
+is `text/*`, a declared `charset`, or a subtype whose name (after any `x-`) or
+`+suffix` is one of the text syntaxes (`json`, `xml`, `yaml`, `javascript`,
+`graphql` and their kin), compared as whole tokens by `mediaTypeOf`: an Office
+document's `vnd.openxmlformats-...` subtype holds `xml` and is still a zip. The
+pane's `detectBodyType` and `bodyType` read the type through the same parts. A
+label the
 platform does not know, or bytes the charset cannot read, put a notice in
 `rawBytes.notice` that `ResponseBody` shows over the text. A non-text body sets
 `bodyType: "binary"`; the pane draws an image from its bytes through a Blob

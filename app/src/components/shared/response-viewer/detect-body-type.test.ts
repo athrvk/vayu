@@ -31,4 +31,20 @@ describe("detectBodyType", () => {
 	it("leaves XHTML to the HTML branch", () => {
 		expect(detectBodyType(typed("application/xhtml+xml"), "")).toBe("html");
 	});
+
+	it("reads a subtype by whole token, so an Office document is not XML", () => {
+		const sheet = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+		expect(detectBodyType(typed(sheet), "")).toBe("text");
+		expect(detectBodyType(typed("application/jsonl"), "")).toBe("text");
+		expect(detectBodyType(typed("application/atom+xml"), "")).toBe("xml");
+		expect(detectBodyType(typed("text/xml"), "")).toBe("xml");
+		expect(detectBodyType(typed("application/ld+json"), "")).toBe("json");
+		expect(detectBodyType(typed("application/x-javascript"), "")).toBe("javascript");
+	});
+
+	it("sniffs the body only when the type is missing or text/plain", () => {
+		expect(detectBodyType({}, '{"a":1}')).toBe("json");
+		expect(detectBodyType(typed("text/plain; charset=utf-8"), '{"a":1}')).toBe("json");
+		expect(detectBodyType(typed("text/csv"), '{"a":1}')).toBe("text");
+	});
 });
