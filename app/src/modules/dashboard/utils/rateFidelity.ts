@@ -21,9 +21,10 @@ export interface RateFidelity {
  * submitting at the deadline and then drains: past it, elapsed time keeps
  * growing while nothing more is owed.
  *
- * Reads the sent count rather than the tick's `requests_expected`, which is 0
- * for `constant_rps`. `undefined` before there is a window to divide by, so the
- * card draws its empty state instead of a 0 or a NaN.
+ * Owed-to-date is `targetRps x window`, not the tick's `requests_expected`:
+ * that is the whole plan, so sent over it is progress through the run, not
+ * fidelity to the rate. `undefined` before there is a window to divide by, so
+ * the card draws its empty state instead of a 0 or a NaN.
  */
 export function liveRateFidelity(input: {
 	targetRps?: number;
