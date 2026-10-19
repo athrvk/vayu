@@ -611,7 +611,7 @@ TEST_F (DbRecoveryTest, ALockedDatabaseIsRefusedAndLeftExactlyAsItWas) {
     ASSERT_EQ (exec_sql (holder.get (), "ROLLBACK"), "");
     holder.reset ();
 
-    // Once the lock is gone the same file opens and migrates, data intact.
+    // Once the lock is gone the same file opens, data intact.
     {
         vayu::db::Database db (DB_PATH, SHORT_WAIT);
         EXPECT_FALSE (db.recovery ().has_value ());
