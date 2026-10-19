@@ -26,7 +26,6 @@ import {
 	confirmedInput,
 	engineErrorResult,
 	errorResult,
-	jsonResult,
 	str,
 	ToolArgError,
 	watchedRun,
@@ -61,6 +60,7 @@ import {
 	validationScriptAliasInput,
 	validationScriptInput,
 } from "./input-schemas.js";
+import { startedRunResult } from "./run-status.js";
 import { readScenarioArg, startScenarioLoadRun } from "./scenario-runs.js";
 
 export const LOAD_TOOLS: McpTool[] = [
@@ -551,7 +551,11 @@ export const LOAD_TOOLS: McpTool[] = [
 			} catch (err) {
 				return engineErrorResult(err);
 			}
-			return watchedRun(withCaveat(jsonResult(started), caveat), "load", started);
+			return watchedRun(
+				withCaveat(startedRunResult(started, payload.mode, payload.duration), caveat),
+				"load",
+				started
+			);
 		},
 	},
 ];

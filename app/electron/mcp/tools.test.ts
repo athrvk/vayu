@@ -8360,6 +8360,364 @@ describe("run housekeeping tools", () => {
 	});
 });
 
+describe("run status reads (#2436)", () => {
+	const NOW = 1_755_000_100_000;
+	const START = 1_755_000_000_000;
+
+	function runRow(overrides: Record<string, unknown> = {}) {
+		return {
+			id: "run_1",
+			type: "load",
+			status: "running",
+			startTime: START,
+			// What the engine writes for a row that has not finished.
+			endTime: START,
+			configSnapshot: {
+				url: "https://api.example.com/users",
+				mode: "constant_rps",
+				duration: "200s",
+				concurrency: 10,
+				targetRps: 50,
+			},
+			requestId: "req_1",
+			baseline: false,
+			...overrides,
+		};
+	}
+
+	async function getRun(row: unknown) {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(NOW);
+		try {
+			const client = fakeClient({ getRun: vi.fn().mockResolvedValue(row) });
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBeFalsy();
+			return JSON.parse(firstText(res)) as Record<string, unknown>;
+		} finally {
+			vi.useRealTimers();
+		}
+	}
+
+	describe("get_run", () => {
+		test.each(["pending", "running"])(
+			"a %s run is not terminal and has no end",
+			async (status) => {
+				const out = await getRun(runRow({ status }));
+				expect(out).toMatchObject({
+					id: "run_1",
+					type: "load",
+					status,
+					terminal: false,
+					startTime: START,
+					endTime: null,
+					elapsedMs: NOW - START,
+					mode: "constant_rps",
+					concurrency: 10,
+					targetRps: 50,
+					duration: "200s",
+					requestId: "req_1",
+					baseline: false,
+				});
+				// 200 s planned: a tenth is 20 s, held to the 10 s ceiling.
+				expect(out.nextStep).toBe("still running; read again in 10 s, or stop_run");
+			}
+		);
+
+		test.each(["completed", "failed", "stopped"])(
+			"a %s run is terminal and reports its real end",
+			async (status) => {
+				const out = await getRun(runRow({ status, endTime: START + 60_000 }));
+				expect(out.terminal).toBe(true);
+				expect(out.endTime).toBe(START + 60_000);
+				expect(out.elapsedMs).toBe(60_000);
+			}
+		);
+
+		test("each terminal status points at the report, and a stopped run says it has no verdict", async () => {
+			const done = await getRun(runRow({ status: "completed", endTime: START + 1 }));
+			expect(done.nextStep).toBe("read get_run_report(runId)");
+			for (const status of ["failed", "stopped"]) {
+				const out = await getRun(runRow({ status, endTime: START + 1 }));
+				expect(out.nextStep).toMatch(/partial numbers.*no verdict/);
+			}
+		});
+
+		test("a running row whose endTime is non-zero is still not terminal", async () => {
+			// endTime is seeded to startTime, so `> 0` would call every run done.
+			const out = await getRun(runRow({ status: "running", endTime: START }));
+			expect(out.terminal).toBe(false);
+			expect(out.endTime).toBeNull();
+		});
+
+		test("a duration-bound run reports its progress, clamped to 0..1", async () => {
+			const half = await getRun(runRow());
+			expect(half.plannedDurationMs).toBe(200_000);
+			expect(half.progress).toBe(0.5);
+
+			const overrun = await getRun(
+				runRow({ configSnapshot: { mode: "constant_rps", duration: "10s" } })
+			);
+			expect(overrun.progress).toBe(1);
+
+			const notStarted = await getRun(runRow({ startTime: NOW + 5_000 }));
+			expect(notStarted.progress).toBe(0);
+		});
+
+		test("an iterations run, or a duration that does not parse, has no progress and the 5 s poll", async () => {
+			const iterations = await getRun(
+				runRow({ configSnapshot: { mode: "iterations", duration: "30s", iterations: 100 } })
+			);
+			expect(iterations.plannedDurationMs).toBeNull();
+			expect(iterations.progress).toBeNull();
+			expect(iterations.nextStep).toBe("still running; read again in 5 s, or stop_run");
+
+			const unparsed = await getRun(
+				runRow({ configSnapshot: { mode: "constant_rps", duration: "soon" } })
+			);
+			expect(unparsed.plannedDurationMs).toBeNull();
+			expect(unparsed.progress).toBeNull();
+			expect(unparsed.nextStep).toContain("5 s");
+
+			const design = await getRun(runRow({ type: "design", configSnapshot: { url: "u" } }));
+			expect(design.progress).toBeNull();
+			expect(design.duration).toBeNull();
+		});
+
+		test("the poll interval is a tenth of the duration between 2 and 10 s", async () => {
+			const poll = async (duration: string) =>
+				(await getRun(runRow({ configSnapshot: { mode: "constant_rps", duration } })))
+					.nextStep;
+			expect(await poll("5s")).toContain("in 2 s");
+			expect(await poll("45s")).toContain("in 5 s");
+			expect(await poll("60s")).toContain("in 6 s");
+			expect(await poll("5m")).toContain("in 10 s");
+		});
+
+		test("the projection never carries the trace, the result or the rest of the snapshot", async () => {
+			const out = await getRun(
+				runRow({
+					configSnapshot: {
+						url: "https://api.example.com/users",
+						mode: "constant_rps",
+						duration: "30s",
+						headers: { "X-Tenant": "acme" },
+						comment: "nightly",
+					},
+					result: { statusCode: 200 },
+					trace: { response: { body: "<body>" } },
+					designResult: { trace: { response: { body: "<body>" } } },
+				})
+			);
+			expect(Object.keys(out).sort()).toEqual(
+				[
+					"id",
+					"type",
+					"status",
+					"terminal",
+					"startTime",
+					"endTime",
+					"elapsedMs",
+					"plannedDurationMs",
+					"progress",
+					"mode",
+					"concurrency",
+					"targetRps",
+					"duration",
+					"requestId",
+					"baseline",
+					"nextStep",
+				].sort()
+			);
+			expect(JSON.stringify(out)).not.toMatch(/api\.example\.com|acme|nightly|<body>/);
+		});
+
+		test("an id that names no run is an error naming the id", async () => {
+			const client = fakeClient({
+				getRun: vi
+					.fn()
+					.mockRejectedValue(new EngineRequestError("404", 404, "Run not found")),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_missing" }, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("run_missing");
+			expect(firstText(res)).toContain("404");
+		});
+
+		test("any other engine failure is reported as the engine's", async () => {
+			const client = fakeClient({
+				getRun: vi.fn().mockRejectedValue(new EngineRequestError("500", 500, "boom")),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe("Engine error (500): boom");
+		});
+
+		test("requires a runId", async () => {
+			const res = await dispatchTool("get_run", {}, ctxWith(fakeClient()));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/runId/);
+		});
+
+		test("is a read tool and states what it withholds from run output", () => {
+			const tool = TOOLS.find((t) => t.name === "get_run");
+			expect(tool?.category).toBe("read");
+			expect(tool?.annotations.readOnlyHint).toBe(true);
+			expect(tool?.description).toContain(WITHHELD_RUN_OUTPUT_SENTENCE);
+		});
+	});
+
+	describe("get_run_report", () => {
+		const report = (status: string, extra: Record<string, unknown> = {}) => ({
+			metadata: { runId: "run_1", status },
+			summary: { totalRequests: 0 },
+			...extra,
+		});
+
+		async function readReport(value: unknown) {
+			const client = fakeClient({ getRunReport: vi.fn().mockResolvedValue(value) });
+			const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+			expect(res.isError).toBeFalsy();
+			return JSON.parse(firstText(res)) as Record<string, unknown>;
+		}
+
+		test.each(["pending", "running"])("a %s run's report is marked partial", async (status) => {
+			const out = await readReport(report(status));
+			expect(out.partial).toBe(true);
+			expect(out.note).toMatch(
+				/has not finished.*no budget verdict.*get_run\(runId\)\.terminal/
+			);
+			expect(out.summary).toEqual({ totalRequests: 0 });
+		});
+
+		test("a report that took the bounds' early return is marked too", async () => {
+			// No `results` array: boundRunReport hands the value back untouched.
+			const out = await readReport(report("running"));
+			expect(out.partial).toBe(true);
+		});
+
+		test("a row-carrying report is marked after its traces are bounded", async () => {
+			const out = await readReport(
+				report("running", { results: [{ id: 1, trace: { response: { body: "x" } } }] })
+			);
+			expect(out.partial).toBe(true);
+			expect((out.results as unknown[]).length).toBe(1);
+		});
+
+		test.each(["completed", "failed", "stopped"])(
+			"a %s run's report carries no partial marker at all",
+			async (status) => {
+				const out = await readReport(report(status));
+				expect(out).not.toHaveProperty("partial");
+				expect(out).not.toHaveProperty("note");
+			}
+		);
+
+		test("a report with no metadata is handed back as it came", async () => {
+			const answer = { latency: {}, summary: {}, statusCodes: {} };
+			expect(await readReport(answer)).toEqual(answer);
+		});
+
+		test("the description leads with the partial rule and names metadata.status", () => {
+			const description = TOOLS.find((t) => t.name === "get_run_report")!.description;
+			expect(description).toMatch(
+				/^Get the report for a run; a run still in progress returns a partial report marked `partial: true`/
+			);
+			expect(description).toContain("metadata.status");
+		});
+	});
+
+	describe("start tools name the status read", () => {
+		const allow = { allowlist: ["api.example.com"] };
+
+		function startClient() {
+			return fakeClient({
+				listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
+				composeRequest: vi
+					.fn()
+					.mockResolvedValue({ method: "GET", url: "https://api.example.com/login" }),
+			});
+		}
+
+		async function started(tool: string, args: Record<string, unknown>) {
+			const res = await dispatchTool(tool, args, ctxWith(startClient(), allow));
+			expect(res.isError).toBeFalsy();
+			return {
+				body: JSON.parse(firstText(res)) as Record<string, unknown>,
+				structured: res.structuredContent,
+			};
+		}
+
+		const NEXT_STEP_MENTIONS = [
+			/get_run\(runId\)/,
+			/completed, failed or stopped/,
+			/get_run_report/,
+		];
+
+		test("a single-target load run carries nextStep with the poll interval from its duration", async () => {
+			const { body, structured } = await started("start_load_run", {
+				url: "https://api.example.com/x",
+				duration: "30s",
+				confirmed: true,
+			});
+			expect(body.runId).toBe("run_1");
+			const nextStep = body.nextStep as string;
+			for (const mention of NEXT_STEP_MENTIONS) expect(nextStep).toMatch(mention);
+			expect(nextStep).toContain("every 3 s");
+			expect(structured).toEqual(body);
+		});
+
+		test("an iterations load run polls at the 5 s fallback", async () => {
+			const { body } = await started("start_load_run", {
+				url: "https://api.example.com/x",
+				mode: "iterations",
+				iterations: 10,
+				confirmed: true,
+			});
+			expect(body.nextStep).toContain("every 5 s");
+		});
+
+		test("a scenario load run carries the same nextStep and no longer says to follow with the report", async () => {
+			const res = await dispatchTool(
+				"start_load_run",
+				{ scenario: { collectionId: "c1" }, duration: "60s", confirmed: true },
+				ctxWith(startClient(), allow)
+			);
+			expect(res.isError).toBeFalsy();
+			const body = JSON.parse(firstText(res)) as Record<string, unknown>;
+			for (const mention of NEXT_STEP_MENTIONS)
+				expect(body.nextStep as string).toMatch(mention);
+			expect(body.nextStep).toContain("every 6 s");
+			const everything = res.content
+				.map((part) => (part as { text: string }).text)
+				.join("\n");
+			expect(everything).not.toContain("Follow the run with");
+		});
+
+		test("run_collection carries the same nextStep field", async () => {
+			const { body } = await started("run_collection", { collectionId: "c1" });
+			for (const mention of NEXT_STEP_MENTIONS)
+				expect(body.nextStep as string).toMatch(mention);
+			expect(body.nextStep).toContain("every 5 s");
+			expect(body.plannedSteps).toBe(1);
+		});
+
+		test("a start answer that is not an object is handed back as it came", async () => {
+			const client = fakeClient({
+				composeRequest: vi
+					.fn()
+					.mockResolvedValue({ method: "GET", url: "https://api.example.com/x" }),
+				startRun: vi.fn().mockResolvedValue("accepted"),
+			});
+			const res = await dispatchTool(
+				"start_load_run",
+				{ url: "https://api.example.com/x", confirmed: true },
+				ctxWith(client, allow)
+			);
+			expect(JSON.parse(firstText(res))).toBe("accepted");
+		});
+	});
+});
+
 describe("webhook inbox tools", () => {
 	const byName = () => new Map(TOOLS.map((t) => [t.name, t]));
 	const forwarded = (client: EngineClient, method: keyof EngineClient) =>
@@ -11585,6 +11943,31 @@ describe("secret withholding", () => {
 		expect(body).toEqual(RUN_REPORT);
 	});
 
+	test("get_run masks a secret in the snapshot fields it echoes unless revealed", async () => {
+		// `duration` is echoed; the secret reaching it shows the mask runs before
+		// the projection, so what the projection keeps cannot carry a secret.
+		const row = {
+			id: "run_1",
+			type: "load",
+			status: "running",
+			startTime: 1_755_000_000_000,
+			endTime: 1_755_000_000_000,
+			configSnapshot: {
+				url: `https://api.example.com/v1?key=${QUERY_FORM}`,
+				mode: "constant_rps",
+				duration: "glob-secret-1",
+			},
+		};
+		const client = runClient({ getRun: vi.fn().mockResolvedValue(row) });
+		const withheld = await read("get_run", client, undefined, { runId: "run_1" });
+		expect(withheld.text).not.toContain("glob-secret-1");
+		for (const leak of RUN_SECRET_CORES) expect(withheld.text).not.toContain(leak);
+		expect(withheld.body.duration).toBe("<redacted>");
+		expect(withheld.body.plannedDurationMs).toBeNull();
+		const revealed = await read("get_run", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body.duration).toBe("glob-secret-1");
+	});
+
 	test("get_run_report masks before it cuts, so no prefix of a secret survives the cut", async () => {
 		// The secret straddles the per-body cut: bounded first, its first three
 		// bytes would be left behind where no form can match them.
@@ -11748,6 +12131,7 @@ describe("secret withholding", () => {
 
 	test.each([
 		["list_runs", {}],
+		["get_run", { runId: "run_1" }],
 		["get_run_samples", { runId: "run_1" }],
 		["get_inbox_captures", { inboxId: "inbox_1" }],
 		["get_mock_activity", { mockId: "mock_1" }],
@@ -12411,6 +12795,7 @@ describe("secret withholding", () => {
 
 	test.each([
 		"run_request",
+		"get_run",
 		"get_run_report",
 		"export_run_report",
 		"get_run_samples",
