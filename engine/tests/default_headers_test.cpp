@@ -179,8 +179,9 @@ TEST (DefaultHeadersTest, RefusingAcceptOrContentTypeWritesLibcurlsRemovalLine) 
     EXPECT_TRUE (has_line (typed.lines, "Content-Type: text/plain"));
 }
 
-// No body, nothing to describe: no removal line either. And a multipart body
-// keeps the header libcurl writes, because its boundary is the body's framing.
+// A bodyless GET: no body to describe and no libcurl default to remove. And a
+// multipart body keeps the header libcurl writes, because its boundary is the
+// body's framing.
 TEST (DefaultHeadersTest, AContentTypeRefusalLeavesABodilessOrMultipartRequestAlone) {
     vayu::Request request = get_request ();
     request.suppressed_default_headers.insert ("content-type");
@@ -193,6 +194,20 @@ TEST (DefaultHeadersTest, AContentTypeRefusalLeavesABodilessOrMultipartRequestAl
     field.value   = "1";
     field.enabled = true;
     request.body.fields.push_back (field);
+    EXPECT_FALSE (has_line (build (request, full_policy ()).lines, "Content-Type:"));
+}
+
+// Issue #2464: libcurl writes its form type into a bodyless POST whose list
+// names no Content-Type, refused or not, so the list removes it - unrecorded.
+// A bodyless PUT is `CURLOPT_CUSTOMREQUEST` alone, which libcurl leaves bare.
+TEST (DefaultHeadersTest, ABodylessPostCarriesTheRemovalLineAndABodylessPutDoesNot) {
+    vayu::Request request = get_request ();
+    request.method        = vayu::HttpMethod::POST;
+    const auto post       = build (request, full_policy ());
+    EXPECT_TRUE (has_line (post.lines, "Content-Type:"));
+    EXPECT_FALSE (post.sent.contains ("Content-Type"));
+
+    request.method = vayu::HttpMethod::PUT;
     EXPECT_FALSE (has_line (build (request, full_policy ()).lines, "Content-Type:"));
 }
 

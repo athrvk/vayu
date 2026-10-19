@@ -355,8 +355,9 @@ int count_examples (const json& collections) {
 /// The app-side half of the engine's own `implied_content_type`
 /// (`http/form_body.cpp`), which is what actually reaches the wire; this one
 /// writes the header *row* an imported request carries, so the user can see it.
-/// `json` and `text` are deliberately absent - they are the modes a user writes
-/// the header for themselves.
+/// `json` and `text` are deliberately absent: the engine derives each at send
+/// time (`application/json`, `text/plain`) with no row, as the Body panel
+/// writes none for `text`.
 std::string required_content_type (const std::string& mode) {
     if (mode == "graphql" || mode == "jsonrpc") {
         return "application/json";

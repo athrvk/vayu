@@ -409,6 +409,23 @@ bool header_value_reaches_wire (std::string_view value) {
     [] (char c) { return std::isspace (static_cast<unsigned char> (c)) == 0; });
 }
 
+namespace {
+
+/// True when libcurl writes `Content-Type: application/x-www-form-urlencoded`
+/// into this transfer if the header list names none (lib/http.c, every
+/// `HTTPREQ_POST`): any body `apply_method_and_body` hands over as POSTFIELDS,
+/// whatever verb is restored afterwards, and a bodyless POST. Multipart is the
+/// exception, its type carries the boundary. A binary file that streams is a
+/// PUT to libcurl, where the removal line this answers for removes nothing.
+bool libcurl_defaults_content_type (const Request& request) {
+    if (vayu::http::has_wire_body (request)) {
+        return !vayu::http::content_type_is_engine_owned (request.body);
+    }
+    return request.method == HttpMethod::POST;
+}
+
+} // namespace
+
 curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
 Headers* sent) {
@@ -425,13 +442,15 @@ Headers* sent) {
             (*sent)[key] = value;
         }
     };
+    // True when the line went on the list.
     const auto append = [&] (const std::string& key, const std::string& value) {
         if (!header_value_reaches_wire (value)) {
-            return;
+            return false;
         }
         const std::string line = key + ": " + value;
         list                   = curl_slist_append (list, line.c_str ());
         record (key, value);
+        return true;
     };
     // A default the request already names is not added: someone who typed the
     // header means it, the same rule the body-implied Content-Type follows.
@@ -440,30 +459,32 @@ Headers* sent) {
         !suppresses_default_header (request, name);
     };
 
+    bool lists_content_type = false;
     for (const auto& [key, value] : request.headers) {
         if (suppresses_request_header (request, key)) {
             // Not sent, so not reported as sent either - libcurl writes the
             // multipart Content-Type, boundary and all.
             continue;
         }
-        append (key, value);
+        if (append (key, value) && CaseInsensitiveLess::equal (key, "Content-Type")) {
+            lists_content_type = true;
+        }
     }
 
     // The Content-Type the body mode implies, when the request declares none.
     // Empty when neither holds - which `append` drops, as it drops any
     // value-less header.
-    if (!suppresses_default_header (request, "Content-Type")) {
-        append ("Content-Type", body_content_type_value (request));
-    } else if (!request.headers.contains ("Content-Type") &&
-    vayu::http::has_wire_body (request) &&
-    !vayu::http::content_type_is_engine_owned (request.body)) {
-        // Refused (issue #1765, Postman's `disabledSystemHeaders`): libcurl
-        // would otherwise write `application/x-www-form-urlencoded` for any
-        // POSTFIELDS body. `Content-Type:` with nothing after it is libcurl's
-        // spelling of "remove the line", so it is appended directly - the
-        // `append` above drops a value-less header - and not recorded as
-        // sent. Multipart keeps the header libcurl writes: its boundary is
-        // what makes the body readable at all.
+    if (!suppresses_default_header (request, "Content-Type") &&
+    append ("Content-Type", body_content_type_value (request))) {
+        lists_content_type = true;
+    }
+    if (!lists_content_type && libcurl_defaults_content_type (request)) {
+        // Nothing declared a type: a refused one (issue #1765, Postman's
+        // `disabledSystemHeaders`), a typed row left blank, a bodyless POST.
+        // The engine never leaves libcurl that gap to fill with its form type
+        // (#2464). `Content-Type:` with nothing after it is libcurl's spelling
+        // of "remove the line", so it is appended directly - `append` drops a
+        // value-less header - and not recorded as sent.
         list = curl_slist_append (list, "Content-Type:");
     }
 

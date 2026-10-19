@@ -165,6 +165,7 @@ add_executable(vayu_tests
     operation_match_test.cpp
     path_variables_test.cpp
     query_encoding_test.cpp
+    implied_content_type_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
     url_scheme_test.cpp
