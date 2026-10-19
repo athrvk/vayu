@@ -8288,7 +8288,7 @@ no frame.
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
-| `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
+| `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |

@@ -761,6 +761,34 @@ TEST_F (LoadStrategyTest, ATimedOutTransferJoinsTheLatencyHistogram) {
     EXPECT_EQ (stats["noResponse"].get<size_t> (), 1u);
 }
 
+// The histogram gate is whether a transfer ran, not whether it took measurable
+// time: a failure that ran and reads 0 ms (a connection refused inside the
+// clock's resolution) still joins at the histogram's 1 microsecond floor, and
+// the same reading from a request that never left stays out. Mutation-check:
+// gate on `total_ms > 0` in record_failed_response and the first half fails.
+TEST_F (LoadStrategyTest, AZeroMsFailureCountsOnlyWhenItsTransferRan) {
+    const auto record = [] (bool transfer_attempted) {
+        auto context = std::make_shared<vayu::core::RunContext> (
+        "test-zero-ms-latency", nlohmann::json{ { "mode", "constant_rps" } });
+        vayu::db::Database db (TEST_DB_PATH);
+
+        context->requests_sent++;
+        vayu::Response response     = timed_out_response (0.0);
+        response.transfer_attempted = transfer_attempted;
+        vayu::core::handle_result (context, db, vayu::Result<vayu::Response> (response));
+        return context;
+    };
+
+    const auto ran = record (true);
+    EXPECT_EQ (ran->metrics_collector->total_errors (), 1u);
+    EXPECT_EQ (ran->metrics_collector->latency_count (), 1);
+    EXPECT_NEAR (ran->metrics_collector->calculate_percentiles ().max, 0.001, 0.001);
+
+    const auto refused = record (false);
+    EXPECT_EQ (refused->metrics_collector->total_errors (), 1u);
+    EXPECT_EQ (refused->metrics_collector->latency_count (), 0);
+}
+
 // A failure built for a request that never left - here the pre-send gate's
 // `error_response` - has no duration, and stays out of every latency figure
 // while still counting as an error.
