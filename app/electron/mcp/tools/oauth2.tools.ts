@@ -21,6 +21,7 @@ import {
 	projectOAuth2Status,
 	projectOAuth2Token,
 } from "./oauth2.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const OAUTH2_TOOLS: McpTool[] = [
 	{
@@ -60,12 +61,13 @@ export const OAUTH2_TOOLS: McpTool[] = [
 			for (const key of ["accessTokenUrl", "refreshTokenUrl"]) {
 				const url = str(config, key);
 				if (url === undefined || url === "") continue;
-				const gate = checkAllowlist(url, ctx.config);
+				const gate = checkAllowlist(url, ctx.config, ctx.host);
 				if (!gate.ok) return errorResult(`${key}: ${gate.error!}`);
 			}
 			const payload: Record<string, unknown> = { config };
 			if (args.force === true) payload.force = true;
 			return callEngine(
+				ctx,
 				() => ctx.client.fetchOAuth2Token(payload, signal),
 				(answer) => projectOAuth2Token(answer)
 			);
@@ -86,6 +88,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		inputSchema: { cacheKey: oauth2CacheKeyInput },
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getOAuth2TokenStatus(requireStr(args, "cacheKey"), signal),
 				(answer) => projectOAuth2Status(answer)
 			),
@@ -95,7 +98,9 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["oauth"],
 		description:
-			"Drop the cached token for a cache key, so the next request that uses that config acquires a fresh one - the tool equivalent of the auth tab's Clear button. Use it when a provider has revoked or rotated credentials and the cache is still serving the old token. Idempotent: clearing a key nothing is cached under reports `deleted: false` rather than failing. No confirmation - nothing saved is lost, only a credential a re-fetch restores. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Drop the cached token for a cache key, so the next request that uses that config acquires a fresh one - the tool equivalent of the auth tab's Clear button. Use it when a provider has revoked or rotated credentials and the cache is still serving the old token. Idempotent: clearing a key nothing is cached under reports `deleted: false` rather than failing. No confirmation - nothing saved is lost, only a credential a re-fetch restores. " +
+			GUARDED_WRITE_SENTENCE +
+			".",
 		annotations: {
 			title: "Clear OAuth 2.0 token",
 			readOnlyHint: false,
@@ -107,7 +112,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			return callEngine(() =>
+			return callEngine(ctx, () =>
 				ctx.client.clearOAuth2Token(requireStr(args, "cacheKey"), signal)
 			);
 		},

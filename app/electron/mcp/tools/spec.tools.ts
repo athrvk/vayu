@@ -53,6 +53,7 @@ import {
 	type SpecBinding,
 	summarizeImportTree,
 } from "./spec-bindings.js";
+import { GUARDED_WRITE_SENTENCE, SPEC_SYNC_TOKEN } from "../remedy.js";
 
 export const SPEC_TOOLS: McpTool[] = [
 	{
@@ -109,7 +110,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				try {
 					collection = await ctx.client.getCollection(collectionId, signal);
 				} catch (err) {
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 				if (collection === null) {
 					return errorResult(`No collection with id "${collectionId}".`);
@@ -159,7 +160,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				};
 				return jsonResult(value);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -205,7 +206,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// collection that binds nothing and says to bind it first, a 404
 				// names the collection, and a 409 names the binding whose document
 				// the store no longer holds.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const diff = asRecord(answer);
 			const added = boundedBucket(diff.added, (entry) => ({
@@ -260,7 +261,11 @@ export const SPEC_TOOLS: McpTool[] = [
 		// has already rewritten.
 		invalidates: ["collection", "request"],
 		description:
-			"Apply a drifted OpenAPI contract to the collection bound to it - the safe half of it. GUARDED: requires write access to be enabled in Vayu Settings. Pass the collection and the re-fetched document text; the engine stores the document, moves the binding to it, and creates, updates and deletes requests in ONE transaction - nothing lands unless all of it does. WHAT IT WRITES IS NOT YOURS TO CHOOSE, deliberately: this sends `policy: \"safe\"` and the engine decides, which means every operation the document adds becomes a request, every field the document moved that nobody had edited by hand is written, and NOTHING IS DELETED and NO HAND-EDITED FIELD IS OVERWRITTEN. A request whose bound document could not be read is left alone whole, since there nobody's edit can be told from the document's change. `skipped` reports what that left: requests untouched, fields not written, deletions not made. Use `diff_spec` first to see the drift and which of it is marked safe - it is the same answer this applies. To apply anything the policy declines - a deletion, or a field somebody edited - use the Vayu app (Collection -> Spec -> Sync), where a person can tick it.",
+			"Apply a drifted OpenAPI contract to the collection bound to it - the safe half of it. " +
+			GUARDED_WRITE_SENTENCE +
+			". Pass the collection and the re-fetched document text; the engine stores the document, moves the binding to it, and creates, updates and deletes requests in ONE transaction - nothing lands unless all of it does. WHAT IT WRITES IS NOT YOURS TO CHOOSE, deliberately: this sends `policy: \"safe\"` and the engine decides, which means every operation the document adds becomes a request, every field the document moved that nobody had edited by hand is written, and NOTHING IS DELETED and NO HAND-EDITED FIELD IS OVERWRITTEN. A request whose bound document could not be read is left alone whole, since there nobody's edit can be told from the document's change. `skipped` reports what that left: requests untouched, fields not written, deletions not made. Use `diff_spec` first to see the drift and which of it is marked safe - it is the same answer this applies. Applying anything the policy declines - a deletion, or a field somebody edited - " +
+			SPEC_SYNC_TOKEN +
+			".",
 		annotations: {
 			title: "Apply OpenAPI spec drift",
 			readOnlyHint: false,
@@ -321,9 +326,9 @@ export const SPEC_TOOLS: McpTool[] = [
 				// nothing and says to bind it first, a 404 names the collection,
 				// and a 409 says a row the comparison was made against has since
 				// gone - which is a re-check, not a bad request.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
-			return withCaveat(jsonResult(outcome), `\n\n${describeSync(outcome)}`);
+			return withCaveat(jsonResult(outcome), `\n\n${describeSync(outcome, ctx.host)}`);
 		},
 	},
 	{
@@ -345,7 +350,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				summary = summarizeImportTree(await ctx.client.parseImport(payload, signal));
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(summary), `\n\n${describeImportPreview(summary)}`);
 		},
@@ -360,7 +365,9 @@ export const SPEC_TOOLS: McpTool[] = [
 		// would leave an open list showing a tree the import has already changed.
 		invalidates: ["collection", "request", "environment"],
 		description:
-			"Import a collection, environment or API spec from its document text. GUARDED: requires write access to be enabled in Vayu Settings. Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 or v5 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything. Call preview_import first with the same arguments to see what would be created and what would be left out, without storing anything.",
+			"Import a collection, environment or API spec from its document text. " +
+			GUARDED_WRITE_SENTENCE +
+			". Every format Vayu accepts is read by the engine: OpenAPI 3.x and 2.0 (JSON or YAML), Postman Collection v2.1 and v2.0, a Postman environment or globals export, and an Insomnia v4 or v5 export - detection is by content, so you do not say which one it is. The whole tree lands in one transaction: a document that is refused creates nothing. An OpenAPI document is stored and the collection is bound to it, so its runs report contract coverage and its responses are schema-checked straight away, and its operations are filed under one sub-collection per tag. The result reports what was created plus `meta`, which names the format, the counts, and - in `meta.skipped` - everything the document declared that Vayu cannot represent, so a lossy import says so rather than looking complete. A Postman globals export MERGES into the existing global scope, imported values winning on a collision; nothing else here overwrites anything. Call preview_import first with the same arguments to see what would be created and what would be left out, without storing anything.",
 		annotations: {
 			title: "Import a document",
 			readOnlyHint: false,
@@ -384,7 +391,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// The engine's own sentence: "Unrecognised format" for a file no
 				// format claims, a read failure naming the line for one that is
 				// broken, and the cap by name for one that is too large.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeImport(outcome)}`);
 		},
@@ -422,7 +429,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				preview = await previewSpecBind(ctx.client, collectionId, content, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(preview), `\n\n${describeBindPreview(preview)}`);
 		},
@@ -438,7 +445,9 @@ export const SPEC_TOOLS: McpTool[] = [
 		// changing any cached row.
 		invalidates: ["collection", "request"],
 		description:
-			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. GUARDED: requires write access to be enabled in Vayu Settings. Pass the document text (JSON or YAML) - the engine stores it, works out which of the collection's requests is which operation by method and path shape, and records that identity, all in one transaction: nothing is created or deleted, and a bind that fails writes nothing at all. RE-BINDING REPLACES THE CONTRACT: any request whose identity the new document does not account for has it cleared, because a stamp naming an operation of a document this collection is no longer bound to would be read as identity rather than as a gap. The result reports how many requests were stamped and how many cleared, plus the requests and operations nothing paired with. Call preview_spec_bind first to see which requests would gain an operation and which would lose the one they carry, without storing anything.",
+			"Bind a collection to an OpenAPI document, so its runs report contract coverage and its responses are schema-checked. " +
+			GUARDED_WRITE_SENTENCE +
+			". Pass the document text (JSON or YAML) - the engine stores it, works out which of the collection's requests is which operation by method and path shape, and records that identity, all in one transaction: nothing is created or deleted, and a bind that fails writes nothing at all. RE-BINDING REPLACES THE CONTRACT: any request whose identity the new document does not account for has it cleared, because a stamp naming an operation of a document this collection is no longer bound to would be read as identity rather than as a gap. The result reports how many requests were stamped and how many cleared, plus the requests and operations nothing paired with. Call preview_spec_bind first to see which requests would gain an operation and which would lose the one they carry, without storing anything.",
 		annotations: {
 			title: "Bind OpenAPI spec",
 			readOnlyHint: false,
@@ -489,7 +498,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					signal
 				);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeBind(outcome)}`);
 		},
@@ -534,7 +543,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// The engine's own sentence, which is the useful one here: a 404
 				// names the collection, and a 409 names the binding whose document
 				// it could not read and says unbinding would export a skeleton.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
@@ -578,7 +587,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// makes for them.
 				exported = await ctx.client.exportPostman(collectionId, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
@@ -598,7 +607,9 @@ export const SPEC_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Detach a collection from the OpenAPI document it is bound to. GUARDED: requires write access to be enabled in Vayu Settings. The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document." +
+			"Detach a collection from the OpenAPI document it is bound to. " +
+			GUARDED_WRITE_SENTENCE +
+			". The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document." +
 			" " +
 			WITHHELD_VARIABLE_SENTENCE +
 			" " +
@@ -624,7 +635,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				collection = await ctx.client.getCollection(collectionId, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (collection === null) {
 				return errorResult(`No collection with id "${collectionId}".`);
@@ -646,6 +657,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			// tab's Unbind sends, so the two paths cannot come to mean different
 			// things.
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateCollection(collectionId, { openapi: null }, signal),
 				collectionEchoShape(ctx)
 			);

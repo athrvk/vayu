@@ -97,7 +97,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			try {
 				requests = await ctx.client.listRequests(collectionId, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const list = Array.isArray(requests) ? requests : [];
 			// Read before any traffic flows: after the loop this call competes with
@@ -144,7 +144,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				// Only what the row echoes is projected; the gate and the send read `url`.
 				const shownUrl = smokeRowUrl(ctx, url, outgoing.auth ?? req.auth);
 
-				const gate = checkAllowlist(url, ctx.config);
+				const gate = checkAllowlist(url, ctx.config, ctx.host);
 				if (!gate.ok) {
 					results.push({
 						name,
@@ -308,7 +308,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 
 			const payload: Record<string, unknown> = {
@@ -343,7 +343,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			try {
 				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			// The engine's 202 body is the answer; anything else is handed back as
 			// it came rather than dressed up as a started run.

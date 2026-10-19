@@ -59,6 +59,7 @@ export class VayuMcpService {
 			contextProvider: (): ToolContext => ({
 				client: this.client,
 				config: this.config,
+				host: "app",
 				onDataChanged: opts.onDataChanged,
 				log: opts.log,
 				dataFileLocation: opts.dataFileLocation,

@@ -44,6 +44,7 @@
 
 import type { McpSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
+import { ENGINE_DOWN_TOKEN, REVEAL_SETTING_TOKEN } from "./remedy.js";
 import { withValue } from "./variable-origins.js";
 
 /** The one setting this module reads off a tool context. */
@@ -53,50 +54,50 @@ interface RevealContext {
 
 type Projection = (value: unknown) => unknown;
 
-/** Where the setting lives, in the words every withholding description uses. */
-export const REVEAL_SETTING = "Reveal secrets to agents (Vayu Settings → MCP)";
+/** The setting's name, which reads the same on both hosts. */
+const REVEAL_SETTING_NAME = "Reveal secrets to agents";
 
 /** What a read carrying variables says about the secret ones. */
-export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; a request that references it still sends with it, because the engine resolves it.`;
+export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes back with \`valueWithheld: true\` in place of its value unless the user has chosen to ${REVEAL_SETTING_TOKEN}; a request that references it still sends with it, because the engine resolves it.`;
 
 /** What a read carrying auth blocks says about the credentials in them. */
-export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value, and a credential row in a Postman import's \`postman\` source as \`valueWithheld: true\` on the row, unless the user has turned on ${REVEAL_SETTING}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
+export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, client secret or key) comes back as \`<member>Withheld: true\` in place of its value, and a credential row in a Postman import's \`postman\` source as \`valueWithheld: true\` on the row, unless the user has chosen to ${REVEAL_SETTING_TOKEN}; a pure {{variable}} reference is shown as written. A block carrying such a marker is refused as \`auth\` by every tool that takes one, because it holds no credential.`;
 
 /** What a read carrying header rows says about the credential-bearing ones. */
-export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a credential (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or the header the request's API-key auth names) comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
+export const WITHHELD_HEADER_SENTENCE = `A header row whose name carries a credential (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or the header the request's API-key auth names) comes back with \`valueWithheld: true\` in place of its value unless the user has chosen to ${REVEAL_SETTING_TOKEN}; an empty value or a pure {{variable}} reference is shown as written.`;
 
 /** What a read carrying saved requests says about the credentials in a URL and in Params rows. */
-export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password of \`user:password@\` dropped and the value of a credential query or fragment parameter (\`api_key\`, \`token\`, \`signature\`, or the one the request's API-key auth places in the query) emptied in place (\`?api_key=&page=2\`), and a \`params\` row naming one comes back with \`valueWithheld: true\` in place of its value, unless the user has turned on ${REVEAL_SETTING}; an empty value or a pure {{variable}} reference is shown as written.`;
+export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password of \`user:password@\` dropped and the value of a credential query or fragment parameter (\`api_key\`, \`token\`, \`signature\`, or the one the request's API-key auth places in the query) emptied in place (\`?api_key=&page=2\`), and a \`params\` row naming one comes back with \`valueWithheld: true\` in place of its value, unless the user has chosen to ${REVEAL_SETTING_TOKEN}; an empty value or a pure {{variable}} reference is shown as written.`;
 
 /** The marker a masked value reads as in run output: the engine's `kRedactedMarker`. */
 export const REDACTED_MARKER = "<redacted>";
 
 /** What a read of run output says about the secrets the run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
 /** What `get_mock_activity` says about the paths a mock server logged. */
-export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
+export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
 
 /** What `start_load_run` says about its confirmation preview's planned run. */
-export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
+export const WITHHELD_PLANNED_RUN_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, the preview's planned run is the composed request as the run will record it: every secret's value reads \`${REDACTED_MARKER}\` and the \`auth\` block's credentials read \`<member>Withheld: true\`.`;
 
 /** What `diff_spec` says about the current side of a stored request's headers, url and params. */
-export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list, or the name the request's API-key auth sends its key under) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`, or the name the request's API-key auth sends its key under in the query) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_SPEC_DIFF_SENTENCE = `A \`headers\`, \`url\` or \`params\` change whose current value could carry a credential - a credential-bearing header (\`Authorization\`, \`Cookie\`, \`X-Api-Key\` and the rest of the shared list, or the name the request's API-key auth sends its key under) with a value, a \`user:password@\` in the url or a url cut short before its host ends, a credential-named query or params value (\`api_key\`, \`token\`, \`signature\`, or the name the request's API-key auth sends its key under in the query) - comes back with \`currentWithheld: true\` in place of \`current\` unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
 
 /** What `run_collection_smoke` says about the `url` every row echoes. */
-export const WITHHELD_SMOKE_ROW_URL_SENTENCE = `Every row's \`url\` - the composed one, or for a request that could not be composed the stored one - has the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_SMOKE_ROW_URL_SENTENCE = `Every row's \`url\` - the composed one, or for a request that could not be composed the stored one - has the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
 
 /** What `get_graphql_schema` says about the `endpoint` it echoes. */
-export const WITHHELD_GRAPHQL_ENDPOINT_SENTENCE = `\`endpoint\` is the composed URL with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has turned on ${REVEAL_SETTING}; the schema itself is never withheld.`;
+export const WITHHELD_GRAPHQL_ENDPOINT_SENTENCE = `\`endpoint\` is the composed URL with the password of \`user:password@\` dropped and a credential query value emptied as in a saved-request read, unless the user has chosen to ${REVEAL_SETTING_TOKEN}; the schema itself is never withheld.`;
 
 /** What `get_cookies` says about cookie values. */
-export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_COOKIE_SENTENCE = `Each cookie value comes back as \`valueWithheld: true\` unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
 
 /** What `get_engine_config` says about proxy URLs. */
-export const WITHHELD_CONFIG_SENTENCE = `A URL entry's credentials (\`proxyUrl\`'s user:password) are stripped, with \`credentialsWithheld: true\` on the entry, unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_CONFIG_SENTENCE = `A URL entry's credentials (\`proxyUrl\`'s user:password) are stripped, with \`credentialsWithheld: true\` on the entry, unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
 
 /** What `diagnose_connection` says about the proxy URL it reports. */
-export const WITHHELD_DIAGNOSE_SENTENCE = `The proxy's URL has its credentials (user:password) stripped, with \`credentialsWithheld: true\` on \`proxy\`, unless the user has turned on ${REVEAL_SETTING}.`;
+export const WITHHELD_DIAGNOSE_SENTENCE = `The proxy's URL has its credentials (user:password) stripped, with \`credentialsWithheld: true\` on \`proxy\`, unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -1283,8 +1284,8 @@ export class MaskingIncompleteError extends Error {
 		const detail = reason instanceof Error ? reason.message : String(reason);
 		super(
 			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
-				`With ${REVEAL_SETTING} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
-				`Retry once the engine answers; a call that sent a request has already sent it, so check list_runs before sending it again.`
+				`With ${REVEAL_SETTING_NAME} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
+				`Retry once the engine answers (${ENGINE_DOWN_TOKEN}); a call that sent a request has already sent it, so check list_runs before sending it again.`
 		);
 		this.name = "MaskingIncompleteError";
 	}

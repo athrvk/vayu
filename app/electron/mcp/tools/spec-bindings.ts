@@ -13,8 +13,9 @@
 
 import { z } from "zod";
 import type { EngineClient } from "../engine-client.js";
+import { PROXY_SETTINGS_TOKEN, SPEC_SYNC_TOKEN, resolveRemedyTokens } from "../remedy.js";
 import { specDiffRequestsToRead, type StoredAuthByRequest } from "../withhold.js";
-import type { ToolContext } from "./contract.js";
+import type { McpHost, ToolContext } from "./contract.js";
 import { bool, isRecord, requireStr, str } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
 import { collectionSubtree, readCollectionRows } from "./cascade.js";
@@ -496,8 +497,7 @@ export function describeBindPreview(preview: Record<string, unknown>): string {
  */
 export const CONNECTION_OUTCOME_HINTS: Record<string, string> = {
 	ok: "The connection works under the proxy, CA and client-certificate settings in force.",
-	proxy_failed:
-		"The proxy refused or could not be reached: check the proxy mode and URL in Vayu Settings -> Network.",
+	proxy_failed: `The proxy refused or could not be reached: ${PROXY_SETTINGS_TOKEN}.`,
 	tls_failed:
 		"The TLS handshake failed: check the custom CA certificates and the client certificate registered for this host (list_client_certificates).",
 	timed_out: "Nothing answered within 10 seconds: check the host, the port and the network path.",
@@ -509,7 +509,7 @@ function num(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-export function describeSync(answer: unknown): string {
+export function describeSync(answer: unknown, host: McpHost): string {
 	const outcome = asRecord(answer);
 	const count = (value: unknown): number => (typeof value === "number" ? value : 0);
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -534,8 +534,8 @@ export function describeSync(answer: unknown): string {
 				`${plural(deletions, "request")} the document no longer declares but which was NOT deleted`
 			);
 		parts.push(
-			`The safe policy declined the rest: ${left.join(", ")}. Applying any of that needs a person to tick it in the Vayu app (Collection -> Spec -> Sync); \`diff_spec\` shows exactly which entries they are.`
+			`The safe policy declined the rest: ${left.join(", ")}. Applying any of that ${SPEC_SYNC_TOKEN}; \`diff_spec\` shows exactly which entries they are.`
 		);
 	}
-	return parts.join(" ");
+	return resolveRemedyTokens(parts.join(" "), host);
 }

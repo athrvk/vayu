@@ -33,6 +33,7 @@ import {
 	type ToolContext,
 	type ToolResult,
 } from "./tools.js";
+import type { McpHost } from "./tools/contract.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
@@ -44,6 +45,7 @@ import {
 	type EngineClient,
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
+import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
@@ -397,8 +399,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 	} as unknown as EngineClient;
 }
 
-function ctxWith(client: EngineClient, safety?: Partial<McpSafetyConfig>): ToolContext {
-	return { client, config: resolveSafetyConfig(safety) };
+function ctxWith(
+	client: EngineClient,
+	safety?: Partial<McpSafetyConfig>,
+	host: McpHost = "app"
+): ToolContext {
+	return { client, config: resolveSafetyConfig(safety), host };
 }
 
 const firstText = (r: { content: Array<{ text: string }> }) => r.content[0].text;
@@ -1589,7 +1595,7 @@ describe("environments, globals and the cookie jar", () => {
 				expect(res.isError).toBe(true);
 				expect(firstText(res)).toContain("token");
 				expect(firstText(res)).toContain("Reveal secrets to agents");
-				expect(firstText(res)).toContain("Settings > MCP");
+				expect(firstText(res)).toContain("Vayu Settings → MCP");
 				expect(write(client)).not.toHaveBeenCalled();
 			});
 
@@ -2280,7 +2286,7 @@ describe("document CRUD parity", () => {
 				ctxWith(client, allow)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toBe(INSECURE_TLS_REFUSAL);
+			expect(firstText(res)).toBe(resolveRemedyTokens(INSECURE_TLS_REFUSAL, "app"));
 			// Refused *before* composition, so nothing was even resolved - a
 			// refusal after the exchange would be a request already sent.
 			expect(client.composeRequest).not.toHaveBeenCalled();
@@ -6072,7 +6078,10 @@ describe("dispatchTool", () => {
 		test("the descriptions say what is refused and where the setting lives", () => {
 			for (const name of ["run_request", "start_load_run"]) {
 				const description = TOOLS.find((t) => t.name === name)!.description;
-				expect(description).toContain("Reveal secrets to agents");
+				expect(description).toContain(REVEAL_SETTING_TOKEN);
+				expect(resolveRemedyTokens(description, "app")).toContain(
+					"Reveal secrets to agents"
+				);
 				expect(description).toMatch(/script you supply here .* is refused/);
 			}
 		});
@@ -7570,12 +7579,12 @@ describe("start_load_run rejects an unusable concurrency at the schema", () => {
  * re-firing a request that already ran.
  */
 describe("engine transport failures are told apart", () => {
-	async function runRequestFailingWith(err: unknown) {
+	async function runRequestFailingWith(err: unknown, host: McpHost = "app") {
 		const client = fakeClient({ executeRequest: vi.fn().mockRejectedValue(err) });
 		return dispatchTool(
 			"run_request",
 			{ url: "https://api.example.com/slow" },
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"] }, host)
 		);
 	}
 
@@ -7600,12 +7609,23 @@ describe("engine transport failures are told apart", () => {
 		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
 	});
 
-	test("a genuinely unreachable engine still says so", async () => {
+	test("a genuinely unreachable engine says so, naming the app for the app host", async () => {
 		const res = await runRequestFailingWith(
-			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876")
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"app"
 		);
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/Make sure the Vayu app is running/);
+	});
+
+	test("a genuinely unreachable engine says so, naming the process for the CLI host", async () => {
+		const res = await runRequestFailingWith(
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"cli"
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/Start vayu-engine, or point VAYU_ENGINE_URL/);
+		expect(firstText(res)).not.toMatch(/Vayu app/);
 	});
 });
 
@@ -7861,7 +7881,7 @@ describe("mock issuer tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockIssuer).not.toHaveBeenCalled();
 		expect(client.listMockIssuers).not.toHaveBeenCalled();
@@ -8238,7 +8258,7 @@ describe("mock server tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockServer).not.toHaveBeenCalled();
 		expect(client.stopMockServer).not.toHaveBeenCalled();
@@ -13246,7 +13266,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(firstText(res)).toContain("saved request by id");
 		expect(client.composeRequest).not.toHaveBeenCalled();
 		expect(client.executeRequest).not.toHaveBeenCalled();
@@ -13268,7 +13288,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 

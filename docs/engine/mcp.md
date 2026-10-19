@@ -154,6 +154,14 @@ node dist-electron/mcp/cli.js
 Configuration comes from environment variables (see [Configuration](#configuration)),
 since there is no Settings UI. It still requires a running engine.
 
+The CLI sets `host: "cli"` on its tool context (the app sets `"app"`), and every
+sentence that sends the user somewhere to lift a refusal reads it, so a guard in
+a stdio session names the variable that lifts it and never a Settings screen or
+the app (#2439): an allowlist refusal names `VAYU_MCP_ALLOWLIST`, a refused write
+`VAYU_MCP_ALLOW_WRITES`, an unreachable engine `vayu-engine` and
+`VAYU_ENGINE_URL`. The full pairing is under
+[Configuration](#configuration); the wording lives in `remedy.ts` and nowhere else.
+
 **Logging** (#1558): stdout is the JSON-RPC channel, so every diagnostic goes
 to stderr as text, unconditionally - never gated by `VAYU_LOG_CONSOLE` the way
 the Electron-hosted host's console rendering is. Set `VAYU_LOG_DIR` to also
@@ -1870,7 +1878,9 @@ no error (issue #2136); the sentence says so in a clause of its own and names
 Enforced in the MCP layer (`safety.ts`, `config.ts`), with one exception noted
 below: script-issued requests are refused engine-side, because this layer cannot
 see them. Nothing here changes engine *behaviour* for other clients. All
-configurable in **Settings → MCP** and persisted.
+configurable in **Settings → MCP** and persisted (in the stdio CLI, through the
+`VAYU_MCP_*` variables, and a refusal there names the variable - see
+[Configuration](#configuration)).
 
 - **Target allowlist** (default empty ⇒ deny all). Network-touching tools refuse
   off-list hosts with an actionable error. An **"Allow all hosts"** opt-in
@@ -2224,14 +2234,15 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | File               | Responsibility                                                              |
 | ------------------ | ---------------------------------------------------------------------------- |
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
-| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing.                        |
+| `safety.ts`        | Pure guards: allowlist, load caps, duration parsing. Each takes the session's `host` so its refusal names that host's remedy. |
+| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a static description per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
@@ -2382,6 +2393,44 @@ from environment variables:
 | `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lifts the secret withholding (reads, write answers, run output). |
 | `VAYU_MCP_DISABLED_TOOLS`       | (empty)                 | Comma-separated tool names to disable. |
 | `VAYU_LOG_DIR`                  | (unset)                 | Also write `mcp_<stamp>.log` there (#1558). |
+
+**What a refusal names in a CLI session** (#2439). Each refusal tells the user
+how to lift it for the host serving the session (`remedy.ts`); the CLI's
+sentence is "set `VAR=true` in the environment of the MCP server and restart
+it", and the config is fixed for the process, so a restart is part of every one.
+
+| Refusal                                              | Names, in the CLI                       | Names, in the app                    |
+| ---------------------------------------------------- | --------------------------------------- | ------------------------------------ |
+| Host not on the allowlist (or the list is empty)     | `VAYU_MCP_ALLOWLIST`                    | Settings → MCP, Target allowlist     |
+| `targetRps`, virtual users, duration, iterations cap | the matching `VAYU_MCP_MAX_*`           | Settings → MCP, the cap's field      |
+| Writes disabled (data writes and engine config)      | `VAYU_MCP_ALLOW_WRITES`                 | Settings → MCP, Write access         |
+| Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
+| Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
+| A tool switched off                                  | `VAYU_MCP_DISABLED_TOOLS`               | Settings → MCP, Tools                |
+| Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | make sure the Vayu app is running  |
+| `verifySSL: false` on a one-off send                 | add the authority to the engine's `customCaCertificates` through `update_engine_config`, which needs `VAYU_MCP_ALLOW_WRITES` and `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | Settings > Network & connectivity |
+| A `binary` body's file path                          | no setting: the stdio server has no request editor to pick a file in and nothing that allows a folder, so only a folder the engine already allows works | the request editor, or Settings > Files |
+| A collection's remembered data file (`dataFile`)     | never present: `dataFileLocation` is absent on stdio, so no path is remembered; ask the user for it | the app remembers the path |
+| What `sync_spec`'s safe policy declined              | no setting: a person ticks it under Collection -> Spec -> Sync in the desktop app | Collection -> Spec -> Sync |
+
+The server instructions' write and reveal gate sentences read the host the same
+way, and so do the tool, resource and prompt descriptions. A description is a
+static string built at module load, so it names its remedy with a token from
+`remedy.ts` (`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
+`REVEAL_SETTING_TOKEN` ends each withheld-output sentence in `withhold.ts`, and
+the Files, authority, data-file, proxy and Sync remedies above have one each).
+`server.ts` fills the tokens in per session: the whole `tools/list` answer (a
+tool's description, its parameters' descriptions and its output schema) and each
+resource's description. `toolCatalog()`, which feeds the app's Settings tool
+list, always resolves for `app`, and `dispatchTool` resolves a token in a
+refusal's text (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`). Only tokens
+`remedy.ts` defines are replaced, so braces in a user's own text pass through.
+`remedy.test.ts` iterates `SAFETY_ENV_VARS`, so a safety field added without
+a variable fails there, and `server-host.test.ts` drives each refusal through the
+real dispatch for both hosts and asserts a CLI message never says "Settings" or
+"Vayu app". It also lists every tool (parameter descriptions included), resource and
+prompt for a CLI session with writes on and off and fails on either phrase, or on
+a token left unresolved, naming the tool.
 
 Both entry points sanitize their input through the same function
 (`sanitizeSafetyInput` in `electron/mcp/config.ts`), so the environment is held to
