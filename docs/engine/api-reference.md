@@ -5672,6 +5672,15 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   left as separators, its path by the path set under
   [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
   ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+  A script and Send write the same request line for a space, a control
+  character, a non-ASCII byte and a value substituted into the path, query or
+  fragment, because the literal pass above encodes a subset of what
+  `encode_url_as_postman` does (issue #2465). They differ on purpose where
+  Send keeps a byte as typed so that a URL that sends today still does: a
+  script also writes `"`, `<`, `>`, a backtick and, in the query, `'` as `%XX`,
+  `{` and `}` in the path, turns a backslash before the query into `/` and
+  lowercases the host. `tests/url_encoding_test.cpp`
+  (`PostmanUrlEncodingAgreement`) pins both halves.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
