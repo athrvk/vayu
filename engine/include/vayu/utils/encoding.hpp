@@ -11,6 +11,7 @@
 
 #include <sodium.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -68,13 +69,104 @@ inline std::string sodium_base64_encode (std::string_view in, int variant) {
     return out;
 }
 
+/// How many bytes the UTF-8 lead byte @p lead announces, or 0 when it cannot
+/// start a sequence at all (a continuation byte, or 0xF8 and above).
+constexpr std::size_t utf8_announced_length (unsigned char lead) {
+    if (lead < 0x80) {
+        return 1;
+    }
+    if ((lead & 0xE0) == 0xC0) {
+        return 2;
+    }
+    if ((lead & 0xF0) == 0xE0) {
+        return 3;
+    }
+    if ((lead & 0xF8) == 0xF0) {
+        return 4;
+    }
+    return 0;
+}
+
+/// True when @p sequence, exactly as long as its lead byte announces, is
+/// well-formed and minimally encoded for a scalar value UTF-8 may carry. The
+/// overlong and surrogate checks are what separate this from a length-only
+/// test: both are byte patterns a decoder must reject rather than pass through.
+inline bool utf8_sequence_is_valid (std::string_view sequence) {
+    const auto byte = [sequence] (std::size_t index) {
+        return static_cast<std::uint32_t> (static_cast<unsigned char> (sequence[index]));
+    };
+    for (std::size_t i = 1; i < sequence.size (); ++i) {
+        if ((byte (i) & 0xC0) != 0x80) {
+            return false;
+        }
+    }
+    switch (sequence.size ()) {
+    case 1: return true;
+    case 2: return byte (0) >= 0xC2; // C0/C1 encode 7-bit values overlong
+    case 3: {
+        const std::uint32_t code =
+        ((byte (0) & 0x0F) << 12) | ((byte (1) & 0x3F) << 6) | (byte (2) & 0x3F);
+        return code >= 0x800 && (code < 0xD800 || code > 0xDFFF);
+    }
+    case 4: {
+        const std::uint32_t code = ((byte (0) & 0x07) << 18) |
+        ((byte (1) & 0x3F) << 12) | ((byte (2) & 0x3F) << 6) | (byte (3) & 0x3F);
+        return code >= 0x10000 && code <= 0x10FFFF;
+    }
+    default: return false;
+    }
+}
+
 } // namespace detail
+
+/**
+ * @brief Length of the well-formed UTF-8 sequence that starts at @p at in
+ *        @p text, or 0 when none does.
+ *
+ * Strict: an overlong form, a surrogate, a value past U+10FFFF and a sequence
+ * cut short by the end of @p text are all 0. That is the set nlohmann's
+ * serializer refuses with `type_error.316`, so a caller deciding whether bytes
+ * can sit in a JSON string asks the same question the serializer will.
+ */
+inline std::size_t utf8_sequence_length (std::string_view text, std::size_t at) {
+    const std::size_t length =
+    detail::utf8_announced_length (static_cast<unsigned char> (text.at (at)));
+    if (length == 0 || text.size () - at < length) {
+        return 0;
+    }
+    return detail::utf8_sequence_is_valid (text.substr (at, length)) ? length : 0;
+}
+
+/**
+ * @brief Whether @p bytes are text: valid UTF-8 over the whole of them, and no
+ *        NUL.
+ *
+ * Whole, unlike `core::looks_binary`'s sniff of the first `SNIFF_BYTES`: the
+ * answer decides whether a response body can travel as a JSON string at all
+ * (issue #2458), and one bad byte past the sniff window is enough to make the
+ * serializer throw. NUL is valid UTF-8 but never appears in text, so a body
+ * carrying one is treated as the binary it almost certainly is. Empty is text.
+ */
+inline bool is_valid_utf8_text (std::string_view bytes) {
+    std::size_t at = 0;
+    while (at < bytes.size ()) {
+        if (bytes[at] == '\0') {
+            return false;
+        }
+        const std::size_t length = utf8_sequence_length (bytes, at);
+        if (length == 0) {
+            return false;
+        }
+        at += length;
+    }
+    return true;
+}
 
 /**
  * @brief Base64-encode arbitrary bytes (RFC 4648, standard alphabet, padded).
  *
- * Used for HTTP Basic credentials and OAuth 2.0 client authentication
- * (RFC 6749 §2.3.1).
+ * Used for HTTP Basic credentials, OAuth 2.0 client authentication
+ * (RFC 6749 §2.3.1), and a response body that is not text (issue #2458).
  */
 inline std::string base64_encode (std::string_view in) {
     return detail::sodium_base64_encode (in, sodium_base64_VARIANT_ORIGINAL);
