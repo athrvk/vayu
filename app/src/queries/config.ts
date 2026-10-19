@@ -31,7 +31,8 @@ export function useConfigQuery() {
 
 /**
  * What the engine will add to a request that names none of it (issue #1229) -
- * `User-Agent`, a negotiated `Accept-Encoding`, an optional correlation id.
+ * `User-Agent`, a negotiated `Accept-Encoding`, an optional correlation id and,
+ * while `sendExpectContinue` is on, `Expect: 100-continue`.
  *
  * Read rather than derived: the *engine* decides the set (its libcurl decides
  * which encodings it can even ask for), so a client that worked it out from the
@@ -62,11 +63,12 @@ export function useUpdateConfigMutation() {
 		onSuccess: (updatedConfig) => {
 			// Update cache with new config
 			queryClient.setQueryData<GetConfigResponse>(queryKeys.config.all, updatedConfig);
-			// Four config entries decide what a send adds on its own
+			// Five config entries decide what a send adds on its own
 			// (`negotiateCompression`, `loadNegotiateCompression`,
-			// `correlationIdEnabled`, `correlationIdHeader`), and the engine
-			// resolves them - so the declared set has to be re-read rather than
-			// patched from the entries written here.
+			// `sendExpectContinue`, `correlationIdEnabled`,
+			// `correlationIdHeader`), and the engine resolves them - so the
+			// declared set has to be re-read rather than patched from the entries
+			// written here.
 			queryClient.invalidateQueries({ queryKey: queryKeys.requestDefaults.all });
 		},
 	});

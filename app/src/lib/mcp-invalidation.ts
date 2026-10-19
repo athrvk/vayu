@@ -237,9 +237,9 @@ const INVALIDATORS: Record<
 
 	/*
 	 * `requestDefaults` beside `config` because it is a second endpoint reading
-	 * the same entries, not a slice of the first: four of them
-	 * (`negotiateCompression`, `loadNegotiateCompression`, `correlationIdEnabled`,
-	 * `correlationIdHeader`) decide what a send adds on its own, and the engine
+	 * the same entries, not a slice of the first: five of them
+	 * (`negotiateCompression`, `loadNegotiateCompression`, `sendExpectContinue`,
+	 * `correlationIdEnabled`, `correlationIdHeader`) decide what a send adds on its own, and the engine
 	 * resolves the answer - its libcurl decides which encodings can even be
 	 * asked for - so the declared set has to be re-read rather than derived here.
 	 * `useUpdateConfigMutation` drops both keys for exactly this reason, and this
