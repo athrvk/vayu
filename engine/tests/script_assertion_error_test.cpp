@@ -167,6 +167,19 @@ TEST_F (AssertionErrorTest, TheCustomMessagePrefixSurvivesTheRename) {
     "AssertionError|true|user 42: Expected value to be truthy");
 }
 
+/**
+ * #2524: the matcher after `.property(name)` reports about the property's value,
+ * so a type mismatch names the value's type, not "object".
+ */
+TEST_F (AssertionErrorTest, AMatcherAfterPropertyReportsAboutTheValue) {
+    EXPECT_EQ (failure_of (R"(pm.expect({id:1}).to.have.property("id").that.is.a("string"))"),
+    "AssertionError: Expected type number to be string");
+    EXPECT_EQ (failure_of (R"(pm.expect({data:"x"}).to.have.property("data").that.is.an("object"))"),
+    "AssertionError: Expected type string to be object");
+    EXPECT_EQ (failure_of (R"(pm.expect({id:1}, "user 42").to.have.property("id").and.equal(2))"),
+    "AssertionError: user 42: Expected 1 to equal 2");
+}
+
 // ----------------------------------------------------------------------------
 // pm.response.to - chai in Postman as much as pm.expect is
 // ----------------------------------------------------------------------------
