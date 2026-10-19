@@ -1167,9 +1167,10 @@ TEST_F (MockServerTest, AnUnlistedOriginGetsNoCorsHeaderOnAResponseOrAPreflight)
     // A listed origin's subdomain or another scheme is a different origin.
     for (const char* other : { "https://sub.app.example.test",
          "http://app.example.test", "https://app.example.test:8443" }) {
-        const auto near = client.Get ("/pets", httplib::Headers{ { "Origin", other } });
-        ASSERT_TRUE (near) << other;
-        EXPECT_FALSE (has_cors_header (*near)) << other;
+        const auto other_origin_res =
+        client.Get ("/pets", httplib::Headers{ { "Origin", other } });
+        ASSERT_TRUE (other_origin_res) << other;
+        EXPECT_FALSE (has_cors_header (*other_origin_res)) << other;
     }
 }
 
