@@ -722,40 +722,39 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return expect_chained (ctx, this_val);
 }
 
-JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+/**
+ * @brief `.to.be.true` / `.to.be.false`: the boolean itself, not its truthiness.
+ *
+ * chai compares with `=== true` and `=== false`, so `expect(1).to.be.true` and
+ * `expect("").to.be.false` fail there. Reading them through `JS_ToBool` passed
+ * both, and `.not.be.false` on `null` as well. `.ok` is the truthy matcher and
+ * keeps `JS_ToBool` (#2523).
+ */
+JSValue expect_boolean_literal (JSContext* ctx, JSValueConst this_val, bool expected) {
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
     if (!state) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    bool is_true = JS_ToBool (ctx, state->actual) == 1;
-    bool pass    = state->negated ? !is_true : is_true;
+    const bool is_literal = JS_IsBool (state->actual) &&
+    (JS_ToBool (ctx, state->actual) == 1) == expected;
+    const bool pass = state->negated ? !is_literal : is_literal;
 
     if (!pass) {
-        const char* msg = state->negated ? "Expected value to be falsy" :
-                                           "Expected value to be truthy";
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be " : " to be ") + (expected ? "true" : "false");
         return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
 }
 
+JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    return expect_boolean_literal (ctx, this_val, true);
+}
+
 JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-
-    bool is_false = JS_ToBool (ctx, state->actual) == 0;
-    bool pass     = state->negated ? !is_false : is_false;
-
-    if (!pass) {
-        const char* msg = state->negated ? "Expected value to not be false" :
-                                           "Expected value to be false";
-        return throw_expect_failure (ctx, state, msg);
-    }
-
-    return expect_chained (ctx, this_val);
+    return expect_boolean_literal (ctx, this_val, false);
 }
 
 /**

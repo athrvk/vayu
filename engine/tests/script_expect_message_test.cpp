@@ -4,8 +4,8 @@
  *
  * The custom message exists for exactly one moment: the failure. A script that
  * asserts the same shape in a loop, or from two code paths, writes the message
- * to say *which* one broke - the generic matcher text ("Expected value to be
- * truthy") never can. Dropping it silently is worse than rejecting it, because
+ * to say *which* one broke - the generic matcher text ("Expected value to
+ * exist") never can. Dropping it silently is worse than rejecting it, because
  * the script looks correct and the report is merely useless.
  *
  * So the assertions here are on the reported error text, per matcher. The
@@ -72,9 +72,9 @@ TEST_F (ExpectMessageTest, TheCustomMessagePrefixesTheGenericFailure) {
     failure_of (R"(pm.expect(false, "this is the MCP-path gap").to.be.true)");
 
     EXPECT_TRUE (contains (reported, "this is the MCP-path gap")) << reported;
-    EXPECT_TRUE (contains (reported, "Expected value to be truthy")) << reported;
+    EXPECT_TRUE (contains (reported, "Expected false to be true")) << reported;
     // chai's order and separator: the context, then what went wrong.
-    EXPECT_TRUE (contains (reported, "this is the MCP-path gap: Expected value to be truthy"))
+    EXPECT_TRUE (contains (reported, "this is the MCP-path gap: Expected false to be true"))
     << reported;
 }
 
@@ -94,7 +94,7 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
     { R"(pm.expect(1, "M").to.equal(2))", "to equal" },
     { R"(pm.expect({ a: 1 }, "M").to.eql({ a: 2 }))", "deeply equal" },
     { R"(pm.expect(undefined, "M").to.exist)", "to exist" },
-    { R"(pm.expect(false, "M").to.be.true)", "truthy" },
+    { R"(pm.expect(false, "M").to.be.true)", "to be true" },
     { R"(pm.expect(true, "M").to.be.false)", "to be false" },
     { R"(pm.expect(1, "M").to.be.above(2))", "to be above" },
     { R"(pm.expect(2, "M").to.be.below(1))", "to be below" },
@@ -141,6 +141,24 @@ TEST_F (ExpectMessageTest, TheMessageSurvivesNegationAndChaining) {
     failure_of (R"(pm.expect(5, "M").to.be.above(1).and.to.be.below(3))"), "M: Expected 5"));
 }
 
+// `.true` / `.false` name the value they refused, and `.ok` keeps its truthy
+// wording because it is the matcher that coerces (#2523).
+TEST_F (ExpectMessageTest, TrueAndFalseNameTheValueTheyRefused) {
+    EXPECT_EQ (failure_of (R"(pm.expect(1).to.be.true)"), "AssertionError: Expected 1 to be true");
+    EXPECT_EQ (failure_of (R"(pm.expect("true").to.be.true)"),
+    "AssertionError: Expected 'true' to be true");
+    EXPECT_EQ (failure_of (R"(pm.expect(0).to.be.false)"),
+    "AssertionError: Expected 0 to be false");
+    EXPECT_EQ (failure_of (R"(pm.expect(null).to.be.false)"),
+    "AssertionError: Expected null to be false");
+    EXPECT_EQ (failure_of (R"(pm.expect(true).to.not.be.true)"),
+    "AssertionError: Expected true to not be true");
+    EXPECT_EQ (failure_of (R"(pm.expect(false).to.not.be.false)"),
+    "AssertionError: Expected false to not be false");
+    EXPECT_EQ (failure_of (R"(pm.expect(0).to.be.ok)"),
+    "AssertionError: Expected value to be truthy");
+}
+
 // The one-argument form is the overwhelming majority of scripts in the wild and
 // its report must read exactly as it did before the message existed - no stray
 // separator, no empty prefix.
@@ -150,7 +168,7 @@ TEST_F (ExpectMessageTest, TheOneArgumentFormIsUnchanged) {
     // `AssertionError:` is chai's name for a failed assertion (#487), not a
     // prefix this feature adds.
     EXPECT_EQ (failure_of (R"(pm.expect(false).to.be.true)"),
-    "AssertionError: Expected value to be truthy");
+    "AssertionError: Expected false to be true");
     EXPECT_EQ (failure_of (R"(pm.expect(1).to.equal(2))"),
     "AssertionError: Expected 1 to equal 2");
 }
@@ -161,14 +179,13 @@ TEST_F (ExpectMessageTest, TheOneArgumentFormIsUnchanged) {
 // ": " in front of the failure.
 TEST_F (ExpectMessageTest, ANonStringMessageIsCoercedAndAnAbsentOneIsNotPrefixed) {
     EXPECT_TRUE (contains (failure_of (R"(pm.expect(false, 42).to.be.true)"),
-    "42: Expected value to be truthy"));
+    "42: Expected false to be true"));
     EXPECT_TRUE (contains (failure_of (R"(pm.expect(false, { a: 1 }).to.be.true)"),
-    "[object Object]: Expected value to be truthy"));
+    "[object Object]: Expected false to be true"));
 
     for (const char* absent : { R"(pm.expect(false, undefined).to.be.true)",
          R"(pm.expect(false, null).to.be.true)", R"(pm.expect(false, "").to.be.true)" }) {
-        EXPECT_EQ (failure_of (absent), "AssertionError: Expected value to be truthy")
-        << absent;
+        EXPECT_EQ (failure_of (absent), "AssertionError: Expected false to be true") << absent;
     }
 }
 

@@ -512,6 +512,50 @@ TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
     EXPECT_TRUE (result.tests[2].passed);
 }
 
+// `.true` / `.false` are `=== true` / `=== false`, as in chai, not truthiness
+// (#2523). Each script below holds one assertion per test so a pass or a fail
+// is read per value, and `.ok` is the matcher that keeps the coercion.
+TEST_F (ScriptEngineTest, ExpectTrueAndFalseRequireARealBoolean) {
+    auto result = engine.execute_test (R"(
+        pm.test("true is true", function() { pm.expect(true).to.be.true; });
+        pm.test("false is false", function() { pm.expect(false).to.be.false; });
+        pm.test("'true' is not true", function() { pm.expect('true').to.be.true; });
+        pm.test("1 is not true", function() { pm.expect(1).to.be.true; });
+        pm.test("{} is not true", function() { pm.expect({}).to.be.true; });
+        pm.test("'' is not false", function() { pm.expect('').to.be.false; });
+        pm.test("0 is not false", function() { pm.expect(0).to.be.false; });
+        pm.test("null is not false", function() { pm.expect(null).to.be.false; });
+        pm.test("undefined is not false", function() { pm.expect(undefined).to.be.false; });
+        pm.test("1 is ok", function() { pm.expect(1).to.be.ok; });
+        pm.test("0 is not ok", function() { pm.expect(0).to.be.ok; });
+    )",
+    request, response, env);
+
+    const std::vector<bool> expected = { true, true, false, false, false, false,
+        false, false, false, true, false };
+    ASSERT_EQ (result.tests.size (), expected.size ());
+    for (size_t i = 0; i < expected.size (); ++i) {
+        EXPECT_EQ (result.tests[i].passed, expected[i]) << result.tests[i].name;
+    }
+}
+
+TEST_F (ScriptEngineTest, ExpectNotTrueAndNotFalseInvertTheStrictCheck) {
+    auto result = engine.execute_test (R"(
+        pm.test("1 is not true", function() { pm.expect(1).to.not.be.true; });
+        pm.test("true is true", function() { pm.expect(true).to.not.be.true; });
+        pm.test("0 is not false", function() { pm.expect(0).to.not.be.false; });
+        pm.test("null is not false", function() { pm.expect(null).to.not.be.false; });
+        pm.test("false is false", function() { pm.expect(false).to.not.be.false; });
+    )",
+    request, response, env);
+
+    const std::vector<bool> expected = { true, false, true, true, false };
+    ASSERT_EQ (result.tests.size (), expected.size ());
+    for (size_t i = 0; i < expected.size (); ++i) {
+        EXPECT_EQ (result.tests[i].passed, expected[i]) << result.tests[i].name;
+    }
+}
+
 TEST_F (ScriptEngineTest, ExpectNullUndefinedOkEmpty) {
     auto result = engine.execute_test (R"(
         pm.test("null", function() { pm.expect(null).to.be.null; });
