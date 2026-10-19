@@ -509,6 +509,14 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
         return row;
     }
 
+    // Ahead of the measure: `dump ()` recurses, and a cell nested far enough
+    // overflows the stack (#2362). Same rule and wording as a data set's rows.
+    if (auto refusal = vayu::core::refuse_overdeep_cell (*field, "data", std::nullopt)) {
+        row.ok    = false;
+        row.error = std::move (*refusal);
+        return row;
+    }
+
     // The same bound a run's whole data set is measured against, applied to the
     // one row this endpoint takes. Measured before the row is kept, so an
     // oversized payload is refused rather than held.
@@ -2340,6 +2348,40 @@ void erase_null_members (nlohmann::json& json) {
 }
 
 /**
+ * The refusal for a data cell nested past the engine's depth bound, read from
+ * the two fields that carry rows (#2362): `data` (`invalid_run_config`, like
+ * every other refusal of it) and `scenario.data` (`invalid_scenario`).
+ *
+ * `handle_start_load_test` dumps the whole payload for the stored snapshot
+ * before either reader runs, and `dump ()` recurses: a cell nested deep enough
+ * crashes the engine there, so the readers' own check comes too late. This
+ * runs right after the parse. Both readers keep the check, so a caller of
+ * `resolve_scenario` or `read_load_data_set` is held to it too.
+ */
+RouteResult refuse_overdeep_run_data (const nlohmann::json& json) {
+    if (!json.is_object ()) {
+        return {};
+    }
+    if (auto data = json.find ("data"); data != json.end ()) {
+        if (auto reason = vayu::core::refuse_overdeep_data (*data, "data")) {
+            return route_error (400, *reason, "invalid_run_config");
+        }
+    }
+    const auto scenario = json.find ("scenario");
+    if (scenario == json.end () || !scenario->is_object ()) {
+        return {};
+    }
+    const auto data = scenario->find ("data");
+    if (data == scenario->end ()) {
+        return {};
+    }
+    if (auto reason = vayu::core::refuse_overdeep_data (*data, "scenario.data")) {
+        return route_error (400, *reason, "invalid_scenario");
+    }
+    return {};
+}
+
+/**
  * A collection run (a scenario with no load `mode`) has no scrape lifecycle,
  * so a `monitor` block beside it would be accepted and never read (#1939).
  * The caller has already established the payload is that shape.
@@ -2716,6 +2758,12 @@ httplib::Response& res) {
         vayu::utils::log_warning (
         "http", "POST /runs - Invalid JSON: " + std::string (e.what ()));
         send_error (res, 400, "Invalid JSON: " + std::string (e.what ()));
+        return;
+    }
+    // Before anything copies or dumps the payload, `snapshot_body` below first.
+    if (const auto depth = refuse_overdeep_run_data (json); !depth) {
+        res.status = depth.error ().status;
+        res.set_content (depth.error ().body.dump (), "application/json");
         return;
     }
     erase_null_members (json);

@@ -94,6 +94,7 @@ add_executable(vayu_tests
     cookie_jar_test.cpp
     form_body_test.cpp
     file_body_test.cpp
+    file_grants_route_test.cpp
     graphql_body_test.cpp
     jsonrpc_body_test.cpp
     url_parts_test.cpp
@@ -221,6 +222,7 @@ add_executable(vayu_tests
     ../src/http/routes/environments.cpp
     ../src/http/routes/client_certificates.cpp
     ../src/http/routes/file_roots.cpp
+    ../src/http/routes/file_grants.cpp
     ../src/http/routes/globals.cpp
     ../src/http/routes/metrics.cpp
     ../src/http/routes/oauth.cpp
@@ -370,6 +372,7 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     FileRootsRouteTest
+    FileGrantsRouteTest
     DeleteRunTest
     ElementsControllersTest
     ElementsControllersLoadTest
@@ -573,7 +576,10 @@ endif()
 # failure, while the cost of being too low is a red release tag, which is
 # what we just paid. Set globally rather than per-preset: one number is
 # easier to trust than a platform conditional, and no healthy configuration
-# comes close to it.
+# comes close to it. The x64 slice now registers shards instead
+# (VAYU_TEST_SHARDS, below), so no release leg discovers under Rosetta any
+# more; the number stays because a cold first start of a large binary is not
+# a Rosetta-only event, and too high still only costs a slower failure.
 
 # One filter, used positive and negated, so the two halves partition the
 # suite exactly however the list changes - no test is discovered twice and
@@ -597,14 +603,75 @@ if(WIN32)
     list(APPEND vayu_scratch_database_properties RESOURCE_LOCK vayu_scratch_database)
 endif()
 
+# **Sharded registration, for a binary whose process start dominates.**
+# VAYU_TEST_SHARDS=N registers N CTest entries instead of one per test. Each
+# runs the whole binary under gtest's own sharding protocol
+# (GTEST_TOTAL_SHARDS / GTEST_SHARD_INDEX), so the suite runs as N processes,
+# each in its own scratch directory (main.cpp), each running its share of the
+# tests one after another - the model a bare `./vayu_tests` already uses.
+#
+# Only `macos-prod-x64` sets it. That slice is cross-compiled and its tests
+# run under Rosetta on the arm64 runners, where starting a process costs about
+# 0.22s of translation: the v0.44.0 release spent ~1,110s of a 1,302s x64
+# suite starting ~4,100 one-test processes, 7m16s of wall time on three cores,
+# against 200s for the same tests in the arm64 half of the same job.
+#
+# What it gives up, stated so nobody rediscovers it: the per-test net becomes
+# a per-shard one, a failure is reported as its shard (gtest's output names
+# the test), and a test shares its process with the ones before it in the
+# shard - so a test that leaks global state into the next is a bug this mode
+# can expose and per-test mode hides. The scratch-database RESOURCE_LOCK is
+# moot here; it is Windows-only. No discovery runs at build time, either. A
+# fourth entry, `vayu_tests_shard_coverage`, fails unless the shards ran every
+# listed test once between them (check_shard_coverage.cmake).
+#
+# The shard timeout is the per-test reasoning above applied to a shard: one
+# third of the suite runs in ~2-3 min under Rosetta, so 15 min covers a slow
+# healthy shard several times over, and a hang still costs no more than that.
+set(VAYU_TEST_SHARDS 0 CACHE STRING
+    "Register the suite as this many gtest shards instead of one CTest entry per test (0 = one per test)")
+if(NOT VAYU_TEST_SHARDS MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "VAYU_TEST_SHARDS must be a non-negative integer, got '${VAYU_TEST_SHARDS}'")
+endif()
+
 include(GoogleTest)
-gtest_discover_tests(vayu_tests
-    TEST_FILTER "${vayu_scratch_database_filter}"
-    DISCOVERY_TIMEOUT 150
-    PROPERTIES ${vayu_scratch_database_properties}
-)
-gtest_discover_tests(vayu_tests
-    TEST_FILTER "-${vayu_scratch_database_filter}"
-    DISCOVERY_TIMEOUT 150
-    PROPERTIES TIMEOUT ${vayu_test_timeout}
-)
+if(VAYU_TEST_SHARDS GREATER 0)
+    message(STATUS "Registering vayu_tests as ${VAYU_TEST_SHARDS} gtest shards")
+    math(EXPR vayu_last_shard "${VAYU_TEST_SHARDS} - 1")
+    set(vayu_shard_dir "${CMAKE_CURRENT_BINARY_DIR}/shard-reports")
+    set(vayu_shard_tests "")
+    foreach(shard RANGE ${vayu_last_shard})
+        add_test(NAME vayu_tests_shard_${shard}
+            COMMAND vayu_tests "--gtest_output=json:${vayu_shard_dir}/shard_${shard}.json")
+        set_tests_properties(vayu_tests_shard_${shard} PROPERTIES
+            ENVIRONMENT "GTEST_TOTAL_SHARDS=${VAYU_TEST_SHARDS};GTEST_SHARD_INDEX=${shard}"
+            TIMEOUT 900
+        )
+        list(APPEND vayu_shard_tests vayu_tests_shard_${shard})
+    endforeach()
+    # Each shard green is not the suite green: see check_shard_coverage.cmake.
+    # DEPENDS orders this after every shard, pass or fail, and does not skip it
+    # when one fails.
+    add_test(NAME vayu_tests_shard_coverage
+        COMMAND ${CMAKE_COMMAND}
+            "-DTEST_BINARY=$<TARGET_FILE:vayu_tests>"
+            "-DSHARD_DIR=${vayu_shard_dir}"
+            "-DSHARDS=${VAYU_TEST_SHARDS}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_shard_coverage.cmake"
+    )
+    set_tests_properties(vayu_tests_shard_coverage PROPERTIES
+        DEPENDS "${vayu_shard_tests}"
+        TIMEOUT 300
+    )
+else()
+    gtest_discover_tests(vayu_tests
+        TEST_FILTER "${vayu_scratch_database_filter}"
+        DISCOVERY_TIMEOUT 150
+        PROPERTIES ${vayu_scratch_database_properties}
+    )
+    gtest_discover_tests(vayu_tests
+        TEST_FILTER "-${vayu_scratch_database_filter}"
+        DISCOVERY_TIMEOUT 150
+        PROPERTIES TIMEOUT ${vayu_test_timeout}
+    )
+endif()

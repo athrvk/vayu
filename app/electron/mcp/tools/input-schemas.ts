@@ -90,7 +90,7 @@ export const defaultHeaderOptOutsInput = z
 	);
 
 export const INSECURE_TLS_REFUSAL =
-	"verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to add the internal authority under Vayu Settings > Network & connectivity, which keeps verification on for every request; or save the request with create_request/update_request `verifySSL: false` and run it (run_collection_smoke composes a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.";
+	"verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to add the internal authority under Vayu Settings > Network & connectivity, which keeps verification on for every request; or save the request with create_request/update_request `verifySSL: false` and send it by id (run_request with `requestId` and no `url` sends a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.";
 
 /**
  * `run_request`'s TLS argument: declared so that asking for the downgrade gets

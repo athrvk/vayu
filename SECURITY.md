@@ -27,6 +27,14 @@ anything. A request the engine itself sends - a Send, a run, a script's
 `pm.sendRequest`, a redirect it follows - never reaches the engine's own port
 or the MCP port, whatever spelling, redirect or DNS name leads there.
 
+Which files a request body may send from disk (the folders you allow and the
+files you pick) changes only through the app: those writes need a secret the
+app hands the engine at start and keeps from its UI window, so another local
+caller of the API, the CLI or an MCP agent included, cannot widen them. The
+app's main process makes the writes, and only for a folder you chose in the
+system folder picker or a file that reached the window through a file dialog
+or a drop; the UI window cannot name either.
+
 A mock server or webhook inbox you start is different: it exists to be called
 from pages, so every page in the browser can reach it and, by default, read
 what it answers (CORS `*`, never with your cookies). Starting one with
@@ -100,8 +108,9 @@ While reveal is off, an agent also cannot send a script of its own with
 script, or a script element): a script reads every variable, secret ones
 included, so the call is refused before anything is sent. A script stored on a
 request or collection, which the write tools can create, is not covered and
-still runs with your secrets, so leave write access off unless you want an
-agent to author them.
+still runs with your secrets (`run_request` sends a saved request, scripts
+included, when given its `requestId` and no `url`), so leave write access off
+unless you want an agent to author them.
 
 While write access is off, nothing a `run_request` sets is saved: an extractor
 the agent attaches, or its own script once reveal is on, still runs and reports,

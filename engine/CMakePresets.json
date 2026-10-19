@@ -264,7 +264,8 @@
         "CMAKE_BUILD_TYPE": "Release",
         "VCPKG_TARGET_TRIPLET": "x64-osx",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
-        "CMAKE_OSX_ARCHITECTURES": "x86_64"
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "VAYU_TEST_SHARDS": "3"
       },
       "condition": {
         "type": "equals",

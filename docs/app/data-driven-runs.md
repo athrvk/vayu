@@ -84,6 +84,13 @@ survives, which is JMeter and k6 behaviour and the reason the preview says so.
 JSON and JSONL keep what the file declared - `3` is a number, `true` is a
 boolean, `null` is null.
 
+A JSON or JSONL cell may also be an object or an array. It is bound as compact
+JSON, so `{{data.address}}` reads `{"city":"Pune"}`. A cell nested deeper than
+100 levels is refused with its row and column named, for example `Row 4, column
+"address" is nested more than 100 levels deep.` The picker says so before the
+run starts, and the engine applies the same limit to a caller that sends rows
+without the picker (a script or an MCP client).
+
 If you need a number to arrive as a number, use a JSON file - and write the
 token _outside_ the quotes in the body, `{"n": {{data.n}}}`, because that is
 what decides whether it arrives as `2` or `"2"`.

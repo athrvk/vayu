@@ -29,6 +29,8 @@ import {
 // change made the gate unreachable.
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { createDefaultRequestState } from "./request-state";
+import { presetFromCommand } from "@/modules/collections/curl-request-preset";
+import { RequestTransformer } from "@/services/transformers/request-transformer";
 import type { SanityResult } from "@/types";
 import type { KeyValueItem } from "@/types";
 import type { RequestState } from "../types";
@@ -200,7 +202,7 @@ describe("buildExecBody form modes", () => {
 		expect(body).not.toHaveProperty("content");
 	});
 
-	it("sends a file part as its path, never as a value, with its trust flag", () => {
+	it("sends a file part as its path, never as a value", () => {
 		const request = stateWith({
 			bodyMode: "form-data",
 			formData: [
@@ -214,10 +216,6 @@ describe("buildExecBody form modes", () => {
 					src: "/tmp/a.png",
 					fileName: "profile.png",
 					contentType: "image/png",
-					// The engine's trust input: a path nobody chose in the editor
-					// is sent only from an allowed folder, so dropping the flag
-					// here would wave an imported path through.
-					unresolved: true,
 				},
 			],
 		});
@@ -234,7 +232,6 @@ describe("buildExecBody form modes", () => {
 				src: "/tmp/a.png",
 				fileName: "profile.png",
 				contentType: "image/png",
-				unresolved: true,
 			},
 		]);
 	});
@@ -271,7 +268,6 @@ describe("buildExecBody form modes", () => {
 				src: "/data/a.png",
 				fileName: "a.png",
 				contentType: "image/png",
-				unresolved: true,
 			},
 		]);
 	});
@@ -291,133 +287,141 @@ describe("buildExecBody form modes", () => {
 });
 
 /**
- * A `binary` body is a file reference, never bytes - and its `unresolved` flag
- * is what the engine's trust rule reads, so it has to reach both the stored
- * shape (`toBodyPayload`, the save) and the sent one (`buildExecBody`).
+ * A `binary` body is a file reference, never bytes, and the stored shape
+ * (`toBodyPayload`, the save) and the sent one (`buildExecBody`) carry the
+ * same one.
  */
 describe("binary bodies", () => {
 	function binaryState(file: RequestState["binaryFile"]): RequestState {
 		return { ...createDefaultRequestState(), bodyMode: "binary", binaryFile: file };
 	}
 
-	it("sends the file reference, unresolved flag included", () => {
+	it("sends the file reference", () => {
 		const request = binaryState({
 			src: "/fixtures/a.bin",
 			fileName: "a.bin",
 			contentType: "image/png",
-			unresolved: true,
 		});
 
 		expect(buildExecBody(request, (s) => s)).toEqual({
 			mode: "binary",
-			file: {
-				src: "/fixtures/a.bin",
-				fileName: "a.bin",
-				contentType: "image/png",
-				unresolved: true,
-			},
+			file: { src: "/fixtures/a.bin", fileName: "a.bin", contentType: "image/png" },
 		});
 	});
 
 	it("stores the same reference the send carries", () => {
-		const request = binaryState({ src: "/fixtures/a.bin", unresolved: true });
+		const request = binaryState({ src: "/fixtures/a.bin" });
 
 		expect(toBodyPayload(request)).toEqual({
 			mode: "binary",
-			file: { src: "/fixtures/a.bin", unresolved: true },
+			file: { src: "/fixtures/a.bin" },
 		});
 	});
 
-	it("leaves empty members off the wire and states a false flag", () => {
-		const request = binaryState({
-			src: "/fixtures/a.bin",
-			fileName: "",
-			contentType: "",
-			unresolved: false,
-		});
+	it("leaves empty members off the wire", () => {
+		const request = binaryState({ src: "/fixtures/a.bin", fileName: "", contentType: "" });
 
 		expect(buildExecBody(request, (s) => s)).toEqual({
 			mode: "binary",
-			file: { src: "/fixtures/a.bin", unresolved: false },
+			file: { src: "/fixtures/a.bin" },
 		});
 	});
 
 	it("sends an empty path rather than no body, so the engine can say why", () => {
-		expect(buildExecBody(binaryState({ src: "", unresolved: true }), (s) => s)).toEqual({
+		expect(buildExecBody(binaryState({ src: "" }), (s) => s)).toEqual({
 			mode: "binary",
-			file: { src: "", unresolved: true },
+			file: { src: "" },
 		});
 	});
 });
 
 /**
- * The engine reads an absent `unresolved` as `true`, so every write path states
- * it: `false` only for a file chosen in this app on this machine, `true` for
- * anything else - a stored row from before writers sent the key included.
+ * `unresolved` is the engine's answer, derived on every read and ignored on
+ * every write (#2356). The editor keeps it for its warning; no payload the
+ * renderer builds from editor state carries it, whatever it holds.
  */
-describe("the file trust flag on every write path", () => {
+describe("the file trust flag never leaves the editor", () => {
 	/** What each writer puts on the wire, read through one shape. */
 	type Written = { fields?: Record<string, unknown>[]; file?: Record<string, unknown> };
 	const writers: [string, (r: RequestState) => Written][] = [
 		["the send", (r) => buildExecBody(r, (s) => s) as Written],
 		["the save", (r) => toBodyPayload(r) as Written],
+		["a pasted command's new request", (r) => presetFromCommand(r).body as Written],
 	];
-
-	function filePart(unresolved: boolean | undefined): KeyValueItem {
-		return {
-			id: "file-row",
-			key: "avatar",
-			value: "",
-			enabled: true,
-			type: "file",
-			src: "/tmp/a.png",
-			unresolved,
-		};
-	}
 
 	function formState(unresolved: boolean | undefined): RequestState {
 		return {
 			...createDefaultRequestState(),
 			bodyMode: "form-data",
-			formData: [filePart(unresolved)],
+			formData: [
+				{
+					id: "file-row",
+					key: "avatar",
+					value: "",
+					enabled: true,
+					type: "file",
+					src: "/tmp/a.png",
+					unresolved,
+				},
+			],
 		};
 	}
 
-	function binaryState(unresolved: boolean | undefined): RequestState {
-		// A row stored before the key existed reaches the editor without it.
-		const file = { src: "/tmp/a.bin", unresolved } as RequestState["binaryFile"];
+	function binaryStateOf(file: RequestState["binaryFile"]): RequestState {
 		return { ...createDefaultRequestState(), bodyMode: "binary", binaryFile: file };
 	}
 
+	function binaryState(unresolved: boolean | undefined): RequestState {
+		return binaryStateOf({ src: "/tmp/a.bin", unresolved });
+	}
+
 	describe.each(writers)("%s", (_name, write) => {
-		it.each([
-			[false, false],
-			[true, true],
-			[undefined, true],
-		])("a form-data file part with %s sends %s", (given, sent) => {
-			expect(write(formState(given)).fields?.[0]).toHaveProperty("unresolved", sent);
+		it.each([[false], [true], [undefined]])("drops a form-data file part's %s", (given) => {
+			const [part] = write(formState(given)).fields ?? [];
+			// Non-vacuous: the part under test is the file part, path and all.
+			expect(part).toMatchObject({ type: "file", src: "/tmp/a.png" });
+			expect(part).not.toHaveProperty("unresolved");
 		});
 
-		it.each([
-			[false, false],
-			[true, true],
-			[undefined, true],
-		])("a binary file with %s sends %s", (given, sent) => {
-			expect(write(binaryState(given)).file).toHaveProperty("unresolved", sent);
-		});
-
-		it("a text part carries no flag at all", () => {
-			const request: RequestState = {
-				...createDefaultRequestState(),
-				bodyMode: "form-data",
-				formData: [{ id: "t", key: "caption", value: "hi", enabled: true }],
-			};
-			expect(write(request).fields?.[0]).not.toHaveProperty("unresolved");
+		it.each([[false], [true], [undefined]])("drops a binary file's %s", (given) => {
+			const { file } = write(binaryState(given));
+			expect(file).toMatchObject({ src: "/tmp/a.bin" });
+			expect(file).not.toHaveProperty("unresolved");
 		});
 	});
 
-	it("a new request's empty binary body is not trusted", () => {
-		expect(createDefaultRequestState().binaryFile).toEqual({ src: "", unresolved: true });
+	it("a new request's empty binary body carries no flag", () => {
+		expect(createDefaultRequestState().binaryFile).toEqual({ src: "" });
+	});
+
+	/*
+	 * The round trip: a request read from the engine keeps the derived answer
+	 * on the way into the editor (the warning reads it), and the next save and
+	 * send built from that state carry none of it.
+	 */
+	it("keeps the engine's answer for display and sends none of it back", () => {
+		const read = RequestTransformer.toFrontend({
+			id: "req_1",
+			collectionId: "col_1",
+			name: "Upload",
+			method: "POST",
+			url: "https://api.test/upload",
+			body: {
+				mode: "binary",
+				file: { src: "/elsewhere/a.bin", fileName: "a.bin", unresolved: true },
+			},
+			createdAt: 1,
+			updatedAt: 1,
+		});
+		if (read.body.mode !== "binary") throw new Error("expected a binary body");
+		const state = binaryStateOf(read.body.file);
+
+		expect(state.binaryFile.unresolved).toBe(true);
+		for (const payload of [toBodyPayload(state), buildExecBody(state, (s) => s)]) {
+			const wire = JSON.stringify(payload);
+			expect(wire).toContain('"src":"/elsewhere/a.bin"');
+			expect(wire).not.toContain("unresolved");
+		}
 	});
 });
 

@@ -51,8 +51,10 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -142,6 +144,27 @@ TEST (ReadDataRow, OverTheByteCapIsRefusedByName) {
     // The same payload under the seeded cap is fine, so the refusal above is
     // the bound and not the shape.
     EXPECT_TRUE (read_data_row (payload, kDataBytes).ok);
+}
+
+/// A cell past the engine's depth bound is refused before the row is measured:
+/// `dump ()` recurses, so measuring it first is the crash (#2362). Exactly at
+/// the bound is still a row.
+TEST (ReadDataRow, ACellPastTheDepthBoundIsRefusedNamingTheColumn) {
+    constexpr size_t bound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+    const auto payload_with = [] (size_t depth) {
+        json payload;
+        payload["data"]        = json::object ();
+        payload["data"]["tag"] = vayu::tests::nested_array (depth);
+        return payload;
+    };
+
+    auto refused = read_data_row (payload_with (bound + 1), kDataBytes);
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.error,
+    "'data' column 'tag' is nested deeper than " + std::to_string (bound) + " levels");
+    EXPECT_FALSE (refused.value.has_value ());
+
+    EXPECT_TRUE (read_data_row (payload_with (bound), kDataBytes).ok);
 }
 
 /// `transient` + `data` and `stream` + `data` both compose: the row is read the

@@ -20,3 +20,12 @@ export const DATA_FILE_MAX_ROWS = 1000;
 
 /** Seed for `maxScenarioDataBytes` - 16 MiB, as the engine seeds it. */
 export const DATA_FILE_MAX_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Deepest a data cell may nest, mirroring `constants::spec_document::MAX_READ_DEPTH`
+ * engine-side (#2362). A fixed bound, not a setting: the engine's reader walks a
+ * cell recursively, so the picker refuses at the same depth and names the row
+ * instead of letting the run fail on its first iteration.
+ * `data-files.engine-parity.test.ts` pins the two together.
+ */
+export const DATA_FILE_MAX_NESTING = 100;

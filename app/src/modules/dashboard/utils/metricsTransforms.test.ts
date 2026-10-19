@@ -123,6 +123,28 @@ describe("buildRampOverlay", () => {
 		expect(overlay.rampDeviationPct).toBeCloseTo(850, 0);
 	});
 
+	/*
+	 * The engine's live clock reads 0 for every tick of a `script.setup` and
+	 * starts counting with load, the ramp's own origin (#2395). A run whose
+	 * concurrency tracks its configured ramp exactly on that clock deviates by
+	 * nothing; ticks offset by the setup's length would read as a lagging ramp.
+	 */
+	it("reads no deviation for an exact ramp whose ticks start at load start", () => {
+		const setupTicks = [0, 0, 0].map(() =>
+			tick({ elapsed_seconds: 0, current_concurrency: 0 })
+		);
+		const rampTicks = [0, 2.5, 5, 7.5, 10, 12].map((t) =>
+			tick({ elapsed_seconds: t, current_concurrency: Math.min(100, t * 10) })
+		);
+		const overlay = buildRampOverlay([...setupTicks, ...rampTicks], {
+			rampUpDurationSeconds: 10,
+			startConcurrency: 0,
+			targetConcurrency: 100,
+		})!;
+		expect(overlay.points[0]).toMatchObject({ time: 0, configured: 0, achieved: 0 });
+		expect(overlay.rampDeviationPct).toBeCloseTo(0, 6);
+	});
+
 	it("does not produce NaN/Inf when configured is 0 at t=0 (start=0)", () => {
 		const overlay = buildRampOverlay(
 			[

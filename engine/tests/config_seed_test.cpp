@@ -167,6 +167,106 @@ TEST (ConfigSeederTest, RewritesAnEntryWhoseMetadataChangedAndKeepsTheUsersValue
     EXPECT_EQ (replaced.front ().updated_at, 1234);
 }
 
+// The adopt-new-default rule (#2419). `stored` is a row an older build wrote
+// (default "0"); the build under test seeds default "1".
+struct AdoptRuleRun {
+    std::vector<vayu::db::ConfigEntry> replaced;
+    std::string stored_value_after;
+};
+
+AdoptRuleRun
+seed_over_old_row (const char* stored_value, const char* stored_default, bool opt_in) {
+    vayu::db::ConfigEntry stored;
+    stored.key           = "someKnob";
+    stored.value         = stored_value;
+    stored.type          = "enum";
+    stored.label         = "Knob";
+    stored.description   = "A knob whose default a build changed.";
+    stored.category      = "limits";
+    stored.default_value = stored_default;
+    stored.updated_at    = 1234;
+
+    vayu::db::ConfigEntry seeded = stored;
+    seeded.value                 = "1";
+    seeded.default_value         = "1";
+    seeded.updated_at            = 9999;
+
+    AdoptRuleRun run;
+    std::unordered_set<std::string> known;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    { stored }, known,
+    [&run] (
+    const vayu::db::ConfigEntry& entry) { run.replaced.push_back (entry); },
+    [] (const std::string&) {});
+    if (opt_in) {
+        seed (seeded, vayu::db::config_seeds::adopt_new_default);
+    } else {
+        seed (seeded);
+    }
+    run.stored_value_after =
+    run.replaced.empty () ? stored.value : run.replaced.back ().value;
+    return run;
+}
+
+TEST (ConfigSeederTest, AdoptsTheNewDefaultWhenTheStoredValueIsTheOldDefault) {
+    const auto run = seed_over_old_row ("0", "0", true);
+    ASSERT_EQ (run.replaced.size (), 1u);
+    EXPECT_EQ (run.replaced.front ().value, "1");
+    EXPECT_EQ (run.replaced.front ().default_value, "1");
+}
+
+TEST (ConfigSeederTest, KeepsAValueTheUserSetAwayFromTheOldDefault) {
+    const auto run = seed_over_old_row ("2", "0", true);
+    EXPECT_EQ (run.stored_value_after, "2");
+    ASSERT_EQ (run.replaced.size (), 1u) << "the new default is still recorded";
+    EXPECT_EQ (run.replaced.front ().default_value, "1");
+}
+
+TEST (ConfigSeederTest, KeepsAnOffTheUserChoseAgainstTheCurrentDefault) {
+    // Stored "0" beside a stored default that is already "1": the user chose
+    // Off against the current default, which is not the untouched case.
+    const auto run = seed_over_old_row ("0", "1", true);
+    EXPECT_TRUE (run.replaced.empty ());
+    EXPECT_EQ (run.stored_value_after, "0");
+}
+
+TEST (ConfigSeederTest, AMigratedRowIsNotRewrittenByTheNextStart) {
+    vayu::db::ConfigEntry migrated;
+    migrated.key           = "someKnob";
+    migrated.value         = "1";
+    migrated.type          = "enum";
+    migrated.label         = "Knob";
+    migrated.description   = "A knob whose default a build changed.";
+    migrated.category      = "limits";
+    migrated.default_value = "1";
+    migrated.updated_at    = 9999;
+
+    std::unordered_set<std::string> known;
+    std::vector<vayu::db::ConfigEntry> replaced;
+    vayu::db::config_seeds::ConfigSeeder seed (
+    { migrated }, known,
+    [&replaced] (
+    const vayu::db::ConfigEntry& entry) { replaced.push_back (entry); },
+    [] (const std::string&) {});
+    // The next start stamps a later `updated_at` on the entry it seeds; a
+    // rewrite that took it over would make every start write the row.
+    vayu::db::ConfigEntry reseeded = migrated;
+    reseeded.updated_at            = migrated.updated_at + 1000;
+    seed (reseeded, vayu::db::config_seeds::adopt_new_default);
+
+    EXPECT_TRUE (replaced.empty ());
+}
+
+TEST (ConfigSeederTest, AnEntryThatDoesNotOptInKeepsItsValueWhenItsDefaultMoves) {
+    // The shape `workers` has on a machine with a different core count: value
+    // equals the stored default, the seeded default differs. Without the
+    // opt-in the user's row is left alone.
+    const auto run = seed_over_old_row ("0", "0", false);
+    EXPECT_EQ (run.stored_value_after, "0");
+    ASSERT_EQ (run.replaced.size (), 1u);
+    EXPECT_EQ (run.replaced.front ().default_value, "1");
+}
+
 TEST (ConfigSeederTest, RefusesAKeySeededTwice) {
     std::unordered_set<std::string> known;
     vayu::db::config_seeds::ConfigSeeder seed (

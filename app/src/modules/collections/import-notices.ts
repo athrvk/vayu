@@ -93,8 +93,8 @@ const COPY: Partial<Record<string, Copy>> = {
 		many: "{n} Insomnia unit tests not imported",
 	},
 	// A whole-file body imports as a `binary` body now, with the path the
-	// source named marked unresolved; the folder lines below are where the
-	// user acts on it, so this line only says what arrived.
+	// source named; the folder lines below are where the user acts on one the
+	// engine would refuse, so this line only says what arrived.
 	file_body: {
 		tier: "note",
 		named: "file body imported - choose the file or allow its folder to send it",
@@ -409,11 +409,12 @@ export interface FileReferenceNeeds {
  * What an import's file references need before they can be sent, read off the
  * drafts themselves rather than a counter, so every format answers alike.
  *
- * - `folders`: every imported path is `unresolved` - nobody chose it on this
- *   machine - so the engine sends it only from an allowed folder. One entry
- *   per distinct parent folder, so a collection exported on this same machine
- *   is one "Allow folder" click rather than a relink per request. A path with
- *   a `{{variable}}` in its folder names no folder yet and is left out.
+ * - `folders`: the paths `POST /import/parse` answered `unresolved` - the
+ *   engine's derived answer that it would refuse them on this machine, being
+ *   neither picked here nor under an allowed folder (#2356). One entry per
+ *   distinct parent folder, so a collection exported on this same machine is
+ *   one "Allow folder" choice rather than a relink per request. A path with a
+ *   `{{variable}}` in its folder names no folder yet and is left out.
  * - `bodiesWithoutFile`: `binary` bodies that arrived with no path at all (an
  *   OpenAPI upload documents the type, never the file). Form-data parts in the
  *   same state are the engine's `unattachedFileParts`, already a line of its

@@ -50,7 +50,7 @@ can read an older engine, but the engine no longer produces it.
 ## Who may call the API
 
 The engine serves no browser. No response carries a CORS header, and the
-request gate in `server.cpp` refuses, before any route runs:
+request gate in `server.cpp` refuses, before any route runs, for every route:
 
 - a request whose `Host` is not exactly `127.0.0.1:<port>`, `localhost:<port>`
   or `[::1]:<port>` (the port this engine bound) - `403`, message naming the
@@ -74,6 +74,32 @@ is opaque to the page (no CORS header, and the browser's CORB/ORB keeps a JSON
 body out of a `<script>`), and **no `GET` route has a side effect**. A page
 can therefore neither read the engine nor change it, though it can make the
 engine run any `GET` handler.
+
+**Writes to file trust need one more thing: the grant secret.** Host and
+Origin decide who reaches the API at all; they cannot tell the Vayu app from
+any other local caller (a script, the CLI, the MCP server, another process).
+What a request body may send from disk is decided by the allowed folders and
+the picked files, so the four routes that change those -
+[`POST`/`DELETE /file-roots`](#allowed-folders-file-roots) and
+[`POST`/`DELETE /file-grants`](#picked-files-file-grants) - also require the
+header `X-Vayu-Grant-Secret` to carry the engine's per-start secret, and answer
+`403` with code `grant_secret_required` otherwise:
+
+- The app's main process generates the secret and passes it in the engine's
+  environment as `VAYU_GRANT_SECRET`. The engine reads it once at start,
+  before any thread exists, and removes it from its own environment, so
+  nothing it later reads or starts sees it. A value shorter than 32 characters
+  is ignored with a warning that does not print it.
+- The header is compared in constant time (both sides hashed with SHA-256, the
+  digests compared with `sodium_memcmp`). A missing header, an empty one and a
+  wrong one are the same `403`. The secret is never logged (the request log
+  records method, path, status, time and size, never a header) and no
+  response carries it, a refusal included.
+- **An engine started without a secret refuses all four writes**, whatever the
+  header says. That is every engine the app did not start: `vayu-engine` run
+  by hand, or one the CLI or a CI job starts. Folders allowed and files picked
+  before then still apply to every send, and `GET /file-roots` and
+  `GET /file-grants` answer as usual.
 
 The engine's own outbound client sends exactly what this gate admits, a
 loopback `Host` and no `Origin`, so the engine never sends a request to its own
@@ -497,8 +523,7 @@ A **`binary`** body is one whole file:
   "file": {
     "src": "/home/ada/fixtures/avatar.png",
     "fileName": "avatar.png",
-    "contentType": "image/png",
-    "unresolved": true
+    "contentType": "image/png"
   }
 }
 ```
@@ -528,7 +553,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
 | `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
-| `unresolved` | `false` only when a person chose `src` in the editor. Fails closed: absent, `null` or any non-boolean is `true`, so a caller that means "chosen" says `false`. |
+| `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
 
@@ -540,27 +565,34 @@ Shape refusals (`400`):
 - A `src` on a part that is not `"type": "file"`: it names a file nothing would
   send.
 
-**The trust rule.** Vayu sends a file you chose in the editor, or any file under
-a folder you allowed in Settings ([Allowed folders](#allowed-folders-file-roots)).
-A reference is sendable when `!unresolved || allowed(canonical(src))`:
-containment is decided on canonical paths, component by component, so a
-symlink inside an allowed folder that points outside it is outside, and
-`/data/fixtures-old` is not under `/data/fixtures`. Every writer that is not a
-person in the editor writes `unresolved: true` - importers, curl paste, MCP -
-and so does every payload that omits the key; **composition sets it too** whenever `src` held a `{{` before resolution
-(`POST /compose`, and a data row bound into the path by a run), so a path a
-variable or a data set chose is sent only from under an allowed folder. The
-flag rides the wire, which is how it survives compose -> app -> execute.
-**Scripts can never choose a path**: the residual pass after the pre-request
-script resolves a reference's `fileName` and `contentType` but never `src`.
+**The trust rule.** Vayu sends a file under a folder you allowed in Settings
+([Allowed folders](#allowed-folders-file-roots)), or a file a person picked
+([Picked files](#picked-files-file-grants), #2356). A reference is sendable when its canonical path lies
+under an allowed folder or equals a picked file's: containment is decided on
+canonical paths, component by component, so a symlink inside an allowed folder
+that points outside it is outside, and `/data/fixtures-old` is not under
+`/data/fixtures`; a picked file is the canonical path recorded when it was
+picked, matched exactly, so a link re-pointed after the pick names another file
+and is refused. **What a request body says about trust is ignored**: the
+`unresolved` member an older client sends is accepted and dropped, on
+`POST /execute`, `POST /runs`, `POST /compose` and every write, so no caller can
+claim a file was chosen. A path composition or a data row fills in is held to
+the same rule as a literal one. **Scripts can never choose a path**: the
+residual pass after the pre-request script resolves a reference's `fileName`
+and `contentType` but never `src`.
 
-**A stored request states it.** `POST`/`PUT /requests` and `POST /import/apply`
-store every file reference of a body they write with an explicit `unresolved`,
-absent read as `true`, and the
-[schema version 4 migration](db-schema.md#the-file-trust-restatement-schema-version-4)
-stated it on every body stored before. So a saved request composed by id
-(`POST /compose` with `requestId`, and every collection run) carries the key
-as stored, and an absent key means `true` there as everywhere else.
+**`unresolved` is derived on read.** No stored body carries the key: the
+request writes (`POST`/`PUT /requests`, `POST /import/apply`, `POST /specs/sync`)
+and a run's `configSnapshot` drop it, and the
+[schema version 6 migration](db-schema.md#the-file-grants-migration-schema-version-6)
+removed it from every body stored before. Every read that hands a body to an
+editor writes it back as the engine's answer for this machine now:
+`GET /requests`, `GET /requests/:id`, the `POST`/`PUT /requests` responses,
+`POST /reorder`'s request rows, `GET /runs/:id`'s `configSnapshot.body` and
+`POST /import/parse`. `true` means a concrete path that is neither under an
+allowed folder nor picked, which the send would refuse; `false` means an
+allowed path or one still holding `{{` (decided after composition). A
+reference with no path carries no `unresolved` at all.
 
 Every enabled reference is checked, in this order, and the first failure
 refuses the send:
@@ -569,7 +601,7 @@ refuses the send:
    `"Form field 'avatar' has no file selected - ..."`).
 2. `src` still holds `{{`: an unresolved variable.
 3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
-4. Untrusted: `"Body file '<path>' was not chosen in the editor and is not
+4. Untrusted: `"Body file '<path>' was not picked on this machine and is not
    under an allowed folder - pick it again in the request, or allow its folder
    in Settings > Files"`.
 5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
@@ -846,6 +878,9 @@ exists, and it is never consulted at execution time. `dbSynchronous` is
 SQLite's durability level, whose three values (`"0"` Off, `"1"` Normal, `"2"`
 Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
+Its default is Normal (`"1"`). After a power cut or an operating-system crash,
+Off can corrupt the whole workspace file, Normal cannot corrupt it but may lose
+the last few seconds of writes, and Full keeps every committed write.
 `proxyMode` is the third - see [Proxy settings](#proxy-settings) below.
 
 The Settings panel renders entries dynamically, so new keys appear without app
@@ -2890,9 +2925,10 @@ operation declares was never going to be written, so it is not counted
 (`rowsNotDeclared` still counts it).
 
 A form's file part, and a binary body's `file`, keep their name, declared file
-name and content type, never the local path they were read from (`src`) nor
-`unresolved`. A path a hand-edited `x-vayu-request` does carry is read back
-marked `unresolved`.
+name and content type, never the local path they were read from (`src`). A
+path a hand-edited `x-vayu-request` does carry is read back as written, and
+sent only once picked or under an allowed folder; an `unresolved` it states is
+dropped.
 
 **`x-vayu-elements`** carries a request's or the collection's whole `elements`
 array verbatim, the same vendor-extension convention `x-vayu-enabled` already
@@ -3393,12 +3429,13 @@ whole-file body (Postman `file`, Insomnia binary, an OpenAPI
 `application/octet-stream` or `format: binary` body) imports as a `binary` body
 naming the file, and the count, with its `requests`, says which bodies have a
 file to relink or choose. **Every file reference an import writes** - a binary
-body's `file`, a form-data file part - carries the path the document named, and
-`"unresolved": true` whenever that path is non-empty: the engine sends it only
-once the file is chosen again in the editor or lies under an allowed folder.
-A reference with no path (`"src": ""`) imports as no file chosen and claims
-nothing, so it is not marked; form parts in that state are counted in
-`meta.unattachedFileParts`. An import that loses something and
+body's `file`, a form-data file part - carries the path the document named,
+which the engine sends only once the file is picked again or lies under an
+allowed folder. `POST /import/parse` answers each with the derived
+`unresolved` ([the trust rule](#file-references-binary-bodies-and-file-parts)):
+`true` for a path this machine would refuse, so the preview can offer to allow
+its folder. A reference with no path (`"src": ""`) imports as no file chosen;
+form parts in that state are counted in `meta.unattachedFileParts`. An import that loses something and
 says nothing is the defect this list exists to prevent, so a format with
 nothing to report answers `[]` rather than omitting the field. **A JMeter
 import's `kind` is not limited to this list** (issue #1518): a `.jmx` class
@@ -4608,10 +4645,14 @@ them.
 
 ## Allowed folders (file roots)
 
-The folders a request-body file may be read from without a person having chosen
-it in the editor - the second half of the [trust rule](#file-references-binary-bodies-and-file-parts).
+The folders a request-body file may be read from without being picked file by
+file - one half of the [trust rule](#file-references-binary-bodies-and-file-parts),
+beside the [picked files](#picked-files-file-grants).
 Stored in `file_roots` (schema version 3); read once per design send and once
-per run, so a change applies to the next send.
+per run, so a change applies to the next send. `POST` and `DELETE` need the
+[grant secret](#who-may-call-the-api) in `X-Vayu-Grant-Secret` and answer `403`
+(`grant_secret_required`) without it, before the body is parsed; an engine
+started without a secret refuses both. `GET` needs nothing.
 
 ### GET /file-roots
 
@@ -4641,6 +4682,45 @@ the id, so a body `id` is a `400`.
 
 Stops allowing a folder; the folder and its files are untouched.
 `{"success": true}`, or `404` when no such row exists.
+
+## Picked files (file grants)
+
+The files a person picked, each sendable from wherever it lies - the other
+half of the [trust rule](#file-references-binary-bodies-and-file-parts),
+beside the [allowed folders](#allowed-folders-file-roots) (#2356). Stored in
+`file_grants` (schema version 6); read once per design send and once per run,
+like the folders. A grant is matched exactly against a reference's canonical
+path, so it covers that one file and nothing beside it. `POST` and `DELETE`
+need the [grant secret](#who-may-call-the-api) in `X-Vayu-Grant-Secret` and
+answer `403` (`grant_secret_required`) without it, before the body is parsed; an
+engine started without a secret refuses both. `GET` needs nothing.
+
+### GET /file-grants
+
+Every picked file, ordered by path, as a bare array:
+
+```json
+[{ "id": "fgrant_...", "path": "/home/ada/Downloads/body.bin", "createdAt": 1764000000000 }]
+```
+
+### POST /file-grants
+
+Records a picked file. Body: `{ "path": "/abs/file" }`. Create only; the
+engine owns the id, so a body `id` is a `400`.
+
+- `201` with the row. `path` is stored canonical (every symlink resolved, `.`
+  and `..` folded), so a link re-pointed after the pick no longer matches.
+- `400` when `path` is missing, not a string, empty, holds a `{{variable}}`
+  (a grant names one file, never a template), is not absolute, or is not an
+  existing regular file - a directory, a device or a pipe is never granted.
+- `409` when the canonical path is already granted, naming the existing row's
+  id, as a second spelling of an allowed folder is.
+
+### DELETE /file-grants/:id
+
+Forgets a picked file; the file itself is untouched, and a body naming it is
+refused from then on unless an allowed folder holds it. `{"success": true}`,
+or `404` when no such row exists.
 
 ## Transport diagnostics
 
@@ -6039,6 +6119,7 @@ Refused with a **400**, before any run row exists and with nothing sent:
 |------|---------|
 | `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
 | over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
+| a column nested deeper than 100 levels | `'data' column 'name' is nested deeper than 100 levels` - refused before the row is measured (issue #2362); a column nested exactly 100 levels is accepted |
 | a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
 | a `null` cell, a header collision, a header name bound to nothing, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
 | an OAuth 2.0 config carries a `{{data.*}}` token | `Auth credentials carry {{data.client}} in an OAuth 2.0 configuration, and no row can reach it: ...` |
@@ -6685,7 +6766,13 @@ and the deferred `tests` script reads that submission's own row as
 
 Everything else is the scenario path's, because it is the same code: the same
 validation (an array of objects, present-but-empty refused, bounded by
-`maxScenarioDataRows` / `maxScenarioDataBytes`), the same `{{data.column}}`
+`maxScenarioDataRows` / `maxScenarioDataBytes`, and a cell nested deeper than
+100 levels refused with `'data' row N column 'name' is nested deeper than 100
+levels`, a row that is not an object and is itself that deep with `'data' row N
+is nested deeper than 100 levels`, and a `data` that is not an array with
+`'data' is nested deeper than 100 levels` - all checked right after the body is
+parsed, whatever shape `data` has, before the engine snapshots the payload), the
+same `{{data.column}}`
 placement rules and escaping, the same credentials-bind-before-they-are-encoded
 order, and the same refusal of a `{{data.*}}` in an `oauth2` config. Every
 rejection is a `400` `invalid_run_config` before the run row exists, so a
@@ -7032,7 +7119,8 @@ sources of truth for the same run boundary.
 
 `script.setup` runs once, before the run's first submission (before
 `test_start` is captured, so its own time is never folded into the run's
-duration figures); a throwing setup fails the run - `Failed`, nothing sent -
+duration figures, live or stored: the live stream's `elapsedSeconds` reads `0`
+until it ends); a throwing setup fails the run - `Failed`, nothing sent -
 the same as a collection-backed run. `script.teardown` runs once, after the
 last submission settles, and sees `pm.info.run` (`requestsSent`,
 `errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
@@ -7187,6 +7275,7 @@ as a smaller one:
 | `data` present and empty | A data set that binds nothing is a mistake - omit the field to run without one. |
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
+| A `data` cell nested deeper than 100 levels (`constants::spec_document::MAX_READ_DEPTH`) | Refused before the row is measured or kept, because both recurse and a cell nested far enough overflows the stack (issue #2362). The message names the row and the column: `'scenario.data' row 1 column 'tag' is nested deeper than 100 levels`. The check runs right after the body is parsed and whatever shape `data` has: a row that is not an object but is itself nested that deep answers `'scenario.data' row 1 is nested deeper than 100 levels`, and a `data` that is not an array, nested that deep, answers `'scenario.data' is nested deeper than 100 levels`. A wrong shape within the bound keeps the refusals above. A cell nested exactly 100 levels is accepted. |
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |
@@ -8307,6 +8396,16 @@ after the last tick was sent (`LIVE_SETTLE_TIMEOUT_MS`), or the status write
 itself failed. A client must read that as "ask the report", never as success:
 the field is absent on that frame, not `null`, and a client older than it saw
 no `status` at all.
+
+`elapsedSeconds` is the time since **load started**, the instant the report's
+`testDuration` is measured from: after the request is built and any
+`script.setup` has run, immediately before the first submission (issue #2395).
+Until then the run is still setting up, and every frame carries
+`elapsedSeconds: 0` with `sendRate` and `throughput` at `0`, because both divide
+by it. The last frame, published just after load ends, therefore reads within
+a fraction of a second of the report's `testDuration`. An engine older than that issue
+counted from when the run was registered, so a slow setup ran its live clock
+ahead of the report and dragged the rates down.
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so

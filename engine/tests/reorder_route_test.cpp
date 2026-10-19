@@ -38,6 +38,8 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -562,6 +564,44 @@ TEST_F (ReorderRouteTest, TheResponseCarriesTheRowsAsWritten) {
         const auto stored_request = db_->get_request (row["id"]);
         ASSERT_HAS_VALUE (stored_request);
         EXPECT_EQ (row["order"].get<int> (), stored_request->order);
+    }
+}
+
+// The rows a client settles its caches on carry the file trust a list entry
+// does, derived from the picked files (#2356). Mutation check: serialize the
+// rows in `reorder_locked` against an empty `FileAccessPolicy` and the picked
+// file reads unresolved.
+TEST_F (ReorderRouteTest, TheResponseRowsDeriveTheirFileTrust) {
+    const std::filesystem::path picked_path =
+    std::filesystem::current_path () / "reorder_route_picked.bin";
+    std::ofstream (picked_path) << "picked";
+    vayu::FileGrant grant;
+    grant.id   = "fgrant_reorder";
+    grant.path = std::filesystem::canonical (picked_path).string ();
+    db_->save_file_grant (grant);
+
+    const std::string col = make_collection ("Uploads");
+    const auto upload = [&] (const std::string& name, const std::string& src) {
+        auto [status, response] = create_request_response (*db_,
+        json{ { "collectionId", col }, { "name", name }, { "method", "POST" },
+        { "url", "https://example.com" },
+        { "body", { { "mode", "binary" }, { "file", { { "src", src } } } } } });
+        EXPECT_EQ (status, 200) << response.dump ();
+        return response["id"].get<std::string> ();
+    };
+    const std::string picked    = upload ("picked", picked_path.string ());
+    const std::string elsewhere = upload ("elsewhere", "/no/such/b.bin");
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ move_request (elsewhere, 0), move_request (picked, 1) }) } });
+    std::filesystem::remove (picked_path);
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    ASSERT_EQ (response["requests"].size (), 2u) << response.dump ();
+    for (const auto& row : response["requests"]) {
+        EXPECT_EQ (row["body"]["file"]["unresolved"], row["id"] == elsewhere)
+        << row.dump ();
     }
 }
 

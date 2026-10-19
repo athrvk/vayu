@@ -50,6 +50,7 @@ import KeyValueRow from "./KeyValueRow";
 import { keyValueGrid } from "./grid";
 import type { PickedFile } from "../file-pick";
 import { EYEBROW_CLASS } from "@/components/ui/eyebrow";
+import { flagAfterPick } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
 
 // Module constants, not inline arrows in the parameter list: an inline default
@@ -131,11 +132,10 @@ export default function KeyValueEditor({
 	 * A pick writes the whole file part at once.
 	 *
 	 * Four `handleUpdate` calls would each rebuild the list from a stale
-	 * `items`, so only the last would survive - and it also has to set
-	 * `unresolved: false`, since choosing the file here is the one event that
-	 * proves the path exists on this machine. Outside Electron there is no path
-	 * to take (`src: ""`), and that row stays unresolved: the filename alone is
-	 * not something the engine can open, and it says so rather than pretending.
+	 * `items`, so only the last would survive - and it also replaces the
+	 * engine's `unresolved` answer for the previous path with a pick's
+	 * (`flagAfterPick`): `false` once the preload handed the main process a
+	 * path to grant, none outside Electron, where only a filename comes back.
 	 */
 	const handlePickFile = useCallback(
 		(id: string, file: PickedFile) => {
@@ -153,7 +153,7 @@ export default function KeyValueEditor({
 									src: file.src,
 									fileName: file.fileName,
 									contentType: file.contentType || undefined,
-									unresolved: !file.src,
+									unresolved: flagAfterPick(file.src),
 								}
 							: item
 					)

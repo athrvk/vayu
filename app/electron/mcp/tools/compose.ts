@@ -308,8 +308,8 @@ export function agentScriptGateSentence(carriers: string): string {
  * could read it by sending a script. Called before anything is composed, so
  * nothing has been sent when the refusal arrives. Scripts stored on a request
  * or collection are not covered: that is a write-tool residual
- * (`docs/engine/mcp.md`), and `requestId` on `run_request` links History only
- * and composes nothing stored.
+ * (`docs/engine/mcp.md`), and they run as stored when `run_request` sends a
+ * saved request by `requestId`.
  *
  * @p elements is the call's `elements` entries, for a tool that takes them as
  * a list (`start_load_run`'s `elements` is a different, run-level object).

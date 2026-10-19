@@ -3,6 +3,7 @@
  * @brief Tests for JSON utilities
  */
 
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -14,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/utils/encoding.hpp"
 
 namespace vayu::json {
@@ -449,7 +451,7 @@ TEST (JsonRequestListSerializer, MarksAnOversizedColumnTruncatedInsteadOfSubstit
     r.auth = R"({"mode":"inherit"})";
 
     std::ostringstream out;
-    serialize_to_stream (r, out);
+    serialize_to_stream (r, out, vayu::http::FileAccessPolicy{});
     const auto parsed = nlohmann::json::parse (out.str ());
 
     EXPECT_EQ (parsed["body"], nlohmann::json::parse (R"({"mode":"none"})"))
@@ -471,7 +473,7 @@ TEST (JsonRequestListSerializer, OmitsTruncatedFieldsWhenEveryColumnFitsTheCap) 
     r.auth          = R"({"mode":"inherit"})";
 
     std::ostringstream out;
-    serialize_to_stream (r, out);
+    serialize_to_stream (r, out, vayu::http::FileAccessPolicy{});
     const auto parsed = nlohmann::json::parse (out.str ());
 
     EXPECT_FALSE (parsed.contains ("truncatedFields"))
@@ -711,6 +713,74 @@ TEST (CapTraceBodies, IgnoresAnErrorTraceWithNoResponseBody) {
     EXPECT_FALSE (trace.contains ("response"));
     EXPECT_FALSE (trace["request"].contains ("bodyTruncated"));
     EXPECT_EQ (trace["error_type"], "CONNECTION_FAILED");
+}
+
+// --- exceeds_depth (#2362) ----------------------------------------------------
+
+// A scalar is depth 0 and a container is 1 plus its deepest child, so the bound
+// is met by a value exactly that deep and passed by one level more. Move the
+// comparison to `>=` and the first pair below swaps answers.
+TEST (ExceedsDepth, AValueExactlyAtTheBoundIsWithinItAndOneMoreIsNot) {
+    for (const std::size_t depth : { 1U, 2U, 5U, 100U }) {
+        EXPECT_FALSE (exceeds_depth (vayu::tests::nested_array (depth), depth)) << depth;
+        EXPECT_TRUE (exceeds_depth (vayu::tests::nested_array (depth + 1), depth)) << depth;
+    }
+}
+
+TEST (ExceedsDepth, AScalarIsDepthZeroWhateverItsType) {
+    for (const auto& scalar : { nlohmann::json (nullptr), nlohmann::json (true),
+         nlohmann::json (7), nlohmann::json (1.5), nlohmann::json ("text") }) {
+        EXPECT_FALSE (exceeds_depth (scalar, 0)) << scalar.dump ();
+    }
+}
+
+TEST (ExceedsDepth, AnEmptyContainerIsDepthOne) {
+    for (const auto& empty : { nlohmann::json::array (), nlohmann::json::object () }) {
+        EXPECT_FALSE (exceeds_depth (empty, 1)) << empty.dump ();
+        EXPECT_TRUE (exceeds_depth (empty, 0)) << empty.dump ();
+    }
+}
+
+// Objects count as a level exactly as arrays do, and mixing them adds up.
+TEST (ExceedsDepth, ObjectsAndArraysBothCountAsALevel) {
+    const nlohmann::json mixed = { { "a", nlohmann::json::array ({ { { "b", 1 } } }) } };
+    EXPECT_FALSE (exceeds_depth (mixed, 3));
+    EXPECT_TRUE (exceeds_depth (mixed, 2));
+}
+
+// Depth is the deepest branch, not the widest level or the longest sibling run:
+// a hundred thousand shallow siblings are no deeper than one.
+TEST (ExceedsDepth, WideIsNotDeep) {
+    nlohmann::json wide = nlohmann::json::array ();
+    for (int i = 0; i < 100000; ++i) {
+        wide.push_back (i);
+    }
+    EXPECT_FALSE (exceeds_depth (wide, 1));
+
+    nlohmann::json fan = nlohmann::json::object ();
+    for (int i = 0; i < 1000; ++i) {
+        fan[std::to_string (i)] = vayu::tests::nested_array (3);
+    }
+    EXPECT_FALSE (exceeds_depth (fan, 4));
+    EXPECT_TRUE (exceeds_depth (fan, 3));
+}
+
+// The deepest branch is found wherever it sits among shallower ones.
+TEST (ExceedsDepth, TheDeepBranchIsFoundAmongShallowSiblings) {
+    nlohmann::json row = { { "first", 1 }, { "last", 2 } };
+    row["middle"]      = vayu::tests::nested_array (10);
+    EXPECT_TRUE (exceeds_depth (row, 10));
+    EXPECT_FALSE (exceeds_depth (row, 11));
+}
+
+// The reason the probe exists: a value `dump ()` and a copy cannot survive. A
+// recursive probe would overflow the stack here; neither the value nor its
+// answer is ever streamed.
+TEST (ExceedsDepth, AValueFarPastAnyStackAnswersWithoutRecursing) {
+    const auto deep = vayu::tests::nested_array (100000);
+    EXPECT_TRUE (exceeds_depth (deep, 100));
+    EXPECT_TRUE (exceeds_depth (deep, 99999));
+    EXPECT_FALSE (exceeds_depth (deep, 100000));
 }
 
 } // namespace

@@ -130,11 +130,10 @@ export interface VariableValue {
  * the contents. `fileName` and `contentType` override what the part declares
  * about itself; absent means the engine lets libcurl derive them from the path.
  *
- * `unresolved` marks a path this app never chose: an import carries the path
- * from whoever exported the collection, and that path usually does not exist on
- * this machine. It is what the editor's warning reads, and it is set `false`
- * the moment the user picks a file. `x-www-form-urlencoded` has no file form,
- * so a file part is only ever valid under `form-data`.
+ * `unresolved` is read-only: the engine's answer, on a read, to whether it
+ * would refuse the path on this machine, and what the editor's warning reads.
+ * It is never sent (`lib/file-trust.ts`). `x-www-form-urlencoded` has no file
+ * form, so a file part is only ever valid under `form-data`.
  */
 export interface FormFieldEntry extends KeyValueEntry {
 	type?: "text" | "file";
@@ -147,18 +146,16 @@ export interface FormFieldEntry extends KeyValueEntry {
 /**
  * The file a `binary` body sends: an absolute path on this machine, read by the
  * engine at send time, never held here. The members mean what they mean on a
- * form-data file part. `unresolved` marks a path no one chose in the editor (an
- * import, a curl paste, an MCP agent); the engine sends such a path only when it
- * resolves under a folder allowed in Settings (`FileRoot`). Required because the
- * engine reads an absent flag as `true`: every writer states it
- * (`lib/file-trust.ts`). A form-data part keeps it optional, since the row type
- * is every key/value table's; `withFileTrust` states it there.
+ * form-data file part, `unresolved` included: derived by the engine on a read,
+ * `true` for a path it would refuse because it is neither under an allowed
+ * folder (`FileRoot`) nor picked on this machine. A pick in the editor sets it
+ * `false` until the next read; nothing sends it (`lib/file-trust.ts`).
  */
 export interface FileRef {
 	src: string;
 	fileName?: string;
 	contentType?: string;
-	unresolved: boolean;
+	unresolved?: boolean;
 }
 
 /** A folder Vayu may read request-body files from without a per-file pick. */

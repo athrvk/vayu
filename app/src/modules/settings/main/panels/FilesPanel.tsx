@@ -20,26 +20,21 @@
  *
  * **The engine owns the path.** A folder is stored canonical (symlinks
  * resolved, no trailing separator), so the row shown is the one the engine
- * returned, not the text typed. A path that is not an existing directory on
- * this machine is refused with the engine's own message.
+ * returned, not the one picked.
+ *
+ * **A folder is added only through the system picker** (#2356). Allowing one
+ * widens what every request may read, so the main process opens the picker
+ * and makes the write itself; there is no field to type a path into, because
+ * a path the renderer names is exactly what the rule does not trust. Outside
+ * Electron there is no picker, and the list is read-only.
  */
 
-import { useState } from "react";
 import { FolderLock, FolderOpen, Loader2, Trash2 } from "lucide-react";
-import {
-	Button,
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-	Input,
-} from "@/components/ui";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import { useDeleteFileRootMutation, useFileRootsQuery } from "@/queries";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
-import { isCommitEnter } from "@/lib/keyboard";
 import { useToastStore } from "@/stores";
 import { appSetting } from "../app-settings";
 
@@ -50,15 +45,8 @@ const ALLOWED_FOLDERS = appSetting("allowed-folders");
 export default function FilesPanel() {
 	const { data: roots = [], isError, isLoading } = useFileRootsQuery();
 	const deleteRoot = useDeleteFileRootMutation();
-	const { allow, chooseAndAllow, isPending } = useAllowFolder();
+	const { chooseAndAllow, isPending } = useAllowFolder();
 	const showToast = useToastStore((s) => s.showToast);
-	const [typed, setTyped] = useState("");
-
-	const submitTyped = async () => {
-		const path = typed.trim();
-		if (!path) return;
-		if (await allow(path)) setTyped("");
-	};
 
 	const remove = async (id: string, path: string) => {
 		try {
@@ -120,42 +108,21 @@ export default function FilesPanel() {
 					</ul>
 				)}
 
-				<div className="flex items-center gap-2">
-					<Input
-						size="sm"
-						value={typed}
-						onChange={(e) => setTyped(e.target.value)}
-						onKeyDown={(e) => {
-							if (isCommitEnter(e)) {
-								e.preventDefault();
-								void submitTyped();
-							}
-						}}
-						placeholder="/path/to/folder"
-						aria-label="Folder to allow"
-						className="font-mono text-xs"
-					/>
+				{chooseAndAllow && (
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => void submitTyped()}
-						disabled={isPending || !typed.trim()}
+						onClick={() => void chooseAndAllow()}
+						disabled={isPending}
 					>
-						{isPending && <Loader2 className="size-icon mr-1.5 animate-spin" />}
-						Allow
-					</Button>
-					{chooseAndAllow && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => void chooseAndAllow()}
-							disabled={isPending}
-						>
+						{isPending ? (
+							<Loader2 className="size-icon mr-1.5 animate-spin" />
+						) : (
 							<FolderOpen className="size-icon mr-1.5" />
-							Choose folder...
-						</Button>
-					)}
-				</div>
+						)}
+						Choose folder...
+					</Button>
+				)}
 			</CardContent>
 		</Card>
 	);

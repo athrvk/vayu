@@ -7,10 +7,12 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -23,8 +25,11 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/file_ref.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::db {
 namespace {
@@ -394,7 +399,9 @@ TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
 TEST_F (DatabaseTest, TheFirstConnectionCarriesTheEnginesDurabilitySettings) {
     Database db (TEST_DB_PATH);
 
-    EXPECT_EQ (db.applied_synchronous (), vayu::core::constants::database::SYNCHRONOUS)
+    // A literal, not the constant: comparing the constant to itself passes
+    // whatever it is set to (#2419 - it was 0, which can corrupt on power loss).
+    EXPECT_EQ (db.applied_synchronous (), 1)
     << "the schema sync ran at SQLite's default instead of the engine's";
 
     // Journal mode is read off the database header rather than from a `-wal`
@@ -434,6 +441,80 @@ TEST_F (DatabaseTest, SynchronousConfigStillWinsOverTheConstructorDefault) {
     Database reopened (TEST_DB_PATH);
     reopened.init ();
     EXPECT_EQ (reopened.applied_synchronous (), kConfigured);
+}
+
+// A fresh workspace opens at NORMAL (#2419): WAL syncs only at a checkpoint,
+// so a commit costs no fsync, and unlike OFF a power cut cannot corrupt the
+// file. Literals on purpose - the constant compared to itself proves nothing.
+TEST_F (DatabaseTest, AFreshWorkspaceDefaultsToNormalSynchronous) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto entry = db.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->value, "1");
+    EXPECT_EQ (entry->default_value, "1");
+    EXPECT_EQ (db.applied_synchronous (), 1);
+}
+
+// The converse of the migration below: a level the user picked past the old
+// default is theirs, and the adopt-new-default rule must not touch it.
+TEST_F (DatabaseTest, AStoredFullSynchronousSurvivesAReopen) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        entry->value = "2";
+        db.save_config_entry (*entry);
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto entry = reopened.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->value, "2");
+    EXPECT_EQ (entry->default_value, "1");
+    EXPECT_EQ (reopened.applied_synchronous (), 2);
+}
+
+// An install from before #2419 holds value "0" beside default "0". The first
+// start of this build moves it to Normal and applies it on that same start;
+// the next one changes nothing.
+TEST_F (DatabaseTest, AWorkspaceOnTheOldOffDefaultMovesToNormalOnce) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        entry->value         = "0";
+        entry->default_value = "0";
+        db.save_config_entry (*entry);
+    }
+
+    int64_t migrated_at = 0;
+    {
+        Database reopened (TEST_DB_PATH);
+        reopened.init ();
+        auto entry = reopened.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        EXPECT_EQ (entry->value, "1");
+        EXPECT_EQ (entry->default_value, "1");
+        EXPECT_EQ (reopened.applied_synchronous (), 1);
+        migrated_at = entry->updated_at;
+    }
+
+    // The move is once: a later start finds value == default and writes
+    // nothing, so the row's timestamp is the migration's and not the latest
+    // start's.
+    Database second (TEST_DB_PATH);
+    second.init ();
+    auto again = second.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (again);
+    EXPECT_EQ (again->value, "1");
+    EXPECT_EQ (again->default_value, "1");
+    EXPECT_EQ (again->updated_at, migrated_at);
+    EXPECT_EQ (second.applied_synchronous (), 1);
 }
 
 // The seed is one transaction now (issue #838) rather than sixty-odd implicit
@@ -2293,7 +2374,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 5);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 6);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
@@ -2451,9 +2532,39 @@ TEST_F (DatabaseTest, AVersionTwoDatabaseIsStampedCurrentAndGainsTheFileRootsTab
     EXPECT_TRUE (reopened.get_file_roots ().empty ());
 }
 
+// The picked files (`file_grants`, schema version 6, #2356) are plain CRUD:
+// they round-trip ordered by path, one reads back by id, and a delete removes
+// exactly one.
+TEST_F (DatabaseTest, FileGrantsRoundTrip) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    for (const auto& [id, path] : std::vector<std::pair<std::string, std::string>>{
+         { "fgrant_b", "/data/b.bin" }, { "fgrant_a", "/data/a.bin" } }) {
+        vayu::FileGrant grant;
+        grant.id         = id;
+        grant.path       = path;
+        grant.created_at = 7;
+        db.save_file_grant (grant);
+    }
+    const auto rows = db.get_file_grants ();
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (rows[0].path, "/data/a.bin") << "ordered by path";
+    EXPECT_EQ (rows[1].path, "/data/b.bin");
+    const auto one = db.get_file_grant ("fgrant_b");
+    ASSERT_HAS_VALUE (one);
+    EXPECT_EQ (one->path, "/data/b.bin");
+    EXPECT_EQ (one->created_at, 7);
+    EXPECT_FALSE (db.get_file_grant ("fgrant_missing"));
+
+    db.delete_file_grant ("fgrant_a");
+    ASSERT_EQ (db.get_file_grants ().size (), 1u);
+    EXPECT_EQ (db.get_file_grants ()[0].id, "fgrant_b");
+}
+
 // ---------------------------------------------------------------------------
-// Schema version 4: every stored body states `unresolved`, and the allowed
-// folders the root rule refuses are gone.
+// The file-trust step: stored bodies lose `unresolved` and the files a person
+// chose become grants (version 6), and the allowed folders the root rule
+// refuses are gone (version 4).
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -2492,16 +2603,62 @@ std::string canonical_home () {
     return canonical.empty () ? home : canonical;
 }
 
-/// A version-3 database as an engine before the trust flag failed closed left
-/// it: file references without the key (one in the trash, one in a run's
-/// snapshot), one already stated, one body that is not JSON, and allowed
-/// folders at `/`, at the home folder, at its parent and inside it.
-void seed_version_three_workspace (const std::string& path) {
-    // Now, not a fixed instant: the startup trash and run retention would
-    // purge an old trashed request or run before the migration test reads it.
-    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::system_clock::now ().time_since_epoch ())
-                        .count ();
+/// A file the migration can grant, under the working directory (private to
+/// this test process), by its canonical path.
+std::string trust_file (const std::string& name) {
+    const std::filesystem::path file =
+    std::filesystem::current_path () / "trust-migration" / name;
+    std::filesystem::create_directories (file.parent_path ());
+    std::ofstream (file) << name;
+    return std::filesystem::canonical (file).string ();
+}
+
+/// Stores a request in `col_1` whose body text is exactly @p body.
+void save_body (Database& db, const char* id, const std::string& body, bool trashed = false) {
+    Request r;
+    r.id            = id;
+    r.collection_id = "col_1";
+    r.name          = id;
+    r.method        = vayu::HttpMethod::POST;
+    r.url           = "https://example.test";
+    r.body          = body;
+    r.order         = 0;
+    r.created_at    = 1;
+    r.updated_at    = 1;
+    // Now, not a fixed instant: the startup trash retention would purge an
+    // old trashed request before a migration test reads it.
+    if (trashed) {
+        r.deleted_at = now_ms ();
+    }
+    db.save_request (r);
+}
+
+/// A design run whose snapshot sends @p body.
+void save_snapshot (Database& db, const char* id, const std::string& body) {
+    vayu::db::Run run;
+    run.id         = id;
+    run.type       = vayu::RunType::Design;
+    run.status     = vayu::RunStatus::Completed;
+    run.start_time = now_ms ();
+    run.config_snapshot =
+    R"({"body":)" + body + R"(,"method":"POST","url":"https://example.test"})";
+    db.create_run (run);
+}
+
+/// A binary body naming @p src, with @p trust as its stored `unresolved`
+/// member (empty: no member at all).
+std::string binary_body (const std::string& src, const std::string& trust = "") {
+    nlohmann::json file{ { "src", src } };
+    if (!trust.empty ()) {
+        file["unresolved"] = nlohmann::json::parse (trust);
+    }
+    return nlohmann::json{ { "mode", "binary" }, { "file", file } }.dump ();
+}
+
+/// A fresh workspace at @p version whose `col_1` holds what @p seed stores,
+/// `file_grants` dropped when the version predates it.
+template <typename Seed>
+void seed_workspace (const std::string& path, int64_t version, Seed seed) {
     {
         Database db (path);
         db.init ();
@@ -2510,38 +2667,36 @@ void seed_version_three_workspace (const std::string& path) {
         col.name  = "C";
         col.order = 0;
         db.create_collection (col);
-        const auto save = [&] (const char* id, const std::string& body, bool trashed) {
-            Request r;
-            r.id            = id;
-            r.collection_id = "col_1";
-            r.name          = id;
-            r.method        = vayu::HttpMethod::POST;
-            r.url           = "https://example.test";
-            r.body          = body;
-            r.order         = 0;
-            r.created_at    = 1;
-            r.updated_at    = 1;
-            if (trashed) {
-                r.deleted_at = now;
-            }
-            db.save_request (r);
-        };
-        save ("req_bin", R"({"file":{"src":"/abs/a.bin"},"mode":"binary"})", false);
-        save ("req_form", R"({"fields":[{"key":"f","src":"/abs/p.png","type":"file"},{"key":"t","value":"v"}],"mode":"form-data"})",
-        false);
-        save ("req_stated",
-        R"({"file":{"src":"/abs/b.bin","unresolved":true},"mode":"binary"})", false);
-        save ("req_trash", R"({"file":{"src":"/abs/t.bin"},"mode":"binary"})", true);
-        save ("req_broken", kBrokenBody, false);
+        seed (db);
+    }
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    ASSERT_EQ (sqlite3_exec (handle, "DROP TABLE file_grants", nullptr, nullptr, nullptr),
+    SQLITE_OK);
+    sqlite3_close (handle);
+    set_user_version (path, version);
+}
 
-        vayu::db::Run run;
-        run.id         = "run_1";
-        run.type       = vayu::RunType::Design;
-        run.status     = vayu::RunStatus::Completed;
-        run.start_time = now;
-        run.config_snapshot =
-        R"({"body":{"file":{"src":"/abs/c.bin"},"mode":"binary"},"method":"POST","url":"https://example.test"})";
-        db.create_run (run);
+/// A version-3 database as an engine before the trust flag failed closed left
+/// it: file references without the key (one in the trash, one in a run's
+/// snapshot, one naming a file that is gone), one stated `true`, one body that
+/// is not JSON, and allowed folders at `/`, at the home folder, at its parent
+/// and inside it.
+void seed_version_three_workspace (const std::string& path) {
+    seed_workspace (path, 3, [] (Database& db) {
+        save_body (db, "req_bin", binary_body (trust_file ("a.bin")));
+        save_body (db, "req_form",
+        nlohmann::json{ { "mode", "form-data" },
+        { "fields",
+        nlohmann::json::array (
+        { { { "key", "f" }, { "type", "file" }, { "src", trust_file ("p.png") } },
+        { { "key", "t" }, { "value", "v" } } }) } }
+        .dump ());
+        save_body (db, "req_stated", binary_body (trust_file ("b.bin"), "true"));
+        save_body (db, "req_trash", binary_body (trust_file ("t.bin")), /*trashed=*/true);
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin"));
+        save_body (db, "req_broken", kBrokenBody);
+        save_snapshot (db, "run_1", binary_body (trust_file ("c.bin")));
 
         const auto allow = [&] (const char* id, const std::string& folder) {
             vayu::FileRoot root;
@@ -2561,24 +2716,146 @@ void seed_version_three_workspace (const std::string& path) {
         }
         allow ("froot_inside",
         (std::filesystem::path (canonical_home ()) / "fixtures").string ());
-    }
-    set_user_version (path, 3);
+    });
 }
 
-/// The file reference of a stored binary body.
-nlohmann::json stored_file (const std::string& path, const std::string& id) {
-    return nlohmann::json::parse (read_stored (path, "requests", "body", id))["file"];
+/// The `path` of every stored grant, ordered.
+std::vector<std::string> granted_paths (const std::string& path) {
+    Database db (path);
+    db.init ();
+    std::vector<std::string> paths;
+    for (const auto& row : db.get_file_grants ()) {
+        paths.push_back (row.path);
+    }
+    return paths;
+}
+
+/// Every stored body and snapshot of the trust seeds, raw.
+std::vector<std::string> stored_trust_values (const std::string& path,
+std::initializer_list<const char*> request_ids) {
+    std::vector<std::string> out;
+    for (const char* id : request_ids) {
+        out.push_back (read_stored (path, "requests", "body", id));
+    }
+    out.push_back (read_stored (path, "runs", "config_snapshot", "run_1"));
+    return out;
+}
+
+/// Every row @p sql answers on @p handle, its columns joined by `|`, SQL NULL
+/// spelled `NULL` so it cannot read as an empty default.
+std::vector<std::string> pragma_rows (sqlite3* handle, const std::string& sql) {
+    std::vector<std::string> rows;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << sql << ": " << sqlite3_errmsg (handle);
+        return rows;
+    }
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        std::string row;
+        for (int i = 0; i < sqlite3_column_count (stmt); ++i) {
+            const auto* text = vayu::db::column_text (stmt, i);
+            row += (i == 0 ? "" : "|") + std::string (text != nullptr ? text : "NULL");
+        }
+        rows.push_back (std::move (row));
+    }
+    sqlite3_finalize (stmt);
+    return rows;
+}
+
+/// @p table as SQLite describes it: each column from `PRAGMA table_xinfo`
+/// (name, type, NOT NULL, default, key, hidden), then each index as its
+/// uniqueness, origin, partiality and columns, sorted, without the names
+/// SQLite numbers for itself.
+std::vector<std::string> table_shape (const std::string& path, const std::string& table) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "cannot open " << path;
+        sqlite3_close (handle);
+        return {};
+    }
+    std::vector<std::string> shape =
+    pragma_rows (handle, "PRAGMA table_xinfo(\"" + table + "\")");
+    std::vector<std::string> indexes;
+    for (const std::string& entry :
+    pragma_rows (handle, "PRAGMA index_list(\"" + table + "\")")) {
+        // seq|name|unique|origin|partial
+        const auto after_seq  = entry.find ('|') + 1;
+        const auto after_name = entry.find ('|', after_seq);
+        const std::string name = entry.substr (after_seq, after_name - after_seq);
+        std::string summary = "index " + entry.substr (after_name + 1);
+        for (const std::string& column :
+        pragma_rows (handle, "PRAGMA index_info(\"" + name + "\")")) {
+            summary += " " + column;
+        }
+        indexes.push_back (std::move (summary));
+    }
+    sqlite3_close (handle);
+    std::sort (indexes.begin (), indexes.end ());
+    shape.insert (shape.end (), indexes.begin (), indexes.end ());
+    return shape;
+}
+
+constexpr const char* kUngrantedMessage =
+"A request-body file chosen before the upgrade was not found, so it was not "
+"recorded as a picked file; pick it again";
+constexpr const char* kUngrantedSummary =
+"Some request-body files chosen before the upgrade were not found and must "
+"be picked again";
+
+/// What opening @p path reports about chosen files it could not grant: one
+/// `table|id|path` per warning, sorted, and the count the summary states
+/// (-1 for no summary). The log goes under the working directory, which is
+/// private to this test process.
+struct UngrantedReport {
+    std::vector<std::string> entries;
+    int64_t count = -1;
+};
+
+UngrantedReport open_and_report_ungranted (const std::string& path) {
+    const auto dir = std::filesystem::current_path () / "trust-migration-log";
+    std::error_code ignored;
+    std::filesystem::remove_all (dir, ignored);
+    std::filesystem::create_directories (dir);
+    vayu::utils::Logger::instance ().init (dir.string ());
+    {
+        Database db (path);
+        db.init ();
+    }
+    vayu::utils::Logger::instance ().flush ();
+
+    UngrantedReport report;
+    for (const auto& file : std::filesystem::directory_iterator (dir)) {
+        std::ifstream in (file.path ());
+        for (std::string line; std::getline (in, line);) {
+            const auto record = nlohmann::json::parse (line, nullptr, false);
+            if (!record.is_object () || record.value ("level", "") != "warn") {
+                continue;
+            }
+            if (record.value ("msg", "") == kUngrantedMessage) {
+                report.entries.push_back (record.value ("table", "") + "|" +
+                record.value ("id", "") + "|" + record.value ("path", ""));
+            } else if (record.value ("msg", "") == kUngrantedSummary) {
+                report.count = record.value ("count", int64_t{ -1 });
+            }
+        }
+    }
+    std::sort (report.entries.begin (), report.entries.end ());
+    return report;
 }
 
 } // namespace
 
-// Mutation checks: drop the `apply_file_trust_plan` rewrites (or the
-// `plan_body_restatement` calls) and the bodies keep no key; drop the
-// `plan_refused_roots` call and `/`, the home folder and its parent are still
-// allowed.
-TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots) {
+// Before version 4 the editor was the one writer that left the key out, so an
+// absent key there was a person's choice: every such path that still names a
+// regular file is granted, in the trash and in a run's snapshot too, and the
+// key is gone from every body. Mutation checks: drop the `apply_file_trust_plan`
+// rewrites and the bodies keep their key; drop the `insert_grants` call and
+// nothing is granted; drop the `plan_refused_roots` call and `/`, the home
+// folder and its parent are still allowed.
+TEST_F (DatabaseTest, AVersionThreeDatabaseGrantsItsEditorPathsAndDropsRefusedRoots) {
     ASSERT_FALSE (vayu::platform::home_directory ().empty ())
     << "this platform reported no home folder to seed";
+    std::filesystem::remove_all ("trust-migration");
     seed_version_three_workspace (TEST_DB_PATH);
     {
         Database db (TEST_DB_PATH);
@@ -2586,22 +2863,18 @@ TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots
     }
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
 
-    // Rows that existed before the key was always written were the editor's.
-    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_bin")["unresolved"], false);
-    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_trash")["unresolved"], false)
-    << "a request in the trash is restated too";
-    auto form = nlohmann::json::parse (
-    read_stored (TEST_DB_PATH, "requests", "body", "req_form"));
-    EXPECT_EQ (form["fields"][0]["unresolved"], false) << form.dump ();
-    EXPECT_FALSE (form["fields"][1].contains ("unresolved"))
-    << "a text part carries no trust";
-    EXPECT_EQ (stored_file (TEST_DB_PATH, "req_stated")["unresolved"], true);
+    std::vector<std::string> expected = { trust_file ("a.bin"),
+        trust_file ("c.bin"), trust_file ("p.png"), trust_file ("t.bin") };
+    std::sort (expected.begin (), expected.end ());
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), expected)
+    << "a stated `true` and a file that is gone are not granted";
+
+    for (const std::string& value : stored_trust_values (TEST_DB_PATH,
+         { "req_bin", "req_form", "req_stated", "req_trash", "req_gone" })) {
+        EXPECT_EQ (value.find ("unresolved"), std::string::npos) << value;
+    }
     EXPECT_EQ (read_stored (TEST_DB_PATH, "requests", "body", "req_broken"), kBrokenBody)
     << "a body that is not JSON is left byte-identical";
-
-    auto snapshot = nlohmann::json::parse (
-    read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
-    EXPECT_EQ (snapshot["body"]["file"]["unresolved"], false) << snapshot.dump ();
 
     Database db (TEST_DB_PATH);
     db.init ();
@@ -2612,33 +2885,187 @@ TEST_F (DatabaseTest, TheVersionFourMigrationStatesFileTrustAndDropsRefusedRoots
     EXPECT_EQ (ids, std::vector<std::string>{ "froot_inside" })
     << "a filesystem root, home and its parent are no longer allowed";
     EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+    std::filesystem::remove_all ("trust-migration");
 }
 
-TEST_F (DatabaseTest, TheVersionFourMigrationIsIdempotent) {
+TEST_F (DatabaseTest, TheFileTrustStepIsIdempotent) {
+    std::filesystem::remove_all ("trust-migration");
     seed_version_three_workspace (TEST_DB_PATH);
     {
         Database db (TEST_DB_PATH);
         db.init ();
     }
-    std::vector<std::string> first;
-    for (const char* id : { "req_bin", "req_form", "req_stated", "req_trash", "req_broken" }) {
-        first.push_back (read_stored (TEST_DB_PATH, "requests", "body", id));
-    }
-    first.push_back (read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
+    const std::initializer_list<const char*> ids = { "req_bin", "req_form",
+        "req_stated", "req_trash", "req_gone", "req_broken" };
+    const auto first        = stored_trust_values (TEST_DB_PATH, ids);
+    const auto first_grants = granted_paths (TEST_DB_PATH);
 
-    set_user_version (TEST_DB_PATH, 3);
+    // Run again as the step a stamped workspace passes through: from version 4
+    // on, a key the first run removed reads as nobody's choice, so nothing is
+    // granted twice and nothing is rewritten.
+    set_user_version (TEST_DB_PATH, 5);
     {
         Database db (TEST_DB_PATH);
         db.init ();
         EXPECT_EQ (db.get_file_roots ().size (), 1u);
     }
-    std::vector<std::string> second;
-    for (const char* id : { "req_bin", "req_form", "req_stated", "req_trash", "req_broken" }) {
-        second.push_back (read_stored (TEST_DB_PATH, "requests", "body", id));
-    }
-    second.push_back (read_stored (TEST_DB_PATH, "runs", "config_snapshot", "run_1"));
-    EXPECT_EQ (first, second);
+    EXPECT_EQ (stored_trust_values (TEST_DB_PATH, ids), first);
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), first_grants) << "no grant twice";
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// From version 4 every write stated the key, so only an explicit `false` was a
+// person's choice: it is granted (once, however many bodies name it) and still
+// sends; `true`, an absent key, a path that is gone and a templated path are
+// not granted, and every key is removed. `file_grants` is dropped first, so
+// the grants must survive the `sync_schema ()` that follows the step - which
+// they do only while `FILE_GRANTS_DDL` matches the mapping. Mutation checks:
+// make `FileAccessPolicy::allows` ignore grants and the chosen file is
+// refused; read an absent key as chosen at version 5 and `n.bin` is granted.
+TEST_F (DatabaseTest, AVersionFiveDatabaseGrantsThePathsStoredAsChosen) {
+    std::filesystem::remove_all ("trust-migration");
+    const std::string chosen   = trust_file ("chosen.bin");
+    const std::string snapshot = trust_file ("snapshot.bin");
+    const std::string stated   = trust_file ("stated.bin");
+    seed_workspace (TEST_DB_PATH, 5, [&] (Database& db) {
+        save_body (db, "req_false", binary_body (chosen, "false"));
+        save_body (db, "req_again",
+        nlohmann::json{ { "mode", "form-data" },
+        { "fields",
+        nlohmann::json::array ({ { { "key", "f" }, { "type", "file" },
+        { "src", chosen }, { "unresolved", false } } }) } }
+        .dump ());
+        save_body (db, "req_true", binary_body (stated, "true"));
+        save_body (db, "req_absent", binary_body (trust_file ("n.bin")));
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin", "false"));
+        save_body (db, "req_templated", binary_body ("{{dir}}/chosen.bin", "false"));
+        save_snapshot (db, "run_1", binary_body (snapshot, "false"));
+    });
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    std::vector<std::string> granted;
+    for (const auto& row : db.get_file_grants ()) {
+        granted.push_back (row.path);
+        EXPECT_EQ (row.id.rfind ("fgrant_", 0), 0u) << row.id;
+    }
+    std::vector<std::string> expected = { chosen, snapshot };
+    std::sort (expected.begin (), expected.end ());
+    EXPECT_EQ (granted, expected);
+    for (const std::string& value : stored_trust_values (TEST_DB_PATH,
+         { "req_false", "req_again", "req_true", "req_absent", "req_gone", "req_templated" })) {
+        EXPECT_EQ (value.find ("unresolved"), std::string::npos) << value;
+    }
+
+    // What the send reads is what the step granted.
+    const auto sendable = [&] (const char* id) {
+        const auto row = db.get_request (id);
+        if (!row) {
+            ADD_FAILURE () << id << " is gone";
+            return false;
+        }
+        auto parsed = vayu::json::deserialize_request (
+        nlohmann::json{ { "method", "POST" }, { "url", "https://example.test" },
+        { "body", nlohmann::json::parse (row->body) } });
+        if (!parsed.is_ok ()) {
+            ADD_FAILURE () << id << ": " << parsed.error ().message;
+            return false;
+        }
+        vayu::Request request = std::move (parsed).value ();
+        vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (db));
+        return !files.prepare (request).has_value ();
+    };
+    EXPECT_TRUE (sendable ("req_false"))
+    << "a file chosen before the upgrade still sends";
+    EXPECT_TRUE (sendable ("req_again"));
+    EXPECT_FALSE (sendable ("req_true"));
+    EXPECT_FALSE (sendable ("req_absent"));
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// `FILE_GRANTS_DDL` creates `file_grants` before `sync_schema ()` first sees
+// it, so a migrated workspace keeps that table for good. A difference
+// `sync_schema ()` acts on (NOT NULL, a default, the key) rebuilds it empty,
+// which the surviving grant catches; one it ignores (a type, UNIQUE) leaves
+// the migrated table unlike a fresh one, which the shape comparison catches.
+// Mutation checks: drop NOT NULL from `created_at` in `FILE_GRANTS_DDL` and
+// the grant is gone; drop UNIQUE from `path` and the indexes differ.
+TEST_F (DatabaseTest, TheMigrationCreatesFileGrantsAsTheMappingDoes) {
+    constexpr const char* FRESH_DB_PATH = "test_vayu_fresh.db";
+    vayu::tests::remove_database_files (FRESH_DB_PATH);
+    std::filesystem::remove_all ("trust-migration");
+    const std::string chosen = trust_file ("chosen.bin");
+    seed_workspace (TEST_DB_PATH, 5, [&] (Database& db) {
+        save_body (db, "req_false", binary_body (chosen, "false"));
+    });
+    {
+        Database migrated (TEST_DB_PATH);
+        migrated.init ();
+        Database fresh (FRESH_DB_PATH);
+        fresh.init ();
+    }
+
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), std::vector<std::string>{ chosen })
+    << "sync_schema () rebuilt the table the migration created";
+    const auto migrated_shape = table_shape (TEST_DB_PATH, "file_grants");
+    EXPECT_FALSE (migrated_shape.empty ()) << "no file_grants table to compare";
+    EXPECT_EQ (migrated_shape, table_shape (FRESH_DB_PATH, "file_grants"));
+    vayu::tests::remove_database_files (FRESH_DB_PATH);
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// A file chosen before the upgrade whose path no longer names a regular file
+// (deleted, or on a drive or share not mounted at upgrade time) gets no grant
+// and is reported: one warning per stored body naming it, by table, id and
+// path, and a count. A templated path, a stated `true` and (from version 4) an
+// absent key were never a choice to carry over. Mutation check: drop the
+// `ungranted.push_back` in `settle_choice` and nothing is reported.
+TEST_F (DatabaseTest, AChosenFileThatIsGoneAtUpgradeIsReported) {
+    std::filesystem::remove_all ("trust-migration");
+    const std::string chosen = trust_file ("chosen.bin");
+    seed_workspace (TEST_DB_PATH, 5, [&] (Database& db) {
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin", "false"));
+        const auto chosen_part = [] (const std::string& src) {
+            return nlohmann::json{ { "key", "f" }, { "type", "file" },
+                { "src", src }, { "unresolved", false } };
+        };
+        const auto parts = nlohmann::json::array (
+        { chosen_part (chosen), chosen_part ("/unplugged/b.bin") });
+        save_body (db, "req_form",
+        nlohmann::json{ { "mode", "form-data" }, { "fields", parts } }.dump ());
+        save_body (db, "req_templated", binary_body ("{{dir}}/t.bin", "false"));
+        save_body (db, "req_true", binary_body ("/abs/stated.bin", "true"));
+        save_body (db, "req_absent", binary_body ("/abs/absent.bin"));
+        save_snapshot (db, "run_1", binary_body ("/abs/snapshot.bin", "false"));
+    });
+
+    const auto report = open_and_report_ungranted (TEST_DB_PATH);
+    EXPECT_EQ (report.entries,
+    (std::vector<std::string>{ "requests|req_form|/unplugged/b.bin",
+    "requests|req_gone|/abs/gone.bin", "runs|run_1|/abs/snapshot.bin" }));
+    EXPECT_EQ (report.count, 3);
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), std::vector<std::string>{ chosen })
+    << "reporting changes nothing about what is granted";
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// Before version 4 a chosen reference had no key, so a body naming a file that
+// is gone has nothing to rewrite and the step only stamps; it must still say
+// so. Mutation check: drop the `log_file_trust_plan` call on the stamp-only
+// path of `migrate_before_sync` and nothing is reported.
+TEST_F (DatabaseTest, AChosenFileThatIsGoneIsReportedWhenTheStepOnlyStamps) {
+    seed_workspace (TEST_DB_PATH, 3, [] (Database& db) {
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin"));
+    });
+
+    const auto report = open_and_report_ungranted (TEST_DB_PATH);
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "the step rewrote something, so this did not take the stamp-only path";
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_EQ (report.entries, std::vector<std::string>{ "requests|req_gone|/abs/gone.bin" });
+    EXPECT_EQ (report.count, 1);
 }
 
 // #1817's `runs.origin` / `origin_client` joined version 5 rather than bumping
@@ -2678,7 +3105,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 5);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 6);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));

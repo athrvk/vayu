@@ -17,6 +17,7 @@
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/id.hpp"
@@ -1225,8 +1226,9 @@ RouteResult read_import_source (const nlohmann::json& body, vayu::core::ImportSo
  * Testable core of POST /import/parse - the parse, answered, nothing written.
  *
  * Separated from the route for the reason every core here is: it takes a
- * `Database` only for the live cap, and a test can then hand it a document
- * rather than a socket.
+ * `Database` for the live cap and for the allowed folders and picked files the
+ * bodies' `unresolved` is derived from (#2356), and a test can then hand it a
+ * document rather than a socket.
  */
 std::pair<int, nlohmann::json>
 import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
@@ -1275,7 +1277,11 @@ import_parse_response (vayu::db::Database& db, const nlohmann::json& body) {
         // broken" - and the import dialog says different things about them.
         return as_response (body_error (parsed.error));
     }
-    return { 200, std::move (parsed.result) };
+    // A copy: `ordered_json` to `json` is a conversion, never a move.
+    nlohmann::json result = parsed.result;
+    vayu::core::derive_import_file_trust (
+    result, vayu::http::FileAccessPolicy::from_database (db));
+    return { 200, std::move (result) };
 }
 
 /**

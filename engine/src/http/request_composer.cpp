@@ -1315,12 +1315,8 @@ nlohmann::json& payload) {
 /**
  * Every string a file reference carries - a form field, or a binary body's
  * `file` - including its path: a fixture directory is exactly the kind of thing
- * an environment variable holds.
- *
- * A path that held a `{{` before resolution is marked `unresolved`, whatever it
- * resolved to: a variable chose that file, not a person in the editor, so it is
- * sent only from under an allowed folder (`file_ref.hpp`). The mark is on the
- * wire, so it survives the compose -> app -> execute round trip.
+ * an environment variable holds. The resolved path is sent under the same
+ * rule as a literal one (`file_ref.hpp`): composition states no trust.
  */
 void resolve_file_strings (const VariableValues& vars,
 const BoundColumnNames& bound_columns,
@@ -1329,10 +1325,6 @@ nlohmann::json& entry,
 std::initializer_list<const char*> names) {
     if (!entry.is_object ()) {
         return;
-    }
-    if (auto src = entry.find ("src"); src != entry.end () && src->is_string () &&
-    src->get<std::string> ().find ("{{") != std::string::npos) {
-        entry["unresolved"] = true;
     }
     for (const char* name : names) {
         if (auto value = entry.find (name); value != entry.end () && value->is_string ()) {

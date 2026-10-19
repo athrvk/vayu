@@ -209,12 +209,23 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/app-paths.test.ts",
 		paths: ["engine/src/daemon.cpp"],
 	},
+	/* The grant secret's header, environment variable and minimum length
+	   (#2356): the app spells them in `electron/constants.ts`, and a drift
+	   refuses every allowed-folder and picked-file write with nothing red. */
+	grantSecret: {
+		reader: "app/electron/file-trust-client.test.ts",
+		paths: ["engine/include/vayu/http/grant_secret.hpp"],
+	},
 	loadTestBounds: {
 		reader: "app/src/constants/load-test.engine-parity.test.ts",
 		paths: ["engine/include/vayu/core/constants.hpp", "engine/src/http/routes/execution.cpp"],
 	},
 	importEvents: {
 		reader: "app/src/constants/import.engine-parity.test.ts",
+		paths: ["engine/include/vayu/core/constants.hpp"],
+	},
+	dataFileNesting: {
+		reader: "app/src/constants/data-files.engine-parity.test.ts",
 		paths: ["engine/include/vayu/core/constants.hpp"],
 	},
 	settingsShelves: {

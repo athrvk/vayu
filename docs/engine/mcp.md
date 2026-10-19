@@ -262,7 +262,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
-| `run_request`          | execute  | `POST /compose` + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
@@ -1110,6 +1110,24 @@ is exactly what MCP's safety model needs: every execute/load tool composes
 first, checks the **allowlist against the composed (resolved) URL**, and only
 then executes the composed payload.
 
+Four tools compose a stored request by id: `run_collection_smoke` and
+`run_collection` for every request of a collection, `start_load_run` with a
+`requestId`, and `run_request` with a `requestId` and **no `url`**
+(issue #2435), which is the single-request replay: the compose body is
+`{ requestId, environmentId?, collectionId? }`, so the send carries the stored
+and inherited auth, the collection chain's and the request's own elements, and
+the stored settings (redirects, protocol, `verifySSL`, cookies), exactly as the
+app's Send does. A field the call states beside the id (`method`, `headers`,
+`body`, `bodyType`, `auth`, `httpVersion`) goes in the compose body's `request`
+overlay and replaces the stored field for that send only. With a `url`,
+`run_request` is ad hoc: `requestId` only links the run in History and is
+never sent to `/compose`, nothing stored is applied, and the result carries a
+caveat saying so, because an agent passing both usually means the saved request
+and would otherwise read a default-auth response as the stored one. A call with
+neither is refused. The by-id branch keeps the ad-hoc gates of the other: the
+`verifySSL: false` refusal and the agent-script refusal run first, and the
+allowlist is checked on the composed URL, not the stored one.
+
 Two things the engine may still do to that payload after the gate has run, both
 of them reasons the gate refuses a URL whose *authority* still carries a
 `{{template}}` rather than trying to check one (`safety.ts`): a pre-request
@@ -1132,7 +1150,10 @@ names outright now that `elements` is the only script source, so the tool
 reads them, folds each into an ad-hoc `script.pre` / `script.post` element,
 and appends both after compose - alongside any ad-hoc `elements` argument the
 agent gave directly - so they run in addition to whatever the composed
-request already carried, never replacing it. `start_load_run`'s ad-hoc
+request already carried, never replacing it. On the by-id branch the append
+happens to the composed payload rather than in the compose body, because the
+engine's inline overlay replaces a whole key and an inline `elements` would
+drop the collection chain's and the request's own. `start_load_run`'s ad-hoc
 `postRequestScript` / `tests` folds the same way now (issue #1594):
 `POST /runs` reads a single target's step-level elements under
 `requestElements`, a key distinct from `elements` there (see below), so the
@@ -1155,10 +1176,12 @@ script (empty or whitespace-only) is not refused, because the engine composes
 and compiles none (`is_blank_script_element`); extractors, assertions and
 timers in `elements` pass (with write access off, what an extractor or a
 revealed script sets is not stored - see the write toggle below);
-`requestId` on `run_request` only links History and
-composes nothing stored, so it carries no script; and with reveal on every
-call is as it was. Scripts stored on a request or collection are not affected
-(see the write toggle below).
+`run_request` with a `url` is an ad-hoc send, where `requestId` only links
+History and composes nothing stored, so it carries no script; without a `url`
+it sends the saved request by id, and the scripts stored on it and its
+collections run as stored, which is the same residual as below; and with
+reveal on every call is as it was. Scripts stored on a request or collection
+are not affected (see the write toggle below).
 
 **One validation script, one name - except where the engine still keeps two.**
 The post-response script is one field in the app - the request builder's
@@ -1190,8 +1213,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   generates a fresh value per iteration rather than repeating one across them
   (issue #995); see
   [variable resolution](../app/variable-resolution.md#dynamic-variables).
-- **Auth** - `run_collection_smoke` composes each saved request by id, so its
-  stored auth applies (`inherit` resolved against the collection chain);
+- **Auth** - `run_collection_smoke` and `run_request` with a `requestId` and no
+  `url` compose each saved request by id, so its stored auth applies
+  (`inherit` resolved against the collection chain);
   `run_request` / `start_load_run` accept an explicit `auth` block and forward
   it raw inside the inline request - the engine resolves variables in it (and
   `inherit`, when a `collectionId` scopes the walk) and applies it at execute
@@ -1202,9 +1226,11 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   sequential collection run, and now `start_load_run`'s single-target path
   too (issue #1594 - the composed `elements` become the run's own
   `requestElements`, a step-level pipeline `POST /runs` now runs per
-  submission). `run_request` takes an ad-hoc `preRequestScript` /
+  submission), and so does `run_request` with a `requestId` and no `url`.
+  An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
-  call has no chain to compose from; `start_load_run` takes the same
+  call has no chain to compose from, and they are appended after the stored
+  ones when it sends a saved request; `start_load_run` takes the same
   `postRequestScript` for a URL-only run, folded into `requestElements` the
   same way, as described above. Those two are supplied per call, are refused while
   reveal is off (above), and are not
@@ -1250,16 +1276,17 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   fetched live on every call.
 - **File bodies** - `create_request` and `update_request` store a `binary`
   body, one file sent as the whole body: `file: {src, contentType?, fileName?}`
-  in place of `body` (a lone `file` implies `bodyType: "binary"`). Every file
-  reference an MCP tool writes is stored `unresolved: true`, whatever the
-  arguments say, so the engine sends it only once the user picks the file
-  again in the request editor or it lives under a folder they allowed in
-  Settings > Files: an agent can name a path, never choose one for the user.
+  in place of `body` (a lone `file` implies `bodyType: "binary"`). The engine
+  sends a stored path only once the user picks the file in the request editor
+  or it lives under a folder they allowed in Settings > Files, whatever the
+  arguments or the body say (#2356): an agent can name a path, never choose
+  one for the user.
   The tools that send an ad-hoc request (`run_request`, `start_load_run`)
   refuse a body that names a file (`bodyType: "binary"` or any `file`
   argument) before composing anything, and say to run the saved request by id
-  instead - `start_load_run` with `requestId`, or `run_collection` /
-  `run_collection_smoke` over its collection. Both declare `file` only so the
+  instead - `run_request` with `requestId` and no `url`, `start_load_run` with
+  `requestId`, or `run_collection` / `run_collection_smoke` over its
+  collection. Both declare `file` only so the
   refusal is reachable: an undeclared key is stripped by the SDK, and the
   request would go out with no body at all.
 - **What actually went out** - the engine adds headers an agent never wrote: the
@@ -1308,7 +1335,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   the overlay: `run_request` refuses `verifySSL: false` and `start_load_run`
   takes no such argument, because a certificate check skipped for one call is
   recorded nowhere afterwards. It is written onto the saved request instead
-  (issue #795), and every by-id compose then carries it.
+  (issue #795), and every by-id compose then carries it, a `run_request` by
+  `requestId` included.
 - **Streaming** - `run_request` takes `stream: true` for a `text/event-stream`
   endpoint (issue #575). `tools/call` is request/response, so the tool does not
   stream to the agent: it starts the run, reads the relay for at most
@@ -1449,8 +1477,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `recursive: true` walks sub-collections in the sidebar's order (each
     subtree before that level's own requests, mirroring `collect_requests`).
   - **Rows are inline** - the engine never opens a file - and its
-    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals are surfaced
-    verbatim rather than re-derived in the schema. `dataFileName` and
+    `maxScenarioDataRows` / `maxScenarioDataBytes` refusals, and the depth
+    refusal (a cell nested deeper than 100 levels, `400` `invalid_run_config`
+    or `invalid_scenario`), are surfaced verbatim rather than re-derived in the
+    schema. `dataFileName` and
     `dataFileHash` (issue #2051) name the file the rows came from - a display
     name and the SHA-256 of its bytes as 64 lowercase hex, which the schema
     checks, refusing a name holding a `/` or `\` as a path - and are forwarded

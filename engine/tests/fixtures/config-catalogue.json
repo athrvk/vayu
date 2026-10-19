@@ -57,7 +57,7 @@
   {
     "advanced": false,
     "category": "general_engine",
-    "default_value": "0",
+    "default_value": "1",
     "depends_on": "",
     "key": "dbSynchronous",
     "max_value": "",

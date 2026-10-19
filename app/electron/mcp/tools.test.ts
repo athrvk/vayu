@@ -6044,8 +6044,9 @@ describe("dispatchTool", () => {
 			expect(client.executeRequest).toHaveBeenCalled();
 		});
 
-		test("run_request with only a requestId link sends with reveal off", async () => {
-			// `requestId` links History; it composes nothing stored, so no script rides it.
+		test("run_request with a url and a requestId link sends with reveal off", async () => {
+			// With a `url` the send is ad hoc: `requestId` links History and composes
+			// nothing stored, so no stored script rides it.
 			const client = fakeClient();
 			const res = await dispatchTool(
 				"run_request",
@@ -6074,6 +6075,250 @@ describe("dispatchTool", () => {
 				expect(description).toContain("Reveal secrets to agents");
 				expect(description).toMatch(/script you supply here .* is refused/);
 			}
+		});
+	});
+
+	/*
+	 * #2435: `run_request` with a `requestId` and no `url` sends the saved
+	 * request as the app's Send does; with a `url` it is ad hoc and `requestId`
+	 * only links the run.
+	 */
+	describe("run_request by saved request id", () => {
+		const OFF = { allowlist: ["api.example.com"] };
+		const composeBody = (client: EngineClient) =>
+			(client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				unknown
+			>;
+		const executed = (client: EngineClient) =>
+			(client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				unknown
+			>;
+
+		test("composes the stored row and executes what comes back, stored auth included", async () => {
+			const auth = { mode: "bearer", token: "{{apiToken}}" };
+			const client = savedRequestClient({ auth });
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", environmentId: "env_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeBody(client)).toMatchObject({
+				requestId: "req_1",
+				environmentId: "env_1",
+			});
+			// Nothing inline: the stored row defines the request.
+			expect(composeBody(client).request).toBeUndefined();
+			expect(executed(client)).toMatchObject({
+				url: "https://api.example.com/users",
+				method: "POST",
+				headers: { "X-Api": "v1" },
+				auth,
+				requestId: "req_1",
+			});
+			expect(executed(client).elements).toHaveLength(3);
+		});
+
+		test("inline fields lay over the stored request without a url", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", headers: { "X-Extra": "1" }, method: "put" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeBody(client).request).toEqual({
+				method: "PUT",
+				headers: { "X-Extra": "1" },
+			});
+			// Not the ad-hoc default: a stored POST must not become a GET.
+			const bare = savedRequestClient();
+			await dispatchTool("run_request", { requestId: "req_1" }, ctxWith(bare, OFF));
+			expect(executed(bare).method).toBe("POST");
+		});
+
+		test("an empty url names no target, so the saved request is sent", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", url: "" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeBody(client).requestId).toBe("req_1");
+			expect(composeBody(client).request).toBeUndefined();
+		});
+
+		test("ad-hoc scripts and elements follow the stored ones instead of replacing them", async () => {
+			const client = savedRequestClient();
+			const extractor = {
+				kind: "extract.jsonpath",
+				config: { path: "$.id", variable: "id" },
+			};
+			const res = await dispatchTool(
+				"run_request",
+				{
+					requestId: "req_1",
+					postRequestScript: "pm.test('mine', () => {})",
+					elements: [extractor],
+				},
+				ctxWith(client, { ...OFF, revealSecretsToAgents: true })
+			);
+			expect(res.isError).toBeFalsy();
+			// The engine replaces a whole inline `elements`, which would drop the chain's.
+			expect(composeBody(client).request).toBeUndefined();
+			const kinds = (executed(client).elements as Array<{ id?: string }>).map((e) => e.id);
+			expect(kinds).toEqual(["el_chain", "el_sig", "el_own", "mcp-script-post", undefined]);
+			expect((executed(client).elements as unknown[])[4]).toEqual(extractor);
+		});
+
+		test("a stored literal credential runs with reveal off and is not echoed", async () => {
+			const KEY = "stored-typed-key";
+			const client = fakeClient({
+				composeRequest: vi.fn().mockResolvedValue({
+					method: "GET",
+					url: "https://api.example.com/users",
+					auth: { mode: "apikey", key: "X-Stored-Key", value: KEY, in: "header" },
+				}),
+				executeRequest: vi.fn().mockResolvedValue({
+					status: 200,
+					requestHeaders: { "X-Stored-Key": KEY },
+				}),
+			});
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(firstText(res)).not.toContain(KEY);
+			expect(JSON.parse(firstText(res)).requestHeaders).toEqual({
+				"X-Stored-Key": "<redacted>",
+			});
+			expect(executed(client).auth).toMatchObject({ value: KEY });
+		});
+
+		test("a composed url off the allowlist is refused and nothing is executed", async () => {
+			const client = savedRequestClient({ url: "https://evil.example.net/users" });
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("evil.example.net");
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
+
+		test("a saved request that stores scripts runs with reveal off", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(client.executeRequest).toHaveBeenCalled();
+		});
+
+		test.each([
+			["preRequestScript", { preRequestScript: "pm.environment.get('t');" }],
+			["elements", { elements: [{ kind: "script.post", config: { script: "pm.test()" } }] }],
+		])(
+			"an agent-supplied %s beside requestId is still refused with reveal off",
+			async (_name, extra) => {
+				const client = savedRequestClient();
+				const res = await dispatchTool(
+					"run_request",
+					{ requestId: "req_1", ...extra },
+					ctxWith(client, OFF)
+				);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).toContain("Nothing was sent");
+				expect(client.composeRequest).not.toHaveBeenCalled();
+				expect(client.executeRequest).not.toHaveBeenCalled();
+			}
+		);
+
+		test("verifySSL: false is refused on this branch too", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", verifySSL: false },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBe(true);
+			expect(client.composeRequest).not.toHaveBeenCalled();
+		});
+
+		test("an unknown id reads as no such saved request", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "nope" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain('No saved request with id "nope"');
+			expect(client.executeRequest).not.toHaveBeenCalled();
+		});
+
+		test("url with requestId stays ad hoc: the id is a link, and a caveat says so", async () => {
+			const client = fakeClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", url: "https://api.example.com/other" },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeBody(client)).not.toHaveProperty("requestId");
+			expect(composeBody(client).request).toMatchObject({
+				url: "https://api.example.com/other",
+				method: "GET",
+			});
+			const payload = executed(client);
+			expect(payload.requestId).toBe("req_1");
+			expect(payload.url).toBe("https://api.example.com/other");
+			expect(payload).not.toHaveProperty("auth");
+			const caveat = res.content[res.content.length - 1].text;
+			expect(caveat).toMatch(/NOT applied/);
+			expect(caveat).toMatch(/Omit "url"/);
+		});
+
+		test("a url alone, or a requestId alone, carries no caveat", async () => {
+			for (const args of [{ url: "https://api.example.com/users" }, { requestId: "req_1" }]) {
+				const res = await dispatchTool(
+					"run_request",
+					args,
+					ctxWith(args.url ? fakeClient() : savedRequestClient(), OFF)
+				);
+				expect(res.isError).toBeFalsy();
+				expect(res.content).toHaveLength(1);
+			}
+		});
+
+		test("neither a url nor a requestId names both ways in", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool("run_request", { method: "GET" }, ctxWith(client, OFF));
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toBe(
+				'Pass "url" for an ad-hoc send, or "requestId" to send a saved request.'
+			);
+			expect(client.composeRequest).not.toHaveBeenCalled();
+		});
+
+		test("the description and the requestId parameter state both paths", () => {
+			const tool = TOOLS.find((t) => t.name === "run_request")!;
+			const idDescription = (tool.inputSchema as Record<string, z.ZodType>).requestId
+				.description;
+			for (const text of [tool.description, idDescription]) {
+				expect(text).toMatch(/Omit `url` and pass `requestId`|Without `url`/);
+				expect(text).toMatch(/nothing stored is applied/);
+				expect(text).toMatch(/only links the run in History/);
+			}
+			expect(tool.description).not.toMatch(/use run_collection_smoke/);
 		});
 	});
 
@@ -12519,17 +12764,18 @@ describe("secret withholding", () => {
 
 /**
  * A `binary` body names a file on the user's machine. An agent may store one,
- * but never as a file the user chose: every MCP-written file reference is
- * `unresolved`, so the engine sends it only once a person picks it in the
- * editor or it sits under an allowed folder. And an agent may never *send* a
- * file inline - the refusal points it at running the saved request by id.
- * `dispatchTool` hands handlers the raw arguments (no zod stripping), so an
- * agent's own `unresolved: false` really does reach `shapeBody` here.
+ * but never choose it: the engine sends it only once a person picks it in the
+ * editor or it sits under an allowed folder, and decides that from its own
+ * records, so the stored reference carries no trust member at all (#2356). An
+ * agent may never *send* a file inline - the refusal points it at running the
+ * saved request by id. `dispatchTool` hands handlers the raw arguments (no zod
+ * stripping), so an agent's own `unresolved: false` really does reach
+ * `shapeBody` here.
  */
 describe("binary file bodies", () => {
 	const WRITE = { allowWrites: true };
 
-	test("create_request stores a binary body unresolved, whatever the agent claims", async () => {
+	test("create_request stores a binary body without the agent's trust claim", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"create_request",
@@ -12547,8 +12793,9 @@ describe("binary file bodies", () => {
 		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/data/a.png", contentType: "image/png", unresolved: true },
+			file: { src: "/data/a.png", contentType: "image/png" },
 		});
+		expect(payload.body.file).not.toHaveProperty("unresolved");
 		expect(payload.bodyType).toBe("binary");
 	});
 
@@ -12562,12 +12809,12 @@ describe("binary file bodies", () => {
 		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/d/a.bin", unresolved: true },
+			file: { src: "/d/a.bin" },
 		});
 		expect(payload.bodyType).toBe("binary");
 	});
 
-	test("update_request replaces the body with an unresolved file", async () => {
+	test("update_request replaces the body with a file reference", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"update_request",
@@ -12582,7 +12829,7 @@ describe("binary file bodies", () => {
 		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/d/a.bin", fileName: "a.bin", unresolved: true },
+			file: { src: "/d/a.bin", fileName: "a.bin" },
 		});
 		expect(payload.bodyType).toBe("binary");
 	});

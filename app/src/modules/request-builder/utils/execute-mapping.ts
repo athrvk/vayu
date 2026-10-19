@@ -33,7 +33,7 @@ import type {
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
-import { isUnresolved, noFile, withFileTrust } from "@/lib/file-trust";
+import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -42,18 +42,18 @@ export interface ExecBody {
 	content?: string;
 	fields?: ExecField[];
 	/** A `binary` body's file - a path, never bytes. */
-	file?: FileRef;
+	file?: WireFileRef;
 }
+
+/** A file reference as a payload carries it: no trust flag. */
+export type WireFileRef = Omit<FileRef, "unresolved">;
 
 /**
  * One form field on the wire payload. A file part sends its path and what the
  * part should declare about itself - never bytes: the engine opens the file, so
  * a renderer that read it would be copying the upload through two processes.
- *
- * `unresolved` travels: it is the engine's trust input, not an editor
- * annotation. A path nobody chose in the editor is sent only when it lies
- * under a folder allowed in Settings, so dropping the flag here would let an
- * imported path through as though the user had picked it.
+ * No trust flag: the engine decides from its allowed folders and grants
+ * (`lib/file-trust.ts`).
  */
 export interface ExecField {
 	key: string;
@@ -63,23 +63,19 @@ export interface ExecField {
 	src?: string;
 	fileName?: string;
 	contentType?: string;
-	unresolved?: boolean;
 }
 
 /**
  * A binary body's file as the stored and the wire shape both take it: empty
- * optional members left out, and `unresolved` always stated
+ * optional members and the engine's `unresolved` answer left out
  * (`lib/file-trust.ts`).
  */
 export function toFileRef(
 	file: FileRef | undefined,
 	resolveString: (input: string) => string = (s) => s
-): FileRef {
+): WireFileRef {
 	if (!file) return noFile();
-	const ref: FileRef = {
-		src: resolveString(file.src ?? ""),
-		unresolved: isUnresolved(file.unresolved),
-	};
+	const ref: WireFileRef = { src: resolveString(file.src ?? "") };
 	if (file.fileName) ref.fileName = resolveString(file.fileName);
 	if (file.contentType) ref.contentType = resolveString(file.contentType);
 	return ref;
@@ -95,7 +91,7 @@ export function toBodyPayload(
 	request: Pick<RequestState, "bodyMode" | "body" | "formData" | "urlEncoded" | "binaryFile">
 ): RequestBody {
 	if (request.bodyMode === "form-data") {
-		return { mode: "form-data", fields: withFileTrust(toKeyValueEntries(request.formData)) };
+		return { mode: "form-data", fields: withoutFileTrust(toKeyValueEntries(request.formData)) };
 	}
 	if (request.bodyMode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: toKeyValueEntries(request.urlEncoded) };
@@ -161,7 +157,6 @@ export function buildExecBody(
 				field.src = resolveString(e.src ?? "");
 				if (e.fileName) field.fileName = resolveString(e.fileName);
 				if (e.contentType) field.contentType = resolveString(e.contentType);
-				field.unresolved = isUnresolved(e.unresolved);
 				return field;
 			}),
 		};
