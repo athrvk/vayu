@@ -5,22 +5,22 @@
  */
 
 #include <gtest/gtest.h>
-#include <httplib.h>
 
 #include <chrono>
-#include <map>
 #include <string>
-#include <thread>
 #include <variant>
 
 #include <nlohmann/json.hpp>
 
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
 namespace oauth = vayu::http::oauth;
+using vayu::tests::MockTokenServer;
+using vayu::tests::parse_form;
 
 namespace {
 
@@ -29,110 +29,6 @@ int64_t now_ms () {
     std::chrono::system_clock::now ().time_since_epoch ())
     .count ();
 }
-
-std::map<std::string, std::string> parse_form (const std::string& body) {
-    std::map<std::string, std::string> out;
-    size_t pos = 0;
-    while (pos < body.size ()) {
-        auto amp = body.find ('&', pos);
-        auto pair =
-        body.substr (pos, amp == std::string::npos ? std::string::npos : amp - pos);
-        if (auto eq = pair.find ('='); eq != std::string::npos) {
-            out[pair.substr (0, eq)] = pair.substr (eq + 1);
-        }
-        if (amp == std::string::npos)
-            break;
-        pos = amp + 1;
-    }
-    return out;
-}
-
-// Mock IdP: one endpoint per behavior; records the last request for assertions.
-class MockTokenServer {
-    public:
-    MockTokenServer () {
-        svr_.Post (".*", [this] (const httplib::Request& req, httplib::Response& res) {
-            ++hits_;
-            last_path_         = req.path;
-            last_body_         = req.body;
-            last_auth_         = req.get_header_value ("Authorization");
-            last_content_type_ = req.get_header_value ("Content-Type");
-            const auto form    = parse_form (req.body);
-            const auto grant =
-            form.count ("grant_type") ? form.at ("grant_type") : "";
-
-            if (req.path == "/token") {
-                res.set_content (R"({"access_token":"AT)" + std::to_string (hits_) +
-                R"(","token_type":"Bearer","expires_in":3600,"refresh_token":"RT1","scope":"s1"})",
-                "application/json");
-            } else if (req.path == "/token-plain") {
-                res.set_content (R"({"access_token":"AT-PLAIN"})", "application/json");
-            } else if (req.path == "/token-legacy") {
-                // Form-encoded body with a string expires_in (legacy GitHub style)
-                res.set_content (
-                "access_token=legacy&token_type=bearer&expires_in=1200", "text/plain");
-            } else if (req.path == "/refresh-norotate") {
-                if (grant == "refresh_token") {
-                    res.set_content (R"({"access_token":"REFRESHED","expires_in":3600})",
-                    "application/json");
-                } else {
-                    res.set_content (R"({"access_token":"FRESH","expires_in":3600})",
-                    "application/json");
-                }
-            } else if (req.path == "/refresh-then-fresh") {
-                if (grant == "refresh_token") {
-                    res.status = 400;
-                    res.set_content (R"({"error":"invalid_grant"})", "application/json");
-                } else {
-                    res.set_content (R"({"access_token":"FRESH-AFTER-REJECT","expires_in":3600})",
-                    "application/json");
-                }
-            } else if (req.path == "/token-fail") {
-                res.status = 400;
-                res.set_content (R"({"error":"invalid_client","error_description":"bad secret"})",
-                "application/json");
-            } else {
-                res.status = 404;
-            }
-        });
-        port_   = svr_.bind_to_any_port ("127.0.0.1");
-        thread_ = std::thread ([this] { svr_.listen_after_bind (); });
-        while (!svr_.is_running ())
-            std::this_thread::sleep_for (std::chrono::milliseconds (5));
-    }
-    ~MockTokenServer () {
-        svr_.stop ();
-        if (thread_.joinable ())
-            thread_.join ();
-    }
-    MockTokenServer (const MockTokenServer&)            = delete;
-    MockTokenServer& operator= (const MockTokenServer&) = delete;
-    MockTokenServer (MockTokenServer&&)                 = delete;
-    MockTokenServer& operator= (MockTokenServer&&)      = delete;
-
-    std::string url (const std::string& path) const {
-        return "http://127.0.0.1:" + std::to_string (port_) + path;
-    }
-    int hits () const {
-        return hits_;
-    }
-    const std::string& last_body () const {
-        return last_body_;
-    }
-    const std::string& last_auth () const {
-        return last_auth_;
-    }
-    const std::string& last_content_type () const {
-        return last_content_type_;
-    }
-
-    private:
-    httplib::Server svr_;
-    int port_ = 0;
-    int hits_ = 0;
-    std::string last_path_, last_body_, last_auth_, last_content_type_;
-    std::thread thread_;
-};
 
 class OAuthClientTest : public ::testing::Test {
     protected:
@@ -154,6 +50,54 @@ class OAuthClientTest : public ::testing::Test {
         return json{ { "grantType", "client_credentials" },
             { "accessTokenUrl", idp.url (path) }, { "clientId", "cid" },
             { "clientSecret", "sec" } };
+    }
+
+
+    // An interactive exchange spends the authorization code the user just
+    // granted; a cached row, fresh or stale, must not answer in its place
+    // (#2472). The helpers below serve those tests.
+    static json auth_code_config (const MockTokenServer& idp) {
+        return json{ { "grantType", "authorization_code" },
+            { "accessTokenUrl", idp.url ("/token-plain") },
+            { "clientId", "cid" }, { "clientSecret", "sec" } };
+    }
+
+    static vayu::db::OAuthToken seeded_row (const json& config, int64_t age_ms) {
+        vayu::db::OAuthToken row;
+        row.cache_key     = oauth::cache_key (config);
+        row.access_token  = "OLD";
+        row.token_type    = "Bearer";
+        row.refresh_token = "RT_OLD";
+        row.expires_in    = 3600;
+        row.created_at    = now_ms () - age_ms;
+        return row;
+    }
+
+    // Runs one interactive acquire over `row` and checks that the code, and
+    // nothing else, went to the provider and that the result replaced the row.
+    void expect_code_exchanged (const MockTokenServer& idp,
+    const json& config,
+    const vayu::db::OAuthToken& row,
+    bool force) {
+        db_->save_oauth_token (row);
+        const oauth::InteractiveExchange exchange{ "CODE123", "VERIFIER456",
+            "http://127.0.0.1:9999/callback" };
+
+        auto result = oauth::acquire_token (*db_, config, force, exchange);
+
+        ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+        EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "AT-PLAIN");
+        EXPECT_EQ (idp.hits (), 1);
+        const auto form = parse_form (idp.last_body ());
+        EXPECT_EQ (form.at ("grant_type"), "authorization_code");
+        EXPECT_EQ (form.at ("code"), "CODE123");
+        EXPECT_EQ (form.count ("refresh_token"), 0u);
+
+        const auto stored = db_->get_oauth_token (row.cache_key);
+        ASSERT_HAS_VALUE (stored);
+        EXPECT_EQ (stored->access_token, "AT-PLAIN");
+        EXPECT_TRUE (stored->refresh_token.empty ())
+        << "the old refresh token belongs to the refresh path only";
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -395,6 +339,40 @@ TEST_F (OAuthClientTest, AuthCodeExchangeSendsCodeVerifierAndRedirect) {
     EXPECT_EQ (form["code"], "CODE123");
     EXPECT_EQ (form["code_verifier"], "VERIFIER456");
     EXPECT_EQ (form["redirect_uri"], "http%3A%2F%2F127.0.0.1%3A9999%2Fcallback");
+}
+
+// An interactive exchange spends the authorization code the user just granted;
+// a cached row, fresh or stale, must not answer in its place (#2472).
+TEST_F (OAuthClientTest, ExchangesTheCodeOverAnUnexpiredRow) {
+    MockTokenServer idp;
+    const auto config = auth_code_config (idp);
+    expect_code_exchanged (idp, config, seeded_row (config, 0), false);
+}
+
+TEST_F (OAuthClientTest, ExchangesTheCodeOverAnExpiredRowWithARefreshToken) {
+    MockTokenServer idp;
+    const auto config = auth_code_config (idp);
+    auto row          = seeded_row (config, 7'200'000);
+    ASSERT_TRUE (oauth::is_expired (row, now_ms ()));
+    expect_code_exchanged (idp, config, row, false);
+}
+
+TEST_F (OAuthClientTest, InteractiveWinsOverForce) {
+    MockTokenServer idp;
+    const auto config = auth_code_config (idp);
+    expect_code_exchanged (idp, config, seeded_row (config, 0), true);
+}
+
+TEST_F (OAuthClientTest, NonInteractiveStillAnswersFromTheCache) {
+    MockTokenServer idp;
+    const auto config = auth_code_config (idp);
+    db_->save_oauth_token (seeded_row (config, 0));
+
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "OLD");
+    EXPECT_EQ (idp.hits (), 0);
 }
 
 TEST_F (OAuthClientTest, InvalidConfigsAre400) {

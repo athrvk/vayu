@@ -339,16 +339,21 @@ double* network_ms) {
     const std::string key = cache_key (config);
     const int64_t now     = now_ms ();
 
-    if (auto answer = token_from_cache (
-        db, config, key, token_url, force_refresh, now, network_ms)) {
-        return *answer;
+    // An interactive call carries an authorization code that only the exchange
+    // can spend, so no cached token (fresh, expired or refreshable) may answer
+    // in its place. The row is replaced by the exchange (#2472); `force_refresh`
+    // adds nothing here.
+    if (!interactive.has_value ()) {
+        if (auto answer = token_from_cache (
+            db, config, key, token_url, force_refresh, now, network_ms)) {
+            return *answer;
+        }
     }
 
     TokenRequest req;
     if (auto refusal = build_grant_request (config, grant, interactive, req)) {
         return *refusal;
     }
-
 
     vayu::utils::log_info ("oauth", "OAuth2: requesting token",
     { { "grant", grant }, { "url", token_url } });

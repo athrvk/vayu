@@ -14,44 +14,16 @@
 
 #include <nlohmann/json.hpp>
 
+#include "oauth_token_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/http/oauth_authorize.hpp"
+#include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
+using vayu::tests::MockTokenServer;
 
 namespace {
-
-// Mock token endpoint: accepts an authorization_code exchange, returns a token.
-class MockTokenServer {
-    public:
-    MockTokenServer () {
-        svr_.Post ("/token", [] (const httplib::Request&, httplib::Response& res) {
-            res.set_content (R"({"access_token":"IATOKEN","token_type":"Bearer","expires_in":3600})",
-            "application/json");
-        });
-        port_   = svr_.bind_to_any_port ("127.0.0.1");
-        thread_ = std::thread ([this] { svr_.listen_after_bind (); });
-        while (!svr_.is_running ())
-            std::this_thread::sleep_for (std::chrono::milliseconds (5));
-    }
-    ~MockTokenServer () {
-        svr_.stop ();
-        if (thread_.joinable ())
-            thread_.join ();
-    }
-    MockTokenServer (const MockTokenServer&)            = delete;
-    MockTokenServer& operator= (const MockTokenServer&) = delete;
-    MockTokenServer (MockTokenServer&&)                 = delete;
-    MockTokenServer& operator= (MockTokenServer&&)      = delete;
-    std::string token_url () const {
-        return "http://127.0.0.1:" + std::to_string (port_) + "/token";
-    }
-
-    private:
-    httplib::Server svr_;
-    int port_ = 0;
-    std::thread thread_;
-};
 
 // Extract the query string from a URL.
 std::string query_of (const std::string& url) {
@@ -74,6 +46,12 @@ std::map<std::string, std::string> parse_q (const std::string& q) {
     return out;
 }
 
+int64_t now_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 class OAuthAuthorizeTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_oauth_authorize.db";
@@ -87,6 +65,25 @@ class OAuthAuthorizeTest : public ::testing::Test {
     }
     static void cleanup () {
         vayu::tests::remove_database_files (DB_PATH);
+    }
+    // A token the cache would answer with, so a completion that reads the
+    // cache instead of exchanging its code is caught (#2472).
+    void seed_cached_token (const json& config) {
+        vayu::db::OAuthToken row;
+        row.cache_key     = vayu::http::oauth::cache_key (config);
+        row.access_token  = "STALE-CACHED";
+        row.token_type    = "Bearer";
+        row.refresh_token = "RT_OLD";
+        row.expires_in    = 3600;
+        row.created_at    = now_ms ();
+        db_->save_oauth_token (row);
+    }
+    // Both completions must leave the provider's answer in the row.
+    void expect_exchanged_token_stored (const json& config, const MockTokenServer& idp) {
+        EXPECT_EQ (idp.hits (), 1);
+        const auto stored = db_->get_oauth_token (vayu::http::oauth::cache_key (config));
+        ASSERT_HAS_VALUE (stored);
+        EXPECT_EQ (stored->access_token, "AT1");
     }
     // db_ declared before the manager is used in each test so the manager (with
     // any live listener capturing db_) is torn down first.
@@ -136,7 +133,7 @@ TEST_F (OAuthAuthorizeTest, EmbeddedRejectsStateMismatch) {
     MockTokenServer idp;
     const json config = { { "grantType", "authorization_code" },
         { "authorizationUrl", "https://idp/auth" },
-        { "accessTokenUrl", idp.token_url () }, { "clientId", "cid" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "sec" }, { "callbackUrl", "https://app/callback" } };
 
     auto start = mgr.start (*db_, config, "embedded");
@@ -151,8 +148,10 @@ TEST_F (OAuthAuthorizeTest, EmbeddedCompletesAndExchanges) {
     MockTokenServer idp;
     const json config = { { "grantType", "authorization_code" },
         { "authorizationUrl", "https://idp/auth" },
-        { "accessTokenUrl", idp.token_url () }, { "clientId", "cid" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "sec" }, { "callbackUrl", "https://app/callback" } };
+
+    seed_cached_token (config);
 
     auto start = mgr.start (*db_, config, "embedded");
     ASSERT_TRUE (start.ok);
@@ -164,6 +163,7 @@ TEST_F (OAuthAuthorizeTest, EmbeddedCompletesAndExchanges) {
     EXPECT_EQ (st.state, "completed");
     EXPECT_FALSE (st.cache_key.empty ());
     EXPECT_TRUE (db_->get_oauth_token (st.cache_key).has_value ());
+    expect_exchanged_token_stored (config, idp);
 }
 
 TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
@@ -171,8 +171,10 @@ TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
     MockTokenServer idp;
     const json config = { { "grantType", "authorization_code" },
         { "authorizationUrl", "https://idp/auth" },
-        { "accessTokenUrl", idp.token_url () }, { "clientId", "cid" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
         { "clientSecret", "sec" } };
+
+    seed_cached_token (config);
 
     auto start = mgr.start (*db_, config, "loopback");
     ASSERT_TRUE (start.ok);
@@ -189,6 +191,7 @@ TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
     auto st = mgr.status (start.attempt_id);
     EXPECT_EQ (st.state, "completed");
     EXPECT_TRUE (db_->get_oauth_token (st.cache_key).has_value ());
+    expect_exchanged_token_stored (config, idp);
 }
 
 TEST_F (OAuthAuthorizeTest, StatusNotFoundForUnknownAttempt) {

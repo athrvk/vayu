@@ -77,6 +77,11 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * performs a fresh grant. `authorization_code` requires `interactive` and
  * fails with 409 oauth2_interactive_required without it.
  *
+ * A call with `interactive` never reads the cache: it always exchanges the
+ * code and overwrites the cached row with the result, whatever `force_refresh`
+ * says and whether the row was fresh, expired or refreshable. The old refresh
+ * token is not carried over; the provider's answer replaces the row whole.
+ *
  * @param network_ms When non-null, the milliseconds this call spent waiting on
  *        the provider's token endpoint are added to it (a refresh and the fresh
  *        grant after a rejected refresh both count); a cache hit adds nothing.

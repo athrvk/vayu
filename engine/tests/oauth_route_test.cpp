@@ -10,8 +10,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "oauth_token_server.hpp"
+#include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/oauth_client.hpp"
 
 using nlohmann::json;
 
@@ -63,6 +66,36 @@ TEST_F (OAuthRouteTest, PostAuthCodeWithoutInteractiveIs409) {
     R"({"config":{"grantType":"authorization_code","accessTokenUrl":"https://idp/token","clientId":"c"}})");
     EXPECT_EQ (status, 409);
     EXPECT_EQ (body["error"]["code"], "oauth2_interactive_required");
+}
+
+// The app's "Get new token" posts `interactive` without `force`; the cached row
+// must not answer for the code it carries (#2472).
+TEST_F (OAuthRouteTest, PostInteractiveExchangesTheCodeOverACachedRow) {
+    vayu::tests::MockTokenServer idp;
+    const json config = { { "grantType", "authorization_code" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
+        { "clientSecret", "sec" } };
+
+    vayu::db::OAuthToken cached;
+    cached.cache_key    = vayu::http::oauth::cache_key (config);
+    cached.access_token = "STALE-CACHED";
+    cached.token_type   = "Bearer";
+    cached.expires_in   = 0; // never expires: the cache would answer
+    cached.created_at   = 1000;
+    db_->save_oauth_token (cached);
+
+    const json request = { { "config", config },
+        { "interactive",
+        { { "code", "CODE123" }, { "codeVerifier", "V" },
+        { "redirectUri", "http://127.0.0.1:9/callback" } } } };
+    auto [status, body] = vayu::http::routes::oauth2_token_post (*db_, request.dump ());
+
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["accessToken"], "AT1");
+    EXPECT_EQ (idp.hits (), 1);
+    const auto stored = db_->get_oauth_token (cached.cache_key);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->access_token, "AT1");
 }
 
 TEST_F (OAuthRouteTest, GetReportsNotFoundThenFound) {
