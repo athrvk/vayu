@@ -507,6 +507,15 @@ struct RefusedRoot {
     std::string reason;
 };
 
+/// A file reference stored as chosen whose `src` no longer names a regular
+/// file (deleted, or on a drive or share not mounted at upgrade time). It gets
+/// no grant, so from here on it reads as not chosen on this machine.
+struct UngrantedChoice {
+    const char* table = "";
+    std::string id;
+    std::string path;
+};
+
 /// Everything the file-trust step changes, read before anything is written so
 /// a database with nothing to change is stamped without a backup or a
 /// transaction.
@@ -515,6 +524,8 @@ struct FileTrustPlan {
     std::vector<RefusedRoot> refused_roots;
     /// Canonical, deduplicated: the `file_grants` rows to insert.
     std::set<std::string> grants;
+    /// Reported, never written: one per stored body that names it.
+    std::vector<UngrantedChoice> ungranted;
 
     [[nodiscard]] bool empty () const {
         return rewrites.empty () && refused_roots.empty () && grants.empty ();
@@ -539,21 +550,34 @@ bool stored_as_chosen (const nlohmann::json& ref, bool absent_means_chosen) {
     return found->is_boolean () && !found->get<bool> ();
 }
 
-/// Removes the trust key from every file reference of @p body, adding a grant
-/// for each one stored as chosen whose `src` still names a regular file
-/// (`grantable_file_path`: a missing path or one holding `{{` is skipped).
-/// True when the body changed.
+/// Grants the chosen @p src when it still names a regular file
+/// (`grantable_file_path`), and otherwise adds it to @p ungranted. An empty or
+/// templated `src` is neither: it named no file to carry over, and a send
+/// refuses a `{{` whatever the trust.
+void settle_choice (const std::string& src,
+std::set<std::string>& grants,
+std::vector<std::string>& ungranted) {
+    if (auto path = vayu::http::grantable_file_path (src)) {
+        grants.insert (std::move (*path));
+        return;
+    }
+    if (!src.empty () && src.find ("{{") == std::string::npos) {
+        ungranted.push_back (src);
+    }
+}
+
+/// Removes the trust key from every file reference of @p body, settling each
+/// one stored as chosen (`settle_choice`). True when the body changed.
 bool settle_body_trust (nlohmann::json& body,
 bool absent_means_chosen,
-std::set<std::string>& grants) {
+std::set<std::string>& grants,
+std::vector<std::string>& ungranted) {
     bool changed = false;
     vayu::json::for_each_file_ref (body, [&] (nlohmann::json& ref) {
         const auto src = ref.find ("src");
         if (src != ref.end () && src->is_string () &&
         stored_as_chosen (ref, absent_means_chosen)) {
-            if (auto path = vayu::http::grantable_file_path (src->get<std::string> ())) {
-                grants.insert (std::move (*path));
-            }
+            settle_choice (src->get<std::string> (), grants, ungranted);
         }
         changed = ref.erase ("unresolved") > 0 || changed;
     });
@@ -608,8 +632,12 @@ FileTrustPlan& plan) {
             }
             body = &*member;
         }
-        if (settle_body_trust (*body, absent_means_chosen, plan.grants)) {
+        std::vector<std::string> ungranted;
+        if (settle_body_trust (*body, absent_means_chosen, plan.grants, ungranted)) {
             plan.rewrites.push_back ({ table, column, id, value.dump () });
+        }
+        for (auto& path : ungranted) {
+            plan.ungranted.push_back ({ table, id, std::move (path) });
         }
     }
     sqlite3_finalize (statement);
@@ -734,9 +762,10 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
     return insert_grants (connection, plan.grants, error);
 }
 
-/// Says, once the step has committed, which allowed folders are gone and why,
-/// so a user who finds one missing from Settings > Files can see it, and how
-/// many picked files the stored bodies were turned into grants for.
+/// Says, once the step has committed or stamped, which allowed folders are
+/// gone and why, so a user who finds one missing from Settings > Files can see
+/// it; how many picked files the stored bodies were turned into grants for;
+/// and which chosen files were not found and must be picked again.
 void log_file_trust_plan (const FileTrustPlan& plan) {
     for (const auto& root : plan.refused_roots) {
         vayu::utils::log_warning ("db",
@@ -749,6 +778,19 @@ void log_file_trust_plan (const FileTrustPlan& plan) {
         vayu::utils::log_info ("db",
         "Recorded the request-body files chosen in the editor as picked files",
         { { "count", plan.grants.size () } });
+    }
+    // `path`, not `src`: a field named `src` would overwrite the record's own.
+    for (const auto& choice : plan.ungranted) {
+        vayu::utils::log_warning ("db",
+        "A request-body file chosen before the upgrade was not found, so it "
+        "was not recorded as a picked file; pick it again",
+        { { "table", choice.table }, { "id", choice.id }, { "path", choice.path } });
+    }
+    if (!plan.ungranted.empty ()) {
+        vayu::utils::log_warning ("db",
+        "Some request-body files chosen before the upgrade were not found and "
+        "must be picked again",
+        { { "count", plan.ungranted.size () } });
     }
 }
 
@@ -959,8 +1001,10 @@ void migrate_before_sync (const std::string& path) {
         // protocol-setting columns of #1765, nullable or NOT NULL with a
         // default, which `sync_schema ()` adds by itself; 2 -> 3 is the new
         // `file_roots` table and 5 -> 6 the new `file_grants`, which
-        // `sync_schema ()` creates outright.
+        // `sync_schema ()` creates outright. A chosen file that is gone
+        // changes nothing stored, but is still reported.
         stamp_schema_version (connection.get ());
+        log_file_trust_plan (trust_plan);
         return;
     }
 

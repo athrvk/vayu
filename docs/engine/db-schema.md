@@ -283,7 +283,12 @@ database below version `6`, after the fold:
   or, on a database below version `4`, no key at all - whose `src` is an absolute path holding no
   `{{` and still resolves to a regular file becomes one `file_grants` row, its canonical path,
   deduplicated (`vayu::http::grantable_file_path`). A path that is gone, a templated one, `true`,
-  a non-boolean, and (from version `4` on) an absent key grant nothing.
+  a non-boolean, and (from version `4` on) an absent key grant nothing. A chosen concrete path
+  that is gone (deleted, or on a drive or share not mounted at upgrade time) is the one of those a
+  person loses, so each is logged at warning level once the step has run, with its `table`, row
+  `id` and `path`, followed by one warning carrying the `count`; this happens on the stamp-only
+  path too, where a pre-version-`4` body without the key leaves nothing to rewrite. The step runs
+  once, so such a file reads as not chosen even after the drive returns, until it is picked again.
 - **Removes the key from every stored body.** The two places a body `FilePlan` sends is stored:
   `requests.body` (trash included) and the top-level `body` of `runs.config_snapshot` (the payload
   a history entry is re-opened from), a binary `file` and every `type: "file"` form part. Only

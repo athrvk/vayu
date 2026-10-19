@@ -29,6 +29,7 @@
 #include "vayu/platform/platform.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
 
 namespace vayu::db {
 namespace {
@@ -2718,6 +2719,54 @@ std::vector<std::string> table_shape (const std::string& path, const std::string
     return shape;
 }
 
+constexpr const char* kUngrantedMessage =
+"A request-body file chosen before the upgrade was not found, so it was not "
+"recorded as a picked file; pick it again";
+constexpr const char* kUngrantedSummary =
+"Some request-body files chosen before the upgrade were not found and must "
+"be picked again";
+
+/// What opening @p path reports about chosen files it could not grant: one
+/// `table|id|path` per warning, sorted, and the count the summary states
+/// (-1 for no summary). The log goes under the working directory, which is
+/// private to this test process.
+struct UngrantedReport {
+    std::vector<std::string> entries;
+    int64_t count = -1;
+};
+
+UngrantedReport open_and_report_ungranted (const std::string& path) {
+    const auto dir = std::filesystem::current_path () / "trust-migration-log";
+    std::error_code ignored;
+    std::filesystem::remove_all (dir, ignored);
+    std::filesystem::create_directories (dir);
+    vayu::utils::Logger::instance ().init (dir.string ());
+    {
+        Database db (path);
+        db.init ();
+    }
+    vayu::utils::Logger::instance ().flush ();
+
+    UngrantedReport report;
+    for (const auto& file : std::filesystem::directory_iterator (dir)) {
+        std::ifstream in (file.path ());
+        for (std::string line; std::getline (in, line);) {
+            const auto record = nlohmann::json::parse (line, nullptr, false);
+            if (!record.is_object () || record.value ("level", "") != "warn") {
+                continue;
+            }
+            if (record.value ("msg", "") == kUngrantedMessage) {
+                report.entries.push_back (record.value ("table", "") + "|" +
+                record.value ("id", "") + "|" + record.value ("path", ""));
+            } else if (record.value ("msg", "") == kUngrantedSummary) {
+                report.count = record.value ("count", int64_t{ -1 });
+            }
+        }
+    }
+    std::sort (report.entries.begin (), report.entries.end ());
+    return report;
+}
+
 } // namespace
 
 // Before version 4 the editor was the one writer that left the key out, so an
@@ -2889,6 +2938,58 @@ TEST_F (DatabaseTest, TheMigrationCreatesFileGrantsAsTheMappingDoes) {
     EXPECT_EQ (migrated_shape, table_shape (FRESH_DB_PATH, "file_grants"));
     vayu::tests::remove_database_files (FRESH_DB_PATH);
     std::filesystem::remove_all ("trust-migration");
+}
+
+// A file chosen before the upgrade whose path no longer names a regular file
+// (deleted, or on a drive or share not mounted at upgrade time) gets no grant
+// and is reported: one warning per stored body naming it, by table, id and
+// path, and a count. A templated path, a stated `true` and (from version 4) an
+// absent key were never a choice to carry over. Mutation check: drop the
+// `ungranted.push_back` in `settle_choice` and nothing is reported.
+TEST_F (DatabaseTest, AChosenFileThatIsGoneAtUpgradeIsReported) {
+    std::filesystem::remove_all ("trust-migration");
+    const std::string chosen = trust_file ("chosen.bin");
+    seed_workspace (TEST_DB_PATH, 5, [&] (Database& db) {
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin", "false"));
+        const auto chosen_part = [] (const std::string& src) {
+            return nlohmann::json{ { "key", "f" }, { "type", "file" },
+                { "src", src }, { "unresolved", false } };
+        };
+        const auto parts = nlohmann::json::array (
+        { chosen_part (chosen), chosen_part ("/unplugged/b.bin") });
+        save_body (db, "req_form",
+        nlohmann::json{ { "mode", "form-data" }, { "fields", parts } }.dump ());
+        save_body (db, "req_templated", binary_body ("{{dir}}/t.bin", "false"));
+        save_body (db, "req_true", binary_body ("/abs/stated.bin", "true"));
+        save_body (db, "req_absent", binary_body ("/abs/absent.bin"));
+        save_snapshot (db, "run_1", binary_body ("/abs/snapshot.bin", "false"));
+    });
+
+    const auto report = open_and_report_ungranted (TEST_DB_PATH);
+    EXPECT_EQ (report.entries,
+    (std::vector<std::string>{ "requests|req_form|/unplugged/b.bin",
+    "requests|req_gone|/abs/gone.bin", "runs|run_1|/abs/snapshot.bin" }));
+    EXPECT_EQ (report.count, 3);
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), std::vector<std::string>{ chosen })
+    << "reporting changes nothing about what is granted";
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// Before version 4 a chosen reference had no key, so a body naming a file that
+// is gone has nothing to rewrite and the step only stamps; it must still say
+// so. Mutation check: drop the `log_file_trust_plan` call on the stamp-only
+// path of `migrate_before_sync` and nothing is reported.
+TEST_F (DatabaseTest, AChosenFileThatIsGoneIsReportedWhenTheStepOnlyStamps) {
+    seed_workspace (TEST_DB_PATH, 3, [] (Database& db) {
+        save_body (db, "req_gone", binary_body ("/abs/gone.bin"));
+    });
+
+    const auto report = open_and_report_ungranted (TEST_DB_PATH);
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "the step rewrote something, so this did not take the stamp-only path";
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_EQ (report.entries, std::vector<std::string>{ "requests|req_gone|/abs/gone.bin" });
+    EXPECT_EQ (report.count, 1);
 }
 
 // #1817's `runs.origin` / `origin_client` joined version 5 rather than bumping
