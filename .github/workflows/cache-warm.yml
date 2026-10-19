@@ -43,10 +43,24 @@ name: Warm build cache
 # `user_agent.cpp` re-preprocesses on a bump and the rest of the tree is
 # byte-identical across releases. Warming triggered by the `VERSION` change on
 # master therefore fills the master scope with the same preprocessed text the tag
-# build asks for. It also serves the first push of every pull request, which can
-# read the default-branch scope but not another pull request's. sccache uses the
-# GHA backend (`SCCACHE_GHA_ENABLED`), which is ref-scoped just like the vcpkg
-# archives, and is separate from the vcpkg files backend used below.
+# build asks for. sccache uses the GHA backend (`SCCACHE_GHA_ENABLED`), which is
+# ref-scoped just like the vcpkg archives, and is separate from the vcpkg files
+# backend used below.
+#
+# **These sccache entries serve the release build and nothing else.** This file
+# said they also served the first push of every pull request; measured, they
+# do not. sccache keys an object on its whole compile command, and the
+# pull-request engine legs compile another one on three of four: they add
+# `-DVAYU_WERROR=ON` (Linux and macOS), build `macos-prod` rather than
+# `macos-prod-arm64`, and run an ubuntu-latest leg this job never warms. Run
+# 39181878500, the first push of a one-file pull request, read 28 hits against
+# 371 misses on both Linux legs and macOS. Only Windows (`windows-prod`, no
+# extra flag) happens to match. The pull-request legs' entries are written by
+# pr-tests.yml itself, which builds its own engine matrix on every engine push
+# to master - one definition for writer and reader, so they cannot drift.
+#
+# The vcpkg archives below are different: their key carries no compile flags,
+# so the pull-request legs on these three images do read what this job saves.
 #
 # vcpkg, by contrast, is pure win: its ABI hash covers the ports, the triplet
 # and the compiler, and *not* the top-level manifest, so the dependency
@@ -59,9 +73,9 @@ on:
   # text (see the top-of-file note). `VERSION` is the high-value, low-cost
   # trigger: the release PR's merge commit is byte-identical to the tree the tag
   # build compiles, so a warm run on the bump fills exactly the keys the release
-  # asks for. `engine/**` would additionally keep the scope warm between releases
-  # and serve first-push PR builds, at ~25 min of runner time per engine merge;
-  # left out for now as the optional half of the trade.
+  # asks for. `engine/**` is not a trigger here: the release needs this scope
+  # warm only for the commit it tags, and pull requests read pr-tests.yml's own
+  # push-to-master build, not this one (see the top-of-file note).
   push:
     branches: [master]
     paths:
@@ -417,8 +431,8 @@ jobs:
 
       # sccache, set up exactly as release.yml and pr-tests.yml do (the guard job
       # asserts the launcher and backend stay in step). The compile below runs
-      # through it and its entries land in the master GHA scope, so a tag build -
-      # and the first push of every pull request - reads them back.
+      # through it and its entries land in the master GHA scope, so a tag build
+      # reads them back (pull requests compile other flags; see the top of file).
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
