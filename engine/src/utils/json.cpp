@@ -1309,12 +1309,21 @@ Result<Request> deserialize_request (const std::string& str) {
 // Response Serialization
 // ============================================================================
 
+Json serialize_header_lines (const std::vector<HeaderLine>& lines) {
+    Json out = Json::array ();
+    for (const auto& line : lines) {
+        out.push_back ({ { "name", line.name }, { "value", line.value } });
+    }
+    return out;
+}
+
 Json serialize (const Response& response) {
     Json json;
 
     json["status"]         = response.status_code;
     json["statusText"]     = response.status_text;
     json["headers"]        = response.headers;
+    json["headerLines"]    = serialize_header_lines (response.header_lines);
     json["requestHeaders"] = response.request_headers;
     json["rawRequest"]     = response.raw_request;
     json["bodySize"]       = response.body_size;

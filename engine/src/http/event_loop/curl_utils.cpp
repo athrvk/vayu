@@ -507,20 +507,43 @@ const DefaultHeaderPolicy& policy) {
     set_opt<CURLOPT_ACCEPT_ENCODING> (curl, encodings);
 }
 
+namespace {
+
+// RFC 9110 section 5.5: the optional whitespace around a field value, space and
+// tab, is not part of it.
+std::string_view trim_optional_whitespace (std::string_view value) {
+    constexpr std::string_view OWS = " \t";
+    const auto first               = value.find_first_not_of (OWS);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return value.substr (first, value.find_last_not_of (OWS) - first + 1);
+}
+
+} // namespace
+
 void ingest_header_line (std::string_view line, Headers& headers) {
+    ingest_header_line (line, headers, nullptr);
+}
+
+void ingest_header_line (std::string_view line, Headers& headers, std::vector<HeaderLine>* lines) {
     const auto colon_pos = line.find (':');
     if (colon_pos == std::string_view::npos) {
         return;
     }
 
-    std::string key = vayu::utils::ascii_lower (line.substr (0, colon_pos));
-
-    auto value = line.substr (colon_pos + 1);
+    const auto name = line.substr (0, colon_pos);
+    auto value      = line.substr (colon_pos + 1);
     while (!value.empty () && value.front () == ' ') {
         value.remove_prefix (1);
     }
 
-    auto [it, inserted] = headers.try_emplace (std::move (key), value);
+    if (lines != nullptr) {
+        lines->push_back (HeaderLine{
+        std::string (name), std::string (trim_optional_whitespace (value)) });
+    }
+
+    auto [it, inserted] = headers.try_emplace (vayu::utils::ascii_lower (name), value);
     if (!inserted) {
         it->second += ", ";
         it->second.append (value);

@@ -233,9 +233,20 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 [[nodiscard]] std::optional<std::string_view> response_body_text (const Response& response);
 
 /**
+ * @brief `Response::header_lines` as a JSON array of `{name, value}` objects,
+ *        in wire order (issue #2460).
+ *
+ * The one spelling behind `serialize`'s `headerLines` and the stored trace's
+ * `response.headerLines`. An empty array for no lines.
+ */
+[[nodiscard]] Json serialize_header_lines (const std::vector<HeaderLine>& lines);
+
+/**
  * @brief Serialize a Response to JSON
  *
- * `bodyEncoding` is always present. A text body is `bodyRaw` as it arrived
+ * `bodyEncoding` is always present. `headerLines` is always present too, an
+ * empty array when none were recorded, so a reader can tell "none" from "an
+ * engine too old to say". A text body is `bodyRaw` as it arrived
  * (less a capped body's incomplete last character, `response_body_text`) and
  * `body` its parse (or `null`); any other body is `bodyRaw` in base64 with
  * `body` `null`. `bodySize` counts the bytes either way.

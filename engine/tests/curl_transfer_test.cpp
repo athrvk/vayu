@@ -66,6 +66,13 @@ class MethodEchoServer {
             res.set_header ("X-Trace", "second");
             res.set_content ("ok", "text/plain");
         });
+        // A redirect hop with headers of its own, so a test can tell the final
+        // hop's header lines from an accumulation of both.
+        svr.Get ("/hop", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "hop=1; Path=/");
+            res.set_header ("X-Hop", "first");
+            res.set_redirect ("/repeated-headers");
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -342,11 +349,125 @@ TEST (IngestHeaderLine, SingleOccurrenceIsStoredVerbatimUnderALowerCasedName) {
     EXPECT_EQ (headers.at ("location"), "https://example.com:8443/a");
 }
 
+// The lossless list: every line, in wire order, name as received. The same five
+// lines the folded map reduces to three entries.
+TEST (IngestHeaderLine, KeepsEveryLineAsReceived) {
+    vayu::Headers headers;
+    std::vector<vayu::HeaderLine> lines;
+    for (const auto* line : { "Set-Cookie: a=1", "Set-Cookie: b=2",
+         "X-Dup: first", "x-dup: third", "X-Ws:    padded   " }) {
+        vayu::http::detail::ingest_header_line (line, headers, &lines);
+    }
+
+    ASSERT_EQ (lines.size (), 5U);
+    const std::vector<vayu::HeaderLine> expected{ { "Set-Cookie", "a=1" },
+        { "Set-Cookie", "b=2" }, { "X-Dup", "first" }, { "x-dup", "third" },
+        { "X-Ws", "padded" } };
+    for (size_t i = 0; i < expected.size (); i++) {
+        EXPECT_EQ (lines[i].name, expected[i].name) << "line " << i;
+        EXPECT_EQ (lines[i].value, expected[i].value) << "line " << i;
+    }
+
+    EXPECT_EQ (headers.at ("set-cookie"), "a=1, b=2");
+    EXPECT_EQ (headers.at ("x-dup"), "first, third");
+    EXPECT_EQ (headers.at ("x-ws"), "padded   ")
+    << "the map keeps its leading-only trim, byte for byte";
+}
+
+TEST (IngestHeaderLine, TrimsTabsAroundAValueInTheLinesOnly) {
+    vayu::Headers headers;
+    std::vector<vayu::HeaderLine> lines;
+    vayu::http::detail::ingest_header_line ("X-Tab:\t \tv w\t ", headers, &lines);
+
+    ASSERT_EQ (lines.size (), 1U);
+    EXPECT_EQ (lines[0].value, "v w");
+}
+
+TEST (IngestHeaderLine, AnEmptyValueIsStillALine) {
+    vayu::Headers headers;
+    std::vector<vayu::HeaderLine> lines;
+    vayu::http::detail::ingest_header_line ("X-Empty:", headers, &lines);
+    vayu::http::detail::ingest_header_line ("not a header", headers, &lines);
+
+    ASSERT_EQ (lines.size (), 1U) << "a line with no colon is not recorded";
+    EXPECT_EQ (lines[0].name, "X-Empty");
+    EXPECT_TRUE (lines[0].value.empty ());
+}
+
 TEST (IngestHeaderLine, ALineThatIsNotAHeaderFieldIsIgnored) {
     vayu::Headers headers;
     vayu::http::detail::ingest_header_line ("this line carries no colon", headers);
 
     EXPECT_TRUE (headers.empty ());
+}
+
+// The lossless list beside the map (issue #2460). httplib keeps a response's
+// headers in an unordered_multimap, so the wire order of the server's lines is
+// not this test's to assert end to end; `KeepsEveryLineAsReceived` pins order on
+// input the test controls, and these pin that each path hands the list over.
+
+namespace {
+
+std::vector<std::string> values_named (const std::vector<vayu::HeaderLine>& lines,
+const std::string& name) {
+    std::vector<std::string> values;
+    for (const auto& line : lines) {
+        if (line.name == name) {
+            values.push_back (line.value);
+        }
+    }
+    std::sort (values.begin (), values.end ());
+    return values;
+}
+
+} // namespace
+
+TEST_F (CurlTransferTest, ClientKeepsEachReceivedHeaderLineSeparately) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/repeated-headers");
+
+    vayu::http::Client client;
+    auto result = client.send (request);
+    ASSERT_TRUE (result.is_ok ());
+    const auto& lines = result.value ().header_lines;
+
+    EXPECT_EQ (values_named (lines, "Set-Cookie"),
+    (std::vector<std::string>{ "csrf=xyz; Path=/", "session=abc; Path=/; HttpOnly" }))
+    << "two Set-Cookie lines stay two entries, in the case the server sent";
+    EXPECT_EQ (values_named (lines, "X-Trace"),
+    (std::vector<std::string>{ "first", "second" }));
+}
+
+// Only the final hop's lines survive, like the map. Mutation-check: drop the
+// header_lines.clear () beside headers.clear () in client.cpp and the first
+// hop's Set-Cookie and X-Hop stay in the list.
+TEST_F (CurlTransferTest, ClientKeepsOnlyTheFinalRedirectHopsHeaderLines) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/hop");
+
+    vayu::http::Client client;
+    auto result = client.send (request);
+    ASSERT_TRUE (result.is_ok ());
+    ASSERT_EQ (result.value ().status_code, 200);
+    const auto& lines = result.value ().header_lines;
+
+    EXPECT_TRUE (values_named (lines, "X-Hop").empty ());
+    EXPECT_EQ (values_named (lines, "Set-Cookie").size (), 2U)
+    << "the final hop's two cookies, not the redirect's third";
+}
+
+// The load path is the hot path: it keeps the folded map and nothing more.
+TEST_F (CurlTransferTest, EventLoopLeavesHeaderLinesEmpty) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = server->url ("/repeated-headers");
+
+    auto result = run_once (request);
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_FALSE (result.value ().headers.empty ());
+    EXPECT_TRUE (result.value ().header_lines.empty ());
 }
 
 // ============================================================================

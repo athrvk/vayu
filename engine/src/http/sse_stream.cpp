@@ -303,7 +303,9 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
 
     // The header block is complete by the time the first body byte arrives, so
     // this is where the run learns what it connected to - published as the
-    // ring's first frame so even a relay that attaches later replays it.
+    // ring's first frame so even a relay that attaches later replays it. The
+    // frame carries the folded map only: `Response::header_lines` is read by
+    // the completed trace, and a client without the lines falls back to the map.
     if (!state->announced) {
         state->announced = true;
         state->context->note_response_open (state->response->status_code,
@@ -362,9 +364,10 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
         // Headers are cleared between redirect hops so the final hop's set is
         // what the run reports - the same rule client.cpp's callback follows.
         response->headers.clear ();
+        response->header_lines.clear ();
         return total_size;
     }
-    vayu::http::detail::ingest_header_line (line, response->headers);
+    vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
     return total_size;
 }
 

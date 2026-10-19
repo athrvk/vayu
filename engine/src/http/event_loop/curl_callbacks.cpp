@@ -126,7 +126,8 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     }
 
     // Parse header: "Key: Value". A repeated name folds rather than replaces -
-    // see ingest_header_line.
+    // see ingest_header_line. Two arguments on purpose: the lossless
+    // `header_lines` is a design-send field, and this is the hot path.
     ingest_header_line (line, data->response.headers);
 
     return total_size;

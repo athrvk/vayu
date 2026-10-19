@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,7 +47,24 @@ struct SetCookie {
 };
 
 /**
- * @brief Parse a `Set-Cookie` header value.
+ * @brief Parse one `Set-Cookie` header line: one line, one cookie.
+ *
+ * No comma splitting. A header line is never several cookies - that is what
+ * the folded form loses - so `prefs=a=1, theme=dark; Path=/` is the single
+ * cookie `prefs` with the value `a=1, theme=dark` (issue #2460). The pair
+ * still splits at the first `=`, as `parse_set_cookie` does.
+ *
+ * @param line One line's value, e.g. `id=a3fWa; Path=/; HttpOnly`.
+ * @return The cookie, or `std::nullopt` for a line that names none (no `=`, or
+ *         an empty name).
+ */
+std::optional<SetCookie> parse_set_cookie_line (std::string_view line);
+
+/**
+ * @brief Parse a folded `Set-Cookie` header value.
+ *
+ * What a response's folded `headers["set-cookie"]` needs; a caller holding the
+ * lines (`Response::header_lines`) uses `parse_set_cookie_line` on each.
  *
  * Handles the two cases that make this more than a split:
  *

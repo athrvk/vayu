@@ -188,6 +188,14 @@ const vayu::Response& response) {
             trace["response"]["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
         }
 
+        // The lossless header list (issue #2460), written only when non-empty
+        // on the `bodyCapped` rule below: a row stored before the field, and a
+        // load sample, hold the folded map alone, and absent says so.
+        if (!response.header_lines.empty ()) {
+            trace["response"]["headerLines"] =
+            vayu::json::serialize_header_lines (response.header_lines);
+        }
+
         // The read cap, carried so a restored response says what the live one
         // said (issue #1157) - the same rule `clientCertificate` above states,
         // and the one the app's two funnels are held to. Written only when it

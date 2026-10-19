@@ -17,9 +17,11 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "vayu/http/set_cookie.hpp"
 
 using nlohmann::json;
@@ -34,6 +36,18 @@ json load_fixture () {
     return json::parse (in);
 }
 
+// A `singleLine` case is one received Set-Cookie line (issue #2460) and goes
+// through the parser that never splits on a comma; the rest are folded headers.
+std::vector<vayu::http::SetCookie> parse_case (const json& c) {
+    const auto header = c["header"].get<std::string> ();
+    if (!c.value ("singleLine", false)) {
+        return vayu::http::parse_set_cookie (header);
+    }
+    const auto cookie = vayu::http::parse_set_cookie_line (header);
+    return cookie ? std::vector<vayu::http::SetCookie>{ *cookie } :
+                    std::vector<vayu::http::SetCookie>{};
+}
+
 } // namespace
 
 TEST (SetCookieConformance, EveryFixtureCasePasses) {
@@ -43,9 +57,8 @@ TEST (SetCookieConformance, EveryFixtureCasePasses) {
 
     for (const auto& c : fixture["cases"]) {
         const std::string name = c["name"].get<std::string> ();
-        const auto parsed =
-        vayu::http::parse_set_cookie (c["header"].get<std::string> ());
-        const auto& expected = c["expected"];
+        const auto parsed      = parse_case (c);
+        const auto& expected   = c["expected"];
 
         ASSERT_EQ (parsed.size (), expected.size ()) << "case: " << name;
         for (size_t i = 0; i < parsed.size (); i++) {
@@ -74,4 +87,20 @@ TEST (SetCookie, ACommaOnlyEndsACookieWhenAnAssignmentFollowsIt) {
     EXPECT_EQ (parsed[0].value, "1");
     EXPECT_EQ (parsed[1].name, "b");
     EXPECT_EQ (parsed[1].value, "2");
+}
+
+TEST (SetCookie, ALineIsNeverSplitOnAComma) {
+    const auto cookie = vayu::http::parse_set_cookie_line ("a=1, b=2; Path=/");
+    ASSERT_HAS_VALUE (cookie);
+    EXPECT_EQ (cookie->name, "a");
+    EXPECT_EQ (cookie->value, "1, b=2");
+
+    // The same text folded is two cookies: the fold is what loses the answer.
+    EXPECT_EQ (vayu::http::parse_set_cookie ("a=1, b=2; Path=/").size (), 2U);
+}
+
+TEST (SetCookie, ALineNamingNoCookieIsNothing) {
+    EXPECT_FALSE (vayu::http::parse_set_cookie_line ("").has_value ());
+    EXPECT_FALSE (vayu::http::parse_set_cookie_line ("no-equals; Path=/").has_value ());
+    EXPECT_FALSE (vayu::http::parse_set_cookie_line ("=orphan").has_value ());
 }

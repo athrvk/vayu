@@ -22,6 +22,7 @@
 
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/set_cookie.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::runtime::pm_detail {
 namespace {
@@ -50,6 +51,24 @@ find_cookie (const std::vector<vayu::http::SetCookie>& cookies, const std::strin
     return nullptr;
 }
 
+// One cookie per received `Set-Cookie` line when the response kept its lines
+// (issue #2460), which is what makes a comma inside a value safe. A response
+// without them - a trace stored before the field - falls back to splitting the
+// folded map entry, where the comma heuristic is all there is.
+std::vector<vayu::http::SetCookie> cookies_from_lines (
+const std::vector<vayu::HeaderLine>& lines) {
+    std::vector<vayu::http::SetCookie> cookies;
+    for (const auto& line : lines) {
+        if (!vayu::utils::ascii_lower_equal (line.name, "set-cookie")) {
+            continue;
+        }
+        if (auto cookie = vayu::http::parse_set_cookie_line (line.value)) {
+            cookies.push_back (std::move (*cookie));
+        }
+    }
+    return cookies;
+}
+
 // The list methods read the response rather than the array they were reached
 // through, so editing the array cannot make get() disagree with the wire. The
 // re-parse is bounded by one header and only happens when a script calls one.
@@ -58,6 +77,9 @@ std::optional<std::vector<vayu::http::SetCookie>> cookies_from_context (JSContex
     if (!data || !data->response) {
         JS_ThrowInternalError (ctx, "No response available");
         return std::nullopt;
+    }
+    if (!data->response->header_lines.empty ()) {
+        return cookies_from_lines (data->response->header_lines);
     }
     auto it = data->response->headers.find ("set-cookie");
     if (it == data->response->headers.end ()) {

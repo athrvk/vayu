@@ -170,6 +170,38 @@ TEST (JsonTest, SerializesUnnegotiatedResponseHttpVersionAsEmptyString) {
     EXPECT_EQ (json["httpVersion"], "");
 }
 
+// The lossless header list (issue #2460). Always present, an empty array when
+// none arrived, so a client can tell "none" from "an engine too old to say" -
+// the rule `httpVersion` above is held to. Wire order, name as received.
+TEST (JsonTest, SerializesHeaderLinesInWireOrderWithTheirCase) {
+    Response response;
+    response.status_code  = 200;
+    response.headers["x"] = "folded";
+    response.header_lines = { { "Set-Cookie", "a=1; Path=/" },
+        { "X-Dup", "first" }, { "Set-Cookie", "b=2" }, { "x-dup", "third" } };
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json["headerLines"].is_array ());
+    ASSERT_EQ (json["headerLines"].size (), 4U);
+    EXPECT_EQ (json["headerLines"][0],
+    (Json{ { "name", "Set-Cookie" }, { "value", "a=1; Path=/" } }));
+    EXPECT_EQ (json["headerLines"][1]["name"], "X-Dup");
+    EXPECT_EQ (json["headerLines"][2]["value"], "b=2");
+    EXPECT_EQ (json["headerLines"][3]["name"], "x-dup");
+}
+
+TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {
+    Response response;
+    response.status_code = 200;
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("headerLines"));
+    EXPECT_TRUE (json["headerLines"].is_array ());
+    EXPECT_TRUE (json["headerLines"].empty ());
+}
+
 // The live body's read cap (issue #1157). Always present, so a pane can tell
 // "not capped" from "this engine cannot say" - the same rule `httpVersion`
 // above is held to, and the one that decides whether a prefix is shown as the

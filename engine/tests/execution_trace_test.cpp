@@ -150,6 +150,32 @@ TEST (ExecutionTrace, EmptyHttpVersionStoredNotOmitted) {
     EXPECT_EQ (trace["response"]["httpVersion"], "");
 }
 
+// The lossless header list is stored with the folded map (issue #2460), so
+// History shows a send the way the live pane did.
+TEST (ExecutionTrace, ResponseCarriesHeaderLinesInWireOrder) {
+    auto response         = make_response ();
+    response.header_lines = { { "Set-Cookie", "a=1" }, { "X-Dup", "first" },
+        { "Set-Cookie", "b=2" } };
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace["response"].contains ("headerLines"));
+    const auto& lines = trace["response"]["headerLines"];
+    ASSERT_EQ (lines.size (), 3U);
+    EXPECT_EQ (lines[0]["name"], "Set-Cookie");
+    EXPECT_EQ (lines[1]["value"], "first");
+    EXPECT_EQ (lines[2]["value"], "b=2");
+}
+
+// Written only when non-empty, on the `bodyCapped` rule below: a load sample
+// and every row stored before the field hold the folded map alone, and absent
+// is what says so.
+TEST (ExecutionTrace, AResponseWithNoHeaderLinesStoresNoHeaderLinesKey) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace["response"].contains ("headerLines"));
+}
+
 // The read cap travels with the exchange (issue #1157), so History says about
 // a response what the live pane said: this body is a prefix, and re-sending
 // under the same setting reads the same prefix. Stored under

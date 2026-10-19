@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for Set-Cookie parsing (issue #301). Read by BOTH the engine gtest suite (set_cookie_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts). The engine parses for pm.response.cookies, the renderer for the response Cookies tab; both read the same header off the same response, so a case answered two ways is a user seeing one thing in the UI and asserting another in a script. Every case is a raw header value exactly as it reaches a client - the two documented corruptions (a comma inside Expires, `=` padding inside a base64 value) are the reason this parser is not a split.",
+  "$comment": "Cross-language conformance fixture for Set-Cookie parsing (issue #301). Read by BOTH the engine gtest suite (set_cookie_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/modules/request-builder/components/ResponseViewer/parse-set-cookie.conformance.test.ts). The engine parses for pm.response.cookies, the renderer for the response Cookies tab; both read the same header off the same response, so a case answered two ways is a user seeing one thing in the UI and asserting another in a script. Every case is a raw header value exactly as it reaches a client - the two documented corruptions (a comma inside Expires, `=` padding inside a base64 value) are the reason this parser is not a split. A case with `singleLine: true` is one received Set-Cookie line (issue #2460), handed to the single-line parser, which never splits on a comma; every other case is the folded header (lines joined with ', ') and goes through the splitting parser.",
   "cases": [
     {
       "name": "a single cookie with attributes",
@@ -108,6 +108,12 @@
         { "name": "sid", "value": "old", "attrs": ["Path=/"] },
         { "name": "sid", "value": "new", "attrs": ["Path=/"] }
       ]
+    },
+    {
+      "name": "one line with a comma then name= in the value is one cookie",
+      "singleLine": true,
+      "header": "prefs=a=1, theme=dark; Path=/",
+      "expected": [{ "name": "prefs", "value": "a=1, theme=dark", "attrs": ["Path=/"] }]
     }
   ]
 }
