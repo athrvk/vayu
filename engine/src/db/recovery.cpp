@@ -101,9 +101,10 @@ std::string unavailable_database_message (const std::string& path, const ProbeRe
         cause += " (SQLite result code " + std::to_string (found.sqlite_code) + ")";
     }
     return "The database at " + path + " could not be examined: " + cause +
-    ". Another program has the database open, or the disk is full or "
-    "read-only; nothing was changed. Close the other program or free the "
-    "disk, then start Vayu again.";
+    ". Nothing was changed. Usually another program has the database open, "
+    "or the disk is full or read-only: close the other program or free the "
+    "disk, then start Vayu again. If the reason above names neither, the "
+    "file itself needs a look before the next start.";
 }
 
 std::string recovery_marker_path (const std::string& db_path) {

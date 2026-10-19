@@ -590,7 +590,7 @@ TEST_F (DbRecoveryTest, ALockedDatabaseIsRefusedAndLeftExactlyAsItWas) {
     EXPECT_NE (refusal.find (DB_PATH), std::string::npos) << refusal;
     EXPECT_NE (refusal.find ("database is locked (SQLite result code 5)"), std::string::npos)
     << refusal;
-    EXPECT_NE (refusal.find ("nothing was changed"), std::string::npos) << refusal;
+    EXPECT_NE (refusal.find ("Nothing was changed"), std::string::npos) << refusal;
     EXPECT_EQ (read_file (DB_PATH), database_bytes)
     << "the database was written to";
     EXPECT_EQ (read_file (backup), backup_bytes) << "the backup was touched";
