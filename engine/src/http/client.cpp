@@ -253,6 +253,47 @@ std::string too_large_message (const Headers& headers, size_t max_bytes) {
     return "Response grew past the " + bound + " and the transfer was cut off there";
 }
 
+/// What `header_callback` writes into: the response, and the state it needs to
+/// tell one status block from the next.
+struct HeaderSink {
+    Response* response = nullptr;
+    /// How many redirect hops may be recorded - `max_redirects` when the send
+    /// follows redirects, 0 when it does not.
+    size_t max_hops = 0;
+    /// Numeric status of the block being read, 0 before the first one.
+    int block_status = 0;
+};
+
+/// The numeric code of "HTTP/<version> <code> [<reason phrase>]", or nullopt
+/// when the line carries none.
+std::optional<int> status_line_code (std::string_view line) {
+    const size_t first_space = line.find (' ');
+    if (first_space == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::string_view rest = line.substr (first_space + 1);
+    return vayu::utils::parse_number<int> (rest.substr (0, rest.find (' ')));
+}
+
+/**
+ * @brief Moves the block just finished into `redirect_hops`, when it is one.
+ *
+ * Only a 3xx counts: a 1xx interim response (`100 Continue`) is not a hop, and
+ * the 2xx a proxy `CONNECT` answers with reaches this callback too. Run on the
+ * next status line, which is the first moment the previous block is known to
+ * be complete, and before the header containers are cleared.
+ */
+void record_finished_hop (HeaderSink& sink) {
+    Response& response = *sink.response;
+    const int status   = sink.block_status;
+    if (status < 300 || status >= 400 || response.redirect_hops.size () >= sink.max_hops) {
+        return;
+    }
+    response.redirect_hops.push_back ({ status,
+    response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
+    std::move (response.header_lines) });
+}
+
 /**
  * @brief Callback for writing response headers.
  *
@@ -268,6 +309,8 @@ std::string too_large_message (const Headers& headers, size_t max_bytes) {
  *
  * On followed redirects, curl emits one status block per hop in order,
  * so overwriting each time leaves status_text reflecting the final hop.
+ * The blocks that are overwritten are not lost: each finished 3xx one is
+ * kept in `Response::redirect_hops` (issue #2461).
  *
  * A header name that arrives more than once in the same block keeps every
  * value, folded with ", " - see ingest_header_line for why. The lossless list
@@ -275,8 +318,9 @@ std::string too_large_message (const Headers& headers, size_t max_bytes) {
  * with it between hops.
  */
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* response    = static_cast<Response*> (userdata);
-    size_t total_size = size * nitems;
+    auto* sink         = static_cast<HeaderSink*> (userdata);
+    Response* response = sink->response;
+    size_t total_size  = size * nitems;
 
     std::string line (buffer, total_size);
 
@@ -291,6 +335,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
 
     // Status line: "HTTP/<version> <code> [<reason phrase>]"
     if (line.starts_with ("HTTP/")) {
+        record_finished_hop (*sink);
         auto first_space = line.find (' ');
         if (first_space != std::string::npos) {
             auto second_space = line.find (' ', first_space + 1);
@@ -301,6 +346,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
                 response->status_text.clear ();
             }
         }
+        sink->block_status = status_line_code (line).value_or (0);
         // Also clear headers between redirect hops so we don't accumulate them.
         response->headers.clear ();
         response->header_lines.clear ();
@@ -595,7 +641,11 @@ Result<Response> Client::send (const Request& request) {
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &sink);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
-    set_opt<CURLOPT_HEADERDATA> (curl, &response);
+    HeaderSink header_sink{ &response,
+        request.follow_redirects ?
+        static_cast<size_t> (std::max (request.max_redirects, 0)) :
+        0 };
+    set_opt<CURLOPT_HEADERDATA> (curl, &header_sink);
 
     // Set timeout
     if (impl_->config.stall_timeout_ms > 0) {

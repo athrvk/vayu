@@ -241,6 +241,10 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
  */
 [[nodiscard]] Json serialize_header_lines (const std::vector<HeaderLine>& lines);
 
+/// The followed redirect hops as `[{status, statusText, headerLines}]`, in the
+/// order they arrived (issue #2461).
+[[nodiscard]] Json serialize_redirects (const std::vector<RedirectHop>& hops);
+
 /**
  * @brief Serialize a Response to JSON
  *

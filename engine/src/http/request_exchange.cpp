@@ -196,6 +196,14 @@ const vayu::Response& response) {
             vayu::json::serialize_header_lines (response.header_lines);
         }
 
+        // The followed redirect hops (issue #2461), on the same rule: a row
+        // stored before the field, and a send that followed nothing, hold no
+        // `redirects`, and absent says so.
+        if (!response.redirect_hops.empty ()) {
+            trace["response"]["redirects"] =
+            vayu::json::serialize_redirects (response.redirect_hops);
+        }
+
         // The read cap, carried so a restored response says what the live one
         // said (issue #1157) - the same rule `clientCertificate` above states,
         // and the one the app's two funnels are held to. Written only when it

@@ -644,6 +644,19 @@ const std::map<int, size_t>& distribution) noexcept {
 }
 
 /**
+ * @brief One redirect response a followed chain passed through (issue #2461).
+ *
+ * `Response::headers` holds the final hop only, so a `Set-Cookie` or
+ * `Location` on an earlier hop is otherwise gone. `header_lines` is the same
+ * received-lines shape `Response::header_lines` uses.
+ */
+struct RedirectHop {
+    int status_code = 0;
+    std::string status_text;
+    std::vector<HeaderLine> header_lines;
+};
+
+/**
  * @brief HTTP Response
  */
 // `optin.performance.Padding` is right that size-ordering these fields would
@@ -669,6 +682,18 @@ struct Response {
      * Holds the final redirect hop only, like `headers`.
      */
     std::vector<HeaderLine> header_lines;
+
+    /**
+     * @brief The 3xx responses libcurl followed before the final one, in the
+     *        order they arrived (issue #2461).
+     *
+     * Filled only by `Client::send`, and only when `Request::follow_redirects`
+     * is set; empty on the load path and when nothing was followed. Holds at
+     * most `Request::max_redirects` entries, so a loop that ends in
+     * `TooManyRedirects` reports the hops it made. A 1xx interim response is
+     * never a hop.
+     */
+    std::vector<RedirectHop> redirect_hops;
 
     Headers request_headers; // Headers that were sent in the request
     std::string raw_request; // Complete raw HTTP request
