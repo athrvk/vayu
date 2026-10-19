@@ -6688,11 +6688,15 @@ whose config set `thresholds.failRun: true` and whose budgets it missed ends `fa
 flag, or on a run that met every budget, a failing budget is reported but
 never changes the terminal status.
 
-Each check carries `evaluated`. A latency percentile needs a completed request
-to mean anything, so a run that recorded none for that metric (every request
-errored before a response arrived) reports `evaluated: false` and omits
-`actual` entirely rather than the default `0`, which would otherwise read as a
-measured 0ms and trivially satisfy an "at most" ceiling. An unevaluated check
+Each check carries `evaluated`. A latency percentile needs a timed request
+to mean anything, so a run that recorded none (every request was refused
+before the wire, cancelled by a Stop or failed before any transfer ran)
+reports `evaluated: false` and omits `actual` entirely rather than the default
+`0`, which would otherwise read as a measured 0ms and trivially satisfy an "at
+most" ceiling. A request that timed out or lost its connection after the
+transfer began *is* timed (see [Latency
+population](#latency-population)), so a run where every request timed out is
+evaluated and its percentiles sit at the timeout. An unevaluated check
 counts toward `failed`: a budget the run could not measure was not met. The
 error rate and the throughput floor have no such gap - `maxErrorRatePct` is
 0/0-safe by request count, and a starved `minThroughputRps` already fails on
@@ -7599,7 +7603,13 @@ counts. **`httpErrors`** is the responses that arrived with a 4xx or 5xx;
 the step's latency includes them, and the iteration carries on to the next
 step. **`noResponse`** is the executions that got nothing back (a transport
 error, booked under status 0 like the run's own distribution, or a
-data-binding failure that sent nothing); only these end the iteration. At the
+data-binding failure that sent nothing); only these end the iteration. A
+`noResponse` execution whose transfer ran (a timeout, a reset, a DNS or TLS
+failure) is also in the step's latency, so a step that times out reports its
+timeout in `p99` and `max`; one that never reached the wire (a data-binding
+failure, a refused header, a skip) adds a count and no duration. The step's
+histogram follows the same population as the run's, and `includeScriptTime`
+applies to a failed step as it does to an answered one (issue #2384). At the
 top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
@@ -7885,8 +7895,12 @@ one number - the MCP tool's cap does.
 The search steers by the published metric tick - the same numbers `GET
 /runs/:id/live` streams - rather than sampling the collector itself, so the
 controller and the dashboard cannot disagree about a level. Windows in which
-nothing completed are not judged: their percentiles are the empty-window zeros
-and reading those as "answered instantly" would climb straight past the limit.
+no request was timed are not judged: their percentiles are the empty-window
+zeros and reading those as "answered instantly" would climb straight past the
+limit. A request that timed out is timed (see [Latency
+population](#latency-population)), so a window of nothing but timeouts has
+samples, is judged, and reports a p99 near the timeout - the level fails its
+latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 windowed p99 and a sequence has one per step.
 
@@ -7981,6 +7995,37 @@ cancellation is exempt. When a run reaches its natural end, a request still in
 flight after its own timeout plus a 2s grace is cancelled too, and that one
 never answered: it stays an error, under status code `0`, and its stored error
 record carries `error_type` `cancelled` (`errors.types` in the report).
+
+### Latency population
+
+A load run's latency figures all describe one set of requests: every request
+whose **transfer ran**, answered or not. That is a response of any status
+(a 4xx or 5xx included) and a request that failed after the transfer began,
+where the duration is the time until it gave up (a timeout is about its
+timeout; a reset, a DNS or TLS failure and a body over the byte cap count
+the same way). The set feeds the report's `latency` block (`p50` to `p999`,
+`max`), the live tick's windowed `latencyP50Ms` / `latencyP95Ms` /
+`latencyP99Ms`, `avgLatencyMs` and `avgQueueWaitMs`, the exports, and the
+`latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
+The mean is the sum over the set divided by the set's size, so it agrees
+with the percentiles and the max. It is not divided by `totalRequests`.
+
+Left out, because they have no duration to report:
+
+- a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
+  natural end after its timeout plus the grace, which is an error with no
+  duration;
+- a request refused before the wire: one dropped at the `maxInFlight` cap
+  (`droppedRequests`), an invalid URL or an unsendable header, a residual
+  `{{token}}` or file-rule refusal, a data-binding failure.
+
+So a run where 5% of requests hit a 2000 ms timeout reports a p99 and `max`
+near 2000 ms, and a `latencyP99Ms` budget below that fails it. `totalRequests`,
+`errorRate`, `httpErrors`, `noResponse` and `cancelled` do not depend on this
+set. The per-phase histograms of the [timing breakdown](#get-runsrunidreport)
+stay answered-only: a request that failed has no connect, TLS or first-byte
+split to report. A scenario step's histogram follows the same rule as the
+run's.
 
 ### GET /runs/:runId/metrics
 
@@ -8242,9 +8287,9 @@ no frame.
 | `activeConnections` | Current in-flight requests |
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
-| `avgLatencyMs` | Mean **perceived** latency |
+| `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |
@@ -8717,9 +8762,11 @@ the same figures the live tick and the report show; `httpErrors` and
 counted in none of them.
 
 `avgLatencyMs` is the same average the final report and the live ticks show:
-the latency sum over the requests that contributed to it (successes). It is not
-divided by `totalRequests`, which would report a lower figure here than
-everywhere else for the same run.
+the latency sum over the [latency population](#latency-population), divided by
+the number of requests in it. It is not divided by `totalRequests` (which counts
+requests that carry no latency, so it would report a lower figure here than
+everywhere else for the same run) nor by the success count (a timeout's
+duration is in the sum).
 
 A run that is already finished answers `{"status": "<status>", "runId": ...,
 "message": "Run already <status>"}`; one that is not in memory answers

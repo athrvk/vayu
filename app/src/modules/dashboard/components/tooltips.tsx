@@ -56,7 +56,7 @@ export const TOOLTIPS = {
 	throughput:
 		"Average requests per second across the run so far. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
 	latencyPercentiles:
-		"Tail latency - 95 (p95) or 99 (p99) of every 100 requests completed in this time or less. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
+		"Tail latency - 95 (p95) or 99 (p99) of every 100 timed requests finished in this time or less. A timed request got an answer or timed out; cancelled and never-sent requests are out. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:
 		"Whether the server has reached its capacity ceiling. 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'degrading' means p99 has crossed the threshold or errors started - the call-out shows the number of virtual users at which the degradation began (the breakpoint).",
 

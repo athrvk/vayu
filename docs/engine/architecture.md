@@ -397,7 +397,14 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   check. Written through `hdr_record_value_atomic` for the same reason the two above are.
 - **Perceived latency**: Latency is measured as `completion − submitted_at` (the full time a
   request spent inside the engine), not just libcurl's wire time. Wire time and the
-  generator-internal `queue_wait` are tracked separately.
+  generator-internal `queue_wait` are tracked separately. A latency sample is any request
+  whose transfer ran: an answer of any status, or a failure after the transfer began (a
+  timeout, reset, DNS or TLS failure, the body cap), whose duration is the time until it
+  gave up. A request a Stop cancelled or one refused before the wire (the `maxInFlight` cap,
+  an invalid URL, a refused header, a data-binding failure) has no duration and is not a
+  sample. The percentiles, the max and the mean share this one population (the mean divides
+  by the sample count, not by successes); see
+  [Latency population](api-reference.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution
 - **Batch DB writes**: Per-request results written after test completion; the metrics thread
@@ -1113,7 +1120,10 @@ row exists - and the executor is the only thing that differs.
 - **Per-step latency histograms**, one per plan step, allocated once from the
   plan's step count - which is what `maxScenarioSteps` bounds. They reach the
   report as `summary.scenario.steps`; a scenario load run stores no per-step
-  `results` rows, so that breakdown is the only per-step record it keeps.
+  `results` rows, so that breakdown is the only per-step record it keeps. A step takes a
+  duration on the run histogram's terms: an answered step and a failed step whose transfer
+  ran (a timeout) both record one, a step that never reached the wire records none, so a
+  step's p99 and the run's agree.
 - **Data rows bind per iteration, from one shared cursor.** A run sent with
   `scenario.data` claims a row per virtual-user iteration off a single run-wide
   cursor, wrapping when the rows run out, and every step of that iteration binds
