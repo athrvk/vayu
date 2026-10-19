@@ -850,12 +850,10 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
  * complexity down, not because anything else calls this.
  */
 void RunContext::compile_step_elements (const nlohmann::json& run_config) {
-    auto request_elements = run_config.find ("requestElements");
-    if (request_elements == run_config.end () ||
-    !request_elements->is_array () || request_elements->empty ()) {
+    if (!declares_request_elements (run_config)) {
         return;
     }
-    nlohmann::json stamped = *request_elements;
+    nlohmann::json stamped = run_config.at ("requestElements");
     vayu::core::stamp_default_element_ids (stamped);
     auto compiled = std::make_shared<std::vector<vayu::core::CompiledElement>> (
     vayu::core::compile_elements (stamped));
@@ -1394,8 +1392,10 @@ vayu::Request& request) {
     // Credentials carrying a token are the one case the build leaves alone: the
     // value has to reach them before `apply_auth` base64s them out of reach
     // (issue #591), so a run whose credentials carry one tells the build to
-    // defer and `bind_iteration` applies them per submission. Every other run
-    // resolves its auth here exactly as it always did.
+    // defer and `bind_iteration` applies them per submission. So does a run
+    // whose credentials wait on its `requestElements` scripts (issue #2473),
+    // applied after each submission's residual pass. Every other run resolves
+    // its auth here exactly as it always did.
     //
     // Asked of the credentials rather than of the run's rows (issue #1055):
     // `{{$vu}}` binds off the iteration, so a run sent without `data` at all

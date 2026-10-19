@@ -939,7 +939,14 @@ Rules worth knowing before you rely on them:
   `delete` work.
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
-  sees the real `Authorization` header and can replace or remove it.
+  sees the real `Authorization` header and can replace or remove it. The one
+  exception is a credential still holding a `{{name}}` no variable defined when
+  the request was composed (#2473): that auth is applied *after* the script, so
+  a value the script sets reaches it, and the header is not in
+  `pm.request.headers` yet. A header the script sets still wins, because auth
+  never replaces one the request already carries. The order is the same on a
+  Send, on every step of a collection run, and under load after an `inline`
+  `script.pre` (a single-request load run's through `requestElements`).
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`
@@ -2302,7 +2309,9 @@ type set the header yourself, as above.
 
 Auth is resolved into the request *before* the script runs, so the script sees
 the real header and has the last word. Removing and re-adding is how you swap
-schemes rather than stack them.
+schemes rather than stack them. (A credential still waiting on a `{{name}}` is
+applied after the script instead, and only if the script left no header of that
+name - set one rather than delete it.)
 
 ```javascript
 delete pm.request.headers['Authorization'];

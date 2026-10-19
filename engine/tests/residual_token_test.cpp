@@ -33,11 +33,14 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
+#include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -600,12 +603,14 @@ class ResidualTokenExchangeTest : public ::testing::Test {
     vayu::http::routes::ExchangeOutcome send (vayu::Request request,
     ScriptVariableScopes& scopes,
     const std::string& pre,
-    bool in_scenario = false) {
+    bool in_scenario                          = false,
+    std::optional<vayu::http::Auth> late_auth = std::nullopt) {
         vayu::runtime::ScriptEngine engine;
         vayu::http::CookieJar jar;
 
         vayu::http::routes::ExchangeInputs inputs;
         inputs.request     = std::move (request);
+        inputs.late_auth   = std::move (late_auth);
         inputs.elements    = vayu::tests::step_elements_with_pre_script (pre);
         inputs.in_scenario = in_scenario;
         return execute_exchange (engine, jar, "", scopes, std::move (inputs));
@@ -711,4 +716,111 @@ TEST_F (ResidualTokenExchangeTest, TheReportedRequestIsTheOneThatWentOut) {
     ASSERT_EQ (outcome.response.status_code, 200);
     EXPECT_EQ (outcome.request.url, server_->url () + "/users/7");
     EXPECT_EQ (outcome.request.headers["Authorization"], "Bearer fresh-token");
+}
+
+// --- auth that waits on the pre-request script (#2473) -----------------------
+
+using vayu::http::routes::apply_late_auth;
+using vayu::tests::basic_pair_of;
+
+/// The defect: a password the script defines reached the wire as base64 of
+/// `user:{{password}}`, because the pair was encoded before the script ran and
+/// no pass can read a token inside base64.
+TEST (LateAuth, ABasicPasswordResolvesBeforeItIsEncoded) {
+    vayu::Request request;
+    const auto refusal =
+    apply_late_auth (request, vayu::http::BasicAuth{ "user", "{{password}}" },
+    environment_with ("password", "s3cret"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (basic_pair_of (request.headers["Authorization"]), "user:s3cret");
+}
+
+TEST (LateAuth, ABasicUsernameResolvesBeforeItIsEncoded) {
+    vayu::Request request;
+    const auto refusal =
+    apply_late_auth (request, vayu::http::BasicAuth{ "{{username}}", "s3cret" },
+    environment_with ("username", "ada"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (basic_pair_of (request.headers["Authorization"]), "ada:s3cret");
+}
+
+/// An api key in the query is written by `apply_auth` after it resolves, so it
+/// takes the query rule and names its parameter for the provenance record.
+TEST (LateAuth, AQueryApiKeyResolvesAndIsEncodedByTheQueryRule) {
+    vayu::Request request;
+    request.url        = "https://api.example/items";
+    const auto refusal = apply_late_auth (request,
+    vayu::http::ApiKeyAuth{ "api_key", "{{key}}", /*in_query=*/true },
+    environment_with ("key", "a b&c"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (request.url, "https://api.example/items?api_key=a%20b%26c");
+    EXPECT_EQ (request.auth_query_param, "api_key");
+}
+
+TEST (LateAuth, ABearerTokenResolves) {
+    vayu::Request request;
+    const auto refusal = apply_late_auth (request,
+    vayu::http::BearerAuth{ "{{token}}" }, environment_with ("token", "fresh-token"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (request.headers["Authorization"], "Bearer fresh-token");
+}
+
+/// A header the request already carries wins, as at build time (#2475) - which
+/// is what lets a script-set `Authorization` override the Auth tab here too.
+TEST (LateAuth, AnAuthorizationTheRequestCarriesWins) {
+    vayu::Request request;
+    request.headers["authorization"] = "Custom from-the-script";
+    const auto refusal =
+    apply_late_auth (request, vayu::http::BasicAuth{ "user", "{{password}}" },
+    environment_with ("password", "s3cret"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (request.headers["Authorization"], "Custom from-the-script");
+}
+
+/// Nothing answered the name: encoded as written, which is what the build did
+/// with it before #2473 - a typo stays visible rather than becoming empty.
+TEST (LateAuth, ANameNothingAnswersIsEncodedAsWritten) {
+    vayu::Request request;
+    ScriptVariableScopes scopes;
+    const auto refusal =
+    apply_late_auth (request, vayu::http::BasicAuth{ "user", "{{password}}" }, scopes);
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_EQ (basic_pair_of (request.headers["Authorization"]), "user:{{password}}");
+}
+
+/// The exchange applies it after the pre-request script, on the wire.
+TEST_F (ResidualTokenExchangeTest, ABasicPasswordThePreRequestScriptSetsReachesTheWire) {
+    vayu::Request request;
+    request.url = server_->url () + "/users";
+
+    ScriptVariableScopes scopes;
+    auto outcome = send (std::move (request), scopes,
+    "pm.environment.set(\"password\", \"s3cret\");", /*in_scenario=*/false,
+    vayu::http::BasicAuth{ "user", "{{password}}" });
+
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (basic_pair_of (server_->header ("Authorization")), "user:s3cret");
+    EXPECT_EQ (basic_pair_of (outcome.request.headers["Authorization"]), "user:s3cret")
+    << "the reported request is the one that went out";
+}
+
+TEST_F (ResidualTokenExchangeTest, AScriptSetAuthorizationWinsOverLateAuth) {
+    vayu::Request request;
+    request.url = server_->url () + "/users";
+
+    ScriptVariableScopes scopes;
+    auto outcome = send (std::move (request), scopes,
+    "pm.environment.set(\"password\", \"s3cret\");"
+    "pm.request.headers.upsert({ key: \"Authorization\", value: \"Custom "
+    "mine\" });",
+    /*in_scenario=*/false, vayu::http::BasicAuth{ "user", "{{password}}" });
+
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->header ("Authorization"), "Custom mine");
 }

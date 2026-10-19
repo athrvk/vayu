@@ -544,15 +544,27 @@ applied to the outgoing request rather than being left to the UI. This lives in
   the request without auth and sets `Request::auth_notice`, which the
   `/execute` answer and the stored trace carry as `authNotice` (#2474). A
   user-supplied `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
-  `{{$vu}}` / `{{$iteration}}` token are the one case auth is *not* resolved
-  into the plan: the value has to be bound before the credential is encoded, so
+  `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
+  into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
-  (`bind_step_auth`, see [Scenario runs](api-reference.md#scenario-runs)).
+  (`bind_step_iteration`, see [Scenario runs](api-reference.md#scenario-runs)).
   **What is deferred is decided by the credentials, not by the run's shape**
   (issue #1055): a build defers because these credentials carry a token, so a
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
   carrying either kind is refused by name instead - its token is acquired once,
-  before any iteration exists, so no bind can reach it.
+  before any iteration exists, so no bind can reach it. A credential still
+  holding a name no scope answered at compose is deferred too, for a script to
+  define (#2473): the row and identity are joined into it without applying it
+  (`bind_iteration_holding_auth`), and it is resolved against the scopes the
+  script left and applied after the residual-token pass (`apply_late_auth` in
+  `request_exchange`), Postman's order. `POST /execute` decides it per send
+  (`plan_send_row_auth`), a collection run per step when its plan resolves
+  (`ScenarioStep::auth_after_scripts`, applied by `execute_exchange` on the
+  sequential run and by `resolve_load_residuals` on the load run), and a
+  single-request load run once, only when it declares `requestElements`
+  (`LoadAuthPlan::after_scripts`), the one shape with a residual pass per
+  submission. A step or run whose credentials hold no such name pays nothing
+  per iteration.
   `plan_auth_refresh` decides afterwards
   whether the credential a *load* run just resolved can be kept current past its
   expiry - see the run lifecycle below.
@@ -727,13 +739,18 @@ All three passes are best-effort: a failure is logged and never blocks startup.
 1. POST /execute
    ↓
 2. Build request: parse JSON + apply timeout + resolve auth (bearer/basic/
-   apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate
+   apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate,
+   except a credential still holding an unanswered {{name}} (#2473), which
+   waits for step 4b
    ↓
 3. Create Run record (type: Design)
    ↓
 4. Execute pre-request script (if provided). Its pm.request edits - method, url,
    headers, body - are written back into the request, so they override the auth
    resolved in step 2
+   ↓
+4b. Resolve the tokens compose left against the scopes the script wrote, then
+   apply any auth that waited (a header the request carries still wins)
    ↓
 5. Send HTTP request via libcurl, through the environment's cookie jar - stored
    cookies go out, Set-Cookie comes back in (see Cookie Jar below)

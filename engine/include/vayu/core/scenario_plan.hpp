@@ -95,9 +95,11 @@ struct ScenarioStep {
     /// each of those sites. The defaults are what default construction already
     /// produced.
     StepDataTemplate data_template{};
-    /// The step's parsed auth, kept **only** when its credentials carry a
-    /// `{{data.column}}`. `NoAuth` for every other step, whose auth is already
-    /// resolved into `request` above. The `{}` here and below is load-bearing:
+    /// The step's parsed auth, kept **only** when its build was deferred: its
+    /// credentials carry a `{{data.column}}` or the identity (`auth_template`),
+    /// or a name only the scopes answer (`auth_after_scripts`). `NoAuth` for
+    /// every other step, whose auth is already resolved into `request` above.
+    /// The `{}` here and below is load-bearing:
     /// aggregate initializations of a step that stop short of these trailing
     /// fields are each a -Wmissing-field-initializers error under clang
     /// otherwise (#946 measured the removal) - redundant to the default
@@ -120,6 +122,14 @@ struct ScenarioStep {
     /// needs no data set. A data token with no data set is still refused when
     /// the plan resolves, so a row is there whenever a token wants one.
     StepDataTemplate auth_template{};
+    /// A credential still holds a name only the variable scopes answer
+    /// (`credentials_await_scripts`, issue #2473), so this step's auth was
+    /// deferred too and `request` carries none of it. `bind_step_iteration`
+    /// joins the row into a copy of `auth` and hands it back unapplied; the
+    /// executor applies it with `http::routes::apply_late_auth` after
+    /// `step.before` and the residual pass. Decided here, once per step, so a
+    /// step whose credentials hold no such name pays nothing per iteration.
+    bool auth_after_scripts = false;
 };
 
 /** An ordered, immutable sequence of composed steps. */
@@ -550,12 +560,19 @@ const ScenarioResolveOptions& options);
  * `nullopt` @p row is a run sent without `data` - the identity still binds,
  * which is the whole point of it being independent of the data set. A no-op
  * returning success for the ordinary step, which carries neither kind of token.
+ *
+ * A step whose auth waits on its scripts (`ScenarioStep::auth_after_scripts`,
+ * issue #2473) gets its credentials joined into @p late_auth instead, and
+ * nothing applied: the executor owes `http::routes::apply_late_auth` after
+ * `step.before` and the residual pass, or the step goes out unauthenticated.
+ * @p late_auth is left alone for every other step.
  */
 [[nodiscard]] DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
 const std::vector<nlohmann::json>& rows,
 std::optional<size_t> row_index,
-IterationIdentity identity);
+IterationIdentity identity,
+std::optional<vayu::http::Auth>& late_auth);
 
 /**
  * The `scenario` object a scenario run stores in `runs.config_snapshot`: the

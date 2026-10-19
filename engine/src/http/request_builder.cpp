@@ -29,12 +29,12 @@ AuthResolution auth_resolution) {
     out.request            = parsed.value ();
     out.request.timeout_ms = timeout_ms;
 
-    // Deferred: the caller holds credentials that must bind a data row or the
-    // iteration identity before they are encoded, and applies the auth itself
-    // once they have. Left
-    // untouched here rather than applied-then-rewritten, because `apply_auth`
-    // is not reversible - a base64 `Authorization` value cannot be un-collapsed
-    // back into the username and password a row was meant to fill.
+    // Deferred: the caller holds credentials that must bind a data row, the
+    // iteration identity or a name the pre-request script defines before they
+    // are encoded, and applies the auth itself once they have. Left untouched
+    // here rather than applied-then-rewritten, because `apply_auth` is not
+    // reversible - a base64 `Authorization` value cannot be un-collapsed back
+    // into the username and password a row was meant to fill.
     if (auth_resolution == AuthResolution::Defer) {
         return out;
     }

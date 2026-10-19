@@ -776,16 +776,18 @@ class ScenarioLoadDriver {
         request.cookie_lines  = vu->cookies;
 
         // The data pass and the identity pass, per iteration and before the
-        // send. A step carrying neither kind of token has empty templates and
-        // is not walked at all, which is what makes a token-free plan free per
-        // iteration.
-        if (!(step.data_template.empty () && step.auth_template.empty ())) {
+        // send. A step carrying neither kind of token, and no auth waiting on
+        // its scripts, has empty templates and is not walked at all, which is
+        // what makes a token-free plan free per iteration.
+        std::optional<vayu::http::Auth> late_auth;
+        if (!step.data_template.empty () || !step.auth_template.empty () ||
+        step.auth_after_scripts) {
             // Every half through the one binder the single-request load path
             // also drives (issues #993, #994), so a request binds identically
             // whether it is repeated on its own or walked as a step - including
             // the credentials-after-fields order the encoding depends on.
-            auto bound = bind_step_iteration (request, step,
-            execution_.data_rows, row, IterationIdentity{ vu_index, iteration });
+            auto bound = bind_step_iteration (request, step, execution_.data_rows,
+            row, IterationIdentity{ vu_index, iteration }, late_auth);
             // A path a row bound is filled from what the plan checked; the
             // transfer never opens a small file and never re-checks one.
             if (bound.ok) {
@@ -817,7 +819,8 @@ class ScenarioLoadDriver {
         // which this keeps - a real resolution attempt now runs first, but a
         // name still unanswered, or a header-name collision the attempt
         // itself produced, is exactly as survivable as one composition alone
-        // left behind.
+        // left behind. Auth that waited on the scripts (issue #2473) is
+        // applied by that pass, against the same view.
         const nlohmann::json* data_row = data_row_at (execution_.data_rows, row);
         const StepBeforeResult before_result = run_step_before (context_,
         *state_, *vu, step, step_index, iteration, vu_index, request, data_row);
@@ -838,14 +841,11 @@ class ScenarioLoadDriver {
         {
             vayu::http::VariableValues vars = state_->base_vars;
             vu->scope_overlay.apply_onto (vars);
-            const auto refusal =
-            vayu::http::routes::resolve_residual_tokens (request, vars);
-            auto still_unresolved = vayu::http::routes::unresolved_token_names (request);
-            if (refusal || !still_unresolved.empty ()) {
+            const auto unresolved = vayu::http::routes::resolve_load_residuals (
+            request, vars, std::move (late_auth));
+            if (!unresolved.empty ()) {
                 state_->steps.record_unresolved_token (step_index);
-                context_->metrics_collector->record_unresolved_token (refusal ?
-                std::vector<std::string>{ refusal->error.message } :
-                std::move (still_unresolved));
+                context_->metrics_collector->record_unresolved_token (unresolved);
             }
         }
 

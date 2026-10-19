@@ -18,6 +18,9 @@
  * `rawRequest`; the names are what it masks by. Driven through the real
  * handler, because the write is a line in the route and no seam below it sees
  * the live body.
+ *
+ * The same handler carries the route half of #2473: auth whose credentials
+ * wait on the pre-request script, on both the buffered and the streaming send.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -29,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -36,7 +40,9 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
+#include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -49,6 +55,7 @@
 namespace {
 
 using nlohmann::json;
+using vayu::tests::basic_pair_of;
 
 constexpr const char* TOKEN = "live-token-5d1e";
 
@@ -89,11 +96,16 @@ class ExecuteAuthProvenanceTest : public ::testing::Test {
         if (!auth.is_null ()) {
             payload["auth"] = auth;
         }
+        return post_execute (payload, 200);
+    }
+
+    /// The `/execute` answer for @p payload, which must carry @p status.
+    json post_execute (const json& payload, int status) const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
         auto response = client.Post ("/execute", payload.dump (), "application/json");
-        if (!response || response->status != 200) {
-            ADD_FAILURE () << "POST /execute did not answer 200";
+        if (!response || response->status != status) {
+            ADD_FAILURE () << "POST /execute did not answer " << status;
             return json::object ();
         }
         return json::parse (response->body, nullptr, false);
@@ -206,6 +218,132 @@ TEST_F (ExecuteAuthProvenanceTest, AnNtlmSendSaysItWentWithoutAuth) {
 
 TEST_F (ExecuteAuthProvenanceTest, ADigestSendSaysItWentWithoutAuth) {
     expect_sent_without_auth ("digest");
+}
+
+// --- auth applied after the pre-request script (#2473) ----------------------
+//
+// A credential still holding a name no scope defined at compose waits for the
+// pre-request script, as Postman's auth does. Asserted on the wire: the defect
+// was a basic pair encoded before the script ran, which only the server sees.
+
+/// A GET to @p echo carrying @p auth, with @p script as its pre-request script.
+json scripted_payload (const vayu::tests::EchoServer& echo,
+const json& auth,
+const std::string& script) {
+    return json{ { "method", "GET" }, { "url", echo.url () }, { "auth", auth },
+        { "elements",
+        json::array ({ vayu::tests::script_element_json ("el_pre", "script.pre", script) }) } };
+}
+
+const json& basic_with_password_token () {
+    static const json auth{ { "mode", "basic" }, { "username", "user" },
+        { "password", "{{password}}" } };
+    return auth;
+}
+
+constexpr const char* SET_PASSWORD =
+"pm.environment.set(\"password\", \"s3cret\");";
+
+TEST_F (ExecuteAuthProvenanceTest, ABasicPasswordTheScriptSetsReachesTheWire) {
+    const vayu::tests::EchoServer echo;
+    post_execute (scripted_payload (echo, basic_with_password_token (), SET_PASSWORD), 200);
+
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "user:s3cret");
+}
+
+TEST_F (ExecuteAuthProvenanceTest, ABasicUsernameTheScriptSetsReachesTheWire) {
+    const vayu::tests::EchoServer echo;
+    post_execute (
+    scripted_payload (echo,
+    { { "mode", "basic" }, { "username", "{{username}}" }, { "password", "s3cret" } },
+    "pm.environment.set(\"username\", \"ada\");"),
+    200);
+
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "ada:s3cret");
+}
+
+TEST_F (ExecuteAuthProvenanceTest, ABearerTokenTheScriptSetsReachesTheWire) {
+    const vayu::tests::EchoServer echo;
+    post_execute (scripted_payload (echo, { { "mode", "bearer" }, { "token", "{{token}}" } },
+                  "pm.environment.set(\"token\", \"fresh-token\");"),
+    200);
+
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer fresh-token");
+}
+
+/// Applied late, the query key is still recorded for the reader that masks it.
+TEST_F (ExecuteAuthProvenanceTest, AQueryApiKeyTheScriptSetsReachesTheWireAndIsNamed) {
+    const vayu::tests::EchoServer echo;
+    const auto answer = post_execute (
+    scripted_payload (echo,
+    { { "mode", "apikey" }, { "key", "access_token" }, { "value", "{{key}}" }, { "in", "query" } },
+    "pm.environment.set(\"key\", \"fresh-key\");"),
+    200);
+
+    EXPECT_NE (echo.target ().find ("access_token=fresh-key"), std::string::npos)
+    << echo.target ();
+    EXPECT_EQ (answer.value ("authQueryParam", ""), "access_token") << answer.dump ();
+}
+
+/// A header the request itself carries wins over late auth, as over the
+/// build's (#2475).
+TEST_F (ExecuteAuthProvenanceTest, ATypedAuthorizationHeaderWinsOverLateAuth) {
+    const vayu::tests::EchoServer echo;
+    auto payload = scripted_payload (echo, basic_with_password_token (), SET_PASSWORD);
+    payload["headers"] = json{ { "Authorization", "Custom typed" } };
+    post_execute (payload, 200);
+
+    EXPECT_EQ (echo.header ("Authorization"), "Custom typed");
+}
+
+TEST_F (ExecuteAuthProvenanceTest, AScriptSetAuthorizationWinsOverLateAuth) {
+    const vayu::tests::EchoServer echo;
+    post_execute (scripted_payload (echo, basic_with_password_token (),
+                  std::string (SET_PASSWORD) + "pm.request.headers.upsert({ key: \"Authorization\", value: \"Custom mine\" });"),
+    200);
+
+    EXPECT_EQ (echo.header ("Authorization"), "Custom mine");
+}
+
+/// Both branches of what the script can see: a static credential is applied in
+/// the build, before the script, exactly as it always was; one waiting on a
+/// variable is not there yet, which is also what Postman shows a script.
+TEST_F (ExecuteAuthProvenanceTest, OnlyAStaticCredentialIsVisibleToTheScript) {
+    constexpr const char* REPORT_SEEN =
+    "pm.request.headers.upsert({ key: \"X-Seen\", value: "
+    "pm.request.headers.has(\"Authorization\") ? \"yes\" : \"no\" });";
+
+    const vayu::tests::EchoServer static_echo;
+    post_execute (
+    scripted_payload (static_echo,
+    { { "mode", "basic" }, { "username", "user" }, { "password", "s3cret" } }, REPORT_SEEN),
+    200);
+    EXPECT_EQ (static_echo.header ("X-Seen"), "yes");
+    EXPECT_EQ (basic_pair_of (static_echo.header ("Authorization")), "user:s3cret");
+
+    const vayu::tests::EchoServer late_echo;
+    post_execute (scripted_payload (late_echo, basic_with_password_token (),
+                  std::string (SET_PASSWORD) + REPORT_SEEN),
+    200);
+    EXPECT_EQ (late_echo.header ("X-Seen"), "no");
+    EXPECT_EQ (basic_pair_of (late_echo.header ("Authorization")), "user:s3cret");
+}
+
+/// The streaming send runs its own pre-request script, so it applies the late
+/// auth itself before the stream opens.
+TEST_F (ExecuteAuthProvenanceTest, AStreamingSendAppliesLateAuthToo) {
+    const vayu::tests::EchoServer echo;
+    auto payload = scripted_payload (echo, basic_with_password_token (), SET_PASSWORD);
+    payload["stream"] = true;
+    post_execute (payload, 202);
+
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (10);
+    while (echo.requests_seen () == 0 && std::chrono::steady_clock::now () < deadline) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    ASSERT_GT (echo.requests_seen (), 0)
+    << "the stream never reached the server";
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "user:s3cret");
 }
 
 } // namespace

@@ -663,9 +663,12 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     // is the order `apply_auth` makes load-bearing (issue #591) -
     // and the iteration's identity last (issue #994). A collection
     // run is one user walking the sequence, so `{{$vu}}` is 1 here
-    // and `{{$iteration}}` is the run's own iteration index.
+    // and `{{$iteration}}` is the run's own iteration index. Auth that waits on
+    // the step's scripts (issue #2473) lands in `late_auth`, which the exchange
+    // applies after the pre-request script.
     if (auto bound = bind_step_iteration (inputs.request, step, ctx.data_rows,
-        ctx.data_row_index, IterationIdentity{ SOLE_VIRTUAL_USER, ctx.iteration });
+        ctx.data_row_index,
+        IterationIdentity{ SOLE_VIRTUAL_USER, ctx.iteration }, inputs.late_auth);
     !bound.ok) {
         data_bind_error = std::move (bound.error);
     }
