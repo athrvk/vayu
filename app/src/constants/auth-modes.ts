@@ -22,11 +22,12 @@
  * source, never an inheritor).
  *
  * digest/aws/ntlm/hawk/oauth1/edgegrid/jwt are stored but never offered: the
- * engine has no resolution for them, so a picker entry would let someone configure something that silently
- * does nothing. They still arrive - the Insomnia importer produces them and the
- * Postman importer preserves them - so both editors must *surface* them (name
- * the stored mode, warn that it is still what runs) rather than narrow them to
- * "none" and quietly rewrite them on save.
+ * engine has no resolution for them, so a picker entry would let someone
+ * configure something that silently does nothing. They still arrive - the
+ * Insomnia importer produces them and the Postman importer preserves them - so
+ * both editors must *surface* them (name the stored mode, say plainly that
+ * Vayu does not send it and the request goes out without auth) rather than
+ * narrow them to "none" and quietly rewrite them on save (#2474).
  */
 
 import type { AuthMode } from "@/types";
@@ -99,6 +100,17 @@ export function isUneditableAuthMode(mode: AuthMode | string): mode is Uneditabl
 /** Narrowing guard: is this a mode the collection auth tab offers? */
 export function isCollectionAuthMode(mode: AuthMode | string): mode is CollectionAuthMode {
 	return (COLLECTION_AUTH_MODES as readonly string[]).includes(mode);
+}
+
+/**
+ * Will the engine put this mode's credentials on the wire? The stored-but-not-
+ * editable modes are exactly the ones it has no resolution for, so the request
+ * goes out without auth; every other mode (including `none` and `inherit`, which
+ * resolve to one of the rest) is applied. A surface that claims "sending X"
+ * asks this first rather than trusting that a stored mode is a sent one.
+ */
+export function isEngineExecutableAuthMode(mode: AuthMode | string): boolean {
+	return !isUneditableAuthMode(mode);
 }
 
 /**

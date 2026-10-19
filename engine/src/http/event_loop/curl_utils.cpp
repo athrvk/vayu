@@ -424,6 +424,23 @@ bool libcurl_defaults_content_type (const Request& request) {
     return request.method == HttpMethod::POST;
 }
 
+/// True when the list must carry the removal line `Expect:` (issue #2468).
+/// libcurl adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and then
+/// waits a second for an interim reply a server may never send, so it stays
+/// only where `sendExpectContinue` is on. @p lists_expect is a typed Expect
+/// that reached the list: the way to send one on purpose, sent as typed. A
+/// typed row left blank never gets there (`append` drops it), which is the gap
+/// libcurl fills, so it does not count. Refusing the declared row removes
+/// libcurl's own line when the policy would have let it stay.
+bool removes_libcurl_expect (const Request& request,
+const DefaultHeaderPolicy& policy,
+bool lists_expect) {
+    if (lists_expect) {
+        return false;
+    }
+    return !policy.expect_continue || suppresses_default_header (request, "Expect");
+}
+
 } // namespace
 
 curl_slist* build_request_header_list (const Request& request,
@@ -460,15 +477,19 @@ Headers* sent) {
     };
 
     bool lists_content_type = false;
+    bool lists_expect       = false;
     for (const auto& [key, value] : request.headers) {
         if (suppresses_request_header (request, key)) {
             // Not sent, so not reported as sent either - libcurl writes the
             // multipart Content-Type, boundary and all.
             continue;
         }
-        if (append (key, value) && CaseInsensitiveLess::equal (key, "Content-Type")) {
-            lists_content_type = true;
+        if (!append (key, value)) {
+            continue;
         }
+        lists_content_type =
+        lists_content_type || CaseInsensitiveLess::equal (key, "Content-Type");
+        lists_expect = lists_expect || CaseInsensitiveLess::equal (key, "Expect");
     }
 
     // The Content-Type the body mode implies, when the request declares none.
@@ -504,6 +525,11 @@ Headers* sent) {
     // instead, appended directly for the reason the Content-Type one is.
     if (!request.headers.contains ("Accept") && suppresses_default_header (request, "Accept")) {
         list = curl_slist_append (list, "Accept:");
+    }
+
+    // Appended directly and unrecorded, like the other removal lines above.
+    if (removes_libcurl_expect (request, policy, lists_expect)) {
+        list = curl_slist_append (list, "Expect:");
     }
 
     if (negotiates_compression (request, policy)) {
@@ -661,15 +687,25 @@ namespace {
  * outlive the setting that asked for it. Null restores the backend's own default.
  */
 void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
+    const char* const bundle = policy.ca_bundle_path.empty () ?
+    static_cast<const char*> (nullptr) :
+    policy.ca_bundle_path.c_str ();
+
     // The return code is checked because this is the one transport option a
     // TLS backend can refuse outright - `CURLE_NOT_BUILT_IN` from a backend
     // with no CAINFO support - and a silently ignored bundle means every
     // request fails verification with nothing anywhere saying the certificates
     // were never loaded. Logged once per process: the load path applies a
     // policy per transfer, and a per-request line would be the log.
-    const CURLcode ca_result = set_opt<CURLOPT_CAINFO> (curl,
-    policy.ca_bundle_path.empty () ? static_cast<const char*> (nullptr) :
-                                     policy.ca_bundle_path.c_str ());
+    //
+    // The bundle is written for the proxy's TLS leg as well (#2469): libcurl
+    // keeps the proxy's trust anchors in their own options, defaulting to the
+    // backend's store rather than to what the origin leg was given, so an
+    // https:// proxy behind an internal CA would otherwise fail verification
+    // with the CA pasted.
+    const CURLcode origin_result = set_opt<CURLOPT_CAINFO> (curl, bundle);
+    const CURLcode proxy_result  = set_opt<CURLOPT_PROXY_CAINFO> (curl, bundle);
+    const CURLcode ca_result = origin_result != CURLE_OK ? origin_result : proxy_result;
     if (ca_result != CURLE_OK && !policy.ca_bundle_path.empty ()) {
         static std::once_flag warned;
         std::call_once (warned, [ca_result] {
@@ -700,7 +736,8 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     // Written in both directions - the default `0` where no bundle is set and
     // the native store is not the anchor source - because a reused handle
     // would otherwise keep a flag the current policy never asked for, the rule
-    // every option here follows.
+    // every option here follows. The proxy leg has its own copy of the flag
+    // and takes the same value, for the reason the bundle is shared above.
     long ssl_options = 0L;
 #ifdef _WIN32
     ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
@@ -710,6 +747,7 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     }
 #endif
     set_opt<CURLOPT_SSL_OPTIONS> (curl, ssl_options);
+    set_opt<CURLOPT_PROXY_SSL_OPTIONS> (curl, ssl_options);
 }
 
 /** The proxy and its bypass list, per mode. */
@@ -1025,6 +1063,24 @@ std::string malformed_url_message (const Request& request) {
     return text;
 }
 
+/// Whether the proxy's own certificate is what failed verification. The code
+/// alone cannot say: `CURLE_PEER_FAILED_VERIFICATION` is the same answer for
+/// the proxy's certificate and the origin's. `CURLINFO_PROXY_SSL_VERIFYRESULT`
+/// is the backend's verdict on the proxy leg and stays 0 for an http:// proxy
+/// and for a transfer with no proxy, so a non-zero value here names the hop
+/// (#2469). Gated on the code because a backend can leave a non-zero result
+/// behind on a leg whose verification was switched off.
+bool proxy_certificate_rejected (CURL* curl, CURLcode code) {
+    if (!curl || code != CURLE_PEER_FAILED_VERIFICATION) {
+        return false;
+    }
+    long verify_result = 0;
+    if (get_info<CURLINFO_PROXY_SSL_VERIFYRESULT> (curl, &verify_result) != CURLE_OK) {
+        return false;
+    }
+    return verify_result != 0;
+}
+
 } // namespace
 
 Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors, const Request* request) {
@@ -1051,6 +1107,15 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors, c
     // mapping does not have to enumerate them.
     if (code != CURLE_OK && proxy_refused_tunnel (curl)) {
         error.code = ErrorCode::ProxyError;
+        return error;
+    }
+
+    // Ahead of the `SslError` mapping, which it keeps as the code: the message
+    // is what changes, so a user is not sent to the target's certificate when
+    // it was the proxy's that was refused (#2469).
+    if (proxy_certificate_rejected (curl, code)) {
+        error.code = ErrorCode::SslError;
+        error.message = "The proxy's certificate was not accepted: " + error.message;
         return error;
     }
 
@@ -1124,6 +1189,14 @@ const std::string& url) {
     set_opt<CURLOPT_REDIR_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
+    // The same switch for an https:// proxy's own handshake (#2469): libcurl
+    // verifies that leg whatever the origin pair says, so without these a
+    // request sent with "Verify TLS certificate" off would still be refused at
+    // the proxy. No client certificate is written for the proxy
+    // (`CURLOPT_PROXY_SSLCERT`): the registry holds identities for origins, and
+    // offering one to a proxy would hand it to a party the user never named it for.
+    set_opt<CURLOPT_PROXY_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
+    set_opt<CURLOPT_PROXY_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
     // Set on every handle, like the proxy: a pooled handle must never be
     // without it. No `CURLOPT_PREREQDATA`; the registry is process-wide.
     set_opt<CURLOPT_PREREQFUNCTION> (curl, refuse_reserved_peer);

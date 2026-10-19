@@ -193,6 +193,7 @@ TEST (SendWithRowAuth, StaticCredentialsResolveInTheBuild) {
     const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok);
     EXPECT_TRUE (plan.credentials.empty ());
+    EXPECT_FALSE (plan.after_scripts);
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
 
@@ -268,14 +269,45 @@ TEST (SendWithRowAuth, AnIdentityTokenDefersWithNoRowAndBindsToTheRunOfOne) {
     EXPECT_EQ (basic->username, "user-1");
 }
 
-/// An ordinary `{{user}}` is not a data token - it is a variable composition
-/// already resolved, and deferring it would defer every authenticated send.
-TEST (SendWithRowAuth, OrdinaryVariableIsNotADataToken) {
+/// An ordinary `{{apiToken}}` is not a data token: no row binds it. Still
+/// holding braces here means composition found no scope defining it, so it
+/// waits on the pre-request script instead (issue #2473) - a deferral the bind
+/// does not finish, which is why `credentials` stays empty.
+TEST (SendWithRowAuth, OrdinaryVariableWaitsOnTheScriptsNotTheRow) {
     const json payload{ { "auth", { { "mode", "bearer" }, { "token", "{{apiToken}}" } } } };
 
     const auto plan = plan_send_row_auth (payload);
     EXPECT_TRUE (plan.ok);
     EXPECT_TRUE (plan.credentials.empty ());
+    EXPECT_TRUE (plan.after_scripts);
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
+}
+
+/// A row token beside a script one: the bind joins the row, and the auth still
+/// waits on the scripts for the rest.
+TEST (SendWithRowAuth, ARowTokenBesideAScriptTokenDefersForBoth) {
+    const json payload{ { "auth",
+    { { "mode", "basic" }, { "username", "{{data.user}}" }, { "password", "{{password}}" } } } };
+
+    const auto plan = plan_send_row_auth (payload);
+    ASSERT_TRUE (plan.ok) << plan.error;
+    EXPECT_FALSE (plan.credentials.empty ());
+    EXPECT_TRUE (plan.after_scripts);
+    EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Defer);
+}
+
+/// OAuth 2.0 is never deferred for a script: its token is acquired before the
+/// send, against a config no script-set name can reach in time.
+TEST (SendWithRowAuth, AnOauth2ScriptTokenIsAppliedInTheBuild) {
+    const json payload{ { "auth",
+    { { "mode", "oauth2" },
+    { "config",
+    { { "grantType", "client_credentials" }, { "clientId", "{{clientId}}" },
+    { "tokenUrl", "https://issuer.example/token" } } } } } };
+
+    const auto plan = plan_send_row_auth (payload);
+    EXPECT_TRUE (plan.ok) << plan.error;
+    EXPECT_FALSE (plan.after_scripts);
     EXPECT_EQ (plan.resolution, vayu::http::AuthResolution::Apply);
 }
 

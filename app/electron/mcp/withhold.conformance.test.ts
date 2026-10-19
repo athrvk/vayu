@@ -93,6 +93,45 @@ describe("MCP sensitive header conformance in run output's headerLines (#2460)",
 	});
 });
 
+describe("MCP sensitive header conformance in a redirect hop's headerLines (#2461)", () => {
+	it("read a non-empty fixture", () => {
+		expect(fixture.sensitiveHeaderNames.length).toBeGreaterThan(0);
+	});
+
+	it.each(fixture.sensitiveHeaderNames)("withholds a %s row's value in any case", (name) => {
+		for (const spelled of [name, name.toUpperCase()]) {
+			expect(
+				withholdRunOutput(
+					{
+						redirects: [
+							{
+								status: 302,
+								statusText: "Found",
+								headerLines: [
+									{ name: spelled, value: "v" },
+									{ name: "Location", value: "/home" },
+								],
+							},
+						],
+					},
+					{ forms: [], apiKeyHeaders: [] }
+				)
+			).toEqual({
+				redirects: [
+					{
+						status: 302,
+						statusText: "Found",
+						headerLines: [
+							{ name: spelled, value: "<redacted>" },
+							{ name: "Location", value: "/home" },
+						],
+					},
+				],
+			});
+		}
+	});
+});
+
 describe("MCP sensitive parameter name conformance", () => {
 	it("read a non-empty fixture", () => {
 		expect(fixture.sensitiveParamNames.length).toBeGreaterThan(0);

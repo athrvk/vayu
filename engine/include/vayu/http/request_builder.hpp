@@ -33,9 +33,11 @@ namespace vayu::http {
  * carry, never the shape of the run, so a caller with no data set at all still
  * defers for an identity token and binds it per iteration. Such a caller parses
  * the auth itself, joins it against the iteration and applies it afterwards -
- * `vayu::core::bind_auth_row` is that step, and it is the only correct way to
- * finish a deferred build. A `Defer` whose auth is never applied sends an
- * unauthenticated request.
+ * `vayu::core::bind_auth_row` is that step. A credential holding a name only
+ * the variable scopes answer defers too (issue #2473), and is finished by
+ * `routes::apply_late_auth` after the pre-request script instead. Those are
+ * the only correct ways to finish a deferred build. A `Defer` whose auth is
+ * never applied sends an unauthenticated request.
  */
 enum class AuthResolution : std::uint8_t { Apply, Defer };
 

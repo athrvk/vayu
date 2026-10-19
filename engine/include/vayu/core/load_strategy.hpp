@@ -78,27 +78,40 @@ struct LoadDataSet {
  * run's shape rather than to what the credentials carry - and it is what made
  * an identity token in a credential go out written as it stood.
  *
- * Empty credentials are the ordinary run, whose auth the build resolves once as
- * it always did.
+ * Empty credentials and no @ref after_scripts are the ordinary run, whose auth
+ * the build resolves once as it always did.
  */
 struct LoadAuthPlan {
     /**
-     * The parsed auth, read only when @ref credentials is non-empty - which is
-     * exactly when the request's build was deferred and carries no credential
-     * until the bind reaches it. `NoAuth` for every run whose auth the build
-     * applied.
+     * The parsed auth, read only when the request's build was deferred
+     * (@ref auth_resolution) and so carries no credential until a submission
+     * applies it. Unread for every run whose auth the build applied.
      */
     vayu::http::Auth auth;
     /// The credentials split around their `{{data.column}}` and
     /// `{{$vu}}` / `{{$iteration}}` tokens; empty when none carries one.
     StepDataTemplate credentials;
+    /**
+     * A credential holds a name only the variable scopes answer
+     * (`credentials_await_scripts`, issue #2473) **and** the run declares
+     * `requestElements` (@ref declares_request_elements), whose `step.before`
+     * and residual pass are what can answer it after the build. Each
+     * submission then joins its row into a copy of @ref auth without applying
+     * it and applies it after that pass (`routes::resolve_load_residuals`).
+     *
+     * False on a run without `requestElements`: nothing after the build
+     * answers such a name there, so the build encodes it as written, as it
+     * always did, and the run keeps sending one shared request.
+     */
+    bool after_scripts = false;
 
-    /// What `build_request` must be told: the credentials are bound after the
-    /// build, so an auth carrying a token must not be encoded during it.
-    /// Derived rather than stored, so it cannot disagree with @ref credentials.
+    /// What `build_request` must be told: credentials bound or resolved after
+    /// the build must not be encoded during it. Derived rather than stored, so
+    /// it cannot disagree with @ref credentials or @ref after_scripts.
     [[nodiscard]] vayu::http::AuthResolution auth_resolution () const {
-        return credentials.empty () ? vayu::http::AuthResolution::Apply :
-                                      vayu::http::AuthResolution::Defer;
+        return credentials.empty () && !after_scripts ?
+        vayu::http::AuthResolution::Apply :
+        vayu::http::AuthResolution::Defer;
     }
 };
 
@@ -257,6 +270,16 @@ validate_lifecycle_elements_run_override (const nlohmann::json& config);
  */
 [[nodiscard]] std::optional<std::string>
 validate_request_elements_run_override (const nlohmann::json& config);
+
+/**
+ * @brief Whether a single-request run @p config declares any
+ *        `requestElements` (issue #1594): a non-empty array.
+ *
+ * The one test `RunContext::step_elements` is compiled under and the route's
+ * auth plan (@ref LoadAuthPlan::after_scripts) is decided under, so a run whose
+ * auth waits on its submissions' residual pass always has one.
+ */
+[[nodiscard]] bool declares_request_elements (const nlohmann::json& config);
 
 /**
  * @brief How long a `constant_rps` tick sleeps before it spins out the rest of

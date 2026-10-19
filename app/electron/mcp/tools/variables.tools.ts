@@ -12,7 +12,12 @@
  */
 
 import { z } from "zod";
-import { type OriginScopes, precedenceNote, resolveVariableReports } from "../variable-origins.js";
+import {
+	ENVIRONMENT_DEFAULT_SENTENCE,
+	type OriginScopes,
+	precedenceNote,
+	resolveVariableReports,
+} from "../variable-origins.js";
 import { secretsShape, withheldPointer, withholdRowSecrets } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -71,7 +76,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		description: (config) =>
 			'Answer which definition of a variable name actually wins in a given context, and list the ones it beat - the question get_globals and list_environments cannot, because each shows one tier in isolation. For every name it reports the winning value with the scope and source that supplied it, then every shadowed definition highest-precedence-first, each saying whether it was outranked by a higher tier or simply switched off (`enabled: false`). A switched-off row is the more common answer to "why is this not the value I set?", and a name whose every definition is disabled resolves to nothing at all rather than to an empty string. ' +
 			precedenceNote(
-				"Pass no environmentId to use the active environment, the same default a send takes; pass a collectionId to include its chain."
+				`${ENVIRONMENT_DEFAULT_SENTENCE} Pass a collectionId to include its chain.`
 			) +
 			" Reports what is stored: it resolves nothing on the wire and starts no run." +
 			withheldPointer(config),
@@ -92,7 +97,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					'Optional environment ID. Omit for the active environment (the default a send takes); pass "none" to resolve as if no environment were active.'
+					'Optional environment ID to resolve against, or "none" for no environment.'
 				),
 			names: z
 				.array(z.string())

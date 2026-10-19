@@ -581,6 +581,12 @@ sent on every send and load test, and painted as a warning while it is off. See
 [TLS trust settings](engine/api-reference.md#tls-trust-settings) for the
 per-platform detail, including what the Windows store does not supply.
 
+The same trust and the same switch apply to the proxy's own handshake when
+`proxyUrl` is an `https://` URL: libcurl keeps those options separate from the
+target's, so the engine writes the proxy twins (`CURLOPT_PROXY_CAINFO`,
+`PROXY_SSL_OPTIONS`, `PROXY_SSL_VERIFYPEER` / `_VERIFYHOST`) from the same
+values, and a refused proxy certificate is reported as the proxy's.
+
 It also carries **what the engine proves it is**. An mTLS endpoint asks the
 client for a certificate, and a certificate belongs to the host being called
 rather than to one request - the transfer that needs it is as often a token

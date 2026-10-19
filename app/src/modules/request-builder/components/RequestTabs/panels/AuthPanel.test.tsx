@@ -95,6 +95,29 @@ describe("AuthPanel with an auth mode it cannot edit", () => {
 		).not.toBeInTheDocument();
 	});
 
+	it("says Vayu does not send it, not that it is still sent", () => {
+		renderPanel({ mode: "digest", config: { username: "u" } });
+
+		expect(
+			screen.getByText(
+				/Vayu does not send this auth type, so the request goes out without auth/i
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/still sent/i)).not.toBeInTheDocument();
+	});
+
+	it("says an inherited mode the engine ignores is not sent", () => {
+		ancestorChain = [collection("root", { mode: "digest", config: {} })];
+		renderPanel({ mode: "inherit" }, "root");
+
+		expect(
+			screen.getByText(
+				/Vayu does not send this auth type, so this request goes out without auth/i
+			)
+		).toBeInTheDocument();
+		ancestorChain = [];
+	});
+
 	it("labels aws and ntlm too", () => {
 		renderPanel({ mode: "aws", config: {} });
 		expect(screen.getByText(/AWS Signature auth is set/i)).toBeInTheDocument();

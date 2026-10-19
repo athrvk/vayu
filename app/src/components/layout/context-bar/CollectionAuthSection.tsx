@@ -21,7 +21,11 @@
 
 import { useCollectionsQuery, useCollectionAncestors } from "@/queries";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
-import { resolveAuthSource, withDraftAuth } from "@/modules/request-builder/utils/auth-resolution";
+import {
+	isUnsavedAuthDraft,
+	resolveAuthSource,
+	withDraftAuth,
+} from "@/modules/request-builder/utils/auth-resolution";
 import { useCollectionAuthDraft } from "@/stores";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
@@ -48,16 +52,19 @@ export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 	const own = draftAuth?.mode ?? collection.auth.mode;
 	const label = AUTH_MODE_LABELS[own];
 
+	// What this sentence describes is the draft, and a request below sends the
+	// stored row until Save, so the sentence says which it is.
+	const unsaved = isUnsavedAuthDraft(collection.auth, draftAuth) ? " (unsaved)" : "";
 	const origin =
 		own === "noauth"
-			? "Requests below inherit nothing - the walk stops here."
+			? `Requests below inherit nothing - the walk stops here${unsaved}.`
 			: own !== "none"
-				? "Requests set to Inherit send this."
+				? `Requests set to Inherit send this${unsaved}.`
 				: source
-					? `Requests below inherit ${AUTH_MODE_LABELS[source.auth.mode]} from ${source.name}.`
+					? `Requests below inherit ${AUTH_MODE_LABELS[source.auth.mode]} from ${source.name}${unsaved}.`
 					: blockedBy
-						? `${blockedBy.name} is set to No auth, so nothing is inherited past it.`
-						: "No ancestor collection defines auth either.";
+						? `${blockedBy.name} is set to No auth, so nothing is inherited past it${unsaved}.`
+						: `No ancestor collection defines auth either${unsaved}.`;
 
 	return (
 		<div className="space-y-2">

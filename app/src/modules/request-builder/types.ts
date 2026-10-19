@@ -29,6 +29,7 @@ import type {
 	FileRef,
 	ExampleSentRequest,
 	HeaderLine,
+	RedirectHop,
 	DataContractScope,
 	ElementDef,
 	ElementOutcome,
@@ -262,6 +263,19 @@ export interface ResponseState {
 	 * Cookies tab splits its folded `set-cookie`.
 	 */
 	headerLines?: HeaderLine[];
+	/**
+	 * The redirect responses followed before this one (issue #2461): status and
+	 * header lines of each 3xx, in arrival order. `headers` and `headerLines`
+	 * hold the final hop only, so a hop's `Set-Cookie` is readable only here;
+	 * the Cookies tab lists them as "Set during redirects". They say what the
+	 * server sent, not what the cookie jar kept.
+	 *
+	 * Both funnels set it through `receivedRedirects`, which reads an empty list
+	 * as absent: the live answer always carries `[]`, the stored trace writes the
+	 * key only when a hop was followed, and an engine from before the key has
+	 * neither.
+	 */
+	redirects?: RedirectHop[];
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	/**
@@ -335,6 +349,17 @@ export interface ResponseState {
 	 * this, a downgrade was indistinguishable from success.
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * The request's auth mode is one the engine does not execute, so it went
+	 * out without authentication (issue #2474); the engine's own sentence,
+	 * absent when there is nothing to say. Set by **both** funnels -
+	 * `responseFromExecuteResult` from the `/execute` body,
+	 * `responseFromRunResult` from `trace.request.authNotice` - and drawn by
+	 * `ResponseViewer` as a band above the tabs, so a 401 from the target
+	 * carries the explanation with it. See `HttpResponse.authNotice` in
+	 * `app/src/types/domain.ts`.
+	 */
+	authNotice?: string;
 	/**
 	 * The client-certificate registry entry this exchange presented, as `host`
 	 * or `host:port` (issue #707); absent when none matched.

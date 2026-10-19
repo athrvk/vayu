@@ -798,7 +798,7 @@ declare const pm: {
 	/**
 	 * Access the HTTP request data including URL, method, headers, and body.
 	 * 
-	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
+	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. An Auth tab credential still holding a {{variable}} nothing defined is applied after the script instead, so its header is not in pm.request yet and a variable this script sets reaches it. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
 	 */
 	request: {
 		/**
@@ -902,7 +902,7 @@ declare const pm: {
 			 */
 			one(name: string): { key: string; value: string } | undefined;
 			/**
-			 * Remove a header from the outgoing request, including one the Auth tab applied. Case-insensitive, and removing an absent header is a no-op.
+			 * Remove a header from the outgoing request, including one the Auth tab applied - not one whose credential still waits on a {{variable}}, which is applied after the script. Case-insensitive, and removing an absent header is a no-op.
 			 */
 			remove(name: string): void;
 			/**

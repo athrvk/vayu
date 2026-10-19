@@ -36,7 +36,7 @@ import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
-import { receivedHeaderLines } from "@/lib/header-lines";
+import { receivedHeaderLines, receivedRedirects } from "@/lib/header-lines";
 import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -322,11 +322,17 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// agree and the Cookies tab can tell a legacy answer from a received
 		// one (issue #2460).
 		headerLines: receivedHeaderLines(result.headerLines),
+		// Same normalisation, for the hops before this response (issue #2461).
+		redirects: receivedRedirects(result.redirects),
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
 		...wireRequestHeadersField(status !== 0, result.rawRequest),
 		httpVersion: result.httpVersion,
 		httpVersionDowngraded: result.httpVersionDowngraded,
+		// The engine omits the key when it has nothing to say; `|| undefined` also
+		// keeps a producer's `""` from drawing an empty banner, so this funnel and
+		// the restored one agree whatever they are handed (issue #2474).
+		authNotice: result.authNotice || undefined,
 		// `""` means no certificate matched, and the pane has nothing to show
 		// for that - mapped to `undefined` so this funnel and the restored one
 		// build the same state (see `clientCertificateFromTrace`).

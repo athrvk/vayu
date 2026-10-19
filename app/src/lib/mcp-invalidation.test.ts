@@ -220,7 +220,7 @@ describe("invalidateForMcpEvent", () => {
 	test("a config change also drops what a send adds on its own", () => {
 		/*
 		 * `requestDefaults` is a second endpoint over the same entries, not a slice
-		 * of `config`: four of them decide the declared set and the engine resolves
+		 * of `config`: five of them decide the declared set and the engine resolves
 		 * it, so the answer is read rather than derived here.
 		 * `useUpdateConfigMutation` drops both keys for that reason, and this map
 		 * dropping only `config.all` is what left the Headers tab's "Added by Vayu"

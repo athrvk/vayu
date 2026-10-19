@@ -21,7 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
-import { receivedHeaderLines } from "@/lib/header-lines";
+import { receivedHeaderLines, receivedRedirects } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { paneBody } from "./execute-mapping";
 import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
@@ -202,6 +202,9 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 
 	return {
 		requestHeaders,
+		// A property of what was sent, so it lives here and reaches the failed
+		// exchange too, which has no `response` node (issue #2474).
+		authNotice: request.authNotice || undefined,
 		// Only the engine's own frame is parsed, and only for an exchange that got
 		// a response: the fallback below is fabricated, and a failed send's frame
 		// may be too (`wireRequestHeadersField`).
@@ -314,6 +317,7 @@ export function responseFromRunResult(
 		headers,
 		// Same rule as the live funnel: an empty list is an absent one.
 		headerLines: receivedHeaderLines(trace.response.headerLines),
+		redirects: receivedRedirects(trace.response.redirects),
 		...sentSide(trace),
 		httpVersion: trace.response.httpVersion,
 		httpVersionDowngraded: trace.response.httpVersionDowngraded,

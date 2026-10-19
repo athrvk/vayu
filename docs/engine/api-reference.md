@@ -933,7 +933,7 @@ reuses a pooled connection only when its proxy configuration matches.
 | Key | Default | Values | Effect |
 |-----|---------|--------|--------|
 | `proxyMode` | `environment` | `environment`, `system`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `system` uses `proxySystemUrl`, which the app resolves from the operating system. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
-| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. |
+| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. An `https` proxy is verified against the same trust as the target (the platform's anchors plus `customCaCertificates`) and the request's `verifySSL` - see [TLS trust settings](#tls-trust-settings). |
 | `proxySystemUrl` | `""` | curl-shaped URL | The proxy for `system` mode, **written by the app, not typed by the user**. The Electron main process resolves the OS proxy through Chromium and stores the answer here at startup, when the machine wakes, and when the renderer sees the network change. Empty means nothing resolved - see the fallback below. Validated exactly as `proxyUrl` is, under every mode. |
 | `proxyBypass` | `""` | comma-separated hosts | Hosts that skip the proxy, passed to curl's `NOPROXY` verbatim: a leading dot matches a domain and everything under it, a single `*` bypasses everything. |
 
@@ -1009,8 +1009,8 @@ matches them on the **origin** host, never the proxy hop.
 
 #### Default request headers
 
-Four `network_performance` entries decide what Vayu adds to a request nobody
-wrote it into (issue #1229). They are read at the top of a request or a run, so
+Five `network_performance` entries decide what Vayu adds to a request nobody
+wrote it into (issue #1229, and #2468 for the Expect header). They are read at the top of a request or a run, so
 a change applies to the next send; a load run reads them once at run start, as
 it does the proxy policy.
 
@@ -1018,6 +1018,7 @@ it does the proxy policy.
 |-----|---------|--------|--------|
 | `negotiateCompression` | `true` | boolean | Ask for a compressed response on a Send, a collection or scenario run, and a script's own `pm.sendRequest`. The value advertised is what *this* libcurl can decode, read off `curl_version_info` - `gzip, deflate` plus `br` and `zstd` where the build has them - and libcurl decodes the response before the engine sees it. Off sends no `Accept-Encoding` at all. |
 | `loadNegotiateCompression` | `true` | boolean | The same decision for a load run, separate because compression is part of what a load test measures: off measures a server's uncompressed ceiling, on measures what its clients actually get. |
+| `sendExpectContinue` | `false` | boolean | Let libcurl send `Expect: 100-continue` on a large body. libcurl adds that header on its own to an HTTP/1.1 body over 1 MiB (1048577 bytes and up) and then waits about a second for an interim reply a server that ignores the header never sends, so with this off the engine removes it with libcurl's `Expect:` removal line and the transfer sends the body at once. One key for a Send, a collection run and a load run alike. The removal line is not a sent header, so it is not in `requestHeaders`. |
 | `correlationIdEnabled` | `false` | boolean | Send a header carrying a fresh identifier with every request, so one send - or one iteration of a load run - can be found in a server's log. Off by default: it is a header the target did not ask for. |
 | `correlationIdHeader` | `X-Vayu-Request-Id` | header name | Which name that identifier goes out under. Vendor-namespaced by default so it collides with nothing a gateway defines; set it to `X-Request-ID` or `X-Correlation-ID` for infrastructure that reads one of those. `POST /config` refuses a value that is not a header name (RFC 9110 token), because a broken name would otherwise put a broken line on every request afterwards. |
 
@@ -1040,6 +1041,17 @@ added:
 
 The correlation id is generated **per transfer**, not per composition, so every
 iteration of a load run carries its own.
+
+**`Expect` is the one default the engine takes away rather than adds.** With
+`sendExpectContinue` off, a request that names no `Expect` gets libcurl's
+removal line, whatever its size or verb. A typed `Expect: 100-continue` is the
+way to send one on purpose: it goes out as typed with the key off, and is
+recorded in `requestHeaders`. A typed `Expect` with a blank value is dropped
+like any value-less header and does not let libcurl's own back in. With the key
+on nothing is appended, so libcurl decides (over 1 MiB, on HTTP/1.1), and the
+`Expect` row `GET /request-defaults` declares is the one a send refuses with
+`disabledDefaultHeaders`, which removes libcurl's line again. With the key off
+that refusal changes nothing: the line is already removed.
 
 **Every size the API reports is the bytes Vayu holds** - `bodySize`, a stored
 trace's `bodyBytes`, a load sample's `body_bytes`. With negotiation on those are
@@ -1134,6 +1146,18 @@ Per-request, `verifySSL: false` turns verification off for one endpoint
 entirely (see [POST /execute](#post-execute)); trusting the authority here is
 the answer that keeps verification on everywhere else.
 
+**An `https://` proxy is a second TLS handshake with the same trust.** libcurl
+decides the proxy's certificate with options of its own
+(`CURLOPT_PROXY_CAINFO`, `CURLOPT_PROXY_SSL_OPTIONS`,
+`CURLOPT_PROXY_SSL_VERIFYPEER` / `_VERIFYHOST`) that do not inherit what the
+target's handshake was given, so the engine writes each of them from the same
+values as its target-side twin: a proxy whose certificate a pasted authority
+signed verifies, and `verifySSL: false` covers the proxy leg as well as the
+target. No client certificate from the registry is ever offered to a proxy - an
+entry names a host the user trusts with that identity, and a proxy is not it. A
+proxy certificate that is refused is an `SSL_ERROR` whose message says the
+*proxy's* certificate was not accepted, so the target's is not blamed.
+
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
@@ -1150,10 +1174,15 @@ config entries above.
   "headers": [
     { "name": "User-Agent", "value": "Vayu/0.25.0", "generated": false },
     { "name": "Accept-Encoding", "value": "gzip, deflate", "configKey": "negotiateCompression", "generated": false },
-    { "name": "X-Vayu-Request-Id", "generated": true, "configKey": "correlationIdEnabled" }
+    { "name": "X-Vayu-Request-Id", "generated": true, "configKey": "correlationIdEnabled" },
+    { "name": "Expect", "value": "100-continue", "configKey": "sendExpectContinue", "generated": false }
   ]
 }
 ```
+
+The `Expect` row appears only while `sendExpectContinue` is on, under both
+scopes, and describes what libcurl may send above 1 MiB rather than a header on
+every request.
 
 A default that is switched off is **absent** rather than listed as disabled.
 `generated: true` means the value is made per send, so the row carries no
@@ -4445,7 +4474,9 @@ never written to disk. Load runs neither read nor write it.
 
 Cookies set *during* a redirect chain follow curl's cross-origin rule rather
 than the jar's - see [POST /execute](#post-execute) for what a redirect that
-changes origin does to them.
+changes origin does to them. The `Set-Cookie` lines of those intermediate hops
+are reported on the answer's `redirects` member, whether or not curl applied
+them.
 
 ### GET /cookies
 
@@ -5319,6 +5350,33 @@ hits the wire:
 | `basic` | `Authorization: Basic <base64(user:pass)>` |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
+| any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
+
+**When it is applied.** As the request is built, before any pre-request script
+runs - so the script's `pm.request` holds the header - unless a credential
+(a `bearer` token, a `basic` username or password, an `apikey` key or value)
+still holds a `{{name}}` that is not a data column or the iteration identity.
+Such a name is one composition found no variable for, and that auth is applied
+**after** the pre-request script and the residual-token pass instead, each
+credential resolved against the scopes as the script left them (#2473), so
+`pm.environment.set("password", …)` reaches a basic pair before it is
+base64-encoded. That is Postman's order; the script then does not see the header
+in `pm.request.headers`, and an `Authorization` it sets wins by the rule below.
+A data column or the identity in the same credential is bound first. A name
+nothing answers is encoded as written. `oauth2` is never deferred this way. The
+same order holds wherever a script can run between the build and the send:
+
+| Send | Applied after |
+|------|---------------|
+| `POST /execute` (buffered and `stream: true`) | the pre-request script |
+| A collection run's step | that step's pre-request script, each iteration |
+| A collection **load** run's step | that submission's `step.before` elements (an `inline` `script.pre`) and the residual pass over its virtual user's scope |
+| A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
+
+A single-request load run without `requestElements` has no such pass, so the
+build encodes the name as written. Under load a name nothing answers is never a
+refusal: it is sent as written and counted like any other unresolved token
+(#1503), except inside a basic pair's base64, where it never was countable.
 
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
@@ -5377,6 +5435,13 @@ else re-acquires). `interactive` is only used for the `authorization_code` grant
 and it always exchanges the code and overwrites the cached row, whatever `force`
 says and whether the cached token is fresh, expired or refreshable (the old
 refresh token is not carried over).
+
+Client credentials sent in the `Authorization: Basic` header are form-encoded
+before they are base64-encoded, as RFC 6749 section 2.3.1 specifies, so a secret
+holding `+`, `/` or `=` travels as `%2B`, `%2F`, `%3D`. A provider that expects
+them raw (as Postman and `curl -u` send them) needs `credentialsPlacement:
+"body"`, which puts `client_id` and `client_secret` in the form instead. The
+default is `basic_auth_header`.
 
 **Response (`200`):**
 ```json
@@ -5580,10 +5645,11 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   `apply_auth` encodes a credential when the request is built and a token left
   for the bind would go out as base64 of its own text. That is a generator's
   case alone: a credential carrying a `{{data.*}}` or a `{{$vu}}` defers the
-  whole build and is bound before the encoding (issue #1055), where a generator
-  has nothing to wait for. A scenario plan's steps are composed with it
-  internally, so a
-  collection run needs no field at all.
+  whole build and is bound before the encoding (issue #1055), and one carrying a
+  name no scope answered defers it until after the pre-request script (#2473,
+  see [Authentication](#authentication)), where a generator has nothing to wait for. A
+  scenario plan's steps are composed with it internally, so a collection run
+  needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
@@ -5601,7 +5667,10 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   before resolution - how an override like "retarget this saved request at
   another URL" works. Given alone, `collectionId` scopes the variable chain and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
-  erroring - composition works with no collection or environment at all.
+  erroring - composition works with no collection or environment at all. That
+  rule is for the app and direct callers: the MCP server checks an
+  `environmentId` against `GET /environments` before composing and refuses one
+  that names no environment ([MCP](mcp.md)).
 
 #### Query encoding
 
@@ -5944,7 +6013,9 @@ Execute a single HTTP request (Design Mode). Returns immediate response with tes
 
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
-the pre-request script runs, so `pm.request` reflects the real outgoing headers.
+the pre-request script runs, so `pm.request` reflects the real outgoing headers -
+unless a credential still holds a name compose could not answer, when it is
+applied after that script instead (#2473).
 If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
 `200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
 (interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
@@ -5958,7 +6029,10 @@ variable scopes as the pre-request script left them. This is what makes the
 canonical imported auth pattern work: a pre-request script does
 `pm.environment.set("token", …)` and the same send's `Authorization: Bearer
 {{token}}` carries the fresh value, rather than the previous run's token or
-`""` on the first run. It resolves the same fields composition does - the URL,
+`""` on the first run. A credential that waited (above) is applied once this
+pass has answered, against the same scopes, so a basic pair carries the value a
+script set rather than base64 of its token. It resolves the same fields
+composition does - the URL,
 header names and values, body content, and the five strings a form field
 carries, plus the value of a `:name` path variable composition left waiting
 (written into its segment, encoded, as the pass ends; see
@@ -6295,18 +6369,21 @@ its `apply` ever running) - see [Elements](elements.md#the-step-trace).
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and
 because auth is resolved *before* the script runs, a script-set `Authorization`
-overrides the one the engine applied. `requestHeaders` and `rawRequest` in the
-response below, and the stored trace behind `GET /runs/:id`, all report the
+overrides the one the engine applied. A credential that waits on the script
+(#2473) is applied after it instead, and a script-set `Authorization` still
+wins: auth never replaces a header the request already carries.
+`requestHeaders` and `rawRequest` in the response below, and the stored trace behind `GET /runs/:id`, all report the
 post-script request. A value the engine cannot send (a non-string url, an
 unknown method) rejects the whole write-back, leaves the request unchanged, and
 is reported as `preScriptError`. See
 [scripting.md](scripting.md#mutating-the-request-pre-request-scripts).
 
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
-follows every 3xx and only the final response is returned - send
-`followRedirects: false` to see the 3xx status and its `Location` header. A
-chain longer than `maxRedirects` (default 10) fails the send with
-`TOO_MANY_REDIRECTS` rather than returning the last 3xx. Both
+follows every 3xx and the final response is returned as the answer, with the
+earlier hops' status and header lines on its `redirects` member (field notes
+below the response example) - send `followRedirects: false` to make the 3xx
+itself the answer. A chain longer than `maxRedirects` (default 10) fails the
+send with `TOO_MANY_REDIRECTS` rather than returning the last 3xx. Both
 clients send these explicitly for exactly that reason (see
 [api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
@@ -6335,7 +6412,9 @@ alike. A flow that depended on a cookie surviving a cross-origin hop (a login
 that bounces through an identity provider is the usual shape) now sends the
 follow-up request without it. Nothing about the [cookie jar](#cookies) itself
 changed: it is domain-scoped as before, so a cookie is still stored under the
-origin that set it and still sent on a later request back to that origin.
+origin that set it and still sent on a later request back to that origin. A
+hop's `Set-Cookie` is reported in `redirects` whether or not curl applied it,
+so the member says what the server sent, not what the jar stored.
 
 **Protocol.** `httpVersion` selects which HTTP version curl attempts:
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
@@ -6366,6 +6445,16 @@ run-shaped way of stating the same field, not a second store.
   },
   "headerLines": [
     { "name": "Content-Type", "value": "application/json" }
+  ],
+  "redirects": [
+    {
+      "status": 302,
+      "statusText": "Found",
+      "headerLines": [
+        { "name": "Set-Cookie", "value": "session=abc; Path=/" },
+        { "name": "Location", "value": "/users" }
+      ]
+    }
   ],
   "requestHeaders": { "accept": "*/*" },
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
@@ -6563,6 +6652,20 @@ parse. The stored `trace_data.response` also carries `headerLines`, written only
 when non-empty; a load-run sample keeps the folded map alone, because the load
 path is the hot path and records no lines.
 
+**`redirects` lists the redirect responses the
+send followed** (issue #2461), in the order they arrived, each as
+`{status, statusText, headerLines}` with `headerLines` shaped as above. `headers`
+and `headerLines` hold the final hop only, so a `Set-Cookie` or `Location` on an
+earlier hop - the `302` that answers a login and sets the session cookie - is
+readable nowhere else. Only 3xx responses are hops: a `1xx` interim response
+such as `100 Continue` is not. It is always present on a design answer, an empty
+array when nothing was followed (`followRedirects: false` always gives an empty
+one, the 3xx being the answer), and holds at most `maxRedirects` entries, so a
+loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
+`trace_data.response` carries it too, written only when non-empty; a load-run
+sample records none. It reports what the server sent: see the cross-origin
+paragraph above for why a hop's cookie is not necessarily one the jar kept.
+
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
 that frame declares one* (`Content-Length` above zero, or `Transfer-Encoding:
@@ -6651,6 +6754,22 @@ before the field; the values beside them stay raw. A streaming send answers
 `202` before any of this exists, so only its stored trace carries them. A
 pre-request script that retargets the URL can leave `authQueryParam` naming a
 parameter the final URL no longer carries.
+
+**And they say when auth was not sent at all** (#2474): `authNotice`, a plain
+string, appears when the request's `auth.mode` is one the engine stores but does
+not execute (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`; an
+import can bring any of them in). The request is still sent, without
+authentication, and the notice says so, naming the mode:
+
+```json
+"authNotice": "auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication"
+```
+
+It follows the same rules as the two keys above: one writer for both homes,
+**absent** when empty (every executed mode, and no auth), absent on rows
+written before the field, and on a streaming send only in the stored trace.
+A collection run's stored step traces carry it through the same trace writer;
+a load run sends such a request the same way and raises no run warning for it.
 
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
@@ -7578,7 +7697,10 @@ for the reason a variable named `data.id` does not answer for the column, and
 everywhere a `data.*` token does, **credential fields included** (issue #1055):
 a credential carrying either name defers its build and is bound before
 `apply_auth` encodes it, on every run shape rather than only on one carrying
-rows, because the identity comes from the iteration rather than from a row. An
+rows, because the identity comes from the iteration rather than from a row. A
+credential that also holds a name only a variable scope answers takes the row
+first and is applied after the pre-request script (#2473), on every send that
+runs one (see [Authentication](#authentication)). An
 OAuth 2.0 config is the exception and is refused by name - its token is acquired
 before any iteration exists.
 

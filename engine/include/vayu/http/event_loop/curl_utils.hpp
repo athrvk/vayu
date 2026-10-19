@@ -259,6 +259,15 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * libcurl's removal line `Content-Type:`, which is not a sent header and is not
  * recorded as one.
  *
+ * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
+ * waits a second for the interim reply (issue #2468). Unless
+ * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
+ * unrecorded for the same reason. A request that types a non-blank Expect sends
+ * it as typed; a typed blank one is dropped like any value-less header and so
+ * still gets the removal line. With the policy on, nothing is appended and
+ * libcurl decides, unless the send refuses the `Expect` default
+ * (`suppresses_default_header`), which removes it again.
+ *
  * @param sent When non-null, cleared and filled with exactly the headers
  *        appended to the returned list. That is `Response::request_headers`,
  *        the "sent record" the response pane's Headers tab and a test script's

@@ -1638,9 +1638,11 @@ compose_request_core (vayu::db::Database& db, const nlohmann::json& body) {
     // built - `apply_auth` collapses basic auth into one base64 value - so a
     // token left for the bind would go out as base64 of its own text. Deferring
     // the build is what a `{{data.*}}` credential needs (issue #591) and what
-    // the identity is waiting on (issue #1055); until that is decided by what
-    // the credentials carry rather than by whether the run has rows, a
-    // generator in a credential is generated here, once, exactly as it was.
+    // the identity is waiting on (issue #1055), and a name no scope answers yet
+    // keeps its braces for the auth applied after the pre-request script
+    // (issue #2473). Until that is decided by what the credentials carry
+    // rather than by whether the run has rows, a generator in a credential is
+    // generated here, once, exactly as it was.
     resolve_compose_auth (chain, vars, bound_columns, payload);
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is

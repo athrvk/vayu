@@ -39,6 +39,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "basic_auth_pair.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -2436,6 +2437,46 @@ TEST_F (ScenarioRunnerTest, ACredentialsFileBindsPerIterationOnTheWire) {
     ASSERT_EQ (seen.size (), 2u);
     EXPECT_EQ (seen[0].authorization, "Basic " + vayu::utils::base64_encode ("ada:pw0"));
     EXPECT_EQ (seen[1].authorization, "Basic " + vayu::utils::base64_encode ("grace:pw1"));
+}
+
+// Issue #2473: a basic password the step's own pre-request script sets reaches
+// the wire, rather than base64 of `user:{{password}}` - the plan encoded the
+// pair before any script ran, and no later pass can read a token inside
+// base64. Mutation check: drop `auth_after_scripts` from the resolution in
+// `resolve_step` (scenario_plan.cpp) and the wire carries the literal token.
+TEST_F (ScenarioRunnerTest, APasswordThePreRequestScriptSetsReachesTheWireThroughLateAuth) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok",
+    "pm.collectionVariables.set('password', 's3cret');", "", "", "", "", "",
+    R"({"mode":"basic","username":"user","password":"{{password}}"})");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 1u);
+    EXPECT_EQ (vayu::tests::basic_pair_of (seen[0].authorization), "user:s3cret");
+}
+
+// Mixed credentials: the row answers its half at the bind and the script the
+// other, each iteration, through the one plan. Mutation check: bind with
+// `bind_iteration` instead of `bind_iteration_holding_auth` in
+// `bind_step_iteration` and the pair is encoded before the script runs.
+TEST_F (ScenarioRunnerTest, ARowAndAScriptEachAnswerHalfOfABasicPairThroughLateAuth) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0,
+    "/ok", "pm.collectionVariables.set('password', 'pw-' + pm.iterationData.get('user'));",
+    "", "", "", "", "",
+    R"({"mode":"basic","username":"{{data.user}}","password":"{{password}}"})");
+
+    const auto run_id = start_with_data (
+    json::array ({ { { "user", "ada" } }, { { "user", "grace" } } }));
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (vayu::tests::basic_pair_of (seen[0].authorization), "ada:pw-ada");
+    EXPECT_EQ (vayu::tests::basic_pair_of (seen[1].authorization), "grace:pw-grace");
 }
 
 // A cell carrying a quote used to end the JSON string it was dropped into and

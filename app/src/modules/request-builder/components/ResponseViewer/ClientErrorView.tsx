@@ -65,7 +65,7 @@ const ErrorHints: Record<string, string> = {
 	DNS_ERROR:
 		"The host name didn't resolve. Check the domain for typos, and that your network can reach it.",
 	SSL_ERROR:
-		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA Certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab.",
+		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA Certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab. An https proxy's own certificate is checked by the same two settings.",
 	PROXY_ERROR:
 		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
 	INVALID_URL:

@@ -205,6 +205,28 @@ TEST_F (OAuthClientTest, BodyPlacementPutsCredsInForm) {
     EXPECT_EQ (form["client_secret"], "sec");
 }
 
+// RFC 6749 section 2.3.1: the id and secret are form-encoded before the Basic
+// header's base64, so a provider expecting them raw needs body placement.
+TEST_F (OAuthClientTest, BasicHeaderFormEncodesReservedCharactersInTheSecret) {
+    MockTokenServer idp;
+    auto config            = cc_config (idp);
+    config["clientSecret"] = "a+b/c=";
+    oauth::acquire_token (*db_, config, false, std::nullopt);
+    // base64("cid:a%2Bb%2Fc%3D")
+    EXPECT_EQ (idp.last_auth (), "Basic Y2lkOmElMkJiJTJGYyUzRA==");
+}
+
+// parse_form does not decode, so the form-encoded secret is what the IdP read.
+TEST_F (OAuthClientTest, BodyPlacementFormEncodesReservedCharactersInTheSecret) {
+    MockTokenServer idp;
+    auto config                    = cc_config (idp);
+    config["clientSecret"]         = "a+b/c=";
+    config["credentialsPlacement"] = "body";
+    oauth::acquire_token (*db_, config, false, std::nullopt);
+    EXPECT_TRUE (idp.last_auth ().empty ());
+    EXPECT_EQ (parse_form (idp.last_body ())["client_secret"], "a%2Bb%2Fc%3D");
+}
+
 TEST_F (OAuthClientTest, PublicClientSendsClientIdInBody) {
     MockTokenServer idp;
     auto config = cc_config (idp);

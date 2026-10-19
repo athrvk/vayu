@@ -127,6 +127,29 @@ describe("AuthContextSection", () => {
 		expect(screen.getByTestId("token-status")).toHaveTextContent("cid");
 	});
 
+	it("says Sending for a mode the engine applies and not for one it ignores", () => {
+		requestAuth = { mode: "bearer", token: "t" };
+		const { unmount } = renderSection();
+		expect(screen.getByText(/Sending/)).toBeInTheDocument();
+		unmount();
+
+		requestAuth = { mode: "digest", config: {} };
+		renderSection();
+		expect(screen.queryByText(/Sending/)).not.toBeInTheDocument();
+		expect(screen.getByText("Digest")).toBeInTheDocument();
+		expect(screen.getByText(/not sent by Vayu/)).toBeInTheDocument();
+	});
+
+	it("does not claim to send an inherited mode the engine ignores", () => {
+		ancestors = [collection("root", { mode: "hawk", config: {} })];
+		renderSection();
+
+		expect(screen.queryByText(/Sending/)).not.toBeInTheDocument();
+		expect(screen.getByText(/Hawk/)).toBeInTheDocument();
+		expect(screen.getByText(/not sent by Vayu/)).toBeInTheDocument();
+		expect(screen.getByText("Inherited from root")).toBeInTheDocument();
+	});
+
 	it("shows no token row for any other mode", () => {
 		requestAuth = { mode: "basic", username: "u", password: "p" };
 		renderSection();

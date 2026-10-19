@@ -586,6 +586,28 @@ bool keeps_deferrable_credential_namespace (const std::string& name) {
     vayu::http::is_identity_variable_name (name);
 }
 
+/// The first token @p keep accepts in any string of @p value, recursively,
+/// written back with its braces. Object keys are not scanned.
+template <typename Keep>
+std::optional<std::string>
+first_kept_token_in (const nlohmann::json& value, const Keep& keep) {
+    if (value.is_string ()) {
+        const auto split = vayu::http::split_tokens (value.get<std::string> (), keep);
+        if (split.names.empty ()) {
+            return std::nullopt;
+        }
+        return "{{" + split.names.front () + "}}";
+    }
+    if (value.is_object () || value.is_array ()) {
+        for (const auto& child : value) {
+            if (auto found = first_kept_token_in (child, keep)) {
+                return found;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 /**
  * Split each visited field around the reserved tokens of one namespace, keeping
  * only the fields that carry one.
@@ -1023,25 +1045,40 @@ const IterationBinding& binding) {
 
 std::optional<std::string> first_deferrable_token_in (const nlohmann::json& value,
 const vayu::http::BoundColumnNames& bound_columns) {
-    if (value.is_string ()) {
-        const auto split = vayu::http::split_tokens (
-        value.get<std::string> (), [&bound_columns] (const std::string& name) {
-            return keeps_deferrable_credential_namespace (name) ||
-            vayu::http::is_bound_column_name (name, bound_columns);
-        });
-        if (split.names.empty ()) {
-            return std::nullopt;
-        }
-        return "{{" + split.names.front () + "}}";
+    return first_kept_token_in (value, [&bound_columns] (const std::string& name) {
+        return keeps_deferrable_credential_namespace (name) ||
+        vayu::http::is_bound_column_name (name, bound_columns);
+    });
+}
+
+std::optional<std::string> first_token_in (const nlohmann::json& value) {
+    return first_kept_token_in (value, [] (const std::string&) { return true; });
+}
+
+bool credentials_await_scripts (const vayu::http::Auth& auth,
+const vayu::http::BoundColumnNames& bound_columns) {
+    const auto only_the_scopes_answer = [&bound_columns] (const std::string& name) {
+        return !keeps_deferrable_credential_namespace (name) &&
+        !vayu::http::is_bound_column_name (name, bound_columns);
+    };
+    bool awaits = false;
+    vayu::http::walk_auth_credentials (
+    auth, [&] (const std::string& field, vayu::http::CredentialDestination) {
+        awaits = awaits ||
+        !vayu::http::split_tokens (field, only_the_scopes_answer).names.empty ();
+    });
+    return awaits;
+}
+
+DataBindResult bind_iteration_holding_auth (vayu::Request& request,
+const StepDataTemplate& fields,
+vayu::http::Auth& auth,
+const StepDataTemplate& credentials,
+const IterationBinding& binding) {
+    if (auto bound = apply_iteration_template (request, fields, binding); !bound.ok) {
+        return bound;
     }
-    if (value.is_object () || value.is_array ()) {
-        for (const auto& child : value) {
-            if (auto found = first_deferrable_token_in (child, bound_columns)) {
-                return found;
-            }
-        }
-    }
-    return std::nullopt;
+    return apply_auth_data_template (auth, credentials, binding);
 }
 
 std::optional<std::string> first_oauth2_deferrable_token (const vayu::http::Auth& auth,

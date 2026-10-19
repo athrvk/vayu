@@ -493,6 +493,23 @@ const StepDataTemplate& credentials,
 const IterationBinding& binding);
 
 /**
+ * @ref bind_iteration for credentials that also wait on the scripts
+ * (@ref credentials_await_scripts, issue #2473): @p fields into @p request,
+ * then @p credentials joined into @p auth **in place**, and nothing applied.
+ *
+ * The row and identity still reach the credentials here, before any script
+ * runs, because only the bind can answer them; what is left is a name the
+ * pre-request script may define, so `http::routes::apply_late_auth` applies
+ * @p auth after that script and the residual pass. On failure, as
+ * @ref bind_iteration's, the request must not be sent.
+ */
+[[nodiscard]] DataBindResult bind_iteration_holding_auth (vayu::Request& request,
+const StepDataTemplate& fields,
+vayu::http::Auth& auth,
+const StepDataTemplate& credentials,
+const IterationBinding& binding);
+
+/**
  * The first token a deferred credential could bind - a `{{data.column}}` or a
  * `{{$vu}}` / `{{$iteration}}` identity - in any string of @p value,
  * recursively, written back with its braces, or `nullopt` when it carries none.
@@ -513,6 +530,29 @@ const IterationBinding& binding);
  * belongs is not a placement anyone means.
  */
 [[nodiscard]] std::optional<std::string> first_deferrable_token_in (const nlohmann::json& value,
+const vayu::http::BoundColumnNames& bound_columns = {});
+
+/**
+ * The first `{{name}}` of any kind in any string of @p value, written back with
+ * its braces, or `nullopt`: whether an auth block spells a token at all, asked
+ * before anything parses it.
+ */
+[[nodiscard]] std::optional<std::string> first_token_in (const nlohmann::json& value);
+
+/**
+ * Whether a credential of @p auth still holds a token that neither the row nor
+ * the iteration identity answers - a name only the variable scopes can, as the
+ * pre-request script leaves them (issue #2473).
+ *
+ * Composition keeps such a name's braces when no scope defined it yet, and
+ * the residual pass after the script cannot reach it once `apply_auth` has
+ * base64-encoded a basic pair, so a request whose credentials answer this
+ * applies its auth after the script instead (`http::routes::apply_late_auth`),
+ * which is also Postman's order. Over the same `walk_auth_credentials` the bind
+ * uses, so OAuth 2.0 is never answered here: its token is acquired before the
+ * send, never deferred.
+ */
+[[nodiscard]] bool credentials_await_scripts (const vayu::http::Auth& auth,
 const vayu::http::BoundColumnNames& bound_columns = {});
 
 /**

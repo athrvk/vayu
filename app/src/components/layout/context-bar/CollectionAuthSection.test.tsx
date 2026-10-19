@@ -143,7 +143,76 @@ describe("CollectionAuthSection", () => {
 
 		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
 		expect(
-			screen.getByText("Requests below inherit nothing - the walk stops here.")
+			screen.getByText("Requests below inherit nothing - the walk stops here (unsaved).")
 		).toBeInTheDocument();
+	});
+
+	describe("marking a draft that is not saved yet", () => {
+		it("says (unsaved) while the draft differs from the stored auth", () => {
+			collections = [collection("col_leaf", bearer)];
+			useCollectionAuthDraftStore
+				.getState()
+				.setDraft("col_leaf", { mode: "bearer", token: "new" });
+
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(
+				screen.getByText("Requests set to Inherit send this (unsaved).")
+			).toBeInTheDocument();
+		});
+
+		it("marks the inherited-from sentence", () => {
+			collections = [
+				collection("col_root", bearer, undefined, "Billing"),
+				collection("col_leaf", { mode: "noauth" }, "col_root"),
+			];
+			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(
+				screen.getByText("Requests below inherit Bearer token from Billing (unsaved).")
+			).toBeInTheDocument();
+		});
+
+		it("marks the blocker sentence and the no-ancestor sentence", () => {
+			collections = [
+				collection("col_mid", { mode: "noauth" }, undefined, "Sandbox"),
+				collection("col_leaf", bearer, "col_mid"),
+			];
+			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+			const { unmount } = render(<CollectionAuthSection tab={TAB} />);
+			expect(
+				screen.getByText(
+					"Sandbox is set to No auth, so nothing is inherited past it (unsaved)."
+				)
+			).toBeInTheDocument();
+			unmount();
+
+			collections = [collection("col_leaf", bearer)];
+			render(<CollectionAuthSection tab={TAB} />);
+			expect(
+				screen.getByText("No ancestor collection defines auth either (unsaved).")
+			).toBeInTheDocument();
+		});
+
+		it("does not say it when the published draft merely equals the stored auth", () => {
+			// The Auth tab publishes its draft while clean, equal to the stored value.
+			collections = [collection("col_leaf", bearer)];
+			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { ...bearer });
+
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(screen.getByText("Requests set to Inherit send this.")).toBeInTheDocument();
+			expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument();
+		});
+
+		it("does not say it when no Auth tab is open", () => {
+			collections = [collection("col_leaf", bearer)];
+
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument();
+		});
 	});
 });

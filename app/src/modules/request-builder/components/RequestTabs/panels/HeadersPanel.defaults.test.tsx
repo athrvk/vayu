@@ -144,6 +144,49 @@ describe("the rows the engine declares", () => {
 	});
 });
 
+describe("the Expect row (#2468)", () => {
+	// The engine declares `Expect: 100-continue` only while `sendExpectContinue`
+	// is on, so the row is data, not a name this panel knows.
+	const withExpect: RequestDefaults = {
+		headers: [
+			...DECLARED.headers,
+			{
+				name: "Expect",
+				value: "100-continue",
+				generated: false,
+				configKey: "sendExpectContinue",
+			},
+		],
+	};
+
+	it("renders, ticked on with its value, when the engine declares it", () => {
+		declared = withExpect;
+		const ui = mount(harness());
+
+		expect(ui.tick("Expect")).toBeChecked();
+		expect(screen.getByText("100-continue")).toBeInTheDocument();
+	});
+
+	it("is absent when the engine does not declare it", () => {
+		const ui = mount(harness());
+
+		expect(screen.queryByRole("checkbox", { name: "Send Expect" })).not.toBeInTheDocument();
+		expect(ui.tick("User-Agent")).toBeChecked();
+	});
+
+	it("unticks into disabledDefaultHeaders like any other row", () => {
+		declared = withExpect;
+		const h = harness();
+		const ui = mount(h);
+
+		fireEvent.click(ui.tick("Expect"));
+
+		expect(h.request.disabledDefaultHeaders).toEqual(["Expect"]);
+		expect(disabledDefaults(h.request)).toEqual({ disabledDefaultHeaders: ["Expect"] });
+		expect(h.request.headers.map((row) => row.key)).toEqual([""]);
+	});
+});
+
 describe("the checkbox's own hit target", () => {
 	// `size-target` (issue #1679), not `size-icon`: a bare checkbox is its own
 	// hit target. Mutation check: put `size-icon` back and this fails.

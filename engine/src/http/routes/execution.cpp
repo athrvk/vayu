@@ -549,7 +549,7 @@ const vayu::http::BoundColumnNames& bound_columns) {
     // such warning on the ordinary send. A block spelling no token at all -
     // which is every ordinary send - is answered here, unparsed, exactly as the
     // `has_row` test used to answer it (issue #1055).
-    if (!vayu::core::first_deferrable_token_in (auth_json, bound_columns)) {
+    if (!vayu::core::first_token_in (auth_json)) {
         return out;
     }
     out.auth = vayu::http::parse_auth (auth_json);
@@ -566,7 +566,8 @@ const vayu::http::BoundColumnNames& bound_columns) {
     }
 
     out.credentials = vayu::core::tokenize_auth_fields (out.auth, bound_columns);
-    if (!out.credentials.empty ()) {
+    out.after_scripts = vayu::core::credentials_await_scripts (out.auth, bound_columns);
+    if (!out.credentials.empty () || out.after_scripts) {
         out.resolution = vayu::http::AuthResolution::Defer;
     }
     return out;
@@ -656,7 +657,11 @@ bool is_scenario) {
     }
     out.auth.auth        = std::move (row_auth.auth);
     out.auth.credentials = std::move (row_auth.credentials);
-    out.set              = std::move (set);
+    // Held for the scripts only where something runs after the build to
+    // answer it (issue #2473); see `LoadAuthPlan::after_scripts`.
+    out.auth.after_scripts =
+    row_auth.after_scripts && vayu::core::declares_request_elements (json);
+    out.set = std::move (set);
     return out;
 }
 
@@ -1453,7 +1458,8 @@ struct ExecutePayload {
     RunOrigin origin;
     /// The row this send binds, if the caller named one (issue #601).
     std::optional<nlohmann::json> data_row;
-    SendRowAuth row_auth;
+    /// Auth the exchange applies after the pre-request script (issue #2473).
+    std::optional<vayu::http::Auth> late_auth;
     vayu::http::RequestBuild built;
 };
 
@@ -1482,6 +1488,9 @@ struct DesignSend {
     /// What the build waited on an OAuth 2.0 provider for; `engine_cost_ms`
     /// leaves it out of Vayu's own cost.
     double auth_fetch_ms = 0.0;
+    /// Auth neither the build nor the bind applied, for after the pre-request
+    /// script (`apply_late_auth`, issue #2473).
+    std::optional<vayu::http::Auth> late_auth;
 };
 
 
@@ -1626,12 +1635,21 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // as literal `{{column}}` text - a single send's `{{data.column}}` still
     // worked, since that namespace is always bindable, which is what made the
     // gap invisible on a full collection or load run (both already pass this).
-    auto bound = vayu::core::bind_iteration (built.request,
-    vayu::core::tokenize_bindable_fields (built.request, row_columns),
-    row_auth.auth, row_auth.credentials, binding);
+    //
+    // Credentials that also wait on the pre-request script (issue #2473) take
+    // the row here and are applied after the script, by the exchange.
+    const auto fields = vayu::core::tokenize_bindable_fields (built.request, row_columns);
+    auto bound = row_auth.after_scripts ?
+    vayu::core::bind_iteration_holding_auth (
+    built.request, fields, row_auth.auth, row_auth.credentials, binding) :
+    vayu::core::bind_iteration (
+    built.request, fields, row_auth.auth, row_auth.credentials, binding);
     if (!bound.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + bound.error);
         return bound.error;
+    }
+    if (row_auth.after_scripts) {
+        out.late_auth = std::move (row_auth.auth);
     }
     out.json              = std::move (json);
     out.transient         = transient.value;
@@ -1639,7 +1657,6 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     out.stream            = std::move (stream);
     out.origin            = std::move (*origin);
     out.data_row          = std::move (data_row.value);
-    out.row_auth          = std::move (row_auth);
     out.built             = std::move (built);
     return std::nullopt;
 }
@@ -1811,15 +1828,22 @@ bool jar_off) {
 
 /**
  * What refuses a streaming send before its stream opens, in the order the
- * buffered send meets them: the residual pass (issue #1008), then the file rule
+ * buffered send meets them: the residual pass (issue #1008), the auth that
+ * waited on the pre-request script (issue #2473), then the file rule
  * (`file_ref.hpp`) over the allowed folders as they stand, code
  * `unsendable_file`.
  */
 std::optional<ResidualRefusal> refuse_before_stream (vayu::db::Database& db,
 vayu::Request& request,
+std::optional<vayu::http::Auth> late_auth,
 const ScriptVariableScopes& scopes) {
     if (auto refusal = resolve_residual_tokens (request, scopes)) {
         return refusal;
+    }
+    if (late_auth) {
+        if (auto refusal = apply_late_auth (request, std::move (*late_auth), scopes)) {
+            return refusal;
+        }
     }
     if (!vayu::http::has_file_refs (request.body)) {
         return std::nullopt;
@@ -1958,7 +1982,8 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // (issue #1008), here because this path runs the pre-request script itself
     // rather than through `execute_exchange`: a `{{token}}` the script has just
     // defined resolves before the stream opens.
-    if (auto refusal = refuse_before_stream (ctx.db, send.request, scopes)) {
+    if (auto refusal = refuse_before_stream (
+        ctx.db, send.request, std::move (send.late_auth), scopes)) {
         // What that pass can refuse (issues #1051 and #1084), in the same words
         // the buffered send refuses it with and under the code composition
         // refuses it under; what differs is where the caller reads it, this
@@ -2160,6 +2185,7 @@ std::chrono::steady_clock::time_point handler_start) {
     // worse than a missing one (issue #300).
     ExchangeInputs inputs;
     inputs.request      = std::move (send.request);
+    inputs.late_auth    = std::move (send.late_auth);
     inputs.elements     = send.elements;
     inputs.request_id   = send.run.request_id;
     inputs.request_name = send.script_request_name;
@@ -2315,11 +2341,14 @@ httplib::Response& res) {
 
     // Take the request built above. Auth is already resolved into its
     // headers/url - by the build, or by the bind for credentials that carried
-    // the row - so pm.request reflects the real outgoing set - and because the
-    // pre-request script runs after that and writes back into this same object,
-    // a script-set Authorization header wins over the engine-applied one.
+    // the row - unless a credential waits on the pre-request script (issue
+    // #2473), when the exchange applies it after that script. Either way a
+    // script-set Authorization header overrides the one the Auth tab applied:
+    // the script writes back into this same object, and `apply_auth` skips a
+    // header the request already carries.
     send.request       = std::move (payload.built.request);
     send.auth_fetch_ms = payload.built.auth_fetch_ms;
+    send.late_auth     = std::move (payload.late_auth);
 
     guard_recorded_send (ctx.db, res, send.run_id, [&] () {
         dispatch_design_send (ctx, res, payload.built, send, handler_start);

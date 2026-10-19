@@ -80,16 +80,25 @@ function variableBagOf(row: unknown): StoredVariableBag | undefined {
 }
 
 /**
- * The environment `resolve_variables` should resolve against.
+ * The environment row a call resolves against, for `resolve_variables` and for
+ * every send (through `resolveEnvironmentId`), so the preview and the send
+ * cannot disagree (#2480).
  *
  * Three cases, deliberately distinct: a named id must exist (a typo resolving
- * silently against the active environment would report confident, wrong
- * answers), `"none"` is the explicit no-environment case that
+ * silently against no environment, or the active one, would report confident,
+ * wrong answers), `"none"` is the explicit no-environment case that
  * `activate_environment` already spells that way, and an omitted id means the
- * active row - the same default a send takes.
+ * active row, as in the app's Send. Read through the raw list: only `id` and
+ * `isActive` decide, nothing a value-withholding rule governs.
  */
-function pickEnvironment(rows: readonly unknown[], environmentId: string | undefined) {
+export async function selectEnvironment(
+	ctx: ToolContext,
+	environmentId: string | undefined,
+	signal?: AbortSignal
+): Promise<Record<string, unknown> | undefined> {
 	if (environmentId === "none") return undefined;
+	const listed = await ctx.client.listEnvironments(signal);
+	const rows = Array.isArray(listed) ? listed : [];
 	if (environmentId !== undefined && environmentId !== "") {
 		const found = rows.find((row) => isRecord(row) && row.id === environmentId);
 		if (!found) throw new ToolArgError(`No environment with id "${environmentId}".`);
@@ -126,17 +135,13 @@ export async function gatherVariableScopes(
 	}
 
 	let environment: OriginScopes["environment"];
-	if (environmentId !== "none") {
-		const listed = await ctx.client.listEnvironments(signal);
-		const rows = Array.isArray(listed) ? listed : [];
-		const row = pickEnvironment(rows, environmentId);
-		if (row) {
-			environment = {
-				id: typeof row.id === "string" ? row.id : undefined,
-				name: typeof row.name === "string" ? row.name : undefined,
-				variables: variableBagOf(row),
-			};
-		}
+	const row = await selectEnvironment(ctx, environmentId, signal);
+	if (row) {
+		environment = {
+			id: typeof row.id === "string" ? row.id : undefined,
+			name: typeof row.name === "string" ? row.name : undefined,
+			variables: variableBagOf(row),
+		};
 	}
 
 	return { globals, chain, environment };

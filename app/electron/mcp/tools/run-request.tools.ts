@@ -35,6 +35,7 @@ import {
 	readRequestOverrides,
 	readValidationScript,
 	refuseAgentScripts,
+	resolveEnvironmentId,
 	runStreamingRequest,
 	scriptElement,
 	withMcpOrigin,
@@ -141,7 +142,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain, using the same precedence as the app; the environment's cookie jar is the one the send uses, and its History row names it. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` See ${VARIABLE_RESOLUTION_URI}.` +
 			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. " +
@@ -151,7 +152,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			" Extractors, assertions and timers in `elements` are not scripts and pass. With write access off, nothing a script or extractor sets is stored: the value is visible for the rest of this send and is not written to the environment, collection or globals. Certificate verification is always on for an ad-hoc send - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it, and a send by `requestId` follows the setting stored there. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. \`bodyEncoding\` says how \`bodyRaw\` is spelled: "utf8" is the body as text; "base64" is a body that is not UTF-8 text (an image, a PDF, a Latin-1 page) as standard base64, which you must decode and never read as text, with \`body\` null - there the cap and \`bodySize\` count decoded bytes and a cut keeps whole 4-character groups, so the prefix still decodes. \`headerLines\` is the response's headers as received, one \`{name, value}\` per line in wire order with each \`Set-Cookie\` its own row; \`headers\` is the folded map.` +
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. \`bodyEncoding\` says how \`bodyRaw\` is spelled: "utf8" is the body as text; "base64" is a body that is not UTF-8 text (an image, a PDF, a Latin-1 page) as standard base64, which you must decode and never read as text, with \`body\` null - there the cap and \`bodySize\` count decoded bytes and a cut keeps whole 4-character groups, so the prefix still decodes. \`headerLines\` is the response's headers as received, one \`{name, value}\` per line in wire order with each \`Set-Cookie\` its own row; \`headers\` is the folded map and holds the final response only: \`redirects\` lists each 3xx the send followed, in order, as \`{status, statusText, headerLines}\` (always present, \`[]\` when none), so a \`Set-Cookie\` or \`Location\` on an earlier hop is there, and it reports what the server sent, not what the cookie jar kept.` +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Send a request",
@@ -248,7 +249,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 					{
 						...target,
 						collectionId: str(args, "collectionId"),
-						environmentId: str(args, "environmentId"),
+						environmentId: await resolveEnvironmentId(args, ctx, signal),
 					},
 					signal
 				);
