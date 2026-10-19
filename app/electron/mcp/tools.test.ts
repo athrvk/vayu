@@ -22,6 +22,8 @@ import {
 	MAX_INTROSPECTION_BYTES,
 	MAX_REDIRECTS_BOUND,
 	MAX_REPORT_TRACE_BYTES,
+	MAX_RESPONSE_SAMPLE_PERIOD,
+	MAX_RESPONSE_SAMPLES_BOUND,
 	MAX_RUN_SERIES_LIMIT,
 	MAX_SCHEMA_SDL_BYTES,
 	MAX_SLOW_THRESHOLD_MS,
@@ -38,7 +40,7 @@ import {
 } from "./tools.js";
 import type { McpHost } from "./tools/contract.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
-import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
+import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
 import {
 	ENVIRONMENT_DEFAULT_SENTENCE,
@@ -55,7 +57,7 @@ import {
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
-import { LOAD_TEST_LIMITS } from "@/constants/load-test";
+import { LOAD_TEST_LIMITS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
 /**
  * @p tool's description as a session under @p safety lists it - the defaults,
@@ -9989,6 +9991,168 @@ describe("start_load_run recording knobs", () => {
 		expect(
 			schema.safeParse({ slowRequestThresholdMs: MAX_SLOW_THRESHOLD_MS + 1 }).success
 		).toBe(false);
+	});
+
+	/**
+	 * The two keys behind `get_run_samples` (#2447). They are the engine's own
+	 * snake_case spellings and a camelCase one would reach it as an unread key,
+	 * so the assertion is on the payload, for both load paths.
+	 */
+	test("the response-sample knobs travel under the engine's own keys", async () => {
+		const { res, client } = await start({ responseSamplePeriod: 10, maxResponseSamples: 50 });
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({
+			response_sample_rate: 10,
+			max_response_samples: 50,
+		});
+		expect(started(client)).not.toHaveProperty("responseSamplePeriod");
+		expect(started(client)).not.toHaveProperty("maxResponseSamples");
+	});
+
+	test("zero samples is a legal request and is sent, not dropped", async () => {
+		const { client } = await start({ maxResponseSamples: 0 });
+		expect(started(client)).toMatchObject({ max_response_samples: 0 });
+	});
+
+	test("the response-sample knobs are absent when not named", async () => {
+		const { client } = await start({ comment: "just a note" });
+		expect(started(client)).not.toHaveProperty("response_sample_rate");
+		expect(started(client)).not.toHaveProperty("max_response_samples");
+	});
+
+	test("the confirmation preview shows both knobs", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com/users",
+				responseSamplePeriod: 10,
+				maxResponseSamples: 50,
+			},
+			ctxWith(client, allow)
+		);
+
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(firstText(res)).toMatch(/"response_sample_rate": 10/);
+		expect(firstText(res)).toMatch(/"max_response_samples": 50/);
+	});
+
+	test("a scenario load run carries the response-sample knobs", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([{ id: "req_1", name: "Step", order: 0 }]),
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/step" }),
+		});
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "col_1" },
+				confirmed: true,
+				responseSamplePeriod: 10,
+				maxResponseSamples: 50,
+			},
+			ctxWith(client, allow)
+		);
+
+		expect(res.isError).toBeFalsy();
+		expect(started(client)).toMatchObject({
+			response_sample_rate: 10,
+			max_response_samples: 50,
+		});
+	});
+
+	test("the schema holds the response-sample knobs to the engine's bounds", () => {
+		const schema = z.object(
+			TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<string, z.ZodType>
+		);
+		// A period of 0 is a division by zero engine-side.
+		expect(schema.safeParse({ responseSamplePeriod: 0 }).success).toBe(false);
+		expect(schema.safeParse({ responseSamplePeriod: 1 }).success).toBe(true);
+		expect(schema.safeParse({ responseSamplePeriod: MAX_RESPONSE_SAMPLE_PERIOD }).success).toBe(
+			true
+		);
+		expect(
+			schema.safeParse({ responseSamplePeriod: MAX_RESPONSE_SAMPLE_PERIOD + 1 }).success
+		).toBe(false);
+		expect(schema.safeParse({ maxResponseSamples: -1 }).success).toBe(false);
+		expect(schema.safeParse({ maxResponseSamples: 0 }).success).toBe(true);
+		expect(schema.safeParse({ maxResponseSamples: MAX_RESPONSE_SAMPLES_BOUND }).success).toBe(
+			true
+		);
+		expect(
+			schema.safeParse({ maxResponseSamples: MAX_RESPONSE_SAMPLES_BOUND + 1 }).success
+		).toBe(false);
+	});
+
+	/**
+	 * The chain `load-test.engine-parity.test.ts` starts: that file ties the
+	 * renderer's ceiling to the engine header and route, this ties the MCP
+	 * schema bound and the cap's ceiling to the renderer's.
+	 */
+	test("the schema bound and the cap's ceiling are the engine's maximum", () => {
+		expect(MAX_RESPONSE_SAMPLES_BOUND).toBe(RESPONSE_SAMPLES_CEILING);
+		expect(MCP_CAP_CEILINGS.maxResponseSamples).toBe(RESPONSE_SAMPLES_CEILING);
+		expect(MAX_RESPONSE_SAMPLE_PERIOD).toBe(100_000);
+	});
+
+	test("a sample count above the MCP cap is refused before anything starts", async () => {
+		const tight = { ...allow, maxResponseSamples: 100 };
+		const client = fakeClient();
+		const single = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/users", confirmed: true, maxResponseSamples: 101 },
+			ctxWith(client, tight)
+		);
+		const scenario = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "col_1" }, confirmed: true, maxResponseSamples: 101 },
+			ctxWith(client, tight)
+		);
+
+		for (const res of [single, scenario]) {
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/maxResponseSamples 101 exceeds the MCP cap of 100/);
+		}
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("a cap below the engine default refuses a run that states no count", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com/users", confirmed: true },
+			ctxWith(client, { ...allow, maxResponseSamples: 100 })
+		);
+
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/maxResponseSamples 1000 \(the engine's default/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * The "written but never read" guard for descriptions: a switch the sample
+	 * reader says `start_load_run` sets has to be an argument an agent can pass.
+	 * Scoped to the sentence naming `start_load_run`, because the same description
+	 * also names the *output* fields (`resultId`, `bodyTruncated`) of a sample.
+	 */
+	test("every argument get_run_samples attributes to start_load_run exists there", () => {
+		const samples = TOOLS.find((t) => t.name === "get_run_samples")!;
+		const load = TOOLS.find((t) => t.name === "start_load_run")!;
+		const description = resolveDescription(samples, resolveSafetyConfig());
+		const sentences = description.split(". ").filter((s) => s.includes("start_load_run"));
+		const named = [
+			...new Set(sentences.flatMap((s) => s.match(/\b[a-z]+(?:[A-Z][a-z]+)+\b/g) ?? [])),
+		];
+
+		// A scan that found nothing would pass forever.
+		expect(named).toEqual(["responseSamplePeriod", "maxResponseSamples"]);
+		for (const name of named) {
+			expect(Object.keys(load.inputSchema), `${name} is named by get_run_samples`).toContain(
+				name
+			);
+		}
 	});
 
 	/**

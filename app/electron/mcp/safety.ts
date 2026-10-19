@@ -442,3 +442,32 @@ export function checkLoadCaps(
 	}
 	return OK;
 }
+
+/**
+ * What a run keeps when `max_response_samples` is not sent
+ * (`DEFAULT_MAX_RESPONSE_SAMPLES`, `constants.hpp`; `safety.test.ts` reads it).
+ */
+export const ENGINE_DEFAULT_MAX_RESPONSE_SAMPLES = 1000;
+
+/**
+ * Enforce the cap on the response bodies a run may keep. Judged like every
+ * load cap, on the run the engine will start: an omitted `maxResponseSamples` is
+ * the engine's default, so a cap below it refuses a run that stated nothing and
+ * the message says why, rather than the cap silently not binding.
+ */
+export function checkSampleCap(
+	maxResponseSamples: number | undefined,
+	config: McpSafetyConfig,
+	host: McpHost
+): GuardResult {
+	const samples = maxResponseSamples ?? ENGINE_DEFAULT_MAX_RESPONSE_SAMPLES;
+	if (samples <= config.maxResponseSamples) return OK;
+	const stated =
+		maxResponseSamples === undefined
+			? `maxResponseSamples ${samples} (the engine's default, as none was stated)`
+			: `maxResponseSamples ${samples}`;
+	return {
+		ok: false,
+		error: `${stated} exceeds the MCP cap of ${config.maxResponseSamples}. Each sample holds a full response body in memory. Lower it, or ask the user to ${settingRemedy("maxResponseSamples", host)}.`,
+	};
+}

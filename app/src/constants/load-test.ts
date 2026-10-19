@@ -155,6 +155,14 @@ export const RESPONSE_SAMPLE_PERIOD = 100;
 export const MAX_RESPONSE_SAMPLES = 1000;
 
 /**
+ * The most `max_response_samples` the engine accepts
+ * (`run_config::MAX_RESPONSE_SAMPLES`). The load dialog sends no sample count, so
+ * this is not a dialog ceiling; it is the top of the MCP "Max response samples"
+ * cap, which the Settings panel advertises and `electron/mcp/config.ts` mirrors.
+ */
+export const RESPONSE_SAMPLES_CEILING = 1_000_000;
+
+/**
  * Convert the dialog's percentage into the engine's `success_sample_rate`.
  *
  * The engine treats that field as a sampling **period** - it keeps a trace when

@@ -3269,6 +3269,8 @@ export interface McpSafetyConfig {
 	 * request count and so cannot be bounded by `maxDurationSeconds`.
 	 */
 	maxIterations: number;
+	/** Hard ceiling on `maxResponseSamples`, the response bodies a load run keeps. */
+	maxResponseSamples: number;
 	/** When false (default), collection/environment write tools are disabled. */
 	allowWrites: boolean;
 	/**

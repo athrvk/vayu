@@ -266,7 +266,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
@@ -358,7 +358,15 @@ Notes:
   `successSamplePeriod` (the engine's `success_sample_rate` - a **period**, keep
   1 in N, not a percentage; the argument is named for what the value means and
   the payload key stays the engine's), `slowRequestThresholdMs`,
-  `saveTimingBreakdown` and `comment`. All four reach a **scenario** run too:
+  `saveTimingBreakdown` and `comment`, plus the two that decide what
+  `get_run_samples` can return (#2447): `responseSamplePeriod`
+  (`response_sample_rate`, a period too, 1-100000, engine default 100) and
+  `maxResponseSamples` (`max_response_samples`, 0-1000000, engine default
+  1000; 0 keeps none). A sample holds a full response body in memory, so the
+  count is held to the **Max response samples** cap
+  ([Safety config](#safety-config)), and the confirmation preview shows both
+  keys in its planned payload. Samples are read only through
+  `get_run_samples`, under the withholding it already applies. All of them reach a **scenario** run too:
   both executors read them off the one `RunContext`, and `comment` is lifted
   into the run summary and the report's `metadata.configuration` whichever
   produced the run. Bounds mirror `validate_run_config`, so a value the schema
@@ -1973,8 +1981,8 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
-- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations on
-  `start_load_run`; over-cap requests are rejected. With the allowlist, these are
+- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations /
+  response samples (`maxResponseSamples`) on `start_load_run`; over-cap requests are rejected. With the allowlist, these are
   the real limits on load, and they cover **every** field the tool forwards:
     - `concurrency` **and** `startConcurrency` are both held to the virtual-user
       cap (**Max virtual users** in Settings). A ramp is seeded with `startConcurrency` before its first duration
@@ -1987,6 +1995,10 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
       unrecognised `mode`, and the guard still reads one carrying an
       `iterations` field as an iterations run, because the engine runs it as
       one.
+    - `maxResponseSamples` is held to its own cap (**Max response samples**,
+      10000 by default) because each retained sample is a full response body in
+      engine memory. An omitted one is judged as the engine's default of 1000, so
+      a cap under 1000 refuses a run that states no count and the refusal says so.
     - An **omitted** field is judged as the default the tool sends for it
       ([Load defaults](#load-defaults)), not as "unbounded": an omitted
       `concurrency` on a constant run is 100 virtual users, so a **Max virtual
@@ -2306,6 +2318,7 @@ secrets; see the write toggle.
 | `maxConcurrency`     | `200`   | `10000`     | Cap on virtual users: `concurrency` and `startConcurrency` (closed-loop). |
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
+| `maxResponseSamples` | `10000` | `1000000`   | Cap on `maxResponseSamples`, the response bodies a run keeps for `get_run_samples`; an omitted one is judged as the engine's `1000`. |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
 | `allowNetworkSettings` | `false` | -         | Let `update_engine_config` change the proxy and trust-anchor keys. |
 | `revealSecretsToAgents` | `false` | -        | Lift every withholding in [Secret values](#secret-values): reads, write answers and run output. |
@@ -2321,7 +2334,9 @@ reaches the guards with a cap outside that range.
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
-per-transfer timeout guard). A cap set above its ceiling is held there rather
+per-transfer timeout guard); `maxResponseSamples` is the engine's
+`run_config::MAX_RESPONSE_SAMPLES` itself, since the load dialog sends no sample
+count. A cap set above its ceiling is held there rather
 than stored: the value it would admit is one the engine refuses or one no Vayu
 surface will compose, so storing it shows a guardrail that does not exist. The
 copy is tied to the renderer constant by `config.test.ts`, the way
@@ -2495,6 +2510,7 @@ from environment variables:
 | `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Virtual-user cap.                      |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
+| `VAYU_MCP_MAX_RESPONSE_SAMPLES` | `10000`                 | Cap on `maxResponseSamples`.           |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | `false`               | `true` opens the proxy and CA config keys to writes. |
 | `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lifts the secret withholding (reads, write answers, run output). |
@@ -2509,7 +2525,7 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Refusal                                              | Names, in the CLI                       | Names, in the app                    |
 | ---------------------------------------------------- | --------------------------------------- | ------------------------------------ |
 | Host not on the allowlist (or the list is empty)     | `VAYU_MCP_ALLOWLIST`                    | Settings → MCP, Target allowlist     |
-| `targetRps`, virtual users, duration, iterations cap | the matching `VAYU_MCP_MAX_*`           | Settings → MCP, the cap's field      |
+| `targetRps`, virtual users, duration, iterations, response samples cap | the matching `VAYU_MCP_MAX_*`           | Settings → MCP, the cap's field      |
 | Writes disabled (data writes and engine config)      | `VAYU_MCP_ALLOW_WRITES`                 | Settings → MCP, Write access         |
 | Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
