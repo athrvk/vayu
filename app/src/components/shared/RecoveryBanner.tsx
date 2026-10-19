@@ -116,8 +116,9 @@ function RecoveryBanner() {
 							{recovery.quarantinedPath}
 						</span>
 						. If it was healthy after all, quit Vayu and copy it back over the database
-						file above to undo this, along with its -wal and -shm files if it has them.
-						If it is damaged,{" "}
+						file above to undo this, along with its -wal and -shm files, and delete any
+						-wal and -shm beside the database that the set does not have. If it is
+						damaged,{" "}
 						<span className="break-all font-mono text-xs text-muted-foreground">
 							sqlite3 {recovery.quarantinedPath} .recover
 						</span>{" "}

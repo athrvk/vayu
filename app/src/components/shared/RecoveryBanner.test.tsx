@@ -110,7 +110,11 @@ describe("RecoveryBanner", () => {
 					/quit Vayu and copy it back over the database file above to undo this/
 				)
 			).toBeTruthy();
-			expect(screen.getByText(/its -wal and -shm files/)).toBeTruthy();
+			expect(
+				screen.getByText(
+					/its -wal and -shm files, and delete any -wal and -shm beside the database that the set does not have/
+				)
+			).toBeTruthy();
 		}
 	);
 

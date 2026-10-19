@@ -165,7 +165,7 @@ an early exit and a thrown startup error as much as on a graceful shutdown. A
 replacement that wins the lock therefore never meets its predecessor's
 connection at its own startup probe. If something else still holds the
 database when an engine starts (a `sqlite3` shell left in a transaction, a sync
-agent), the engine waits up to 10 s for it, then exits 1 naming the database
+agent), the engine waits for it (10 s on each connection it opens), then exits 1 naming the database
 and leaves every file as it was, rather than treating the held file as corrupt
 ([db-schema.md](engine/db-schema.md#startup-validation-backup-and-recovery)).
 
