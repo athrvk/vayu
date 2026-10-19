@@ -219,8 +219,10 @@ host you chose, an export you saved, or a reply to an MCP agent you connected.
 
 On a cross-host redirect the engine drops `Authorization` and `Cookie`, as curl
 does; every other header you set, including API-key headers, follows the
-redirect, and a configured client certificate stays attached. The MCP host
-allowlist is checked against the URL you send, not against where it redirects.
+redirect, and a configured client certificate stays attached. The API Key editor
+says so; turn off follow-redirects on a request whose key must stay on one host.
+The MCP host allowlist is checked against the URL you send, not against where it
+redirects.
 
 ## Releases
 

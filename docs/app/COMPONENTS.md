@@ -2347,7 +2347,12 @@ there is no editor-local vocabulary and nothing to translate at the boundary.
   a variable-aware token editor while the collection editor takes the default
   plain input, which accents `{{var}}`. `noAuthDescription` is host-supplied: a
   request sends nothing, a collection hands nothing down, and those are different
-  statements under one empty state.
+  statements under one empty state. An API key sent in a **header** carries a
+  one-sentence note that a redirect takes the key to whichever host it leads to
+  and that turning off Follow redirects on the request prevents it (issue
+  #2476): libcurl drops only `Authorization` and `Cookie` across hosts. A query
+  key and the `Authorization` modes do not get it, and
+  `AuthFields.test.tsx` holds all three branches.
 - `types.ts` - `AuthFieldsProps`, `AuthTextInput`, `EditableAuth`.
 
 What stays with each host: the mode picker (only the request offers `inherit`),
