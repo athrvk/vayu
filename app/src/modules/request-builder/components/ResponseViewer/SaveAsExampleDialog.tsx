@@ -40,6 +40,7 @@ import { formatSize } from "@/components/shared/response-viewer";
 import { useCreateRequestExampleMutation } from "@/queries";
 import { isCommitEnter } from "@/lib/keyboard";
 import { defaultExampleName, exampleFromResponse } from "./save-as-example";
+import { heldBodySize } from "../../utils/response-bytes";
 import type { ResponseState } from "../../types";
 
 export interface SaveAsExampleDialogProps {
@@ -113,8 +114,8 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					 */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="This body is not the whole response">
-							Only the first {formatSize(response.body.length)} of{" "}
-							{formatSize(response.bodyBytes ?? response.body.length)} was kept when
+							Only the first {formatSize(heldBodySize(response))} of{" "}
+							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept when
 							the run was stored, and that is what gets saved. Re-send the request
 							first to keep the complete body.
 						</Callout>

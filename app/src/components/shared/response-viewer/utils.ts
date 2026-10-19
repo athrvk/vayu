@@ -19,6 +19,12 @@ export function detectBodyType(headers: Record<string, string>, body: string): B
 	const contentType = headers["content-type"] || headers["Content-Type"] || "";
 	const lowerContentType = contentType.toLowerCase();
 
+	// SVG is text (#2458): checked before `image/` so it reads and formats as
+	// the XML it is, which is also what the engine sends it as.
+	if (lowerContentType.includes("image/svg+xml")) {
+		return "xml";
+	}
+
 	// Image types
 	if (lowerContentType.includes("image/")) {
 		return "image";

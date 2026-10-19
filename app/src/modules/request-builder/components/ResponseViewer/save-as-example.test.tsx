@@ -138,6 +138,20 @@ describe("save response as example", () => {
 		expect(saveButton()).toBeNull();
 	});
 
+	it("is disabled, behind its reason, for a body that is not UTF-8 text (#2458)", () => {
+		state.response = okResponse({
+			headers: { "Content-Type": "text/plain; charset=iso-8859-1" },
+			body: "café",
+			bodyRaw: "café",
+			bodyType: "text",
+			rawBytes: { data: new Uint8Array([0x63, 0x61, 0x66, 0xe9]), isText: true },
+		});
+		renderViewer();
+
+		expect(saveButton()).toBeDisabled();
+		expect(saveButton()!.closest('[data-slot="disabled-hint"]')).not.toBeNull();
+	});
+
 	it("writes the status, headers, body and a user origin - and never an order", async () => {
 		state.response = okResponse();
 		renderViewer();

@@ -11,9 +11,12 @@
  * Displays HTTP response body with multiple view modes:
  * - Pretty: Formatted/syntax highlighted view (default)
  * - Raw: Unformatted text view
- * - Preview: HTML/image rendering (when applicable)
+ * - Preview: HTML rendering (when applicable)
  *
- * Similar to Postman's response body viewer.
+ * Similar to Postman's response body viewer. A body that is not text (an
+ * image, a PDF, other bytes) has no modes: an image is drawn from its bytes,
+ * and the rest say what they are and how big. Those bytes are `rawBytes`, the
+ * decoded base64 the engine sent for a body that is not UTF-8 (issue #2458).
  *
  * Past `LARGE_BODY_BYTES` it drops to one mode: no `formatBody`, no syntax
  * highlighting, and a prefix of the raw body in the editor, with a notice
@@ -23,7 +26,7 @@
  * passes and why 2MB.
  */
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FileCode, Image as ImageIcon, File, Eye, Code, FileText } from "lucide-react";
 import { CodeEditor, ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { cn } from "@/lib/utils";
@@ -36,7 +39,12 @@ import {
 	LARGE_BODY_BYTES,
 } from "./utils";
 import { buildPreviewDocument } from "./preview-document";
-import type { ResponseBodyProps, ViewMode } from "./types";
+import type { BodyType, ResponseBodyProps, ViewMode } from "./types";
+import {
+	contentTypeOf,
+	type DecodeNotice,
+	type ResponseBytes,
+} from "@/modules/request-builder/utils/response-bytes";
 
 interface ExtendedResponseBodyProps extends ResponseBodyProps {
 	/** Default view mode */
@@ -58,6 +66,7 @@ interface ExtendedResponseBodyProps extends ResponseBodyProps {
 export default function ResponseBody({
 	body,
 	bodyRaw,
+	rawBytes,
 	headers,
 	className,
 	defaultMode = "pretty",
@@ -88,13 +97,15 @@ export default function ResponseBody({
 	 * reached. The header still decides where there is one; an unlabelled large
 	 * body reads as text, which is what the pane renders it as either way.
 	 */
-	const detectedType = useMemo(
-		() => detectBodyType(headers, isLargeBody ? "" : bodyRaw || body),
-		[headers, bodyRaw, body, isLargeBody]
-	);
+	const detectedType = useMemo(() => {
+		const declared = detectBodyType(headers, isLargeBody ? "" : bodyRaw || body);
+		// Bytes with no text view never reach the editor, whatever the header
+		// says: the funnel already decided there is no text (`isText`).
+		if (rawBytes && !rawBytes.isText) return isNonTextType(declared) ? declared : "binary";
+		return declared;
+	}, [headers, bodyRaw, body, isLargeBody, rawBytes]);
 
-	// Check if preview is available
-	const canPreview = detectedType === "html" || detectedType === "image";
+	const canPreview = detectedType === "html";
 
 	// Format body for display
 	// Raw mode: use bodyRaw (original raw bytes from server) if available, fallback to body
@@ -124,159 +135,61 @@ export default function ResponseBody({
 		[body, bodyRaw, detectedType, isLargeBody]
 	);
 
-	// Handle image types - use bodyRaw for actual image data
-	if (detectedType === "image") {
-		const contentType = headers["content-type"] || headers["Content-Type"] || "image/png";
-		const imageData = bodyRaw || body;
-		return (
-			<div
-				className={cn(
-					"flex-1 flex items-center justify-center p-4 surface-sunken",
-					className
-				)}
-			>
-				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<ImageIcon className="size-icon" />
-						<span>
-							Image response ({contentType.split("/")[1]?.toUpperCase() || "IMAGE"})
-						</span>
-					</div>
-					<div className="max-w-full max-h-[400px] overflow-auto">
-						<img
-							src={`data:${contentType};base64,${imageData}`}
-							alt="Response"
-							className="max-w-full h-auto border border-rule"
-						/>
-					</div>
-				</div>
-			</div>
-		);
-	}
+	const contentType = contentTypeOf(headers);
 
-	// Handle PDF
-	if (detectedType === "pdf") {
+	if (isNonTextType(detectedType)) {
 		return (
-			<div
-				className={cn(
-					"flex-1 flex items-center justify-center p-4 surface-sunken",
-					className
-				)}
-			>
-				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<File className="size-icon" />
-						<span>PDF document</span>
-					</div>
-					<p className="text-sm text-muted-foreground">
-						PDF preview is not available. Download to view.
-					</p>
-				</div>
-			</div>
-		);
-	}
-
-	// Handle binary
-	if (detectedType === "binary") {
-		return (
-			<div
-				className={cn(
-					"flex-1 flex items-center justify-center p-4 surface-sunken",
-					className
-				)}
-			>
-				<div className="text-center space-y-4">
-					<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
-						<FileCode className="size-icon" />
-						<span>Binary data</span>
-					</div>
-					<p className="text-sm text-muted-foreground">
-						Binary content can't be displayed. Download to view.
-					</p>
-				</div>
+			<div className={cn("flex-1 flex flex-col h-full", className)}>
+				<BodyToolbar label={detectedType}>{actions}</BodyToolbar>
+				<NonTextBody
+					type={detectedType}
+					rawBytes={rawBytes}
+					text={bodyRaw || body}
+					contentType={contentType}
+					canDownload={Boolean(actions)}
+				/>
 			</div>
 		);
 	}
 
 	return (
 		<div className={cn("flex-1 flex flex-col h-full", className)}>
-			{/*
-			 * The toolbar sits on a 32px band.
-			 *
-			 * It was `px-4 py-2` around `h-7` segments - 44px, against a 24px tab
-			 * strip directly above it. `ResponseActions` carries a comment saying
-			 * its icons are `h-6` precisely so they share that 24px row; this
-			 * toolbar never got the same treatment and ran 83% taller than the
-			 * band it hangs under. `h-8` with no vertical padding is the same
-			 * construction the tab row uses, one step up so the hierarchy still
-			 * reads.
-			 *
-			 * **No background of its own**, which is the second thing that was
-			 * wrong here and the harder one to see. It was `bg-muted/20`; the fix
-			 * for that was `surface-sunken`, and that over-corrected - a full
-			 * `--muted` fill turns this row into a heavy grey band between a
-			 * card-coloured tab strip and a card-coloured editor, reading as a
-			 * separate block wedged between them rather than part of the pane.
-			 *
-			 * The rule problem `surface-sunken` was solving does not need a fill to
-			 * solve. This row sits inside the pane, which declares `surface-card`,
-			 * so `border-b border-rule` already resolves against a card - exactly
-			 * how the tab strip above gets its edge, with no background either.
-			 * The band is defined by its rule and its height, not by a colour.
-			 *
-			 * `h-band` (issue #1679), not the bare `h-8` this comment already
-			 * claimed was 32px: under the 3px spacing rhythm `--spacing` moved to
-			 * for #1670, `h-8` resolves to 24px, level with the tab strip rather
-			 * than a step above it - a comment describing an intent the class had
-			 * stopped delivering. `--spacing-band` is the floor that does not ride
-			 * density, the same one the tab strip and drawer header use.
-			 */}
-			<div className="flex h-band items-center justify-between gap-2 px-4 border-b border-rule">
-				<div className="flex items-center gap-2">
-					{/* `size-icon-sm`, matching the tab row's icons. It was 16px. */}
-					<FileCode className="size-icon-sm text-muted-foreground" />
-					<span className="text-label text-muted-foreground uppercase tracking-[0.06em]">
-						{detectedType}
-					</span>
-				</div>
-
-				<div className="flex items-center gap-2">
-					{showModeToggle && !isLargeBody && (
-						<ToggleGroup
-							value={viewMode}
-							// Radix clears the value when the active item is pressed again.
-							// A view mode has no "off" - ignore the empty string rather than
-							// letting the body render nothing.
-							onValueChange={(next) => next && setViewMode(next as ViewMode)}
-							// Always `xs`, not `compact ? "xs" : "sm"`: this toolbar's row
-							// is `h-band` (32px) in both modes, but `sm`'s track (`h-control`
-							// 28px plus `p-1` padding, 34px total) is taller than that - it
-							// overflowed the band's own border once #1679 made `sm` a flat
-							// 28px instead of a `--spacing`-derived value that happened to
-							// fit. `xs`'s track (`h-control-sm` 24px plus `p-0.5`, 27px) is
-							// the one size that actually clears it.
-							size="xs"
-							aria-label="Body view mode"
-						>
-							<ToggleGroupItem value="pretty">
-								<Code className="size-icon-sm" />
-								Pretty
+			<BodyToolbar label={detectedType}>
+				{showModeToggle && !isLargeBody && (
+					<ToggleGroup
+						value={viewMode}
+						// Radix clears the value when the active item is pressed again.
+						// A view mode has no "off" - ignore the empty string rather than
+						// letting the body render nothing.
+						onValueChange={(next) => next && setViewMode(next as ViewMode)}
+						// Always `xs`, not `compact ? "xs" : "sm"`: this toolbar's row
+						// is `h-band` (32px) in both modes, but `sm`'s track (`h-control`
+						// 28px plus `p-1` padding, 34px total) is taller than that - it
+						// overflowed the band's own border once #1679 made `sm` a flat
+						// 28px instead of a `--spacing`-derived value that happened to
+						// fit. `xs`'s track (`h-control-sm` 24px plus `p-0.5`, 27px) is
+						// the one size that actually clears it.
+						size="xs"
+						aria-label="Body view mode"
+					>
+						<ToggleGroupItem value="pretty">
+							<Code className="size-icon-sm" />
+							Pretty
+						</ToggleGroupItem>
+						<ToggleGroupItem value="raw">
+							<FileText className="size-icon-sm" />
+							Raw
+						</ToggleGroupItem>
+						{canPreview && (
+							<ToggleGroupItem value="preview">
+								<Eye className="size-icon-sm" />
+								Preview
 							</ToggleGroupItem>
-							<ToggleGroupItem value="raw">
-								<FileText className="size-icon-sm" />
-								Raw
-							</ToggleGroupItem>
-							{canPreview && (
-								<ToggleGroupItem value="preview">
-									<Eye className="size-icon-sm" />
-									Preview
-								</ToggleGroupItem>
-							)}
-						</ToggleGroup>
-					)}
-					{actions}
-				</div>
-			</div>
+						)}
+					</ToggleGroup>
+				)}
+				{actions}
+			</BodyToolbar>
 
 			{/*
 			 * Said here rather than in either viewer, because this is the
@@ -295,6 +208,11 @@ export default function ResponseBody({
 						{formatSize(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.
 						{actions ? " Download saves the body the app received." : ""}
 					</Callout>
+				</div>
+			)}
+			{rawBytes?.notice && (
+				<div className="shrink-0 px-4 pt-3">
+					<DecodeNoticeCallout notice={rawBytes.notice} canDownload={Boolean(actions)} />
 				</div>
 			)}
 
@@ -328,4 +246,163 @@ export default function ResponseBody({
 			</div>
 		</div>
 	);
+}
+
+/**
+ * The toolbar sits on a 32px band.
+ *
+ * It was `px-4 py-2` around `h-7` segments - 44px, against a 24px tab
+ * strip directly above it. `ResponseActions` carries a comment saying
+ * its icons are `h-6` precisely so they share that 24px row; this
+ * toolbar never got the same treatment and ran 83% taller than the
+ * band it hangs under. `h-8` with no vertical padding is the same
+ * construction the tab row uses, one step up so the hierarchy still
+ * reads.
+ *
+ * **No background of its own**, which is the second thing that was
+ * wrong here and the harder one to see. It was `bg-muted/20`; the fix
+ * for that was `surface-sunken`, and that over-corrected - a full
+ * `--muted` fill turns this row into a heavy grey band between a
+ * card-coloured tab strip and a card-coloured editor, reading as a
+ * separate block wedged between them rather than part of the pane.
+ *
+ * The rule problem `surface-sunken` was solving does not need a fill to
+ * solve. This row sits inside the pane, which declares `surface-card`,
+ * so `border-b border-rule` already resolves against a card - exactly
+ * how the tab strip above gets its edge, with no background either.
+ * The band is defined by its rule and its height, not by a colour.
+ *
+ * `h-band` (issue #1679), not the bare `h-8` this comment already
+ * claimed was 32px: under the 3px spacing rhythm `--spacing` moved to
+ * for #1670, `h-8` resolves to 24px, level with the tab strip rather
+ * than a step above it - a comment describing an intent the class had
+ * stopped delivering. `--spacing-band` is the floor that does not ride
+ * density, the same one the tab strip and drawer header use.
+ */
+function BodyToolbar({ label, children }: { label: string; children?: ReactNode }) {
+	return (
+		<div className="flex h-band items-center justify-between gap-2 px-4 border-b border-rule">
+			<div className="flex items-center gap-2">
+				{/* `size-icon-sm`, matching the tab row's icons. It was 16px. */}
+				<FileCode className="size-icon-sm text-muted-foreground" />
+				<span className="text-label text-muted-foreground uppercase tracking-[0.06em]">
+					{label}
+				</span>
+			</div>
+			<div className="flex items-center gap-2">{children}</div>
+		</div>
+	);
+}
+
+const NON_TEXT_TYPES: ReadonlySet<BodyType> = new Set(["image", "pdf", "binary"]);
+
+function isNonTextType(type: BodyType): type is "image" | "pdf" | "binary" {
+	return NON_TEXT_TYPES.has(type);
+}
+
+/** The text on screen is not a faithful reading of the bytes; say which way. */
+function DecodeNoticeCallout({
+	notice,
+	canDownload,
+}: {
+	notice: DecodeNotice;
+	canDownload: boolean;
+}) {
+	const download = canDownload ? " Download saves the exact bytes." : "";
+	const replaced = notice.replaced
+		? ` Bytes that aren't valid ${notice.charset} appear as \uFFFD.`
+		: "";
+	if (notice.unknownLabel) {
+		return (
+			<Callout severity="warning" title={`Unknown charset "${notice.unknownLabel}"`}>
+				{`This body is shown as ${notice.charset} instead.${replaced}${download}`}
+			</Callout>
+		);
+	}
+	return (
+		<Callout severity="warning" title="Some bytes didn't decode">
+			{`${replaced.trim()}${download}`}
+		</Callout>
+	);
+}
+
+/**
+ * An image, a PDF or other bytes: what it is, how big, and the image itself.
+ * The bytes are `rawBytes` when the engine sent base64, else the UTF-8 text it
+ * sent, which is then exactly those bytes.
+ */
+function NonTextBody({
+	type,
+	rawBytes,
+	text,
+	contentType,
+	canDownload,
+}: {
+	type: "image" | "pdf" | "binary";
+	rawBytes: ResponseBytes | undefined;
+	text: string;
+	contentType: string;
+	canDownload: boolean;
+}) {
+	const bytes = useMemo(() => rawBytes?.data ?? new TextEncoder().encode(text), [rawBytes, text]);
+	const size = formatSize(bytes.length);
+	const download = canDownload ? " Download saves it." : "";
+
+	return (
+		<div className="flex-1 flex items-center justify-center p-4 surface-sunken">
+			<div className="text-center space-y-4">
+				<div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-rule text-sm text-muted-foreground">
+					{type === "image" && <ImageIcon className="size-icon" />}
+					{type === "pdf" && <File className="size-icon" />}
+					{type === "binary" && <FileCode className="size-icon" />}
+					<span>
+						{type === "image" &&
+							`Image (${contentType.split(/[/;+]/)[1]?.toUpperCase() || "image"}), ${size}`}
+						{type === "pdf" && `PDF document, ${size}`}
+						{type === "binary" && `Binary data, ${size}`}
+					</span>
+				</div>
+				{type === "image" ? (
+					<div className="max-w-full max-h-[400px] overflow-auto">
+						<ImagePreview bytes={bytes} contentType={contentType} />
+					</div>
+				) : (
+					<p className="text-sm text-muted-foreground">
+						{type === "pdf"
+							? "PDF preview isn't available here."
+							: "This body isn't text."}
+						{download}
+					</p>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * The image, from an object URL over its own bytes, revoked when they change
+ * or the preview unmounts. Set on the element in the effect rather than held in
+ * state, so a StrictMode remount creates a fresh URL instead of keeping the one
+ * its first cleanup revoked.
+ */
+function ImagePreview({
+	bytes,
+	contentType,
+}: {
+	bytes: Uint8Array<ArrayBuffer>;
+	contentType: string;
+}) {
+	const ref = useRef<HTMLImageElement>(null);
+	useEffect(() => {
+		const img = ref.current;
+		if (!img) return;
+		const url = URL.createObjectURL(new Blob([bytes], { type: contentType || "image/png" }));
+		img.src = url;
+		return () => {
+			img.removeAttribute("src");
+			URL.revokeObjectURL(url);
+		};
+	}, [bytes, contentType]);
+
+	return <img ref={ref} alt="Response" className="max-w-full h-auto border border-rule" />;
 }
