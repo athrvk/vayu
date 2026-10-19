@@ -247,7 +247,7 @@ columns dead data and the cut a real migration rather than another additive pass
 its `scriptsFoldedIntoElements` marker and its `.pre-elements-fold.bak` snapshot are gone; `PRAGMA
 user_version` is the marker now.
 
-`migrate_before_sync (path)` (`engine/src/db/db_maintenance.cpp`, declared in `database_impl.hpp`
+`migrate_before_sync (path, busy_timeout)` (`engine/src/db/db_maintenance.cpp`, declared in `database_impl.hpp`
 so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call it before *any*
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
@@ -274,7 +274,13 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    migration without a duplicate), and write the row back. A database neither table needs folding
    for (a fresh install, or one some other path already brought to this shape) skips the backup and
    the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
-   that caused it.
+   that caused it. A refused `BEGIN IMMEDIATE` (another writer holds the lock), a refused stamp and
+   a failed `COMMIT` are treated the same way: each throws that message through the same
+   `exec_or_throw` helper (a failed `COMMIT` is rolled back first), and the stamp-only path throws
+   on a failed stamp too. The file is left as it was, scripts still in their columns and
+   `user_version` unmoved, so the next start runs the migration again. The constructor's first call
+   is unguarded and the probe's call classifies the throw as unavailable, never corrupt, so neither
+   path quarantines the file.
 3. **Stamp `user_version = SCHEMA_VERSION`.** Both writes (the no-fold path and the fold's
    commit) go through one helper, `stamp_schema_version`, so a bump of the constant is a bump of
    every stamp. Only after this returns does `sync_schema ()` see a mapping with no

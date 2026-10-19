@@ -751,6 +751,8 @@ void recover_database (const std::filesystem::path& db_file,
 const std::filesystem::path& backup_file,
 const std::string& db_path,
 const std::function<ProbeResult (const std::string&)>& probe);
-void migrate_before_sync (const std::string& path, std::chrono::milliseconds busy_timeout);
+void migrate_before_sync (const std::string& path,
+std::chrono::milliseconds busy_timeout,
+const std::function<void (sqlite3*)>& on_connection = {});
 
 } // namespace vayu::db
