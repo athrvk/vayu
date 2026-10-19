@@ -124,7 +124,7 @@ bool is_loopback_bind (const std::string& bind);
  * 200 with no body.
  *
  * A non-loopback `bind` additionally requires `confirmNonLoopback: true`: the
- * engine's management API has no route auth and CORS `*`, so binding wide is a
+ * engine's management API has no route auth and sends no CORS header, so binding wide is a
  * trust decision the caller states rather than one a default makes.
  *
  * The parsed request is the *value*, not an out-parameter, for the reason
