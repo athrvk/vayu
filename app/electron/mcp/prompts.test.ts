@@ -127,6 +127,29 @@ describe("compare_runs", () => {
 		expect(text).toContain('"comparability": []');
 	});
 
+	// #2438: the same refusal as the tool, so the prompt cannot embed the deltas it withholds.
+	test("a pair of runs of different types is refused, with no deltas embedded", async () => {
+		const reports: Record<string, unknown> = {
+			run_main: { ...REPORT, metadata: { runType: "load" } },
+			run_target: { ...REPORT, metadata: { runType: "scenario" } },
+		};
+		const client = fakeClient({
+			getRunReport: vi.fn().mockImplementation((id: string) => Promise.resolve(reports[id])),
+		});
+		const text = textOf(
+			await prompt("compare_runs").build(
+				{ baseRunId: "run_main", targetRunId: "run_target" },
+				ctxWith(client)
+			)
+		);
+
+		expect(text).toContain("run_main (Load test)");
+		expect(text).toContain("run_target (Collection run)");
+		expect(text).toMatch(/list_runs takes a "type" filter/);
+		expect(text).not.toContain("comparability");
+		expect(text).not.toContain("latency");
+	});
+
 	test("a target with no pinned baseline fails with the fix named", async () => {
 		const client = fakeClient({ listBaselineRuns: vi.fn().mockResolvedValue({ data: [] }) });
 

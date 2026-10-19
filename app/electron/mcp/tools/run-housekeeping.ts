@@ -8,7 +8,8 @@
 /**
  * @file run-housekeeping.ts
  * @brief Reading runs back: the `list_runs` filters, the page bounds of the
- *        per-run reads, the delete prompts' wording and baseline resolution.
+ *        per-run reads, the delete prompts' wording, baseline resolution and
+ *        the run-type refusal `compare_runs` shares with its prompt.
  */
 
 import {
@@ -16,6 +17,7 @@ import {
 	MAX_ENGINE_PAGE_LIMIT,
 	type RunListQuery,
 } from "../engine-client.js";
+import type { RunComparison } from "../compare.js";
 import type { ToolContext, ToolResult } from "./contract.js";
 import {
 	engineErrorResult,
@@ -229,4 +231,23 @@ export async function resolveBaseline(
 		);
 	}
 	return baseRunId;
+}
+
+/**
+ * Why @p comparison must not be answered with its deltas, or `null` when it
+ * can be (#2438). Runs of different types measure different things, so a load
+ * test's throughput against a collection run's is not a regression either way.
+ * Shared by the `compare_runs` tool and prompt so neither hands a model deltas
+ * the other refuses. `compareReports` itself keeps the `run_type` entry: the
+ * History strip and the run-report export show it rather than refusing.
+ */
+export function runTypeRefusal(comparison: RunComparison): string | null {
+	const mismatch = comparison.comparability.find((entry) => entry.code === "run_type");
+	if (!mismatch) return null;
+	return (
+		`Run ${comparison.baseRunId} (${mismatch.base}) and run ${comparison.targetRunId} ` +
+		`(${mismatch.target}) are different types of run, whose figures measure different ` +
+		`things, so they were not compared. Compare runs of the same type; list_runs takes a ` +
+		`"type" filter (${RUN_TYPES.map((type) => `"${type}"`).join(", ")}).`
+	);
 }

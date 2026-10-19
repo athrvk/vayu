@@ -7221,6 +7221,71 @@ describe("dispatchTool", () => {
 	});
 
 	/*
+	 * Issue #2438: a load run against a collection run printed +241% avgRps as
+	 * if they were one experiment. The pair is refused before any delta leaves.
+	 */
+	describe("compare_runs and the run type", () => {
+		const report = (runType: string | undefined, avgRps: number) => ({
+			metadata: { status: "completed", ...(runType ? { runType } : {}) },
+			summary: { avgRps, testDuration: 15 },
+		});
+		const compare = (reports: Record<string, unknown>) =>
+			dispatchTool(
+				"compare_runs",
+				{ baseRunId: "run_a", targetRunId: "run_b" },
+				ctxWith(
+					fakeClient({
+						getRunReport: vi
+							.fn()
+							.mockImplementation((id: string) => Promise.resolve(reports[id])),
+					})
+				)
+			);
+
+		test("a load run against a collection run is refused, naming both runs and types", async () => {
+			const res = await compare({
+				run_a: report("load", 99.88),
+				run_b: report("scenario", 340.6),
+			});
+
+			expect(res.isError).toBe(true);
+			expect(res.structuredContent).toBeUndefined();
+			const text = firstText(res);
+			expect(text).toContain("run_a (Load test)");
+			expect(text).toContain("run_b (Collection run)");
+			expect(text).toMatch(/list_runs takes a "type" filter/);
+			expect(text).not.toContain("avgRps");
+			expect(text).not.toContain("340.6");
+		});
+
+		test("two collection runs compare", async () => {
+			const res = await compare({
+				run_a: report("scenario", 10),
+				run_b: report("scenario", 12),
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(res.structuredContent).toMatchObject({ comparability: [] });
+		});
+
+		test("reports without a run type compare as they always did", async () => {
+			const res = await compare({
+				run_a: report(undefined, 10),
+				run_b: report(undefined, 12),
+			});
+
+			expect(res.isError).toBeFalsy();
+			expect(res.structuredContent).toMatchObject({ comparability: [] });
+		});
+
+		test("the description says a mismatched pair is refused", () => {
+			const description = TOOLS.find((t) => t.name === "compare_runs")?.description ?? "";
+			expect(description).toMatch(/different types[^.]*refused/);
+			expect(description).toContain("run type, mode");
+		});
+	});
+
+	/*
 	 * Omitting the base is the "did my change regress?" shape: the agent knows
 	 * the run it just started and not which older run is the reference. It
 	 * resolves through the same endpoint the history view's strip uses, so the
