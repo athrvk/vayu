@@ -143,6 +143,8 @@ function statusError(status: number): string | null {
 	return null;
 }
 
+const NOT_JSON = "The endpoint answered, but not with JSON - it may not be a GraphQL endpoint.";
+
 /** Why a parsed 2xx body is not an introspection result; null when it is one. */
 function bodyError(parsed: unknown): string | null {
 	if (!isRecord(parsed)) return "The endpoint's answer is not an introspection result.";
@@ -174,6 +176,9 @@ export function readIntrospectionAnswer(
 	if (status === 0) return { error: unreachedError(answer, url) };
 	const refused = statusError(status);
 	if (refused) return { error: refused };
+	// A body the engine could not hold as UTF-8 text is not a JSON document,
+	// and its `bodyRaw` is base64 whose length is not the body's (issue #2458).
+	if (answer.bodyEncoding === "base64") return { error: NOT_JSON };
 	const raw = typeof answer.bodyRaw === "string" ? answer.bodyRaw : "";
 	const bytes = Buffer.byteLength(raw, "utf8");
 	if (bytes > MAX_INTROSPECTION_BYTES) {
@@ -185,9 +190,7 @@ export function readIntrospectionAnswer(
 	try {
 		parsed = JSON.parse(raw);
 	} catch {
-		return {
-			error: "The endpoint answered, but not with JSON - it may not be a GraphQL endpoint.",
-		};
+		return { error: NOT_JSON };
 	}
 	const unreadable = bodyError(parsed);
 	return unreadable ? { error: unreadable } : { data: (parsed as { data: unknown }).data };

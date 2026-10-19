@@ -96,7 +96,11 @@ function contextProvider(
 	safety?: Partial<McpSafetyConfig>,
 	client?: EngineClient
 ): () => ToolContext {
-	return () => ({ client: client ?? fakeClient(), config: resolveSafetyConfig(safety) });
+	return () => ({
+		client: client ?? fakeClient(),
+		config: resolveSafetyConfig(safety),
+		host: "app",
+	});
 }
 
 /** Connect a real SDK client to the Vayu server over a linked in-memory pair. */

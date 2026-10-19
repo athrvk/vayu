@@ -20,6 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
+import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
 	BodyMode,
@@ -286,6 +287,14 @@ export interface ResponseState {
 	 * the limit.
 	 */
 	bodyCapped?: boolean;
+	/**
+	 * The body's exact bytes, present exactly when the engine sent it as base64
+	 * (issue #2458): not UTF-8 text. `body` and `bodyRaw` then hold its decoding
+	 * (`rawBytes.isText`) or nothing at all, never the base64 itself. Both funnels
+	 * build it with `decodeResponseBody`; Download writes these bytes and the
+	 * image preview reads them.
+	 */
+	rawBytes?: ResponseBytes;
 	time: number;
 	timing?: ResponseTiming;
 	/**

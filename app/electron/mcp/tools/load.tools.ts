@@ -409,7 +409,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				composed = await composeLoadRunRequest(args, ctx, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const url = String(composed.payload.url ?? "");
 			if (!url) {
@@ -417,7 +417,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					`Saved request "${str(args, "requestId")}" has no URL to load-test.`
 				);
 			}
-			const gate = checkAllowlist(url, ctx.config);
+			const gate = checkAllowlist(url, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 
 			// A monitored run contacts a second host, so it gets a second gate.
@@ -425,7 +425,11 @@ export const LOAD_TOOLS: McpTool[] = [
 			// joined when the run ends, so whatever bounds the run bounds it.
 			const monitor = args.monitor as { url?: unknown } | undefined;
 			if (monitor && typeof monitor === "object") {
-				const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config);
+				const monitorGate = checkMonitorHost(
+					String(monitor.url ?? ""),
+					ctx.config,
+					ctx.host
+				);
 				if (!monitorGate.ok) return errorResult(monitorGate.error!);
 			}
 
@@ -444,7 +448,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
 				stepDuration: (args.stepDuration as string | number | undefined) ?? undefined,
 			};
-			const caps = checkLoadCaps(loadParams, ctx.config);
+			const caps = checkLoadCaps(loadParams, ctx.config, ctx.host);
 			if (!caps.ok) return errorResult(caps.error!);
 
 			const payload: Record<string, unknown> = {
@@ -549,7 +553,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			try {
 				started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return watchedRun(
 				withCaveat(startedRunResult(started, payload.mode, payload.duration), caveat),

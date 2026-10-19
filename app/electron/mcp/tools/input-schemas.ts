@@ -14,6 +14,7 @@
 import { z } from "zod";
 import { DATA_FILE_HASH_PATTERN } from "../../data-file.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
+import { TRUST_AUTHORITY_TOKEN } from "../remedy.js";
 import {
 	DEFAULT_STREAM_BUDGET_MS,
 	DEFAULT_STREAM_MAX_EVENTS,
@@ -89,8 +90,7 @@ export const defaultHeaderOptOutsInput = z
 		'Default headers this send refuses, by name (e.g. ["User-Agent", "Accept-Encoding"]). This is the only way to send a request with **no** User-Agent at all - writing one yourself replaces the value but still sends the header. Only the engine\'s own defaults are refusable; a name it adds nothing under is accepted and does nothing, and a name that cannot be a header name is refused by the engine. Nothing is stored: the refusal applies to this send alone.'
 	);
 
-export const INSECURE_TLS_REFUSAL =
-	"verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to add the internal authority under Vayu Settings > Network & connectivity, which keeps verification on for every request; or save the request with create_request/update_request `verifySSL: false` and send it by id (run_request with `requestId` and no `url` sends a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.";
+export const INSECURE_TLS_REFUSAL = `verifySSL: false is not accepted on a one-off send - a skipped certificate check has to leave a record, and an argument on a single call leaves none. Two ways forward: ask the user to ${TRUST_AUTHORITY_TOKEN}, which keeps verification on for every request; or save the request with create_request/update_request \`verifySSL: false\` and send it by id (run_request with \`requestId\` and no \`url\` sends a saved request exactly as stored). The app then shows that request as accepting any certificate, and the user can untick it.`;
 
 /**
  * `run_request`'s TLS argument: declared so that asking for the downgrade gets
@@ -101,7 +101,7 @@ export const verifySSLSendInput = z
 	.boolean()
 	.optional()
 	.describe(
-		"Verify the server's TLS certificate (default true). Only `true` is accepted here: `false` is refused, because skipping the certificate check for one agent-issued send leaves no trace in Vayu afterwards. Save the request with `verifySSL: false` (create_request / update_request) if the user wants an internal or self-signed host reachable, or have them trust that authority under Vayu Settings > Network & connectivity."
+		`Verify the server's TLS certificate (default true). Only \`true\` is accepted here: \`false\` is refused, because skipping the certificate check for one agent-issued send leaves no trace in Vayu afterwards. Save the request with \`verifySSL: false\` (create_request / update_request) if the user wants an internal or self-signed host reachable, or have the user ${TRUST_AUTHORITY_TOKEN}.`
 	);
 
 /**
@@ -521,7 +521,7 @@ export function requestSettingsInput() {
 			.boolean()
 			.optional()
 			.describe(
-				"Follow 3xx redirects when this request is sent (default true). The request builder's Settings tab."
+				"Follow 3xx redirects when this request is sent (default true). The request builder's redirect option."
 			),
 		maxRedirects: z
 			.number()
@@ -548,7 +548,7 @@ export function requestSettingsInput() {
 			.boolean()
 			.optional()
 			.describe(
-				"Verify the server's TLS certificate when this request is sent (default true). Setting it false skips the certificate check entirely, hostname included, so an internal or self-signed host answers instead of failing - and anything on the network path can then read and rewrite the request. It is stored on the request and applies to every later send of it: the app's Send, a load run and a stream alike. Prefer keeping it on and having the user add the internal authority under Vayu Settings > Network & connectivity; turn it off only when they have asked for exactly that, and say so in your reply, because the app shows this request as accepting any certificate from then on."
+				`Verify the server's TLS certificate when this request is sent (default true). Setting it false skips the certificate check entirely, hostname included, so an internal or self-signed host answers instead of failing - and anything on the network path can then read and rewrite the request. It is stored on the request and applies to every later send of it: the app's Send, a load run and a stream alike. Prefer keeping it on and having the user ${TRUST_AUTHORITY_TOKEN}; turn it off only when they have asked for exactly that, and say so in your reply, because the app shows this request as accepting any certificate from then on.`
 			),
 	};
 }

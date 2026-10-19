@@ -75,7 +75,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			try {
 				started = await ctx.client.startMockServer(payload, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			// The caveat rides on the result rather than being left in the JSON:
 			// "the mock started" and "the mock can answer" are different answers,
@@ -98,7 +98,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listMockServers(signal)),
+		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listMockServers(signal)),
 	},
 	{
 		name: "get_mock_routes",
@@ -116,7 +116,9 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			mockId: z.string().describe("Mock server ID (from start_mock_server)."),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.getMockServerRoutes(requireStr(args, "mockId"), signal)),
+			callEngine(ctx, () =>
+				ctx.client.getMockServerRoutes(requireStr(args, "mockId"), signal)
+			),
 	},
 	{
 		name: "get_mock_activity",
@@ -145,6 +147,7 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			const limit = args.limit as number | undefined;
 			const mockId = requireStr(args, "mockId");
 			return callEngine(
+				ctx,
 				() => ctx.client.getMockServerActivity(mockId, limit ?? 50, signal),
 				await runOutputShape(ctx, signal)
 			);
@@ -169,6 +172,6 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 			mockId: z.string().describe("Mock server ID to stop (from start_mock_server)."),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.stopMockServer(requireStr(args, "mockId"), signal)),
+			callEngine(ctx, () => ctx.client.stopMockServer(requireStr(args, "mockId"), signal)),
 	},
 ];

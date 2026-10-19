@@ -36,6 +36,25 @@ describe("ClientErrorView headings for non-network codes", () => {
 	});
 });
 
+// An engine that answered with an HTTP error of its own is not a target that
+// never answered (#2458): a bodiless 500 reads as `UNKNOWN_ERROR` with the
+// status line as its message, and an explained one as `internal_error`.
+// Mutation check: drop either from ErrorTitles and it falls back to
+// "Couldn't get a response".
+describe("ClientErrorView heading for an engine that answered with an error", () => {
+	it.each([
+		["UNKNOWN_ERROR", "HTTP 500: Internal Server Error"],
+		["internal_error", "Execution failed: something threw"],
+	])("names the engine for %s, and shows what it said", (code, message) => {
+		render(<ClientErrorView errorCode={code} errorMessage={message} />);
+
+		expect(screen.getByText("Vayu's engine answered with an error")).toBeInTheDocument();
+		expect(screen.getByText(message)).toBeInTheDocument();
+		expect(screen.getByText(/Vayu's failure, not the server's/)).toBeInTheDocument();
+		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
+	});
+});
+
 // The engine answers INVALID_URL both for a URL it cannot parse and for one it
 // parsed and refused by scheme, so the heading has to be true of both.
 // Mutation check: restore "Couldn't parse the URL" and the refused-scheme case
@@ -78,10 +97,12 @@ describe("ClientErrorView glyphs", () => {
 			"CONNECTION_FAILED",
 			"DNS_ERROR",
 		].map(glyph);
-		const own = ["ENGINE_ERROR", "INTERNAL_ERROR"].map(glyph);
+		const own = ["ENGINE_ERROR", "INTERNAL_ERROR", "UNKNOWN_ERROR", "internal_error"].map(
+			glyph
+		);
 
 		expect(glyph("CONNECTION_FAILED")).toBe("lucide-server-off");
-		expect(own).toEqual(["lucide-server-crash", "lucide-server-crash"]);
+		expect(own).toEqual(Array(4).fill("lucide-server-crash"));
 		for (const g of own) expect(network).not.toContain(g);
 	});
 });

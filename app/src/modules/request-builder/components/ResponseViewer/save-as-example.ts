@@ -48,6 +48,18 @@ export function defaultExampleName(response: ResponseState): string {
 		: String(response.status);
 }
 
+/**
+ * Why @p response cannot become an example, or nothing when it can.
+ *
+ * An example's body is text, and a body the engine sent as base64 (issue
+ * #2458) is not: its text, when it has one, is a decoding the engine would
+ * store and serve as UTF-8 under a Content-Type that still names the original
+ * charset. Refused rather than saved as something the server never sent.
+ */
+export function exampleRefusal(response: Pick<ResponseState, "rawBytes">): string | undefined {
+	return response.rawBytes ? "Examples hold UTF-8 text, and this body isn't" : undefined;
+}
+
 /** The response's headers as stored entries, in the order they are held. */
 function headerEntries(headers: Record<string, string>): KeyValueEntry[] {
 	return Object.entries(headers).map(([key, value]) => ({ key, value, enabled: true }));

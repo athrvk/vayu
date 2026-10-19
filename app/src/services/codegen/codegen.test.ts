@@ -1327,3 +1327,136 @@ describe("a binary body", () => {
 		expect(code).not.toContain("Content-Type");
 	});
 });
+
+/**
+ * A header the request already carries wins over the one its auth would write
+ * (issue #2475), as in the engine's `apply_auth`. Counted over the whole
+ * snippet, because the defect is a second line rather than a wrong one, and
+ * asserted per target since each writes headers and basic credentials its own
+ * way.
+ */
+describe("a typed header is not duplicated by auth", () => {
+	const count = (code: string, name: string) => (code.match(new RegExp(name, "gi")) ?? []).length;
+
+	for (const target of CODE_TARGETS) {
+		describe(target.label, () => {
+			it("keeps a typed Authorization over bearer", () => {
+				const { code } = target.generate({
+					...GET,
+					headers: { Authorization: "Bearer typed" },
+					auth: { mode: "bearer", token: "from-auth" },
+				});
+				expect(count(code, "authorization")).toBe(1);
+				expect(code).toContain("Bearer typed");
+				expect(code).not.toContain("from-auth");
+			});
+
+			it("keeps a typed lower-case authorization over basic, with no credentials path", () => {
+				const { code } = target.generate({
+					...GET,
+					headers: { authorization: "Token typed" },
+					auth: { mode: "basic", username: "ada", password: "s3cret" },
+				});
+				expect(count(code, "authorization")).toBe(1);
+				expect(code).toContain("authorization");
+				expect(code).toContain("Token typed");
+				// `-u`, `-a`, `auth=`, `btoa` and `ToBase64String` are the places basic
+				// credentials would surface.
+				expect(code).not.toContain("ada");
+				expect(code).not.toContain("s3cret");
+			});
+
+			it("keeps a typed header named like the API key, in another case", () => {
+				const { code } = target.generate({
+					...GET,
+					headers: { "x-key": "typed" },
+					auth: { mode: "apikey", key: "X-Key", value: "from-auth", in: "header" },
+				});
+				expect(count(code, "x-key")).toBe(1);
+				expect(code).toContain("x-key");
+				expect(code).toContain("typed");
+				expect(code).not.toContain("from-auth");
+			});
+
+			it("still writes an API key no typed header carries", () => {
+				const { code } = target.generate({
+					...GET,
+					headers: { Accept: "application/json" },
+					auth: { mode: "apikey", key: "X-Key", value: "from-auth", in: "header" },
+				});
+				expect(count(code, "x-key")).toBe(1);
+				expect(code).toContain("from-auth");
+				expect(code).toContain("application/json");
+			});
+		});
+	}
+});
+
+/**
+ * fetch and requests take a header as Latin-1 where Vayu sends UTF-8, and say
+ * so rather than transcode. curl writes the bytes it was given and has nothing
+ * to warn about.
+ */
+describe("a header value fetch and requests cannot send as Vayu does", () => {
+	const withHeader = (value: string): SnippetRequest => ({
+		...GET,
+		headers: { "X-Name": value },
+	});
+	const CLIENTS = [
+		["fetch", generateFetch, "fetch"],
+		["python", generatePython, "requests"],
+	] as const;
+
+	for (const [id, generate, client] of CLIENTS) {
+		it(`${id} says a character above U+00FF is not representable`, () => {
+			const { notes } = generate(withHeader("नमस्ते"));
+			expect(notes).toHaveLength(1);
+			expect(notes[0]).toContain("X-Name");
+			expect(notes[0]).toContain("above U+00FF");
+			expect(notes[0]).toContain(`not representable in a ${client} header`);
+		});
+
+		it(`${id} says a Latin-1 character is sent as one byte, not UTF-8`, () => {
+			const { notes } = generate(withHeader("café"));
+			expect(notes).toHaveLength(1);
+			expect(notes[0]).toContain("U+0080 to U+00FF");
+			expect(notes[0]).toContain("Latin-1");
+			expect(notes[0]).toContain("UTF-8");
+		});
+
+		it(`${id} says nothing about ASCII, and keeps the value as written`, () => {
+			expect(generate(withHeader("plain")).notes).toEqual([]);
+			expect(generate(withHeader("café")).code).toContain("café");
+		});
+
+		it(`${id} covers an auth-derived value it emits, and not one that is typed over`, () => {
+			const bearer: SnippetRequest = { ...GET, auth: { mode: "bearer", token: "tökén" } };
+			expect(generate(bearer).notes).toHaveLength(1);
+			const basic: SnippetRequest = {
+				...GET,
+				auth: { mode: "basic", username: "ada", password: "pässword" },
+			};
+			expect(generate(basic).notes).toHaveLength(1);
+			const typedOver: SnippetRequest = {
+				...bearer,
+				headers: { Authorization: "Bearer ok" },
+			};
+			expect(generate(typedOver).notes).toEqual([]);
+		});
+
+		it(`${id} judges the masked value, which is what the snippet carries`, () => {
+			const { notes } = generate(
+				{ ...GET, auth: { mode: "bearer", token: "tökén" } },
+				{ mask: true, secrets: ["tökén"] }
+			);
+			expect(notes).toEqual([]);
+		});
+	}
+
+	it("curl, HTTPie and PowerShell carry no such note", () => {
+		for (const generate of [generateCurl, generateHttpie, generatePowerShell]) {
+			expect(generate(withHeader("नमस्ते")).notes).toEqual([]);
+			expect(generate(withHeader("café")).notes).toEqual([]);
+		}
+	});
+});

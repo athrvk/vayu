@@ -113,7 +113,7 @@ export const READ_TOOLS: McpTool[] = [
 					? structuredResult(value)
 					: structuredResult({ status: "unknown", raw: value ?? null });
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -122,7 +122,7 @@ export const READ_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			'Which tab and environment the user has open in the Vayu app right now, for "this request", "the run I have open" or "my current environment". Returns `activeTab` (`type`, `entityId`, `label`; `entityId` is the request, collection, run, inbox or mock server id by `type`, null for a tab with no entity), `run` (`{ runId }`, set only when the open tab is a run) and `activeEnvironment` (`id`, `name`); each is null when nothing of that kind is open. Names and ids only, never a variable value: read the entity with its own tool (get_request for a request). A `label` is a saved name or a kind word such as "Request", never text taken from a URL. The copy is the app window\'s last report, so it can lag a click by a moment. An error saying the Vayu window is not connected means there is no app window to ask - the standalone stdio server has none, and the app may not be open yet - so ask the user for a Vayu reference line instead.',
+			'Which tab and environment the user has open in the Vayu window right now, for "this request", "the run I have open" or "my current environment". Returns `activeTab` (`type`, `entityId`, `label`; `entityId` is the request, collection, run, inbox or mock server id by `type`, null for a tab with no entity), `run` (`{ runId }`, set only when the open tab is a run) and `activeEnvironment` (`id`, `name`); each is null when nothing of that kind is open. Names and ids only, never a variable value: read the entity with its own tool (get_request for a request). A `label` is a saved name or a kind word such as "Request", never text taken from a URL. The copy is the app window\'s last report, so it can lag a click by a moment. An error saying the Vayu window is not connected means there is no app window to ask - the standalone stdio server has none, and the app may not be open yet - so ask the user for a Vayu reference line instead.',
 		annotations: {
 			title: "Get the app's open tab and environment",
 			readOnlyHint: true,
@@ -171,6 +171,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				async () =>
 					withCurrentDataFileHashes(
 						presentCollections(await ctx.client.listCollections(signal), ctx),
@@ -199,6 +200,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: { collectionId: z.string().describe("Collection ID to list.") },
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
 				secretsShape(ctx, withholdRowListSecrets)
 			),
@@ -227,6 +229,7 @@ export const READ_TOOLS: McpTool[] = [
 		},
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
 				secretsShape(ctx, withholdRowSecrets)
 			),
@@ -251,6 +254,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.listEnvironments(signal),
 				secretsShape(ctx, withholdRowListSecrets)
 			),
@@ -325,6 +329,7 @@ export const READ_TOOLS: McpTool[] = [
 			// try it would be reported as an engine failure.
 			const query = runListQuery(args);
 			return pagedRead(
+				ctx,
 				() => ctx.client.listRuns(query, signal),
 				"runs",
 				await runOutputShape(ctx, signal)
@@ -341,8 +346,8 @@ export const READ_TOOLS: McpTool[] = [
 			"A run may also carry `warnings`: what it did not do, even though it finished and its numbers look fine - a request sent with an unresolved `{{token}}`, or a step whose pre-request script load mode never runs. Each entry carries `code`, a human-readable `message`, and either `count`/`names` or `steps`. Absent for a run with nothing to report. " +
 			"A run of a collection bound to an OpenAPI document also carries `coverage`: which of the contract's operations the run exercised, which of their declared responses it saw, and any statuses the document never declared. Absent - never zeros - for a run that was not measured against a contract. " +
 			"`results` is a selection of the stored rows, not a uniform sample: at most 100 for a single-request run, every stored step for a scenario run. When the run stored more than the cap, rows with a failing status (outside 2xx/3xx, including status 0 for no response) are chosen first, successes fill the remainder, and the chosen rows are listed in time order. `resultsStored` is how many rows the run stored and `resultsCap` the cap applied; `resultsStored > resultsCap` is the only sign that `results` is a selection. Absent on an older engine. " +
-			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in the Vayu app's own run history. ` +
-			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in the Vayu app's own run history. ` +
+			`Stored bodies on each row's trace (request and response) are capped at ${MAX_INLINE_BODY_BYTES} bytes for this result: a capped one carries \`bodyTruncated: true\` beside \`bodyBytes\`, the full size, and a capped \`rawRequest\` carries \`rawRequestTruncated\`. A body in full is still available in Vayu's own run history. A response node with \`bodyEncoding: "base64"\` holds a body that is not UTF-8 text as standard base64 in \`body\`: decode it, never read it as text; its cap and \`bodyBytes\` count decoded bytes, and a cut keeps whole 4-character groups. Without the key the body is text. ` +
+			`The traces together are capped at ${MAX_REPORT_TRACE_BYTES} bytes, since a multi-step run's rows add up past any per-body cap: rows beyond the budget keep every scalar (status, latency, step identity) and carry \`traceOmitted: true\` instead of their trace, with \`tracesOmitted\` and \`traceBudgetBytes\` on the report saying how many. Non-passing steps keep their traces first, matching the engine's own rule for \`stepsStored\`, so a failure is the last thing dropped. An omitted row's trace is still in Vayu's own run history. ` +
 			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Get run report",
@@ -423,6 +428,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunSamples(runId, limit, offset, signal),
 				"captured samples",
 				await runOutputShape(ctx, signal)
@@ -471,6 +477,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunTimeSeries(runId, limit, offset, signal),
 				"ticks"
 			);
@@ -517,6 +524,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunMonitorSeries(runId, limit, offset, signal),
 				"monitor samples"
 			);
@@ -538,6 +546,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getConfig(signal),
 				secretsShape(ctx, withholdConfigCredentials)
 			),

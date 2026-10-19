@@ -26,8 +26,9 @@
  * re-exported here.
  */
 
+import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
 import { MaskingIncompleteError } from "./withhold.js";
-import type { McpTool, McpToolInfo, ToolContext, ToolResult } from "./tools/contract.js";
+import type { McpHost, McpTool, McpToolInfo, ToolContext, ToolResult } from "./tools/contract.js";
 import {
 	errorResult,
 	NOTHING_CHANGED,
@@ -174,9 +175,26 @@ function findTool(name: string): McpTool | undefined {
 export function toolCatalog(): McpToolInfo[] {
 	return TOOLS.map((t) => ({
 		name: t.name,
-		description: t.description,
+		// Settings is an app screen, so the catalog is always the app's wording.
+		description: resolveRemedyTokens(t.description, "app"),
 		category: t.category,
 	}));
+}
+
+/**
+ * A refusal shared by several tools (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`)
+ * names its remedy with a token, since the constant is built before any host is
+ * known. Only an error's text is resolved: a success carries workspace data,
+ * which is never rewritten.
+ */
+function withRemedyResolved(result: ToolResult, host: McpHost): ToolResult {
+	if (!result.isError) return result;
+	return {
+		...result,
+		content: result.content.map((part) =>
+			part.type === "text" ? { ...part, text: resolveRemedyTokens(part.text, host) } : part
+		),
+	};
 }
 
 /**
@@ -200,14 +218,16 @@ export async function dispatchTool(
 	// Tools the user switched off in Settings are rejected (and are also omitted
 	// from tools/list, so a well-behaved client won't call them).
 	if (ctx.config.disabledTools.includes(name)) {
-		return errorResult(`Tool "${name}" is disabled in Vayu Settings → MCP.`);
+		return errorResult(
+			`Tool "${name}" is disabled. To use it, ask the user to ${settingRemedy("disabledTools", ctx.host)}.`
+		);
 	}
 	let result: ToolResult;
 	try {
-		result = await tool.handler(args, ctx, signal);
+		result = withRemedyResolved(await tool.handler(args, ctx, signal), ctx.host);
 	} catch (err) {
 		if (err instanceof ToolArgError || err instanceof MaskingIncompleteError) {
-			return errorResult(err.message);
+			return withRemedyResolved(errorResult(err.message), ctx.host);
 		}
 		return errorResult(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
 	}

@@ -204,7 +204,7 @@ describe("buildSafetyConfigFromEnv", () => {
 		expect(config.maxRps).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxRps);
 		expect(Number.isNaN(config.maxRps)).toBe(false);
 		// The cap has to still fire - an unsanitized NaN would let this through.
-		expect(checkLoadCaps({ targetRps: 50000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ targetRps: 50000 }, config, "app").ok).toBe(false);
 	});
 
 	it("falls back for every cap variable, not just RPS", () => {
@@ -217,11 +217,13 @@ describe("buildSafetyConfigFromEnv", () => {
 		expect(config.maxConcurrency).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxConcurrency);
 		expect(config.maxDurationSeconds).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxDurationSeconds);
 		expect(config.maxIterations).toBe(DEFAULT_MCP_SAFETY_CONFIG.maxIterations);
-		expect(checkLoadCaps({ concurrency: 10000 }, config).ok).toBe(false);
-		expect(checkLoadCaps({ duration: "24h" }, config).ok).toBe(false);
+		expect(checkLoadCaps({ concurrency: 10000 }, config, "app").ok).toBe(false);
+		expect(checkLoadCaps({ duration: "24h" }, config, "app").ok).toBe(false);
 		// The iterations cap is the one a malformed value must not silently
 		// disable: that mode stops on a request count, so no other cap bounds it.
-		expect(checkLoadCaps({ mode: "iterations", iterations: 1_000_000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 1_000_000 }, config, "app").ok).toBe(
+			false
+		);
 		expect(ignored.map((i) => i.variable)).toContain("VAYU_MCP_MAX_ITERATIONS");
 	});
 
@@ -230,8 +232,10 @@ describe("buildSafetyConfigFromEnv", () => {
 
 		expect(ignored).toEqual([]);
 		expect(config.maxIterations).toBe(250);
-		expect(checkLoadCaps({ mode: "iterations", iterations: 251 }, config).ok).toBe(false);
-		expect(checkLoadCaps({ mode: "iterations", iterations: 250 }, config).ok).toBe(true);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 251 }, config, "app").ok).toBe(
+			false
+		);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 250 }, config, "app").ok).toBe(true);
 	});
 
 	it("holds an over-ceiling cap the same way the Settings path does", () => {
@@ -251,7 +255,7 @@ describe("buildSafetyConfigFromEnv", () => {
 				applied: MCP_CAP_CEILINGS.maxConcurrency,
 			},
 		]);
-		expect(checkLoadCaps({ concurrency: 10_001 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ concurrency: 10_001 }, config, "app").ok).toBe(false);
 	});
 
 	it("reports a clamped cap for every cap variable, never for an in-range one", () => {
@@ -314,8 +318,8 @@ describe("buildSafetyConfigFromEnv", () => {
 		});
 
 		expect(config.allowlist).toEqual(["api.example.com", "localhost"]);
-		expect(checkAllowlist("https://api.example.com/users", config).ok).toBe(true);
-		expect(checkAllowlist("http://localhost:9876/health", config).ok).toBe(true);
+		expect(checkAllowlist("https://api.example.com/users", config, "app").ok).toBe(true);
+		expect(checkAllowlist("http://localhost:9876/health", config, "app").ok).toBe(true);
 	});
 
 	it("names each ignored variable, its raw value, and the default that applied", () => {

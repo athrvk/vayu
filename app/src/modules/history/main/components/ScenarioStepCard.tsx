@@ -46,7 +46,7 @@
  * be a promise this card cannot keep.
  */
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
@@ -66,6 +66,7 @@ import ElementOutcomes from "@/modules/request-builder/components/ResponseViewer
 import SchemaValidation from "@/modules/request-builder/components/ResponseViewer/SchemaValidation";
 import TestResults from "@/modules/request-builder/components/ResponseViewer/TestResults";
 import { responseFromRunResult } from "@/modules/request-builder/utils/restore-response";
+import { heldBodySize } from "@/modules/request-builder/utils/response-bytes";
 import { cn } from "@/lib/utils";
 import type { StepOutcome } from "@/types";
 import { tallyTests, type ScenarioStepRow } from "../scenario-steps";
@@ -119,7 +120,12 @@ function ScenarioStepCard({
 	const openTab = useTabsStore((s) => s.openTab);
 	const openRequestWithDataRow = useTabsStore((s) => s.openRequestWithDataRow);
 
-	const response = step.result ? responseFromRunResult(step.result, runId) : null;
+	// Memoized because a base64 body decodes to fresh bytes on every call, and
+	// an image preview keyed on them would make a new object URL per render.
+	const response = useMemo(
+		() => (step.result ? responseFromRunResult(step.result, runId) : null),
+		[step.result, runId]
+	);
 	// A binary body's file, from the step's stored request node.
 	const sentFile = sentBodyFileOf(step.result?.trace?.request?.bodyFile);
 	const phases = phasesFromTrace(step.result?.trace);
@@ -301,14 +307,15 @@ function ScenarioStepCard({
 					    reason. */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="Body truncated for storage">
-							Only the first {formatSize(response.body.length)} of{" "}
-							{formatSize(response.bodyBytes ?? response.body.length)} was kept.
+							Only the first {formatSize(heldBodySize(response))} of{" "}
+							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept.
 						</Callout>
 					)}
 					<UnifiedResponseViewer
 						response={{
 							body: response.body,
 							bodyRaw: response.bodyRaw,
+							rawBytes: response.rawBytes,
 							headers: response.headers,
 							status: response.status,
 							statusText: response.statusText,

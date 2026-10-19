@@ -152,6 +152,13 @@ export function buildIntrospectionRequest(
 	return request;
 }
 
+function notJson(): IntrospectionError {
+	return new IntrospectionError(
+		"parse",
+		"The endpoint answered, but not with JSON - it may not be a GraphQL endpoint."
+	);
+}
+
 export async function introspectSchema(target: IntrospectionTarget): Promise<GraphQLSchema> {
 	// A throw from compose or execute is the engine's own failure - it is down,
 	// the collection is gone, a variable didn't resolve. The endpoint refusing
@@ -206,6 +213,9 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 			`The endpoint answered HTTP ${res.status}; introspection needs a 2xx.`
 		);
 	}
+	// A body the engine could not hold as UTF-8 text is not a JSON document,
+	// and its `bodyRaw` is base64 whose length is not the body's (issue #2458).
+	if (res.bodyEncoding === "base64") throw notJson();
 	if (res.bodyRaw.length > MAX_INTROSPECTION_CHARS) {
 		throw new IntrospectionError(
 			"too-large",
@@ -219,10 +229,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 	try {
 		parsed = JSON.parse(res.bodyRaw);
 	} catch {
-		throw new IntrospectionError(
-			"parse",
-			"The endpoint answered, but not with JSON - it may not be a GraphQL endpoint."
-		);
+		throw notJson();
 	}
 	if (parsed.errors?.length) {
 		const detail = parsed.errors.map((e) => e.message).join("; ");

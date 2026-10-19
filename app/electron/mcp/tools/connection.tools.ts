@@ -27,6 +27,7 @@ import {
 	requireStr,
 	withCaveat,
 } from "./kit.js";
+import { resolveRemedyTokens } from "../remedy.js";
 import { asRecord, CONNECTION_OUTCOME_HINTS } from "./spec-bindings.js";
 
 export const CONNECTION_TOOLS: McpTool[] = [
@@ -35,7 +36,7 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			'List the client certificates (mutual TLS) Vayu presents, one per host and optional port: `host` (or `*.example.com`), `port` (null for every port), `certPath`, `keyPath` ("" for a PKCS#12 bundle), `certFormat` and `hasPassphrase`. The passphrase itself is never returned. Read this when a host answers with a TLS handshake failure, or diagnose_connection reports `tls_failed`: a host with no entry sends no certificate. Entries are added in Vayu Settings.',
+			'List the client certificates (mutual TLS) Vayu presents, one per host and optional port: `host` (or `*.example.com`), `port` (null for every port), `certPath`, `keyPath` ("" for a PKCS#12 bundle), `certFormat` and `hasPassphrase`. The passphrase itself is never returned. Read this when a host answers with a TLS handshake failure, or diagnose_connection reports `tls_failed`: a host with no entry sends no certificate. Entries are added by the user; no tool adds one.',
 		annotations: {
 			title: "List client certificates",
 			readOnlyHint: true,
@@ -44,7 +45,7 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
-			callEngine(() => ctx.client.listClientCertificates(signal)),
+			callEngine(ctx, () => ctx.client.listClientCertificates(signal)),
 	},
 	{
 		name: "diagnose_connection",
@@ -67,20 +68,20 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		},
 		handler: async (args, ctx, signal) => {
 			const url = requireStr(args, "url");
-			const gate = checkAllowlist(url, ctx.config);
+			const gate = checkAllowlist(url, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			let answer: unknown;
 			try {
 				answer = await ctx.client.diagnoseConnection(url, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const outcome = asRecord(answer).outcome;
 			const hint =
 				typeof outcome === "string" ? CONNECTION_OUTCOME_HINTS[outcome] : undefined;
 			return withCaveat(
 				jsonResult(secretsShape(ctx, withholdDiagnoseCredentials)(answer)),
-				hint ? `\n\n${hint}` : ""
+				hint ? `\n\n${resolveRemedyTokens(hint, ctx.host)}` : ""
 			);
 		},
 	},

@@ -26,6 +26,7 @@ function ctxWith(appFocus?: ToolContext["appFocus"]): ToolContext {
 	return {
 		client: {} as unknown as EngineClient,
 		config: resolveSafetyConfig({ allowWrites: false }),
+		host: "app",
 		appFocus,
 	};
 }

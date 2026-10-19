@@ -20,7 +20,11 @@ function ctxWith(
 	client: Partial<Record<keyof EngineClient, unknown>>,
 	safety: Partial<McpSafetyConfig> = {}
 ): ToolContext {
-	return { client: client as unknown as EngineClient, config: resolveSafetyConfig(safety) };
+	return {
+		client: client as unknown as EngineClient,
+		config: resolveSafetyConfig(safety),
+		host: "app",
+	};
 }
 
 const text = (r: { content: Array<{ text: string }> }) => r.content.map((c) => c.text).join("\n");

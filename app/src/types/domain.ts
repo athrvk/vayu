@@ -1429,6 +1429,14 @@ export interface RunResultTrace {
 		/** The response body's original byte length, present only when truncated. */
 		bodyBytes?: number;
 		/**
+		 * `body` is the bytes in base64, the same spelling the live answer's
+		 * `bodyEncoding` gave them (issue #2458). Written only then: absent is
+		 * text, which is what every row stored before the key holds. A truncated
+		 * one is the base64 of the prefix kept, and `bodyBytes` counts the
+		 * original bytes.
+		 */
+		bodyEncoding?: "base64";
+		/**
 		 * The protocol negotiated for this exchange, as stored by
 		 * `build_result_trace` (`engine/src/http/routes/execution.cpp`) - same
 		 * display-string value space as `ResponseState.httpVersion`
@@ -2035,6 +2043,15 @@ export interface HttpResponse {
 	rawRequest?: string;
 	body: unknown;
 	bodyRaw: string;
+	/**
+	 * How to read `bodyRaw` (issue #2458). `"base64"`: the body is not UTF-8
+	 * text, `bodyRaw` is its bytes in standard padded base64 and `body` is
+	 * null; `bodySize` still counts bytes. Always present on a live body; an
+	 * absent one (an older engine, or `useEngine`'s synthesised failure) is
+	 * `"utf8"`. Read through `decodeResponseBody`
+	 * (`request-builder/utils/response-bytes.ts`), never by hand.
+	 */
+	bodyEncoding?: "utf8" | "base64";
 	bodySize: number;
 	timing: ResponseTiming;
 	errorCode?: string;

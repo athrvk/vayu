@@ -151,7 +151,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			" Extractors, assertions and timers in `elements` are not scripts and pass. With write access off, nothing a script or extractor sets is stored: the value is visible for the rest of this send and is not written to the environment, collection or globals. Certificate verification is always on for an ad-hoc send - `verifySSL: false` is refused here, because a skipped check on a one-off call is recorded nowhere; it belongs on the saved request, where the app shows it, and a send by `requestId` follows the setting stored there. " +
 			ENGINE_DEFAULT_HEADERS_SENTENCE +
 			" " +
-			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. ` +
+			`The response body is capped at ${MAX_INLINE_BODY_BYTES} bytes in this result: over that, \`bodyRaw\` holds the first ${MAX_INLINE_BODY_BYTES} bytes, \`bodyTruncated\` is true, \`bodySize\` is the real size, and the parsed \`body\` is null rather than a full copy of what was cut. A large \`rawRequest\` is capped the same way (headers kept whole) and flagged with \`rawRequestTruncated\`. \`bodyCapped\` is a different fact and is always present: it says the engine itself stopped reading the response at \`maxDesignResponseBodyBytes\`, so \`bodySize\` is the prefix it read and re-sending returns the same amount - raise that config entry to read more, where \`bodyTruncated\` is only this result showing less than the engine returned. \`bodyEncoding\` says how \`bodyRaw\` is spelled: "utf8" is the body as text; "base64" is a body that is not UTF-8 text (an image, a PDF, a Latin-1 page) as standard base64, which you must decode and never read as text, with \`body\` null - there the cap and \`bodySize\` count decoded bytes and a cut keeps whole 4-character groups, so the prefix still decodes. ` +
 			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Send a request",
@@ -189,7 +189,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				.enum(HTTP_VERSIONS)
 				.optional()
 				.describe(
-					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s Settings tab picker.'
+					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s protocol picker.'
 				),
 			verifySSL: verifySSLSendInput,
 			requestId: z
@@ -227,7 +227,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL);
 			// The same posture for the same reason: a script is refused before the
 			// compose that would carry it, not after an exchange that ran it (#1834).
-			refuseAgentScripts(args, ctx.config.revealSecretsToAgents, elementsArg(args));
+			refuseAgentScripts(args, ctx, elementsArg(args));
 			// An empty `url` names no target, the same as an absent one.
 			const url = str(args, "url") || undefined;
 			const linkId = str(args, "requestId");
@@ -254,10 +254,10 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (sendsSaved) appendAdHocElements(payload, args);
-			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config);
+			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			// By id the engine stamped it already; ad hoc it is only the History link.
 			if (linkId !== undefined) payload.requestId = linkId;

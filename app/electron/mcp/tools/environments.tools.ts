@@ -37,6 +37,7 @@ import {
 	removeVariablesInput,
 	variablesInput,
 } from "./variable-blobs.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const ENVIRONMENT_TOOLS: McpTool[] = [
 	{
@@ -44,7 +45,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. " +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: once this one is active they shadow every collection and global of the same name."
 			) +
@@ -72,14 +75,18 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			// Merged against nothing, which is what turns the string form into a
 			// stored entry and enforces "a new variable carries a value" - on a
 			// create every variable is new.
-			const merged = mergeVariables({}, patch, [], ctx.config.revealSecretsToAgents);
+			const merged = mergeVariables({}, patch, [], ctx);
 			// No `id`: the engine assigns every id it stores and answers a body
 			// carrying one with a 400 (issue #97), so the tool does not offer a
 			// field it would only have to refuse.
 			const payload: Record<string, unknown> = { name, variables: merged.variables };
 			const description = str(args, "description");
 			if (description !== undefined) payload.description = description;
-			return callEngine(() => ctx.client.createEnvironment(payload, signal), echoShape(ctx));
+			return callEngine(
+				ctx,
+				() => ctx.client.createEnvironment(payload, signal),
+				echoShape(ctx)
+			);
 		},
 	},
 	{
@@ -87,7 +94,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. " +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: while this environment is active they shadow every collection and global of the same name. Writing here to an inactive environment changes nothing a request resolves until activate_environment makes it current."
 			) +
@@ -127,14 +136,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				existing = ((await ctx.client.getEnvironment(environmentId, signal)) ??
 					{}) as Record<string, unknown>;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
-			const merged = mergeVariables(
-				existing.variables,
-				patch,
-				removals,
-				ctx.config.revealSecretsToAgents
-			);
+			const merged = mergeVariables(existing.variables, patch, removals, ctx);
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no
 			// default - omitting it would keep the stored name, but sending the
@@ -144,6 +148,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				variables: merged.variables,
 			};
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateEnvironment(environmentId, payload, signal),
 				echoShape(ctx)
 			);
@@ -157,7 +162,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. GUARDED: requires write access to be enabled in Vayu Settings. ' +
+			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. ' +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			precedenceNote(
 				"This is the one call that changes which tier answers without changing any value: the newly active environment shadows every collection and global of the same name, so a name can start resolving differently with nothing else edited."
 			) +
@@ -186,6 +193,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				// would be a second definition of the same rule. No `name` - absent
 				// on a PUT means keep.
 				return callEngine(
+					ctx,
 					() => ctx.client.updateEnvironment(environmentId, { isActive: true }, signal),
 					echoShape(ctx)
 				);
@@ -201,7 +209,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				active = rows.find((row) => isRecord(row) && row.isActive === true) as
 					Record<string, unknown> | undefined;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const activeId = active && typeof active.id === "string" ? active.id : undefined;
 			if (activeId === undefined) {
@@ -212,6 +220,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				);
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.updateEnvironment(activeId, { isActive: false }, signal),
 				echoShape(ctx)
 			);
@@ -222,7 +231,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Delete an environment and every variable in it. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the environment's name and how many variables go with it; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a saved request that referenced those variables keeps its {{placeholders}} with nothing to resolve them.",
+			"Delete an environment and every variable in it. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation: if the client supports elicitation the user is prompted with the environment's name and how many variables go with it; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a saved request that referenced those variables keeps its {{placeholders}} with nothing to resolve them.",
 		annotations: {
 			title: "Delete environment",
 			readOnlyHint: false,
@@ -249,7 +260,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 					return errorResult(`No environment with id "${environmentId}".`);
 				environment = found;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const subject = describeEnvironment(environmentId, environment);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -263,7 +274,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_environment again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteEnvironment(environmentId, signal));
+			return callEngine(ctx, () => ctx.client.deleteEnvironment(environmentId, signal));
 		},
 	},
 ];

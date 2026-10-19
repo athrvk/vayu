@@ -38,6 +38,7 @@ import {
 } from "./kit.js";
 import { describeRun, resolveBaseline } from "./run-housekeeping.js";
 import { runComparisonSchema } from "./output-schemas.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 /** The Export menu's HTML report: a file for a person, which an agent can neither save nor use. */
 const HTML_FORMAT = "html";
@@ -86,14 +87,16 @@ export const RUN_TOOLS: McpTool[] = [
 		},
 		inputSchema: { runId: z.string().describe("Run ID to stop.") },
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.stopRun(requireStr(args, "runId"), signal)),
+			callEngine(ctx, () => ctx.client.stopRun(requireStr(args, "runId"), signal)),
 	},
 	{
 		name: "set_run_baseline",
 		category: "write",
 		invalidates: ["run"],
 		description:
-			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. " +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			WITHHELD_RUN_OUTPUT_SENTENCE,
 		annotations: {
 			title: "Pin run as baseline",
@@ -129,7 +132,9 @@ export const RUN_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["run"],
 		description:
-			"Delete a run and everything recorded against it - its report, metrics, captured samples and step traces. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with what the run was, otherwise call once for a preview and again with `confirmed: true`. There is no undo. A run still executing is stopped first and deleted once its worker has settled; if it does not settle in time nothing is deleted and the call says to retry.",
+			"Delete a run and everything recorded against it - its report, metrics, captured samples and step traces. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation: if the client supports elicitation the user is prompted with what the run was, otherwise call once for a preview and again with `confirmed: true`. There is no undo. A run still executing is stopped first and deleted once its worker has settled; if it does not settle in time nothing is deleted and the call says to retry.",
 		annotations: {
 			title: "Delete run",
 			readOnlyHint: false,
@@ -156,7 +161,7 @@ export const RUN_TOOLS: McpTool[] = [
 				if (err instanceof EngineRequestError && err.status === 404) {
 					return errorResult(`No run with id "${runId}".`);
 				}
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			// The run row is run output: its snapshot `url` can carry a credential,
 			// and the preview is read by the model.
@@ -184,7 +189,7 @@ export const RUN_TOOLS: McpTool[] = [
 						`Run ${runId} is still stopping and was NOT deleted. It has been asked to stop - call delete_run again once it reports a terminal status (check with list_runs).`
 					);
 				}
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -216,7 +221,7 @@ export const RUN_TOOLS: McpTool[] = [
 			// before dispatch, but the handler is the layer that knows a
 			// non-positive limit reaches `slice(-limit)` and inverts the bound.
 			const limit = optionalPositiveInt(args, "limit", 10);
-			return callEngine(() =>
+			return callEngine(ctx, () =>
 				ctx.client.getLiveMetricsSnapshot(runId, limit, undefined, signal)
 			);
 		},
@@ -265,7 +270,7 @@ export const RUN_TOOLS: McpTool[] = [
 				// caller can fix, not an engine failure - it must not be reported
 				// as one.
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -315,7 +320,7 @@ export const RUN_TOOLS: McpTool[] = [
 					baseRunId = await resolveBaseline(runId, ctx, signal);
 				} catch (err) {
 					if (err instanceof ToolArgError) return errorResult(err.message);
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 			}
 			return callEngineForRunText(

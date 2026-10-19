@@ -11,16 +11,21 @@
  * bridge, and an export does not need one.
  */
 
-/**
- * Hand `text` to the browser as a file called `fileName`.
- *
- * @param mimeType - the Blob's type, e.g. `application/json`.
- */
-export function downloadTextFile(text: string, fileName: string, mimeType: string): void {
-	const url = URL.createObjectURL(new Blob([text], { type: mimeType }));
+/** Hand `blob` to the browser as a file called `fileName`, its bytes untouched. */
+export function downloadBlob(blob: Blob, fileName: string): void {
+	const url = URL.createObjectURL(blob);
 	const anchor = document.createElement("a");
 	anchor.href = url;
 	anchor.download = fileName;
 	anchor.click();
 	URL.revokeObjectURL(url);
+}
+
+/**
+ * Hand `text` to the browser as a file called `fileName`, encoded as UTF-8.
+ *
+ * @param mimeType - the Blob's type, e.g. `application/json`.
+ */
+export function downloadTextFile(text: string, fileName: string, mimeType: string): void {
+	downloadBlob(new Blob([text], { type: mimeType }), fileName);
 }

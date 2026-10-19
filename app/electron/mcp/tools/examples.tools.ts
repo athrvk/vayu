@@ -31,6 +31,7 @@ import {
 	exampleWritePayload,
 	MAX_EXAMPLES_BODY_BYTES,
 } from "./examples.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const EXAMPLE_TOOLS: McpTool[] = [
 	{
@@ -52,6 +53,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const requestId = requireStr(args, "requestId");
 			return callEngine(
+				ctx,
 				() => ctx.client.listRequestExamples(requestId, signal),
 				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))
 			);
@@ -62,7 +64,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. GUARDED: requires write access to be enabled in Vayu Settings. Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
+			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. " +
+			GUARDED_WRITE_SENTENCE +
+			". Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
 			" " +
 			WITHHELD_HEADER_SENTENCE,
 		annotations: {
@@ -104,6 +108,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			// imported rows must not be handed one it did not write (#588, #722).
 			payload.origin = "user";
 			return callEngine(
+				ctx,
 				() => ctx.client.createRequestExample(requestId, payload, signal),
 				echoShape(ctx)
 			);
@@ -114,7 +119,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Correct a saved example: its name, status, headers, body or content type. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
+			"Correct a saved example: its name, status, headers, body or content type. " +
+			GUARDED_WRITE_SENTENCE +
+			". Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
 			" " +
 			WITHHELD_HEADER_SENTENCE,
 		annotations: {
@@ -150,6 +157,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				);
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.updateRequestExample(requestId, exampleId, payload, signal),
 				echoShape(ctx)
 			);
@@ -160,7 +168,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["request"],
 		description:
-			"Delete one saved example from a request. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the example's name and what a mock server loses; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a mock server for this collection stops answering with it once it is restarted.",
+			"Delete one saved example from a request. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation: if the client supports elicitation the user is prompted with the example's name and what a mock server loses; otherwise call once for a preview, then again with `confirmed: true`. There is no undo, and a mock server for this collection stops answering with it once it is restarted.",
 		annotations: {
 			title: "Delete saved example",
 			readOnlyHint: false,
@@ -190,7 +200,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 					(row) => isRecord(row) && row.id === exampleId
 				) as Record<string, unknown> | undefined;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (!stored) {
 				return errorResult(`No example with id "${exampleId}" on request "${requestId}".`);
@@ -209,7 +219,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_request_example again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteRequestExample(requestId, exampleId, signal));
+			return callEngine(ctx, () =>
+				ctx.client.deleteRequestExample(requestId, exampleId, signal)
+			);
 		},
 	},
 ];

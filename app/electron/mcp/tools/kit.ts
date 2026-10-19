@@ -27,6 +27,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { EngineRequestError, EngineTimeoutError } from "../engine-client.js";
 import { presentCollection } from "../collection-shape.js";
+import { engineDownRemedy, settingRemedy } from "../remedy.js";
 import { runOutputShape, secretsShape, withholdRowSecrets } from "../withhold.js";
 import type { StartedRun, ToolContext, ToolResult } from "./contract.js";
 
@@ -65,7 +66,7 @@ export function withCaveat(result: ToolResult, caveat: string): ToolResult {
 	};
 }
 
-export function engineErrorResult(err: unknown): ToolResult {
+export function engineErrorResult(err: unknown, ctx: ToolContext): ToolResult {
 	if (err instanceof EngineRequestError) {
 		return errorResult(`Engine error (${err.status}): ${err.body || err.message}`);
 	}
@@ -89,7 +90,7 @@ export function engineErrorResult(err: unknown): ToolResult {
 	}
 	if (/ECONNREFUSED|fetch failed/i.test(msg)) {
 		return errorResult(
-			`Could not reach the Vayu engine. Make sure the Vayu app is running, then retry. (${msg})`
+			`Could not reach the Vayu engine. ${engineDownRemedy(ctx.host)}, then retry. (${msg})`
 		);
 	}
 	return errorResult(`Unexpected error: ${msg}`);
@@ -102,6 +103,7 @@ export function engineErrorResult(err: unknown): ToolResult {
  * where a passthrough tool can bound what it hands an agent (issue #767).
  */
 export async function callEngine(
+	ctx: ToolContext,
 	fn: () => Promise<unknown>,
 	shape?: (value: unknown) => unknown
 ): Promise<ToolResult> {
@@ -109,7 +111,7 @@ export async function callEngine(
 		const answer = await fn();
 		return jsonResult(shape ? shape(answer) : answer);
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 }
 
@@ -175,7 +177,7 @@ async function withheldRunAnswer(
 	try {
 		answer = await fn();
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 	const withhold = await runOutputShape(ctx, options.signal, [options.auth]);
 	return render(withhold(answer));
@@ -314,7 +316,7 @@ export function optionalOffset(args: Record<string, unknown>, key: string): numb
 export function writesDisabled(ctx: ToolContext): ToolResult | null {
 	if (ctx.config.allowWrites) return null;
 	return errorResult(
-		"Writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+		`Writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`
 	);
 }
 

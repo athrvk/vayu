@@ -77,6 +77,25 @@ describe("response body truncation notice", () => {
 		).toBeInTheDocument();
 	});
 
+	it("counts a stored base64 slice by its bytes, not its text (#2458)", () => {
+		response = baseResponse({
+			headers: { "content-type": "image/png" },
+			body: "",
+			bodyType: "binary",
+			rawBytes: { data: new Uint8Array(2048), isText: false },
+			bodyTruncated: true,
+			bodyBytes: 5_242_880,
+		});
+
+		render(
+			<TooltipProvider>
+				<ResponseViewer />
+			</TooltipProvider>
+		);
+
+		expect(screen.getByText(/Only the first 2\.0 KB of 5\.0 MB was kept/)).toBeInTheDocument();
+	});
+
 	it("shows no notice for an untruncated response", () => {
 		response = baseResponse();
 

@@ -12,6 +12,7 @@
  */
 
 import type { RunResultStreamEvents } from "@/types/domain";
+import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
 
 // Extended body type to support more response formats
 export type BodyType =
@@ -33,6 +34,8 @@ export type ViewMode = "pretty" | "raw" | "preview";
 export interface ResponseData {
 	body: string;
 	bodyRaw?: string; // Raw response body from server (used for raw view mode)
+	/** `ResponseState.rawBytes`: the exact bytes of a body the engine sent as base64. */
+	rawBytes?: ResponseBytes;
 	headers: Record<string, string>;
 	status?: number;
 	statusText?: string;
@@ -52,6 +55,11 @@ export interface RequestData {
 export interface ResponseBodyProps {
 	body: string;
 	bodyRaw?: string; // Raw response body from server (used for raw view mode)
+	/**
+	 * `ResponseState.rawBytes`. Its `isText` is the funnel's verdict, and this
+	 * component takes it rather than sniffing one of its own.
+	 */
+	rawBytes?: ResponseBytes;
 	headers: Record<string, string>;
 	className?: string;
 }

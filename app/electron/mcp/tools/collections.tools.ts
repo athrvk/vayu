@@ -39,6 +39,7 @@ import {
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
 import { collectionScriptInput, elementsInput, storedAuthInput } from "./input-schemas.js";
 import { type CascadeScope, describeCascade, readCascadeScope } from "./cascade.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const COLLECTION_TOOLS: McpTool[] = [
 	{
@@ -46,7 +47,9 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
+			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. " +
+			GUARDED_WRITE_SENTENCE +
+			". Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			) +
@@ -91,12 +94,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			// create every variable is new, which is what turns the string form
 			// into a stored entry and enforces "a new variable carries a value".
 			if (patch !== undefined)
-				payload.variables = mergeVariables(
-					{},
-					patch,
-					[],
-					ctx.config.revealSecretsToAgents
-				).variables;
+				payload.variables = mergeVariables({}, patch, [], ctx).variables;
 			const elementsGiven = elementsArg(args);
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
@@ -117,6 +115,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				if (elements.length > 0) payload.elements = elements;
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.createCollection(payload, signal),
 				collectionEchoShape(ctx)
 			);
@@ -127,7 +126,9 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. GUARDED: requires write access to be enabled in Vayu Settings. Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth and elements each replace the stored block/list whole. This is not a move - to re-parent a collection, use move_item. " +
+			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. " +
+			GUARDED_WRITE_SENTENCE +
+			". Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth and elements each replace the stored block/list whole. This is not a move - to re-parent a collection, use move_item. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			) +
@@ -204,15 +205,10 @@ export const COLLECTION_TOOLS: McpTool[] = [
 					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
 						{}) as Record<string, unknown>;
 				} catch (err) {
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 				if (patch !== undefined || removals.length > 0) {
-					const merged = mergeVariables(
-						existing.variables,
-						patch,
-						removals,
-						ctx.config.revealSecretsToAgents
-					);
+					const merged = mergeVariables(existing.variables, patch, removals, ctx);
 					payload.variables = merged.variables;
 					absentRemovals = merged.absentRemovals;
 				}
@@ -228,6 +224,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				payload.elements = elementsGiven;
 			}
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateCollection(collectionId, payload, signal),
 				collectionEchoShape(ctx)
 			);
@@ -241,7 +238,9 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection"],
 		description:
-			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out.",
+			"Delete a collection AND EVERYTHING INSIDE IT - every nested sub-collection and every saved request in them. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation: if the client supports elicitation the user is prompted with the number of sub-collections and requests this destroys; otherwise call once to see those counts, then again with `confirmed: true`. It goes to Vayu's Trash rather than disappearing outright - list_trash shows it there, and restore_trash_entry puts it back, until the retention window (`trashRetentionDays`, 30 days by default) runs out.",
 		annotations: {
 			title: "Delete collection",
 			readOnlyHint: false,
@@ -264,7 +263,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				scope = await readCascadeScope(ctx.client, collectionId, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const cascade = describeCascade(scope);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -278,7 +277,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_collection again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			const result = await callEngine(() =>
+			const result = await callEngine(ctx, () =>
 				ctx.client.deleteCollection(collectionId, signal)
 			);
 			// The counts describe what was destroyed, so they belong only on a
