@@ -16,7 +16,7 @@
  * syntax error.
  */
 
-import { prepareRequest } from "./prepare";
+import { headerEncodingNotes, prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A JS string literal for this value. `JSON.stringify` *is* the escape rule. */
@@ -29,7 +29,7 @@ export function generateFetch(
 	options: CodegenOptions = {}
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
-	const notes = [...prepared.notes];
+	const notes = [...prepared.notes, ...headerEncodingNotes(prepared, "fetch")];
 	// Said rather than emitted: this target's stock idiom buffers the whole
 	// body, so a snippet that looked like the request would simply hang on an
 	// endless stream. A stated limit is better than a command that stalls.
