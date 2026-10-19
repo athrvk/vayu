@@ -151,12 +151,23 @@ jobs:
           keys=() commits=()
           for f in "${files[@]}"; do
             p=".github/workflows/$f"
-            key=$(grep -oE '^[[:space:]]*key: vcpkg-.*$' "$p" | head -1 \
-                  | sed -E 's/^[[:space:]]*key: //; s/vcpkg-Linux-/vcpkg-\$\{\{ runner.os \}\}-/')
-            commit=$(grep -oE "VCPKG_COMMIT: '[0-9a-f]{40}'" "$p" | head -1)
+            # Every key line and every pin in the file, deduplicated: a
+            # workflow with two engine jobs (release.yml builds the macOS x64
+            # slice's tests in a job of its own) must agree with itself as well
+            # as with the others, or the second job's line is the one a bump
+            # forgets and nothing here would read it.
+            key=$(grep -oE '^[[:space:]]*key: vcpkg-.*$' "$p" \
+                  | sed -E 's/^[[:space:]]*key: //; s/vcpkg-Linux-/vcpkg-\$\{\{ runner.os \}\}-/' \
+                  | sort -u)
+            commit=$(grep -oE "VCPKG_COMMIT: '[0-9a-f]{40}'" "$p" | sort -u)
             # A guard that matched nothing would pass forever. Fail instead.
             if [ -z "$key" ] || [ -z "$commit" ]; then
               echo "::error::$p has no vcpkg cache key line or no VCPKG_COMMIT - this guard just stopped guarding it." >&2
+              exit 1
+            fi
+            if [ "$(printf '%s\n' "$key" | wc -l)" -ne 1 ] || [ "$(printf '%s\n' "$commit" | wc -l)" -ne 1 ]; then
+              echo "::error::$p disagrees with itself: its vcpkg cache key lines or its VCPKG_COMMIT pins are not all the same." >&2
+              printf '%s\n' "$key" "$commit" >&2
               exit 1
             fi
             keys+=("$key"); commits+=("$commit")
