@@ -55,25 +55,45 @@ void request_stop () {
     g_wake.notify_all ();
 }
 
-vayu::platform::LockHandle g_lock_handle = vayu::platform::INVALID_LOCK_HANDLE;
+/// The single-instance lock, released when this goes out of scope.
+///
+/// `run_daemon` declares it before the `Database`, so locals destroyed in
+/// reverse order close the database (its checkpoint included) before the lock
+/// is released: a successor that takes the lock never meets this engine's
+/// connection at its startup probe (issue #2420). An early return or a
+/// throw releases it the same way.
+class InstanceLock {
+    public:
+    InstanceLock () = default;
+    ~InstanceLock () {
+        vayu::platform::release_file_lock (handle_);
+    }
+    InstanceLock (const InstanceLock&)            = delete;
+    InstanceLock& operator= (const InstanceLock&) = delete;
+    InstanceLock (InstanceLock&&)                 = delete;
+    InstanceLock& operator= (InstanceLock&&)      = delete;
 
-bool acquire_lock (const std::string& lock_path) {
-    if (!vayu::platform::acquire_file_lock (lock_path, g_lock_handle)) {
-        vayu::utils::log_error ("startup",
-        "Error: Another instance of Vayu Engine is "
-        "already running, or failed to create lock "
-        "file: " +
-        lock_path);
-        return false;
+    bool acquire (const std::string& lock_path) {
+        if (!vayu::platform::acquire_file_lock (lock_path, handle_)) {
+            vayu::utils::log_error ("startup",
+            "Error: Another instance of Vayu Engine is "
+            "already running, or failed to create lock "
+            "file: " +
+            lock_path);
+            return false;
+        }
+
+        if (!vayu::platform::write_pid_to_lock (handle_)) {
+            vayu::utils::log_warning ("startup", "Failed to write PID to lock file");
+            // Not fatal, continue anyway
+        }
+
+        return true;
     }
 
-    if (!vayu::platform::write_pid_to_lock (g_lock_handle)) {
-        vayu::utils::log_warning ("startup", "Failed to write PID to lock file");
-        // Not fatal, continue anyway
-    }
-
-    return true;
-}
+    private:
+    vayu::platform::LockHandle handle_ = vayu::platform::INVALID_LOCK_HANDLE;
+};
 
 /// The usage `-h` / `--help` answers with. Printed here rather than by the
 /// parse, which reports the request and owns no output stream (#1031).
@@ -143,7 +163,8 @@ int run_daemon (std::span<char* const> args) {
 
     // Check for single instance
     std::string lock_path = vayu::platform::path_join (data_dir, "vayu.lock");
-    if (!acquire_lock (lock_path)) {
+    InstanceLock instance_lock;
+    if (!instance_lock.acquire (lock_path)) {
         return 1;
     }
 
@@ -277,18 +298,16 @@ int run_daemon (std::span<char* const> args) {
     // while both were destroyed underneath them.
     //
     // The order below is load-bearing: workers joined, then curl's global
-    // teardown, then `server` / `run_manager` / `db` at scope exit.
+    // teardown, then `server` / `run_manager` / `db` at scope exit, and the
+    // instance lock last of all, after `db` has closed (see `InstanceLock`).
     run_manager.shutdown ();
 
-    // Before the lock goes: a snapshot still reading the database must not
-    // overlap the next engine's start. Interrupted rather than waited out; the
-    // previous backup stands.
+    // A snapshot still reading the database must not overlap the next
+    // engine's start. Interrupted rather than waited out; the previous backup
+    // stands.
     db.finish_recovery_backup_refresh ();
 
     vayu::http::global_cleanup ();
-
-    // Release lock file
-    vayu::platform::release_file_lock (g_lock_handle);
 
     vayu::utils::log_info ("shutdown", "Goodbye!");
 
@@ -309,16 +328,13 @@ int main (int argc, char* argv[]) {
         // an escape from `main` aborts with no message and a status no caller
         // can tell from a crash.
         //
-        // Honest about what this is now worth: #1028 and #1031 closed the
-        // argument-parsing route, which was the one case with a demonstration
-        // behind it (`--port notanumber` used to abort with 134). No input
-        // reaching this handler is known today. It stays because three
-        // constructions in `run_daemon` still throw where nothing catches -
-        // `Logger::init`, the `Database` object itself (the `try` below it
-        // guards the *next* call, not the constructor) and `Server` - and
-        // because `cli.cpp` has held this invariant for far longer than any
-        // one reachable input justified. Defence in depth, said plainly,
-        // rather than a fix advertised by a bug it no longer has.
+        // The `Database` constructor's refusals land here on purpose (the
+        // `try` in `run_daemon` guards `init`, not the constructor): a
+        // database written by a newer schema (#1514) and one that could not
+        // be examined because it is locked, the disk is full or read-only
+        // (#2420). Each message names the path and what to do, and this is
+        // what puts it on stderr with exit status 1. `Logger::init` and
+        // `Server` also throw where nothing else catches.
         std::cerr << "vayu-engine: " << e.what () << "\n";
         vayu::utils::log_error ("startup", std::string ("vayu-engine: ") + e.what ());
         return 1;

@@ -212,6 +212,22 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `script.*` element before #1514's pipeline existed; now that it does, the
   two columns are dead data and this is the real cut-over the #1513 comment
   above once deferred.
+- **Only a corrupt database reaches recovery** (#2420). `probe_database`
+  answers a `ProbeResult` (`vayu/db/recovery.hpp`), and
+  `classify_probe_failure` is the one place a failure is sorted: `SQLITE_CORRUPT`
+  and `SQLITE_NOTADB` in sqlite_orm's SQLite error category are corrupt, and
+  anything else (a lock, a full disk, a read-only directory, a filesystem
+  error, a failed migration step) is unavailable, which the constructor throws
+  as `unavailable_database_message` with every file untouched - a `.bak` that
+  cannot be examined stops `recover_database` the same way. Every connection
+  the constructor opens carries its busy timeout before its first statement:
+  `open_workspace_connection` takes one, and `Impl` sets it first in `on_open`
+  and calls `open_forever ()` before its pragmas, because sqlite_orm re-applies a
+  remembered `journal_mode` to a new connection ahead of `on_open`. The
+  timeout is `BUSY_TIMEOUT_MS`; `Database (path, startup_busy_timeout)` lowers
+  it for a test and `applied_busy_timeout_ms ()` reads it back. `daemon.cpp`
+  releases the instance lock through an `InstanceLock` declared before the
+  `Database`, so the database closes first (`platform_test.cpp` scans for it).
 - **Any change to `make_vayu_storage`'s mapping bumps `SCHEMA_VERSION`**
   (`vayu/db/database.hpp`, #1492), an added nullable column included:
   `sync_schema ()` runs without `preserve`, so an older engine would rebuild

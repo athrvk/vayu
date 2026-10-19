@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -33,7 +34,12 @@ using namespace sqlite_orm;
 
 namespace vayu::db {
 
-Database::Database (const std::string& db_path) {
+Database::Database (const std::string& db_path)
+: Database (db_path,
+  std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS)) {
+}
+
+Database::Database (const std::string& db_path, std::chrono::milliseconds startup_busy_timeout) {
     // Refused outright, before anything else - a database written by a newer
     // engine is not corrupt, and letting it fall into the recovery branch
     // below would quarantine a perfectly good (newer) file and silently start
@@ -41,15 +47,28 @@ Database::Database (const std::string& db_path) {
     // version gate exists to prevent. This call is deliberately not inside
     // `probe_database`'s try/catch: the exception must reach the daemon's own
     // startup failure path, naming both versions, rather than being read here
-    // as "will not open" and handed to recovery.
-    migrate_before_sync (db_path);
+    // as corruption and handed to recovery.
+    migrate_before_sync (db_path, startup_busy_timeout);
 
     fs::path db_file (db_path);
     fs::path backup_file = db_file;
     backup_file += ".bak";
 
-    // 1. Validate current database
-    const bool validated = has_sqlite_header (db_file) && probe_database (db_path);
+    const auto probe = [startup_busy_timeout] (const std::string& path) {
+        return probe_database (path, startup_busy_timeout);
+    };
+
+    // 1. Validate current database. A file SQLite would not even recognise
+    // is corrupt without asking it (`has_sqlite_header` says why).
+    const ProbeResult found = has_sqlite_header (db_file) ?
+    probe (db_path) :
+    ProbeResult{ ProbeResult::Verdict::Corrupt, 0, "no SQLite header" };
+    // Not corrupt, only not examinable: refused the way the version gate
+    // refuses, with every file left as it was (issue #2420).
+    if (found.verdict == ProbeResult::Verdict::Unavailable) {
+        throw std::runtime_error (unavailable_database_message (db_path, found));
+    }
+    const bool validated = found.verdict == ProbeResult::Verdict::Valid;
     if (validated) {
         // 2. The database is valid, so the backup for *next* time may be
         // refreshed from it - only ever from a database that validated, so a
@@ -61,7 +80,7 @@ Database::Database (const std::string& db_path) {
         // up, as a consistent snapshot rather than a file copy.
         vayu::utils::log_debug ("db", "Database validation successful");
     } else {
-        recover_database (db_file, backup_file, db_path, probe_database);
+        recover_database (db_file, backup_file, db_path, probe);
     }
 
     // 3. Final Initialization
@@ -69,8 +88,8 @@ Database::Database (const std::string& db_path) {
     // Idempotent by this point in every reachable case (the branch above
     // already migrated whichever file `db_path` now holds), kept here too as
     // the same defence in depth every `sync_schema ()` call gets.
-    migrate_before_sync (db_path);
-    impl_ = std::make_unique<Impl> (db_path);
+    migrate_before_sync (db_path, startup_busy_timeout);
+    impl_ = std::make_unique<Impl> (db_path, startup_busy_timeout);
     // sync_schema might throw if restore failed or backup was also bad
     impl_->storage.sync_schema ();
     impl_->recovery_backup_due = validated;
