@@ -31,6 +31,35 @@ function unwrapIpcError(error: unknown): Error {
 }
 
 /**
+ * The channel a picked file's path is reported to main on (#2356). Main's
+ * spelling is `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this
+ * CommonJS script cannot import; `preload-grant-channel.test.ts` holds the two
+ * together.
+ */
+const FILE_PICKED_CHANNEL = "file:picked";
+
+/**
+ * The path `webUtils` gives a `File`, reported to main as one a person picked.
+ *
+ * The report is what makes the engine send the file (main records it with
+ * `POST /file-grants`), so it must carry only a path Chromium vouches for: a
+ * `File` reaches the page only through a file chooser or a drop, and
+ * `getPathForFile` answers "" for one the page built itself. The channel is
+ * therefore sent from here and nowhere else, never with a string a caller
+ * passed in; `preload-grant-channel.test.ts` fails if any other send appears.
+ */
+function pathOfPickedFile(file: File): string {
+	let picked: string;
+	try {
+		picked = webUtils.getPathForFile(file);
+	} catch {
+		return "";
+	}
+	if (picked) ipcRenderer.send(FILE_PICKED_CHANNEL, picked);
+	return picked;
+}
+
+/**
  * The engine's port for this session, which the main process appends to this
  * renderer's command line (`additionalArguments` in main.ts, #2118). Null when
  * it is absent or not a port; the renderer falls back to its default then.
@@ -313,26 +342,43 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		fields?: Record<string, unknown>;
 	}): void => ipcRenderer.send("log:record", record),
 
-	// The absolute path of a `File` the user picked, for a multipart file part:
+	// The absolute path of a `File` the user picked or dropped, for a body file:
 	// the engine opens the file itself, so the renderer needs its path and never
-	// its bytes. `File.path` was removed in Electron 32 and `webUtils` is the
-	// replacement - it is synchronous and local to the preload, so this is not
-	// an IPC channel and grants the renderer no ability to name paths of its
-	// own. Empty when the object is not a real file (a drag-and-drop of remote
-	// content), which the caller reports rather than sending a phantom path.
-	getFilePath: (file: File): string => {
-		try {
-			return webUtils.getPathForFile(file);
-		} catch {
-			return "";
-		}
-	},
+	// its bytes. Empty when the object is not a real file (a drag-and-drop of
+	// remote content), which the caller reports rather than sending a phantom
+	// path. A path is also reported to main as picked (#2356) - see
+	// `pathOfPickedFile` below for why that cannot be used to name one.
+	getFilePath: (file: File): string => pathOfPickedFile(file),
 
-	// The system folder picker, for Settings > Files and the body editor's
-	// "Allow folder...". Resolves to the chosen folder, or null on cancel; the
-	// engine stores and re-checks it (`POST /file-roots`).
-	selectDirectory: (options?: { defaultPath?: string; title?: string }): Promise<string | null> =>
-		ipcRenderer.invoke("file:selectDirectory", options),
+	// The system folder picker, for Settings > Files, the body editor's "Allow
+	// folder..." and the import preview. Main allows the chosen folder itself
+	// (`POST /file-roots` with the grant secret, #2356) and answers what the
+	// engine said, so the renderer never names a folder to allow. The shape
+	// mirrors `AllowFolderReply` in electron/file-ipc.ts, inlined because this
+	// file is a CommonJS script and must not grow imports.
+	allowFolder: (options?: {
+		defaultPath?: string;
+		title?: string;
+	}): Promise<
+		| { outcome: "cancelled" }
+		| {
+				outcome: "done";
+				path: string;
+				value: { id: string; path: string; createdAt: number };
+		  }
+		| { outcome: "refused"; path: string; status: number; code: string; message: string }
+		| { outcome: "unreachable"; path: string; message: string }
+	> => ipcRenderer.invoke("file:allowFolder", options),
+
+	// Stop allowing a folder, by the id the engine gave its row. Same reply
+	// family as `allowFolder` (`RemoveFolderReply` in electron/file-ipc.ts).
+	removeAllowedFolder: (
+		id: string
+	): Promise<
+		| { outcome: "done"; value: null }
+		| { outcome: "refused"; status: number; code: string; message: string }
+		| { outcome: "unreachable"; message: string }
+	> => ipcRenderer.invoke("file:removeAllowedFolder", id),
 
 	// A binary body file's size for the editor's file line - never its bytes:
 	// the engine reads the file at send time. Null for a relative path, a

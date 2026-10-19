@@ -64,7 +64,7 @@ vi.mock("@/queries", () => ({
 	useUpdateConfigMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	// Settings > Files lists and edits the engine's allowed folders.
 	useFileRootsQuery: () => ({ data: [], isLoading: false, isError: false }),
-	useCreateFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useAllowChosenFolderMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteFileRootMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	// Network & connectivity's client-certificate registry, one of the engine
 	// category Cards rendered below.

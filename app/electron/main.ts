@@ -94,6 +94,8 @@ import {
 import { registerLogIpc } from "./log-ipc.js";
 import { registerFileIpc } from "./file-ipc.js";
 import { createFileTrustClient } from "./file-trust-client.js";
+import { createFileGrants, registerFilePickedIpc } from "./file-grants.js";
+import { isFromAppMainFrame, type IpcSenderLike } from "./ipc-sender.js";
 /*
  * MCP is imported by weight, not through its barrel.
  *
@@ -224,6 +226,15 @@ const appFocus = new AppFocusStore();
  * The sidecar hands it each spawned engine's secret; see file-trust-client.ts.
  */
 const fileTrust = createFileTrustClient({ origin: engineOrigin });
+/**
+ * The files a person picked, recorded with the engine and copied here for the
+ * main-process readers of a renderer-named path (#2357). Fed only by the
+ * preload's picked-file report and the OS open-file door; see file-grants.ts.
+ */
+const fileGrants = createFileGrants({
+	client: fileTrust,
+	log: (msg, fields) => appLogger().warn("ipc", msg, fields),
+});
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -281,6 +292,7 @@ const openIntents = createOpenIntents({
 		return true;
 	},
 	focus: focusMainWindow,
+	grant: (filePath) => void fileGrants.record(filePath),
 });
 
 /**
@@ -902,9 +914,18 @@ function publishEnginePort(port: number): void {
 	appLogger().info("main", "Engine endpoint for this session", { url: engineOrigin() });
 }
 
-/** A spawned engine's grant secret, for the one module that sends it (#2356). */
+/**
+ * A spawned engine's grant secret, for the one module that sends it (#2356).
+ * A new engine is also when the grants copy can have gone stale.
+ */
 function receiveGrantSecret(secret: string): void {
 	fileTrust.setSecret(secret);
+	fileGrants.invalidate();
+}
+
+/** Whether an IPC message came from the app window's top-level document. */
+function isAppFrame(event: IpcSenderLike): boolean {
+	return isFromAppMainFrame(event, liveWindow());
 }
 
 async function startEngine() {
@@ -917,6 +938,9 @@ async function startEngine() {
 		);
 		await engineSidecar.start();
 		appLogger().info("main", "Engine started successfully", { url: engineSidecar.getApiUrl() });
+		// Sends a document the OS handed over before the engine listened, and
+		// reads the grants earlier launches recorded.
+		void fileGrants.sync();
 		// Read once per launch: the file floor governs every record buffered
 		// before this resolves, and every one after.
 		void applyFloorFromEngine(appLogger(), engineSidecar.getApiUrl());
@@ -1129,6 +1153,7 @@ async function restartEngine(): Promise<{ success: boolean; error?: string }> {
 	try {
 		await engineSidecar.restart();
 		appLogger().info("main", "Engine restarted successfully");
+		void fileGrants.sync();
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1545,13 +1570,25 @@ function setupIpcHandlers() {
 	});
 
 	// The folder picker behind Settings > Files and the body editor's "Allow
-	// folder...", and the size-only stat behind its file line. Neither reads a
-	// file's contents; see file-ipc.ts.
+	// folder...", which allows what was chosen with the grant secret (#2356),
+	// and the size-only stat behind the body editor's file line. Nothing here
+	// reads a file's contents; see file-ipc.ts.
 	registerFileIpc(ipcMain, {
 		showOpenDialog: (options) => {
 			const win = liveWindow();
 			return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
 		},
+		createFileRoot: (folder) => fileTrust.createFileRoot(folder),
+		deleteFileRoot: (id) => fileTrust.deleteFileRoot(id),
+		isAppFrame,
+	});
+
+	// The preload's report of a file the user picked or dropped, recorded with
+	// the engine so a body naming it is sent (#2356). See file-grants.ts.
+	registerFilePickedIpc(ipcMain, {
+		grants: fileGrants,
+		isAppFrame,
+		log: (msg) => appLogger().warn("ipc", msg),
 	});
 }
 

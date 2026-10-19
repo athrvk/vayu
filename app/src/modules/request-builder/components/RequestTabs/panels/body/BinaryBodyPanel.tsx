@@ -90,7 +90,7 @@ export default function BinaryBodyPanel() {
 	const variables = useVariableSupport();
 	const file: FileRef = request.binaryFile ?? noFile();
 	const { data: roots = [] } = useFileRootsQuery();
-	const { allow, chooseAndAllow, isPending: allowing } = useAllowFolder();
+	const { chooseAndAllow, isPending: allowing } = useAllowFolder();
 	const [dragging, setDragging] = useState(false);
 
 	const setFile = useCallback((next: FileRef) => updateField("binaryFile", next), [updateField]);
@@ -151,11 +151,6 @@ export default function BinaryBodyPanel() {
 		: undefined;
 	const needsTrust = Boolean(src.trim()) && (file.unresolved === true || templated);
 	const contentType = binaryContentType(request.headers, file);
-
-	const allowFolder = () => {
-		if (chooseAndAllow) void chooseAndAllow(folder || undefined);
-		else if (folder) void allow(folder);
-	};
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -230,12 +225,12 @@ export default function BinaryBodyPanel() {
 										Relink
 									</Button>
 								)}
-								{(chooseAndAllow || folder) && (
+								{chooseAndAllow && (
 									<Button
 										type="button"
 										size="sm"
 										variant="ghost"
-										onClick={allowFolder}
+										onClick={() => void chooseAndAllow(folder || undefined)}
 										disabled={allowing}
 									>
 										Allow folder...

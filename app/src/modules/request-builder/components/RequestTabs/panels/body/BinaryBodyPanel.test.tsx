@@ -29,11 +29,11 @@ import type { RequestBuilderContextValue } from "../../../../types";
 import { createDefaultRequestState } from "../../../../utils/request-state";
 
 const roots: FileRoot[] = [];
-const createRoot = vi.fn();
+const allowRoot = vi.fn();
 
 vi.mock("@/queries", () => ({
 	useFileRootsQuery: () => ({ data: roots }),
-	useCreateFileRootMutation: () => ({ mutateAsync: createRoot, isPending: false }),
+	useAllowChosenFolderMutation: () => ({ mutateAsync: allowRoot, isPending: false }),
 }));
 vi.mock("@/stores", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/stores")>()),
@@ -86,7 +86,7 @@ function pickThroughInput(container: HTMLElement, file: File) {
 beforeEach(() => {
 	updateField = vi.fn();
 	roots.length = 0;
-	createRoot.mockReset();
+	allowRoot.mockReset();
 });
 
 afterEach(() => {
@@ -167,6 +167,7 @@ describe("choosing the file", () => {
 
 describe("the unresolved banner", () => {
 	it("offers Relink and Allow folder for a path nobody chose here", () => {
+		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
 		expect(screen.getByText("Not chosen on this machine")).toBeInTheDocument();
@@ -198,28 +199,33 @@ describe("the unresolved banner", () => {
 	});
 
 	it("Allow folder opens the picker at the file's folder inside Electron", async () => {
-		const selectDirectory = vi.fn(async () => "/imported/data");
-		vi.stubGlobal("electronAPI", { selectDirectory });
-		createRoot.mockResolvedValue({ id: "r1", path: "/imported/data", createdAt: 1 });
+		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
+		allowRoot.mockResolvedValue({
+			outcome: "done",
+			path: "/imported/data",
+			value: { id: "r1", path: "/imported/data", createdAt: 1 },
+		});
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
 		fireEvent.click(screen.getByRole("button", { name: "Allow folder..." }));
 
-		await waitFor(() => expect(createRoot).toHaveBeenCalledWith("/imported/data"));
-		expect(selectDirectory).toHaveBeenCalledWith({
-			title: "Allow a folder",
-			defaultPath: "/imported/data",
-		});
+		await waitFor(() =>
+			expect(allowRoot).toHaveBeenCalledWith({
+				title: "Allow a folder",
+				defaultPath: "/imported/data",
+			})
+		);
 	});
 
-	it("Allow folder allows the file's folder directly where there is no picker", async () => {
+	// #2356: the renderer cannot allow a folder it names, so with no picker
+	// there is nothing to offer. Relink still is.
+	it("offers no Allow folder where there is no picker", () => {
 		vi.stubGlobal("electronAPI", undefined);
-		createRoot.mockResolvedValue({ id: "r1", path: "/imported/data", createdAt: 1 });
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
-		fireEvent.click(screen.getByRole("button", { name: "Allow folder..." }));
-
-		await waitFor(() => expect(createRoot).toHaveBeenCalledWith("/imported/data"));
+		expect(screen.queryByRole("button", { name: "Allow folder..." })).toBeNull();
+		expect(screen.getByRole("button", { name: "Relink" })).toBeInTheDocument();
+		expect(allowRoot).not.toHaveBeenCalled();
 	});
 });
 

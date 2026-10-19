@@ -28,7 +28,10 @@ anything.
 Which files a request body may send from disk (the folders you allow and the
 files you pick) changes only through the app: those writes need a secret the
 app hands the engine at start and keeps from its UI window, so another local
-caller of the API, the CLI or an MCP agent included, cannot widen them.
+caller of the API, the CLI or an MCP agent included, cannot widen them. The
+app's main process makes the writes, and only for a folder you chose in the
+system folder picker or a file that reached the window through a file dialog
+or a drop; the UI window cannot name either.
 
 ## Renderer posture
 

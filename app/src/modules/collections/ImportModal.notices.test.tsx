@@ -229,6 +229,7 @@ describe("the import preview's notices", () => {
 describe("the import preview's file folders", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
 		useImportModalStore.setState({ isOpen: true });
 	});
 
@@ -266,11 +267,15 @@ describe("the import preview's file folders", () => {
 			],
 		});
 
-	it("lists each folder once, and Allow folder posts it", async () => {
+	it("lists each folder once, and Allow folder opens the picker there", async () => {
 		vi.spyOn(apiService, "getFileRoots").mockResolvedValue([]);
-		const create = vi
-			.spyOn(apiService, "createFileRoot")
-			.mockResolvedValue({ id: "r1", path: "/home/me/fixtures", createdAt: 1 });
+		// The bridge's presence is what offers the action; the call is spied below.
+		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
+		const allow = vi.spyOn(apiService, "allowChosenFolder").mockResolvedValue({
+			outcome: "done",
+			path: "/home/me/fixtures",
+			value: { id: "r1", path: "/home/me/fixtures", createdAt: 1 },
+		});
 		stubParse(withFiles);
 		preview();
 
@@ -285,7 +290,22 @@ describe("the import preview's file folders", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Allow folder /home/me/fixtures" }));
 
-		await waitFor(() => expect(create).toHaveBeenCalledWith({ path: "/home/me/fixtures" }));
+		// The folder is where the picker opens; main allows what is chosen there.
+		await waitFor(() =>
+			expect(allow).toHaveBeenCalledWith({
+				title: "Allow a folder",
+				defaultPath: "/home/me/fixtures",
+			})
+		);
+	});
+
+	it("offers no Allow folder outside Electron, where nothing can allow one", async () => {
+		vi.spyOn(apiService, "getFileRoots").mockResolvedValue([]);
+		stubParse(withFiles);
+		preview();
+
+		await screen.findByRole("list", { name: "Folders the imported files are in" });
+		expect(screen.queryByRole("button", { name: /Allow folder/ })).toBeNull();
 	});
 
 	it("marks a folder already allowed instead of offering it again", async () => {

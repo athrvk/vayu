@@ -1870,11 +1870,15 @@ click; refetching either removes it or proves it real.
   in Settings > Network & connectivity. The mutations invalidate rather than
   patching: the engine refuses a second entry for a host+port pair already
   taken, so the list is the authority on what a new entry may claim
-- **`useFileRootsQuery()`** and the create / delete mutations
-  (`queries/file-roots.ts`) - the folders a request-body file may be sent from
-  without a per-file pick, read by Settings > Files, the binary body editor and
-  the import preview. The create invalidates rather than appending: the engine
-  stores the canonical path, which can differ from the one picked
+- **`useFileRootsQuery()`**, **`useAllowChosenFolderMutation()`** and
+  **`useDeleteFileRootMutation()`** (`queries/file-roots.ts`) - the folders a
+  request-body file may be sent from without a per-file pick, read by Settings >
+  Files, the binary body editor and the import preview. The list is a plain
+  `GET`; both writes go through the main process, which holds the engine's
+  grant secret (#2356): the allow mutation takes where the folder picker opens,
+  never a folder, and resolves with the engine's answer (`cancelled` included).
+  An allow that lands invalidates rather than appending: the engine stores the
+  canonical path, which can differ from the one picked
 
 **Mutations:**
 - **`useCreateEnvironmentMutation()`**

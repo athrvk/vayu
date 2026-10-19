@@ -11,6 +11,7 @@
 
 import type { ThemeSource, ColorScheme } from "./ui";
 import type {
+	FileRoot,
 	McpDataChangedEvent,
 	McpSafetyConfig,
 	McpStatus,
@@ -200,6 +201,27 @@ export interface ContextMenuTarget {
 export type ContextMenuCommand =
 	{ type: "import-command"; text: string } | { type: "edit-variable"; name: string };
 
+/**
+ * An engine refusal carried across the IPC hop: its status, code and message,
+ * so a 409 still reads as "already there". Mirrors the `refused` and
+ * `unreachable` members of `EngineWrite` in `electron/file-trust-client.ts`.
+ */
+type EngineWriteFailure =
+	| { outcome: "refused"; status: number; code: string; message: string }
+	| { outcome: "unreachable"; message: string };
+
+/**
+ * What `allowFolder` resolves to: the user cancelled, or the engine's answer to
+ * allowing the folder they chose, which is `path`. Mirrors `AllowFolderReply`
+ * in `electron/file-ipc.ts`.
+ */
+export type AllowFolderReply =
+	| { outcome: "cancelled" }
+	| ({ path: string } & ({ outcome: "done"; value: FileRoot } | EngineWriteFailure));
+
+/** What `removeAllowedFolder` resolves to. Mirrors `RemoveFolderReply` in `electron/file-ipc.ts`. */
+export type RemoveFolderReply = { outcome: "done"; value: null } | EngineWriteFailure;
+
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
 
@@ -343,20 +365,27 @@ interface ElectronAPI {
 	}) => void;
 
 	/**
-	 * Absolute path of a picked `File`, for a multipart file part. Synchronous
-	 * (Electron's `webUtils`, not IPC) and `""` when the object has no path on
-	 * this machine. Absent outside Electron, which is what the browser-hosted
-	 * test environment sees.
+	 * Absolute path of a picked or dropped `File`, for a body file. Synchronous
+	 * (Electron's `webUtils`) and `""` when the object has no path on this
+	 * machine. A path is also recorded as picked, so the engine sends it
+	 * (#2356); that happens in the preload and main, and nothing here can name
+	 * a path to record. Absent outside Electron, which is what the
+	 * browser-hosted test environment sees.
 	 */
 	getFilePath: (file: File) => string;
 
 	/**
-	 * Open the system folder picker; resolves to the chosen folder's absolute
-	 * path, or null when the user cancelled. Used to add an allowed folder
-	 * (Settings > Files, the body editor's "Allow folder..."). Absent outside
-	 * Electron.
+	 * Open the system folder picker, starting at `defaultPath`, and allow the
+	 * folder the user chooses (#2356): the main process makes the engine write,
+	 * because only it holds the secret the engine requires for one, and the
+	 * renderer names only where the picker opens. Resolves with the engine's
+	 * answer rather than rejecting on a refusal. Renderer callers go through
+	 * `apiService.allowChosenFolder`. Absent outside Electron.
 	 */
-	selectDirectory: (options?: { defaultPath?: string; title?: string }) => Promise<string | null>;
+	allowFolder: (options?: { defaultPath?: string; title?: string }) => Promise<AllowFolderReply>;
+
+	/** Stop allowing a folder, by its row's id. Same reply family; absent outside Electron. */
+	removeAllowedFolder: (id: string) => Promise<RemoveFolderReply>;
 
 	/**
 	 * Size and modification time of the regular file at an absolute path, for

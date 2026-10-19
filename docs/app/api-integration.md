@@ -200,18 +200,43 @@ The engine keeps one cookie jar per environment for design-mode requests
 
 ```typescript
 apiService.getFileRoots(): Promise<FileRoot[]>                 // GET /file-roots, a bare array
-apiService.createFileRoot({ path }): Promise<FileRoot>         // POST /file-roots -> 201 row
-apiService.deleteFileRoot(id: string): Promise<void>           // DELETE /file-roots/:id
+apiService.allowChosenFolder(options?): Promise<AllowFolderReply>  // picker in main, then POST /file-roots
+apiService.deleteFileRoot(id: string): Promise<void>           // main's DELETE /file-roots/:id
 ```
 
 The folders a request-body file may be sent from without a per-file pick -
 the second half of the trust rule under [Request bodies](#request-bodies).
-`POST` carries the path alone (the engine owns the id) and answers the row as
-stored: canonical, so it can differ from what was typed. A path that is not an
-existing directory is a `400`, one already allowed a `409`; `useAllowFolder`
-(`hooks/useAllowFolder.ts`) is the one caller that interprets them, for
-Settings > Files (`FilesPanel`), the binary body editor and the import
-preview, and it treats the `409` as success.
+Only the list is an engine call from the renderer. Both writes need the
+engine's grant secret ([who may call the API](../engine/api-reference.md#who-may-call-the-api)),
+which only the main process holds, so they cross the Electron bridge
+(#2356):
+
+| `electronAPI` method | Channel | What main does |
+|---|---|---|
+| `allowFolder({defaultPath?, title?})` | `file:allowFolder` | Opens the system folder picker at `defaultPath`, then `POST /file-roots` with the folder the user chose and the secret. The renderer names only where the picker opens, never the folder. |
+| `removeAllowedFolder(id)` | `file:removeAllowedFolder` | `DELETE /file-roots/:id` with the secret, for an id shaped like one the engine mints. |
+
+Both answer only the app window's main frame (`electron/ipc-sender.ts`) and
+resolve with the engine's answer rather than throwing it away at the
+process boundary: `{outcome: "done", value}`, `{outcome: "refused", status,
+code, message}` or `{outcome: "unreachable", message}`, and for
+`allowFolder` also `{outcome: "cancelled"}`, with the chosen folder as `path`
+on every other outcome. The row is stored canonical, so it can differ from the
+folder picked. `useAllowFolder` (`hooks/useAllowFolder.ts`) is the one caller
+that interprets an add, for Settings > Files (`FilesPanel`), the binary body
+editor and the import preview, and it treats a `409` (already allowed) as
+success; `deleteFileRoot` turns a refusal back into an `ApiError`. Outside
+Electron neither write exists, and the surfaces offer no way to add one.
+
+**A picked file is recorded by main, not sent by the renderer.** When the
+preload's `getFilePath(file)` gets a path from `webUtils.getPathForFile`, it
+also reports it on an internal channel, `file:picked`, that no `electronAPI`
+method exposes; main checks the sender is the app window's main frame and the
+value an absolute path, then records it with `POST /file-grants` and the secret
+(`electron/file-grants.ts`). A document the OS hands the app (`open-intent.ts`)
+is recorded the same way. The report is one-way, so the renderer cannot wait
+for it: a pick followed by a send within the same few milliseconds can reach
+the engine first.
 
 #### Request examples
 

@@ -14,10 +14,12 @@
  * Files. A collection exported on this same machine names files that are
  * right here, and relinking them one request at a time is the chore this
  * exists to remove - so the preview lists each distinct folder the paths sit
- * in, with an "Allow folder" beside it. A folder that does not exist here is
- * refused by the engine with its own message (`useAllowFolder`), which is the
- * honest answer for a collection from another computer: relink those in the
- * request instead.
+ * in, with an "Allow folder..." beside it. It opens the system picker at that
+ * folder for the user to confirm, because a folder is allowed only when a
+ * person chose it there (#2356, `useAllowFolder`); outside Electron there is no
+ * picker and no action. A folder that does not exist here cannot be chosen,
+ * which is the honest answer for a collection from another computer: relink
+ * those in the request instead.
  *
  * Shared by the single-file preview and the batch ledger (across every file
  * the batch will import), so a folder is offered once however many files
@@ -55,7 +57,7 @@ export function ImportFileFolders({ results }: { results: readonly ImportResult[
 export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds }) {
 	const { folders, bodiesWithoutFile } = needs;
 	const { data: roots = [] } = useFileRootsQuery();
-	const { allow, isPending } = useAllowFolder();
+	const { chooseAndAllow, isPending } = useAllowFolder();
 	const bodiesNotice = bodiesWithoutFileNotice(bodiesWithoutFile);
 
 	if (folders.length === 0 && !bodiesNotice) return null;
@@ -97,17 +99,19 @@ export function FileReferenceNeedsView({ needs }: { needs: FileReferenceNeeds })
 											Allowed
 										</span>
 									) : (
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											className="ml-auto h-control-sm shrink-0 px-2 text-xs"
-											disabled={isPending}
-											onClick={() => void allow(folder)}
-											aria-label={`Allow folder ${folder}`}
-										>
-											Allow folder
-										</Button>
+										chooseAndAllow && (
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												className="ml-auto h-control-sm shrink-0 px-2 text-xs"
+												disabled={isPending}
+												onClick={() => void chooseAndAllow(folder)}
+												aria-label={`Allow folder ${folder}`}
+											>
+												Allow folder...
+											</Button>
+										)
 									)}
 								</li>
 							);

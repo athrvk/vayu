@@ -6,13 +6,17 @@
  */
 
 /**
- * The two file channels a request-body file and the allowed-folder list need:
+ * The file channels a request-body file and the allowed-folder list need:
  *
- * - `file:selectDirectory` opens the system folder picker and answers the
- *   chosen folder's path, or null when the user cancelled. Settings > Files
- *   and the body editor's "Allow folder..." use it; the engine is what stores
- *   the folder (`POST /file-roots`), and it re-checks that the path is a
- *   directory, so nothing here is a gate.
+ * - `file:allowFolder` opens the system folder picker and, when the user
+ *   chooses a folder, allows it: `POST /file-roots` with the grant secret
+ *   (#2356). Settings > Files, the body editor's "Allow folder..." and the
+ *   import preview use it. The renderer cannot name the folder - only the
+ *   dialog's starting point - because an allowed folder widens what every
+ *   request may read from disk, and the engine refuses that write from anyone
+ *   without the secret this process holds. The engine's answer comes back
+ *   whole, so the renderer can tell "already allowed" (409) from a refusal.
+ * - `file:removeAllowedFolder` stops allowing one, by the id of its row.
  * - `file:stat` answers a file's size and modification time for the body
  *   editor's "name, size" line. It never opens the file: the engine reads the
  *   bytes at send time, and a renderer that could read them would hold a
@@ -25,12 +29,15 @@
  * that is not a regular file answer null, so the line says "not found" rather
  * than describing a directory or a device.
  *
- * Kept out of main.ts so it can be tested; the Electron surfaces arrive as
- * arguments, the `log-ipc.ts` shape.
+ * The two folder channels answer only the app window's main frame
+ * (`ipc-sender.ts`). Kept out of main.ts so it can be tested; the Electron
+ * surfaces arrive as arguments, the `log-ipc.ts` shape.
  */
 
 import { promises as fs } from "fs";
 import path from "path";
+import type { EngineWrite, FileTrustRow } from "./file-trust-client.js";
+import type { IpcSenderLike } from "./ipc-sender.js";
 
 /** What `file:stat` answers for a regular file. */
 export interface FileStat {
@@ -39,8 +46,21 @@ export interface FileStat {
 }
 
 interface IpcLike {
-	handle(channel: string, listener: (event: unknown, ...args: unknown[]) => unknown): unknown;
+	handle(
+		channel: string,
+		listener: (event: IpcSenderLike, ...args: unknown[]) => unknown
+	): unknown;
 }
+
+/**
+ * What `file:allowFolder` answers: the user cancelled, or the engine's answer
+ * to allowing the folder they chose, with that folder as `path`.
+ */
+export type AllowFolderReply =
+	{ outcome: "cancelled" } | (EngineWrite<FileTrustRow> & { path: string });
+
+/** What `file:removeAllowedFolder` answers: the engine's answer to the delete. */
+export type RemoveFolderReply = EngineWrite<null>;
 
 /** The subset of `dialog.showOpenDialog`'s options this channel sets. */
 export interface DirectoryDialogOptions {
@@ -54,6 +74,12 @@ export interface FileIpcDeps {
 	showOpenDialog: (
 		options: DirectoryDialogOptions
 	) => Promise<{ canceled: boolean; filePaths: string[] }>;
+	/** `FileTrustClient.createFileRoot`: `POST /file-roots` with the grant secret. */
+	createFileRoot: (folder: string) => Promise<EngineWrite<FileTrustRow>>;
+	/** `FileTrustClient.deleteFileRoot`, which refuses an id that is not a row id. */
+	deleteFileRoot: (id: string) => Promise<EngineWrite<null>>;
+	/** `isFromAppMainFrame` against the live main window. */
+	isAppFrame: (event: IpcSenderLike) => boolean;
 	stat?: (filePath: string) => Promise<{ size: number; mtimeMs: number; isFile: () => boolean }>;
 	/** The host's absolute-path rule; injectable so both platforms' answers are testable. */
 	isAbsolute?: (filePath: string) => boolean;
@@ -77,8 +103,8 @@ export async function statFile(
 	}
 }
 
-/** `file:selectDirectory`'s whole decision, exported for the test. */
-export async function selectDirectory(
+/** The folder the user chose in the system picker, or null when they cancelled. */
+export async function chooseFolder(
 	options: unknown,
 	deps: Pick<FileIpcDeps, "showOpenDialog">
 ): Promise<string | null> {
@@ -95,9 +121,31 @@ export async function selectDirectory(
 	return result.filePaths[0] ?? null;
 }
 
+/** `file:allowFolder`'s whole decision, exported for the test. */
+export async function allowFolder(
+	options: unknown,
+	deps: Pick<FileIpcDeps, "showOpenDialog" | "createFileRoot">
+): Promise<AllowFolderReply> {
+	const folder = await chooseFolder(options, deps);
+	if (folder === null) return { outcome: "cancelled" };
+	return { ...(await deps.createFileRoot(folder)), path: folder };
+}
+
+/** Throws for a sender that is not the app window, so the renderer's call rejects. */
+function assertAppFrame(event: IpcSenderLike, deps: Pick<FileIpcDeps, "isAppFrame">): void {
+	if (!deps.isAppFrame(event)) {
+		throw new Error("Refused: allowed folders change only from the Vayu window.");
+	}
+}
+
 export function registerFileIpc(ipc: IpcLike, deps: FileIpcDeps): void {
-	ipc.handle("file:selectDirectory", (_event, options: unknown) =>
-		selectDirectory(options, deps)
-	);
+	ipc.handle("file:allowFolder", (event, options: unknown) => {
+		assertAppFrame(event, deps);
+		return allowFolder(options, deps);
+	});
+	ipc.handle("file:removeAllowedFolder", (event, id: unknown): Promise<RemoveFolderReply> => {
+		assertAppFrame(event, deps);
+		return deps.deleteFileRoot(typeof id === "string" ? id : "");
+	});
 	ipc.handle("file:stat", (_event, filePath: unknown) => statFile(filePath, deps));
 }
