@@ -627,8 +627,9 @@ nlohmann::json metric_trend_at (const std::string& path) {
         { { "name", "n" }, { "type", "trend" }, { "source", { { "jsonpath", path } } } } } };
 }
 
-// Mutation check: drop the `json_within_depth` test in `ensure_parsed_body`
-// and the over-the-bound halves below report "ok" / record 7 instead.
+// Mutation check: pass a larger bound to `parse_ordered_json` in
+// `ensure_parsed_body` and the over-the-bound halves below report "ok" /
+// record 7 instead.
 TEST_F (ElementKindsTest, ExtractJsonSkipsABodyNestedPastTheDepthBound) {
     response = ok_json_response (200, body_nested_to (BODY_DEPTH + 1));
 
@@ -742,9 +743,8 @@ TEST_F (ElementKindsTest, ExtractJsonWritesAnObjectMatchInItsOwnMemberOrder) {
     EXPECT_EQ (variables["collection:v"], R"({"b":1,"a":2})");
 }
 
-// A repeated key keeps its first position and its last value: nlohmann's
-// parser writes each value through `operator[]`, which on `ordered_json`
-// finds the existing member rather than appending a second.
+// A repeated key keeps its first position and its last value, as
+// `ordered_json::parse` does (`ordered_json_parse_test.cpp` holds the parity).
 TEST_F (ElementKindsTest, ExtractJsonRepeatedKeyKeepsTheFirstPositionAndTheLastValue) {
     response = ok_json_response (200, R"({"b": 1, "a": 3, "b": 2})");
 
@@ -782,6 +782,34 @@ TEST_F (ElementKindsTest, AssertJsonPathReportsAnObjectMatchInItsOwnMemberOrder)
     ASSERT_EQ (outcomes.size (), 1u);
     EXPECT_EQ (outcomes[0].status, "failed");
     EXPECT_EQ (message_of (outcomes[0]), R"(expected '$.m' to equal 3, got {"b":1,"a":2})");
+}
+
+// A server chooses the width of an object; the shared parse must not pay for
+// it quadratically. Mutation check: parse with `ordered_json::parse` in
+// `ensure_parsed_body` and this runs for tens of seconds.
+TEST_F (ElementKindsTest, ExtractJsonReadsTheLastOfAHundredThousandMembersInLinearTime) {
+    constexpr size_t members = 100'000;
+    std::string body         = "{";
+    for (size_t i = 0; i < members; ++i) {
+        body +=
+        (i == 0 ? "\"k" : ",\"k") + std::to_string (i) + "\":" + std::to_string (i);
+    }
+    body += "}";
+    response           = ok_json_response (200, body);
+    ElementContext ctx = make_context ();
+    // About 1.04 MiB, a little over the default bound a user may raise.
+    ctx.max_body_bytes = body.size ();
+
+    std::vector<ElementOutcome> sink;
+    const auto started = std::chrono::steady_clock::now ();
+    ElementPipeline::run (
+    Phase::StepAfter, ctx, one_element (extract_json_at ("$.k99999")), sink);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    ASSERT_EQ (sink.size (), 1u);
+    EXPECT_EQ (sink[0].status, "ok") << message_of (sink[0]);
+    EXPECT_EQ (variables["collection:v"], "99999");
+    EXPECT_LT (elapsed, std::chrono::seconds (5));
 }
 
 TEST_F (ElementKindsTest, MetricJsonPathWildcardRecordsTheBodysFirstMember) {

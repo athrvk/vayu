@@ -14,10 +14,10 @@
  * nlohmann's parser is iterative, so a document of any depth parses; what
  * recurses is everything downstream (`dump`, a copy, a comparison, the schema
  * translation). A tree built from text an attacker chose therefore has to be
- * bounded before anything walks it, and two readers do that - the OpenAPI
- * document reader and the element pipeline's response-body parse - so the rule
- * lives here rather than being written twice with two answers to "how deep is
- * too deep".
+ * bounded before anything walks it. The OpenAPI document reader calls this;
+ * the element pipeline's response-body parse applies the same measure while it
+ * builds the tree (`parse_ordered_json`), and `ordered_json_parse_test.cpp`
+ * holds the two to one answer to "how deep is too deep".
  */
 
 #include <cstddef>

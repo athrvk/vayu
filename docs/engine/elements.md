@@ -207,7 +207,8 @@ identically, same as `timer.pacing`.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot, which keeps every object's members in the order
-the body wrote them (`nlohmann::ordered_json`, issue #2459) - a body over the
+the body wrote them (`nlohmann::ordered_json`, issue #2459) and costs time linear in the body
+however wide its objects are - a body over the
 [`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
 is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
 recurse over it, and a hostile server chooses its shape); every such kind on that step reports
