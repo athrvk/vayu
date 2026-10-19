@@ -32,6 +32,7 @@ import {
 	TabErrorDot,
 	Badge,
 	Button,
+	DisabledHint,
 	Kbd,
 } from "@/components/ui";
 import { useRequestBuilderContext } from "../../context";
@@ -64,6 +65,8 @@ import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
 import { useFittedTabs } from "@/components/layout/useFittedTabs";
 import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
+import { contentTypeOf, heldBodySize } from "../../utils/response-bytes";
+import { exampleRefusal } from "./save-as-example";
 
 /**
  * The eight sub-tabs, in strip order. One list: the fit measures these labels
@@ -439,8 +442,13 @@ export default function ResponseViewer() {
 	 *
 	 * And for a client-side error: no server answered, so there is no exchange
 	 * to keep as an example of one.
+	 *
+	 * A body that is not UTF-8 is the one case drawn disabled, with its reason:
+	 * the response is real and finished, so an absent button would read as a
+	 * missing feature rather than a refusal.
 	 */
 	const canSaveExample = !!requestId && !isStreaming && !isClientError;
+	const saveRefusal = exampleRefusal(shown);
 	const isShown = (id: ResponseTab) => visibleIds.includes(id);
 
 	/*
@@ -621,15 +629,18 @@ export default function ResponseViewer() {
 					 * row's height.
 					 */}
 					{canSaveExample && (
-						<Button
-							size="sm"
-							variant="ghost"
-							onClick={() => setSavingExample(true)}
-							className="h-control-sm shrink-0 px-2 text-xs"
-						>
-							<BookmarkPlus className="size-icon-sm" />
-							Save as example
-						</Button>
+						<DisabledHint reason={saveRefusal}>
+							<Button
+								size="sm"
+								variant="ghost"
+								disabled={saveRefusal !== undefined}
+								onClick={() => setSavingExample(true)}
+								className="h-control-sm shrink-0 px-2 text-xs"
+							>
+								<BookmarkPlus className="size-icon-sm" />
+								Save as example
+							</Button>
+						</DisabledHint>
 					)}
 				</div>
 
@@ -662,9 +673,9 @@ export default function ResponseViewer() {
 							{shown.bodyTruncated && (
 								<div className="px-4 pt-3 shrink-0">
 									<Callout severity="warning" title="Body truncated for storage">
-										Only the first {formatSize(shown.body.length)} of{" "}
-										{formatSize(shown.bodyBytes ?? shown.body.length)} was kept.
-										Re-send the request to view the full response.
+										Only the first {formatSize(heldBodySize(shown))} of{" "}
+										{formatSize(shown.bodyBytes ?? heldBodySize(shown))} was
+										kept. Re-send the request to view the full response.
 									</Callout>
 								</div>
 							)}
@@ -679,10 +690,11 @@ export default function ResponseViewer() {
 							{shown.bodyCapped && (
 								<div className="px-4 pt-3 shrink-0">
 									<Callout severity="warning" title="Body capped while reading">
-										Only the first {formatSize(shown.size || shown.body.length)}{" "}
-										of this response was read - the engine stops a design-mode
-										send there, so re-sending reads the same amount. Raise Max
-										Design Response Body in Settings to read more.
+										Only the first{" "}
+										{formatSize(shown.size || heldBodySize(shown))} of this
+										response was read - the engine stops a design-mode send
+										there, so re-sending reads the same amount. Raise Max Design
+										Response Body in Settings to read more.
 									</Callout>
 								</div>
 							)}
@@ -690,6 +702,7 @@ export default function ResponseViewer() {
 								<SharedResponseBody
 									body={shown.body}
 									bodyRaw={shown.bodyRaw}
+									rawBytes={shown.rawBytes}
 									headers={shown.headers}
 									showModeToggle
 									/*
@@ -705,12 +718,15 @@ export default function ResponseViewer() {
 									 * render without the strip scrolling.
 									 *
 									 * `shown.bodyType` names the download; the history
-									 * viewer has no such field and keeps `.txt`.
+									 * viewer has no such field and keeps `.txt`. A
+									 * base64 body's bytes are named by their type.
 									 */
 									actions={
 										<ResponseActions
 											content={shown.body}
 											fileExtension={shown.bodyType}
+											rawBytes={shown.rawBytes}
+											contentType={contentTypeOf(shown.headers)}
 										/>
 									}
 								/>

@@ -6270,6 +6270,7 @@ run-shaped way of stating the same field, not a second store.
   "authQueryParam": "access_token",
   "body": { "id": 1, "name": "John" },
   "bodyRaw": "{\"id\":1,\"name\":\"John\"}",
+  "bodyEncoding": "utf8",
   "bodySize": 20,
   "bodyCapped": false,
   "httpVersion": "HTTP/1.1",
@@ -6315,6 +6316,22 @@ run-shaped way of stating the same field, not a second store.
 }
 ```
 
+**`bodyEncoding` says how to read `bodyRaw`** (issue #2458), and it is always
+present. `"utf8"`: the whole body is valid UTF-8 with no NUL byte, `bodyRaw` is
+that text and `body` its JSON parse (or `null`). `"base64"`: anything else - an
+image, a PDF, `application/octet-stream`, Latin-1 or Windows-1252 or UTF-16
+text, a compressed body libcurl did not decode, text containing a NUL - and
+`bodyRaw` is the bytes in standard padded base64, `body` is `null`, and
+`bodySize` is still the number of bytes, not the length of the base64. The
+check reads the whole body, not a sniffed prefix, and the engine decodes no
+declared charset: a body that is valid UTF-8 is `"utf8"` whatever its
+`Content-Type` says, and one whose `charset=utf-8` is wrong is `"base64"`, left
+for the client to decode by the declared charset. A header value that is not
+UTF-8 has no such field and is answered with U+FFFD in place of each bad byte.
+
+So a response the server answered is a `200` whatever its bytes are; the end
+of this section has the `500` that remains.
+
 **`bodyCapped` says the body is a prefix** (issue #1157). A design-mode send
 reads at most `maxDesignResponseBodyBytes` (Settings → Limits, default 32MB);
 a response past that stops being read there, and `body` / `bodyRaw` /
@@ -6328,11 +6345,26 @@ reading less: a cut JSON body no longer parses, so `body` is `null` and a test
 script's `pm.response.json()` throws, and `validation` below reports
 `checked: false` with `body_not_json` rather than inventing a schema failure.
 
+The cap falls on a byte count, so it can land inside a UTF-8 character. For a
+capped body only, `bodyEncoding` is decided with that incomplete last character
+(at most three bytes, and only bytes some continuation could still make valid)
+left out, and a `"utf8"` `bodyRaw` ends before it: a text body stays text rather
+than turning to base64 over its last character. `bodySize` still counts every
+byte read, so it can exceed the UTF-8 length of `bodyRaw` by up to three. A
+`"base64"` body is never trimmed, and a body that was not capped is judged
+whole. The stored trace makes the same decision on the same bytes.
+
 This is **not** the stored trace's `bodyTruncated` (see `GET /runs/:id`), which
 is `maxTraceBodyBytes` shortening a body for storage after the whole of it was
 read and shown - a re-send recovers from that one. A design run whose live
 response was capped stores `trace_data.response.bodyCapped`, so a restored
 response says what the live one said.
+
+A body the live answer sent as `bodyEncoding: "base64"` is stored the same way:
+`trace_data.response.body` holds the base64 and `trace_data.response` gains
+`"bodyEncoding": "base64"`. The key is written only then; absent means the
+stored `body` is the text itself, which is what every row written before the
+field holds. A collection run's step traces follow the same rule.
 
 **`validation` is what the response was against the schema its contract
 declares** (issue #628), and it is **absent entirely** for a request whose
@@ -6590,6 +6622,15 @@ cannot be stored (a busy or locked database, a full disk, an I/O error) answers
 [`POST /runs`](#post-runs). The app retries a `5xx` and treats a `4xx` as a
 verdict, so a momentary lock no longer reads as a refused request (#2353). A
 `transient` send writes no row and is unaffected.
+
+**A send that fails once its row exists is a `500` with a body, and a `failed`
+row** (#2458). Anything that throws after the run row is written - building
+the answer, running the exchange, handing a stream to its worker - answers
+`500` `Execution failed: <reason>` in the usual `{"error": {"code",
+"message"}}` shape and marks the row `failed`, even when its result had
+already been recorded, so `GET /runs/:runId` never shows a send the caller got
+no answer for as `running` or `completed`. A body the engine cannot hold as
+text is not such a failure: it is a `200` with `bodyEncoding: "base64"`, above.
 
 ### POST /runs
 
@@ -8871,7 +8912,10 @@ affected `trace.request` and/or `trace.response` object carries
 `"bodyTruncated": true` and `"bodyBytes": <original length>`; its `body` then
 holds only the first `maxTraceBodyBytes` of the original. Absent when the body
 fit. Clients surface this as a "body truncated for storage" notice and re-send
-to fetch the whole body.
+to fetch the whole body. A `trace.response` with `"bodyEncoding": "base64"`
+(see [`POST /execute`](#post-execute)) is measured in decoded bytes: its `body`
+is the base64 of the first `maxTraceBodyBytes` bytes rounded down to a multiple
+of three, so the slice still decodes, and `bodyBytes` counts decoded bytes.
 
 `configSnapshot.body` is capped the same way, independently of the trace
 (issue #1486): `content` over `maxTraceBodyBytes` is cut to that length and the

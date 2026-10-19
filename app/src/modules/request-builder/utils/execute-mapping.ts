@@ -34,6 +34,7 @@ import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
+import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
 export interface ExecBody {
@@ -272,15 +273,6 @@ function paneBody(body: unknown, bodyRaw: string): string {
 	return bodyRaw || "";
 }
 
-/** Sniff the render mode from the response's content type. */
-function bodyTypeFromContentType(headers: Record<string, string> | undefined) {
-	const contentType = (headers?.["content-type"] || "").toLowerCase();
-	if (contentType.includes("json")) return "json" as const;
-	if (contentType.includes("html")) return "html" as const;
-	if (contentType.includes("xml")) return "xml" as const;
-	return "text" as const;
-}
-
 /**
  * Map an engine execute result onto the response pane's state.
  *
@@ -309,9 +301,17 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 	 * and the original bytes are already gone by the time we are stringifying a
 	 * parsed object. Compact is the closest honest reconstruction; indenting
 	 * would be inventing formatting the server never sent.
+	 *
+	 * A base64 `bodyRaw` (issue #2458) is decoded first, so from here on
+	 * `bodyRaw` is text or nothing: the bytes ride `rawBytes`.
 	 */
+	const decoded = decodeResponseBody({
+		bodyRaw: result.bodyRaw ?? "",
+		bodyEncoding: result.bodyEncoding,
+		headers: result.headers,
+	});
 	const bodyRaw =
-		result.bodyRaw ||
+		decoded.text ||
 		(typeof result.body === "object" && result.body !== null
 			? JSON.stringify(result.body)
 			: String(result.body || ""));
@@ -341,7 +341,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// writes it only when it happened, so without this the two funnels would
 		// disagree in type on every uncapped response.
 		bodyCapped: result.bodyCapped || undefined,
-		bodyType: bodyTypeFromContentType(result.headers),
+		// Absent for a `"utf8"` body, the same normalisation as `bodyCapped`: the
+		// stored trace marks only a base64 one.
+		...(decoded.bytes && { rawBytes: decoded.bytes }),
+		bodyType: responseBodyType(result.headers, decoded.bytes),
 		// When it arrived, as opposed to how long it took. The status bar shows
 		// it as an age, which is the only thing distinguishing a fresh response
 		// from one sent before the request beside it was edited.

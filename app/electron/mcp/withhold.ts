@@ -72,7 +72,7 @@ export const WITHHELD_URL_SENTENCE = `A saved request's \`url\` has the password
 export const REDACTED_MARKER = "<redacted>";
 
 /** What a read of run output says about the secrets the run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
 /** What `get_mock_activity` says about the paths a mock server logged. */
 export const WITHHELD_MOCK_ACTIVITY_SENTENCE = `Unless the user has turned on ${REVEAL_SETTING}, every secret variable's value in an entry (the path a client sent can carry one) reads \`${REDACTED_MARKER}\`, as in run output; the rest of the entry is kept.`;
@@ -1132,6 +1132,41 @@ function maskRequestLine(frame: string, names: readonly string[]): string {
 interface RecordMasking {
 	apiKeyHeaders: readonly string[];
 	authQueryNames: readonly string[];
+	/**
+	 * The record's body is base64 (`bodyEncoding`, #2458), so it is searched in
+	 * the bytes it decodes to: a match in the base64 text is coincidence, and
+	 * `<redacted>` there would stop it decoding.
+	 */
+	base64Body: boolean;
+}
+
+/** The members a record's body is spelled in: the live answer's `bodyRaw`, a trace node's `body`. */
+const BODY_MEMBERS: ReadonlySet<string> = new Set(["body", "bodyRaw"]);
+
+/**
+ * Each form as bytes read one character per byte can hold it, longest first:
+ * as written, which is its Latin-1 spelling (a form with a character past
+ * U+00FF never matches that way), and as its UTF-8 bytes.
+ */
+function byteSpellings(forms: readonly string[]): string[] {
+	const spellings = new Set<string>();
+	for (const form of forms) {
+		spellings.add(form);
+		spellings.add(Buffer.from(form, "utf8").toString("latin1"));
+	}
+	return [...spellings].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * A base64 body with every secret form masked in its bytes, and base64 still:
+ * `<redacted>` stands in for the bytes it matched, so the body decodes. One
+ * that matched nothing comes back as it was given, character for character.
+ */
+function withholdBase64Body(encoded: string, forms: readonly string[]): string {
+	if (forms.length === 0) return encoded;
+	const bytes = Buffer.from(encoded, "base64").toString("latin1");
+	const masked = maskSecretForms(bytes, byteSpellings(forms));
+	return masked === bytes ? encoded : Buffer.from(masked, "latin1").toString("base64");
 }
 
 /**
@@ -1156,6 +1191,7 @@ function recordMasking(record: Record<string, unknown>, rule: RunOutputRule): Re
 			typeof param === "string" && param !== ""
 				? [...new Set([param, encodeQueryKey(param)])]
 				: [],
+		base64Body: record.bodyEncoding === "base64",
 	};
 }
 
@@ -1165,6 +1201,9 @@ function withholdRunMember(
 	rule: RunOutputRule,
 	here: RecordMasking
 ): unknown {
+	if (here.base64Body && BODY_MEMBERS.has(key) && typeof value === "string") {
+		return withholdBase64Body(value, rule.forms);
+	}
 	const masked = withholdRunOutput(value, rule);
 	if (HEADER_SET_MEMBER.test(key)) return withholdHeaderSet(masked, here.apiKeyHeaders);
 	if (typeof masked !== "string") return masked;

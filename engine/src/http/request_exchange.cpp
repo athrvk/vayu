@@ -27,6 +27,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/request_composer.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -172,9 +173,20 @@ const vayu::Response& response) {
         // "" when nothing was negotiated, not omitted - same convention as
         // serialize(Response) in json.cpp, so restore-response.ts can't
         // confuse "empty" with "this key doesn't exist on a stored trace".
-        trace["response"] = { { "headers", response.headers },
-            { "body", response.body }, { "httpVersion", response.http_version },
-            { "httpVersionDowngraded", response.http_version_downgraded } };
+        const auto body_text = vayu::json::response_body_text (response);
+        std::string body     = body_text ? std::string (*body_text) :
+                                           vayu::utils::base64_encode (response.body);
+        trace["response"]    = { { "headers", response.headers },
+               { "body", std::move (body) }, { "httpVersion", response.http_version },
+               { "httpVersionDowngraded", response.http_version_downgraded } };
+
+        // The same decision `serialize (Response)` makes for the live answer
+        // (issue #2458), so a restored body is the text or bytes the live one
+        // was. Written only when it applies, on the `bodyCapped` rule below:
+        // every row stored before this field holds text, and absent says so.
+        if (!body_text) {
+            trace["response"]["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
+        }
 
         // The read cap, carried so a restored response says what the live one
         // said (issue #1157) - the same rule `clientCertificate` above states,

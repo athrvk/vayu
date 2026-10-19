@@ -36,6 +36,17 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
 }
 
 /**
+ * The engine answered the send with an HTTP error of its own, rather than
+ * reporting the target's failure as `status: 0` (issue #2458). Two spellings
+ * reach here: `UNKNOWN_ERROR` is `readApiError`'s word for a body that was not
+ * the engine's JSON error (its message carries the status line), and
+ * `internal_error` is the engine's own code for a 5xx it explained.
+ */
+const ENGINE_ANSWERED_ERROR = "Vayu's engine answered with an error";
+const ENGINE_ANSWERED_HINT =
+	"This is Vayu's failure, not the server's. Send again; if it repeats, the engine log in Settings › General › Logs has the reason.";
+
+/**
  * Error hints for common error codes
  *
  * The proxy and TLS hints name the *setting* to go to, not just the condition
@@ -63,6 +74,8 @@ const ErrorHints: Record<string, string> = {
 		"This method can't carry the body this request has. Remove the body, or change the method.",
 	DATA_BINDING_FAILED:
 		"A {{data.*}} variable names a column the bound row doesn't have. Check the column names in the data file.",
+	UNKNOWN_ERROR: ENGINE_ANSWERED_HINT,
+	internal_error: ENGINE_ANSWERED_HINT,
 };
 
 /**
@@ -93,6 +106,8 @@ const ErrorTitles: Record<string, string> = {
 	AUTH_REQUIRED: "This request needs an OAuth 2.0 token",
 	INVALID_METHOD: "Couldn't send - the method doesn't allow this",
 	DATA_BINDING_FAILED: "Couldn't bind the data row",
+	UNKNOWN_ERROR: ENGINE_ANSWERED_ERROR,
+	internal_error: ENGINE_ANSWERED_ERROR,
 };
 
 /**
@@ -116,6 +131,8 @@ function getErrorIcon(errorCode?: string) {
 		// (docs/ux-writing.md, "Errors have three sources").
 		case "ENGINE_ERROR":
 		case "INTERNAL_ERROR":
+		case "UNKNOWN_ERROR":
+		case "internal_error":
 			return ServerCrash;
 		default:
 			return AlertCircle;

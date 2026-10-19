@@ -470,4 +470,31 @@ TEST (LogRedactionTest, AUrlFieldKeepsSchemeHostAndPathOnly) {
     EXPECT_EQ (records.back ().at ("url"), "https://host/token");
 }
 
+// ---------------------------------------------------------------------------
+// Bytes that are not UTF-8 (issue #2458). A curl exchange's `lines[]` carries
+// response header lines verbatim, and a strict dump threw out of the send that
+// logged them. Both sinks dump: the file the whole record, the console every
+// non-string field. Mutation check: put either `dump ()` in `logger.cpp` back
+// to the strict form and this throws.
+// ---------------------------------------------------------------------------
+
+TEST (LogRecordTest, AFieldThatIsNotUtf8IsWrittenWithReplacementCharacters) {
+    ScratchLogDir dir;
+    Logger::instance ().init (dir.string ());
+    Logger::instance ().set_max_file_bytes (0);
+    Logger::instance ().set_file_level (Logger::Level::DEBUG);
+    const int verbosity = Logger::instance ().get_verbosity ();
+    Logger::instance ().set_verbosity (2);
+
+    nlohmann::json fields;
+    fields["lines"] = nlohmann::json::array ({ "< X-Latin: caf\xE9" });
+    EXPECT_NO_THROW (vayu::utils::log_debug ("client", "curl exchange", fields));
+    Logger::instance ().set_verbosity (verbosity);
+    Logger::instance ().flush ();
+
+    const auto records = read_records (newest_log (dir.path ()));
+    ASSERT_FALSE (records.empty ());
+    EXPECT_EQ (records.back ().at ("lines").at (0), "< X-Latin: caf\xEF\xBF\xBD");
+}
+
 } // namespace
