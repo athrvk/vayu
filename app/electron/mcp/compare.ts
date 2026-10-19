@@ -147,12 +147,15 @@ export interface RunComparison {
 	compressionNegotiationDiffers: boolean;
 	/**
 	 * Every way the two runs differ in what they measured, in a fixed order
-	 * (`mode`, `concurrency`, `target_rps`, `duration`, `status`,
+	 * (`run_type`, `mode`, `concurrency`, `target_rps`, `duration`, `status`,
 	 * `http_version`, `data_file`, `request`, `compression`). Empty for a
-	 * like-for-like pair. A field a report does not carry is unknown, not a
-	 * difference, except a data file, where none against one is a real
-	 * difference. Read this before the deltas: a short stopped run against a
-	 * long one always looks like a throughput and tail-latency regression.
+	 * like-for-like pair. When both reports carry `metadata.runType`, a
+	 * `mode`, `concurrency` or `target_rps` only one of them recorded is a
+	 * difference, its missing side `not recorded`; otherwise a field a report
+	 * does not carry is unknown, not a difference, except a data file, where
+	 * none against one is a real difference. Read this before the deltas: a
+	 * short stopped run against a long one always looks like a throughput and
+	 * tail-latency regression.
 	 */
 	comparability: ComparabilityWarning[];
 }
@@ -207,6 +210,49 @@ function warnIfDiffer<T>(
 ): ComparabilityWarning | null {
 	if (base === null || target === null || base === target) return null;
 	return { code, message, base: show(base), target: show(target) };
+}
+
+const runType = (report: Report): string | null => str(report, "metadata", "runType");
+
+/** The run type as the app names it in History. */
+function runTypeLabel(type: string): string {
+	switch (type) {
+		case "design":
+			return "Send";
+		case "load":
+			return "Load test";
+		case "scenario":
+			return "Collection run";
+		default:
+			return type;
+	}
+}
+
+const NOT_RECORDED = "not recorded";
+
+/**
+ * {@link warnIfDiffer} for a field of the run's configuration (#2438).
+ * `metadata.runType` marks a report from an engine that records each field a
+ * run was given, so once both reports carry it, a field only one recorded is
+ * one the other run was not given: a real difference, not an older engine's
+ * silence.
+ */
+function warnIfConfigDiffers<T>(
+	code: string,
+	message: string,
+	base: Report,
+	target: Report,
+	read: (report: Report) => T | null,
+	show: (value: T) => string = String
+): ComparabilityWarning | null {
+	const b = read(base);
+	const t = read(target);
+	const recordedOnOneSide = (b === null) !== (t === null);
+	if (recordedOnOneSide && runType(base) !== null && runType(target) !== null) {
+		const label = (value: T | null): string => (value === null ? NOT_RECORDED : show(value));
+		return { code, message, base: label(b), target: label(t) };
+	}
+	return warnIfDiffer(code, message, b, t, show);
 }
 
 const capitalize = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
@@ -322,26 +368,29 @@ function compressionWarning(base: Report, target: Report): ComparabilityWarning 
 
 /** In the order `RunComparison.comparability` documents; the conformance test pins it. */
 const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarning | null)[] = [
+	// A collection's load run is `load` too, so it compares with a single
+	// request's load run without this entry.
 	(base, target) =>
 		warnIfDiffer(
-			"mode",
-			"Test mode differs.",
-			str(base, ...CONFIG, "mode"),
-			str(target, ...CONFIG, "mode")
+			"run_type",
+			"Run types differ, so these figures measure different things.",
+			runType(base),
+			runType(target),
+			runTypeLabel
 		),
 	(base, target) =>
-		warnIfDiffer(
-			"concurrency",
-			"Virtual users differ.",
-			virtualUsers(base),
-			virtualUsers(target)
+		warnIfConfigDiffers("mode", "Test mode differs.", base, target, (report) =>
+			str(report, ...CONFIG, "mode")
 		),
 	(base, target) =>
-		warnIfDiffer(
+		warnIfConfigDiffers("concurrency", "Virtual users differ.", base, target, virtualUsers),
+	(base, target) =>
+		warnIfConfigDiffers(
 			"target_rps",
 			"Target request rate differs.",
-			num(base, ...CONFIG, "targetRps"),
-			num(target, ...CONFIG, "targetRps"),
+			base,
+			target,
+			(report) => num(report, ...CONFIG, "targetRps"),
 			(rps) => `${rps} rps`
 		),
 	durationWarning,

@@ -75,6 +75,17 @@ describe("comparability", () => {
 		expected: { code: string; message: string; base: string; target: string };
 	}[] = [
 		{
+			name: "run_type, named as the app names each kind of run",
+			base: report({}, { runType: "load" }),
+			target: report({}, { runType: "scenario" }),
+			expected: {
+				code: "run_type",
+				message: "Run types differ, so these figures measure different things.",
+				base: "Load test",
+				target: "Collection run",
+			},
+		},
+		{
 			name: "mode",
 			base: report({ mode: "constant_rps" }),
 			target: report({ mode: "constant_concurrency" }),
@@ -281,7 +292,83 @@ describe("comparability", () => {
 		});
 	});
 
-	describe("what a report does not carry is unknown, not a difference", () => {
+	describe("run_type", () => {
+		const typed = (runType: string) => report({}, { runType });
+
+		test("a send reads as Send, and a type the app does not name as written", () => {
+			const entries = compareReports(
+				"a",
+				"b",
+				typed("design"),
+				typed("replay")
+			).comparability;
+			expect(entries.map((w) => [w.code, w.base, w.target])).toEqual([
+				["run_type", "Send", "replay"],
+			]);
+		});
+
+		test("two runs of one type, or a type on one side only, say nothing", () => {
+			expect(codes(typed("scenario"), typed("scenario"))).toEqual([]);
+			expect(codes(typed("load"), report())).toEqual([]);
+		});
+	});
+
+	describe("once both reports carry runType, a config field on one side only differs", () => {
+		const load = (configuration: Part = {}) => report(configuration, { runType: "load" });
+
+		test("virtual users and a target rate recorded on one side show the other as not recorded", () => {
+			const entries = compareReports(
+				"a",
+				"b",
+				load({ mode: "constant_rps" }),
+				load({ mode: "constant_rps", concurrency: 100, targetRps: 50 })
+			).comparability;
+			expect(entries).toEqual([
+				{
+					code: "concurrency",
+					message: "Virtual users differ.",
+					base: "not recorded",
+					target: "100",
+				},
+				{
+					code: "target_rps",
+					message: "Target request rate differs.",
+					base: "not recorded",
+					target: "50 rps",
+				},
+			]);
+		});
+
+		test("a mode recorded on one side is a difference too, whichever side lacks it", () => {
+			const entries = compareReports(
+				"a",
+				"b",
+				load({ mode: "iterations" }),
+				load()
+			).comparability;
+			expect(entries).toEqual([
+				{
+					code: "mode",
+					message: "Test mode differs.",
+					base: "iterations",
+					target: "not recorded",
+				},
+			]);
+		});
+
+		test("runType on one side only keeps the field unknown", () => {
+			expect(codes(report(), load({ mode: "iterations", concurrency: 5 }))).toEqual([]);
+		});
+
+		test("http_version still treats auto, or no version, as unknown", () => {
+			expect(codes(load({ httpVersion: "auto" }), load({ httpVersion: "http2" }))).toEqual(
+				[]
+			);
+			expect(codes(load(), load({ httpVersion: "http2" }))).toEqual([]);
+		});
+	});
+
+	describe("what a report with no runType does not carry is unknown, not a difference", () => {
 		test("a field on one side only says nothing, except a data file", () => {
 			const bare = report();
 			const full = report(
@@ -320,15 +407,16 @@ describe("comparability", () => {
 	test("entries come out in one fixed order, whatever the report's key order", () => {
 		const base = report(
 			{ acceptEncoding: false, mode: "constant_rps", concurrency: 10, targetRps: 100 },
-			{ requestMethod: "GET" },
+			{ requestMethod: "GET", runType: "load" },
 			{ testDuration: 20 }
 		);
 		const target = report(
 			{ concurrency: 50, mode: "constant_concurrency", targetRps: 400, acceptEncoding: true },
-			{ status: "stopped", requestMethod: "POST" },
+			{ status: "stopped", requestMethod: "POST", runType: "design" },
 			{ testDuration: 3 }
 		);
 		expect(codes(base, target)).toEqual([
+			"run_type",
 			"mode",
 			"concurrency",
 			"target_rps",

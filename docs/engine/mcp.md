@@ -580,7 +580,10 @@ Notes:
   a like-for-like pair, one entry per way the runs were not the same
   experiment. `base` and `target` are the two values already formatted
   (`"20 s"` against `"3 s, stopped"`). The codes, always in this order:
-  `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
+  `run_type` (#2438; `design`, `load` and `scenario` shown as the app names
+  them, `Send`, `Load test` and `Collection run`; a collection's load run is
+  `load` too, so it compares with a single request's load run without this
+  entry), `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
   ramp time too), `target_rps`, `duration` (the runs' measured
   `summary.testDuration`, in seconds, more than 2x apart), `status` (any two differing run
   statuses, such as `Stopped` against `Completed`), `http_version` (`auto`
@@ -588,7 +591,11 @@ Notes:
   one counts), `request` (method or URL, the URL without userinfo, query or
   fragment because the comparison is not masked the way `get_run_report` is)
   and `compression` (the same fact as `compressionNegotiationDiffers`, which
-  stays). A field a report does not carry is unknown, not a difference. The
+  stays). When both reports carry `metadata.runType`, a `mode`,
+  `concurrency` or `target_rps` only one of them recorded is a difference,
+  its missing side `not recorded`; a report with no `runType` is from an
+  engine that may not record them, and there a field a report does not carry
+  is unknown, not a difference. The
   history view's vs-baseline strip renders the same list from the same
   computation (`src/lib/run-compare.ts`), so the two cannot disagree.
 - **Run housekeeping** (issue #755) is the History surface an agent could

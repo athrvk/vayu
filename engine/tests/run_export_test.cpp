@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -350,7 +351,11 @@ TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {
                                                           << text;
     }
     // The base differs in its request, so its URL is shown - cut to its path.
-    EXPECT_EQ (document["comparison"]["differences"][0],
+    const json& differences = document["comparison"]["differences"];
+    const auto request      = std::ranges::find_if (
+    differences, [] (const json& d) { return d.at ("field") == "request"; });
+    ASSERT_NE (request, differences.end ()) << differences.dump (2);
+    EXPECT_EQ (*request,
     (json{ { "field", "request" }, { "base", "POST https://h/x" },
     { "target", "GET https://x.test/a" } }));
 }

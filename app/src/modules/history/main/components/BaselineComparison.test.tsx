@@ -46,6 +46,7 @@ function report(over: {
 	status?: string;
 	testDuration?: number;
 	configuration?: Record<string, unknown>;
+	runType?: string;
 }): RunReport {
 	const configuration = {
 		...over.configuration,
@@ -54,7 +55,7 @@ function report(over: {
 	return {
 		metadata: {
 			runId: "r",
-			runType: "load",
+			runType: over.runType ?? "load",
 			status: over.status ?? "completed",
 			startTime: 0,
 			endTime: 1000,
@@ -325,6 +326,45 @@ describe("BaselineComparison", () => {
 		for (const row of within(list).getAllByRole("listitem")) {
 			expect(row.className).toContain("text-status-warning-text");
 		}
+	});
+
+	/*
+	 * Issue #2438: a pin that is another kind of run measured something else,
+	 * and with runType on both reports a figure only one recorded is named too.
+	 */
+	it("names the run types, and a figure the baseline did not record", async () => {
+		mocked.getRun.mockResolvedValue(run());
+		mocked.listRuns.mockResolvedValue(
+			baselinePage([run({ id: "run_baseline", baseline: true })])
+		);
+		mocked.getRunReport.mockResolvedValue(
+			report({ p99: 50, avgRps: 100, errorRate: 1, runType: "scenario" })
+		);
+
+		render(
+			withQueryClient(
+				<BaselineComparison
+					report={report({
+						p99: 50,
+						avgRps: 100,
+						errorRate: 1,
+						configuration: { concurrency: 10 },
+					})}
+					runId="run_target"
+				/>
+			)
+		);
+
+		await waitFor(() => expect(screen.getByText("vs baseline")).toBeInTheDocument());
+		const list = screen.getByRole("list", { name: "Comparability warnings" });
+		expect(
+			within(list)
+				.getAllByRole("listitem")
+				.map((row) => row.textContent)
+		).toEqual([
+			"Run types differ, so these figures measure different things. Collection run vs Load test.",
+			"Virtual users differ. not recorded vs 10.",
+		]);
 	});
 
 	it("says nothing when the two runs are like for like", async () => {

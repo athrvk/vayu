@@ -4093,16 +4093,21 @@ answers. Its members:
 - `baseRunId`, and `baseReference`, the base run's line written as
   `run.reference` is.
 - `differences[]`: `{field, base, target}` for every way the two runs were not
-  the same experiment, in the order `mode`, `concurrency` (virtual users; for a
+  the same experiment, in the order `run_type` (`Send`, `Load test` or
+  `Collection run`; the export takes load runs only, so it does not arise
+  here today), `mode`, `concurrency` (virtual users; for a
   ramp the start level and ramp time too), `target_rps`, `duration` (only past
   a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
   `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
   the first 8 characters of its hash; none against one *is* a difference),
   `request` (method and URL with the query, fragment and userinfo cut) and
-  `compression`. The two values are strings formatted as the app shows them. A
-  field only one report carries is unknown and not listed. Read these before
-  the deltas: a short stopped run against a long one always looks like a
-  regression.
+  `compression`. The two values are strings formatted as the app shows them.
+  Every report the export reads carries `metadata.runType`, so a `mode`,
+  `concurrency` or `target_rps` only one run recorded is listed, its missing
+  side `not recorded` (the shared rule leaves such a field unknown when either
+  report lacks `runType`); any other field only one report carries is unknown
+  and not listed. Read these before the deltas: a short stopped run against a
+  long one always looks like a regression.
 - `deltas[]`: `{metric, base, target, delta, pctChange, direction}`, one per
   metric in this order:
 
