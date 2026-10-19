@@ -2526,10 +2526,19 @@ export interface RunReport {
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;
+		/** Requests sent over `sendingDurationSeconds`, not over the drain (#2392). */
 		sendRate?: number;
+		/** Completions over the whole `testDuration`, including the end-of-run drain. */
 		throughput?: number;
 		backpressure?: number;
+		/** Load start to the last request settling: includes the drain. */
 		testDuration?: number;
+		/**
+		 * Load start to the moment the run stopped submitting, before the drain
+		 * (#2392). Absent from a run stored by an older engine, whose `sendRate`
+		 * divided by `testDuration`.
+		 */
+		sendingDurationSeconds?: number;
 		setupOverhead?: number;
 		peakConcurrency?: number;
 		droppedRequests?: number;
@@ -2577,8 +2586,13 @@ export interface RunReport {
 	};
 	rateControl?: {
 		targetRps: number;
+		/** Requests sent over the sending window (#2392). */
 		actualRps: number;
+		/** Percent: `requestsSent / requestsExpected`, or the stored formula on an older run. */
 		achievement: number;
+		/** Run totals behind `achievement`; absent from a run stored before #2392. */
+		requestsSent?: number;
+		requestsExpected?: number;
 	};
 	/**
 	 * Two independent halves, either of which can be present without the other.

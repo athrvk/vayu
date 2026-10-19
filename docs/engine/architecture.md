@@ -1294,7 +1294,7 @@ data/
 │   ├── engine_<stamp>.log   # One file per daemon start (UTC timestamps inside, %Y%m%d_%H%M%S in the name)
 │   ├── engine_<stamp>.log.1 # The rotated half of a file that reached the size cap
 │   └── cli_<stamp>.log      # vayu-cli writes here too, under its own data directory
-└── vayu.lock            # Single-instance lock file
+└── vayu.lock            # The running engine's PID; the single-instance guard is on data/ itself (POSIX)
 ```
 
 On Linux and macOS the daemon runs `vayu::platform::prepare_data_directory`
@@ -1418,7 +1418,14 @@ record shape, the category list, the redaction rule and the file layout
   (`validate_transferable`) refuses a binary body no plan checked. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
   path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
-- **Single instance**: File lock prevents multiple daemon instances
+- **Single instance**: one engine per data directory, held from before the
+  database opens until after it closes (`InstanceLock` in `daemon.cpp`). On
+  Linux and macOS it is a `flock` on the data directory plus one on
+  `vayu.lock`, so deleting the file does not let a second engine in (issue
+  #2422); a filesystem that cannot lock a directory falls back to the file
+  alone and logs a warning. On Windows `vayu.lock` is held with share mode 0
+  and cannot be deleted while held. See
+  [lock-file-handling.md](../lock-file-handling.md).
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
   are stored in **plaintext** in SQLite; `runs.config_snapshot` withholds the
   composed request's credentials before persistence (`auth` down to `{mode}`,

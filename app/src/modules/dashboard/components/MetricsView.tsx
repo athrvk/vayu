@@ -47,6 +47,7 @@ import {
 } from "../utils/metricsTransforms";
 import { createAnomalyDetector } from "../utils/detectAnomalies";
 import { errorBreakdown } from "../utils/errorBreakdown";
+import { liveRateFidelity } from "../utils/rateFidelity";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
 import { LatencyStat } from "./stats/LatencyStat";
@@ -97,6 +98,7 @@ function MetricsView({
 	targetRps,
 	concurrency,
 	mode,
+	runDurationSeconds,
 	rampConfig,
 }: MetricsViewProps) {
 	const loadMode = useMode(mode);
@@ -181,10 +183,12 @@ function MetricsView({
 	const derived = useMemo<DashboardDerived | null>(() => {
 		if (!metrics || typeof metrics.requests_completed === "undefined") return null;
 
-		// "Rate Fidelity" measures throughput fidelity (responses/sec vs target).
-		// Prefer cumulative measures over current_rps (which is a delta-per-100ms
-		// and routinely blips to 0 in low-RPS tests).
-		const actualRps = metrics.throughput ?? metrics.current_rps;
+		const fidelity = liveRateFidelity({
+			targetRps,
+			requestsSent: metrics.requests_sent,
+			elapsedSeconds: lastElapsedSeconds,
+			durationSeconds: runDurationSeconds,
+		});
 		const droppedRequests = metrics.dropped_requests ?? 0;
 		const failedRequests = metrics.requests_failed ?? 0;
 		const { httpErrors, noResponse } = errorBreakdown(
@@ -197,7 +201,8 @@ function MetricsView({
 			mode: loadMode,
 			isCompleted: false,
 			targetRps,
-			actualRps,
+			actualRps: fidelity?.actualRps,
+			rateAchievementPct: fidelity?.achievementPct,
 			sendRate: metrics.send_rate,
 			throughput: metrics.throughput,
 			currentRps: metrics.current_rps ?? 0,
@@ -234,6 +239,7 @@ function MetricsView({
 		targetRps,
 		concurrency,
 		mode,
+		runDurationSeconds,
 		rampConfig,
 		peakConcurrency,
 		rampOverlay,

@@ -21,7 +21,7 @@ import {
 	type LoadDefaultsTable,
 } from "../safety.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
-import { WITHHELD_PLANNED_RUN_SENTENCE, withholdPlannedRequest } from "../withhold.js";
+import { withheldPointer, withholdPlannedRequest } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	confirmDestructive,
@@ -56,7 +56,7 @@ import {
 	collectionIdInput,
 	defaultHeaderOptOutsInput,
 	elementsTimersInput,
-	ENGINE_DEFAULT_HEADERS_SENTENCE,
+	ENGINE_DEFAULT_HEADERS_POINTER,
 	environmentIdInput,
 	LOAD_RUN_SCHEMA_GATE_REFUSAL,
 	scenarioDataInput,
@@ -94,13 +94,13 @@ export const LOAD_TOOLS: McpTool[] = [
 		name: "start_load_run",
 		category: "load",
 		invalidates: ["run"],
-		description:
+		description: (config) =>
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS, `concurrency` (virtual users) and duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
 			agentScriptGateSentence("`postRequestScript` or `tests`") +
-			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`. " +
-			WITHHELD_PLANNED_RUN_SENTENCE +
+			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`." +
+			withheldPointer(config, "preview") +
 			" " +
-			ENGINE_DEFAULT_HEADERS_SENTENCE +
+			ENGINE_DEFAULT_HEADERS_POINTER +
 			" A load run reads `loadNegotiateCompression` rather than `negotiateCompression` for the Accept-Encoding decision, because decompressing every response changes what the run measures.",
 		annotations: {
 			title: "Start load test",
@@ -154,7 +154,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe(
-					`Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by \`targetRps\`. Default ${statedDefaults("concurrency")}; none when a \`targetRps\` paces the run, and a capacity search's ceiling is the engine's own. A scenario run's default is ${SCENARIO_LOAD_DEFAULTS.constant_concurrency.concurrency} virtual users in each of its modes.`
+					`Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by \`targetRps\`. Default ${statedDefaults("concurrency")}; none when a \`targetRps\` paces the run. A scenario run's default is ${SCENARIO_LOAD_DEFAULTS.constant_concurrency.concurrency} virtual users in each of its modes.`
 				),
 			// Positive for the same reason `concurrency` is: the ramp is seeded
 			// with this count, so a negative casts to ~1.8e19 engine-side and a

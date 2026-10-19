@@ -21,9 +21,11 @@ export const TOOLTIPS = {
 	// ---- Hero card #1 (mode-adaptive) ----
 	rateFidelity: (
 		<>
-			How closely actual throughput tracked the target RPS. 100% = the engine hit the target
-			exactly. Below ~95% means the engine couldn&apos;t keep up - either CPU-bound locally or
-			the server is backpressuring.
+			Requests sent against requests owed over the sending window: the target rate times the
+			time spent sending, up to the configured duration. 100% = every request the target
+			called for went out. The end-of-run wait for slow responses is not counted, so a slow
+			server does not lower it. Below ~95% means the engine couldn&apos;t send fast enough, or
+			the in-flight cap dropped requests.
 		</>
 	),
 	achievedThroughput:
@@ -54,7 +56,7 @@ export const TOOLTIPS = {
 	concurrencyUtil:
 		"Of your configured N virtual users, how many were actually active on average. Below 100% means some virtual users were idle - usually because the load test was completing requests faster than it could re-fire (rare) or because the server occasionally returned errors that aborted iterations.",
 	throughput:
-		"Average requests per second across the run so far. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
+		"Responses received per second since load started: so far while the run is live, the whole run once it has finished, including the wait for the last responses. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
 	latencyPercentiles:
 		"Tail latency - 95 (p95) or 99 (p99) of every 100 timed requests finished in this time or less. A timed request got an answer or timed out; cancelled and never-sent requests are out. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:

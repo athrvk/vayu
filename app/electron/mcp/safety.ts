@@ -320,14 +320,15 @@ export interface EngineLoadDefaults {
 
 /**
  * The single-target strategies' defaults per mode, from `run_config::DEFAULT_*`
- * and `capacity::DEADLINE_MS` in `constants.hpp` (`safety.test.ts` reads both).
+ * and `capacity::DEADLINE_MS` / `capacity::MAX_CONCURRENCY` in `constants.hpp` (`safety.test.ts` reads both).
  * A scenario run has an executor and defaults of its own
  * (`SCENARIO_LOAD_DEFAULTS`, `scenario-runs.ts`).
  *
  * Keyed by mode because the defaults are: `capacity` walks a level every
  * `stepDuration`, so its deadline is 300s rather than the 60s the others fall
- * back to. Its other knobs (`sloMs`, `stepDuration`, its virtual-user ceiling)
- * stay the engine's. `iterations` has no duration: the mode never reads one.
+ * back to. Its `concurrency` is the search ceiling, not a target: sent
+ * explicitly, it is what `checkLoadCaps` judges against `maxConcurrency` (#2493).
+ * Its other knobs (`sloMs`, `stepDuration`) stay the engine's. `iterations` has no duration: the mode never reads one.
  */
 export const ENGINE_LOAD_DEFAULTS = {
 	constant_concurrency: { concurrency: 100, durationSeconds: 60, ratePaced: true },
@@ -339,7 +340,7 @@ export const ENGINE_LOAD_DEFAULTS = {
 		rampUpDurationSeconds: 10,
 	},
 	iterations: { concurrency: 10, iterations: 1000 },
-	capacity: { durationSeconds: 300 },
+	capacity: { concurrency: 100, durationSeconds: 300 },
 } as const satisfies Record<LoadMode, EngineLoadDefaults>;
 
 /**

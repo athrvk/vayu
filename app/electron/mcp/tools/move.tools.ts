@@ -11,14 +11,7 @@
  */
 
 import { z } from "zod";
-import {
-	secretsShape,
-	WITHHELD_AUTH_SENTENCE,
-	WITHHELD_HEADER_SENTENCE,
-	WITHHELD_URL_SENTENCE,
-	WITHHELD_VARIABLE_SENTENCE,
-	withholdReorderRows,
-} from "../withhold.js";
+import { secretsShape, withholdReorderRows, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -45,18 +38,11 @@ export const MOVE_TOOLS: McpTool[] = [
 		 * and the subtree a moved collection took with it.
 		 */
 		invalidates: ["collection", "request"],
-		description:
+		description: (config) =>
 			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. " +
 			GUARDED_WRITE_SENTENCE +
 			". It lands at the end of its new parent by default, or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree." +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" " +
-			WITHHELD_AUTH_SENTENCE +
-			" " +
-			WITHHELD_HEADER_SENTENCE +
-			" " +
-			WITHHELD_URL_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Move an item",
 			readOnlyHint: false,

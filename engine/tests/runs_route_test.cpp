@@ -1355,6 +1355,92 @@ TEST_F (RunsRouteTest, ReportReadsZeroCancelledFromAnOlderSummary) {
     EXPECT_EQ (body["summary"]["cancelledRequests"].get<size_t> (), 0u);
 }
 
+// A 50 RPS run that sent all 100 of its requests in 2 s, then drained for half
+// a second: completed over wall time is 40/s, the pacer's own count is 100%.
+vayu::core::RunSummaryInputs drained_run_inputs () {
+    auto inputs               = summary_inputs ();
+    inputs.total_requests     = 100;
+    inputs.status_codes       = { { 200, 100 } };
+    inputs.test_duration_s    = 2.5;
+    inputs.rps                = 40.0;
+    inputs.throughput         = 40.0;
+    inputs.requests_sent      = 100;
+    inputs.requests_expected  = 100;
+    inputs.sending_duration_s = 2.0;
+    inputs.send_rate          = 50.0;
+    return inputs;
+}
+
+constexpr const char* TARGET_50_RPS =
+R"({"url":"https://x.test/","method":"GET","mode":"constant_rps","duration":"2s","targetRps":50})";
+
+// #2392: rate fidelity is sent over expected, in a window the drain is not
+// part of. Mutation check: drop the `apply_sending_window_rates` call in
+// `reconcile_report_rates` and `achievement` reads 80, `actualRps` 40.
+TEST_F (RunsRouteTest, ReportRateControlDividesByTheSendingWindow) {
+    seed ({ .id = "run_window", .start_time = 1000, .config_snapshot = TARGET_50_RPS });
+    db_->update_run_summary ("run_window",
+    vayu::core::build_run_summary_payload (drained_run_inputs ()).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_window");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("rateControl")) << body.dump ();
+    const auto& rate = body["rateControl"];
+    EXPECT_DOUBLE_EQ (rate["achievement"].get<double> (), 100.0);
+    EXPECT_DOUBLE_EQ (rate["actualRps"].get<double> (), 50.0);
+    EXPECT_EQ (rate["requestsSent"].get<size_t> (), 100u);
+    EXPECT_EQ (rate["requestsExpected"].get<size_t> (), 100u);
+    EXPECT_DOUBLE_EQ (body["summary"]["sendingDurationSeconds"].get<double> (), 2.0);
+    // The completed-over-wall-time figures keep the drain.
+    EXPECT_DOUBLE_EQ (body["summary"]["avgRps"].get<double> (), 40.0);
+    EXPECT_DOUBLE_EQ (body["summary"]["testDuration"].get<double> (), 2.5);
+}
+
+// A Stop 1.2 s in sent at the target rate but only 60 of the 100 planned: the
+// achievement is the share of the plan, not the rate. Mutation check: compute
+// it from `actual_rps / target_rps` in `apply_sending_window_rates` and it
+// reads 100.
+TEST_F (RunsRouteTest, ReportRateFidelityOfAStoppedRunIsTheShareOfItsPlan) {
+    seed ({ .id      = "run_stopped_window",
+    .status          = vayu::RunStatus::Stopped,
+    .start_time      = 1000,
+    .config_snapshot = TARGET_50_RPS });
+    auto inputs               = drained_run_inputs ();
+    inputs.requests_sent      = 60;
+    inputs.sending_duration_s = 1.2;
+    db_->update_run_summary ("run_stopped_window",
+    vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] =
+    vayu::http::routes::run_report_response (*db_, "run_stopped_window");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("rateControl")) << body.dump ();
+    EXPECT_DOUBLE_EQ (body["rateControl"]["achievement"].get<double> (), 60.0);
+    EXPECT_DOUBLE_EQ (body["rateControl"]["actualRps"].get<double> (), 50.0);
+}
+
+// A run stored before #2392 has no sending window: it keeps the achievement it
+// always reported and gains no key it cannot fill.
+TEST_F (RunsRouteTest, ReportFromAnOlderSummaryKeepsTheOldRateFidelity) {
+    seed ({ .id = "run_pre_window", .start_time = 1000, .config_snapshot = TARGET_50_RPS });
+    auto stored = vayu::core::build_run_summary_payload (drained_run_inputs ());
+    for (const char* key : { "requests_sent", "requests_expected", "sending_duration" }) {
+        ASSERT_TRUE (stored.contains (key)) << key;
+        stored.erase (key);
+    }
+    db_->update_run_summary ("run_pre_window", stored.dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_pre_window");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("rateControl")) << body.dump ();
+    const auto& rate = body["rateControl"];
+    EXPECT_DOUBLE_EQ (rate["achievement"].get<double> (), 80.0);
+    EXPECT_DOUBLE_EQ (rate["actualRps"].get<double> (), 40.0);
+    EXPECT_FALSE (rate.contains ("requestsSent"));
+    EXPECT_FALSE (rate.contains ("requestsExpected"));
+    EXPECT_FALSE (body["summary"].contains ("sendingDurationSeconds"));
+}
+
 // Every store a run keeps is bounded, so the report has to say how much each
 // one thinned away - a Samples tab showing 1000 traces from a 3M-request run
 // is honest only if the reader can also see that 29,000 candidates were

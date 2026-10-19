@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { runOutputShape, WITHHELD_RUN_OUTPUT_SENTENCE } from "../withhold.js";
+import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -194,10 +194,10 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		name: "get_inbox_captures",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
-			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender. ` +
-			WITHHELD_RUN_OUTPUT_SENTENCE,
+			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. \`pagination\` says how many exist; read the rest with \`offset\`. There is no live stream over MCP: poll this after triggering the sender.` +
+			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get inbox captures",
 			readOnlyHint: true,

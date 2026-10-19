@@ -19,7 +19,14 @@ import { describe, it, expect, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { createMcpServer } from "./server.js";
-import { TOOLS, dispatchTool, toolCatalog, type ToolContext } from "./tools.js";
+import {
+	TOOLS,
+	dispatchTool,
+	resolveDescription,
+	toolCatalog,
+	type McpTool,
+	type ToolContext,
+} from "./tools.js";
 import type { McpHost } from "./tools/contract.js";
 import { GUARDED_WRITE_SENTENCE, resolveRemedyTokens } from "./remedy.js";
 import type { EngineClient } from "./engine-client.js";
@@ -313,6 +320,42 @@ describe("server instructions, per host", () => {
 		expect(text).toContain("turn on Reveal secrets to agents in Vayu Settings → MCP");
 		expect(text).not.toContain("VAYU_MCP_");
 	});
+
+	/*
+	 * A tool's description carries one pointer line (#2441), so the instructions
+	 * are the one place each rule a tool used to state in full still lives. One
+	 * fact per rule the removed sentences carried.
+	 */
+	it("states every withholding rule while reveal is off, and none while it is on", async () => {
+		const off = await instructionsFor("app", {});
+		for (const fact of [
+			"`Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`",
+			"`X-CSRF-Token` or the header the request's API-key auth names",
+			"Postman import's `postman` source `valueWithheld: true`",
+			"empty value or a pure {{variable}} reference is shown as written",
+			"refused as `auth` by every tool that takes one",
+			"(`?api_key=&page=2`)",
+			"`params` row naming one reads `valueWithheld: true`",
+			"a smoke test row's, composed or else stored",
+			"`endpoint`, though never the schema",
+			"`credentialsWithheld: true` on the config entry or the connection diagnosis's `proxy`",
+			"reads `currentWithheld: true` in place of `current`",
+			"a url cut short before its host ends",
+			"inbox captures, mock activity) reads `<redacted>`",
+			"4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped",
+			"`headerLines` and `rawRequest` header lines, request and response alike",
+			"an OAuth 2.0 token or an API key, whatever its source",
+			"credential-named query value (matched on the whole name",
+			"matched as UTF-8 and as Latin-1",
+			"the request was sent with the real values",
+			"answers an error naming it and none of the result",
+			"confirmation preview shows the run as it will be recorded",
+		]) {
+			expect(off).toContain(fact);
+		}
+		const on = await instructionsFor("app", { revealSecretsToAgents: true });
+		expect(on).not.toMatch(/Withheld|<redacted>/);
+	});
 });
 
 /** Every string under @p value with the path that reaches it. */
@@ -358,8 +401,11 @@ function offenders(listing: Awaited<ReturnType<typeof listEverything>>, pattern:
 	);
 }
 
+/** @p tool's description in a session under the defaults (writes and reveal off). */
+const defaultDescription = (tool: McpTool) => resolveDescription(tool, resolveSafetyConfig());
+
 /** The write-gate descriptions the registry declares, so the scan cannot shrink unnoticed. */
-const GUARDED_TOOL_COUNT = TOOLS.filter((t) => t.description.includes("GUARDED")).length;
+const GUARDED_TOOL_COUNT = TOOLS.filter((t) => defaultDescription(t).includes("GUARDED")).length;
 
 describe("tools/list, resources and prompts, per host", () => {
 	it("registers at least the 31 GUARDED descriptions", () => {
@@ -385,7 +431,7 @@ describe("tools/list, resources and prompts, per host", () => {
 		it("names the variable that lifts each gate it describes", async () => {
 			const { tools } = await listEverything("cli", { allowWrites });
 			const description = (name: string) => tools.find((t) => t.name === name)?.description;
-			expect(description("get_cookies")).toContain("VAYU_MCP_REVEAL_SECRETS=true");
+			expect(description("run_request")).toContain("VAYU_MCP_REVEAL_SECRETS=true");
 			if (!allowWrites) return;
 			expect(description("create_collection")).toContain("VAYU_MCP_ALLOW_WRITES=true");
 			expect(description("update_engine_config")).toContain(
@@ -405,12 +451,12 @@ describe("tools/list, resources and prompts, per host", () => {
 		expect(gate).toContain("Vayu Settings → MCP");
 		const writeGated = guarded.filter((t) => t.description?.includes(gate));
 		expect(writeGated.length).toBe(
-			TOOLS.filter((t) => t.description.includes(GUARDED_WRITE_SENTENCE)).length
+			TOOLS.filter((t) => defaultDescription(t).includes(GUARDED_WRITE_SENTENCE)).length
 		);
 		expect(writeGated.length).toBeGreaterThanOrEqual(28);
 		expect(offenders(listing, /\{\{remedy:/)).toEqual([]);
 		const get = (name: string) => listing.tools.find((t) => t.name === name)?.description;
-		expect(get("get_cookies")).toContain(
+		expect(get("run_request")).toContain(
 			"turn on Reveal secrets to agents in Vayu Settings → MCP"
 		);
 		expect(get("update_engine_config")).toContain("Vayu Settings → restart engine");
