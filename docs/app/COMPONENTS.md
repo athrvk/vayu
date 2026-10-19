@@ -794,7 +794,7 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   to the same discipline through the shared `useCopy` (see [Services](#services-modulesservices)) -
   it is not a mutation, but it is the other thing here that can fail, and it claimed success
   regardless until #565.
-- `InboxStartOptions.tsx` - the secondary start path (issue #2367): a **Inbox options** icon button
+- `InboxStartOptions.tsx` - the secondary start path (issue #2367): an **Inbox options** icon button
   beside every Start (the tab's empty state and its stopped-inbox **Start new**, and the Services
   drawer's **New inbox**) opening a dialog with the **Allowed origins** box. The one-click start
   stays one click and sends `{}`; the dialog is the only way a list reaches the engine. It owns its
