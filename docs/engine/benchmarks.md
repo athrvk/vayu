@@ -992,7 +992,7 @@ For load testing this class of target on this machine:
 | `eventLoopMaxPerHost` | 500 | Not binding at c=64; removes any doubt |
 | `dnsCacheTimeout` | 3600 | Target hostname never needs re-resolution |
 | `scriptEnableConsole` | false | Matters only when scripts run |
-| `dbSynchronous` | 1 (Normal) | The default. In WAL, NORMAL has no per-commit sync, so it costs no more than Off. The throughput figures above were measured at Off; the perf harness has not been re-run at Normal |
+| `dbSynchronous` | 1 (Normal) | The default. In WAL, NORMAL has no per-commit sync, so it costs no more than Off. Measured with `scripts/perf/measure_engine.py` on a 4-core Linux box, release build, 8 VUs for 30 s against the local mock server (three runs each, interleaved, `avgRps`): Normal 19.9k, 20.1k and 20.2k against Off 20.2k, 19.6k and 19.1k. The difference is inside the run-to-run spread |
 | measurement method | standalone engine | Worth ~9% versus running through the app |
 
 ## Per-platform measurement in CI
