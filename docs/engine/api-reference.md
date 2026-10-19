@@ -5599,7 +5599,10 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   before resolution - how an override like "retarget this saved request at
   another URL" works. Given alone, `collectionId` scopes the variable chain and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
-  erroring - composition works with no collection or environment at all.
+  erroring - composition works with no collection or environment at all. That
+  rule is for the app and direct callers: the MCP server checks an
+  `environmentId` against `GET /environments` before composing and refuses one
+  that names no environment ([MCP](mcp.md)).
 
 #### Query encoding
 

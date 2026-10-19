@@ -15,6 +15,7 @@ import { z } from "zod";
 import { DATA_FILE_HASH_PATTERN } from "../../data-file.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import { TRUST_AUTHORITY_TOKEN } from "../remedy.js";
+import { ENVIRONMENT_DEFAULT_SENTENCE } from "../variable-origins.js";
 import {
 	DEFAULT_STREAM_BUDGET_MS,
 	DEFAULT_STREAM_MAX_EVENTS,
@@ -33,7 +34,9 @@ export const collectionIdInput = z
 export const environmentIdInput = z
 	.string()
 	.optional()
-	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
+	.describe(
+		`Environment whose variables resolve {{templates}} in this request. ${ENVIRONMENT_DEFAULT_SENTENCE}`
+	);
 
 /**
  * The refusal an ad-hoc send gets for `verifySSL: false`, and with it the

@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { precedenceNote } from "../variable-origins.js";
+import { ENVIRONMENT_DEFAULT_SENTENCE, precedenceNote } from "../variable-origins.js";
 import { withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
@@ -160,7 +160,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description: (config) =>
-			'Make an environment the active one - the set {{variables}} resolve against when a call names no environmentId of its own, and what the app\'s own switcher shows. Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. Tools that take an explicit environmentId (run_request, start_load_run, run_collection) are unaffected by this - it is the default, not an override. ' +
+			"Make an environment the active one, the one the app's own switcher shows. " +
+			ENVIRONMENT_DEFAULT_SENTENCE +
+			' Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. A call that names an explicit environmentId (run_request, start_load_run, run_collection) is unaffected by this - it is the default, not an override. ' +
 			GUARDED_WRITE_SENTENCE +
 			". " +
 			precedenceNote(
