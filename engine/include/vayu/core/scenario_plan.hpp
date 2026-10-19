@@ -442,6 +442,32 @@ std::string_view field,
 std::vector<nlohmann::json>& rows_out);
 
 /**
+ * The refusal for a data row whose cell nests past
+ * `constants::spec_document::MAX_READ_DEPTH` levels (issue #2362), or nothing.
+ *
+ * nlohmann parses a payload iteratively, but `dump ()` and a copy recurse, so
+ * a cell nested far past any real value would overflow the stack the moment a
+ * row is measured or kept. This is the one place that decides, and it only
+ * walks with `vayu::json::exceeds_depth`. @p field names the payload field as
+ * `read_data_rows` does; @p row_index is the row's raw 0-based index, absent
+ * for the one row `POST /execute` takes. A @p row that is not an object has no
+ * cells and is nothing to refuse here.
+ */
+[[nodiscard]] std::optional<std::string> refuse_overdeep_cell (const nlohmann::json& row,
+std::string_view field,
+std::optional<size_t> row_index);
+
+/**
+ * `refuse_overdeep_cell` over every row of @p data, for a caller that must
+ * know before it touches the payload at all: `POST /runs` snapshots the whole
+ * body ahead of `read_data_rows`. Stops at the first row that is not an object
+ * (and at a @p data that is not an array), which `read_data_rows` refuses in
+ * its own words, so the two agree on which refusal comes first.
+ */
+[[nodiscard]] std::optional<std::string>
+refuse_overdeep_data (const nlohmann::json& data, std::string_view field);
+
+/**
  * Read which file a run's `data` rows came from (issue #2051): `dataFileName`,
  * a display name, and `dataFileHash`, the SHA-256 of the file's bytes as 64
  * lowercase hex characters. Each is optional and independent of the other;

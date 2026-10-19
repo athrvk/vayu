@@ -41,6 +41,7 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
@@ -288,6 +289,23 @@ TEST (ReadLoadDataSet, TheRefusalsMatchTheScenarioPathAndNameThisField) {
     // told which field of *theirs* was wrong.
     EXPECT_NE (refusal (json::array ()).find ("'data'"), std::string::npos);
     EXPECT_EQ (refusal (json::array ()).find ("scenario.data"), std::string::npos);
+}
+
+// The depth refusal is the shared reader's, so a single-request run names its own
+// field and the row's raw index, like the other row refusals (#2362).
+TEST (ReadLoadDataSet, ACellPastTheDepthBoundIsRefusedNamingRowAndColumn) {
+    constexpr size_t bound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+    json deep_row   = { { "id", "b" } };
+    deep_row["tag"] = vayu::tests::nested_array (bound + 1);
+    json payload    = { { "url", "https://example.test/" } };
+    payload["data"] = json::array ({ json{ { "id", "a" } }, std::move (deep_row) });
+
+    const auto read = read_load_data_set (payload, stock_limits (), false);
+
+    EXPECT_FALSE (read.ok);
+    EXPECT_EQ (read.error,
+    "'data' row 1 column 'tag' is nested deeper than " + std::to_string (bound) + " levels");
+    EXPECT_EQ (read.set, nullptr);
 }
 
 TEST (ReadLoadDataSet, TheLimitsAreTheOnesACollectionRunIsHeldTo) {

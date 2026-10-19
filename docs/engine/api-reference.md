@@ -5959,6 +5959,7 @@ Refused with a **400**, before any run row exists and with nothing sent:
 |------|---------|
 | `data` is not an object | `'data' must be an object of name/value pairs (got array). A single send binds one row; a set of rows is a collection run.` |
 | over the byte cap | `'data' is N bytes, over the limit of M (raise the 'maxScenarioDataBytes' setting to allow more)` |
+| a column nested deeper than 100 levels | `'data' column 'name' is nested deeper than 100 levels` - refused before the row is measured (issue #2362); a column nested exactly 100 levels is accepted |
 | a token names a column the row lacks | the binder's own sentence, naming the token, the row and the row's columns |
 | a `null` cell, a header collision, a header name bound to nothing, an unwritable XML placement | the binder's own sentence - identical to a run's, see [Scenario runs](#scenario-runs) |
 | an OAuth 2.0 config carries a `{{data.*}}` token | `Auth credentials carry {{data.client}} in an OAuth 2.0 configuration, and no row can reach it: ...` |
@@ -6564,7 +6565,10 @@ and the deferred `tests` script reads that submission's own row as
 
 Everything else is the scenario path's, because it is the same code: the same
 validation (an array of objects, present-but-empty refused, bounded by
-`maxScenarioDataRows` / `maxScenarioDataBytes`), the same `{{data.column}}`
+`maxScenarioDataRows` / `maxScenarioDataBytes`, and a cell nested deeper than
+100 levels refused with `'data' row N column 'name' is nested deeper than 100
+levels` - checked right after the body is parsed, before the engine snapshots
+the payload), the same `{{data.column}}`
 placement rules and escaping, the same credentials-bind-before-they-are-encoded
 order, and the same refusal of a `{{data.*}}` in an `oauth2` config. Every
 rejection is a `400` `invalid_run_config` before the run row exists, so a
@@ -7060,6 +7064,7 @@ as a smaller one:
 | `data` present and empty | A data set that binds nothing is a mistake - omit the field to run without one. |
 | `data` not an array, or a row that is not an object | |
 | More `data` rows than `maxScenarioDataRows` | The message carries the count and the cap. |
+| A `data` cell nested deeper than 100 levels (`constants::spec_document::MAX_READ_DEPTH`) | Refused before the row is measured or kept, because both recurse and a cell nested far enough overflows the stack (issue #2362). The message names the row and the column: `'scenario.data' row 1 column 'tag' is nested deeper than 100 levels`. A cell nested exactly 100 levels is accepted. |
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token in its `oauth2` config | The token is acquired once, when the plan is resolved, so no iteration exists for a row to reach it. Refused with or without a data set. |

@@ -17,6 +17,7 @@
 #include <utility>
 #include <variant>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/spec_binding.hpp"
@@ -24,6 +25,7 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::core {
 
@@ -565,6 +567,45 @@ void mark_scope_entries (std::vector<nlohmann::json>& raw_elements_per_step) {
 
 } // namespace
 
+std::optional<std::string> refuse_overdeep_cell (const nlohmann::json& row,
+std::string_view field,
+std::optional<size_t> row_index) {
+    if (!row.is_object ()) {
+        return std::nullopt;
+    }
+    constexpr size_t max_depth = constants::spec_document::MAX_READ_DEPTH;
+    for (const auto& [column, cell] : row.items ()) {
+        if (!vayu::json::exceeds_depth (cell, max_depth)) {
+            continue;
+        }
+        std::string where = "'" + std::string (field) + "'";
+        if (row_index) {
+            where += " row " + std::to_string (*row_index);
+        }
+        where += " column '";
+        where += column;
+        where += "' is nested deeper than " + std::to_string (max_depth) + " levels";
+        return where;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string>
+refuse_overdeep_data (const nlohmann::json& data, std::string_view field) {
+    if (!data.is_array ()) {
+        return std::nullopt;
+    }
+    for (size_t i = 0; i < data.size (); ++i) {
+        if (!data[i].is_object ()) {
+            return std::nullopt;
+        }
+        if (auto refusal = refuse_overdeep_cell (data[i], field, i)) {
+            return refusal;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> read_data_rows (const nlohmann::json& data,
 const ScenarioLimits& limits,
 std::string_view field,
@@ -599,6 +640,11 @@ std::vector<nlohmann::json>& rows_out) {
             return name + " row " + std::to_string (i) +
             " must be an object of name/value pairs (got " +
             std::string (data[i].type_name ()) + ")";
+        }
+        // Ahead of the dump and the copy below, both of which recurse.
+        if (auto refusal = refuse_overdeep_cell (data[i], field, i)) {
+            rows_out.clear ();
+            return refusal;
         }
         data_bytes += data[i].dump ().size ();
         if (data_bytes > limits.max_data_bytes) {
