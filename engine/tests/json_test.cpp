@@ -95,6 +95,16 @@ TEST (JsonTest, AHeaderObjectStaysOneLinePerKey) {
     EXPECT_EQ (result.value ().headers, (HeaderList{ { "A", "1" }, { "B", "2" } }));
 }
 
+// Two spellings of one name in an object were one entry in the map this list
+// replaced: the first spelling, the last value.
+TEST (JsonTest, AHeaderObjectFoldsTwoSpellingsOfOneName) {
+    auto result = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":{"X-Dup":"a","x-dup":"b"}})"));
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().headers, (HeaderList{ { "X-Dup", "b" } }));
+}
+
 TEST (JsonTest, RefusesAHeaderLineThatIsNotANameAndAValue) {
     for (const char* headers : { R"([{"name":"X-A"}])",
          R"([{"name":1,"value":"v"}])", R"(["X-A: v"])", R"("X-A: v")" }) {

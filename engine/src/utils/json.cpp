@@ -1143,7 +1143,7 @@ std::optional<Error> drop_refused_body_mode_headers (const Json& json, Request& 
 
 /**
  * `headers`, in either shape (issue #2466): an array of `{"name", "value"}`
- * lines in send order, every one kept, or the older object, one line per key
+ * lines in send order, every one kept, or the older object, one line per name
  * in the object's key order.
  */
 std::optional<Error> read_request_headers (const Json& json, Request& request) {
@@ -1152,8 +1152,11 @@ std::optional<Error> read_request_headers (const Json& json, Request& request) {
         return std::nullopt;
     }
     if (headers->is_object ()) {
+        // A JSON object names a header once, and the map this replaced folded
+        // two spellings of one name into one: `[]` keeps that (first spelling,
+        // last value), where `add` would send both.
         for (const auto& [name, value] : headers->items ()) {
-            request.headers.add (name, value.get<std::string> ());
+            request.headers[name] = value.get<std::string> ();
         }
         return std::nullopt;
     }
