@@ -1554,9 +1554,10 @@ than `crypto.subtle`.
 
 **Which failures throw and which reach the callback.** Transport failures are
 the network's answer, so they arrive as the callback's `err` - an `Error` with
-a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, …) and `res` null. The
-script's own mistakes throw out of the call instead: an unusable argument, an
-unsupported body mode, exceeding the request cap, and the capability being off.
+a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, `TOO_MANY_REDIRECTS`, …)
+and `res` null. The script's own mistakes throw out of the call instead: an
+unusable argument, an unsupported body mode, exceeding the request cap, and the
+capability being off.
 A response over the byte bound below is the network's answer too, not a
 mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`. So does a URL
 whose scheme is not `http` or `https` once its variables resolve
