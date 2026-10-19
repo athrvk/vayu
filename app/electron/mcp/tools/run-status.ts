@@ -13,6 +13,7 @@
  */
 
 import { parseDurationSeconds } from "../safety.js";
+import type { LoadShape } from "./compose.js";
 import type { ToolResult } from "./contract.js";
 import { isRecord, jsonResult, structuredResult } from "./kit.js";
 
@@ -137,12 +138,17 @@ export function markPartialReport(report: unknown): unknown {
 }
 
 /**
- * A start tool's answer: the engine's 202 body with `nextStep` added, so the
- * run id arrives beside the instruction to follow it. A body that is not an
- * object is handed back as it came, as the start tools do for any answer they
- * cannot read a run from.
+ * A load run's start answer: the engine's 202 body with `nextStep` and the
+ * resolved `shape` the run was started with (#2437) added, so the run id
+ * arrives beside the instruction to follow it and what it will do. A body that
+ * is not an object is handed back as it came, as the start tools do for any
+ * answer they cannot read a run from.
  */
-export function startedRunResult(started: unknown, mode: unknown, duration: unknown): ToolResult {
+export function startedRunResult(started: unknown, shape: LoadShape): ToolResult {
 	if (!isRecord(started)) return jsonResult(started);
-	return structuredResult({ ...started, nextStep: startedRunNextStep(mode, duration) });
+	return structuredResult({
+		...started,
+		nextStep: startedRunNextStep(shape.mode, shape.duration),
+		shape,
+	});
 }

@@ -53,6 +53,7 @@ import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
 import { TimeValue } from "../TimeValue";
 import type { HeadersViewerProps } from "./types";
+import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 
 /**
  * A header value with each time in it carrying the time card (#1786), the text
@@ -75,6 +76,19 @@ export function HeaderValue({ value }: { value: string }) {
 	return <>{parts}</>;
 }
 
+function isWireLines(headers: HeadersViewerProps["headers"]): headers is readonly WireHeaderLine[] {
+	return Array.isArray(headers);
+}
+
+/** The rows to list: wire lines as given, a map through the lines as received. */
+function viewerLines(
+	headers: HeadersViewerProps["headers"],
+	headerLines: HeaderLine[] | undefined
+): HeaderLine[] {
+	if (isWireLines(headers)) return headers.map(([name, value]) => ({ name, value }));
+	return resolveHeaderLines(headers, headerLines);
+}
+
 export default function HeadersViewer({
 	headers,
 	headerLines,
@@ -84,7 +98,7 @@ export default function HeadersViewer({
 	className,
 }: HeadersViewerProps) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
-	const lines = resolveHeaderLines(headers, headerLines);
+	const lines = viewerLines(headers, headerLines);
 
 	if (lines.length === 0) {
 		return null;
@@ -209,6 +223,12 @@ export function CompactHeadersViewer({
 export interface ResponseHeadersPanelProps {
 	/** Headers that were sent. Collapsed by default - usually not the question. */
 	requestHeaders?: Record<string, string>;
+	/**
+	 * The request as it went out, line by line (`ResponseState.wireRequestHeaders`).
+	 * Listed in place of `requestHeaders` when present: the sent record lacks the
+	 * lines the transport wrote itself.
+	 */
+	wireRequestHeaders?: readonly WireHeaderLine[];
 	/** Headers that came back. Open by default. */
 	responseHeaders?: Record<string, string>;
 	/** The response's lines as received (issue #2460); `responseHeaders` when absent. */
@@ -231,6 +251,11 @@ export interface ResponseHeadersPanelProps {
  * The two treatments are a deliberate difference, not drift: a table needs
  * width the compact pane does not have.
  *
+ * The request section is one list. It shows the request as it went out
+ * (`wireRequestHeaders`, issue #2464) when the engine recorded one, and the
+ * sent record otherwise - a failed send, or a stored row from before the frame
+ * was kept. A display of the frame, never an input: nothing here reaches a send.
+ *
  * The empty-state fallback is the one piece of behaviour that is this panel's
  * own. `HeadersViewer` renders `null` with no entries, so without it a response
  * carrying no headers showed a blank pane with nothing explaining why - which is
@@ -238,18 +263,17 @@ export interface ResponseHeadersPanelProps {
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
+	wireRequestHeaders,
 	responseHeaders,
 	responseHeaderLines,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
 	const responseLineCount = resolveHeaderLines(response, responseHeaderLines).length;
-	const hasRequestHeaders = requestHeaders && Object.keys(requestHeaders).length > 0;
+	const request = wireRequestHeaders?.length ? wireRequestHeaders : requestHeaders;
 
 	return (
 		<div className="p-4 overflow-auto h-full space-y-4">
-			{hasRequestHeaders && (
-				<HeadersViewer headers={requestHeaders} variant="request" defaultOpen={false} />
-			)}
+			{request && <HeadersViewer headers={request} variant="request" defaultOpen={false} />}
 
 			<HeadersViewer
 				headers={response}

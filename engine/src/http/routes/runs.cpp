@@ -44,6 +44,24 @@ void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char*
         dst[key] = src[key];
 }
 
+// The run's open-loop rate, recorded as `targetRps`. The POST /runs body names
+// it `rps` or `targetRps`; the list row and the report both expose the one name
+// and record the rate the run paced at, which `requested_rps`
+// (load_strategy.cpp) decides: `rps` unless it is absent, null or zero, then
+// `targetRps`. A zero `rps` with no `targetRps` is recorded as the zero it was.
+void add_target_rps (nlohmann::json& dst, const nlohmann::json& src) {
+    const auto present = [&src] (const char* key) -> const nlohmann::json* {
+        const auto it = src.find (key);
+        return it == src.end () || it->is_null () ? nullptr : &*it;
+    };
+    const nlohmann::json* rps    = present ("rps");
+    const nlohmann::json* target = present ("targetRps");
+    const bool rps_paces         = rps != nullptr && *rps != 0;
+    const nlohmann::json* rate = rps_paces || target == nullptr ? rps : target;
+    if (rate != nullptr)
+        dst["targetRps"] = *rate;
+}
+
 // httpVersion is handled separately from add_if_present, and always ends up
 // present: a raw POST /runs body of `"httpVersion": null` (a request for no
 // explicit protocol) lands in config_snapshot verbatim, because config_snapshot is
@@ -118,9 +136,10 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the fourteen keys the history/dashboard
-// list UIs read, each omitted when absent from the snapshot (httpVersion
-// excepted - see add_http_version), plus `acceptEncoding` (issue #1488) and
+// The compact list-row summary: exactly the sixteen keys the history/dashboard
+// list UIs read (`targetRps` is `rps` renamed, see add_target_rps), each
+// omitted when absent from the snapshot (httpVersion excepted - see
+// add_http_version), plus `acceptEncoding` (issue #1488) and
 // `scenario` on a collection run only, both omitted rather than defaulted
 // when the snapshot carries neither. `dataFileName` / `dataFileHash` (issue
 // #2051) are a single-request run's; a collection run's ride `scenario`. The
@@ -151,10 +170,11 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
             for (const char* key : { "url", "method", "mode", "duration", "concurrency",
-                 "startConcurrency", "rampUpDuration", "comment", "followRedirects",
+                 "iterations", "startConcurrency", "rampUpDuration", "comment", "followRedirects",
                  "maxRedirects", "requestName", "dataFileName", "dataFileHash" }) {
                 add_if_present (summary, config, key);
             }
+            add_target_rps (summary, config);
             add_http_version (summary, config);
             add_accept_encoding (summary, config);
             add_scenario (summary, config);
@@ -810,7 +830,8 @@ nlohmann::json serialize_run_row (const vayu::db::Run& run, nlohmann::json summa
  * `limit`/`offset` arrive already parsed and clamped by the caller (limit
  * default 50, capped at 500; offset floored at 0); `filter` holds the already
  * validated type/status/requestId/q constraints. Rows carry the compact
- * `summary` (nine keys) instead of the full `config_snapshot`, wrapped in the
+ * `summary` (see build_run_summary for its keys) instead of the full
+ * `config_snapshot`, wrapped in the
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
  * design run's row also carries `resultSummary` (statusCode + latencyMs), and a
  * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, each
@@ -1000,18 +1021,18 @@ int64_t offset) {
 /**
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
- * bound and the budgets it carried (fourteen keys total) and, when the
+ * bound and the budgets it carried (fifteen keys total) and, when the
  * snapshot carries one,
  * `acceptEncoding` (issue #1488), built from an already-parsed
- * config_snapshot. `rps`/`targetRps` is the one rename, so it stays as an
- * inline branch in the caller rather than living in this key list.
+ * config_snapshot. `rps`/`targetRps` is the one rename (add_target_rps), so the
+ * caller applies it rather than this key list.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
  * runs_route_test.cpp - without the full report handler's DB/metrics reads.
  */
 nlohmann::json build_run_report_config (const nlohmann::json& config) {
     nlohmann::json config_obj = nlohmann::json::object ();
-    for (const char* key : { "mode", "duration", "concurrency", "startConcurrency",
+    for (const char* key : { "mode", "duration", "concurrency", "iterations", "startConcurrency",
          "rampUpDuration", "timeout", "comment", "followRedirects", "maxRedirects",
          // The size of the data set a run bound (issue #993). The snapshot
          // carries the count in the rows' place - they are never persisted -
@@ -1230,13 +1251,10 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             metadata["bodyFile"] = *file;
         }
 
-        // Built by build_run_report_config above. `rps` is the one rename
-        // (-> targetRps) and stays inline here rather than in that key list.
+        // Built by build_run_report_config above; `rps` is the one rename
+        // (-> targetRps), shared with the list-row summary.
         nlohmann::json config_obj = build_run_report_config (config);
-        if (config.contains ("rps"))
-            config_obj["targetRps"] = config["rps"];
-        if (config.contains ("targetRps"))
-            config_obj["targetRps"] = config["targetRps"];
+        add_target_rps (config_obj, config);
 
         if (!config_obj.empty ()) {
             metadata["configuration"] = config_obj;
@@ -1975,8 +1993,9 @@ void register_run_routes (RouteContext& ctx) {
      * GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=
      * Lists test runs (both "design" single requests and "load" tests), newest
      * first. Rows carry a compact `summary` (url/method/mode/duration/
-     * concurrency/startConcurrency/rampUpDuration/comment/httpVersion/
-     * followRedirects/maxRedirects/requestName) instead of the full
+     * concurrency/iterations/targetRps/startConcurrency/rampUpDuration/comment/
+     * httpVersion/followRedirects/maxRedirects/requestName/dataFileName/
+     * dataFileHash, plus acceptEncoding and scenario when recorded) instead of the full
      * config_snapshot, wrapped in the `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
      * with it. A design run's row also carries `resultSummary`

@@ -12,6 +12,7 @@
  */
 
 import type { HeaderLine, RunResultStreamEvents } from "@/types/domain";
+import type { HeaderLine as WireHeaderLine } from "./wire-headers";
 import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
 
 // Extended body type to support more response formats
@@ -68,12 +69,13 @@ export interface ResponseBodyProps {
 
 // Props for headers viewer component
 export interface HeadersViewerProps {
-	headers: Record<string, string>;
+	/** A map, or the lines in order when a name may repeat (`WireHeaderLine`). */
+	headers: Record<string, string> | readonly WireHeaderLine[];
 	/**
 	 * The lines as received (issue #2460): repeats kept, names in the server's
-	 * case. Absent or empty, the table is built from `headers`, one row per
-	 * name - which is all a load-run sample, an inbox capture and a request's
-	 * own headers have.
+	 * case. Read only beside a map `headers`; absent or empty, the table is built
+	 * from the map, one row per name - which is all a load-run sample, an inbox
+	 * capture and a request's own headers have.
 	 */
 	headerLines?: HeaderLine[];
 	title?: string;

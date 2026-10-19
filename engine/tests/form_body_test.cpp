@@ -204,11 +204,10 @@ TEST_F (FormBodyWireTest, MultipartContentTypeIsEngineOwned) {
 // All-disabled fields are no body at all - not an empty multipart envelope,
 // and not a Content-Type the engine derived for a body that is not there.
 //
-// The methods differ deliberately: libcurl labels a bodiless POST
-// `application/x-www-form-urlencoded` on its own (its default for
-// CURLOPT_POST, and true of every empty-bodied POST this engine has ever
-// sent), so a POST cannot tell the engine's header from curl's. A PUT can -
-// curl adds nothing there.
+// PUT, because a bodyless POST is libcurl's case rather than the encoders':
+// it would label one `application/x-www-form-urlencoded` on its own, and the
+// engine's removal line for that is `ABodylessPostSendsNoContentType`'s
+// (`sent_headers_wire_test.cpp`). A PUT isolates what the encoders send.
 TEST_F (FormBodyWireTest, NoEnabledFieldsSendsNoBody) {
     auto urlencoded =
     form_request (server_->url (), BodyMode::Form, { { "off", "1", false } });
@@ -630,14 +629,18 @@ TEST (FormBodyRules, ContentTypeOwnership) {
     empty_json.mode = BodyMode::Json;
     EXPECT_EQ (implied_content_type (empty_json), "");
 
-    // `text` stays absent, and deliberately: JSON has exactly one right answer
-    // and text has none - `text/plain`, `text/csv` and a JWT are all this mode,
-    // so the header is the author's to write. Not an oversight, a different
-    // question.
+    // `text` implies `text/plain` (issue #2464): deriving nothing left libcurl
+    // to send its form type. Derived, not owned, so a typed `text/csv` wins.
     Body text;
     text.mode    = BodyMode::Text;
     text.content = "hello";
-    EXPECT_EQ (implied_content_type (text), "");
+    EXPECT_EQ (implied_content_type (text), "text/plain");
+    EXPECT_FALSE (content_type_is_engine_owned (text));
+
+    // An empty text body describes nothing, as an empty JSON one does.
+    Body empty_text;
+    empty_text.mode = BodyMode::Text;
+    EXPECT_EQ (implied_content_type (empty_text), "");
 }
 
 // ---------------------------------------------------------------------------

@@ -194,6 +194,12 @@ export function str(args: Record<string, unknown>, key: string): string | undefi
 	return typeof v === "string" ? v : undefined;
 }
 
+/** An optional number argument, absent when the caller stated nothing. */
+export function num(args: Record<string, unknown>, key: string): number | undefined {
+	const v = args[key];
+	return typeof v === "number" ? v : undefined;
+}
+
 /** An optional boolean argument, absent when the caller stated nothing. */
 export function bool(args: Record<string, unknown>, key: string): boolean | undefined {
 	const v = args[key];

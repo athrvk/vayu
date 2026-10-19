@@ -57,13 +57,15 @@ export const CONTENT_TYPE = "Content-Type";
  *
  * `json` is the Body panel's most common mode, so it earns the same auto-write
  * rather than staying silent about what the engine already implies for it.
- * `text` is deliberately absent: it is the mode a user reaches for precisely
- * to write the header themselves, and it implies nothing on the engine side.
+ * `text` is deliberately absent: the engine derives `text/plain` for it at send
+ * time and the panel writes no row, so a Content-Type the user types for a CSV
+ * or a JWT is the only one on the request and needs no row removed first.
  *
  * This table is the app-side half of the engine's `implied_content_type`
- * (`engine/src/http/form_body.cpp`); the two must name the same type per mode.
- * The engine's is what actually reaches the wire - this one drives the header
- * row the panel writes, so the user can see and edit what will be sent.
+ * (`engine/src/http/form_body.cpp`): for the modes it lists, the same type per
+ * mode. The engine's is what actually reaches the wire - this one drives the
+ * header row the panel writes, so the user can see and edit what will be sent.
+ * `implied-content-type.conformance.test.ts` holds both to one fixture.
  */
 const REQUIRED_CONTENT_TYPE: Partial<Record<BodyMode, string>> = {
 	json: "application/json",

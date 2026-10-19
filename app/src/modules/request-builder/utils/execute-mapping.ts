@@ -33,6 +33,7 @@ import type {
 import type { RequestState, ResponseState } from "../types";
 import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
+import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
 import { receivedHeaderLines } from "@/lib/header-lines";
@@ -310,8 +311,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 
 	const body = paneBody(bodyRaw);
 
+	const status = result.status !== undefined && result.status !== null ? result.status : 200;
+
 	return {
-		status: result.status !== undefined && result.status !== null ? result.status : 200,
+		status,
 		statusText: result.statusText || "",
 		headers: result.headers || {},
 		// The engine sends `[]` for a response with no headers, the stored trace
@@ -321,6 +324,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		headerLines: receivedHeaderLines(result.headerLines),
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
+		...wireRequestHeadersField(status !== 0, result.rawRequest),
 		httpVersion: result.httpVersion,
 		httpVersionDowngraded: result.httpVersionDowngraded,
 		// `""` means no certificate matched, and the pane has nothing to show

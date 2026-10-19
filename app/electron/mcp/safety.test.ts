@@ -14,8 +14,13 @@ import {
 	checkMonitorHost,
 	parseDurationSeconds,
 	checkLoadCaps,
-	defaultDurationUnderCap,
+	ENGINE_LOAD_DEFAULTS,
+	type EngineLoadDefaults,
+	type LoadMode,
+	type LoadRunParams,
 } from "./safety.js";
+import { resolveLoadShape } from "./tools/compose.js";
+import { SCENARIO_LOAD_DEFAULTS } from "./tools/scenario-runs.js";
 import { DEFAULT_MCP_SAFETY_CONFIG, normalizeHost, resolveSafetyConfig } from "./config.js";
 
 describe("extractHost", () => {
@@ -341,22 +346,21 @@ describe("checkLoadCaps", () => {
 	});
 });
 
-describe("defaultDurationUnderCap", () => {
-	test("supplies the cap when the run would otherwise take the engine's 60s default", () => {
-		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
-		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, config)).toBe("30s");
+describe("resolveLoadShape's duration under the cap", () => {
+	const durationOf = (params: LoadRunParams, maxDurationSeconds: number) =>
+		resolveLoadShape(params, resolveSafetyConfig({ maxDurationSeconds })).duration;
+
+	test("sends the cap when it is under the engine's 60s default", () => {
+		expect(durationOf({ mode: "constant_concurrency" }, 30)).toBe("30s");
 	});
-	test("supplies nothing when the engine default is already inside the cap", () => {
-		const config = resolveSafetyConfig({ maxDurationSeconds: 300 });
-		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, config)).toBeNull();
+	test("sends the engine default when the cap already holds it", () => {
+		expect(durationOf({ mode: "constant_concurrency" }, 300)).toBe("60s");
 	});
-	test("supplies nothing when the caller gave a duration", () => {
-		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
-		expect(defaultDurationUnderCap({ duration: "10s" }, config)).toBeNull();
+	test("keeps the caller's duration", () => {
+		expect(durationOf({ duration: "10s" }, 30)).toBe("10s");
 	});
-	test("supplies nothing for an iterations run, which never reads duration", () => {
-		const config = resolveSafetyConfig({ maxDurationSeconds: 30 });
-		expect(defaultDurationUnderCap({ mode: "iterations", iterations: 10 }, config)).toBeNull();
+	test("sends nothing for an iterations run, which never reads duration", () => {
+		expect(durationOf({ mode: "iterations", iterations: 10 }, 30)).toBeUndefined();
 	});
 });
 
@@ -399,48 +403,96 @@ describe("capacity discovery", () => {
 		// set did not accidentally route it to the iterations branch, which
 		// takes no duration cap at all.
 		const tight = resolveSafetyConfig({ maxDurationSeconds: 30 });
-		expect(defaultDurationUnderCap({ mode: "capacity" }, tight)).toBe("30s");
+		expect(resolveLoadShape({ mode: "capacity" }, tight).duration).toBe("30s");
 	});
 
 	test("caps an omitted duration against this mode's own engine default", () => {
 		// The regression: `capacity` falls back to 300s engine-side, not the 60s
 		// every other mode uses. A 120s cap is *above* 60 and *below* 300, so a
 		// guard keyed on one default injected nothing and let the search run
-		// 2.5x over the ceiling. `checkLoadCaps` cannot catch it either - with
-		// `duration` omitted there is nothing for it to check.
+		// 2.5x over the ceiling.
 		const cap = resolveSafetyConfig({ maxDurationSeconds: 120 });
-		expect(defaultDurationUnderCap({ mode: "capacity" }, cap)).toBe("120s");
-		// The same cap over a 60s-default mode still needs no field.
-		expect(defaultDurationUnderCap({ mode: "constant_concurrency" }, cap)).toBeNull();
+		expect(resolveLoadShape({ mode: "capacity" }, cap).duration).toBe("120s");
+		// The same cap over a 60s-default mode leaves that mode's default.
+		expect(resolveLoadShape({ mode: "constant_concurrency" }, cap).duration).toBe("60s");
 	});
 
-	test("supplies nothing once the cap clears the capacity default", () => {
+	test("sends the capacity default once the cap clears it", () => {
 		const roomy = resolveSafetyConfig({ maxDurationSeconds: 600 });
-		expect(defaultDurationUnderCap({ mode: "capacity" }, roomy)).toBeNull();
+		expect(resolveLoadShape({ mode: "capacity" }, roomy).duration).toBe("300s");
+	});
+});
+
+/**
+ * A drift guard, not a restatement: the tables are what `start_load_run` sends
+ * for an omitted field and what the caps judge, so they are only true if they
+ * are the numbers the engine falls back to, and nothing else connects the
+ * files. Same pattern as `src/constants/load-test.engine-parity.test.ts`. The
+ * paths are held in the testkit, so CI routes an edit to either engine file back
+ * to this suite rather than to the next unrelated change under `app/`.
+ */
+describe("the load default tables mirror the engine", () => {
+	const [CONSTANTS_HPP, SCENARIO_LOAD_CPP] =
+		ENGINE_READING_GUARDS.mcpSafetyCeiling.paths.map(fromRepoRoot);
+
+	function read(path: string): string {
+		const text = readFileSync(path, "utf8");
+		// CLAUDE.md's documented failure mode: a source scan reading "" passes.
+		expect(text.length, path).toBeGreaterThan(0);
+		return text;
+	}
+
+	test("the single-target table is constants.hpp's run_config and capacity defaults", () => {
+		const header = read(CONSTANTS_HPP);
+		const constant = (name: string) => {
+			const match = header.match(
+				new RegExp(`constexpr\\s+int64_t\\s+${name}\\s*=\\s*(\\d+);`)
+			);
+			expect(match, `${name} not found in constants.hpp`).not.toBeNull();
+			return Number(match![1]);
+		};
+		const concurrency = constant("DEFAULT_CONCURRENCY");
+		const durationSeconds = constant("DEFAULT_DURATION_MS") / 1000;
+		const expected: Record<LoadMode, EngineLoadDefaults> = {
+			constant_concurrency: { concurrency, durationSeconds, ratePaced: true },
+			constant_rps: { concurrency, durationSeconds, ratePaced: true },
+			ramp_up: {
+				concurrency,
+				startConcurrency: constant("DEFAULT_START_CONCURRENCY"),
+				durationSeconds,
+				rampUpDurationSeconds: constant("DEFAULT_RAMP_DURATION_MS") / 1000,
+			},
+			iterations: {
+				concurrency: constant("DEFAULT_ITERATIONS_CONCURRENCY"),
+				iterations: constant("DEFAULT_ITERATIONS"),
+			},
+			capacity: { durationSeconds: constant("DEADLINE_MS") / 1000 },
+		};
+		expect(ENGINE_LOAD_DEFAULTS).toEqual(expected);
 	});
 
-	test("mirrors the engine's own capacity deadline", () => {
-		// A drift guard, not a restatement: the number above is only a cap if it
-		// is the number the engine actually falls back to, and nothing else
-		// connects the two files. Same pattern as
-		// `src/constants/load-test.engine-parity.test.ts`.
-		// Held in the testkit, so CI routes an edit to the header back to this
-		// suite rather than to the next unrelated change under `app/`.
-		const [CONSTANTS_HPP] = ENGINE_READING_GUARDS.mcpSafetyCeiling.paths.map(fromRepoRoot);
-		const constantsHpp = readFileSync(CONSTANTS_HPP, "utf8");
-		// CLAUDE.md's documented failure mode: a source scan reading "" passes.
-		expect(constantsHpp.length).toBeGreaterThan(0);
-
-		const match = constantsHpp.match(/constexpr\s+int64_t\s+DEADLINE_MS\s*=\s*(\d+);/);
-		expect(match, "capacity::DEADLINE_MS not found in constants.hpp").not.toBeNull();
-		const engineSeconds = Number(match![1]) / 1000;
-
-		// Read through the exported behaviour rather than the private table: a
-		// cap one second under the engine's default must produce a field, and a
-		// cap exactly at it must not.
-		const under = resolveSafetyConfig({ maxDurationSeconds: engineSeconds - 1 });
-		const at = resolveSafetyConfig({ maxDurationSeconds: engineSeconds });
-		expect(defaultDurationUnderCap({ mode: "capacity" }, under)).toBe(`${engineSeconds - 1}s`);
-		expect(defaultDurationUnderCap({ mode: "capacity" }, at)).toBeNull();
+	test("the scenario table is scenario_load.cpp's fallbacks", () => {
+		const source = read(SCENARIO_LOAD_CPP);
+		// `config.value ("concurrency", 10)` and `duration_field_ms (config,
+		// "duration", 60000)`: the executor's fallbacks are literals, not named.
+		const fallback = (field: string) => {
+			const match = source.match(
+				new RegExp(`\\(\\s*(?:config,\\s*)?"${field}",\\s*(\\d+)\\s*\\)`)
+			);
+			expect(match, `the "${field}" fallback not found in scenario_load.cpp`).not.toBeNull();
+			return Number(match![1]);
+		};
+		const concurrency = fallback("concurrency");
+		const durationSeconds = fallback("duration") / 1000;
+		expect(SCENARIO_LOAD_DEFAULTS).toEqual({
+			constant_concurrency: { concurrency, durationSeconds },
+			ramp_up: {
+				concurrency,
+				startConcurrency: fallback("startConcurrency"),
+				durationSeconds,
+				rampUpDurationSeconds: fallback("rampUpDuration") / 1000,
+			},
+			iterations: { concurrency, iterations: fallback("iterations") },
+		});
 	});
 });

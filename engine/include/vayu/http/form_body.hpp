@@ -143,9 +143,15 @@ namespace vayu::http {
  * Deriving it here takes no header away from anyone, because a declared one
  * still wins.
  *
- * Empty for **text**, and that one *is* restraint: `text/plain`, `text/csv`, a
- * JWT and a raw signature are all `text`, so there is no answer to derive and
- * the header stays the author's.
+ * **text** is `text/plain` (issue #2464). It was empty, as restraint: `text/csv`,
+ * a JWT and a raw signature are all `text`, so the header was left to the
+ * author. But an author who wrote none got libcurl's `x-www-form-urlencoded`,
+ * not "no type", and Postman and Bruno send `text/plain` for the same body. The
+ * author's override is unchanged: a typed row wins, `disabledSystemHeaders`
+ * sends none.
+ *
+ * Empty for **multipart**, whose type libcurl writes with the boundary
+ * (`content_type_is_engine_owned`), and for a body with nothing to send.
  *
  * **binary** answers from the file: `FileRef::content_type`, else the type its
  * extension names (`media_type_for_extension`), else `application/octet-stream`

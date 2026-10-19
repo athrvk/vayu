@@ -194,7 +194,7 @@ export const DOC_READING_GUARDS = {
 export const ENGINE_READING_GUARDS = {
 	mcpSafetyCeiling: {
 		reader: "app/electron/mcp/safety.test.ts",
-		paths: ["engine/include/vayu/core/constants.hpp"],
+		paths: ["engine/include/vayu/core/constants.hpp", "engine/src/core/scenario_load.cpp"],
 	},
 	/*
 	 * The engine's copy of the MCP server's port (#2355): the server lives in the
@@ -315,6 +315,10 @@ export const ENGINE_READING_GUARDS = {
 	authHeaderPrecedence: {
 		reader: "app/src/services/codegen/prepare.conformance.test.ts",
 		paths: ["engine/tests/fixtures/auth-header-precedence.json"],
+	},
+	impliedContentType: {
+		reader: "app/src/modules/request-builder/utils/implied-content-type.conformance.test.ts",
+		paths: ["engine/tests/fixtures/implied-content-type-conformance.json"],
 	},
 	importPayloads: {
 		reader: "app/src/services/importers/orchestrator.payload-conformance.test.ts",

@@ -287,11 +287,11 @@ runs ask, and the MCP server never does. See
 
 Only `raw` bodies are supported. Postman's `formdata` / `urlencoded` modes are
 refused by name rather than sent as an empty body - serialise the payload
-yourself and set the `Content-Type` header, which is the header that goes out
-either way since no content type is inferred from the mode. Headers may be
-Postman's `header` array of `{ key, value }` or a plain object under either
-`header` or `headers`; sending both spellings at once is refused rather than
-resolved by precedence.
+yourself and set the `Content-Type` header. A `raw` body is sent as
+`text/plain` unless that header names another type, which always wins. Headers
+may be Postman's `header` array of `{ key, value }` or a plain object under
+either `header` or `headers`; sending both spellings at once is refused rather
+than resolved by precedence.
 
 `{{variables}}` in the script-supplied URL, header names and values, a raw body
 and an `auth` credential **are** resolved, as the call is made (issues #1001,

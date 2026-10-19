@@ -279,88 +279,87 @@ export interface LoadRunParams {
 }
 
 /**
- * Modes the engine recognises (`parse_load_test_type`, `vayu/types.hpp`).
- * Anything else falls through `LoadStrategy::create`, so the guard mirrors that
- * fallback rather than trusting the string it was given.
- *
- * Exported for the prompt test rather than for production use: this is the one
- * list in the MCP layer that has to track the engine's modes (a mode missing
- * here reaches the wrong cap), which makes it the thing to measure the
- * `suggest_load_profile` prompt's enumeration against - that prompt named four
- * of five for as long as `capacity` had existed.
+ * Modes the engine recognises (`parse_load_test_type`, `vayu/types.hpp`), the
+ * default first. The one list behind `start_load_run`'s `mode` enum and
+ * {@link KNOWN_LOAD_MODES}, so the schema and the guard cannot disagree about
+ * which modes exist.
  */
-export const KNOWN_LOAD_MODES = new Set([
-	"constant_rps",
+export const LOAD_MODES = [
 	"constant_concurrency",
+	"constant_rps",
 	"ramp_up",
 	"iterations",
 	"capacity",
-]);
+] as const;
+
+export type LoadMode = (typeof LOAD_MODES)[number];
 
 /**
- * What the engine runs when `duration` is absent, **per mode**.
- *
- * An omitted duration is not "no duration": each strategy passes its own
- * fallback to `duration_field_ms`, so a cap only binds when the field is sent
- * *or* when the cap is under the default the engine would otherwise use.
- *
- * This was a single number, on the assumption that every mode falls back to
- * 60s. `capacity` does not - it walks a level every `stepDuration`, so its
- * `constants::capacity::DEADLINE_MS` is 300s - and the assumption became a
- * hole: with the cap set to 120s and an agent omitting `duration`,
- * `checkLoadCaps` had nothing to check and this function returned null because
- * 120 >= 60, so the search ran for 300s against a 120s cap. Keyed by mode, the
- * guard now models what the engine actually does rather than one mode's version
- * of it, and `safety.test.ts` reads `constants.hpp` to keep the numbers in step.
+ * {@link LOAD_MODES} as a set. Anything outside it falls through
+ * `LoadStrategy::create`, so the guard mirrors that fallback rather than
+ * trusting the string it was given. `prompts.test.ts` measures the
+ * `suggest_load_profile` prompt's enumeration against it.
  */
-const ENGINE_DEFAULT_DURATION_SECONDS: Readonly<Record<string, number>> = {
-	capacity: 300,
-};
+export const KNOWN_LOAD_MODES: ReadonlySet<string> = new Set<string>(LOAD_MODES);
 
-/** The fallback for every mode that has no entry of its own. */
-const ENGINE_FALLBACK_DURATION_SECONDS = 60;
-
-/** What the engine would run for, in seconds, if `duration` were omitted. */
-function engineDefaultDurationSeconds(mode: string): number {
-	return ENGINE_DEFAULT_DURATION_SECONDS[mode] ?? ENGINE_FALLBACK_DURATION_SECONDS;
+function isLoadMode(mode: string): mode is LoadMode {
+	return KNOWN_LOAD_MODES.has(mode);
 }
 
-/** What the engine runs when `iterations` is absent (`IterationsLoadStrategy`). */
-const ENGINE_DEFAULT_ITERATIONS = 1000;
-
-/**
- * Whether the engine will run these params as an iterations run - the one mode
- * that stops on a request count and never reads `duration`, so no duration cap
- * can bound it. Mirrors `LoadStrategy::create` (`load_strategy.cpp`): an
- * unrecognised mode carrying an `iterations` field still lands on that
- * strategy, so keying on the mode string alone leaves a way past the cap.
- */
-function isIterationsRun(params: LoadRunParams): boolean {
-	// The engine's own default for an absent `mode`, which is a duration mode.
-	const mode = params.mode ?? "constant_rps";
-	if (mode === "iterations") return true;
-	if (KNOWN_LOAD_MODES.has(mode)) return false;
-	return typeof params.iterations === "number";
+/** What a strategy runs with when a shape field is absent from `POST /runs`. */
+export interface EngineLoadDefaults {
+	/** Virtual users; for a rate-paced mode, only when no `targetRps` paces it. */
+	concurrency?: number;
+	startConcurrency?: number;
+	durationSeconds?: number;
+	rampUpDurationSeconds?: number;
+	iterations?: number;
+	/** `ConstantLoadStrategy`: a positive `targetRps` runs it open-loop. */
+	ratePaced?: boolean;
 }
 
 /**
- * The `duration` to send when the caller omitted one, or null when the engine
- * default is already inside the cap and the payload needs no field. Iterations
- * runs get null: `duration` is not read in that mode, so injecting it would be
- * a value written and never read.
+ * The single-target strategies' defaults per mode, from `run_config::DEFAULT_*`
+ * and `capacity::DEADLINE_MS` in `constants.hpp` (`safety.test.ts` reads both).
+ * A scenario run has an executor and defaults of its own
+ * (`SCENARIO_LOAD_DEFAULTS`, `scenario-runs.ts`).
+ *
+ * Keyed by mode because the defaults are: `capacity` walks a level every
+ * `stepDuration`, so its deadline is 300s rather than the 60s the others fall
+ * back to. Its other knobs (`sloMs`, `stepDuration`, its virtual-user ceiling)
+ * stay the engine's. `iterations` has no duration: the mode never reads one.
  */
-export function defaultDurationUnderCap(
-	params: LoadRunParams,
-	config: McpSafetyConfig
-): string | null {
-	if (params.duration !== undefined) return null;
-	if (isIterationsRun(params)) return null;
-	// The engine's own default for an absent `mode` is a duration mode, and the
-	// same string `isIterationsRun` reads - the two must agree about which run
-	// this is or the cap lands on the wrong strategy.
+export const ENGINE_LOAD_DEFAULTS = {
+	constant_concurrency: { concurrency: 100, durationSeconds: 60, ratePaced: true },
+	constant_rps: { concurrency: 100, durationSeconds: 60, ratePaced: true },
+	ramp_up: {
+		concurrency: 100,
+		startConcurrency: 1,
+		durationSeconds: 60,
+		rampUpDurationSeconds: 10,
+	},
+	iterations: { concurrency: 10, iterations: 1000 },
+	capacity: { durationSeconds: 300 },
+} as const satisfies Record<LoadMode, EngineLoadDefaults>;
+
+/**
+ * Defaults per mode, read as optional fields. Partial because an executor need
+ * not run every mode: the scenario executor refuses two of the five.
+ */
+export type LoadDefaultsTable = Readonly<Partial<Record<LoadMode, EngineLoadDefaults>>>;
+
+/**
+ * The mode whose strategy the engine runs for these params, mirroring
+ * `LoadStrategy::create` (`load_strategy.cpp`): an absent `mode` is the
+ * engine's own `constant_rps` (`start_load_run` always sends one, so only a
+ * direct caller of these guards meets that case), and an unrecognised mode is a
+ * constant run, or an iterations run when it carries `iterations`. Keying on
+ * the mode string alone would leave that last case a way past the cap.
+ */
+export function engineLoadMode(params: LoadRunParams): LoadMode {
 	const mode = params.mode ?? "constant_rps";
-	if (config.maxDurationSeconds >= engineDefaultDurationSeconds(mode)) return null;
-	return `${config.maxDurationSeconds}s`;
+	if (isLoadMode(mode)) return mode;
+	return typeof params.iterations === "number" ? "iterations" : "constant_rps";
 }
 
 /**
@@ -425,8 +424,8 @@ export function checkLoadCaps(
 			error: `duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it, or ask the user to ${settingRemedy("maxDurationSeconds", host)}.`,
 		};
 	}
-	if (isIterationsRun(params)) {
-		const iterations = params.iterations ?? ENGINE_DEFAULT_ITERATIONS;
+	if (engineLoadMode(params) === "iterations") {
+		const iterations = params.iterations ?? ENGINE_LOAD_DEFAULTS.iterations.iterations;
 		if (!Number.isFinite(iterations) || iterations <= 0) {
 			return {
 				ok: false,

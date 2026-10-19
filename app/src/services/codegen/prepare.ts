@@ -168,9 +168,8 @@ function appendQueryParam(url: string, key: string, value: string, encode: boole
  * The engine's `implied_content_type` (`engine/src/http/form_body.cpp`) is what
  * reaches the wire, and this is the same table for the snippet: a mode whose
  * meaning includes its media type - JSON's, GraphQL's and JSON-RPC's JSON
- * envelopes, XML's document - carries it, and `text` does not, because a
- * `text/plain`, a CSV, a JWT and a raw signature are all that one mode and the
- * header is the author's to write.
+ * envelopes, XML's document, and `text` as `text/plain` - carries it. A text
+ * body that is really a CSV or a JWT declares its own header, which wins.
  *
  * Without this, every snippet fell through as raw content with **no** header,
  * so a copied curl of a GraphQL request went out as libcurl's default
@@ -183,11 +182,12 @@ function appendQueryParam(url: string, key: string, value: string, encode: boole
  * on purpose: their generators express the body as `-F` / `--data-urlencode`
  * and the client writes the header itself, boundary included.
  */
-const IMPLIED_CONTENT_TYPE: Record<string, string> = {
+export const IMPLIED_CONTENT_TYPE: Readonly<Record<string, string>> = {
 	json: "application/json",
 	graphql: "application/json",
 	jsonrpc: "application/json",
 	xml: "application/xml",
+	text: "text/plain",
 };
 
 /**

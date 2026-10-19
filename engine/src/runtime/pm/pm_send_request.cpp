@@ -88,9 +88,8 @@ read_send_request_headers (JSContext* ctx, JSValueConst value, Headers& out) {
 
 // pm.sendRequest's body: a raw string, or Postman's { mode: 'raw', raw }.
 //
-// No Content-Type is inferred from the mode - the engine's send path derives
-// none either, so the header the script sets is the header that goes out. An
-// inferred one would silently disagree with an explicit one.
+// Read as a Text body, which the send path sends as `text/plain` unless the
+// script's headers name a Content-Type (issue #2464); a named one always wins.
 std::optional<std::string>
 read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     if (JS_IsUndefined (value) || JS_IsNull (value)) {

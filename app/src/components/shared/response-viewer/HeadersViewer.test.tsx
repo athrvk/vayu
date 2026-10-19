@@ -139,3 +139,28 @@ describe("HeadersViewer: header lines as received (issue #2460)", () => {
 		expect(errors).toEqual([]);
 	});
 });
+
+describe("HeadersViewer: a list of lines", () => {
+	it("renders each line as a row in the order given, a repeated name included", () => {
+		render(
+			<HeadersViewer
+				headers={[
+					["X-Tag", "one"],
+					["Host", "a.test"],
+					["X-Tag", "two"],
+				]}
+				defaultOpen
+			/>
+		);
+
+		const rows = screen.getAllByRole("row").slice(1);
+		expect(rows.map((row) => row.textContent)).toEqual(["X-Tagone", "Hosta.test", "X-Tagtwo"]);
+		expect(screen.getByText("3")).toBeInTheDocument();
+	});
+
+	it("renders nothing for an empty list, as it does for an empty map", () => {
+		const { container } = render(<HeadersViewer headers={[]} />);
+
+		expect(container).toBeEmptyDOMElement();
+	});
+});

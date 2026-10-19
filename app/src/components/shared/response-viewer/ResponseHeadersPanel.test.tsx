@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { ResponseHeadersPanel } from "./HeadersViewer";
 
@@ -93,5 +93,88 @@ describe("ResponseHeadersPanel", () => {
 
 		expect(screen.queryByText("No headers in response")).toBeNull();
 		expect(screen.getByText("Server")).toBeInTheDocument();
+	});
+});
+
+describe("ResponseHeadersPanel, the request as sent (issue #2464)", () => {
+	const wire: [string, string][] = [
+		["Host", "api.example.com"],
+		["Accept", "*/*"],
+		["accept", "text/plain"],
+		["Content-Length", "5"],
+	];
+
+	it("lists the wire lines in the one request section, in order, repeats included", () => {
+		render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "application/json" }}
+				wireRequestHeaders={wire}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		// One section, titled as before: no second group for the transport's lines.
+		const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+		expect(titles).toEqual(["Request headers", "Response headers"]);
+
+		// Collapsed like the sent record was: the response is the question.
+		expect(screen.queryByText("Host")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+
+		const rows = screen.getAllByRole("row").map((row) => row.firstElementChild?.textContent);
+		expect(rows.slice(0, 5)).toEqual(["Name", "Host", "Accept", "accept", "Content-Length"]);
+	});
+
+	it("counts the wire lines in the section's badge", () => {
+		render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "x" }}
+				wireRequestHeaders={wire}
+				responseHeaders={{}}
+			/>
+		);
+
+		expect(screen.getByRole("button", { name: /request headers/i })).toHaveTextContent("4");
+	});
+
+	it("falls back to the sent record when there are no wire lines", () => {
+		const { rerender } = render(
+			<ResponseHeadersPanel requestHeaders={{ "x-mine": "1" }} responseHeaders={{ a: "b" }} />
+		);
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("x-mine")).toBeInTheDocument();
+
+		rerender(
+			<ResponseHeadersPanel
+				requestHeaders={{ "x-mine": "1" }}
+				wireRequestHeaders={[]}
+				responseHeaders={{ a: "b" }}
+			/>
+		);
+		expect(screen.getByText("x-mine")).toBeInTheDocument();
+	});
+
+	it("shows the wire lines without a sent record", () => {
+		render(
+			<ResponseHeadersPanel
+				wireRequestHeaders={[["Host", "a.test"]]}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("a.test")).toBeInTheDocument();
+	});
+
+	it("names nothing of the transport in the pane", () => {
+		const { container } = render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "x" }}
+				wireRequestHeaders={wire}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		expect(container.textContent?.toLowerCase()).not.toContain("libcurl");
 	});
 });

@@ -238,6 +238,12 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * this function and the driver read, so the record cannot claim an encoding the
  * transfer did not ask for.
  *
+ * libcurl writes `application/x-www-form-urlencoded` into a POSTFIELDS body or
+ * a bodyless POST whose list names no Content-Type. The engine never leaves it
+ * that gap (issue #2464): where nothing declared a type, the list carries
+ * libcurl's removal line `Content-Type:`, which is not a sent header and is not
+ * recorded as one.
+ *
  * @param sent When non-null, cleared and filled with exactly the headers
  *        appended to the returned list. That is `Response::request_headers`,
  *        the "sent record" the response pane's Headers tab and a test script's
