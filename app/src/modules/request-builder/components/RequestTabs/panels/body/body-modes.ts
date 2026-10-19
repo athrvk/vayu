@@ -12,8 +12,8 @@
  * the wire for that mode, whether the panel writes the header or the engine
  * implies it. Which Content-Type a mode makes the panel actually write a header
  * row for is the separate, narrower rule in `content-type.ts`; the two answer
- * different questions and a mode can have one without the other (`json` shows
- * `application/json` and writes nothing).
+ * different questions and a mode can have one without the other (`text` shows
+ * `text/plain` and writes nothing, because the engine derives it at send time).
  *
  * It sits in its own module rather than in `BodyPanel.tsx` because
  * `body-editor-completion.test.tsx` derives the modes it renders from this

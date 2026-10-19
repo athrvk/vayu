@@ -1919,8 +1919,8 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
             staged.body.content = std::move (body_text);
             if (staged.body.mode == BodyMode::None) {
                 // A body on a request that had none: Text is the mode that means
-                // "this string, as written". Nothing downstream derives
-                // Content-Type from the mode, so the script still owns that header.
+                // "this string, as written". The send derives `text/plain` for
+                // it unless the script set a Content-Type (issue #2464).
                 staged.body.mode = BodyMode::Text;
             }
         }

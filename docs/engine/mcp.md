@@ -1319,10 +1319,11 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   refusal is reachable: an undeclared key is stripped by the SDK, and the
   request would go out with no body at all.
 - **What actually went out** - the engine adds headers an agent never wrote: the
-  body-implied `Content-Type` (a `graphql` body on `POST`, or a `jsonrpc` body,
-  sends `application/json`; a `graphql` body on `GET` has no body, so the engine
-  adds no Content-Type for it at all - an `xml` one `application/xml`, an
-  `x-www-form-urlencoded` one its own type), the
+  body-implied `Content-Type` (a `json` body, a `graphql` body on `POST`, or a
+  `jsonrpc` body, sends `application/json`; a `graphql` body on `GET` has no
+  body, so the engine adds no Content-Type for it at all - a `text` one
+  `text/plain`, an `xml` one `application/xml`, an `x-www-form-urlencoded` one
+  its own type, and a bodyless `POST` none), the
   [default headers](api-reference.md#default-request-headers) a send adds - a
   default `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id
   where one is switched on - and

@@ -289,5 +289,146 @@ TEST_F (SentHeadersWireTest, ARefusedContentTypeTheBodyModeWroteStaysOffTheWire)
     EXPECT_EQ (server_->header ("Content-Type"), "application/json");
 }
 
+// ---------------------------------------------------------------------------
+// The Content-Type libcurl would invent (issue #2464). Any POSTFIELDS body and
+// a bodyless POST get `application/x-www-form-urlencoded` from libcurl when the
+// list names no Content-Type, so "no type" is asserted as no line at all.
+// Multipart and binary keep their own wire tests: the multipart one above and
+// `file_body_test.cpp`'s Content-Type tiers.
+// ---------------------------------------------------------------------------
+
+Request text_request (const std::string& url, HttpMethod method) {
+    Request request      = get_request (url);
+    request.method       = method;
+    request.body.mode    = BodyMode::Text;
+    request.body.content = "plain";
+    return request;
+}
+
+// Mutation check: return "" for Text from `implied_content_type` and neither
+// the wire nor the record carries a type (the removal line keeps libcurl's
+// form type off).
+TEST_F (SentHeadersWireTest, ATextBodyGoesOutAsTextPlainAndIsRecorded) {
+    auto result = client_->send (text_request (server_->url (), HttpMethod::POST));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (server_->content_type (), "text/plain");
+    EXPECT_EQ (server_->body (), "plain");
+    const auto& sent = result.value ().request_headers;
+    ASSERT_TRUE (sent.contains ("Content-Type"));
+    EXPECT_EQ (sent.at ("Content-Type"), "text/plain");
+}
+
+// POSTFIELDS makes the transfer a POST in libcurl's eyes whatever verb is
+// restored afterwards, so each of these had the form type too.
+TEST_F (SentHeadersWireTest, ATextBodyIsTextPlainOnEveryVerbThatCarriesOne) {
+    for (const auto method : { HttpMethod::PUT, HttpMethod::PATCH, HttpMethod::GET }) {
+        const std::string name = to_string (method);
+        ASSERT_TRUE (client_->send (text_request (server_->url (), method)).is_ok ()) << name;
+        EXPECT_EQ (server_->method (), name);
+        EXPECT_EQ (server_->content_type (), "text/plain") << name;
+        EXPECT_EQ (server_->body (), "plain") << name;
+    }
+}
+
+// Mutation check: drop the removal line in `build_request_header_list` and the
+// server sees libcurl's form type on a request with no body to describe.
+TEST_F (SentHeadersWireTest, ABodylessPostSendsNoContentType) {
+    Request request = get_request (server_->url ());
+    request.method  = HttpMethod::POST;
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_FALSE (server_->has_header ("Content-Type")) << server_->content_type ();
+    EXPECT_EQ (server_->header ("Content-Length"), "0");
+    EXPECT_FALSE (result.value ().request_headers.contains ("Content-Type"));
+}
+
+// The premise the removal line's scope rests on: a bodyless PUT or PATCH is
+// `CURLOPT_CUSTOMREQUEST` alone, which libcurl sends with no Content-Type of
+// its own, so the engine has nothing to remove there.
+TEST_F (SentHeadersWireTest, ABodylessPutOrPatchGetsNoContentTypeFromLibcurl) {
+    for (const auto method : { HttpMethod::PUT, HttpMethod::PATCH }) {
+        Request request = get_request (server_->url ());
+        request.method  = method;
+        ASSERT_TRUE (client_->send (request).is_ok ()) << to_string (method);
+        EXPECT_EQ (server_->method (), to_string (method));
+        EXPECT_FALSE (server_->has_header ("Content-Type"))
+        << to_string (method) << ": " << server_->content_type ();
+    }
+}
+
+TEST_F (SentHeadersWireTest, ATypedContentTypeWinsOverTextPlain) {
+    Request request = text_request (server_->url (), HttpMethod::POST);
+    request.headers["Content-Type"] = "text/csv";
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (server_->content_type (), "text/csv");
+    EXPECT_EQ (result.value ().request_headers.at ("Content-Type"), "text/csv");
+}
+
+TEST_F (SentHeadersWireTest, ARefusedContentTypeSendsNoneForATextBody) {
+    Request request = text_request (server_->url (), HttpMethod::POST);
+    request.suppressed_default_headers.insert ("content-type");
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_FALSE (server_->has_header ("Content-Type")) << server_->content_type ();
+    EXPECT_EQ (server_->body (), "plain");
+    EXPECT_FALSE (result.value ().request_headers.contains ("Content-Type"));
+}
+
+// A typed row left blank is the author's (it wins over `text/plain`), and
+// `append` drops it as a removal line - so nothing named a type, which is the
+// gap libcurl filled. Mutation check: drop the removal line and the form type
+// reappears on both requests, the refused one included.
+TEST_F (SentHeadersWireTest, ABlankTypedContentTypeDoesNotLetTheFormTypeBack) {
+    Request request = text_request (server_->url (), HttpMethod::POST);
+    request.headers["Content-Type"] = "  ";
+    auto result                     = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_FALSE (server_->has_header ("Content-Type")) << server_->content_type ();
+    EXPECT_FALSE (result.value ().request_headers.contains ("Content-Type"));
+
+    request.suppressed_default_headers.insert ("content-type");
+    ASSERT_TRUE (client_->send (request).is_ok ());
+    EXPECT_FALSE (server_->has_header ("Content-Type")) << server_->content_type ();
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverSendsTheSameContentTypes) {
+    EventLoop loop;
+    loop.start ();
+    auto text =
+    loop.submit_async (text_request (server_->url (), HttpMethod::POST)).future.get ();
+    const std::string text_type = server_->content_type ();
+
+    Request bodyless = get_request (server_->url ());
+    bodyless.method  = HttpMethod::POST;
+    auto none        = loop.submit_async (bodyless).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (text.is_ok ()) << text.error ().message;
+    EXPECT_EQ (text_type, "text/plain");
+    ASSERT_TRUE (none.is_ok ()) << none.error ().message;
+    EXPECT_FALSE (server_->has_header ("Content-Type")) << server_->content_type ();
+}
+
+TEST_F (SentHeadersWireTest, TheStreamConsumerSendsAndRecordsTextPlain) {
+    SseStreamRequest stream_request;
+    stream_request.run_id  = "run-text-content-type";
+    stream_request.request = text_request (server_->url (), HttpMethod::POST);
+    SseStreamContext context (stream_request.run_id, stream_request.limits);
+
+    const vayu::Response response = consume_sse_stream (stream_request, context);
+
+    EXPECT_EQ (server_->content_type (), "text/plain");
+    ASSERT_TRUE (response.request_headers.contains ("Content-Type"));
+    EXPECT_EQ (response.request_headers.at ("Content-Type"), "text/plain");
+}
+
 } // namespace
 } // namespace vayu::http

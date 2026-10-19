@@ -1,0 +1,24 @@
+{
+  "$comment": "Cross-language conformance fixture for the Content-Type a body mode implies when the request declares none (issue #2464). Read by the engine gtest suite (engine/tests/implied_content_type_test.cpp, via VAYU_ENGINE_SOURCE_DIR), which checks `vayu::http::implied_content_type` on the request each row describes; the app reads the same rows to pin its own copies of the table (the Body panel's mode list, the header row the panel writes, the code generators). `modes` holds exactly one row per body mode, with a body that has something to send: `expected` is the engine's implied type, \"\" when it implies none (`none` sends no body; `form-data` is libcurl's to write, `multipart/form-data` with the boundary it generates). `panelWritesRow` says whether the Body panel writes that type as a header row (true) or the engine derives it at send time with no row (false); it is the app's half and the engine does not read it. `cases` are the edge rows the engine answers differently from its mode row: an empty body, the GraphQL GET transport (the document travels in the URL, so there is no body to describe), and the binary tiers (declared type, then extension, then `application/octet-stream`). Row shape: `name`, `mode` (the payload spelling), `method` (default POST), and the body members a payload carries (`content`, `fields`, `file`). A typed Content-Type row still wins over every answer here, and `disabledSystemHeaders` removes it; neither is this table's question.",
+  "modes": [
+    { "name": "none sends no body", "mode": "none", "expected": "", "panelWritesRow": false },
+    { "name": "json", "mode": "json", "content": "{\"a\":1}", "expected": "application/json", "panelWritesRow": true },
+    { "name": "text is text/plain", "mode": "text", "content": "plain", "expected": "text/plain", "panelWritesRow": false },
+    { "name": "x-www-form-urlencoded", "mode": "x-www-form-urlencoded", "fields": [{ "key": "a", "value": "1", "enabled": true }], "expected": "application/x-www-form-urlencoded", "panelWritesRow": false },
+    { "name": "form-data is libcurl's to write", "mode": "form-data", "fields": [{ "key": "a", "value": "1", "enabled": true }], "expected": "", "panelWritesRow": false },
+    { "name": "binary with no declared type or known extension", "mode": "binary", "file": { "src": "/data/upload" }, "expected": "application/octet-stream", "panelWritesRow": false },
+    { "name": "graphql is its JSON envelope", "mode": "graphql", "content": "{\"query\":\"{ me }\"}", "expected": "application/json", "panelWritesRow": true },
+    { "name": "jsonrpc is its JSON envelope", "mode": "jsonrpc", "content": "{\"method\":\"ping\"}", "expected": "application/json", "panelWritesRow": true },
+    { "name": "xml", "mode": "xml", "content": "<a/>", "expected": "application/xml", "panelWritesRow": true }
+  ],
+  "cases": [
+    { "name": "an empty text body has nothing to describe", "mode": "text", "content": "", "expected": "" },
+    { "name": "an empty json body has nothing to describe", "mode": "json", "content": "", "expected": "" },
+    { "name": "a form with no enabled field has nothing to describe", "mode": "x-www-form-urlencoded", "fields": [{ "key": "a", "value": "1", "enabled": false }], "expected": "" },
+    { "name": "a text body on a GET is still text/plain", "mode": "text", "method": "GET", "content": "plain", "expected": "text/plain" },
+    { "name": "a text body on a PUT is still text/plain", "mode": "text", "method": "PUT", "content": "plain", "expected": "text/plain" },
+    { "name": "graphql on a GET travels in the URL", "mode": "graphql", "method": "GET", "content": "{\"query\":\"{ me }\"}", "expected": "" },
+    { "name": "binary names its declared type first", "mode": "binary", "file": { "src": "/data/photo.png", "contentType": "image/webp" }, "expected": "image/webp" },
+    { "name": "binary falls back to what its extension names", "mode": "binary", "file": { "src": "/data/report.csv" }, "expected": "text/csv" }
+  ]
+}

@@ -20,6 +20,7 @@
 // Type-only, and therefore safe despite `body-drafts` importing `BodyMode` back
 // from here: `import type` is erased, so no runtime cycle exists.
 import type { BodyDrafts, VariablesDraft } from "./utils/body-drafts";
+import type { HeaderLine } from "@/components/shared/response-viewer/wire-headers";
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type {
@@ -246,6 +247,18 @@ export interface ResponseState {
 	headers: Record<string, string>;
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
+	/**
+	 * The request's header lines as they went out, in wire order, read off the
+	 * engine's recorded `rawRequest` (issue #2464): the transport's own lines
+	 * (`Host`, `Accept`, `Content-Length`, the jar's `Cookie`) beside the
+	 * author's. The Headers tab's request section lists these when present and
+	 * `requestHeaders` otherwise; never sent and never in `pm.request.headers`.
+	 *
+	 * Set by **both** funnels, and only for an exchange that got a response:
+	 * absent on a failed send, and on a restored row with no recorded frame,
+	 * where `buildRawRequest` fabricates one the engine never reported.
+	 */
+	wireRequestHeaders?: HeaderLine[];
 	body: string;
 	bodyRaw?: string;
 	bodyType: "json" | "html" | "xml" | "text" | "binary";

@@ -189,6 +189,11 @@ std::string implied_content_type (const Body& body) {
     case BodyMode::GraphQL:
     case BodyMode::JsonRpc: return "application/json";
     case BodyMode::Xml: return "application/xml";
+    // `text/plain` is a default, not a claim that every text body is plain
+    // text (issue #2464): a typed `Content-Type` row wins (`text/csv`, a JWT's
+    // `application/jwt`), and `disabledSystemHeaders` removes it. Deriving
+    // nothing (#889) left the gap libcurl fills with its form type.
+    case BodyMode::Text: return "text/plain";
     // The file's declared type, else what its extension names, else the
     // type that claims nothing. An empty string is absent at every tier.
     case BodyMode::Binary: {
@@ -200,9 +205,7 @@ std::string implied_content_type (const Body& body) {
         std::string{ "application/octet-stream" } :
         std::string (by_extension);
     }
-    // `text` is the one content mode with no answer, and that is a decision
-    // rather than a gap (issue #889): `text/plain`, `text/csv`, a JWT and a
-    // raw signature are all this mode, so the header is the author's to write.
+    // Multipart: libcurl writes the type, because the boundary is its own.
     default: return {};
     }
 }
