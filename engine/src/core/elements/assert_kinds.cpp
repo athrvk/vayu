@@ -139,9 +139,8 @@ class AssertJsonPathElement final : public Element {
         }
         const nlohmann::json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
-            ctx.outcome_status = "skipped";
-            ctx.outcome_message =
-            "response body is not JSON, or exceeds maxElementBodyBytes";
+            ctx.outcome_status  = "skipped";
+            ctx.outcome_message = constants::elements::BODY_UNREADABLE_MESSAGE;
             return;
         }
         const auto matches = detail::evaluate_json_path (*body, *path_);

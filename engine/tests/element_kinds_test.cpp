@@ -29,11 +29,14 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstddef>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
+#include "vayu/core/custom_metric_type.hpp"
 #include "vayu/core/elements.hpp"
 
 namespace {
@@ -597,6 +600,102 @@ TEST_F (ElementKindsTest, AWrongTypedPatternMemberCompilesWithoutThrowing) {
     EXPECT_NO_THROW (one_element (nlohmann::json{ { "id", "e2" }, { "kind", "assert.jsonpath" },
     { "config", { { "path", "$.a" }, { "regex", 5 } } } }));
     EXPECT_NO_THROW (control_if_raw (7));
+}
+
+// ---------------------------------------------------------------------------
+// A response body nesting past MAX_BODY_DEPTH is not handed to the JSON kinds
+// (#2361)
+// ---------------------------------------------------------------------------
+
+constexpr size_t BODY_DEPTH = vayu::core::constants::elements::MAX_BODY_DEPTH;
+
+/// {"n": 7, "v": [[...]]} with @p levels arrays under `v`, the innermost empty:
+/// that array sits at depth @p levels. Never built deeper than the bound plus a
+/// level, so a regression is a wrong outcome here rather than a stack overflow.
+std::string body_nested_to (size_t levels) {
+    return R"({"n": 7, "v": )" + std::string (levels, '[') + std::string (levels, ']') + "}";
+}
+
+nlohmann::json assert_jsonpath_exists (const std::string& path) {
+    return nlohmann::json{ { "id", "a1" }, { "kind", "assert.jsonpath" },
+        { "config", { { "path", path }, { "exists", true } } } };
+}
+
+nlohmann::json metric_trend_at (const std::string& path) {
+    return nlohmann::json{ { "id", "m1" }, { "kind", "metric.record" },
+        { "config",
+        { { "name", "n" }, { "type", "trend" }, { "source", { { "jsonpath", path } } } } } };
+}
+
+// Mutation check: drop the `json_within_depth` test in `ensure_parsed_body`
+// and the over-the-bound halves below report "ok" / record 7 instead.
+TEST_F (ElementKindsTest, ExtractJsonSkipsABodyNestedPastTheDepthBound) {
+    response = ok_json_response (200, body_nested_to (BODY_DEPTH + 1));
+
+    const auto outcomes = run_after (one_element (extract_json_at ("$.n")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "skipped");
+    EXPECT_NE (message_of (outcomes[0]).find ("nests too deeply"), std::string::npos)
+    << message_of (outcomes[0]);
+    EXPECT_NE (message_of (outcomes[0]).find ("maxElementBodyBytes"), std::string::npos)
+    << message_of (outcomes[0]);
+    EXPECT_TRUE (variables.empty ());
+}
+
+TEST_F (ElementKindsTest, ExtractJsonStillReadsABodyAtExactlyTheDepthBound) {
+    response = ok_json_response (200, body_nested_to (BODY_DEPTH));
+
+    EXPECT_EQ (run_after (one_element (extract_json_at ("$.n")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "7");
+
+    // The deep subtree itself is matched and copied out at the bound.
+    variables.clear ();
+    response = ok_json_response (200, body_nested_to (BODY_DEPTH));
+    EXPECT_EQ (run_after (one_element (extract_json_at ("$.v")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"],
+    std::string (BODY_DEPTH, '[') + std::string (BODY_DEPTH, ']'));
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathSkipsABodyNestedPastTheDepthBound) {
+    response = ok_json_response (200, body_nested_to (BODY_DEPTH + 1));
+
+    const auto outcomes =
+    run_after (one_element (assert_jsonpath_exists ("$.n")));
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "skipped");
+    EXPECT_NE (message_of (outcomes[0]).find ("nests too deeply"), std::string::npos)
+    << message_of (outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathStillReadsABodyAtExactlyTheDepthBound) {
+    response = ok_json_response (200, body_nested_to (BODY_DEPTH));
+
+    EXPECT_EQ (run_after (one_element (assert_jsonpath_exists ("$.n")))[0].status, "ok");
+}
+
+TEST_F (ElementKindsTest, MetricJsonPathRecordsNothingFromABodyNestedPastTheDepthBound) {
+    std::vector<double> recorded;
+    const auto run_metric = [&] (size_t levels) {
+        recorded.clear ();
+        response           = ok_json_response (200, body_nested_to (levels));
+        ElementContext ctx = make_context ();
+        ctx.record_metric = [&recorded] (const std::string&, vayu::core::CustomMetricType,
+                            double value) { recorded.push_back (value); };
+        std::vector<ElementOutcome> sink;
+        ElementPipeline::run (
+        Phase::StepAfter, ctx, one_element (metric_trend_at ("$.n")), sink);
+        return sink;
+    };
+
+    const auto at_bound = run_metric (BODY_DEPTH);
+    ASSERT_EQ (at_bound.size (), 1u);
+    EXPECT_EQ (at_bound[0].status, "ok");
+    EXPECT_EQ (recorded, std::vector<double>{ 7.0 });
+
+    const auto past_bound = run_metric (BODY_DEPTH + 1);
+    ASSERT_EQ (past_bound.size (), 1u);
+    EXPECT_EQ (past_bound[0].status, "missing");
+    EXPECT_TRUE (recorded.empty ());
 }
 
 } // namespace
