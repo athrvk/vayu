@@ -1738,11 +1738,11 @@ const std::vector<std::string>& secret_values) {
     return parsed.dump ();
 }
 
-bool exceeds_depth (const Json& value, std::size_t max_depth) {
+bool exceeds_depth (const Json& value, size_t max_depth) {
     // Each entry is a container and the level it sits at (the root is level
     // 1); scalars never go on the stack, so a wide array of them costs one
     // pass and no growth.
-    std::vector<std::pair<const Json*, std::size_t>> pending;
+    std::vector<std::pair<const Json*, size_t>> pending;
     if (value.is_structured ()) {
         pending.emplace_back (&value, 1);
     }

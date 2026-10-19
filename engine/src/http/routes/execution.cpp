@@ -509,9 +509,6 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
         return row;
     }
 
-    // The same bound a run's whole data set is measured against, applied to the
-    // one row this endpoint takes. Measured before the row is kept, so an
-    // oversized payload is refused rather than held.
     // Ahead of the measure: `dump ()` recurses, and a cell nested far enough
     // overflows the stack (#2362). Same rule and wording as a data set's rows.
     if (auto refusal = vayu::core::refuse_overdeep_cell (*field, "data", std::nullopt)) {
@@ -519,6 +516,10 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes) {
         row.error = std::move (*refusal);
         return row;
     }
+
+    // The same bound a run's whole data set is measured against, applied to the
+    // one row this endpoint takes. Measured before the row is kept, so an
+    // oversized payload is refused rather than held.
     const size_t bytes = field->dump ().size ();
     if (bytes > max_bytes) {
         row.ok    = false;

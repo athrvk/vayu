@@ -1227,6 +1227,106 @@ TEST_F (RunConfigValidationRouteTest, ADeepScenarioDataCellIsRefusedBeforeTheSna
     EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
+// The snapshot dumps the whole body, so the early check cannot assume `data` is
+// an array of objects: a deep value under any other shape crashed the same way.
+// Mutation check: restore the old `refuse_overdeep_data` (nullopt for a
+// non-array, a stop at the first non-object row) and these crash the binary.
+namespace {
+
+std::string run_with_data (const std::string& data_json, const std::string& url) {
+    return R"({"method":"GET","url":")" + url +
+    R"(","iterations":1,"concurrency":1,"data":)" + data_json + "}";
+}
+
+std::string deep_message (const std::string& where) {
+    return where + " is nested deeper than " +
+    std::to_string (vayu::core::constants::spec_document::MAX_READ_DEPTH) + " levels";
+}
+
+} // namespace
+
+TEST_F (RunConfigValidationRouteTest, ADeepObjectDataIsRefusedBeforeTheSnapshotDumpsIt) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] =
+    post_text ("/runs", run_with_data (deep_cell_row ("a"), echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'data'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepCellBehindANonObjectRowIsRefusedBeforeTheSnapshot) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text (
+    "/runs", run_with_data ("[1," + deep_cell_row ("a") + "]", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'data' row 1 column 'a'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepArrayAsADataRowIsRefusedBeforeTheSnapshotDumpsIt) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text ("/runs",
+    run_with_data (
+    "[" + vayu::tests::nested_array_text (kCrashingDepth) + "]", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'data' row 0"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepObjectScenarioDataIsRefusedBeforeTheSnapshotDumpsIt) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":)" +
+    deep_cell_row ("a") + "}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'scenario.data'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest,
+ADeepCellBehindANonObjectScenarioRowIsRefusedBeforeTheSnapshot) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":[1,)" +
+    deep_cell_row ("a") + "]}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'scenario.data' row 1 column 'a'"));
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepArrayAsAScenarioDataRowIsRefusedBeforeTheSnapshot) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":[)" +
+    vayu::tests::nested_array_text (kCrashingDepth) + "]}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'scenario.data' row 0"));
+}
+
+// A wrong shape within the bound keeps the reader's own words.
+TEST_F (RunConfigValidationRouteTest, AShallowWrongShapedDataKeepsItsShapeRefusal) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] =
+    post_text ("/runs", run_with_data (R"({"a":1})", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (vayu::http::routes::error_message_of (body).find (
+               "must be an array of objects"),
+    std::string::npos)
+    << body.dump ();
+}
+
 // `POST /execute` measures its one row with `dump ()` too.
 TEST_F (RunConfigValidationRouteTest, ADeepExecuteDataCellIsRefusedBeforeItIsMeasured) {
     const vayu::tests::EchoServer echo;

@@ -458,11 +458,15 @@ std::string_view field,
 std::optional<size_t> row_index);
 
 /**
- * `refuse_overdeep_cell` over every row of @p data, for a caller that must
- * know before it touches the payload at all: `POST /runs` snapshots the whole
- * body ahead of `read_data_rows`. Stops at the first row that is not an object
- * (and at a @p data that is not an array), which `read_data_rows` refuses in
- * its own words, so the two agree on which refusal comes first.
+ * The same refusal over the whole of @p data whatever its shape, for a caller
+ * that must know before it touches the payload at all: `POST /runs` snapshots
+ * the whole body ahead of `read_data_rows`. An array is walked row by row
+ * (`refuse_overdeep_cell` for an object row; a row of any other type is refused
+ * as `'<field>' row <i> is nested deeper than 100 levels` when it is itself
+ * too deep); a @p data that is not an array is refused as `'<field>' is nested
+ * deeper than 100 levels` when it is too deep. A shape wrong but within the
+ * bound is no refusal here and is left to `read_data_rows`, in its own words
+ * and its own order.
  */
 [[nodiscard]] std::optional<std::string>
 refuse_overdeep_data (const nlohmann::json& data, std::string_view field);

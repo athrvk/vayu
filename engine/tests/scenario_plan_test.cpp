@@ -958,6 +958,62 @@ TEST_F (ScenarioPlanTest, ADataCellNestedExactlyAtTheDepthBoundResolves) {
     EXPECT_EQ (resolved.data_rows.size (), 1u);
 }
 
+// `refuse_overdeep_data` is what `POST /runs` asks before it snapshots the body,
+// so it has to answer for every shape `data` can take, not only an array of
+// objects (#2362). Each too-deep value is moved into place: a copy recurses.
+namespace {
+
+constexpr size_t kDepthBound = vayu::core::constants::spec_document::MAX_READ_DEPTH;
+
+std::string overdeep_message (const std::string& where) {
+    return where + " is nested deeper than " + std::to_string (kDepthBound) + " levels";
+}
+
+} // namespace
+
+TEST (RefuseOverdeepData, ANonArrayDataTooDeepIsRefusedAsAWhole) {
+    json object = json::object ();
+    object["a"] = vayu::tests::nested_array (kDepthBound + 1);
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (object, "data"),
+    overdeep_message ("'data'"));
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (object, "scenario.data"),
+    overdeep_message ("'scenario.data'"));
+}
+
+TEST (RefuseOverdeepData, ANonObjectRowTooDeepIsRefusedByIndexAndRowsBeforeItAreSkipped) {
+    json data = json::array ();
+    data.push_back (1);
+    data.push_back (json{ { "ok", 1 } });
+    data.push_back (vayu::tests::nested_array (kDepthBound + 1));
+
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (data, "scenario.data"),
+    overdeep_message ("'scenario.data' row 2"));
+}
+
+TEST (RefuseOverdeepData, ANonObjectRowDoesNotStopTheWalkBeforeALaterDeepCell) {
+    json deep_row   = json::object ();
+    deep_row["tag"] = vayu::tests::nested_array (kDepthBound + 1);
+    json data       = json::array ();
+    data.push_back (1);
+    data.push_back (std::move (deep_row));
+
+    EXPECT_EQ (vayu::core::refuse_overdeep_data (data, "data"),
+    overdeep_message ("'data' row 1 column 'tag'"));
+}
+
+TEST (RefuseOverdeepData, WrongShapesWithinTheBoundAreLeftToReadDataRows) {
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json{ { "a", 1 } }, "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json ("text"), "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json::array ({ 1, "bob" }), "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (json::array (), "data"));
+
+    json at_bound = json::array ();
+    at_bound.push_back (vayu::tests::nested_array (kDepthBound));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (at_bound, "data"));
+    EXPECT_FALSE (vayu::core::refuse_overdeep_data (
+    json{ { "a", vayu::tests::nested_array (kDepthBound - 1) } }, "data"));
+}
+
 TEST_F (ScenarioPlanTest, SmallObjectAndArrayCellsStillResolveAndBindAsCompactJson) {
     seed_collection ("col", "");
     seed_request ("req", "col");

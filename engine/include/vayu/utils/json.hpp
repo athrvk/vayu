@@ -247,7 +247,7 @@ void serialize_to_stream (const vayu::db::Request& request, std::ostream& out);
  * nested far past any real document must be refused before either runs on it.
  * This is the only probe that is safe on such a value.
  */
-[[nodiscard]] bool exceeds_depth (const Json& value, std::size_t max_depth);
+[[nodiscard]] bool exceeds_depth (const Json& value, size_t max_depth);
 
 /**
  * @brief Sanitize a run's config snapshot before persistence: the composed

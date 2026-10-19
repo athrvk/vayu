@@ -592,12 +592,27 @@ std::optional<size_t> row_index) {
 
 std::optional<std::string>
 refuse_overdeep_data (const nlohmann::json& data, std::string_view field) {
+    constexpr size_t max_depth = constants::spec_document::MAX_READ_DEPTH;
+    const std::string where    = "'" + std::string (field) + "'";
+    const std::string bound =
+    " is nested deeper than " + std::to_string (max_depth) + " levels";
     if (!data.is_array ()) {
+        if (vayu::json::exceeds_depth (data, max_depth)) {
+            return where + bound;
+        }
         return std::nullopt;
     }
     for (size_t i = 0; i < data.size (); ++i) {
+        // A row that is not an object is read_data_rows' to refuse, but only
+        // once it is shallow enough to be dumped.
         if (!data[i].is_object ()) {
-            return std::nullopt;
+            if (vayu::json::exceeds_depth (data[i], max_depth)) {
+                std::string refusal = where + " row ";
+                refusal += std::to_string (i);
+                refusal += bound;
+                return refusal;
+            }
+            continue;
         }
         if (auto refusal = refuse_overdeep_cell (data[i], field, i)) {
             return refusal;
