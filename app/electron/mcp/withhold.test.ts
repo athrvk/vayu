@@ -631,6 +631,27 @@ describe("withholdRunOutput", () => {
 		expect(Object.keys(out.headers)).toEqual(Object.keys(response.headers));
 	});
 
+	test("masks a response's headerLines rows, keeping every name, the order and the repeated Set-Cookie (#2460)", () => {
+		const response = {
+			headerLines: [
+				{ name: "Content-Type", value: "text/html" },
+				{ name: "Set-Cookie", value: "sid=1; Path=/" },
+				{ name: "set-cookie", value: "theme=dark; Expires=Wed, 21 Oct 2026 07:28:00 GMT" },
+				{ name: "Authorization", value: "Bearer abc" },
+				{ name: "ETag", value: "w/1" },
+			],
+		};
+		expect(withholdRunOutput(response, rule)).toEqual({
+			headerLines: [
+				{ name: "Content-Type", value: "text/html" },
+				{ name: "Set-Cookie", value: "<redacted>" },
+				{ name: "set-cookie", value: "<redacted>" },
+				{ name: "Authorization", value: "<redacted>" },
+				{ name: "ETag", value: "w/1" },
+			],
+		});
+	});
+
 	test("masks credential header rows and a sent-header map, by the shared list and the API-key name", () => {
 		const node = {
 			headers: [
