@@ -5320,7 +5320,10 @@ Acquire (or return a cached) token for an `OAuth2Config`. Supports the
 ```
 
 `force: true` bypasses the cache (refreshes via the refresh token when present,
-else re-acquires). `interactive` is only used for the `authorization_code` grant.
+else re-acquires). `interactive` is only used for the `authorization_code` grant,
+and it always exchanges the code and overwrites the cached row, whatever `force`
+says and whether the cached token is fresh, expired or refreshable (the old
+refresh token is not carried over).
 
 **Response (`200`):**
 ```json
@@ -5370,7 +5373,9 @@ hands it back.
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
 
 Attempts time out after 5 minutes; on success the token is written to the cache
-and `cacheKey` is returned.
+and `cacheKey` is returned. A completion (the loopback callback and `POST
+/oauth2/authorize/complete` alike) always exchanges its code and replaces any
+token already cached under that key.
 
 ### Local mock issuer
 
@@ -9020,9 +9025,16 @@ one).
 The whole-run aggregates come from the run's stored `summary` (written once when the run reaches
 a terminal status - see [db-schema.md](db-schema.md#runs)), combined with the sampled `results`
 rows for the timing breakdown and the `results[]` array (at most 100 rows, failures
-first - see "`results[]` is not a uniform sample" below). A run with no summary never reached a
-terminal status - the engine died mid-run - and its report is built from those sampled `results`
-alone rather than erroring. **The response shape is the same either way.**
+first - see "`results[]` is not a uniform sample" below). A run with no summary has either not
+reached a terminal status yet (`metadata.status` is `pending` or `running`) or never will because
+the engine died mid-run; its report is built from those sampled `results` alone rather than
+erroring. **The response shape is the same either way.**
+
+A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
+come from whatever results have been sampled so far, `metadata.status` says the run is still in
+flight, and `thresholdValidation` is absent even when the run declared budgets, because the
+verdict is computed from the summary written at the end. Read `metadata.status` before treating a
+report as final.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is

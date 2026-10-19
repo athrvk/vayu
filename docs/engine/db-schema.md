@@ -1208,8 +1208,9 @@ bounded by retention and ordered by `idx_runs_start_time`.
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
 bytes, and the script-validation tallies. It is written once - by `run_manager.cpp` when the run
 reaches `completed`/`stopped`, and best-effort (minus `setup_overhead`, with a wall-clock
-`test_duration`) when it fails. `""` means the engine died before the run reached a terminal
-status, and the report then stands on the run's sampled `results` alone. NOT NULL with a `""`
+`test_duration`) when it fails. `""` means no terminal status has written one: the run is still
+`pending`/`running`, or the engine died before it got there. The report then stands on the run's
+sampled `results` alone. NOT NULL with a `""`
 default, so `sync_schema()` can
 `ALTER TABLE ADD COLUMN` it onto an existing table (same pattern as `requests.follow_redirects`).
 

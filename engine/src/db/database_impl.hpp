@@ -371,8 +371,8 @@ inline auto make_vayu_storage (const std::string& path) {
     // Whole-run results written once at terminal status. NOT NULL, so the
     // default_value is what lets sync_schema ALTER TABLE ADD COLUMN it onto an
     // existing, non-empty runs table - pre-existing rows backfill to `""`,
-    // which the report route reads as "the engine died before this run
-    // finished; report from the sampled results alone".
+    // which the report route reads as "no terminal summary (#2436): still
+    // running, or the engine died; report from the sampled results alone".
     make_column ("summary", &Run::summary, default_value ("")),
     // Pinned-as-baseline flag; see Run::baseline for why retention reads it.
     make_column ("baseline", &Run::baseline, default_value (false)),

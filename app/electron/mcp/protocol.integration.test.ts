@@ -154,6 +154,7 @@ describe("MCP protocol handshake (in-memory)", () => {
 		expect(offNames.filter((n) => writeNames.includes(n))).toEqual([]);
 		// The read/execute surface is untouched by the gate.
 		expect(offNames).toContain("list_collections");
+		expect(offNames).toContain("get_run");
 		await off.server.close();
 
 		const on = await connectClient({ safety: { allowWrites: true } });
@@ -276,7 +277,9 @@ describe("MCP protocol handshake (in-memory)", () => {
 			const instructions = client.getInstructions() ?? "";
 			expect(instructions).toContain('Vayu <kind> "<name>" (<id>)');
 			expect(instructions).toMatch(/ask the user for a reference line/);
-			expect(instructions).toMatch(/first row of the run list, which is newest first/);
+			expect(instructions).toMatch(
+				/read by the runId its start call returned, not by its position in the run list/
+			);
 			await server.close();
 		}
 	});

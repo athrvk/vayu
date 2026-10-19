@@ -44,6 +44,32 @@ on:
   pull_request:
     branches:
       - master
+  # **The writer of the master sccache scope is this file's own engine matrix.**
+  # A pull request reads its own scope and master's, never another pull
+  # request's, and sccache keys every object on the full compile command:
+  # compiler binary, preset, `-DVAYU_WERROR`, include paths. cache-warm.yml
+  # compiles the *release* configuration, which differs from the legs below on
+  # three of four (no `-Werror`, `macos-prod-arm64` instead of `macos-prod`, no
+  # ubuntu-latest), so first pushes read nothing from it: 28 hits to 371 misses
+  # on both Linux legs and macOS in run 39181878500, a one-file change. Building
+  # this same matrix on master is what makes the two sides agree by
+  # construction - no second copy of the flags exists to drift.
+  #
+  # On a push the engine job builds and stops: no tests, no lint, no gate. Those
+  # ran on the pull request; this run exists to leave master's objects behind.
+  # Engine paths only, as the `engine` filter below has them, minus what only
+  # lint or verification reads. Concurrency cancels an older master run when a
+  # newer one starts, which loses nothing: sccache writes each object as it
+  # compiles, so a cancelled run keeps everything it finished.
+  push:
+    branches:
+      - master
+    paths:
+      - 'engine/**'
+      - 'VERSION'
+      - '.github/actions/linux-release-toolchain/**'
+      - '.github/workflows/pr-tests.yml'
+      - '!**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,6 +78,10 @@ concurrency:
 jobs:
   changes:
     name: Detect changes
+    # A push to master is already filtered by `on.push.paths`, and the filters
+    # below read a pull request's file list. Skipped here, every job that needs
+    # it is skipped too - except `engine`, whose condition admits a push.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # Both filters read the PR's file list from the API rather than cloning, so
     # this is all they need. Stated explicitly rather than inherited, since a
@@ -647,7 +677,12 @@ jobs:
     name: Engine on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
+    # `!cancelled()` because `changes` is skipped on a push, and a job whose
+    # need was skipped is skipped too unless its condition says otherwise.
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name == 'push'
+          || (needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true')) }}
     permissions:
       contents: read
       checks: write
@@ -824,6 +859,8 @@ jobs:
       # See #589; drop the redirect on one side and that class is reachable
       # again.
       - name: Run engine tests
+        # A push to master builds to fill the cache and stops (see `on.push`).
+        if: github.event_name == 'pull_request'
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
@@ -911,7 +948,8 @@ jobs:
       # coverage of the per-OS branches at all.
       - name: Lint changed engine sources
         if: >-
-          runner.os != 'macOS'
+          github.event_name == 'pull_request'
+          && runner.os != 'macOS'
           && matrix.os != 'ubuntu-22.04'
           && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
@@ -1098,7 +1136,8 @@ jobs:
       # read as a clean pass, and "the lint step is missing" is easy to miss.
       - name: Note the lint skip
         if: >-
-          runner.os != 'macOS'
+          github.event_name == 'pull_request'
+          && runner.os != 'macOS'
           && matrix.os != 'ubuntu-22.04'
           && contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
@@ -1122,7 +1161,8 @@ jobs:
       # suite, and turning this on would make one failing test fail two steps.
       - name: Publish C++ test results
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
-        if: always()
+        # A push runs no tests, and `require_tests` would fail on the missing report.
+        if: always() && github.event_name == 'pull_request'
         with:
           report_paths: 'engine/test-results.xml'
           check_name: 'C++ Tests (${{ matrix.os }})'
@@ -1455,7 +1495,10 @@ jobs:
     # job skips everything, and "skipped" would pass this gate on a change
     # nobody ran.
     needs: [changes, quality, app, engine, engine-format, installer, build-script, scripts]
-    if: always()
+    # The gate grades a pull request. A push to master runs only the engine
+    # build (see `on.push`), and the gate's first check - change detection
+    # succeeded - would fail on the skipped `changes`.
+    if: always() && github.event_name == 'pull_request'
     # `actions: read` is what lets the download below reach this run's own
     # artifacts; everything else here reads job results, which need nothing.
     permissions:

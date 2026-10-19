@@ -555,8 +555,9 @@ applied to the outgoing request rather than being left to the UI. This lives in
   expiry - see the run lifecycle below.
 - **`oauth_client`** (`acquire_token`) - grant handling (client_credentials,
   password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
-  cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. It
-  never logs token bodies/headers.
+  cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. An
+  interactive call skips the cache and always exchanges its code. It never logs
+  token bodies/headers.
 - **`oauth_authorize`** - the interactive Authorization Code manager: an
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens

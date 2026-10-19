@@ -49,6 +49,7 @@ import {
 	smokeRowUrl,
 	smokeScopeCaveat,
 } from "./output-schemas.js";
+import { startedRunNextStep } from "./run-status.js";
 import { preflightScenarioSteps, scenarioBlock } from "./scenario-runs.js";
 
 export const COLLECTION_RUN_TOOLS: McpTool[] = [
@@ -354,14 +355,14 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 					...(started as Record<string, unknown>),
 					plannedSteps,
 					nextStep:
-						`The run executes engine-side. Read it with get_run_report(runId): the ` +
-						`\`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
+						`The run executes engine-side. ${startedRunNextStep(undefined, undefined)} ` +
+						`The report's \`scenario\` section carries the iteration and pass/fail/skip totals plus ` +
 						`\`stepsStored\`/\`stepsDropped\`, and \`results\` returns every stored step row ` +
 						`(a run past the step cap keeps non-passing steps first; \`stepsDropped\` and ` +
 						`\`resultsStored\`/\`resultsCap\` say whether it did). Each row's \`trace\` carries that step's ` +
 						`request and response bodies inline, so a long plan against large responses ` +
 						`makes for a large report - read the totals first and the rows when you need ` +
-						`them. stop_run ends the run early.`,
+						`them.`,
 				}),
 				"collection",
 				started
