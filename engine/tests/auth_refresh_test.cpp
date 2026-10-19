@@ -596,18 +596,19 @@ TEST_F (MidRunRefreshTest, ARunOutlivingItsTokenSendsARefreshedOne) {
 
 // #2395: `atSeconds` is measured from load start, the report's origin, not from
 // when the run was registered. The token is minted while the request is built,
-// before a 1.5 s `script.setup`, and renewed 2 s after minting (3 s tokens, 1 s
-// lead), so the refresh lands about 0.5 s into load and about 2 s after
-// registration. Mutation check: stamp `at_seconds` off the registration instant
-// again and this reads about 2.
+// before a 1.5 s `script.setup`, and renewed 4 s after minting (5 s tokens, 1 s
+// lead), so the refresh lands about 2.5 s into load (less by however long the
+// request build took) and about 4 s after registration. The bounds leave a slow
+// runner a second and a half of build time. Mutation check: stamp `at_seconds`
+// off the registration instant again and this reads about 4.
 TEST_F (MidRunRefreshTest, ARefreshIsStampedRelativeToLoadStartNotSetup) {
     MockTarget target;
     vayu::http::MockIssuerManager issuers;
-    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 5 } });
     ASSERT_TRUE (issuer.ok) << issuer.error_message;
 
     json config = run_config (target.api_url (), oauth2_config (issuer.token_url));
-    config["duration"]          = "3s";
+    config["duration"]          = "5s";
     config["lifecycleElements"] = json::array (
     { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
     { "config", { { "script", "const until = Date.now () + 1500; while (Date.now () < until) {}" } } } } });
@@ -619,7 +620,7 @@ TEST_F (MidRunRefreshTest, ARefreshIsStampedRelativeToLoadStartNotSetup) {
     ASSERT_TRUE (refreshes.is_array () && !refreshes.empty ()) << summary.dump ();
     const double at_seconds = refreshes[0]["atSeconds"].get<double> ();
     EXPECT_GT (at_seconds, 0.0) << summary.dump ();
-    EXPECT_LT (at_seconds, 1.25)
+    EXPECT_LT (at_seconds, 3.2)
     << "the refresh was stamped on the setup-inclusive clock";
 }
 
