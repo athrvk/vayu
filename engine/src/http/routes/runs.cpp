@@ -204,6 +204,14 @@ struct ThresholdOutcome {
     }
 };
 
+// What a run submitted, what its mode set out to submit (0 for an open-ended
+// one), and the window it submitted in, off the stored summary (#2392).
+struct SendingTotals {
+    size_t requests_sent      = 0;
+    size_t requests_expected  = 0;
+    double sending_duration_s = 0.0;
+};
+
 // Report fields that live outside the DetailedReport struct: whole-run counters
 // the report injects into its `summary` object. Filled from the run's stored
 // summary.
@@ -378,6 +386,10 @@ struct ReportExtras {
     // leaves the key out entirely rather than an empty array every run would
     // otherwise carry.
     nlohmann::json warnings = nlohmann::json::array ();
+    // Empty for a summary stored before #2392, which keeps the old
+    // rate-fidelity formula and leaves `summary.sendingDurationSeconds` and
+    // `rateControl`'s two counts out rather than reporting them as zero.
+    std::optional<SendingTotals> sending;
 };
 
 // Read a number out of a JSON object, leaving @p out untouched when the key is
@@ -505,6 +517,14 @@ ReportExtras& extras) {
     read_number (summary, "bytes_sent", extras.bytes_sent);
     read_number (summary, "bytes_received", extras.bytes_received);
     read_number (summary, "http_version_downgraded", extras.http_version_downgraded);
+    // Written together since #2392, so one key stands for the three.
+    if (summary.contains ("sending_duration") && summary["sending_duration"].is_number ()) {
+        SendingTotals sending;
+        read_number (summary, "sending_duration", sending.sending_duration_s);
+        read_number (summary, "requests_sent", sending.requests_sent);
+        read_number (summary, "requests_expected", sending.requests_expected);
+        extras.sending = sending;
+    }
 
     if (summary.contains ("latency") && summary["latency"].is_object ()) {
         const auto& latency = summary["latency"];
@@ -1159,6 +1179,27 @@ int64_t stop_wait_ms) {
 }
 
 /**
+ * Rate fidelity as the pacer counts it (#2392): requests sent over requests
+ * expected, and the achieved rate over the sending window, which the
+ * end-of-run drain is not part of. Leaves the completed-over-wall-time figures
+ * alone for a run stored before the window was, and for a mode that expected
+ * no count.
+ */
+void apply_sending_window_rates (const ReportExtras& extras,
+double target_rps,
+vayu::DetailedReport& report) {
+    const auto& sending = extras.sending;
+    if (target_rps <= 0 || !sending || sending->sending_duration_s <= 0 ||
+    sending->requests_expected == 0) {
+        return;
+    }
+    const auto sent   = static_cast<double> (sending->requests_sent);
+    report.actual_rps = sent / sending->sending_duration_s;
+    report.rps_achievement =
+    sent / static_cast<double> (sending->requests_expected) * 100.0;
+}
+
+/**
  * The figures the stored summary and the sampled results have to be reconciled
  * into: the success/failure split from whichever status distribution won, the
  * error rate that split implies, and the run's rate against its declared target.
@@ -1221,6 +1262,7 @@ vayu::DetailedReport& report) {
         report.total_duration_s =
         static_cast<double> (report.total_requests) / report.actual_rps;
     }
+    apply_sending_window_rates (extras, target_rps, report);
     return target_rps;
 }
 
@@ -1449,6 +1491,9 @@ double target_rps) {
         { "httpVersionDowngraded", static_cast<size_t> (extras.http_version_downgraded) },
         { "throughputBytesPerSec",
         report.total_duration_s > 0 ? extras.bytes_received / report.total_duration_s : 0.0 } };
+    if (const auto& sending = extras.sending) {
+        json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
+    }
     json_report["latency"] = { { "min", report.latency_min }, { "max", report.latency_max },
         { "avg", report.latency_avg }, { "median", report.latency_p50 },
         { "p50", report.latency_p50 }, { "p75", report.latency_p75 },
@@ -1459,6 +1504,10 @@ double target_rps) {
     if (target_rps > 0) {
         json_report["rateControl"] = { { "targetRps", report.target_rps },
             { "actualRps", report.actual_rps }, { "achievement", report.rps_achievement } };
+        if (const auto& sending = extras.sending) {
+            json_report["rateControl"]["requestsSent"] = sending->requests_sent;
+            json_report["rateControl"]["requestsExpected"] = sending->requests_expected;
+        }
     }
 
     nlohmann::json errors_obj;

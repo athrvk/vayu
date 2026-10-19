@@ -288,6 +288,16 @@ export default function PerformanceTab({
 								>
 									{formatNumber(report.rateControl.achievement)}%
 								</p>
+								{/* Absent on a run stored before #2392, and 0 expected is the
+								    engine falling back to the legacy formula: no plan to state. */}
+								{report.rateControl.requestsSent !== undefined &&
+									!!report.rateControl.requestsExpected && (
+										<p className="text-xs text-muted-foreground mt-1">
+											{formatNumber(report.rateControl.requestsSent)} sent /{" "}
+											{formatNumber(report.rateControl.requestsExpected)}{" "}
+											expected
+										</p>
+									)}
 							</div>
 						</div>
 					</CardContent>

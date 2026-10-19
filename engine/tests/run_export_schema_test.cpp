@@ -47,7 +47,9 @@ json phase () {
 json healthy_summary () {
     return json{ { "total_requests", 100 }, { "cancelled", 0 }, { "rps", 10.0 },
         { "send_rate", 10.0 }, { "throughput", 9.9 }, { "test_duration", 10.0 },
-        { "setup_overhead", 0.1 }, { "peak_concurrency", 5 }, { "dropped_requests", 0 },
+        { "setup_overhead", 0.1 }, { "requests_sent", 100 },
+        { "requests_expected", 100 }, { "sending_duration", 9.8 },
+        { "peak_concurrency", 5 }, { "dropped_requests", 0 },
         { "queue_wait_avg", 0.2 }, { "bytes_sent", 1000 }, { "bytes_received", 5000 },
         { "http_version_downgraded", 0 }, { "status_codes", { { "200", 100 } } },
         { "latency",
@@ -228,6 +230,12 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
          "lifecycle", "elements", "thresholdValidation", "customMetrics" }) {
         EXPECT_TRUE (document["report"].contains (section)) << section;
     }
+    // The optional members validate only if they are written (#2392).
+    EXPECT_TRUE (
+    document["report"]["summary"].contains ("sendingDurationSeconds"));
+    EXPECT_TRUE (document["report"]["rateControl"].contains ("requestsSent"));
+    EXPECT_TRUE (
+    document["report"]["rateControl"].contains ("requestsExpected"));
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 

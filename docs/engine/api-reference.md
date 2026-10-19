@@ -8508,7 +8508,11 @@ Until then the run is still setting up, and every frame carries
 by it. The last frame, published just after load ends, therefore reads within
 a fraction of a second of the report's `testDuration`. An engine older than that issue
 counted from when the run was registered, so a slow setup ran its live clock
-ahead of the report and dragged the rates down.
+ahead of the report and dragged the rates down. The last frame's `sendRate` is
+still not the report's: the report divides requests sent by the sending
+window, which ends before the end-of-run drain, where a live frame divides by
+everything elapsed so far ([`GET /runs/:runId/report`](#get-runsrunidreport),
+issue #2392).
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so
@@ -9278,7 +9282,7 @@ named it.
       "mode": "constant_rps",
       "duration": "60s",
       "concurrency": 100,
-      "targetRps": 500,
+      "targetRps": 100,
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
@@ -9301,26 +9305,28 @@ named it.
     "noResponseRequests": 0,
     "cancelledRequests": 0,
     "errorRate": 0.5,
-    "totalDurationSeconds": 60.0,
-    "avgRps": 100.0,
-    "testDuration": 60.0,
+    "totalDurationSeconds": 60.4,
+    "avgRps": 99.34,
+    "testDuration": 60.4,
     "sendRate": 100.0,
-    "throughput": 99.5,
+    "throughput": 99.34,
     "setupOverhead": 0.12,
     "peakConcurrency": 100,
     "droppedRequests": 0,
     "avgQueueWaitMs": 0.4,
     "bytesSent": 192000,
     "bytesReceived": 7680000,
-    "throughputBytesPerSec": 128000,
-    "httpVersionDowngraded": 0
+    "throughputBytesPerSec": 127152.32,
+    "httpVersionDowngraded": 0,
+    "sendingDurationSeconds": 60.0
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
     "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
   },
   "statusCodes": [[200, 5970], [500, 30]],
-  "rateControl": { "targetRps": 100, "actualRps": 99.5, "achievement": 99.5 },
+  "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
+                   "requestsSent": 6000, "requestsExpected": 6000 },
   "errors": {
     "total": 30,
     "withDetails": 30,
@@ -9403,6 +9409,37 @@ named it.
   "resultsCap": 100
 }
 ```
+
+**Two clocks, and which rate reads which** (issue #2392). `testDuration` (and
+`totalDurationSeconds`, the same figure) is the wall time from load start - the
+instant of the first submission - to the last request settling, so it includes
+the end-of-run drain, in which requests still in flight at the deadline are let
+answer (up to their `timeout` plus a grace). `avgRps` and `throughput` are
+completed requests over that wall time: they describe what the target served,
+and a run whose requests outlive its deadline reads below its target there by
+design. `sendRate` and `rateControl` describe what the generator sent, and
+divide by `sendingDurationSeconds`: load start to the moment the run stopped
+submitting, before the drain. `rateControl.achievement` is
+`requestsSent / requestsExpected x 100`, the pacer's own count with
+`requestsExpected` = `targetRps` x `duration`, and `rateControl.actualRps` is
+`requestsSent / sendingDurationSeconds`. `rateControl.requestsSent` and
+`requestsExpected` are the run totals behind the live `metrics` frame's fields of
+the same name. A shortfall there is not only a slow generator: a request
+dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
+ends the sending early, so a stopped run's achievement is the share of its plan
+it reached. The app's live Rate fidelity card instead divides by what the
+target owed up to now (`targetRps` times the time spent sending, capped at the
+duration), so on a Stop it reads the pace and the stored report reads the plan.
+
+An `iterations` run, single-request or scenario, is the one exception: its
+loop returns on its last submission with the batch before it still in flight,
+so a window measured to that point would overstate the rate it sustained. Its
+`sendingDurationSeconds` is its whole `testDuration`, unless a Stop ended it,
+in which case the measured window stands. A run stored before issue #2392 has
+neither `sendingDurationSeconds` nor the two counts: its `sendRate` divided by
+`testDuration`, and its `rateControl` keeps the formula it was stored with,
+`actualRps` the completed rate and `achievement` = `actualRps / targetRps x
+100`.
 
 **`statusCodes` and `errors.byStatusCode` are `[[code, count], ...]` pairs** on
 the wire, in ascending code order, not objects: each is a `std::map<int,

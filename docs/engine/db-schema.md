@@ -1248,6 +1248,7 @@ default, so `sync_schema()` can
 {
   "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
   "test_duration": 2.0, "setup_overhead": 0.25,
+  "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
@@ -1291,6 +1292,18 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`requests_sent`, `requests_expected` and `sending_duration` (issue #2392) are what the run
+submitted, what its mode set out to submit (`targetRps` x `duration` for a rate-limited run, the
+iteration count for an `iterations` one, `0` for an open-ended mode), and the seconds it
+submitted in: load start to the moment it stopped submitting, before the end-of-run drain that
+`test_duration` includes. An `iterations` run that reached its own end stores its whole
+`test_duration` there instead (see the report's
+[two clocks](api-reference.md#get-runsrunidreport)). `send_rate` is `requests_sent` over
+`sending_duration`; `rps` and `throughput` stay completed requests over `test_duration`, and so
+does every threshold that reads them. A failed run stores its wall-clock `test_duration` in
+`sending_duration` too. Always written, zeros included: a summary with no `sending_duration` key
+predates the issue, and the report keeps that run's old rate-fidelity formula.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`
