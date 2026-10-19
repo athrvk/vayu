@@ -471,6 +471,18 @@ describe("secret masking", () => {
 			expect(masked).toBe(true);
 		});
 
+		// `{` `}` and the backtick are encoded by the path set, the backtick alone
+		// by the fragment set, and neither by the query set, so each spelling
+		// below is one the other forms do not produce.
+		it.each([
+			["the path", "https://h/p%7Bq%7D%60r/x", "https://h/<secret>/x"],
+			["the fragment", "https://h/p#p{q}%60r", "https://h/p#<secret>"],
+		])("masks a secret substituted into %s", (_name, url, masked) => {
+			const { code } = generateCurl({ ...GET, url }, { secrets: ["p{q}`r"], mask: true });
+			expect(code).toContain(masked.replace("<secret>", SECRET_PLACEHOLDER));
+			expect(code).not.toMatch(/%60/);
+		});
+
 		it("masks the longer secret's encoded form whole", () => {
 			// "a%20b" is a prefix of "a%20bc": shortest-first would leave the "c".
 			const { code } = generateCurl(
