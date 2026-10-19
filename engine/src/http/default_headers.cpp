@@ -243,6 +243,9 @@ DefaultHeaderScope scope) {
         policy.accept_encoding = supported_accept_encodings ();
     }
 
+    policy.expect_continue =
+    db.get_config_bool (std::string (SEND_EXPECT_CONTINUE_KEY), false);
+
     return policy;
 }
 
@@ -260,6 +263,10 @@ const DefaultHeaderPolicy& policy) {
     if (!policy.correlation_header.empty ()) {
         declared.push_back (DeclaredDefaultHeader{ policy.correlation_header,
         {}, std::string (CORRELATION_ID_ENABLED_KEY), true });
+    }
+    if (policy.expect_continue) {
+        declared.push_back (DeclaredDefaultHeader{ "Expect", "100-continue",
+        std::string (SEND_EXPECT_CONTINUE_KEY), false });
     }
     return declared;
 }

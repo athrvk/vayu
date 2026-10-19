@@ -164,12 +164,12 @@ describe("InheritanceChain", () => {
 
 		render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "noauth" }} />);
 
-		expect(screen.getByText("No auth (blocks inheriting)")).toBeInTheDocument();
+		expect(screen.getByText("No auth (blocks inheriting) (unsaved)")).toBeInTheDocument();
 		expect(screen.queryByText("Source")).not.toBeInTheDocument();
 		// Names Payments (the leaf) as the blocker, which only happens once its
 		// row reads the draft's noauth rather than its stored bearer token.
 		expect(
-			screen.getByText(/is set to No auth, so requests below it inherit nothing/)
+			screen.getByText(/is set to No auth \(unsaved\), so requests below it inherit nothing/)
 		).toBeInTheDocument();
 	});
 
@@ -200,5 +200,80 @@ describe("InheritanceChain", () => {
 		}
 		// The last row has nothing beneath it to divide from.
 		expect(last.contains("border-b")).toBe(false);
+	});
+
+	describe("marking a draft that is not saved yet", () => {
+		const stored = () => {
+			chain.length = 0;
+			chain.push(
+				collection("root", "Acme", { mode: "bearer", token: "t" }),
+				collection("leaf", "Payments", { mode: "none" })
+			);
+		};
+
+		it("marks this collection's row while the draft differs from the stored auth", () => {
+			stored();
+
+			render(
+				<InheritanceChain
+					collectionId="leaf"
+					draftAuth={{ mode: "basic", username: "u", password: "p" }}
+				/>
+			);
+
+			expect(screen.getByText("Basic auth (unsaved)")).toBeInTheDocument();
+			// The ancestor's row describes a stored value and is not a draft.
+			expect(screen.getByText("Bearer token")).toBeInTheDocument();
+			expect(screen.getAllByText(/unsaved/)).toHaveLength(1);
+		});
+
+		it("does not mark the row when the draft equals the stored auth", () => {
+			stored();
+
+			render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "none" }} />);
+
+			expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument();
+		});
+
+		it("does not mark anything without a draft", () => {
+			stored();
+
+			render(<InheritanceChain collectionId="leaf" />);
+
+			expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument();
+		});
+
+		it("marks the blocker sentence when the blocker is the draft row", () => {
+			chain.length = 0;
+			chain.push(
+				collection("root", "Acme", { mode: "bearer", token: "t" }),
+				collection("leaf", "Health", { mode: "none" })
+			);
+
+			render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "noauth" }} />);
+
+			expect(
+				screen.getByText(
+					/is set to No auth \(unsaved\), so requests below it inherit nothing/
+				)
+			).toBeInTheDocument();
+		});
+
+		it("leaves the blocker sentence plain when the blocker is an ancestor", () => {
+			// Stored bearer, drafted to none: the walk now reaches the stored
+			// ancestor's No auth. That row is saved; only the leaf's own is a draft.
+			chain.length = 0;
+			chain.push(
+				collection("mid", "Public endpoints", { mode: "noauth" }),
+				collection("leaf", "Health", { mode: "bearer", token: "t" })
+			);
+
+			render(<InheritanceChain collectionId="leaf" draftAuth={{ mode: "none" }} />);
+
+			expect(
+				screen.getByText(/is set to No auth, so requests below it inherit nothing/)
+			).toBeInTheDocument();
+			expect(screen.getByText("No auth (unsaved)")).toBeInTheDocument();
+		});
 	});
 });

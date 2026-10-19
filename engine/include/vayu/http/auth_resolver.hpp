@@ -44,7 +44,9 @@ struct OAuth2Auth {
     nlohmann::json config; // opaque until the oauth2 token path lands
 };
 struct UnsupportedAuth {
-    std::string mode; // digest / aws / ntlm - stored but not executed
+    // digest / aws / ntlm / hawk / oauth1 / edgegrid / jwt - stored but not
+    // executed; `apply_auth` sends without auth and sets `Request::auth_notice`.
+    std::string mode;
 };
 
 using Auth =
@@ -120,7 +122,7 @@ void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
             // handled where it is refused rather than here.
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
-            // digest / aws / ntlm are stored but never executed, so a token in
+            // An unsupported mode is stored but never executed, so a token in
             // one binds nothing and reaches no wire.
         }
     },

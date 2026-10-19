@@ -39,6 +39,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_ref.hpp"
@@ -155,12 +156,13 @@ nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
 
 /**
- * Record which parts of @p request `apply_auth` wrote onto @p node, the two
- * keys a reader that masks credentials cannot recover from the URL or the
- * header set (#1835): `authQueryParam` (the raw name of the query parameter)
- * and `authHeaders` (the header names). Each is omitted when auth wrote none of
- * that kind - unlike `serialize (Response)`'s always-present fields - and a
- * reader treats absent as "nothing written".
+ * Record what `apply_auth` did to @p request onto @p node: the two keys a
+ * reader that masks credentials cannot recover from the URL or the header set
+ * (#1835), `authQueryParam` (the raw name of the query parameter) and
+ * `authHeaders` (the header names), and `authNotice`, the sentence saying the
+ * auth mode was not executed and the request went without it (#2474). Each is
+ * omitted when empty - unlike `serialize (Response)`'s always-present fields -
+ * and a reader treats absent as "nothing written".
  *
  * One writer, two homes: `build_result_trace` calls it on the trace's `request`
  * node, and `POST /execute` calls it on the top level of its answer (#1845), so
@@ -376,8 +378,8 @@ const std::string& name,
 const std::string& value);
 
 /**
- * One exchange's inputs: a composed, auth-resolved request and the scripts
- * that bracket it.
+ * One exchange's inputs: a composed request, auth-resolved unless its auth
+ * waits in @ref late_auth, and the scripts that bracket it.
  *
  * `iteration` / `vu` / `iteration_count` / `iteration_data` belong to a caller
  * that binds a row: the scenario runner, per iteration, and `POST /execute` when
@@ -493,6 +495,14 @@ struct ExchangeInputs {
     /// caller that forgets it refuses every file nobody chose in the editor
     /// rather than sending it.
     vayu::http::FilePlan* files = nullptr;
+
+    /// Auth whose credentials still hold a name only the scopes answer
+    /// (`core::credentials_await_scripts`, issue #2473), with any row already
+    /// joined in; the build left @ref request without it, and this exchange
+    /// applies it through @ref apply_late_auth after the pre-request script
+    /// and the residual pass. Empty when the build or the bind applied the
+    /// auth, which is every request whose credentials hold no such name.
+    std::optional<vayu::http::Auth> late_auth;
 };
 
 /** What one exchange produced. */
@@ -605,6 +615,32 @@ resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& sco
 resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValues& vars);
 
 /**
+ * Apply auth the build deferred because a credential holds a name only the
+ * variable scopes answer (`core::credentials_await_scripts`, issue #2473):
+ * each credential resolved against @p vars by the resolver the residual pass
+ * uses, then `apply_auth`.
+ *
+ * Called after the pre-request script and the residual pass, never before:
+ * the point is that `pm.environment.set("password", …)` reaches a basic pair
+ * before it is base64-encoded, which no pass over the request can do after.
+ * It is Postman's order, with what follows from it: the script's
+ * `pm.request.headers` does not hold the engine-applied header, and a header
+ * the script set still wins, by `apply_auth`'s own rule (#2475). A name
+ * nothing answers is encoded as written, as it was before.
+ *
+ * @return why the send must not go out, in the residual pass's shape, when
+ *         `apply_auth` fails; only OAuth 2.0 can, and it is never deferred.
+ */
+[[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
+vayu::http::Auth auth,
+const vayu::http::VariableValues& vars);
+
+/** @ref apply_late_auth over the scopes, flattened as the residual pass reads them. */
+[[nodiscard]] std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
+vayu::http::Auth auth,
+const ScriptVariableScopes& scopes);
+
+/**
  * Every `{{name}}` still on @p request, without attempting to resolve any of
  * them (issue #1503).
  *
@@ -617,6 +653,26 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * @ref resolvable_strings is, not because this reads anything mutable.
  */
 [[nodiscard]] std::vector<std::string> unresolved_token_names (vayu::Request& request);
+
+/**
+ * The residual pass as the load paths run it before a submission: resolve
+ * against @p vars, then apply @p late_auth (@ref apply_late_auth, issue #2473)
+ * against the same map, then report.
+ *
+ * Never refused, only counted (issue #1503): the request is sent whatever this
+ * answers, so the late auth is applied even after a refusal, and a credential
+ * name nothing answers is encoded as written - what the build did with it
+ * before #2473.
+ *
+ * @return what the run counts as unresolved, empty when nothing: the
+ *         refusal's sentence when the pass refused, otherwise every `{{name}}`
+ *         still on the request. A late bearer token or api key still holding
+ *         one is among them; a name inside a basic pair's base64 is not, as it
+ *         never was.
+ */
+[[nodiscard]] std::vector<std::string> resolve_load_residuals (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+std::optional<vayu::http::Auth> late_auth);
 
 /**
  * Run one exchange: pre-request script, send, test script.

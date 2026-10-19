@@ -222,8 +222,9 @@ export interface OAuth2Config {
  * inheritance; a folder left on Inherit does not), and collapsing the two is how
  * an imported No Auth folder used to leak its parent's bearer token (issue
  * #195). `resolveAuthSource` in `modules/request-builder/utils/auth-resolution.ts`
- * is the one place that reads the difference, mirrored for MCP in
- * `electron/mcp/resolve.ts`.
+ * is the app's half of that read; the engine's is `resolve_inherited_auth` in
+ * `engine/src/http/request_composer.cpp`, which `POST /compose` (and so MCP)
+ * walks.
  *
  * On a *request* the two coincide - a request's own auth is never walked, so
  * `none` already means send nothing - which is why only the collection editor
@@ -1428,6 +1429,13 @@ export interface RunResultTrace {
 		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
 		 */
 		bodyFile?: unknown;
+		/**
+		 * The auth mode was not executed and the request went out without
+		 * authentication - see {@link HttpResponse.authNotice} (issue #2474).
+		 * Written on the request node because it describes what was sent, so it
+		 * is present on a failed exchange (no `response` node) too.
+		 */
+		authNotice?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -1438,6 +1446,12 @@ export interface RunResultTrace {
 		 * folded map alone.
 		 */
 		headerLines?: HeaderLine[];
+		/**
+		 * The redirect hops followed, written only when there were some (issue
+		 * #2461) - `HttpResponse.redirects` is the live spelling. Absent on rows
+		 * stored before the key, on load-run samples and when nothing was followed.
+		 */
+		redirects?: RedirectHop[];
 		body?: unknown;
 		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
 		bodyTruncated?: boolean;
@@ -2061,10 +2075,31 @@ export interface HeaderLine {
 	value: string;
 }
 
+/**
+ * One redirect response the engine followed on the way to the final answer
+ * (issue #2461): its status and every header line it carried. `headers` and
+ * `headerLines` of the answer hold the last hop only, so a `Set-Cookie` or
+ * `Location` here is readable nowhere else. It reports what the server sent,
+ * not what the cookie jar kept.
+ */
+export interface RedirectHop {
+	status: number;
+	statusText: string;
+	headerLines: HeaderLine[];
+}
+
 export interface HttpResponse {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	/**
+	 * The redirect hops followed before this response, in the order they
+	 * arrived - `serialize(Response)` always sends the key, `[]` when nothing
+	 * was followed (and always for `followRedirects: false`). Absent on an
+	 * engine from before #2461. `responseFromExecuteResult` passes it through
+	 * `receivedRedirects`, which reads an empty list as an absent one.
+	 */
+	redirects?: RedirectHop[];
 	/**
 	 * The response's header lines in wire order - `serialize(Response)`
 	 * (`engine/src/utils/json.cpp`) always sends the key, `[]` when there were
@@ -2123,6 +2158,17 @@ export interface HttpResponse {
 	 * changed, and the answer belongs to the exchange, not to the editor.
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * The request's auth mode is one the engine stores but does not execute
+	 * (`digest`, `ntlm`, ...), so it was sent without authentication
+	 * (issue #2474). A sentence naming the mode, written by
+	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
+	 * key and to `trace.request.authNotice` from one place. **Absent** when
+	 * there is nothing to say - an executed mode, no auth, or an engine older
+	 * than the key - and on a streaming send, which is answered before it
+	 * exists: only its stored trace carries it.
+	 */
+	authNotice?: string;
 	/**
 	 * Which client-certificate registry entry this exchange presented, as
 	 * `host` or `host:port`; `""` when none matched (issue #707). Always

@@ -559,5 +559,115 @@ TEST_F (SentHeadersWireTest, TheStreamConsumerSendsAndRecordsTextPlain) {
     EXPECT_EQ (response.request_headers.at ("Content-Type"), "text/plain");
 }
 
+// ---------------------------------------------------------------------------
+// The Expect libcurl would invent (issue #2468). It adds `Expect: 100-continue`
+// to an HTTP/1.1 body over 1 MiB and waits a second for a reply, so the engine
+// removes it unless `sendExpectContinue` is on. Only the header is asserted -
+// never the second it costs, which would make the test as slow as the bug.
+// ---------------------------------------------------------------------------
+
+constexpr size_t EXPECT_THRESHOLD_BYTES = 1048576;
+
+Request sized_post (const std::string& url, size_t bytes) {
+    Request request      = text_request (url, HttpMethod::POST);
+    request.body.content = std::string (bytes, 'a');
+    return request;
+}
+
+ClientConfig expect_client_config (bool allow) {
+    ClientConfig config;
+    config.default_headers.expect_continue = allow;
+    return config;
+}
+
+// Mutation check: drop the `Expect:` line in `build_request_header_list` and
+// the 2 MiB case below carries libcurl's own.
+TEST_F (SentHeadersWireTest, ALargeBodyCarriesNoExpectByDefault) {
+    auto result =
+    client_->send (sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (server_->body ().size (), 2 * EXPECT_THRESHOLD_BYTES);
+    EXPECT_FALSE (server_->has_header ("Expect")) << server_->header ("Expect");
+    EXPECT_FALSE (result.value ().request_headers.contains ("Expect"));
+}
+
+TEST_F (SentHeadersWireTest, SendExpectContinueLetsLibcurlSendItOnALargeBody) {
+    Client client (expect_client_config (true));
+    auto result = client.send (sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (server_->header ("Expect"), "100-continue");
+}
+
+// libcurl's threshold is "larger than 1 MiB", so the byte on either side of it
+// is where an engine that removed the line only for some sizes would show.
+// This also pins the premise: if a libcurl upgrade moved the threshold, the
+// "on" half reddens before the removal is trusted.
+TEST_F (SentHeadersWireTest, TheExpectDecisionHoldsEitherSideOfTheOneMiBThreshold) {
+    for (const bool allow : { false, true }) {
+        Client client (expect_client_config (allow));
+        for (const size_t bytes : { EXPECT_THRESHOLD_BYTES, EXPECT_THRESHOLD_BYTES + 1 }) {
+            ASSERT_TRUE (client.send (sized_post (server_->url (), bytes)).is_ok ());
+            const bool expected = allow && bytes > EXPECT_THRESHOLD_BYTES;
+            EXPECT_EQ (server_->has_header ("Expect"), expected)
+            << "allow=" << allow << " bytes=" << bytes;
+        }
+    }
+}
+
+TEST_F (SentHeadersWireTest, ATypedExpectIsSentAsTypedWhileTheKeyIsOff) {
+    Request request = sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES);
+    request.headers["Expect"] = "100-continue";
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (server_->header ("Expect"), "100-continue");
+    EXPECT_EQ (result.value ().request_headers.at ("Expect"), "100-continue");
+}
+
+// Mutation check: count a blank row as naming an Expect (`lists_expect` set
+// before `append`'s gate) and libcurl's own comes back on the wire.
+TEST_F (SentHeadersWireTest, ABlankTypedExpectDoesNotLetLibcurlsBack) {
+    Request request = sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES);
+    request.headers["Expect"] = "";
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_FALSE (server_->has_header ("Expect")) << server_->header ("Expect");
+    EXPECT_FALSE (result.value ().request_headers.contains ("Expect"));
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverDecidesExpectTheSameWay) {
+    for (const bool allow : { false, true }) {
+        EventLoopConfig config;
+        config.default_headers.expect_continue = allow;
+        EventLoop loop (config);
+        loop.start ();
+        auto result =
+        loop
+        .submit_async (sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES))
+        .future.get ();
+        loop.stop ();
+
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        EXPECT_EQ (server_->has_header ("Expect"), allow) << "allow=" << allow;
+    }
+}
+
+TEST_F (SentHeadersWireTest, TheStreamConsumerRemovesExpectByDefault) {
+    SseStreamRequest stream_request;
+    stream_request.run_id = "run-expect";
+    stream_request.request = sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES);
+    SseStreamContext context (stream_request.run_id, stream_request.limits);
+
+    const vayu::Response response = consume_sse_stream (stream_request, context);
+
+    EXPECT_FALSE (server_->has_header ("Expect")) << server_->header ("Expect");
+    EXPECT_FALSE (response.request_headers.contains ("Expect"));
+}
+
 } // namespace
 } // namespace vayu::http

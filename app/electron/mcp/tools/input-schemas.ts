@@ -15,6 +15,7 @@ import { z } from "zod";
 import { DATA_FILE_HASH_PATTERN } from "../../data-file.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import { TRUST_AUTHORITY_TOKEN } from "../remedy.js";
+import { ENVIRONMENT_DEFAULT_SENTENCE } from "../variable-origins.js";
 import {
 	DEFAULT_STREAM_BUDGET_MS,
 	DEFAULT_STREAM_MAX_EVENTS,
@@ -33,7 +34,9 @@ export const collectionIdInput = z
 export const environmentIdInput = z
 	.string()
 	.optional()
-	.describe("Optional environment ID whose variables resolve {{templates}} in this request.");
+	.describe(
+		`Environment whose variables resolve {{templates}} in this request. ${ENVIRONMENT_DEFAULT_SENTENCE}`
+	);
 
 /**
  * The refusal an ad-hoc send gets for `verifySSL: false`, and with it the
@@ -71,11 +74,11 @@ export const environmentIdInput = z
  * {@link ENGINE_DEFAULT_HEADERS_POINTER} (#2441).
  */
 export const ENGINE_DEFAULT_HEADERS_SENTENCE =
-	"Headers the engine adds itself: every request sent through Vayu that does not already name them gets a `User-Agent` (`Vayu/<version>`), an `Accept-Encoding` negotiating the compression this build can decode, and - only when the user has switched it on - a fresh per-request correlation id (`X-Vayu-Request-Id` by default). They are added at send time and never stored on a request, and a header you write under one of those names always wins, so setting `User-Agent` yourself is how you control what the target sees. Refusing one outright - sending no `User-Agent` at all - is the engine's `disabledDefaultHeaders` field, which names the headers a send declines; the app's Headers tab offers it as a tick per header, and run_request and start_load_run take it as an argument. run_collection_smoke does not: it replays each saved request exactly as stored, so a refusal there would be a per-send decision applied to requests the agent did not write.";
+	"Headers the engine adds itself: every request sent through Vayu that does not already name them gets a `User-Agent` (`Vayu/<version>`), an `Accept-Encoding` negotiating the compression this build can decode, and - only when the user has switched it on - a fresh per-request correlation id (`X-Vayu-Request-Id` by default) or `Expect: 100-continue` (`sendExpectContinue`; otherwise the engine suppresses libcurl's own on a body over 1 MiB, which stalls a server that ignores it). They are added at send time and never stored on a request, and a header you write under one of those names always wins, so setting `User-Agent` yourself is how you control what the target sees. Refusing one outright - sending no `User-Agent` at all - is the engine's `disabledDefaultHeaders` field, which names the headers a send declines; the app's Headers tab offers it as a tick per header, and run_request and start_load_run take it as an argument. run_collection_smoke does not: it replays each saved request exactly as stored, so a refusal there would be a per-send decision applied to requests the agent did not write.";
 
 /** What `start_load_run` and `run_collection_smoke` say about the engine's default headers. */
 export const ENGINE_DEFAULT_HEADERS_POINTER =
-	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id to a request that does not name them; a header you write under that name wins; run_request states the rule.";
+	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id or `Expect: 100-continue` to a request that does not name them; a header you write under that name wins; run_request states the rule.";
 
 /**
  * A request's `headers` argument, on the tools that send one (`run_request`,
@@ -484,15 +487,64 @@ export function collectionScriptInput(which: "pre" | "post") {
 		);
 }
 
+/** The modes the engine applies, plus the two a collection chain reads (`none`, `noauth`) and `inherit`. */
+const AUTH_MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"] as const;
+
+/**
+ * Modes an import can store that the engine has no resolution for
+ * (`UneditableAuthMode` in the app's `constants/auth-modes.ts`). Named so the
+ * refusal can say Vayu does not send them rather than call them misspelt.
+ */
+const UNEXECUTED_AUTH_MODES: readonly string[] = [
+	"digest",
+	"aws",
+	"ntlm",
+	"hawk",
+	"oauth1",
+	"edgegrid",
+	"jwt",
+];
+
+/**
+ * Why a `mode` was refused. The engine maps an unknown one to "no auth" and
+ * sends anyway, so the refusal has to happen here, before a request goes out
+ * the agent believes is authenticated.
+ */
+function authModeError(input: unknown): string {
+	const keep = 'Leave "auth" out to keep what is stored.';
+	if (typeof input === "string" && UNEXECUTED_AUTH_MODES.includes(input)) {
+		return `Vayu does not execute auth mode "${input}": a request carrying it is sent with no authentication. Use one of ${AUTH_MODES.join(", ")}. ${keep}`;
+	}
+	return `Unknown auth mode ${JSON.stringify(input)}. Modes are lowercase and exact: ${AUTH_MODES.join(", ")}. ${keep}`;
+}
+
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
  * (read via list_requests). The engine applies it - bearer/basic/apikey and
  * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
  * `inherit` resolves against the collection chain (supply collectionId).
+ *
+ * `mode` is closed and `.passthrough()` stays: the members each mode reads
+ * (token, username, config…) belong to the engine, which is the only place that
+ * knows them. `in` is optional because the engine defaults an api key to a
+ * header; a Postman-style `addTo` is refused because the engine would read
+ * nothing from it and send the key in a header.
  */
 export const authInput = z
-	.object({ mode: z.string().describe("bearer | basic | apikey | oauth2 | inherit | none.") })
+	.object({
+		mode: z
+			.enum(AUTH_MODES, { error: (issue) => authModeError(issue.input) })
+			.describe(AUTH_MODES.join(" | ") + "."),
+		in: z
+			.enum(["header", "query"])
+			.optional()
+			.describe("apikey only: where the key goes (default header)."),
+	})
 	.passthrough()
+	.refine((auth) => auth.mode !== "apikey" || !("addTo" in auth), {
+		path: ["addTo"],
+		error: 'An apikey block places the key with "in" ("header" | "query"), not "addTo".',
+	})
 	.optional()
 	.describe(
 		"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."

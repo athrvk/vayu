@@ -36,6 +36,7 @@ import {
 	describeLoadShape,
 	loadShapePayload,
 	readLoadParams,
+	resolveEnvironmentId,
 	resolveLoadShape,
 	withMcpOrigin,
 } from "./compose.js";
@@ -365,10 +366,11 @@ export async function startScenarioLoadRun(
 	const caps = checkLoadCaps(shape, ctx.config, ctx.host);
 	if (!caps.ok) return errorResult(caps.error!);
 
-	const environmentId = str(args, "environmentId");
 	const recursive = scenario.recursive === true;
+	let environmentId: string | undefined;
 	let plannedSteps: number;
 	try {
+		environmentId = await resolveEnvironmentId(args, ctx, signal);
 		plannedSteps = await preflightScenarioSteps(
 			{ collectionId: scenario.collectionId, recursive, environmentId },
 			ctx,

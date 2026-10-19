@@ -123,7 +123,10 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "The proxy to route through when Proxy is set to Manual, written the way "
     "curl takes it: scheme://user:password@host:port. The scheme selects the "
     "kind - http, https, socks4, socks4a, socks5, socks5h - and credentials in "
-    "the URL are sent as basic proxy authentication.",
+    "the URL are sent as basic proxy authentication. An https proxy is "
+    "verified against the same trust as the target - this computer's "
+    "certificates plus Custom CA Certificates - and the same Verify TLS "
+    "certificate switch.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // The resolved system proxy (issue #708). Written by the app's main
@@ -162,7 +165,7 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // What the engine adds to a request nobody wrote it into (issue #1229).
-    // Four entries, read together by `resolve_default_header_policy` at the top
+    // Five entries, read together by `resolve_default_header_policy` at the top
     // of a request or a run, so a change applies to the next send rather than
     // the next restart - the shape the proxy entries above use, and for the
     // same reason. What each of them adds is shown in the Headers tab as a row
@@ -187,6 +190,17 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "off, both are the identity response. Turn it off to measure a server's "
     "uncompressed ceiling, on to measure what its clients actually get.",
     "network_performance", "true", std::nullopt, std::nullopt, std::nullopt, now }));
+
+    seed (keywords ({ "upload", "latency", "stall", "delay" }) (ConfigEntry{
+    "sendExpectContinue", "false", "boolean", "Send Expect: 100-continue on large bodies",
+    "libcurl adds an Expect: 100-continue header to a request body over 1 MiB "
+    "on its own and then waits for the server to answer before sending the "
+    "body. A server that ignores the header costs about a second per transfer, "
+    "so Vayu removes it unless this is on. Turn it on to send what libcurl "
+    "would send, for a server that needs the interim reply. A request that "
+    "carries its own Expect header is sent as typed. Applies to a Send, a "
+    "collection run and a load run alike.",
+    "network_performance", "false", std::nullopt, std::nullopt, std::nullopt, now }));
 
     seed (keywords ({ "tracing", "x-request-id", "debugging" }) (
     ConfigEntry{ "correlationIdEnabled", "false", "boolean", "Correlation Id",

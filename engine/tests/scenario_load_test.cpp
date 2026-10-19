@@ -29,11 +29,14 @@
 
 #include <httplib.h>
 
+#include "basic_auth_pair.hpp"
 #include "mock_server.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
@@ -298,6 +301,51 @@ class ScenarioLoadTest : public ::testing::Test {
             step.auth          = vayu::http::parse_auth (auth);
             step.auth_template = vayu::core::tokenize_auth_fields (step.auth);
         }
+    }
+
+    /// A one-step plan resolved by `resolve_scenario` from a stored request
+    /// GETting @p url under @p auth, for a case whose subject is a decision
+    /// the resolver makes rather than one this file can hand-build.
+    vayu::core::ScenarioExecution resolve_one_step (const std::string& url,
+    const json& auth,
+    const json& elements,
+    const json& data = json ()) {
+        vayu::db::Collection collection;
+        collection.id         = "col_test";
+        collection.name       = "Collection";
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db_->create_collection (collection);
+
+        vayu::db::Request request;
+        request.id            = "req_0";
+        request.collection_id = collection.id;
+        request.name          = "step0";
+        request.method        = vayu::HttpMethod::GET;
+        request.url           = url;
+        request.auth          = auth.dump ();
+        request.elements      = elements.dump ();
+        request.created_at    = 1;
+        request.updated_at    = 1;
+        db_->save_request (request);
+
+        json scenario{ { "source", "collection" }, { "collectionId", collection.id } };
+        if (!data.is_null ()) {
+            scenario["data"] = data;
+        }
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms           = 5000;
+        options.limits.max_steps     = 10;
+        options.limits.max_data_rows = 100;
+        options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        auto resolved = vayu::core::resolve_scenario (*db_, scenario, options);
+        EXPECT_TRUE (resolved.ok) << resolved.error;
+
+        vayu::core::ScenarioExecution execution;
+        execution.request   = std::move (resolved.request);
+        execution.plan      = std::move (resolved.plan);
+        execution.data_rows = std::move (resolved.data_rows);
+        return execution;
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -2092,6 +2140,48 @@ TEST_F (ScenarioLoadTest, AnAbsentColumnInACredentialErrorsTheStepInsteadOfSendi
     ASSERT_FALSE (errors.empty ());
     EXPECT_NE (errors[0].error_message.find ("{{data.missing}}"), std::string::npos)
     << errors[0].error_message;
+}
+
+// Issue #2473 on the load path: a password an inline `script.pre` sets reaches
+// every submission's basic pair, applied after the residual pass rather than
+// encoded around the token when the plan resolved. Mutation check: drop
+// `auth_after_scripts` from the resolution in `resolve_step`
+// (scenario_plan.cpp) and the wire carries `user:{{password}}`.
+TEST_F (ScenarioLoadTest, AnInlineScriptPreSetsAPasswordThatReachesTheWireThroughLateAuth) {
+    ScenarioMockServer server;
+    const auto execution = resolve_one_step (server.url ("/echo"),
+    json{ { "mode", "basic" }, { "username", "user" }, { "password", "{{password}}" } },
+    json::array ({ vayu::tests::script_element_json ("el_pre", "script.pre",
+    "pm.environment.set('password', 's3cret');", /*inline_script=*/true) }));
+    ASSERT_EQ (execution.plan.steps.size (), 1u);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    for (const auto& echo : echoes) {
+        EXPECT_EQ (vayu::tests::basic_pair_of (echo.authorization), "user:s3cret");
+    }
+}
+
+// The count-only rule (#1503) holds for a credential that waited: nothing
+// answered it, so it is encoded as written and sent, never refused.
+TEST_F (ScenarioLoadTest, ACredentialNothingAnswersIsSentAsWrittenThroughLateAuth) {
+    ScenarioMockServer server;
+    const auto execution = resolve_one_step (server.url ("/echo"),
+    json{ { "mode", "basic" }, { "username", "user" }, { "password", "{{password}}" } },
+    json::array ());
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 1u) << "the step was refused rather than sent";
+    EXPECT_EQ (vayu::tests::basic_pair_of (echoes[0].authorization), "user:{{password}}");
+    EXPECT_EQ (state->steps_errored.load (), 0u);
 }
 
 // A token naming a column the bound row does not carry fails the step loudly:

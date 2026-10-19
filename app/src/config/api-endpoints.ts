@@ -24,7 +24,8 @@ export const API_ENDPOINTS = {
 	HEALTH: `/health`,
 	CONFIG: `/config`,
 	// What the engine adds to a request that names none of it (issue #1229):
-	// User-Agent, a negotiated Accept-Encoding, an optional correlation id.
+	// User-Agent, a negotiated Accept-Encoding, an optional correlation id and,
+	// while sendExpectContinue is on, Expect: 100-continue.
 	// Config-derived but not config: the engine resolves the set, so a client
 	// displays it rather than working it out from the entries.
 	// `?scope=design|load` selects which send is being described (issue #1338):

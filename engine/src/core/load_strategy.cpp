@@ -551,6 +551,11 @@ const nlohmann::json& config) {
     return std::nullopt;
 }
 
+bool declares_request_elements (const nlohmann::json& config) {
+    const auto elements = config.find ("requestElements");
+    return elements != config.end () && elements->is_array () && !elements->empty ();
+}
+
 std::optional<std::string> plan_load_files (vayu::http::FilePlan& files,
 vayu::Request& request,
 const LoadDataSet* data) {
@@ -594,7 +599,8 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
  */
 bool sends_the_shared_request (const RunContext& context) {
     return context.load_data == nullptr && context.load_template.empty () &&
-    context.load_auth.credentials.empty () && !context.step_elements_have_step_before;
+    context.load_auth.auth_resolution () == vayu::http::AuthResolution::Apply &&
+    !context.step_elements_have_step_before;
 }
 
 class SubmissionRequest {
@@ -855,12 +861,15 @@ std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
  * @p request and its credentials, through the one binder both load paths drive.
  *
  * Reached only for a run carrying a reserved token in its request or its
- * credentials: the caller keeps the token-free path clear of all of this.
+ * credentials, or auth waiting on its scripts: the caller keeps the token-free
+ * path clear of all of this. That last auth is joined into @p late_auth and
+ * not applied (issue #2473); the caller owes it to the residual pass.
  */
 DataBindResult bind_submission (vayu::Request& request,
 const RunContext& context,
 const LoadDataSet* data,
-const ResultAnnotations& annotations) {
+const ResultAnnotations& annotations,
+std::optional<vayu::http::Auth>& late_auth) {
     const size_t iteration = vayu::utils::invariant_value (annotations.iteration,
     "every submission claims its iteration before binding");
     const IterationBinding binding{ data == nullptr ?
@@ -872,8 +881,13 @@ const ResultAnnotations& annotations) {
     // The auth halves are the run's own, not the data set's: a credential
     // carrying the identity defers on a run that has no set at all (issue
     // #1055), and both are empty for a run whose auth the build resolved.
-    return bind_iteration (request, context.load_template,
-    context.load_auth.auth, context.load_auth.credentials, binding);
+    if (!context.load_auth.after_scripts) {
+        return bind_iteration (request, context.load_template,
+        context.load_auth.auth, context.load_auth.credentials, binding);
+    }
+    auto& auth = late_auth.emplace (context.load_auth.auth);
+    return bind_iteration_holding_auth (request, context.load_template, auth,
+    context.load_auth.credentials, binding);
 }
 
 /**
@@ -940,7 +954,8 @@ SubmissionRequest& live) {
     // step's request is copied per iteration: the shared one has to stay the
     // template every later row is bound against.
     vayu::Request request = live.current ();
-    auto bound = bind_submission (request, *context, data, annotations);
+    std::optional<vayu::http::Auth> late_auth;
+    auto bound = bind_submission (request, *context, data, annotations, late_auth);
     // A path a row bound is filled from what the plan checked; the transfer
     // never opens a small file and never re-checks one.
     if (bound.ok) {
@@ -975,16 +990,17 @@ SubmissionRequest& live) {
     // token-free fast path above never copies `request` at all (issue #992)
     // and is not scanned here for that reason - it records
     // `context->load_unresolved_tokens`, scanned once by `start_run` before
-    // this loop began (issue #1540).
+    // this loop began (issue #1540). Auth that waited on the scripts (issue
+    // #2473) is applied by that pass; only a run declaring `requestElements`
+    // holds any (`LoadAuthPlan::after_scripts`), so the branch below never
+    // has one to drop.
     if (has_step_elements) {
         vayu::http::VariableValues vars = context->step_base_vars;
         overlay->apply_onto (vars);
-        const auto refusal = vayu::http::routes::resolve_residual_tokens (request, vars);
-        auto still_unresolved = vayu::http::routes::unresolved_token_names (request);
-        if (refusal || !still_unresolved.empty ()) {
-            context->metrics_collector->record_unresolved_token (refusal ?
-            std::vector<std::string>{ refusal->error.message } :
-            std::move (still_unresolved));
+        const auto unresolved = vayu::http::routes::resolve_load_residuals (
+        request, vars, std::move (late_auth));
+        if (!unresolved.empty ()) {
+            context->metrics_collector->record_unresolved_token (unresolved);
         }
     } else {
         // No residual pass on this run, so the bind above was the last thing

@@ -473,7 +473,10 @@ nlohmann::json get_script_completions () {
     "Access the HTTP request data including URL, method, headers, and body.\n\n"
     "In a **pre-request** script these are writable: whatever pm.request holds "
     "when the script ends is what is sent, and a script-set header overrides "
-    "the one the Auth tab applied. A value the engine cannot send - an empty "
+    "the one the Auth tab applied. An Auth tab credential still holding a "
+    "{{variable}} nothing defined is applied after the script instead, so its "
+    "header is not in pm.request yet and a variable this script sets reaches "
+    "it. A value the engine cannot send - an empty "
     "URL, an unrecognised method - rejects the whole edit rather than part of "
     "it: the request goes out exactly as it was before the script ran, and "
     "the reason is reported in the Console tab. In a **test** script it is a "
@@ -775,7 +778,9 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.request.headers.remove(name: string): void" },
     { "documentation",
     "Remove a header from the outgoing request, including one the Auth tab "
-    "applied. Case-insensitive, and removing an absent header is a no-op." },
+    "applied - not one whose credential still waits on a {{variable}}, which "
+    "is applied after the script. Case-insensitive, and removing an absent "
+    "header is a no-op." },
     { "sortText", "1_pm_request_headers_remove" } });
 
     // The PropertyList reads, the same six the response object carries - they
@@ -1008,7 +1013,9 @@ nlohmann::json get_script_completions () {
     { "detail", "Remove a header (pre-request)" },
     { "documentation",
     "Remove a header from the outgoing request, including one the Auth tab "
-    "applied. The name is case-sensitive - match it exactly." },
+    "applied - not one whose credential still waits on a {{variable}}, which "
+    "is applied after the script. The name is case-sensitive - match it "
+    "exactly." },
     { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
     { "sortText", "2_pm_request_headers_delete" } });
 

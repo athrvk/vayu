@@ -143,8 +143,10 @@ TEST (DefaultHeadersTest, EveryDefaultCanBeRefusedBySend) {
     const auto policy = full_policy ();
     EXPECT_FALSE (vayu::http::negotiates_compression (request, policy));
 
+    // The one line left is libcurl's Expect removal (issue #2468): the policy's
+    // `expect_continue` is off, and an Expect is not something these refuse.
     const auto built = build (request, policy);
-    EXPECT_TRUE (built.lines.empty ());
+    EXPECT_EQ (built.lines, std::vector<std::string>{ "Expect:" });
     EXPECT_TRUE (built.sent.empty ());
 }
 
@@ -239,8 +241,70 @@ TEST (DefaultHeadersTest, AnEmptyPolicyMemberAddsNothing) {
     policy.user_agent.clear ();
 
     const auto built = build (get_request (), policy);
-    EXPECT_TRUE (built.lines.empty ());
+    EXPECT_EQ (built.lines, std::vector<std::string>{ "Expect:" });
     EXPECT_TRUE (built.sent.empty ());
+
+    policy.expect_continue = true;
+    const auto allowed     = build (get_request (), policy);
+    EXPECT_TRUE (allowed.lines.empty ());
+    EXPECT_TRUE (allowed.sent.empty ());
+}
+
+// Issue #2468: libcurl adds `Expect: 100-continue` to a body over 1 MiB and
+// waits a second for a reply a server may never send. The policy defaults to
+// removing it, with libcurl's removal spelling, which is not a sent header.
+// Mutation check: drop the `"Expect:"` append in `build_request_header_list`
+// and the first two assertions red; make the append unconditional and the
+// "on" case reds.
+TEST (DefaultHeadersTest, ExpectContinueIsRemovedUnlessThePolicyAllowsIt) {
+    EXPECT_FALSE (DefaultHeaderPolicy{}.expect_continue);
+
+    const auto off = build (get_request (), full_policy ());
+    EXPECT_TRUE (has_line (off.lines, "Expect:"));
+    EXPECT_FALSE (off.sent.contains ("Expect"));
+
+    DefaultHeaderPolicy on = full_policy ();
+    on.expect_continue     = true;
+    const auto allowed     = build (get_request (), on);
+    EXPECT_FALSE (has_line (allowed.lines, "Expect:"));
+    EXPECT_FALSE (allowed.sent.contains ("Expect"));
+}
+
+// A typed Expect is how a person sends one on purpose, so it is sent as typed
+// and nothing removes it. A typed blank one is dropped like any value-less
+// header, which would leave libcurl's own - so it still gets the removal line.
+// Mutation check: drop the `lists_expect` guard and the typed case gains a
+// removal line beside its own; set it for a blank row too and the blank case
+// loses its removal line.
+TEST (DefaultHeadersTest, ATypedExpectWinsAndATypedBlankOneStillGetsTheRemoval) {
+    vayu::Request request     = get_request ();
+    request.headers["expect"] = "100-continue";
+
+    const auto typed = build (request, full_policy ());
+    EXPECT_TRUE (has_line (typed.lines, "expect: 100-continue"));
+    EXPECT_FALSE (has_line (typed.lines, "Expect:"));
+    EXPECT_EQ (typed.sent.at ("expect"), "100-continue");
+
+    request.headers["expect"] = "  ";
+    const auto blank          = build (request, full_policy ());
+    EXPECT_TRUE (has_line (blank.lines, "Expect:"));
+    EXPECT_FALSE (blank.sent.contains ("expect"));
+}
+
+// With the policy on, the declared row is the one a send can refuse; refusing
+// it removes libcurl's line, as refusing Accept does. With the policy off the
+// refusal changes nothing - the line is already removed, once.
+TEST (DefaultHeadersTest, RefusingTheExpectDefaultRemovesLibcurlsOwnWhenThePolicyAllowsIt) {
+    vayu::Request request = get_request ();
+    request.suppressed_default_headers.insert ("EXPECT");
+
+    DefaultHeaderPolicy on = full_policy ();
+    on.expect_continue     = true;
+    const auto refused     = build (request, on);
+    EXPECT_EQ (std::count (refused.lines.begin (), refused.lines.end (), "Expect:"), 1);
+
+    const auto off = build (request, full_policy ());
+    EXPECT_EQ (std::count (off.lines.begin (), off.lines.end (), "Expect:"), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +447,16 @@ TEST (DefaultHeadersTest, IsIdempotentOnARowItHasAlreadyDisabledAndMarked) {
 // Resolution from config, and the declaration clients read
 // ---------------------------------------------------------------------------
 
+// Whether a scope's answer holds a row of this name. The name is read out of
+// the row before comparing: MSVC finds `json == std::string_view` ambiguous
+// between nlohmann's own operator and the string_view one.
+bool declares (const nlohmann::json& body, std::string_view name) {
+    return std::any_of (body["headers"].begin (), body["headers"].end (),
+    [name] (const nlohmann::json& row) {
+        return row.at ("name").get<std::string> () == name;
+    });
+}
+
 class DefaultHeaderConfigTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_default_headers.db";
@@ -437,6 +511,42 @@ TEST_F (DefaultHeaderConfigTest, TheSeededDefaultsAreCompressionOnAndNoCorrelati
     EXPECT_TRUE (design.correlation_header.empty ());
     EXPECT_EQ (design.accept_encoding, vayu::http::supported_accept_encodings ());
     EXPECT_EQ (load.accept_encoding, vayu::http::supported_accept_encodings ());
+}
+
+// Issue #2468. Mutation check: seed the default as "true", or read the key in
+// the policy as `true` when unset, and the first assertions red.
+TEST_F (DefaultHeaderConfigTest, ExpectContinueIsOffByDefaultAndOneKeyGovernsBothScopes) {
+    for (const auto scope : { DefaultHeaderScope::Design, DefaultHeaderScope::Load }) {
+        EXPECT_FALSE (vayu::http::resolve_default_header_policy (*db_, scope).expect_continue);
+    }
+
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"sendExpectContinue":"true"}})");
+
+    for (const auto scope : { DefaultHeaderScope::Design, DefaultHeaderScope::Load }) {
+        EXPECT_TRUE (vayu::http::resolve_default_header_policy (*db_, scope).expect_continue);
+    }
+}
+
+TEST_F (DefaultHeaderConfigTest, ExpectIsDeclaredOnlyWhileTheKeyIsOn) {
+    for (const auto scope : { DefaultHeaderScope::Design, DefaultHeaderScope::Load }) {
+        const auto declared = vayu::http::routes::request_defaults_json (*db_, scope);
+        EXPECT_FALSE (declares (declared, "Expect")) << declared.dump ();
+    }
+
+    vayu::http::routes::apply_config_update (*db_, R"({"entries":{"sendExpectContinue":"true"}})");
+
+    for (const auto scope : { DefaultHeaderScope::Design, DefaultHeaderScope::Load }) {
+        const auto declared = vayu::http::routes::request_defaults_json (*db_, scope);
+        ASSERT_TRUE (declares (declared, "Expect")) << declared.dump ();
+        for (const auto& row : declared["headers"]) {
+            if (row["name"] != "Expect") {
+                continue;
+            }
+            EXPECT_EQ (row["value"], "100-continue");
+            EXPECT_EQ (row["configKey"], "sendExpectContinue");
+            EXPECT_FALSE (row["generated"].get<bool> ());
+        }
+    }
 }
 
 TEST_F (DefaultHeaderConfigTest, EachScopeReadsItsOwnCompressionSetting) {
@@ -508,16 +618,6 @@ TEST_F (DefaultHeaderConfigTest, ADefaultSwitchedOffIsNotDeclared) {
     for (const auto& row : declared["headers"]) {
         EXPECT_NE (row["name"], "Accept-Encoding");
     }
-}
-
-// Whether a scope's answer holds a row of this name. The name is read out of
-// the row before comparing: MSVC finds `json == std::string_view` ambiguous
-// between nlohmann's own operator and the string_view one.
-bool declares (const nlohmann::json& body, std::string_view name) {
-    return std::any_of (body["headers"].begin (), body["headers"].end (),
-    [name] (const nlohmann::json& row) {
-        return row.at ("name").get<std::string> () == name;
-    });
 }
 
 TEST_F (DefaultHeaderConfigTest, TheAnswerIsForTheScopeTheCallerNames) {

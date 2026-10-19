@@ -37,7 +37,7 @@ export const oauth2ConfigInput = z
 	})
 	.passthrough()
 	.describe(
-		"The OAuth 2.0 config to acquire a token for - the same block a saved request's `auth` carries, so it can be copied from list_requests verbatim. Beyond the three required fields the engine reads clientSecret, username/password (password grant), scope, audience, resource, refreshTokenUrl, autoRefreshToken, clientAuthentication and credentialsId. The cache key is derived from accessTokenUrl + clientId + credentialsId + username: configs differing only in scope share one cached token, so set a distinct `credentialsId` to keep them apart."
+		"The OAuth 2.0 config to acquire a token for - the same block a saved request's `auth` carries, so it can be copied from list_requests verbatim. Beyond the three required fields the engine reads clientSecret, username/password (password grant), scope, audience, resource, refreshTokenUrl, autoRefreshToken, credentialsPlacement (basic_auth_header | body) and credentialsId. The cache key is derived from accessTokenUrl + clientId + credentialsId + username: configs differing only in scope share one cached token, so set a distinct `credentialsId` to keep them apart."
 	);
 
 /** The engine-derived key one cache entry lives under. */

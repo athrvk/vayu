@@ -67,6 +67,11 @@ inline constexpr std::string_view NEGOTIATE_COMPRESSION_KEY =
 /// Config key: the same decision for a load run, which measures with it.
 inline constexpr std::string_view LOAD_NEGOTIATE_COMPRESSION_KEY =
 "loadNegotiateCompression";
+/// Config key: send `Expect: 100-continue` on a large body (issue #2468).
+/// One key for a design send and a load run, unlike compression: it changes
+/// whether a transfer waits for a server's interim reply, not what is measured.
+inline constexpr std::string_view SEND_EXPECT_CONTINUE_KEY =
+"sendExpectContinue";
 
 /// The vendor-namespaced default, so nothing collides with a gateway's own.
 inline constexpr std::string_view DEFAULT_CORRELATION_HEADER =
@@ -82,8 +87,10 @@ inline constexpr std::string_view LEGACY_DEFAULT_SOURCE = "legacy-default";
  * @brief The resolved decision about what this send adds, read from config
  *        once per request or per run rather than per transfer.
  *
- * An empty string is "do not add this one" for every member, so a driver holds
- * one struct instead of a flag beside each value.
+ * An empty string is "do not add this one" for every string member, so a driver
+ * holds one struct instead of a flag beside each value. `expect_continue` is the
+ * one boolean: the header is not added by the engine at all, it is libcurl's own
+ * and the policy decides whether it may stay.
  */
 struct DefaultHeaderPolicy {
     /// `Vayu/<version>` unless config or a caller emptied it.
@@ -92,6 +99,10 @@ struct DefaultHeaderPolicy {
     std::string correlation_header;
     /// The `Accept-Encoding` value to negotiate with; empty for none.
     std::string accept_encoding;
+    /// True lets libcurl send its own `Expect: 100-continue` on a large body
+    /// (over 1 MiB on HTTP/1.1); false, the default, removes it. A server that
+    /// ignores the header costs each such transfer about a second (issue #2468).
+    bool expect_continue = false;
 };
 
 /// Which kind of send a policy is being resolved for. The two read different

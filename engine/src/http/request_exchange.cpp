@@ -96,6 +96,9 @@ void record_auth_provenance (nlohmann::json& node, const vayu::Request& request)
     if (!request.secret_header_names.empty ()) {
         node["authHeaders"] = request.secret_header_names;
     }
+    if (!request.auth_notice.empty ()) {
+        node["authNotice"] = request.auth_notice;
+    }
 }
 
 nlohmann::json build_result_trace (const vayu::Request& request,
@@ -200,6 +203,14 @@ const vayu::Response& response) {
         if (!response.header_lines.empty ()) {
             trace["response"]["headerLines"] =
             vayu::json::serialize_header_lines (response.header_lines);
+        }
+
+        // The followed redirect hops (issue #2461), on the same rule: a row
+        // stored before the field, and a send that followed nothing, hold no
+        // `redirects`, and absent says so.
+        if (!response.redirect_hops.empty ()) {
+            trace["response"]["redirects"] =
+            vayu::json::serialize_redirects (response.redirect_hops);
         }
 
         // The read cap, carried so a restored response says what the live one
@@ -665,6 +676,46 @@ const ScriptVariableScopes& scopes) {
     return resolve_residual_tokens (request, values_from_scopes (scopes));
 }
 
+std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
+vayu::http::Auth auth,
+const vayu::http::VariableValues& vars) {
+    // Resolved raw: `apply_auth` encodes what each destination needs (base64
+    // for a basic pair, the query rule for an api key in the query).
+    vayu::http::walk_auth_credentials (
+    auth, [&vars] (std::string& field, vayu::http::CredentialDestination) {
+        field = vayu::http::resolve_template (field, vars);
+    });
+    // No database: only OAuth 2.0 needs one, and it is never deferred.
+    auto applied = vayu::http::apply_auth (request, auth, nullptr);
+    if (applied.ok) {
+        return std::nullopt;
+    }
+    return ResidualRefusal{ vayu::Error{ applied.code, std::move (applied.message) },
+        std::move (applied.detail_code) };
+}
+
+std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
+vayu::http::Auth auth,
+const ScriptVariableScopes& scopes) {
+    return apply_late_auth (request, std::move (auth), values_from_scopes (scopes));
+}
+
+std::vector<std::string> resolve_load_residuals (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+std::optional<vayu::http::Auth> late_auth) {
+    auto refusal = resolve_residual_tokens (request, vars);
+    if (late_auth) {
+        auto late_refusal = apply_late_auth (request, std::move (*late_auth), vars);
+        if (!refusal) {
+            refusal = std::move (late_refusal);
+        }
+    }
+    if (refusal) {
+        return { std::move (refusal->error.message) };
+    }
+    return unresolved_token_names (request);
+}
+
 void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
     vayu::Environment* target = &collection_;
     if (scope == "env") {
@@ -888,7 +939,13 @@ ExchangeInputs inputs) {
     // sends nothing resolves nothing; before the send, because the point is the
     // wire. A step of a scenario run reaches this with the *previous* steps'
     // writes in `scopes` too, which is the same rule one step further on.
-    if (auto refusal = resolve_residual_tokens (outcome.request, scopes)) {
+    // Deferred auth (issue #2473) goes on once the pass has answered, so no
+    // credential it writes is resolved a second time.
+    auto refusal = resolve_residual_tokens (outcome.request, scopes);
+    if (!refusal && inputs.late_auth) {
+        refusal = apply_late_auth (outcome.request, std::move (*inputs.late_auth), scopes);
+    }
+    if (refusal) {
         // Answered exactly as the pre-send gate answers its own refusals, which
         // is what the transfer below would have done with this request had the
         // collision been something the gate could see: a status-0 response

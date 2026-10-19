@@ -173,8 +173,9 @@ apiService.getRequestDefaults(scope?: RequestDefaultsScope): Promise<RequestDefa
 ```
 
 `getRequestDefaults` reads what the engine will add to a request that names none
-of it (issue #1229) - a `User-Agent`, a negotiated `Accept-Encoding`, and an
-opt-in correlation id - as `{headers: [{name, value?, generated, configKey?}]}`.
+of it (issue #1229) - a `User-Agent`, a negotiated `Accept-Encoding`, an
+opt-in correlation id, and an `Expect: 100-continue` row while
+`sendExpectContinue` is on (issue #2468) - as `{headers: [{name, value?, generated, configKey?}]}`.
 A row with `generated: true` carries no `value`: it is made fresh per transfer.
 The set is **read, never derived**: the engine resolves it (its libcurl decides
 which encodings can even be asked for), so a renderer working it out from the
@@ -218,7 +219,8 @@ rather than offering a tick that could not turn it back on.
 disagree - `negotiateCompression` governs a design send's `Accept-Encoding`
 and `loadNegotiateCompression` governs a load run's - so the load-test dialog
 reads both and names the difference rather than starting a run whose headers
-silently do not match what the tab just showed.
+silently do not match what the tab just showed. `sendExpectContinue` is one key
+for both scopes, so it never makes them disagree.
 
 #### Cookie jar
 
@@ -1476,9 +1478,11 @@ replay puts the run's recorded list back on its seeded rows.
   bodyEncoding: "utf8",
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
+  // authNotice: "auth mode 'ntlm' is not executed by Vayu; ..."  (absent here)
   clientCertificate: "",
   bodyCapped: false,
   headerLines: [{ name: "Content-Type", value: "application/json" }],
+  redirects: [],
   timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
@@ -1520,6 +1524,17 @@ it is true. Load runs carry the whole-run count as
 the requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
 ([#215](https://github.com/athrvk/vayu/issues/215)).
+
+`authNotice` is the engine's sentence for a request whose auth mode it stores but
+does not execute (`digest`, `ntlm`, ...), which is sent without authentication
+(issue #2474). The key is **absent** when there is nothing to say, on the live
+body and in the stored trace alike; the trace holds it on `trace.request`, so a
+failed exchange with no `response` node still has it, and a streaming send
+carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
+both set `ResponseState.authNotice` (an empty string reads as absent), held
+together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
+warning `Callout` between the status band and the tabs, so it shows on every
+tab and on a 401 from the target, which is the response it explains.
 
 `clientCertificate` names the client-certificate registry entry the exchange
 presented, as `host` or `host:port`, and `""` when none matched (issue #707).
@@ -1574,6 +1589,26 @@ split by the legacy `parseSetCookie` rather than read one cookie per line. The
 Headers and Raw tabs and the History step pane show the lines when there are
 some and `headers` when there are not (`resolveHeaderLines`); Save as example
 stores the folded map.
+
+`redirects` is the redirect responses the send followed (issue #2461): one
+`{ status, statusText, headerLines }` per 3xx, in arrival order. `headers` and
+`headerLines` hold the final response only, so a `Set-Cookie` on the `302` that
+answers a login is readable nowhere else. The live body always carries the key
+(`[]` when nothing was followed, and always for `followRedirects: false`); the
+stored trace writes `trace.response.redirects` only when a hop was followed, and
+a load sample or a row stored before the key has none. Both funnels pass it
+through `receivedRedirects` (`lib/header-lines.ts`), the same empty-is-absent
+rule, so the live and restored `ResponseState.redirects` agree
+(`redirects-funnels.test.ts`). The Cookies tab reads it: with no cookie on any
+hop it is the one table it always was; once a hop set one it shows two groups,
+**Set by this response** (the final response's lines, as above) and **Set during
+redirects**, one sub-heading per hop that set a cookie ("302 Found, to /home":
+the hop's status, and its `Location` when it sent one) over that hop's table,
+each `Set-Cookie` line parsed on its own. The empty state ("No cookies in
+response") shows only when neither group has a cookie; the tab carries no count.
+The rows say what the server sent and never that the jar stored it, because curl
+drops a hop's cookie when the redirect changes origin. `GET /cookies` and the
+Settings cookie card are what the jar holds.
 
 The renderer keeps it strictly apart from `bodyTruncated`, which is
 `maxTraceBodyBytes` shortening a *stored* body after the whole of it was read:

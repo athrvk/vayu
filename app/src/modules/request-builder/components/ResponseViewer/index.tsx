@@ -518,6 +518,23 @@ export default function ResponseViewer() {
 				streaming={isStreaming ? { events: events.length } : undefined}
 			/>
 
+			{/*
+			 * The engine's own sentence, saying the request went out with no
+			 * authentication because its auth mode is one Vayu does not execute
+			 * (issue #2474). A band between the status and the tabs rather than
+			 * inside the Body tab, unlike the two body notices: it explains the
+			 * status (a 401 is the expected result), so it must show on every
+			 * tab and on a `status: 0` failure, whose Body tab is
+			 * `ClientErrorView`.
+			 */}
+			{shown.authNotice && (
+				<div className={cn("px-4 pt-3 shrink-0", staleClass)}>
+					<Callout severity="warning" title="Authentication not sent">
+						{shown.authNotice}
+					</Callout>
+				</div>
+			)}
+
 			{/* Response Tabs */}
 			<Tabs
 				value={activeTab}
@@ -750,7 +767,11 @@ export default function ResponseViewer() {
 					/>
 				</TabsContent>
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
-					<ResponseCookies headers={shown.headers} headerLines={shown.headerLines} />
+					<ResponseCookies
+						headers={shown.headers}
+						headerLines={shown.headerLines}
+						redirects={shown.redirects}
+					/>
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 					{shown.timing ? (

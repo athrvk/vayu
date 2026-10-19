@@ -33,6 +33,7 @@ import {
 } from "@/modules/request-builder/utils/query-encoding";
 import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
+import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -70,13 +71,18 @@ export interface PreparedRequest {
 	masked: boolean;
 }
 
-/** What a mode's credentials are called, for the note when we cannot send them. */
-const UNREPRODUCIBLE_AUTH: Record<string, string> = {
-	oauth2: "OAuth 2.0 - Vayu's engine fetches and attaches the token at send time",
-	digest: "Digest - the challenge/response happens on the wire",
-	aws: "AWS signature - the signature covers this exact request and is computed at send time",
-	ntlm: "NTLM - the handshake happens on the wire",
-};
+/**
+ * What to call a mode we cannot put in a snippet, for the note. OAuth 2.0 is
+ * sent by the engine at send time; the stored-but-unexecuted modes are not sent
+ * by Vayu at all, so the snippet matches what Vayu does (#2474).
+ */
+function unreproducibleAuthName(mode: string): string {
+	if (mode === "oauth2")
+		return "OAuth 2.0 - Vayu's engine fetches and attaches the token at send time";
+	if (isUneditableAuthMode(mode))
+		return `${AUTH_MODE_LABELS[mode]} - Vayu does not send this auth type`;
+	return `${mode} auth`;
+}
 
 function asString(value: unknown): string {
 	return typeof value === "string" ? value : "";
@@ -398,7 +404,7 @@ export function prepareRequest(
 		}
 		default:
 			notes.push(
-				`This request uses ${UNREPRODUCIBLE_AUTH[mode] ?? `${mode} auth`}, so the snippet carries no credentials.`
+				`This request uses ${unreproducibleAuthName(mode)}, so the snippet carries no credentials.`
 			);
 	}
 

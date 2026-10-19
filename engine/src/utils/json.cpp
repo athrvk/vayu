@@ -1346,6 +1346,15 @@ Json serialize_header_lines (const std::vector<HeaderLine>& lines) {
     return out;
 }
 
+Json serialize_redirects (const std::vector<RedirectHop>& hops) {
+    Json out = Json::array ();
+    for (const auto& hop : hops) {
+        out.push_back ({ { "status", hop.status_code }, { "statusText", hop.status_text },
+        { "headerLines", serialize_header_lines (hop.header_lines) } });
+    }
+    return out;
+}
+
 Json serialize (const Response& response) {
     Json json;
 
@@ -1353,6 +1362,10 @@ Json serialize (const Response& response) {
     json["statusText"]  = response.status_text;
     json["headers"]     = response.headers;
     json["headerLines"] = serialize_header_lines (response.header_lines);
+    // Always present, empty when no redirect was followed: the earlier hops'
+    // headers are otherwise gone, since `headers` holds the final hop only
+    // (issue #2461).
+    json["redirects"] = serialize_redirects (response.redirect_hops);
     // One value per name, for the readers written against it, and every line
     // as sent, in order (issue #2466).
     json["requestHeaders"] = response.request_headers.folded ();

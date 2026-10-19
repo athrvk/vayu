@@ -40,7 +40,11 @@ import type { McpHost } from "./tools/contract.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
-import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
+import {
+	ENVIRONMENT_DEFAULT_SENTENCE,
+	VARIABLE_PRECEDENCE_SENTENCE,
+	VARIABLE_RESOLUTION_URI,
+} from "./variable-origins.js";
 import {
 	DEFAULT_RUN_PAGE_LIMIT,
 	EngineRequestError,
@@ -119,6 +123,14 @@ const OAUTH2_TOKEN_RECORD = {
 	expiresAt: 1_755_003_600_000,
 	hasRefreshToken: true,
 };
+
+/**
+ * An environments list holding `env_1`, for a test that scopes a send by it: a
+ * send refuses an id no environment has (#2480). Inactive, so an omitted id
+ * still composes with no environment.
+ */
+const listingEnv1 = () =>
+	vi.fn().mockResolvedValue([{ id: "env_1", name: "Staging", isActive: false }]);
 
 /** Build a fake EngineClient with vi.fn()s for the methods under test. */
 function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
@@ -3058,6 +3070,7 @@ describe("run_collection_smoke", () => {
 			environmentId: "env_1",
 		};
 		const client = fakeClient({
+			listEnvironments: listingEnv1(),
 			listRequests: vi
 				.fn()
 				.mockResolvedValue([{ id: "r1", collectionId: "c1", name: "get user" }]),
@@ -3552,6 +3565,7 @@ describe("run_collection", () => {
 	/** A client whose collection `c1` holds two allowlisted requests. */
 	function scenarioClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
 		return fakeClient({
+			listEnvironments: listingEnv1(),
 			listRequests: vi.fn().mockResolvedValue([
 				{ id: "r1", name: "login" },
 				{ id: "r2", name: "checkout" },
@@ -4059,6 +4073,7 @@ describe("start_load_run headers (#2466)", () => {
 describe("start_load_run scenario runs", () => {
 	function scenarioLoadClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
 		return fakeClient({
+			listEnvironments: listingEnv1(),
 			listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
 			composeRequest: vi
 				.fn()
@@ -6531,6 +6546,7 @@ describe("dispatchTool", () => {
 		// The engine resolves {{host}}; MCP must send it raw (never pre-resolved -
 		// that would be a second interpolation pass) and forward the composed URL.
 		const client = fakeClient({
+			listEnvironments: listingEnv1(),
 			composeRequest: vi
 				.fn()
 				.mockResolvedValue({ method: "GET", url: "https://api.example.com/users" }),
@@ -6556,7 +6572,7 @@ describe("dispatchTool", () => {
 	test("run_request sends the auth block raw for the engine to resolve and apply", async () => {
 		// `{{apiToken}}` and the inherit walk are engine-side; MCP forwards the
 		// block untouched inside the compose body.
-		const client = fakeClient();
+		const client = fakeClient({ listEnvironments: listingEnv1() });
 		const res = await dispatchTool(
 			"run_request",
 			{
@@ -6907,6 +6923,7 @@ describe("dispatchTool", () => {
 	// over the stored request before the composed result comes back.
 	const savedRequestClient = (composedOverrides: Record<string, unknown> = {}) =>
 		fakeClient({
+			listEnvironments: listingEnv1(),
 			composeRequest: vi
 				.fn()
 				.mockImplementation(
@@ -11487,6 +11504,161 @@ describe("resolve_variables", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).not.toContain("must be an array");
 	});
+
+	/**
+	 * Every tool that composes with an environment picks it the way
+	 * resolve_variables does (#2480): the active row for an omitted id, none for
+	 * "none", a refusal for an id no environment has.
+	 */
+	describe("a send resolves against the environment the preview names", () => {
+		type Spy = ReturnType<typeof vi.fn>;
+		interface Send {
+			label: string;
+			tool: string;
+			args: Record<string, unknown>;
+			/** The environment the engine runs with, when it is not the compose body's. */
+			forwarded?: (client: EngineClient) => unknown;
+		}
+		const runPayload = (client: EngineClient) =>
+			((client.startRun as Spy).mock.calls[0][0] as Record<string, unknown>).environmentId;
+		const SENDS: Send[] = [
+			{
+				label: "run_request",
+				tool: "run_request",
+				args: { url: "https://api.example.com/x" },
+			},
+			{
+				label: "start_load_run (url)",
+				tool: "start_load_run",
+				args: { url: "https://api.example.com/x", duration: "30s", confirmed: true },
+			},
+			{
+				label: "start_load_run (requestId)",
+				tool: "start_load_run",
+				args: { requestId: "r1", duration: "30s", confirmed: true },
+			},
+			{
+				label: "start_load_run (scenario)",
+				tool: "start_load_run",
+				args: { scenario: { collectionId: "c1" }, duration: "30s", confirmed: true },
+				forwarded: runPayload,
+			},
+			{
+				label: "run_collection",
+				tool: "run_collection",
+				args: { collectionId: "c1" },
+				forwarded: runPayload,
+			},
+			{
+				label: "run_collection_smoke",
+				tool: "run_collection_smoke",
+				args: { collectionId: "c1" },
+			},
+			{
+				label: "get_graphql_schema",
+				tool: "get_graphql_schema",
+				args: { requestId: "r1" },
+				forwarded: (client) =>
+					((client.executeRequest as Spy).mock.calls[0][0] as Record<string, unknown>)
+						.environmentId,
+			},
+		];
+		const ALLOWED = { allowlist: ["api.example.com"] };
+
+		const sendClient = (environments: unknown[] = ENVIRONMENTS) =>
+			fakeClient({
+				listEnvironments: vi.fn().mockResolvedValue(environments),
+				listRequests: vi.fn().mockResolvedValue([{ id: "r1", name: "login" }]),
+				composeRequest: vi
+					.fn()
+					.mockResolvedValue({ method: "GET", url: "https://api.example.com/x" }),
+			});
+
+		/** Every environment the call composed or ran with, one entry per engine call. */
+		async function sentEnvironments(
+			send: Send,
+			args: Record<string, unknown>,
+			client = sendClient()
+		) {
+			await dispatchTool(send.tool, args, ctxWith(client, ALLOWED));
+			const composed = (client.composeRequest as Spy).mock.calls.map(
+				([body]) => (body as Record<string, unknown>).environmentId
+			);
+			expect(composed.length).toBeGreaterThan(0);
+			return send.forwarded ? [...composed, send.forwarded(client)] : composed;
+		}
+
+		test.each(SENDS)("$label with no environmentId uses the active one", async (send) => {
+			const sent = await sentEnvironments(send, send.args);
+			expect(new Set(sent)).toEqual(new Set(["env_active"]));
+		});
+
+		test.each(SENDS)('$label with "none" composes with no environment', async (send) => {
+			const sent = await sentEnvironments(send, { ...send.args, environmentId: "none" });
+			expect(new Set(sent)).toEqual(new Set([undefined]));
+		});
+
+		test.each(SENDS)(
+			"$label with none active and none named has no environment",
+			async (send) => {
+				const inactive = ENVIRONMENTS.map((row) => ({ ...row, isActive: false }));
+				const sent = await sentEnvironments(send, send.args, sendClient(inactive));
+				expect(new Set(sent)).toEqual(new Set([undefined]));
+			}
+		);
+
+		test.each(SENDS)("$label with a named environment uses that one", async (send) => {
+			const sent = await sentEnvironments(send, { ...send.args, environmentId: "env_other" });
+			expect(new Set(sent)).toEqual(new Set(["env_other"]));
+		});
+
+		test.each(SENDS)(
+			"$label refuses an unknown environmentId and sends nothing",
+			async (send) => {
+				const client = sendClient();
+				const res = await dispatchTool(
+					send.tool,
+					{ ...send.args, environmentId: "ghost" },
+					ctxWith(client, ALLOWED)
+				);
+				expect(res.isError).toBe(true);
+				expect(firstText(res)).toContain('No environment with id "ghost"');
+				expect(client.composeRequest).not.toHaveBeenCalled();
+				expect(client.executeRequest).not.toHaveBeenCalled();
+				expect(client.startRun).not.toHaveBeenCalled();
+			}
+		);
+
+		test("resolve_variables and run_request name the same environment", async () => {
+			const preview = await resolve({});
+			const sent = await sentEnvironments(SENDS[0], SENDS[0].args);
+			expect(preview.context.environmentId).toBe("env_active");
+			expect(sent).toEqual([preview.context.environmentId]);
+		});
+
+		test("every tool that takes environmentId states the one default", () => {
+			const names = [
+				"resolve_variables",
+				"activate_environment",
+				...new Set(SENDS.map((send) => send.tool)),
+			];
+			const read = names.filter((name) => {
+				const tool = TOOLS.find((t) => t.name === name);
+				const param = tool?.inputSchema.environmentId?.description ?? "";
+				return `${descriptionOf(tool)} ${param}`.includes(ENVIRONMENT_DEFAULT_SENTENCE);
+			});
+			expect(ENVIRONMENT_DEFAULT_SENTENCE).not.toBe("");
+			expect(read).toEqual([
+				"resolve_variables",
+				"activate_environment",
+				"run_request",
+				"start_load_run",
+				"run_collection",
+				"run_collection_smoke",
+				"get_graphql_schema",
+			]);
+		});
+	});
 });
 
 /**
@@ -12664,6 +12836,32 @@ describe("secret withholding", () => {
 		expect(revealed.body.requestHeaderLines).toEqual(lines);
 	});
 
+	test("run_request passes a followed redirect through and masks the hop's Set-Cookie (#2461)", async () => {
+		const hop = {
+			status: 302,
+			statusText: "Found",
+			headerLines: [
+				{ name: "Set-Cookie", value: "session=hop-cookie-value; Path=/" },
+				{ name: "Location", value: "/home" },
+			],
+		};
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({ ...EXECUTE_ANSWER, redirects: [hop] }),
+		});
+		const { text, body } = await sendRequest(client);
+		expect(text).not.toContain("hop-cookie-value");
+		expect(body.redirects).toEqual([
+			{
+				status: 302,
+				statusText: "Found",
+				headerLines: [
+					{ name: "Set-Cookie", value: "<redacted>" },
+					{ name: "Location", value: "/home" },
+				],
+			},
+		]);
+	});
+
 	test("run_request returns the exchange as the engine answered it with reveal on", async () => {
 		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
 		const { body } = await sendRequest(client, REVEAL);
@@ -12699,6 +12897,23 @@ describe("secret withholding", () => {
 		);
 		const revealed = await sendRequest(client, REVEAL);
 		expect(revealed.body).toEqual(answer);
+	});
+
+	test("run_request passes the engine's authNotice through, masked or revealed (#2474)", async () => {
+		// The agent that sees a 401 from a request whose auth mode is not
+		// executed is the reader who most needs to be told it was never sent.
+		const NOTICE =
+			"auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication";
+		const answer = { ...EXECUTE_ANSWER, status: 401, authNotice: NOTICE };
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(answer) });
+		const withheld = await sendRequest(client);
+		expect(withheld.body.authNotice).toBe(NOTICE);
+		const revealed = await sendRequest(client, REVEAL);
+		expect(revealed.body.authNotice).toBe(NOTICE);
+		// A response without the key stays without it, so the pass-through adds no
+		// empty field for an executed mode.
+		const plain = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		expect("authNotice" in (await sendRequest(plain)).body).toBe(false);
 	});
 
 	test("run_request masks the header an inline API-key auth names", async () => {
@@ -13813,6 +14028,7 @@ describe("get_graphql_schema", () => {
 
 	function clientFor(composed: unknown, executed: unknown = introspected(FIXTURE_SDL)) {
 		return fakeClient({
+			listEnvironments: listingEnv1(),
 			composeRequest: vi.fn().mockResolvedValue(composed),
 			executeRequest: vi.fn().mockResolvedValue(executed),
 		});

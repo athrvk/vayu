@@ -25,7 +25,7 @@ import { useMemo } from "react";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import { resolveAuthSource } from "@/modules/request-builder/utils/auth-resolution";
-import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import { AUTH_MODE_LABELS, isEngineExecutableAuthMode } from "@/constants/auth-modes";
 import { TokenStatusRow } from "@/components/shared/OAuth2Form";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
@@ -102,12 +102,22 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	if (isLoading) return <SectionLoading />;
 	if (!request || !own) return <SectionEmpty>No request loaded</SectionEmpty>;
 
-	const label = effective.auth ? AUTH_MODE_LABELS[effective.auth.mode] : AUTH_MODE_LABELS.none;
+	const mode = effective.auth?.mode ?? "none";
+	const label = AUTH_MODE_LABELS[mode];
 
 	return (
 		<div className="space-y-2">
 			<p className="text-xs text-foreground m-0">
-				Sending <span className="font-semibold text-primary">{label}</span>
+				{isEngineExecutableAuthMode(mode) ? (
+					<>
+						Sending <span className="font-semibold text-primary">{label}</span>
+					</>
+				) : (
+					<>
+						<span className="font-semibold text-primary">{label}</span> - not sent by
+						Vayu
+					</>
+				)}
 			</p>
 			<p className="text-label text-muted-foreground m-0">{effective.origin}</p>
 			{oauthConfig && <TokenStatusRow resolvedConfig={oauthConfig} />}

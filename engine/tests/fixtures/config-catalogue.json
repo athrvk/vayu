@@ -627,6 +627,17 @@
     "type": "integer"
   },
   {
+    "advanced": false,
+    "category": "network_performance",
+    "default_value": "false",
+    "depends_on": "",
+    "key": "sendExpectContinue",
+    "max_value": "",
+    "min_value": "",
+    "requires_restart": false,
+    "type": "boolean"
+  },
+  {
     "advanced": true,
     "category": "services",
     "default_value": "60000",

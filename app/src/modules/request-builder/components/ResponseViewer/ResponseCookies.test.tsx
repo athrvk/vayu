@@ -183,3 +183,115 @@ describe("one cookie per received line (issue #2460)", () => {
 		expect(parseSetCookieLine("garbage")).toBeNull();
 	});
 });
+
+describe("cookies set during redirects (issue #2461)", () => {
+	const HOP_LOGIN = {
+		status: 302,
+		statusText: "Found",
+		headerLines: [
+			{ name: "Set-Cookie", value: "session=abc; Path=/; HttpOnly" },
+			{ name: "Location", value: "/home" },
+		],
+	};
+	const HOP_QUIET = {
+		status: 301,
+		statusText: "Moved Permanently",
+		headerLines: [{ name: "Location", value: "/login" }],
+	};
+	const HOP_SECOND = {
+		status: 307,
+		statusText: "Temporary Redirect",
+		headerLines: [
+			{ name: "set-cookie", value: "theme=dark, prefs=a=1" },
+			{ name: "Set-Cookie", value: "lang=en" },
+		],
+	};
+	const FINAL = [{ name: "Set-Cookie", value: "final=1" }];
+
+	const rows = (root: ParentNode) =>
+		Array.from(root.querySelectorAll("tbody tr")).map(
+			(tr) => tr.querySelectorAll("td")[0].textContent
+		);
+	const labels = (container: HTMLElement) =>
+		Array.from(container.querySelectorAll('[data-slot="eyebrow"]')).map((e) => e.textContent);
+
+	it("lists a hop's cookie under 'Set during redirects' with the hop's status and Location", () => {
+		const { container } = render(
+			<ResponseCookies headers={{}} headerLines={[]} redirects={[HOP_LOGIN]} />
+		);
+
+		expect(labels(container)).toEqual(["Set during redirects"]);
+		expect(container.textContent).toContain("302 Found, to /home");
+		expect(rows(container)).toEqual(["session"]);
+		expect(container.textContent).toContain("HttpOnly");
+	});
+
+	it("keeps the final response's cookies in their own group beside the hops'", () => {
+		const { container } = render(
+			<ResponseCookies headers={{}} headerLines={FINAL} redirects={[HOP_LOGIN]} />
+		);
+
+		expect(labels(container)).toEqual(["Set by this response", "Set during redirects"]);
+		const [finalGroup, hopGroup] = Array.from(container.querySelectorAll("section"));
+		expect(rows(finalGroup)).toEqual(["final"]);
+		expect(rows(hopGroup)).toEqual(["session"]);
+	});
+
+	it("gives each hop that set a cookie its own sub-heading and table, in order", () => {
+		const { container } = render(
+			<ResponseCookies
+				headers={{}}
+				headerLines={[]}
+				redirects={[HOP_LOGIN, HOP_QUIET, HOP_SECOND]}
+			/>
+		);
+
+		const hopGroup = container.querySelectorAll("section")[0];
+		const headings = Array.from(hopGroup.querySelectorAll("p.font-mono")).map(
+			(p) => p.textContent
+		);
+		// The quiet hop set nothing, so it has no heading either; a hop with no
+		// Location is named by its status alone.
+		expect(headings).toEqual(["302 Found, to /home", "307 Temporary Redirect"]);
+		const tables = Array.from(hopGroup.querySelectorAll("table"));
+		expect(tables.map((t) => rows(t))).toEqual([["session"], ["theme", "lang"]]);
+	});
+
+	it("reads a hop's lines one cookie per line, a comma in a value included", () => {
+		const { container } = render(
+			<ResponseCookies headers={{}} redirects={[HOP_SECOND]} headerLines={[]} />
+		);
+
+		expect(rows(container)).toEqual(["theme", "lang"]);
+		expect(container.textContent).toContain("dark, prefs=a=1");
+	});
+
+	it("never calls a hop's cookie stored", () => {
+		const { container } = render(
+			<ResponseCookies headers={{}} headerLines={FINAL} redirects={[HOP_LOGIN]} />
+		);
+
+		expect(container.textContent?.toLowerCase()).not.toContain("stored");
+	});
+
+	it("shows the one table, unlabelled, when no hop set a cookie", () => {
+		const { container } = render(
+			<ResponseCookies headers={{}} headerLines={FINAL} redirects={[HOP_QUIET]} />
+		);
+
+		expect(labels(container)).toEqual([]);
+		expect(rows(container)).toEqual(["final"]);
+	});
+
+	it("says there are none only when neither group has a cookie", () => {
+		const none = render(
+			<ResponseCookies headers={{}} headerLines={[]} redirects={[HOP_QUIET]} />
+		).container;
+		expect(none.textContent).toContain("No cookies in response");
+
+		const hopsOnly = render(
+			<ResponseCookies headers={{}} headerLines={[]} redirects={[HOP_LOGIN]} />
+		).container;
+		expect(hopsOnly.textContent).not.toContain("No cookies in response");
+	});
+});
