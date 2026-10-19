@@ -846,6 +846,9 @@ exists, and it is never consulted at execution time. `dbSynchronous` is
 SQLite's durability level, whose three values (`"0"` Off, `"1"` Normal, `"2"`
 Full) are an enumeration rather than a range; it is stored as an `enum` so the
 panel draws a picker instead of an integer box the description has to explain.
+Its default is Normal (`"1"`). After a power cut or an operating-system crash,
+Off can corrupt the whole workspace file, Normal cannot corrupt it but may lose
+the last few seconds of writes, and Full keeps every committed write.
 `proxyMode` is the third - see [Proxy settings](#proxy-settings) below.
 
 The Settings panel renders entries dynamically, so new keys appear without app

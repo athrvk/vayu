@@ -394,7 +394,9 @@ TEST_F (DatabaseTest, CacheSizeConfigReachesTheConnection) {
 TEST_F (DatabaseTest, TheFirstConnectionCarriesTheEnginesDurabilitySettings) {
     Database db (TEST_DB_PATH);
 
-    EXPECT_EQ (db.applied_synchronous (), vayu::core::constants::database::SYNCHRONOUS)
+    // A literal, not the constant: comparing the constant to itself passes
+    // whatever it is set to (#2419 - it was 0, which can corrupt on power loss).
+    EXPECT_EQ (db.applied_synchronous (), 1)
     << "the schema sync ran at SQLite's default instead of the engine's";
 
     // Journal mode is read off the database header rather than from a `-wal`
@@ -434,6 +436,63 @@ TEST_F (DatabaseTest, SynchronousConfigStillWinsOverTheConstructorDefault) {
     Database reopened (TEST_DB_PATH);
     reopened.init ();
     EXPECT_EQ (reopened.applied_synchronous (), kConfigured);
+}
+
+// A fresh workspace opens at NORMAL (#2419): WAL syncs only at a checkpoint,
+// so a commit costs no fsync, and unlike OFF a power cut cannot corrupt the
+// file. Literals on purpose - the constant compared to itself proves nothing.
+TEST_F (DatabaseTest, AFreshWorkspaceDefaultsToNormalSynchronous) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto entry = db.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->value, "1");
+    EXPECT_EQ (entry->default_value, "1");
+    EXPECT_EQ (db.applied_synchronous (), 1);
+}
+
+// The converse of the migration below: a level the user picked past the old
+// default is theirs, and the adopt-new-default rule must not touch it.
+TEST_F (DatabaseTest, AStoredFullSynchronousSurvivesAReopen) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        entry->value = "2";
+        db.save_config_entry (*entry);
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto entry = reopened.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->value, "2");
+    EXPECT_EQ (entry->default_value, "1");
+    EXPECT_EQ (reopened.applied_synchronous (), 2);
+}
+
+// An install from before #2419 holds value "0" beside default "0". The first
+// start of this build moves it to Normal and applies it on that same start.
+TEST_F (DatabaseTest, AWorkspaceOnTheOldOffDefaultMovesToNormalOnce) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        auto entry = db.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        entry->value         = "0";
+        entry->default_value = "0";
+        db.save_config_entry (*entry);
+    }
+
+    Database reopened (TEST_DB_PATH);
+    reopened.init ();
+    auto entry = reopened.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (entry);
+    EXPECT_EQ (entry->value, "1");
+    EXPECT_EQ (entry->default_value, "1");
+    EXPECT_EQ (reopened.applied_synchronous (), 1);
 }
 
 // The seed is one transaction now (issue #838) rather than sixty-odd implicit

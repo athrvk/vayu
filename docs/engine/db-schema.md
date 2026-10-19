@@ -1854,6 +1854,16 @@ the shared `ConfigSeeder` and helpers in `config_seeds/seed.hpp`. Adding a
 setting is editing the one category file it belongs to; adding a category is
 one new file and one call.
 
+**A stored value is the user's, except where an entry opts in to follow a
+changed default** (#2419). A seed call written `seed (entry, adopt_new_default)`
+moves a row whose value still equals the default its previous build stored to
+the new default, once, and records that default so the next start finds nothing
+to do; a value the user moved off the old default is kept, and so is every entry
+that does not opt in. Opt-in is per entry because a default can differ with no
+build having changed it: `workers` seeds from the machine's core count, and a
+workspace file moved to another machine must keep its row. Only `dbSynchronous`
+opts in.
+
 **requires_restart / advanced / keywords** are NOT NULL with a `default_value`
 (false, false and `"[]"`), so
 `sync_schema` adds them to an existing table with `ALTER TABLE ADD COLUMN`
@@ -1945,7 +1955,13 @@ is derived state a delete only costs a rewrite.
 
 **`dbSynchronous`** is the exception: SQLite's durability levels (`"0"` Off,
 `"1"` Normal, `"2"` Full) are its enumeration rather than ours, so that one
-list is literal.
+list is literal. After a power cut or an operating-system crash, **Off** can
+leave the whole workspace file corrupt; **Normal**, the default, cannot corrupt
+it but may lose the last few seconds of writes (in WAL it syncs only at a
+checkpoint, so a commit costs no fsync); **Full** keeps every committed write at
+the cost of a sync per commit. A workspace still holding the old default (Off,
+before #2419) moves to Normal once at the first start of the build that changed
+it; one that had picked Normal or Full keeps its choice.
 
 ---
 

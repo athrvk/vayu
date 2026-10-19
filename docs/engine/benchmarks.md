@@ -992,7 +992,7 @@ For load testing this class of target on this machine:
 | `eventLoopMaxPerHost` | 500 | Not binding at c=64; removes any doubt |
 | `dnsCacheTimeout` | 3600 | Target hostname never needs re-resolution |
 | `scriptEnableConsole` | false | Matters only when scripts run |
-| `dbSynchronous` | 0 (Off) | Already optimal by default |
+| `dbSynchronous` | 1 (Normal) | The default. In WAL, NORMAL has no per-commit sync, so it costs no more than Off. The throughput figures above were measured at Off; the perf harness has not been re-run at Normal |
 | measurement method | standalone engine | Worth ~9% versus running through the app |
 
 ## Per-platform measurement in CI

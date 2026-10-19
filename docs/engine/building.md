@@ -801,15 +801,15 @@ measurements.
 
 **Where the flush barrier actually was (#838).** This section used to name
 "the flush barrier `synchronous=FULL` issues per commit" as the cost, and that
-was wrong about the steady state: `dbSynchronous` defaults to **Off**
-(`constants::database::SYNCHRONOUS` is `0`), so a committed result has never
-carried an fsync. What did carry one was everything a `Database` does *before*
+was wrong about the steady state: in WAL a committed result does not carry an
+fsync at `dbSynchronous` Normal, the default (`constants::database::SYNCHRONOUS`
+is `1`; it was Off until #2419, which moved it because Off can corrupt the file
+on power loss). What did carry one was everything a `Database` does *before*
 `init` applies that setting - two `sync_schema` passes from the constructor and
 a config seed that wrote its sixty-odd rows as sixty-odd separate transactions -
 all of it on SQLite's own defaults, a rollback journal at `synchronous=FULL`.
 Per process, once; and the suite is one process per test. So the barrier was
-real, it was paid at open rather than per commit, and it was the engine paying
-for durability its own configuration says it does not want. #838 applies the
+real, and it was paid at open rather than per commit. #838 applies the
 engine's journal mode and `synchronous` to the first connection the constructor
 opens, and makes the seed one transaction.
 

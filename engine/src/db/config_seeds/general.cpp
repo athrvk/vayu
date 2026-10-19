@@ -22,7 +22,8 @@ namespace {
 // in the `options` column rather than spelled out as "0 = Off, 1 = ..." prose
 // over an integer input, which is what the entry used to do.
 std::string db_synchronous_options_json () {
-    const nlohmann::json options = { { { "value", "0" }, { "label", "Off" } },
+    const nlohmann::json options = { { { "value", "0" },
+                                     { "label", "Off (can corrupt on power loss)" } },
         { { "value", "1" }, { "label", "Normal" } },
         { { "value", "2" }, { "label", "Full" } } };
     return options.dump ();
@@ -73,16 +74,20 @@ void seed_general (ConfigSeeder& seed, int64_t now) {
     "60000", // max: 60 seconds
     std::nullopt, now })))));
 
-    seed (restart_required (keywords ({ "fsync", "pragma" }) (ConfigEntry{
+    // adopt_new_default: the default moved from Off to Normal in #2419, and a
+    // workspace still holding the old default's value follows it once.
+    seed (
+    restart_required (keywords ({ "fsync", "pragma" }) (ConfigEntry{
     "dbSynchronous", std::to_string (vayu::core::constants::database::SYNCHRONOUS), "enum", "Data Safety Mode",
-    "How hard SQLite works to get results onto disk before reporting them "
-    "written. Off is the fastest and the default: the database stays "
-    "uncorrupted through a crash, but the last few results may be lost to a "
-    "power cut, which is an acceptable trade for test telemetry. Normal and "
-    "Full buy durability back at the cost of write throughput during a "
-    "high-RPS run.",
+    "How hard SQLite works to get data onto disk before reporting it "
+    "written. Off: a power cut or an operating-system crash can corrupt the "
+    "whole workspace file. Normal, the default: the file cannot be corrupted, "
+    "but the last few seconds of writes may be lost. Full: every committed "
+    "write survives a power cut, at the cost of a disk sync per commit "
+    "during a high-RPS run.",
     "general_engine", std::to_string (vayu::core::constants::database::SYNCHRONOUS),
-    std::nullopt, std::nullopt, db_synchronous_options_json (), now })));
+    std::nullopt, std::nullopt, db_synchronous_options_json (), now })),
+    adopt_new_default);
 }
 
 } // namespace vayu::db::config_seeds
