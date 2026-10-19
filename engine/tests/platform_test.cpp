@@ -21,8 +21,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -417,7 +417,9 @@ class DurableFilesTest : public ::testing::Test {
     }
     [[nodiscard]] static std::string read_file (const fs::path& file) {
         std::ifstream in (file, std::ios::binary);
-        return { std::istreambuf_iterator<char> (in), std::istreambuf_iterator<char> () };
+        std::ostringstream buffer;
+        buffer << in.rdbuf ();
+        return buffer.str ();
     }
     fs::path root_;
 };
