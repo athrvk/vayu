@@ -258,7 +258,8 @@ run has no collection row to compile that array from - it compiles `POST /runs`'
 `ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright
 beside a `scenario` block, whose collection already has a real `elements` column for this. `run.start` runs before the
 sequential run's iteration loop, and before `execute_load_test` captures the load run's own
-`test_start` - so a setup script's own time is never folded into either mode's duration figures - and
+`test_start` - so a setup script's own time is never folded into either mode's duration figures, and a
+load run's live `elapsedSeconds` reads `0` until setup ends (issue #2395) - and
 writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
 run shares, so its writes are visible from the very first step or submission. A throwing setup fails
 the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is

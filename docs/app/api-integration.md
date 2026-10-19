@@ -127,26 +127,32 @@ untransformed. The mode strings are a contract: the engine matches
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
 engine writes the Content-Type each form mode implies. A `form-data` row may be
-a **file part** (`{type: "file", src, fileName?, contentType?, unresolved}`): the
-renderer sends the path the user picked - never the bytes - and the engine opens
-the file at send time. A **`binary`** body is one file as the whole body,
-`{mode: "binary", file: {src, fileName?, contentType?, unresolved}}`, built from
+a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
+sends the path the user picked - never the bytes - and the engine opens the file
+at send time. A **`binary`** body is one file as the whole body,
+`{mode: "binary", file: {src, fileName?, contentType?}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
 refuse it as "no file selected" rather than send a bodiless request.
 
-`unresolved` travels on both, and is the engine's trust input rather than an
-editor note: a file reference is sent only when someone chose it in the editor
-(`unresolved: false`) or it lies under a folder allowed in Settings > Files
-([allowed folders](#allowed-folders)). The engine reads an **absent** flag as
-`true`, so every renderer write states it, on the send (`buildExecBody`), the
-save (`toBodyPayload`, and History's Save to request) and a stored row read back
-(`RequestTransformer`, so a Duplicate forwards it): `false` only for a file the
-user picked, dropped or typed in this app, `true` for anything else - an empty
-path, a pick outside Electron that yields no path, a row stored before writers
-sent the key. The rule is `lib/file-trust.ts`. An import, a curl paste and an MCP
-agent set it `true`, and composition does whenever `src` held a `{{variable}}`. A refused file comes back as a send
-failure (status 0, the engine's message naming the field or "Body file", the path
-and what to do), which the response pane's `ClientErrorView` prints as-is under
+**`unresolved` comes back, never goes out** (#2356). The engine sends a file
+reference only when its path was picked on this machine or lies under a folder
+allowed in Settings > Files ([allowed folders](#allowed-folders)), and decides
+that from its own records: on every read that hands a body to an editor it
+writes `unresolved` on each file reference with a path (`true`: it would refuse
+it), and on every write and send it ignores the key. So the renderer keeps the
+derived value for display - `RequestTransformer` and the History run seed leave
+it as read - and strips it from everything it sends, through `lib/file-trust.ts`:
+the send (`buildExecBody`), the save (`toBodyPayload`, which a pasted command's
+new request uses too), History's Save to request and a Duplicate. A pick or a
+drop in the editor is the grant itself (the preload reports the path to the main
+process, which records it), so it sets `unresolved: false` locally until the
+next read; a typed or pasted path carries no flag and reads as not chosen until
+the engine answers for it. An import's `POST /import/apply` payload echoes the
+parse answer's flag unchanged, because it is pinned to the engine's own apply
+mapping (`orchestrator.payload-conformance.test.ts`); the engine drops it there
+too. A refused file comes back as a send failure (status 0, the engine's message
+naming the field or "Body file", the path and what to do), which the response
+pane's `ClientErrorView` prints as-is under
 "Couldn't send the request". See [the engine's `body` union](../engine/api-reference.md#the-request-body-union)
 for the full contract.
 
@@ -200,18 +206,43 @@ The engine keeps one cookie jar per environment for design-mode requests
 
 ```typescript
 apiService.getFileRoots(): Promise<FileRoot[]>                 // GET /file-roots, a bare array
-apiService.createFileRoot({ path }): Promise<FileRoot>         // POST /file-roots -> 201 row
-apiService.deleteFileRoot(id: string): Promise<void>           // DELETE /file-roots/:id
+apiService.allowChosenFolder(options?): Promise<AllowFolderReply>  // picker in main, then POST /file-roots
+apiService.deleteFileRoot(id: string): Promise<void>           // main's DELETE /file-roots/:id
 ```
 
 The folders a request-body file may be sent from without a per-file pick -
 the second half of the trust rule under [Request bodies](#request-bodies).
-`POST` carries the path alone (the engine owns the id) and answers the row as
-stored: canonical, so it can differ from what was typed. A path that is not an
-existing directory is a `400`, one already allowed a `409`; `useAllowFolder`
-(`hooks/useAllowFolder.ts`) is the one caller that interprets them, for
-Settings > Files (`FilesPanel`), the binary body editor and the import
-preview, and it treats the `409` as success.
+Only the list is an engine call from the renderer. Both writes need the
+engine's grant secret ([who may call the API](../engine/api-reference.md#who-may-call-the-api)),
+which only the main process holds, so they cross the Electron bridge
+(#2356):
+
+| `electronAPI` method | Channel | What main does |
+|---|---|---|
+| `allowFolder({defaultPath?, title?})` | `file:allowFolder` | Opens the system folder picker at `defaultPath`, then `POST /file-roots` with the folder the user chose and the secret. The renderer names only where the picker opens, never the folder. |
+| `removeAllowedFolder(id)` | `file:removeAllowedFolder` | `DELETE /file-roots/:id` with the secret, for an id shaped like one the engine mints. |
+
+Both answer only the app window's main frame (`electron/ipc-sender.ts`) and
+resolve with the engine's answer rather than throwing it away at the
+process boundary: `{outcome: "done", value}`, `{outcome: "refused", status,
+code, message}` or `{outcome: "unreachable", message}`, and for
+`allowFolder` also `{outcome: "cancelled"}`, with the chosen folder as `path`
+on every other outcome. The row is stored canonical, so it can differ from the
+folder picked. `useAllowFolder` (`hooks/useAllowFolder.ts`) is the one caller
+that interprets an add, for Settings > Files (`FilesPanel`), the binary body
+editor and the import preview, and it treats a `409` (already allowed) as
+success; `deleteFileRoot` turns a refusal back into an `ApiError`. Outside
+Electron neither write exists, and the surfaces offer no way to add one.
+
+**A picked file is recorded by main, not sent by the renderer.** When the
+preload's `getFilePath(file)` gets a path from `webUtils.getPathForFile`, it
+also reports it on an internal channel, `file:picked`, that no `electronAPI`
+method exposes; main checks the sender is the app window's main frame and the
+value an absolute path, then records it with `POST /file-grants` and the secret
+(`electron/file-grants.ts`). A document the OS hands the app (`open-intent.ts`)
+is recorded the same way. The report is one-way, so the renderer cannot wait
+for it: a pick followed by a send within the same few milliseconds can reach
+the engine first.
 
 #### Request examples
 

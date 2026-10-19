@@ -16,7 +16,10 @@
  * folder), that directory is neither a filesystem root nor the home folder
  * or a folder containing it (`refused_root_reason`), and one folder is one
  * row - a second
- * spelling of an allowed folder is a 409.
+ * spelling of an allowed folder is a 409. Writes need the grant secret
+ * (`admit_file_trust_write`, #2356): a caller that could add a folder could
+ * otherwise send any file under it, which the picked-file grants exist to
+ * prevent.
  */
 
 #include "vayu/http/file_access_policy.hpp"
@@ -124,14 +127,20 @@ nlohmann::json list_file_roots_response (vayu::db::Database& db) {
     return out;
 }
 
-/// Testable core of DELETE /file-roots/:id.
+/// Testable core of DELETE /file-roots/:id. Check and delete under one lock,
+/// so a concurrent delete of the same id answers 404 rather than 200 twice.
 std::pair<int, nlohmann::json>
 delete_file_root_response (vayu::db::Database& db, const std::string& id) {
-    if (!db.get_file_root (id)) {
-        return { 404, error_body (404, "Allowed folder not found") };
-    }
-    db.delete_file_root (id);
-    return { 200, nlohmann::json{ { "success", true } } };
+    std::pair<int, nlohmann::json> result{ 500, nlohmann::json::object () };
+    db.with_lock ([&] {
+        if (!db.get_file_root (id)) {
+            result = error_response (404, "Allowed folder not found");
+            return;
+        }
+        db.delete_file_root (id);
+        result = { 200, nlohmann::json{ { "success", true } } };
+    });
+    return result;
 }
 
 void register_file_root_routes (RouteContext& ctx) {
@@ -145,14 +154,17 @@ void register_file_root_routes (RouteContext& ctx) {
 
     /**
      * POST /file-roots
-     * Allows a folder. Body: `{path}` - absolute, an existing directory, not a
-     * filesystem root, not the home folder or a folder containing it; stored
-     * canonical. 201
-     * with the row; 400 for a bad path or a body `id`; 409 when the folder is
+     * Allows a folder. Needs the grant secret (403 without it). Body:
+     * `{path}` - absolute, an existing directory, not a filesystem root, not
+     * the home folder or a folder containing it; stored canonical. 201 with
+     * the row; 400 for a bad path or a body `id`; 409 when the folder is
      * already allowed.
      */
     ctx.server.Post (
     "/file-roots", [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        if (!admit_file_trust_write (ctx.grant_secret, req, res)) {
+            return;
+        }
         try {
             auto json           = nlohmann::json::parse (req.body);
             auto [status, body] = create_file_root_response (
@@ -170,10 +182,14 @@ void register_file_root_routes (RouteContext& ctx) {
 
     /**
      * DELETE /file-roots/:id
-     * Stops allowing a folder. The folder and its files are untouched.
+     * Stops allowing a folder. Needs the grant secret (403 without it). The
+     * folder and its files are untouched.
      */
     ctx.server.Delete (R"(/file-roots/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
+        if (!admit_file_trust_write (ctx.grant_secret, req, res)) {
+            return;
+        }
         const std::string id = req.matches[1];
         auto [status, body]  = delete_file_root_response (ctx.db, id);
         res.status           = status;

@@ -12432,17 +12432,18 @@ describe("secret withholding", () => {
 
 /**
  * A `binary` body names a file on the user's machine. An agent may store one,
- * but never as a file the user chose: every MCP-written file reference is
- * `unresolved`, so the engine sends it only once a person picks it in the
- * editor or it sits under an allowed folder. And an agent may never *send* a
- * file inline - the refusal points it at running the saved request by id.
- * `dispatchTool` hands handlers the raw arguments (no zod stripping), so an
- * agent's own `unresolved: false` really does reach `shapeBody` here.
+ * but never choose it: the engine sends it only once a person picks it in the
+ * editor or it sits under an allowed folder, and decides that from its own
+ * records, so the stored reference carries no trust member at all (#2356). An
+ * agent may never *send* a file inline - the refusal points it at running the
+ * saved request by id. `dispatchTool` hands handlers the raw arguments (no zod
+ * stripping), so an agent's own `unresolved: false` really does reach
+ * `shapeBody` here.
  */
 describe("binary file bodies", () => {
 	const WRITE = { allowWrites: true };
 
-	test("create_request stores a binary body unresolved, whatever the agent claims", async () => {
+	test("create_request stores a binary body without the agent's trust claim", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"create_request",
@@ -12460,8 +12461,9 @@ describe("binary file bodies", () => {
 		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/data/a.png", contentType: "image/png", unresolved: true },
+			file: { src: "/data/a.png", contentType: "image/png" },
 		});
+		expect(payload.body.file).not.toHaveProperty("unresolved");
 		expect(payload.bodyType).toBe("binary");
 	});
 
@@ -12475,12 +12477,12 @@ describe("binary file bodies", () => {
 		const payload = (client.createRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/d/a.bin", unresolved: true },
+			file: { src: "/d/a.bin" },
 		});
 		expect(payload.bodyType).toBe("binary");
 	});
 
-	test("update_request replaces the body with an unresolved file", async () => {
+	test("update_request replaces the body with a file reference", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
 			"update_request",
@@ -12495,7 +12497,7 @@ describe("binary file bodies", () => {
 		const [, payload] = (client.updateRequest as ReturnType<typeof vi.fn>).mock.calls[0];
 		expect(payload.body).toEqual({
 			mode: "binary",
-			file: { src: "/d/a.bin", fileName: "a.bin", unresolved: true },
+			file: { src: "/d/a.bin", fileName: "a.bin" },
 		});
 		expect(payload.bodyType).toBe("binary");
 	});

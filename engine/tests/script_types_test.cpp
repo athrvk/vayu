@@ -109,9 +109,10 @@ std::set<std::string> declared_members (const std::string& body) {
  * suppression for a one-line read.
  *
  * `concurrency-mt-unsafe` is silenced rather than fixed (#945): `getenv` races
- * only against a write to the environment, and the only writer in this suite
- * is `ScopedEnv` in `transport_policy_test.cpp`. gtest runs one test body at a
- * time, so that write and this read never overlap.
+ * only against a write to the environment, and the writers in this suite are
+ * `ScopedEnv` (`scoped_env.hpp`) and the grant-secret test that calls
+ * `take_grant_secret_from_environment`. gtest runs one test body at a time, so
+ * those writes and this read never overlap.
  */
 bool env_is_set (const char* name) {
 #ifdef _WIN32

@@ -117,6 +117,26 @@ describe("duplicating a request", () => {
 		expect(sent).toEqual({ ...expected, name: "Get pet (Copy)" });
 	});
 
+	// #2356: the read's `unresolved` is the engine's answer for the source, not
+	// part of the record, so the copy's write carries none of it.
+	it("copies a file reference without the engine's derived flag", async () => {
+		const upload: Request = {
+			...source,
+			body: { mode: "binary", file: { src: "/data/a.bin", unresolved: true } },
+			bodyType: "binary",
+		};
+		const { result } = renderCrud();
+
+		await act(async () => {
+			await result.current.rows.onDuplicateRequest(upload);
+		});
+
+		expect(createRequest.mock.calls[0][0].body).toEqual({
+			mode: "binary",
+			file: { src: "/data/a.bin" },
+		});
+	});
+
 	// Issue #1485: a list row can carry `truncatedFields` when the engine
 	// substituted a default for a column over its size cap. Copying it would
 	// silently persist the substitution as if it were the real value.

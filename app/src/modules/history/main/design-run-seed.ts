@@ -36,7 +36,7 @@ import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
 import { holdsWithheld, isWithheld } from "@/lib/withheld-value";
-import { noFile, withFileTrust } from "@/lib/file-trust";
+import { noFile } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
@@ -150,11 +150,9 @@ export interface WithheldParts {
 function fileRefOf(node: unknown): FileRef {
 	if (!node || typeof node !== "object") return noFile();
 	const raw = node as Record<string, unknown>;
-	const file: FileRef = {
-		src: typeof raw.src === "string" ? raw.src : "",
-		// Only a recorded `false` was chosen here; anything else is not.
-		unresolved: raw.unresolved !== false,
-	};
+	const file: FileRef = { src: typeof raw.src === "string" ? raw.src : "" };
+	// The engine's answer for this machine, derived on the run read.
+	if (typeof raw.unresolved === "boolean") file.unresolved = raw.unresolved;
 	if (typeof raw.fileName === "string" && raw.fileName) file.fileName = raw.fileName;
 	if (typeof raw.contentType === "string" && raw.contentType) file.contentType = raw.contentType;
 	return file;
@@ -309,9 +307,7 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 			headers,
 			bodyMode,
 			body: body?.content ?? "",
-			formData: toKeyValueItems(
-				withFileTrust(bodyMode === "form-data" ? (body?.fields ?? []) : [])
-			),
+			formData: toKeyValueItems(bodyMode === "form-data" ? (body?.fields ?? []) : []),
 			urlEncoded: toKeyValueItems(
 				bodyMode === "x-www-form-urlencoded" ? (body?.fields ?? []) : []
 			),

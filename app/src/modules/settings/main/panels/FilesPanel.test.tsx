@@ -11,26 +11,26 @@
 /**
  * Settings > Files: the engine's allowed folders, listed, added and removed.
  *
- * What is pinned is what reaches the engine - the path a POST carries, the id
- * a DELETE names - and the three outcomes of an add, because a 409 ("already
- * allowed") is the result the user wanted and must not read as a failure.
+ * What is pinned is what the panel asks for - the picker, never a typed path
+ * (#2356), and the id a remove names - and the outcomes of an add, because a
+ * 409 ("already allowed") is the result the user wanted and must not read as
+ * a failure.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-import { ApiError } from "@/services/http-client";
 import type { FileRoot } from "@/types";
 
 const roots: FileRoot[] = [];
 let rootsFailed = false;
-const createRoot = vi.fn();
+const allowRoot = vi.fn();
 const deleteRoot = vi.fn();
 const showToast = vi.fn();
 
 vi.mock("@/queries", () => ({
 	useFileRootsQuery: () => ({ data: roots, isLoading: false, isError: rootsFailed }),
-	useCreateFileRootMutation: () => ({ mutateAsync: createRoot, isPending: false }),
+	useAllowChosenFolderMutation: () => ({ mutateAsync: allowRoot, isPending: false }),
 	useDeleteFileRootMutation: () => ({ mutateAsync: deleteRoot, isPending: false }),
 }));
 vi.mock("@/stores", async (importOriginal) => ({
@@ -55,7 +55,10 @@ function renderPanel() {
 beforeEach(() => {
 	roots.length = 0;
 	rootsFailed = false;
-	createRoot.mockReset();
+	allowRoot.mockReset();
+	// Inside Electron unless a case says otherwise: the bridge's presence is
+	// what offers the picker, and the mutation above is what it would call.
+	vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
 	deleteRoot.mockReset();
 	showToast.mockReset();
 });
@@ -97,57 +100,91 @@ describe("FilesPanel", () => {
 		);
 	});
 
-	it("allows a typed folder by posting its path", async () => {
-		createRoot.mockResolvedValue({ id: "r1", path: "/data/fixtures", createdAt: 1 });
+	it("allows the folder chosen in the picker", async () => {
+		allowRoot.mockResolvedValue({
+			outcome: "done",
+			path: "/picked/",
+			value: { id: "r1", path: "/picked", createdAt: 1 },
+		});
 		renderPanel();
 
-		fireEvent.change(screen.getByLabelText("Folder to allow"), {
-			target: { value: "  /data/fixtures  " },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
 
-		await waitFor(() => expect(createRoot).toHaveBeenCalledWith("/data/fixtures"));
+		await waitFor(() => expect(allowRoot).toHaveBeenCalledWith({ title: "Allow a folder" }));
+		// The row the engine kept, canonical, not the folder as picked.
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
-				"Files under /data/fixtures can be sent now.",
+				"Files under /picked can be sent now.",
 				"success"
 			)
 		);
-		expect(screen.getByLabelText("Folder to allow")).toHaveValue("");
+	});
+
+	it("offers no field to type a folder into", () => {
+		renderPanel();
+		expect(screen.queryByRole("textbox")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
 	});
 
 	it("treats an already-allowed folder as done, not as an error", async () => {
-		createRoot.mockRejectedValue(new ApiError(409, "conflict", "already allowed"));
+		allowRoot.mockResolvedValue({
+			outcome: "refused",
+			path: "/data",
+			status: 409,
+			code: "conflict",
+			message: "The folder '/data' is already allowed (id r1)",
+		});
 		renderPanel();
 
-		fireEvent.change(screen.getByLabelText("Folder to allow"), {
-			target: { value: "/data" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith("/data is already an allowed folder.", "info")
 		);
 	});
 
-	it("shows the engine's reason when it refuses a folder, and keeps the text", async () => {
-		createRoot.mockRejectedValue(
-			new ApiError(400, "invalid_request", "'/nope' is not an existing directory")
-		);
+	it("shows the engine's reason when it refuses a folder", async () => {
+		allowRoot.mockResolvedValue({
+			outcome: "refused",
+			path: "/home/ada",
+			status: 400,
+			code: "invalid_request",
+			message: "'/home/ada' is your home folder",
+		});
 		renderPanel();
 
-		fireEvent.change(screen.getByLabelText("Folder to allow"), {
-			target: { value: "/nope" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
-				"Couldn't allow /nope: '/nope' is not an existing directory",
+				"Couldn't allow /home/ada: '/home/ada' is your home folder",
 				"error"
 			)
 		);
-		expect(screen.getByLabelText("Folder to allow")).toHaveValue("/nope");
+	});
+
+	it("says the engine did not answer when it could not be asked", async () => {
+		allowRoot.mockResolvedValue({ outcome: "unreachable", path: "/data", message: "x" });
+		renderPanel();
+
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				expect.stringMatching(/^Couldn't allow \/data: .*Restart Vayu\.$/),
+				"error"
+			)
+		);
+	});
+
+	it("says nothing when the picker is cancelled", async () => {
+		allowRoot.mockResolvedValue({ outcome: "cancelled" });
+		renderPanel();
+
+		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
+
+		await waitFor(() => expect(allowRoot).toHaveBeenCalled());
+		expect(showToast).not.toHaveBeenCalled();
 	});
 
 	it("removes a folder by its id", async () => {
@@ -160,35 +197,10 @@ describe("FilesPanel", () => {
 		await waitFor(() => expect(deleteRoot).toHaveBeenCalledWith("r1"));
 	});
 
-	it("offers the folder picker inside Electron and allows what it returns", async () => {
-		const selectDirectory = vi.fn(async () => "/picked");
-		vi.stubGlobal("electronAPI", { selectDirectory });
-		createRoot.mockResolvedValue({ id: "r1", path: "/picked", createdAt: 1 });
-		renderPanel();
-
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
-
-		await waitFor(() => expect(createRoot).toHaveBeenCalledWith("/picked"));
-		expect(selectDirectory).toHaveBeenCalledWith({ title: "Allow a folder" });
-	});
-
-	it("posts nothing when the picker is cancelled", async () => {
-		const selectDirectory = vi.fn(async () => null);
-		vi.stubGlobal("electronAPI", { selectDirectory });
-		renderPanel();
-
-		fireEvent.click(screen.getByRole("button", { name: "Choose folder..." }));
-
-		await waitFor(() => expect(selectDirectory).toHaveBeenCalled());
-		expect(createRoot).not.toHaveBeenCalled();
-	});
-
-	it("offers no picker outside Electron, where there is none to open", () => {
+	it("offers no picker outside Electron, where nothing may allow a folder", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		renderPanel();
 		expect(screen.queryByRole("button", { name: "Choose folder..." })).toBeNull();
-		// The typed path still works there.
-		expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
 	});
 
 	it("declares the surface its folder dividers read", () => {

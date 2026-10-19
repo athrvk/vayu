@@ -1381,16 +1381,21 @@ record shape, the category list, the redaction rule and the file layout
   [api-reference.md](api-reference.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this
   machine for exactly two body shapes - a `binary` body's `file` and a
-  `form-data` file part - and sends one only when *a person chose it in the
-  editor, or it lies under a folder they allowed in Settings*
-  (`file_roots`). A reference is sendable iff `!unresolved ||
-  allowed(canonical(src))`, decided on canonical paths component by component,
-  so a symlink escaping an allowed folder is outside it. `unresolved` is forced
-  by every writer that is not a person in the editor (importers, curl paste,
-  MCP) and by composition whenever `src` held a `{{` - a path a variable or a
-  data row chose - and it fails closed: a payload that omits it is unresolved
-  (`vayu::json::reads_as_unresolved`), and every stored write states it. Scripts can never set a path: the residual pass does not
-  resolve `src`. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
+  `form-data` file part - and sends one only when *it lies under a folder the
+  user allowed in Settings* (`file_roots`) *or is a file a person picked*
+  (`file_grants`, #2356). A reference is sendable iff
+  `FileAccessPolicy::allows (src)`: containment is decided on canonical paths
+  component by component, so a symlink escaping an allowed folder is outside
+  it, and a grant is the canonical path recorded at the pick, matched exactly,
+  so a link re-pointed afterwards names another file. Nothing a request body
+  says changes the answer: its `unresolved` is ignored when a payload is
+  parsed, never stored, and derived on every read for the editor to show. A
+  `src` still holding `{{` is refused, and no grant can name one. Scripts can
+  never set a path: the residual pass does not
+  resolve `src`. Both tables change only through `POST`/`DELETE` on
+  `/file-roots` and `/file-grants`, which need the per-start grant secret the
+  app passes as `VAYU_GRANT_SECRET` (`http/grant_secret.hpp`); an engine
+  started without one refuses those writes and still honours the rows. The rule lives in `http/file_ref.hpp` (`FilePlan`) and
   `http/file_access_policy.hpp`, runs once per design send after the residual
   pass and once per run at plan time (every distinct data-bound path
   included), and refuses before any transfer; the send gate

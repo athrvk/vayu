@@ -6,16 +6,23 @@
  */
 
 /**
- * The file-body trust flag as every writer states it. The engine reads an
- * absent `unresolved` as `true`, so the two branches that matter are an
- * explicit `false` (chosen here) and everything else.
+ * The file-reference trust flag is the engine's derived answer (#2356): the
+ * editor reads it, a pick sets `false` until the next read, and no payload
+ * carries it.
  */
 
 import { describe, it, expect } from "vitest";
-import type { FormFieldEntry } from "@/types";
-import { isUnresolved, noFile, withFileTrust } from "./file-trust";
+import type { FormFieldEntry, RequestBody } from "@/types";
+import {
+	flagAfterPick,
+	isUnresolved,
+	noFile,
+	withoutBodyFileTrust,
+	withoutFileTrust,
+} from "./file-trust";
 
 describe("isUnresolved", () => {
+	// Absent is a path the engine has not answered for yet: typed or pasted.
 	it.each([
 		[false, false],
 		[true, true],
@@ -25,14 +32,22 @@ describe("isUnresolved", () => {
 	});
 });
 
+describe("flagAfterPick", () => {
+	it("is false for a pick that yielded a path, and nothing without one", () => {
+		expect(flagAfterPick("/home/u/a.png")).toBe(false);
+		expect(flagAfterPick("")).toBeUndefined();
+	});
+});
+
 describe("noFile", () => {
-	it("is an empty path nobody chose, and a fresh object each time", () => {
-		expect(noFile()).toEqual({ src: "", unresolved: true });
+	it("is an empty path with no flag, and a fresh object each time", () => {
+		expect(noFile()).toEqual({ src: "" });
+		expect(noFile()).not.toHaveProperty("unresolved");
 		expect(noFile()).not.toBe(noFile());
 	});
 });
 
-describe("withFileTrust", () => {
+describe("withoutFileTrust", () => {
 	const part = (unresolved: boolean | undefined): FormFieldEntry => ({
 		key: "f",
 		value: "",
@@ -42,16 +57,43 @@ describe("withFileTrust", () => {
 		unresolved,
 	});
 
-	it.each([
-		[false, false],
-		[true, true],
-		[undefined, true],
-	])("states a file part's %s as %s", (given, stated) => {
-		expect(withFileTrust([part(given)])[0]).toHaveProperty("unresolved", stated);
+	it.each([[false], [true], [undefined]])("drops a file part's %s", (given) => {
+		const [out] = withoutFileTrust([part(given)]);
+		expect(out).not.toHaveProperty("unresolved");
+		expect(out).toMatchObject({ type: "file", src: "/a.png" });
 	});
 
-	it("leaves a text part without the flag", () => {
+	it("leaves a text part's members as they were", () => {
 		const text: FormFieldEntry = { key: "k", value: "v", enabled: true };
-		expect(withFileTrust([text])[0]).toBe(text);
+		expect(withoutFileTrust([text])).toEqual([text]);
+	});
+});
+
+describe("withoutBodyFileTrust", () => {
+	it("drops a binary body's flag and keeps the rest of the reference", () => {
+		const body: RequestBody = {
+			mode: "binary",
+			file: { src: "/a.bin", fileName: "a.bin", unresolved: true },
+		};
+		expect(withoutBodyFileTrust(body)).toEqual({
+			mode: "binary",
+			file: { src: "/a.bin", fileName: "a.bin" },
+		});
+	});
+
+	it("drops a form-data file part's flag", () => {
+		const body: RequestBody = {
+			mode: "form-data",
+			fields: [
+				{ key: "f", value: "", enabled: true, type: "file", src: "/a", unresolved: false },
+			],
+		};
+		const out = withoutBodyFileTrust(body);
+		expect(out.mode === "form-data" && out.fields[0]).not.toHaveProperty("unresolved");
+	});
+
+	it("returns a body with no file reference unchanged", () => {
+		const body: RequestBody = { mode: "json", content: "{}" };
+		expect(withoutBodyFileTrust(body)).toBe(body);
 	});
 });

@@ -49,6 +49,7 @@
 #include <httplib.h>
 
 #include "echo_server.hpp"
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -857,9 +858,15 @@ class RunConfigValidationRouteTest : public ::testing::Test {
 
     /// The status and body @p path answered @p payload with.
     std::pair<int, json> post (const char* path, const json& payload) const {
+        return post_text (path, payload.dump ());
+    }
+
+    /// The same, for a body that is JSON text already: a payload nested past
+    /// what `dump ()` survives cannot be built as a `json` and sent.
+    std::pair<int, json> post_text (const char* path, const std::string& body) const {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
-        auto response = client.Post (path, payload.dump (), "application/json");
+        auto response = client.Post (path, body, "application/json");
         if (!response) {
             ADD_FAILURE () << "no response from POST " << path;
             return { 0, json::object () };
@@ -1162,4 +1169,185 @@ TEST_F (RunConfigValidationRouteTest, AStartThatSucceedsLeavesTheRowToItsWorker)
     const auto run = db_->get_run ("run_started");
     ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Pending);
+}
+
+// --- A data cell nested far past the depth bound (#2362) --------------------
+//
+// `POST /runs` dumps the whole payload for its snapshot before it reads the
+// data rows, and `dump ()` recurses, so a cell this deep overflowed the stack
+// and took the engine down. The refusal has to come before that dump, which is
+// why these go through the real handler: a reader-level check alone leaves this
+// process dead. Mutation check: remove the `refuse_overdeep_run_data` call and
+// the test binary crashes.
+
+namespace {
+
+constexpr std::size_t kCrashingDepth = 100000;
+
+std::string deep_cell_row (const char* column) {
+    return std::string ("{\"") + column +
+    "\":" + vayu::tests::nested_array_text (kCrashingDepth) + "}";
+}
+
+std::string error_code_of (const nlohmann::json& body) {
+    const auto error = body.find ("error");
+    if (error == body.end () || !error->is_object ()) {
+        return {};
+    }
+    return error->value ("code", std::string ());
+}
+
+} // namespace
+
+TEST_F (RunConfigValidationRouteTest, ADeepDataCellIsRefusedBeforeTheSnapshotDumpsIt) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text ("/runs",
+    R"({"method":"GET","url":")" + echo.url () +
+    R"(","iterations":1,"concurrency":1,"data":[{"ok":1},)" + deep_cell_row ("tag") + "]}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    "'data' row 1 column 'tag' is nested deeper than " +
+    std::to_string (vayu::core::constants::spec_document::MAX_READ_DEPTH) + " levels");
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepScenarioDataCellIsRefusedBeforeTheSnapshotDumpsIt) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":[)" +
+    deep_cell_row ("tag") + "]}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    "'scenario.data' row 0 column 'tag' is nested deeper than " +
+    std::to_string (vayu::core::constants::spec_document::MAX_READ_DEPTH) + " levels");
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+// The snapshot dumps the whole body, so the early check cannot assume `data` is
+// an array of objects: a deep value under any other shape crashed the same way.
+// Mutation check: restore the old `refuse_overdeep_data` (nullopt for a
+// non-array, a stop at the first non-object row) and these crash the binary.
+namespace {
+
+std::string run_with_data (const std::string& data_json, const std::string& url) {
+    return R"({"method":"GET","url":")" + url +
+    R"(","iterations":1,"concurrency":1,"data":)" + data_json + "}";
+}
+
+std::string deep_message (const std::string& where) {
+    return where + " is nested deeper than " +
+    std::to_string (vayu::core::constants::spec_document::MAX_READ_DEPTH) + " levels";
+}
+
+} // namespace
+
+TEST_F (RunConfigValidationRouteTest, ADeepObjectDataIsRefusedBeforeTheSnapshotDumpsIt) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] =
+    post_text ("/runs", run_with_data (deep_cell_row ("a"), echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'data'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepCellBehindANonObjectRowIsRefusedBeforeTheSnapshot) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text (
+    "/runs", run_with_data ("[1," + deep_cell_row ("a") + "]", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'data' row 1 column 'a'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepArrayAsADataRowIsRefusedBeforeTheSnapshotDumpsIt) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text ("/runs",
+    run_with_data (
+    "[" + vayu::tests::nested_array_text (kCrashingDepth) + "]", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_run_config");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'data' row 0"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepObjectScenarioDataIsRefusedBeforeTheSnapshotDumpsIt) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":)" +
+    deep_cell_row ("a") + "}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body), deep_message ("'scenario.data'"));
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+}
+
+TEST_F (RunConfigValidationRouteTest,
+ADeepCellBehindANonObjectScenarioRowIsRefusedBeforeTheSnapshot) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":[1,)" +
+    deep_cell_row ("a") + "]}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'scenario.data' row 1 column 'a'"));
+}
+
+TEST_F (RunConfigValidationRouteTest, ADeepArrayAsAScenarioDataRowIsRefusedBeforeTheSnapshot) {
+    const auto [status, body] = post_text ("/runs",
+    R"({"scenario":{"source":"collection","collectionId":"col","data":[)" +
+    vayu::tests::nested_array_text (kCrashingDepth) + "]}}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (error_code_of (body), "invalid_scenario");
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    deep_message ("'scenario.data' row 0"));
+}
+
+// A wrong shape within the bound keeps the reader's own words.
+TEST_F (RunConfigValidationRouteTest, AShallowWrongShapedDataKeepsItsShapeRefusal) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] =
+    post_text ("/runs", run_with_data (R"({"a":1})", echo.url ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (vayu::http::routes::error_message_of (body).find (
+               "must be an array of objects"),
+    std::string::npos)
+    << body.dump ();
+}
+
+// `POST /execute` measures its one row with `dump ()` too.
+TEST_F (RunConfigValidationRouteTest, ADeepExecuteDataCellIsRefusedBeforeItIsMeasured) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text ("/execute",
+    R"({"method":"GET","url":")" + echo.url () + R"(","data":)" + deep_cell_row ("tag") + "}");
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (vayu::http::routes::error_message_of (body),
+    "'data' column 'tag' is nested deeper than " +
+    std::to_string (vayu::core::constants::spec_document::MAX_READ_DEPTH) + " levels");
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
+// A cell right at the bound still runs: the refusal is the bound, not the shape.
+TEST_F (RunConfigValidationRouteTest, ADataCellAtTheDepthBoundStillStartsTheRun) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, body] = post_text ("/runs",
+    R"({"method":"GET","url":")" + echo.url () + R"(","iterations":1,"concurrency":1,"data":[{"tag":)" +
+    vayu::tests::nested_array_text (vayu::core::constants::spec_document::MAX_READ_DEPTH) +
+    "}]}");
+
+    EXPECT_EQ (status, 202) << body.dump ();
 }

@@ -15,15 +15,16 @@
  * form-data file part uses too), or typed into the path field, which is how a
  * `{{fixturesDir}}/a.bin` path is written.
  *
- * **Who chose the path decides whether it is sent.** The rule, in the words
- * Settings uses: Vayu sends a file you chose in the editor, or any file under
- * a folder you allowed. Picking, dropping and typing here all set
- * `unresolved: false`; an import, a curl paste or an agent sets it `true`. A
- * path with a `{{variable}}` in it is treated as unresolved by the engine's
- * composition whatever this flag says, because the variable could point
- * anywhere. So the banner below appears for both, offers the two ways out -
- * Relink (pick the file here) and Allow folder - and goes quiet when the path
- * already sits under an allowed folder. That check is the text comparison in
+ * **Only a pick chooses a file** (#2356). Vayu sends a file picked on this
+ * machine, or any file under a folder you allowed. Picking and dropping go
+ * through the preload, which hands the main process the path to grant, so
+ * either one clears the banner below. A typed path is not a pick: until the
+ * engine answers for it on the next read (`unresolved`, `lib/file-trust.ts`)
+ * it reads as not chosen, the same as an imported or pasted one. A path with a
+ * `{{variable}}` in it is sent only from an allowed folder, because the
+ * variable could point anywhere. The banner offers the two ways out - Relink
+ * (pick the file here) and Allow folder - and goes quiet when the path already
+ * sits under an allowed folder. That check is the text comparison in
  * `lib/file-path.ts`, a display answer; the engine's own check is on
  * canonical paths and is the one that decides.
  *
@@ -41,7 +42,7 @@ import VariableInput from "@/components/shared/VariableInput";
 import { useFilePick, pickedFileOf, type PickedFile } from "@/components/shared/file-pick";
 import { containsVariableToken } from "@/constants/variables";
 import { fileBaseName, isUnderFolder, parentFolder } from "@/lib/file-path";
-import { noFile } from "@/lib/file-trust";
+import { flagAfterPick, isUnresolved, noFile } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
 import { formatSize } from "@/components/shared/response-viewer/utils";
 import { useAllowFolder } from "@/hooks/useAllowFolder";
@@ -90,26 +91,23 @@ export default function BinaryBodyPanel() {
 	const variables = useVariableSupport();
 	const file: FileRef = request.binaryFile ?? noFile();
 	const { data: roots = [] } = useFileRootsQuery();
-	const { allow, chooseAndAllow, isPending: allowing } = useAllowFolder();
+	const { chooseAndAllow, isPending: allowing } = useAllowFolder();
 	const [dragging, setDragging] = useState(false);
 
 	const setFile = useCallback((next: FileRef) => updateField("binaryFile", next), [updateField]);
 
 	/*
-	 * A pick or a drop is the one event that proves the path exists here, so
-	 * it sets `unresolved: false`. The Content-Type the user set is kept - a
-	 * different file is not a reason to forget it - and the browser's own
-	 * guess at a type is not written: the engine's extension table decides
-	 * when the user did not, and it is the one that reaches the wire.
+	 * The Content-Type the user set is kept - a different file is not a reason
+	 * to forget it - and the browser's own guess at a type is not written: the
+	 * engine's extension table decides when the user did not, and it is the
+	 * one that reaches the wire.
 	 */
 	const onPick = useCallback(
 		(picked: PickedFile) => {
-			// Outside Electron there is no path, and a name alone is nothing
-			// the engine can open - so that pick stays unresolved.
 			const next: FileRef = {
 				src: picked.src,
 				fileName: picked.fileName,
-				unresolved: !picked.src,
+				unresolved: flagAfterPick(picked.src),
 			};
 			if (file.contentType) next.contentType = file.contentType;
 			setFile(next);
@@ -125,10 +123,10 @@ export default function BinaryBodyPanel() {
 		if (dropped) onPick(pickedFileOf(dropped));
 	};
 
-	// Typing is choosing too: the user wrote this path here, by hand. The
-	// declared name belonged to the previous path, so it goes with it.
+	// The declared name and the engine's answer belonged to the previous path,
+	// so they go with it.
 	const onTypePath = (src: string) => {
-		const next: FileRef = { src, unresolved: !src.trim() };
+		const next: FileRef = { src };
 		if (file.contentType) next.contentType = file.contentType;
 		setFile(next);
 	};
@@ -149,13 +147,10 @@ export default function BinaryBodyPanel() {
 	const coveringRoot = resolvedPath
 		? roots.find((root) => isUnderFolder(resolvedPath, root.path))
 		: undefined;
-	const needsTrust = Boolean(src.trim()) && (file.unresolved === true || templated);
+	const hasPath = Boolean(src.trim());
+	const notChosen = hasPath && !templated && isUnresolved(file.unresolved);
+	const needsTrust = notChosen || (hasPath && templated);
 	const contentType = binaryContentType(request.headers, file);
-
-	const allowFolder = () => {
-		if (chooseAndAllow) void chooseAndAllow(folder || undefined);
-		else if (folder) void allow(folder);
-	};
 
 	return (
 		<div className="flex flex-col gap-3">
@@ -220,22 +215,20 @@ export default function BinaryBodyPanel() {
 				) : (
 					<Callout
 						severity="warning"
-						title={
-							file.unresolved ? "Not chosen on this machine" : "Path has a variable"
-						}
+						title={notChosen ? "Not chosen on this machine" : "Path has a variable"}
 						action={
 							<div className="flex items-center gap-1">
-								{file.unresolved && (
+								{notChosen && (
 									<Button type="button" size="sm" variant="ghost" onClick={open}>
 										Relink
 									</Button>
 								)}
-								{(chooseAndAllow || folder) && (
+								{chooseAndAllow && (
 									<Button
 										type="button"
 										size="sm"
 										variant="ghost"
-										onClick={allowFolder}
+										onClick={() => void chooseAndAllow(folder || undefined)}
 										disabled={allowing}
 									>
 										Allow folder...
@@ -244,8 +237,8 @@ export default function BinaryBodyPanel() {
 							</div>
 						}
 					>
-						{file.unresolved
-							? "This path came from an import, a pasted command or an agent. Vayu sends it only after you pick the file here or allow its folder in Settings > Files."
+						{notChosen
+							? "A typed, imported or pasted path is sent only after you pick the file here or allow its folder in Settings > Files."
 							: "A path built from a variable is sent only from a folder allowed in Settings > Files."}
 					</Callout>
 				))}

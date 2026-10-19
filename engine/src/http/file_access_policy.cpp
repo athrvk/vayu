@@ -7,6 +7,7 @@
 
 #include "vayu/http/file_access_policy.hpp"
 
+#include <algorithm>
 #include <system_error>
 
 #include "vayu/utils/ascii_case.hpp"
@@ -39,7 +40,22 @@ std::string canonical_root_path (const std::string& path) {
     return without_trailing_separator (resolved).string ();
 }
 
-FileAccessPolicy::FileAccessPolicy (const std::vector<std::string>& roots) {
+std::optional<std::string> grantable_file_path (const std::string& path) {
+    if (path.empty () || path.find ("{{") != std::string::npos ||
+    !fs::path (path).is_absolute ()) {
+        return std::nullopt;
+    }
+    std::error_code ec;
+    const fs::path resolved = fs::canonical (fs::path (path), ec);
+    if (ec || !fs::is_regular_file (resolved, ec)) {
+        return std::nullopt;
+    }
+    return resolved.string ();
+}
+
+FileAccessPolicy::FileAccessPolicy (const std::vector<std::string>& roots,
+const std::vector<std::string>& grants)
+: grants_ (grants.begin (), grants.end ()) {
     roots_.reserve (roots.size ());
     for (const auto& root : roots) {
         const std::string canonical = canonical_root_path (root);
@@ -49,11 +65,15 @@ FileAccessPolicy::FileAccessPolicy (const std::vector<std::string>& roots) {
 }
 
 FileAccessPolicy FileAccessPolicy::from_database (vayu::db::Database& db) {
-    std::vector<std::string> paths;
+    std::vector<std::string> roots;
     for (const auto& row : db.get_file_roots ()) {
-        paths.push_back (row.path);
+        roots.push_back (row.path);
     }
-    return FileAccessPolicy (paths);
+    std::vector<std::string> grants;
+    for (const auto& row : db.get_file_grants ()) {
+        grants.push_back (row.path);
+    }
+    return FileAccessPolicy (roots, grants);
 }
 
 bool FileAccessPolicy::contains (const fs::path& root, const fs::path& candidate) {
@@ -133,7 +153,7 @@ refused_root_reason (std::string_view canonical, std::string_view home) {
 }
 
 bool FileAccessPolicy::allows (const std::string& path) const {
-    if (roots_.empty () || path.empty ()) {
+    if (path.empty () || (roots_.empty () && grants_.empty ())) {
         return false;
     }
     // `canonical`, not `weakly_canonical`: every component must exist so every
@@ -144,12 +164,11 @@ bool FileAccessPolicy::allows (const std::string& path) const {
     if (ec) {
         return false;
     }
-    for (const auto& root : roots_) {
-        if (contains (root, resolved)) {
-            return true;
-        }
+    if (grants_.contains (resolved.string ())) {
+        return true;
     }
-    return false;
+    return std::any_of (roots_.begin (), roots_.end (),
+    [&resolved] (const fs::path& root) { return contains (root, resolved); });
 }
 
 } // namespace vayu::http

@@ -617,7 +617,7 @@ TEST (JmeterImport, FileOnlyUploadBuildsAFormDataBodyRow) {
     EXPECT_EQ (field.at ("src").get<std::string> (), "/tmp/a.png");
     EXPECT_EQ (field.at ("fileName").get<std::string> (), "a.png");
     EXPECT_EQ (field.at ("contentType").get<std::string> (), "image/png");
-    EXPECT_EQ (field.at ("unresolved").get<bool> (), true);
+    EXPECT_FALSE (field.contains ("unresolved")) << "the parse states no trust";
 }
 
 /// A sampler mixing `HTTPsampler.Files` with regular `HTTPsampler.Arguments`

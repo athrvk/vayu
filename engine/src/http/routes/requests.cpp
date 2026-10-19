@@ -12,6 +12,7 @@
 
 #include "vayu/core/import_document.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
@@ -54,7 +55,8 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
     if (!request) {
         return { 404, error_body (404, "Request not found") };
     }
-    return { 200, vayu::json::serialize (*request) };
+    return { 200,
+        vayu::json::serialize (*request, vayu::http::FileAccessPolicy::from_database (db)) };
 }
 
 /**
@@ -73,14 +75,15 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
  * get_request_response above.
  */
 namespace {
-std::string serialize_request_list (const std::vector<vayu::db::Request>& requests) {
+std::string serialize_request_list (const std::vector<vayu::db::Request>& requests,
+const vayu::http::FileAccessPolicy& files) {
     std::ostringstream out;
     out << "[";
     bool is_first = true;
     for (const auto& r : requests) {
         std::ostringstream item;
         try {
-            vayu::json::serialize_to_stream (r, item);
+            vayu::json::serialize_to_stream (r, item, files);
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
             "GET /requests - Error serializing request " + r.id + ": " +
@@ -99,11 +102,13 @@ std::string serialize_request_list (const std::vector<vayu::db::Request>& reques
 } // namespace
 
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id) {
-    return serialize_request_list (db.get_requests_in_collection (collection_id));
+    return serialize_request_list (db.get_requests_in_collection (collection_id),
+    vayu::http::FileAccessPolicy::from_database (db));
 }
 
 std::string list_all_requests_body (vayu::db::Database& db) {
-    return serialize_request_list (db.get_requests_in_live_collections ());
+    return serialize_request_list (db.get_requests_in_live_collections (),
+    vayu::http::FileAccessPolicy::from_database (db));
 }
 
 /**
@@ -461,13 +466,12 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
-    // Every file reference a written body carries is stored with its trust
-    // stated, absent read as unresolved. A body this write leaves alone was
-    // stated when it was written, or by the schema-version-4 migration.
+    // Trust is derived on read and never stored (#2356): the `unresolved` an
+    // older client still sends is dropped here, on every writer's path.
     if (const auto body = json.find ("body"); body != json.end () && body->is_object ()) {
-        nlohmann::json stated = *body;
-        vayu::json::state_file_trust (stated, vayu::json::AbsentFileTrust::Unresolved);
-        r.body = stated.dump ();
+        nlohmann::json stored = *body;
+        vayu::json::erase_file_trust (stored);
+        r.body = stored.dump ();
     }
     apply_string_field (json, "bodyType", r.body_type, "none", is_create);
     // A request's auth may be 'inherit' - that is its default, and the app
@@ -644,7 +648,8 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     db.save_request (r);
-    return { 200, vayu::json::serialize (r) };
+    return { 200,
+        vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
 }
 
 /** The read-merge-write of PUT /requests/:id, run under the caller's lock. */
@@ -685,7 +690,8 @@ const std::function<void ()>& before_write) {
         before_write ();
     }
     db.save_request (r);
-    return { 200, vayu::json::serialize (r) };
+    return { 200,
+        vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
 }
 
 /**

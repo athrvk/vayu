@@ -143,6 +143,7 @@ describe("parseOpenIntents", () => {
 describe("createOpenIntents", () => {
 	function harness(options: { sends?: boolean } = {}) {
 		const sent: OpenIntent[] = [];
+		const granted: string[] = [];
 		let focuses = 0;
 		let sends = options.sends ?? true;
 		const intents = createOpenIntents({
@@ -154,10 +155,14 @@ describe("createOpenIntents", () => {
 			focus: () => {
 				focuses++;
 			},
+			grant: (filePath) => {
+				granted.push(filePath);
+			},
 		});
 		return {
 			intents,
 			sent,
+			granted,
 			focuses: () => focuses,
 			setSends(next: boolean) {
 				sends = next;
@@ -221,6 +226,26 @@ describe("createOpenIntents", () => {
 		const os = harness();
 		os.intents.offerArgv(["vayu", "--enable-logging"]);
 		expect(os.focuses()).toBe(0);
+	});
+
+	/*
+	 * #2356: a document the OS handed over is one the user chose, so its path is
+	 * recorded as picked - when offered, before the renderer can read it, and
+	 * whichever door it came through. Mutation check: drop the `grant` call in
+	 * `offer` and both of these redden.
+	 */
+	it("records an offered document's path as picked, before delivery", () => {
+		const os = harness();
+		os.intents.offer({ kind: "import", path: "/docs/a.json" });
+		expect(os.granted).toEqual(["/docs/a.json"]);
+		expect(os.sent).toEqual([]);
+	});
+
+	it("records the documents on a command line and nothing else it carries", () => {
+		const os = harness();
+		os.intents.offerArgv(["vayu", "/docs/b.yaml", `${OPEN_COLLECTION_ARG}c1`, "/docs/c.txt"]);
+		os.intents.offer({ kind: "newRequest" });
+		expect(os.granted).toEqual(["/docs/b.yaml"]);
 	});
 
 	it("delivers each waiting intent once", () => {

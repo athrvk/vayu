@@ -11,6 +11,7 @@
  *        requests (issue #365).
  */
 
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
@@ -494,8 +495,9 @@ const std::function<void ()>& before_write) {
         collections_out.push_back (vayu::json::serialize (row));
         collection_rows.push_back (row);
     }
+    const auto files = vayu::http::FileAccessPolicy::from_database (db);
     for (const auto& [id, row] : writes.requests) {
-        requests_out.push_back (vayu::json::serialize (row));
+        requests_out.push_back (vayu::json::serialize (row, files));
         request_rows.push_back (row);
     }
 

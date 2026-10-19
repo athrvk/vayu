@@ -207,9 +207,9 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 |---------------------|--------------------|-------|
 | `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)`, a row's non-`"text"` `type` kept as on a header |
-| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), marked `unresolved`. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
+| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), which the parse answer marks `unresolved` unless this machine already allows it. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
-| `file` | `{ mode: "binary", file: { src, fileName, unresolved: true } }` | `src` is `body.file.src` as written and `fileName` its base name; `src: null` or no `file` (Postman's shape before a file is chosen) imports as `{ src: "" }`, no file chosen. Counted as `file_body`, a file reference to relink |
+| `file` | `{ mode: "binary", file: { src, fileName } }` | `src` is `body.file.src` as written and `fileName` its base name; `src: null` or no `file` (Postman's shape before a file is chosen) imports as `{ src: "" }`, no file chosen. Counted as `file_body`, a file reference to relink |
 | anything else | `{ mode: "none" }` | |
 
 **GraphQL `variables` (`graphqlContent`):** Postman stores `body.graphql` as `{ query, variables }` where `variables` is the *text* of the Variables pane - a JSON-encoded string. Vayu's own `serializeGraphQLBody` writes `variables` as an object, and the engine sends the stored content verbatim, so the string is parsed here; embedding it as-is put `"variables": "{\"limit\": 10}"` on the wire (spec-invalid) and showed a double-escaped blob in the Variables pane. Two deliberate fallbacks: a variables string that is **not valid JSON is kept as text** (the pane text is the only copy of the user's work, so an import that deletes it is worse than one that shows it unparsed - and the pane now shows a string-typed `variables` verbatim rather than as an escaped blob, converting it to an object once an edit makes it parse), and an **empty or whitespace-only** string drops the key entirely, which is what Vayu writes for an empty pane. Every other key on the object rides along untouched.
@@ -241,10 +241,10 @@ a Content-Type the server may disagree with. `"xml"` is the only new mapping -
 `"html"`, `"javascript"` and the rest still fall through to the sniff.
 
 **File references are imported, never dropped.** A `file` body and every
-`formdata` file entry keep the path the export named, and each one with a path
-is marked `unresolved`: it names a file on the exporting machine, so Vayu sends
-it only once you choose the file again in the request, or once it lies under a
-folder you allowed in Settings > Files. Each `file` body is counted as
+`formdata` file entry keep the path the export named. A path names a file on
+the exporting machine, so Vayu sends it only once you pick the file again in
+the request, or once it lies under a folder you allowed in Settings > Files;
+the parse answer marks each one this machine would refuse `unresolved`. Each `file` body is counted as
 `{ kind: "file_body", count, requests }` - informational, the requests whose
 body file to relink - and each file entry with no path as an
 `unattachedFileParts` field to fill.

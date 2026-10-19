@@ -9,26 +9,27 @@
 
 /**
  * @file file_access_policy.hpp
- * @brief Which folders a request-body file may be read from without a person
- * having chosen it in the editor.
+ * @brief Which files a request body may be read from.
  *
- * The trust rule is one sentence: Vayu sends a file you chose in the editor, or
- * any file under a folder you allowed in Settings. This type is the second half
- * of it - the allowed folders (`file_roots`) - and `file_ref.hpp` applies the
- * whole rule. A reference no human chose (`FileRef::unresolved`: an import, a
- * curl paste, an MCP agent, or a `{{variable}}` composition filled in) is sent
- * only when this policy allows its path.
+ * The trust rule is one sentence: Vayu sends a file you picked, or any file
+ * under a folder you allowed in Settings. This type holds both halves - the
+ * allowed folders (`file_roots`) and the picked files (`file_grants`, #2356) -
+ * and `file_ref.hpp` applies it. Nothing a request body says changes the
+ * answer: trust is a property of the path on this machine.
  *
  * Containment is decided on **canonical** paths, compared component by
  * component: `canonical` resolves every symlink, so a link inside a root that
  * points outside it is outside, and `/data/fixtures-old` is not under
- * `/data/fixtures` the way a string prefix test would say it is.
+ * `/data/fixtures` the way a string prefix test would say it is. A grant is the
+ * canonical path recorded when the file was picked and is matched exactly, so a
+ * symlink re-pointed after the pick resolves elsewhere and is refused.
  */
 
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace vayu::db {
@@ -39,20 +40,25 @@ namespace vayu::http {
 
 class FileAccessPolicy {
     public:
-    /// No folder is allowed: only files chosen in the editor are sent.
+    /// Nothing is allowed: no request-body file is sent.
     FileAccessPolicy () = default;
 
-    /// The folders in @p roots, each canonicalised once here. A root that no
-    /// longer exists is kept in its lexical form and simply matches nothing a
-    /// send could open.
-    explicit FileAccessPolicy (const std::vector<std::string>& roots);
+    /// The folders in @p roots, each canonicalised once here, and the picked
+    /// files in @p grants, taken as stored: already canonical, and never
+    /// re-resolved, because resolving a grant again would follow a link planted
+    /// at its path since the pick. A root that no longer exists is kept in its
+    /// lexical form and simply matches nothing a send could open.
+    explicit FileAccessPolicy (const std::vector<std::string>& roots,
+    const std::vector<std::string>& grants = {});
 
-    /// The stored `file_roots`, read once - per design send, or once per run.
+    /// The stored `file_roots` and `file_grants`, read once - per design send,
+    /// or once per run.
     [[nodiscard]] static FileAccessPolicy from_database (vayu::db::Database& db);
 
     /// True when @p path resolves (symlinks followed) to a location inside one
-    /// of the roots. A path that cannot be canonicalised - it does not exist,
-    /// or a component is unreadable - is not allowed.
+    /// of the roots, or to exactly a granted file. A path that cannot be
+    /// canonicalised - it does not exist, or a component is unreadable - is not
+    /// allowed.
     [[nodiscard]] bool allows (const std::string& path) const;
 
     /// Component-wise containment of two already-canonical paths: @p candidate
@@ -66,6 +72,7 @@ class FileAccessPolicy {
 
     private:
     std::vector<std::filesystem::path> roots_;
+    std::unordered_set<std::string> grants_;
 };
 
 /**
@@ -76,6 +83,17 @@ class FileAccessPolicy {
  * cannot be resolved at all.
  */
 [[nodiscard]] std::string canonical_root_path (const std::string& path);
+
+/**
+ * @brief The canonical spelling `file_grants` stores for @p path, or nothing
+ * when @p path may not be granted.
+ *
+ * Grantable is an absolute path, holding no `{{` (a template names no file
+ * until composition, and a grant is for a file, never a pattern), that
+ * resolves through every symlink to an existing regular file - a directory, a
+ * device or a pipe is never one.
+ */
+[[nodiscard]] std::optional<std::string> grantable_file_path (const std::string& path);
 
 /**
  * @brief Why the canonical folder @p canonical may not be allowed, or nothing.
