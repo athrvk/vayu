@@ -131,6 +131,14 @@ TEST (PostmanUrlEncodingAgreement, SpaceControlsAndNonAsciiAreWrittenAlike) {
     }
 }
 
+// A URL with no unsendable byte takes `wire_url`'s early return, so the bytes
+// Postman would also write (`{`, `"`, `'`, `<`, `>`, a backtick) must come back
+// exactly as typed.
+TEST (PostmanUrlEncodingAgreement, ASendableUrlIsReturnedAsTyped) {
+    const std::string url = "http://h/p{x}/%20?q='\"<>&r=a+b#f`g";
+    EXPECT_EQ (sent_by_send (url), url);
+}
+
 // Send substitutes a value into the component it lands in; a script's value is
 // substituted as text and the whole URL then encoded. Both write the same
 // bytes for a value carrying a space or a non-ASCII character.
