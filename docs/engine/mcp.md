@@ -468,7 +468,15 @@ Notes:
   `null`, because the two carry the same payload and an intact `body` would
   return in full exactly what was just dropped. A trace the engine had already
   truncated keeps the original size the engine recorded. Under the bound,
-  nothing is added and nothing is changed. **`bodyCapped` on a `run_request`
+  nothing is added and nothing is changed. **A body that is not UTF-8 text is
+  base64** (issue #2458): the live answer's `bodyEncoding` is always present,
+  `"utf8"` or `"base64"`, and a stored trace's response node carries
+  `bodyEncoding: "base64"` only when it applies (absent is text). A base64 body
+  is bounded by the bytes it decodes to, not by its text, and is cut on a whole
+  4-character group (the engine's `cap_base64_node_body` rule), so the prefix
+  still decodes; `bodySize` and `bodyBytes` count decoded bytes and
+  `bodyEncoding` is kept. Both tool descriptions tell the agent to decode such a
+  body rather than read it as text. **`bodyCapped` on a `run_request`
   response is not this** (issue #1157): it is the engine's own flag, always
   present, saying it stopped *reading* the response at
   `maxDesignResponseBodyBytes`, so `bodySize` is the prefix it read and

@@ -57,6 +57,36 @@ export function boundText(
 }
 
 /**
+ * Cut standard base64 text to at most `maxBytes` *decoded* bytes, reporting the
+ * decoded size: the engine's `cap_base64_node_body`, rule for rule.
+ *
+ * Whole four-character groups only, so the prefix is itself valid base64 of the
+ * first bytes; a cut inside a group would not decode.
+ */
+function boundBase64(
+	text: string,
+	maxBytes = MAX_INLINE_BODY_BYTES
+): { text: string; truncated: boolean; bytes: number } {
+	let unpadded = text.length;
+	while (unpadded > 0 && text[unpadded - 1] === "=") unpadded--;
+	const bytes = Math.floor((unpadded * 3) / 4);
+	if (bytes <= maxBytes) return { text, truncated: false, bytes };
+	return { text: text.slice(0, Math.floor(maxBytes / 3) * 4), truncated: true, bytes };
+}
+
+/**
+ * Bound the body a record carries in @p text, by the spelling its sibling
+ * `bodyEncoding` names (#2458): `"base64"` is counted and cut in decoded bytes,
+ * and anything else, absent included, is UTF-8 text.
+ */
+function boundBody(
+	record: Record<string, unknown>,
+	text: string
+): { text: string; truncated: boolean; bytes: number } {
+	return record.bodyEncoding === "base64" ? boundBase64(text) : boundText(text);
+}
+
+/**
  * Bound a node's `rawRequest` wire message, cutting the body half only.
  *
  * The engine's rule for this field, kept rather than re-decided
@@ -108,7 +138,7 @@ export function boundExecuteResponse(value: unknown): unknown {
 	let out = value;
 	const bodyRaw = value.bodyRaw;
 	if (typeof bodyRaw === "string") {
-		const bounded = boundText(bodyRaw);
+		const bounded = boundBody(value, bodyRaw);
 		if (bounded.truncated) {
 			out = {
 				...out,
@@ -140,7 +170,7 @@ export function boundTraceNode(node: unknown): unknown {
 	let out = node;
 	const body = node.body;
 	if (typeof body === "string") {
-		const bounded = boundText(body);
+		const bounded = boundBody(node, body);
 		if (bounded.truncated) {
 			out = {
 				...out,
