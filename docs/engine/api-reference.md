@@ -6259,6 +6259,15 @@ reading less: a cut JSON body no longer parses, so `body` is `null` and a test
 script's `pm.response.json()` throws, and `validation` below reports
 `checked: false` with `body_not_json` rather than inventing a schema failure.
 
+The cap falls on a byte count, so it can land inside a UTF-8 character. For a
+capped body only, `bodyEncoding` is decided with that incomplete last character
+(at most three bytes, and only bytes some continuation could still make valid)
+left out, and a `"utf8"` `bodyRaw` ends before it: a text body stays text rather
+than turning to base64 over its last character. `bodySize` still counts every
+byte read, so it can exceed the UTF-8 length of `bodyRaw` by up to three. A
+`"base64"` body is never trimmed, and a body that was not capped is judged
+whole. The stored trace makes the same decision on the same bytes.
+
 This is **not** the stored trace's `bodyTruncated` (see `GET /runs/:id`), which
 is `maxTraceBodyBytes` shortening a body for storage after the whole of it was
 read and shown - a re-send recovers from that one. A design run whose live

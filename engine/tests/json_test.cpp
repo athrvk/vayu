@@ -250,6 +250,38 @@ TEST (BodyEncoding, OneBadByteAfterALongTextPrefixIsStillBase64) {
     EXPECT_EQ (serialize (response_with_body (bytes))["bodyEncoding"], "base64");
 }
 
+// A body the read cap cut inside a character is still text, less that
+// character; the same bytes uncapped are not text at all, because a body that
+// arrived whole ends where its server ended it. Mutation check: drop the
+// `body_truncated` branch in `response_body_text` and the capped case answers
+// base64.
+TEST (BodyEncoding, ACappedBodyCutInsideACharacterIsTextWithoutTheCut) {
+    auto capped           = response_with_body ("{\"s\":\"caf\xC3\xA9\xE2\x82");
+    capped.body_truncated = true;
+
+    EXPECT_EQ (response_body_text (capped), "{\"s\":\"caf\xC3\xA9");
+    const auto json = serialize (capped);
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+    EXPECT_EQ (json["bodyRaw"], "{\"s\":\"caf\xC3\xA9");
+    EXPECT_EQ (json["bodySize"], capped.body.size ());
+    EXPECT_TRUE (json["bodyCapped"].get<bool> ());
+}
+
+TEST (BodyEncoding, AnUncappedBodyEndingInsideACharacterIsBase64) {
+    const auto uncapped = response_with_body ("ok\xE2\x82");
+
+    EXPECT_FALSE (response_body_text (uncapped).has_value ());
+    EXPECT_EQ (serialize (uncapped)["bodyEncoding"], "base64");
+}
+
+TEST (BodyEncoding, ACappedBodyWithABadByteBeforeTheCutIsBase64) {
+    auto capped           = response_with_body ("ok\xFF ok\xE2\x82");
+    capped.body_truncated = true;
+
+    EXPECT_FALSE (response_body_text (capped).has_value ());
+    EXPECT_EQ (response_body_bytes (serialize (capped)), capped.body);
+}
+
 TEST (BodyEncoding, AnAnswerWithNoEncodingReadsAsUtf8) {
     EXPECT_EQ (response_body_bytes (Json{ { "bodyRaw", "plain" } }), "plain");
 }

@@ -1624,7 +1624,9 @@ stored at all. When a body is cut, its node gains two keys:
 
 A `response.body` that is not text (not valid UTF-8 over its whole length, or carrying a NUL) is
 stored as its base64, and only then does `response` carry **`bodyEncoding: "base64"`** (#2458):
-the same decision and spelling the live `POST /execute` answer makes for `bodyRaw`. Absent means
+the same decision and spelling the live `POST /execute` answer makes for `bodyRaw`, including
+that a body the read cap cut (`bodyCapped`) is judged, and stored as text, without an incomplete
+last UTF-8 character. Absent means
 the stored `body` is the text itself, which every row written before the key holds. Such a body is
 capped by its decoded bytes, cut at a multiple of three so the stored slice still decodes, and
 its `bodyBytes` counts decoded bytes.

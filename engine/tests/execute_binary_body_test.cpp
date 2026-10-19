@@ -85,6 +85,16 @@ std::string bytes_of (std::span<const std::uint8_t> bytes) {
     return std::string (vayu::utils::byte_view (bytes));
 }
 
+/// `{"s":"` and then three-byte characters, so a 1024-byte cap falls one byte
+/// into the character starting at byte 1023.
+std::string euro_json () {
+    std::string body = "{\"s\":\"";
+    for (int i = 0; i < 400; ++i) {
+        body += "\xE2\x82\xAC";
+    }
+    return body + "\"}";
+}
+
 std::string every_byte_value () {
     std::string bytes;
     for (int value = 0; value < 256; ++value) {
@@ -101,7 +111,7 @@ struct ServedBody {
     std::string bytes;
 };
 
-/// The issue's table, one route per row, plus the two text controls.
+/// The issue's table, one route per row, plus the text controls.
 std::vector<ServedBody> served_bodies () {
     return {
         { "/latin1", "text/plain; charset=iso-8859-1", "", "caf\xE9 na\xEFve \xA3 \xFF\xFE" },
@@ -115,6 +125,7 @@ std::vector<ServedBody> served_bodies () {
         { "/brotli", "text/plain", "br", bytes_of (BROTLI_LOOKING) },
         { "/gzip", "text/plain", "gzip", bytes_of (GZIP_OF_TEXT) },
         { "/utf8-bom", "text/plain; charset=utf-8", "", "\xEF\xBB\xBFhi" },
+        { "/euro-json", "application/json", "", euro_json () },
     };
 }
 
@@ -269,9 +280,10 @@ void expect_base64_answer (const json& answer, const std::string& bytes) {
 
 // ---------------------------------------------------------------------------
 // The byte rows: base64 live and stored, run completed. Mutation check: make
-// `serialize (Response)` always take the utf8 branch and every row answers a
-// 500 (the strict dump in `run_buffered_execution` would throw, now caught by
-// `guard_recorded_send`), failing the run.
+// `serialize (Response)` always take the utf8 branch and every row still
+// answers 200, because the route dumps with `replace`, but with U+FFFD in
+// place of each byte that is not UTF-8, so `expect_base64_answer` fails on
+// `bodyEncoding` and on the bytes.
 // ---------------------------------------------------------------------------
 
 struct ByteRow {
@@ -376,6 +388,31 @@ TEST_F (ExecuteBinaryBodyTest, ATraceCapKeepsABase64BodyDecodable) {
     EXPECT_EQ (node.value ("bodyBytes", size_t{ 0 }), size_t{ 256 });
     EXPECT_EQ (vayu::utils::base64_decode (node.value ("body", "")),
     every_byte_value ().substr (0, 99));
+}
+
+// A body the read cap cut inside a character is the text it was, less that
+// character, live and stored alike. Mutation check: drop the `body_truncated`
+// branch in `response_body_text` and both answer base64.
+TEST_F (ExecuteBinaryBodyTest, ACappedUtf8BodyCutInsideACharacterStaysText) {
+    auto entry = db_->get_config_entry ("maxDesignResponseBodyBytes");
+    ASSERT_HAS_VALUE (entry);
+    entry->value = "1024";
+    db_->save_config_entry (*entry);
+
+    const BytesServer server;
+    const auto answer = fetch (server, "/euro-json");
+
+    EXPECT_EQ (answer.value ("bodyEncoding", ""), "utf8") << answer.dump ();
+    EXPECT_TRUE (answer.value ("bodyCapped", false));
+    EXPECT_EQ (answer.value ("bodySize", size_t{ 0 }), size_t{ 1024 });
+    EXPECT_EQ (answer.value ("bodyRaw", ""), euro_json ().substr (0, 1023));
+
+    const auto trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("response")) << trace.dump ();
+    const auto& node = trace.at ("response");
+    EXPECT_FALSE (node.contains ("bodyEncoding")) << node.dump ();
+    EXPECT_TRUE (node.value ("bodyCapped", false));
+    EXPECT_EQ (node.value ("body", ""), answer.value ("bodyRaw", ""));
 }
 
 // ---------------------------------------------------------------------------

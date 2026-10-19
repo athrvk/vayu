@@ -213,9 +213,23 @@ inline constexpr std::string_view BODY_ENCODING_UTF8   = "utf8";
 inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 
 /**
+ * @brief The text a response body travels as, or `std::nullopt` when it is not
+ *        text and travels as base64.
+ *
+ * The one decision behind the live answer (`serialize`) and the stored trace
+ * (`build_result_trace`), so the two spell a body alike. A body the read cap
+ * cut (`Response::body_truncated`) can end inside a character, and that
+ * incomplete tail is left off the text rather than sending the whole prefix
+ * as base64 (`vayu::utils::without_incomplete_utf8_tail`). A view into
+ * `response.body`.
+ */
+[[nodiscard]] std::optional<std::string_view> response_body_text (const Response& response);
+
+/**
  * @brief Serialize a Response to JSON
  *
- * `bodyEncoding` is always present. A text body is `bodyRaw` as it arrived and
+ * `bodyEncoding` is always present. A text body is `bodyRaw` as it arrived
+ * (less a capped body's incomplete last character, `response_body_text`) and
  * `body` its parse (or `null`); any other body is `bodyRaw` in base64 with
  * `body` `null`. `bodySize` counts the bytes either way.
  */

@@ -21,6 +21,7 @@ using vayu::utils::is_valid_utf8_text;
 using vayu::utils::url_decode;
 using vayu::utils::url_encode;
 using vayu::utils::utf8_sequence_length;
+using vayu::utils::without_incomplete_utf8_tail;
 
 namespace {
 
@@ -237,4 +238,49 @@ TEST (Encoding, Utf8SequenceLengthNamesTheSequenceAtAnOffset) {
     EXPECT_EQ (utf8_sequence_length (text, 1), 3u);
     EXPECT_EQ (utf8_sequence_length (text, 2), 0u); // a continuation byte
     EXPECT_EQ (utf8_sequence_length (text, 4), 0u); // cut short by the end
+}
+
+// ---------------------------------------------------------------------------
+// without_incomplete_utf8_tail (issue #2458): a body the read cap cut can end
+// inside a character, and only that cut is forgiven. Mutation check: return
+// `bytes` unchanged and every `Trims...` case below goes red.
+// ---------------------------------------------------------------------------
+
+TEST (Encoding, Utf8TailKeepsABodyEndingOnACharacterBoundary) {
+    for (const std::string_view whole :
+    { std::string_view (""), std::string_view ("ok"), std::string_view ("caf\xC3\xA9"),
+    std::string_view ("\xE2\x82\xAC"), std::string_view ("ok\xF0\x9F\x8E\x89") }) {
+        EXPECT_EQ (without_incomplete_utf8_tail (whole), whole);
+    }
+}
+
+TEST (Encoding, Utf8TailTrimsEveryCutOfTwoThreeAndFourByteCharacters) {
+    for (const std::string_view character : { std::string_view ("\xC3\xA9"),
+         std::string_view ("\xE2\x82\xAC"), std::string_view ("\xF0\x9F\x8E\x89") }) {
+        for (std::size_t kept = 1; kept < character.size (); ++kept) {
+            const std::string body = "ok" + std::string (character.substr (0, kept));
+            EXPECT_EQ (without_incomplete_utf8_tail (body), "ok")
+            << character.size () << "-byte character cut after " << kept;
+        }
+    }
+}
+
+// A tail no continuation could complete is not a cut character, so it stays
+// for `is_valid_utf8_text` to refuse: C0 and F5 start nothing, E0 80 is
+// overlong, ED A0 a surrogate, F4 90 past U+10FFFF, and a run of continuation
+// bytes has no lead in reach.
+TEST (Encoding, Utf8TailKeepsATailNoCharacterStartsWith) {
+    for (const std::string_view body :
+    { std::string_view ("ok\xC0"), std::string_view ("ok\xF5"),
+    std::string_view ("ok\xE0\x80"), std::string_view ("ok\xED\xA0"),
+    std::string_view ("ok\xF4\x90"), std::string_view ("ok\x80\x80\x80\x80") }) {
+        EXPECT_EQ (without_incomplete_utf8_tail (body), body);
+        EXPECT_FALSE (is_valid_utf8_text (without_incomplete_utf8_tail (body)));
+    }
+}
+
+TEST (Encoding, Utf8TailLeavesAnInvalidByteMidBodyToFail) {
+    const std::string_view body = "a\xFFz\xE2\x82";
+    EXPECT_EQ (without_incomplete_utf8_tail (body), "a\xFFz");
+    EXPECT_FALSE (is_valid_utf8_text (without_incomplete_utf8_tail (body)));
 }

@@ -11,6 +11,7 @@
 
 #include <sodium.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -117,6 +118,22 @@ inline bool utf8_sequence_is_valid (std::string_view sequence) {
     }
 }
 
+/// True when @p partial, a lead byte followed by fewer continuation bytes than
+/// the @p announced length, can still be completed into a valid sequence. The
+/// completions of a prefix span one range of scalar values, and the values
+/// UTF-8 refuses (overlongs, surrogates, past U+10FFFF) are whole aligned
+/// blocks, so the range's lowest or highest completion is valid when any is.
+inline bool utf8_prefix_can_complete (std::string_view partial, std::size_t announced) {
+    for (const int fill : { 0x80, 0xBF }) {
+        std::string sequence (partial);
+        sequence.resize (announced, static_cast<char> (fill));
+        if (utf8_sequence_is_valid (sequence)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace detail
 
 /**
@@ -160,6 +177,33 @@ inline bool is_valid_utf8_text (std::string_view bytes) {
         at += length;
     }
     return true;
+}
+
+/**
+ * @brief @p bytes without the incomplete UTF-8 sequence a cut at a byte count
+ *        can leave at their end, or @p bytes whole when they end on a
+ *        character boundary.
+ *
+ * A body the read cap stopped (issue #2458) ends wherever the cap fell, which
+ * can be inside a character: at most three bytes of a sequence whose lead
+ * announces more. Those are dropped only when some continuation could still
+ * make them valid, so a lead no character starts with, or a stray continuation
+ * byte, stays where `is_valid_utf8_text` refuses it.
+ */
+inline std::string_view without_incomplete_utf8_tail (std::string_view bytes) {
+    const std::size_t reach = std::min<std::size_t> (bytes.size (), 3);
+    for (std::size_t cut = 1; cut <= reach; ++cut) {
+        const std::size_t at = bytes.size () - cut;
+        const auto byte      = static_cast<unsigned char> (bytes[at]);
+        if ((byte & 0xC0) == 0x80) {
+            continue;
+        }
+        const std::size_t announced = detail::utf8_announced_length (byte);
+        const bool incomplete       = announced > cut &&
+        detail::utf8_prefix_can_complete (bytes.substr (at), announced);
+        return incomplete ? bytes.substr (0, at) : bytes;
+    }
+    return bytes;
 }
 
 /**

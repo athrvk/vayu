@@ -173,18 +173,18 @@ const vayu::Response& response) {
         // "" when nothing was negotiated, not omitted - same convention as
         // serialize(Response) in json.cpp, so restore-response.ts can't
         // confuse "empty" with "this key doesn't exist on a stored trace".
-        const bool body_is_text = vayu::utils::is_valid_utf8_text (response.body);
-        trace["response"] = { { "headers", response.headers },
-            { "body",
-            body_is_text ? response.body : vayu::utils::base64_encode (response.body) },
-            { "httpVersion", response.http_version },
-            { "httpVersionDowngraded", response.http_version_downgraded } };
+        const auto body_text = vayu::json::response_body_text (response);
+        std::string body     = body_text ? std::string (*body_text) :
+                                           vayu::utils::base64_encode (response.body);
+        trace["response"]    = { { "headers", response.headers },
+               { "body", std::move (body) }, { "httpVersion", response.http_version },
+               { "httpVersionDowngraded", response.http_version_downgraded } };
 
         // The same decision `serialize (Response)` makes for the live answer
-        // (issue #2458), so a restored body is the bytes the live one was.
-        // Written only when it applies, on the `bodyCapped` rule below: every
-        // row stored before this field holds text, and absent says so.
-        if (!body_is_text) {
+        // (issue #2458), so a restored body is the text or bytes the live one
+        // was. Written only when it applies, on the `bodyCapped` rule below:
+        // every row stored before this field holds text, and absent says so.
+        if (!body_text) {
             trace["response"]["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
         }
 

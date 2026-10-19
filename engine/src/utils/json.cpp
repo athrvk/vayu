@@ -1337,14 +1337,15 @@ Json serialize (const Response& response) {
     // the live pane and a restored one read one field.
     json["clientCertificate"] = response.client_certificate;
 
-    // Decided once, over the whole body (issue #2458): a JSON string holds only
-    // UTF-8, so bytes that are not text travel as base64 rather than making the
-    // route's dump throw. Always present, like the fields above, so a reader
-    // never has to guess which spelling `bodyRaw` is in.
-    if (vayu::utils::is_valid_utf8_text (response.body)) {
-        auto parsed          = try_parse_body (response.body);
+    // Decided once, by `response_body_text` (issue #2458): a JSON string holds
+    // only UTF-8, so bytes that are not text travel as base64 rather than
+    // making the route's dump throw. Always present, like the fields above, so
+    // a reader never has to guess which spelling `bodyRaw` is in.
+    if (const auto text = response_body_text (response)) {
+        std::string raw (*text);
+        auto parsed          = try_parse_body (raw);
         json["body"]         = parsed ? std::move (*parsed) : Json (nullptr);
-        json["bodyRaw"]      = response.body;
+        json["bodyRaw"]      = std::move (raw);
         json["bodyEncoding"] = BODY_ENCODING_UTF8;
     } else {
         json["body"]         = nullptr;
@@ -1386,6 +1387,17 @@ Json serialize (const Response& response) {
     return json;
 }
 
+std::optional<std::string_view> response_body_text (const Response& response) {
+    std::string_view body = response.body;
+    if (response.body_truncated) {
+        body = vayu::utils::without_incomplete_utf8_tail (body);
+    }
+    if (!vayu::utils::is_valid_utf8_text (body)) {
+        return std::nullopt;
+    }
+    return body;
+}
+
 std::optional<std::string> response_body_bytes (const Json& answer) {
     std::string raw = answer.value ("bodyRaw", "");
     const std::string encoding =
@@ -1400,8 +1412,7 @@ std::optional<std::string> response_body_bytes (const Json& answer) {
 }
 
 std::string serialize_string (const Response& response, int indent) {
-    // A header value may still carry a byte that is not UTF-8; the body cannot.
-    return serialize (response).dump (indent, ' ', false, Json::error_handler_t::replace);
+    return serialize (response).dump (indent);
 }
 
 // ============================================================================
