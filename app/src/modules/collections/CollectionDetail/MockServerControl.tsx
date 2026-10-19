@@ -134,7 +134,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 				</Button>
 				<TooltipIconButton
 					label="Mock server options"
-					tooltipHint="Latency and error rate"
+					tooltipHint="Latency, error rate and allowed origins"
 					icon={
 						<SlidersHorizontal
 							className="size-icon-sm"
@@ -198,7 +198,7 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			/>
 			<TooltipIconButton
 				label={`Stop mock server on port ${running.port}`}
-				tooltipHint="A mock keeps the collection, latency and error rate it started with - stop and start it again to change any of them"
+				tooltipHint="A mock keeps the collection, latency, error rate and allowed origins it started with - stop and start it again to change any of them"
 				icon={
 					<IconSwap
 						state={stopMock.isPending ? "stopping" : "idle"}

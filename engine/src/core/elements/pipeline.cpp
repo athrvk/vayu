@@ -18,6 +18,7 @@
 #include <cmath>
 #include <random>
 
+#include "vayu/core/json_depth.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/utils/id.hpp"
 
@@ -301,7 +302,10 @@ const nlohmann::json* ensure_parsed_body (ElementContext& ctx) {
         if (ctx.response->body.size () <= ctx.max_body_bytes) {
             auto parsed = nlohmann::json::parse (
             ctx.response->body, nullptr, /*allow_exceptions=*/false);
-            if (!parsed.is_discarded ()) {
+            // nlohmann's parser is iterative, so it is the kinds that recurse
+            // over the tree (#2361) that need this bound.
+            if (!parsed.is_discarded () &&
+            json_within_depth (parsed, constants::elements::MAX_BODY_DEPTH)) {
                 ctx.parsed_body = std::move (parsed);
             }
         }

@@ -95,8 +95,18 @@ const ResultAnnotations& annotations) {
     // `maxStoredErrors`. Passing the response rather than a copy keeps the
     // body-sized work inside the collector, after it has decided to keep
     // the record (see MetricsCollector::record_error).
-    context->metrics_collector->record_error (response.error_code, response.error_message,
-    error_json.dump (), context->capture_response_bodies ? &response : nullptr);
+    //
+    // A failure whose transfer ran joins the latency population at its own
+    // duration (#2384): a timeout is the slowest outcome a request can have,
+    // and percentiles that left it out described only the requests that
+    // answered.
+    std::optional<AttemptDuration> attempt;
+    if (response.transfer_attempted) {
+        attempt = AttemptDuration{ response.timing.total_ms, response.timing.queue_wait_ms };
+    }
+    context->metrics_collector->record_error (response.error_code,
+    response.error_message, error_json.dump (),
+    context->capture_response_bodies ? &response : nullptr, attempt);
     context->metrics_collector->record_bytes (
     response.timing.bytes_up, response.timing.bytes_down);
 }
@@ -206,7 +216,10 @@ const ResultAnnotations& annotations) {
 }
 
 namespace {
-/** A transfer that ended in an Error rather than a Response, as a failure. */
+/**
+ * A transfer that ended in an Error rather than a Response, as a failure. No
+ * Error carries a transfer's timing, so none joins the latency population.
+ */
 void record_error_result (const std::shared_ptr<RunContext>& context,
 const vayu::Error& error,
 const ResultAnnotations& annotations) {
@@ -1409,13 +1422,15 @@ class CapacitySearch {
             return true;
         }
         if (latency_windows_ == 0) {
-            // Not one completion landed in the whole step, so every windowed
-            // percentile it saw was the empty-window zero. Judging the level on
-            // those would read a service that answered nothing as one that
-            // answered instantly, and the search would climb straight past the
-            // limit it exists to find. The level stays open instead; a search
-            // that never gets a completion ends on its deadline having reported
-            // only the levels it actually measured.
+            // Not one timed completion landed in the whole step - neither an
+            // answer nor a failure whose transfer ran, which a timeout is
+            // (#2384) - so every windowed percentile it saw was the
+            // empty-window zero. Judging the level on those would read a
+            // service that measured nothing as one that answered instantly,
+            // and the search would climb straight past the limit it exists to
+            // find. The level stays open instead; a search that never gets a
+            // timed completion ends on its deadline having reported only the
+            // levels it actually measured.
             return true;
         }
 

@@ -1903,6 +1903,52 @@ TEST_F (ScenarioRunnerTest, ACollectionRunIsJudgedAgainstItsDeclaredBudgets) {
     }
 }
 
+// #2384, the sequential side of the load path's latency population: a step the
+// residual pass refused before the wire (its pre-request script emptied a
+// header name) is an errored request with no duration. It counts in the error
+// rate and in no percentile, so a latency budget over it has nothing to judge
+// rather than a 0 ms step to pass on. Mutation-check: push the latency for
+// every sent step again and the p99 check reads evaluated.
+TEST_F (ScenarioRunnerTest, AStepRefusedBeforeTheWireIsAnErrorWithNoLatency) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", R"(pm.collectionVariables.set("header_name", "");)",
+    "", "", "", R"([{"key":"{{header_name}}","value":"acme","enabled":true}])");
+
+    const auto run_id = start_with_thresholds (
+    /*iterations=*/1, json{ { "latencyP99Ms", 200 }, { "maxErrorRatePct", 50 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "the refused step reached the wire";
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ());
+    ASSERT_EQ (thresholds["checks"].size (), 2u);
+    const auto& latency = thresholds["checks"][0];
+    EXPECT_EQ (latency["metric"].get<std::string> (), "latencyP99Ms");
+    EXPECT_FALSE (latency["evaluated"].get<bool> ()) << latency.dump ();
+    const auto& errors = thresholds["checks"][1];
+    EXPECT_EQ (errors["metric"].get<std::string> (), "maxErrorRatePct");
+    EXPECT_DOUBLE_EQ (errors["actual"].get<double> (), 100.0) << errors.dump ();
+}
+
+// The other half: a transport failure ran a transfer, so it keeps its duration
+// and the latency budget has a measurement to judge.
+TEST_F (ScenarioRunnerTest, AStepWhoseTransferFailedKeepsItsLatency) {
+    seed_collection ("col_1");
+    // Port 1 refuses the connection.
+    seed_request ("req_a", 0, "/ok", "", "", "http://127.0.0.1:1/");
+
+    const auto run_id =
+    start_with_thresholds (/*iterations=*/1, json{ { "latencyP99Ms", 60000 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_FALSE (thresholds.is_null ());
+    ASSERT_EQ (thresholds["checks"].size (), 1u);
+    EXPECT_TRUE (thresholds["checks"][0]["evaluated"].get<bool> ())
+    << thresholds["checks"][0].dump ();
+}
+
 // A run whose config declares no `thresholds` block stores no verdict at all -
 // not a verdict of zero checks, on the same absent-not-zeroed rule every other
 // optional summary section here follows. Mutation check: comment out the

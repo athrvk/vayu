@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -106,6 +107,54 @@ TEST (InboxParseStart, RejectsRatherThanDefaultsAnUnusableValue) {
     EXPECT_FALSE (vayu::http::parse_inbox_start (json{ { "port", 70000 } }).has_value ());
     EXPECT_FALSE (vayu::http::parse_inbox_start (json{ { "bind", "" } }).has_value ());
     EXPECT_FALSE (vayu::http::parse_inbox_start (json ("not an object")).has_value ());
+}
+
+TEST (InboxParseStart, AllowedOriginsDefaultsToEmptyAndIsStoredCanonical) {
+    const auto empty_body = vayu::http::parse_inbox_start (json (nullptr));
+    ASSERT_HAS_VALUE (empty_body);
+    EXPECT_TRUE (empty_body->allowed_origins.empty ());
+
+    const auto null_list =
+    vayu::http::parse_inbox_start (json{ { "allowedOrigins", nullptr } });
+    ASSERT_HAS_VALUE (null_list);
+    EXPECT_TRUE (null_list->allowed_origins.empty ());
+
+    const auto parsed = vayu::http::parse_inbox_start (json{ { "allowedOrigins",
+    json::array ({ "HTTPS://App.Example.Test:443", "http://localhost:5173" }) } });
+    ASSERT_HAS_VALUE (parsed);
+    EXPECT_EQ (parsed->allowed_origins,
+    (std::vector<std::string>{ "https://app.example.test", "http://localhost:5173" }));
+}
+
+TEST (InboxParseStart, RefusesAnAllowedOriginsEntryThatIsNotAnOrigin) {
+    const std::string too_long = "https://" +
+    std::string (inbox_constants::MAX_ALLOWED_ORIGIN_LENGTH, 'a') + ".test";
+    json too_many = json::array ();
+    for (std::size_t i = 0; i <= inbox_constants::MAX_ALLOWED_ORIGINS; ++i) {
+        too_many.push_back ("https://app" + std::to_string (i) + ".example.test");
+    }
+    for (const json& bad : { json ("https://app.example.test"), json::object (),
+         json::array ({ "*" }), json::array ({ "https://*.example.test" }),
+         json::array ({ "https://app.example.test/path" }),
+         json::array ({ "" }), json::array ({ "null" }), json::array ({ 7 }),
+         json::array ({ "https://app.example.test", "ftp://app.example.test" }),
+         json::array ({ too_long }), too_many }) {
+        const auto refused =
+        vayu::http::parse_inbox_start (json{ { "allowedOrigins", bad } });
+        ASSERT_FALSE (refused.has_value ()) << bad.dump ();
+        EXPECT_EQ (refused.error ().http_status, 400) << bad.dump ();
+        EXPECT_EQ (refused.error ().code, "bad_request") << bad.dump ();
+        EXPECT_NE (refused.error ().message.find ("allowedOrigins"), std::string::npos)
+        << refused.error ().message;
+    }
+
+    // The refusal names the entry that failed, not only the field.
+    const auto refused =
+    vayu::http::parse_inbox_start (json{ { "allowedOrigins",
+    json::array ({ "https://app.example.test", "https://app.example.test/x" }) } });
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_NE (refused.error ().message.find ("allowedOrigins[1]"), std::string::npos)
+    << refused.error ().message;
 }
 
 TEST (InboxParseStart, NonLoopbackBindNeedsExplicitConfirmation) {
@@ -387,25 +436,40 @@ TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {
 // status - a preflight must get a 2xx or the browser aborts before the real
 // request ever arrives, so a canned response configured with a non-2xx
 // status to exercise a sender's retry path would otherwise break every
-// browser-hosted sender silently.
+// browser-hosted sender silently. Which origins the answer grants follows
+// the inbox's `allowedOrigins` (#2367): none listed is `*` with no
+// credentials; a list echoes a listed Origin with credentials and grants any
+// other nothing.
 // ---------------------------------------------------------------------------
+
+/// True when any response header is a CORS one.
+bool has_cors_header (const httplib::Response& response) {
+    for (const auto& [name, value] : response.headers) {
+        if (name.starts_with ("Access-Control-")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+constexpr const char* LISTED_ORIGIN = "https://app.example.test";
 
 TEST_F (InboxListenerTest, APreflightIsAnswered204AndNeverReachesTheCapture) {
     auto started = start ();
     auto client  = client_for (started.info);
 
     const httplib::Headers preflight_headers = {
-        { "Origin", "https://app.example.test" },
+        { "Origin", LISTED_ORIGIN },
         { "Access-Control-Request-Method", "POST" },
         { "Access-Control-Request-Headers", "X-Signature" },
     };
     const auto preflight = client.Options ("/hook", preflight_headers);
     ASSERT_TRUE (preflight) << "no response from the inbox";
     EXPECT_EQ (preflight->status, 204);
-    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
-    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
-    EXPECT_EQ (preflight->get_header_value ("Vary"), "Origin");
+    // The default policy never reads the Origin: the wildcard, no credentials.
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (preflight->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (preflight->has_header ("Vary"));
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Signature");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
@@ -461,6 +525,25 @@ TEST_F (InboxListenerTest, ACaptureWithNoOriginGetsTheWildcard) {
     ASSERT_TRUE (posted);
     EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
     EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (posted->has_header ("Vary"));
+}
+
+// The default used to echo any Origin with Allow-Credentials: true, so every
+// page in the browser could read the canned answer with the user's cookies -
+// beyond 127.0.0.1 too, since an inbox can bind wide. Mutation check: send
+// credentials from the empty-list branch of apply_cors_origin and this goes
+// red.
+TEST_F (InboxListenerTest, AnOriginUnderTheDefaultPolicyGetsTheWildcardAndNoCredentials) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", "https://evil.example" } };
+    const auto posted = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (posted->has_header ("Vary"));
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Expose-Headers"), "*");
 }
 
 TEST_F (InboxListenerTest, ACannedHeaderNamedAccessControlIsNotDuplicated) {
@@ -472,28 +555,46 @@ TEST_F (InboxListenerTest, ACannedHeaderNamedAccessControlIsNotDuplicated) {
     auto started = start (request);
     auto client  = client_for (started.info);
 
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
     const auto posted = client.Post ("/hook", with_origin, "{}", "application/json");
     ASSERT_TRUE (posted);
     EXPECT_EQ (posted->headers.count ("Access-Control-Allow-Origin"), 1u);
-    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
+}
+
+TEST_F (InboxListenerTest, ACannedCorsHeaderGrantsNothingToAnUnlistedOrigin) {
+    // Replaying a canned Access-Control-Allow-Origin would hand the page the
+    // very grant the policy just refused it.
+    InboxStartRequest request;
+    request.response.headers = { { "Access-Control-Allow-Origin", "https://evil.example" } };
+    request.allowed_origins = { LISTED_ORIGIN };
+    auto started            = start (request);
+    auto client             = client_for (started.info);
+
+    const httplib::Headers evil = { { "Origin", "https://evil.example" } };
+    const auto posted = client.Post ("/hook", evil, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_FALSE (has_cors_header (*posted));
 }
 
 TEST_F (InboxListenerTest, CredentialedExposeHeadersNamesTheCannedResponsesOwnHeaders) {
     InboxStartRequest request;
     request.response.headers = { { "X-Custom", "v" } };
+    request.allowed_origins  = { LISTED_ORIGIN };
     auto started             = start (request);
     auto client              = client_for (started.info);
 
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
     const auto credentialed = client.Post ("/hook", with_origin, "{}", "application/json");
     ASSERT_TRUE (credentialed);
     EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
 
+    // No Origin under a list: not a CORS request, so nothing is granted and
+    // there is no Expose-Headers to rewrite.
     const auto anonymous = client.Post ("/hook", "{}", "application/json");
     ASSERT_TRUE (anonymous);
-    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+    EXPECT_FALSE (has_cors_header (*anonymous));
+    EXPECT_EQ (anonymous->get_header_value ("Vary"), "Origin");
 }
 
 TEST_F (InboxListenerTest, ANullOriginIsTreatedAsNonCredentialed) {
@@ -508,6 +609,110 @@ TEST_F (InboxListenerTest, ANullOriginIsTreatedAsNonCredentialed) {
     ASSERT_TRUE (posted);
     EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), "*");
     EXPECT_FALSE (posted->has_header ("Access-Control-Allow-Credentials"));
+}
+
+TEST_F (InboxListenerTest, AListedOriginIsEchoedWithCredentialsOnACaptureAndAPreflight) {
+    InboxStartRequest request;
+    request.allowed_origins = { LISTED_ORIGIN, "http://localhost:5173" };
+    auto started            = start (request);
+    auto client             = client_for (started.info);
+
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
+    const auto posted = client.Post ("/hook", with_origin, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->status, 200);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), LISTED_ORIGIN);
+    EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (posted->get_header_value ("Vary"), "Origin");
+
+    const auto preflight = client.Options ("/hook",
+    httplib::Headers{ { "Origin", "http://localhost:5173" },
+    { "Access-Control-Request-Method", "PUT" } });
+    ASSERT_TRUE (preflight);
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "http://localhost:5173");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "PUT");
+}
+
+// Mutation check: make apply_cors_origin echo every Origin it is sent again
+// and both halves go red.
+TEST_F (InboxListenerTest, AnUnlistedOriginGetsNoCorsHeaderOnACaptureOrAPreflight) {
+    InboxStartRequest request;
+    request.allowed_origins = { LISTED_ORIGIN };
+    auto started            = start (request);
+    auto client             = client_for (started.info);
+
+    // The delivery is still recorded and answered - a webhook sender is not a
+    // page - but nothing grants the page's origin a read of the answer.
+    const httplib::Headers evil = { { "Origin", "https://evil.example" } };
+    const auto posted = client.Post ("/hook", evil, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->status, 200);
+    EXPECT_FALSE (has_cors_header (*posted));
+    EXPECT_EQ (posted->get_header_value ("Vary"), "Origin");
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 1);
+
+    const auto preflight = client.Options ("/hook",
+    httplib::Headers{ { "Origin", "https://evil.example" },
+    { "Access-Control-Request-Method", "POST" },
+    { "Access-Control-Request-Headers", "X-Signature" } });
+    ASSERT_TRUE (preflight);
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_FALSE (has_cors_header (*preflight));
+    EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 1);
+
+    // `null` is never listed: it cannot be configured, and an inbound one
+    // canonicalises to nothing.
+    const auto opaque = client.Post (
+    "/hook", httplib::Headers{ { "Origin", "null" } }, "{}", "application/json");
+    ASSERT_TRUE (opaque);
+    EXPECT_FALSE (has_cors_header (*opaque));
+}
+
+TEST_F (InboxListenerTest, AnOriginMatchesItsListedEntryWhateverItsSpelling) {
+    const auto parsed = vayu::http::parse_inbox_start (
+    json{ { "allowedOrigins", json::array ({ "HTTPS://App.Example.Test:443" }) } });
+    ASSERT_HAS_VALUE (parsed);
+    ASSERT_EQ (parsed->allowed_origins.size (), 1u);
+    EXPECT_EQ (parsed->allowed_origins.front (), LISTED_ORIGIN);
+    auto started = start (*parsed);
+    auto client  = client_for (started.info);
+
+    for (const char* spelling :
+    { "https://app.example.test", "https://APP.example.test:443" }) {
+        const auto posted = client.Post ("/hook",
+        httplib::Headers{ { "Origin", spelling } }, "{}", "application/json");
+        ASSERT_TRUE (posted) << spelling;
+        EXPECT_EQ (posted->get_header_value ("Access-Control-Allow-Origin"), spelling);
+        EXPECT_EQ (
+        posted->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    }
+}
+
+TEST_F (InboxListenerTest, StartAndListEchoTheAllowedOrigins) {
+    auto open = start ();
+    EXPECT_EQ (vayu::http::inbox_info_json (open.info)["allowedOrigins"], json::array ());
+
+    InboxStartRequest request;
+    request.allowed_origins = { LISTED_ORIGIN };
+    auto restricted         = start (request);
+    EXPECT_EQ (
+    vayu::http::routes::inbox_json (*db_, restricted.info)["allowedOrigins"],
+    json::array ({ LISTED_ORIGIN }));
+
+    // GET /inbox answers from the same record, through the same wire shape.
+    const auto listed = manager_->list ();
+    ASSERT_EQ (listed.size (), 2u);
+    for (const auto& info : listed) {
+        const json expected = info.inbox_id == restricted.info.inbox_id ?
+        json::array ({ LISTED_ORIGIN }) :
+        json::array ();
+        EXPECT_EQ (
+        vayu::http::routes::inbox_json (*db_, info)["allowedOrigins"], expected)
+        << info.inbox_id;
+    }
 }
 
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
@@ -1060,6 +1265,12 @@ TEST (InboxWireShape, CaptureAndInfoCarryEveryFieldTheUiReads) {
     // Present even on a shape built without a database, so a client never has
     // to tell "no captures" apart from "the field is missing".
     EXPECT_EQ (info_wire["captureCount"], 0);
+    // Present when unset too, as an empty list rather than a missing key.
+    EXPECT_EQ (info_wire["allowedOrigins"], json::array ());
+
+    info.allowed_origins = { "https://app.example.test" };
+    EXPECT_EQ (vayu::http::inbox_info_json (info)["allowedOrigins"],
+    json::array ({ "https://app.example.test" }));
 }
 
 } // namespace

@@ -160,16 +160,20 @@ StepHistograms::~StepHistograms () {
     }
 }
 
-void StepHistograms::record (size_t step, double latency_ms) {
-    if (step >= histograms_.size ()) {
-        return;
-    }
-    completed_[step].fetch_add (1, std::memory_order_relaxed);
+void StepHistograms::record_latency (size_t step, double latency_ms) {
     // Microseconds, matching the aggregate histogram's unit. Atomic because
     // every event-loop worker records concurrently - the plain record is a
     // non-atomic read-modify-write on counts[] and loses increments.
     hdr_record_value_atomic (histograms_[step],
     static_cast<int64_t> (std::max (0.0, latency_ms) * 1000.0));
+}
+
+void StepHistograms::record (size_t step, double latency_ms) {
+    if (step >= histograms_.size ()) {
+        return;
+    }
+    completed_[step].fetch_add (1, std::memory_order_relaxed);
+    record_latency (step, latency_ms);
 }
 
 void StepHistograms::record_error (size_t step) {
@@ -178,6 +182,13 @@ void StepHistograms::record_error (size_t step) {
     }
     completed_[step].fetch_add (1, std::memory_order_relaxed);
     no_response_[step].fetch_add (1, std::memory_order_relaxed);
+}
+
+void StepHistograms::record_failed_transfer (size_t step, double latency_ms) {
+    if (step >= histograms_.size ()) {
+        return;
+    }
+    record_latency (step, latency_ms);
 }
 
 void StepHistograms::record_failed_status (size_t step) {
@@ -202,6 +213,13 @@ size_t StepHistograms::unresolved_tokens (size_t step) const {
     return step < unresolved_tokens_.size () ?
     unresolved_tokens_[step].load (std::memory_order_relaxed) :
     0;
+}
+
+size_t StepHistograms::latency_samples (size_t step) const {
+    if (step >= histograms_.size () || histograms_[step] == nullptr) {
+        return 0;
+    }
+    return static_cast<size_t> (histograms_[step]->total_count);
 }
 
 size_t StepHistograms::errors (size_t step) const {
@@ -869,10 +887,8 @@ class ScenarioLoadDriver {
             }
 
             const bool errored = response.has_error ();
-            if (!errored) {
-                record_answered_step (*context, *state, step_index, response,
-                pipeline_before_ms + pipeline_after_ms);
-            }
+            record_step_response (*context, *state, step_index, response,
+            pipeline_before_ms + pipeline_after_ms);
             // Every completion, including the failed ones: a transport error is
             // a request this operation was sent and did not answer, and coverage
             // that counted only successes would report the send as if it never
@@ -1080,12 +1096,15 @@ class ScenarioLoadDriver {
     }
 
     /**
-     * A step that got a response: its latency, and an HTTP error status in its
-     * error tally (#2134). The status never makes the step `errored`, which is
-     * the iteration-abort edge: a 4xx/5xx is a response the next step can
-     * still follow (a 404 lookup, a 409 retry).
+     * A completed transfer in its step's histogram: the latency of every one
+     * that ran, answered or not (#2384), and an HTTP error status in the
+     * step's error tally (#2134). The status never makes the step `errored`,
+     * which is the iteration-abort edge: a 4xx/5xx is a response the next step
+     * can still follow (a 404 lookup, a 409 retry). A failed transfer is
+     * counted by `finish_step`'s `record_error`, so here it adds only its
+     * duration, and one refused before the wire adds nothing.
      */
-    static void record_answered_step (const RunContext& context,
+    static void record_step_response (const RunContext& context,
     ScenarioLoadState& state,
     size_t step_index,
     const vayu::Response& response,
@@ -1093,6 +1112,12 @@ class ScenarioLoadDriver {
         const double latency_ms = context.include_script_time ?
         response.timing.total_ms + static_cast<double> (pipeline_ms) :
         response.timing.total_ms;
+        if (response.has_error ()) {
+            if (response.transfer_attempted) {
+                state.steps.record_failed_transfer (step_index, latency_ms);
+            }
+            return;
+        }
         state.steps.record (step_index, latency_ms);
         if (!vayu::is_success_status (response.status_code)) {
             state.steps.record_failed_status (step_index);

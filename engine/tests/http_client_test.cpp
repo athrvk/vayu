@@ -261,6 +261,8 @@ TEST_F (HttpClientTest, UnnegotiatedConnectionReportsEmptyHttpVersion) {
     const auto& response = result.value ();
     EXPECT_NE (response.error_code, ErrorCode::None);
     EXPECT_EQ (response.http_version, "");
+    // Failed, but a transfer ran: its timing is a measurement (#2384).
+    EXPECT_TRUE (response.transfer_attempted);
 }
 
 TEST_F (HttpClientTest, UnreachableHostsRawRequestNamesWhatWasAskedFor) {

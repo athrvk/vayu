@@ -69,6 +69,7 @@ function inbox(overrides: Partial<Inbox> = {}): Inbox {
 		running: true,
 		loopback: true,
 		captureCount: 0,
+		allowedOrigins: [],
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};
@@ -104,6 +105,7 @@ function mockServer(overrides: Partial<MockServer> = {}): MockServer {
 		routeCount: 3,
 		routesWithoutExample: 0,
 		createdAt: 1700000000000,
+		allowedOrigins: [],
 		...overrides,
 	};
 }

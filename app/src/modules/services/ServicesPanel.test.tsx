@@ -71,6 +71,7 @@ function inbox(overrides: Partial<Inbox> = {}): Inbox {
 		running: true,
 		loopback: true,
 		captureCount: 0,
+		allowedOrigins: [],
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};
@@ -178,8 +179,37 @@ describe("the services drawer", () => {
 		listInboxes.mockResolvedValue([inbox({ running: false })]);
 		renderPanel();
 		fireEvent.click((await screen.findAllByRole("button", { name: "New inbox" }))[0]);
-		await waitFor(() => expect(startInbox).toHaveBeenCalled());
+		await waitFor(() => expect(startInbox).toHaveBeenCalledWith({}));
 		expect(screen.queryByRole("button", { name: /^start inbox$/i })).not.toBeInTheDocument();
+	});
+
+	/*
+	 * The origin policy (#2367) is the secondary start path beside "New inbox";
+	 * a started inbox is reported and highlighted either way.
+	 */
+	it("starts an inbox with the origins listed in its options, and reports it like any other", async () => {
+		startInbox.mockResolvedValue(
+			inbox({ inboxId: "inbox_new", port: 41240, allowedOrigins: ["https://a.example"] })
+		);
+		renderPanel();
+
+		fireEvent.click(await screen.findByRole("button", { name: "Inbox options" }));
+		const dialog = within(await screen.findByRole("dialog"));
+		fireEvent.change(dialog.getByRole("textbox", { name: /allowed origins/i }), {
+			target: { value: "https://a.example" },
+		});
+		fireEvent.click(dialog.getByRole("button", { name: "Start inbox" }));
+
+		await waitFor(() =>
+			expect(startInbox).toHaveBeenCalledWith({ allowedOrigins: ["https://a.example"] })
+		);
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]).toMatchObject({
+				variant: "success",
+				message: "Inbox started on port 41240",
+			})
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 	});
 
 	/*
@@ -239,6 +269,19 @@ describe("the services drawer", () => {
 });
 
 describe("an inbox row", () => {
+	it("marks an inbox that lets only some origins in, and says nothing for the default", async () => {
+		listInboxes.mockResolvedValue([
+			inbox({ allowedOrigins: ["https://a.example", "http://localhost:5173"] }),
+			inbox({ inboxId: "inbox_b", port: 41235, url: "http://127.0.0.1:41235/" }),
+		]);
+		renderPanel();
+
+		const note = await screen.findByText("2 origins");
+		expect(note).toHaveAttribute("title", "Origins: https://a.example, http://localhost:5173");
+		expect(screen.getAllByText(/\d+ origins?$/)).toHaveLength(1);
+		expect(screen.queryByText(/any origin/i)).not.toBeInTheDocument();
+	});
+
 	it("opens the inbox tab - the drawer lists, the tab shows the captures", async () => {
 		listInboxes.mockResolvedValue([inbox()]);
 		renderPanel();

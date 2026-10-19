@@ -1259,6 +1259,12 @@ export interface Inbox {
 	 * knows better; see `capturesAtRisk` in `modules/inbox/useInboxDeletion.ts`.
 	 */
 	captureCount: number;
+	/**
+	 * The pages granted credentialed CORS (#2367), canonical spelling. Empty is
+	 * the default policy: every origin may read the canned answer, none with
+	 * the user's cookies. Fixed for the inbox's life.
+	 */
+	allowedOrigins: string[];
 	response: InboxCannedResponse;
 }
 
@@ -1285,6 +1291,8 @@ export interface StartInboxRequest {
 	bind?: string;
 	/** Required by the engine for any bind that is not loopback. */
 	confirmNonLoopback?: boolean;
+	/** At most 32 `scheme://host[:port]` origins; absent or empty is the any-origin default. */
+	allowedOrigins?: string[];
 	response?: Partial<InboxCannedResponse>;
 }
 
@@ -1411,6 +1419,12 @@ export interface MockServer {
 	 */
 	routesWithoutExample: number;
 	createdAt: number;
+	/**
+	 * The pages granted credentialed CORS (#2367), canonical spelling. Empty is
+	 * the default policy: every origin may read the mock, none with the user's
+	 * cookies. Fixed for the mock's life.
+	 */
+	allowedOrigins: string[];
 }
 
 export interface StartMockServerRequest {
@@ -1421,6 +1435,8 @@ export interface StartMockServerRequest {
 	latencyMs?: number;
 	/** Share of answers replaced by a synthesized 500, 0-100. */
 	errorRatePct?: number;
+	/** At most 32 `scheme://host[:port]` origins; absent or empty is the any-origin default. */
+	allowedOrigins?: string[];
 }
 
 export interface ListMockServersResponse {

@@ -892,7 +892,7 @@ governs what a run measures rather than what it keeps:
 | `maxTraceBodyBytes` | `5242880` | 1024–104857600 | Largest request/response body stored in a design run's `trace_data`. Bigger bodies are truncated with `bodyTruncated`/`bodyBytes` (see `GET /runs/:id`). |
 | `maxResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **load-test** transfer reads into memory, and what a `pm.sendRequest` from that run's deferred `tests` script may read. A bigger response fails that request (see `POST /runs`). Not a storage cap and unrelated to `maxTraceBodyBytes`, which truncates what a *completed* design request writes to the database. |
 | `maxDesignResponseBodyBytes` | `33554432` | 1024–1073741824 | Largest response body a **design-mode** send - `POST /execute`, and each step of a collection run - reads into memory, and what a `pm.sendRequest` from that send's scripts may read. A bigger response is read up to this point and answered with `bodyCapped: true` (see `POST /execute`) rather than failing, because someone is watching for it - a script's own fetch is the exception and refuses, having no way to tell the script its body was cut (see [scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)). Separate from `maxResponseBodyBytes` above, which is the load path's and refuses in every case. |
-| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json` or `assert.jsonpath` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all: every JSON-reading element on that step reports `skipped`, with the reason, instead of paying for - or failing on - a parse of an oversized body. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
+| `maxElementBodyBytes` | `1048576` | 1024–1073741824 | Largest response body an `extract.json` or `assert.jsonpath` [element](elements.md) will parse as JSON, in a design send, a collection run and a scenario load run alike. A bigger response is not parsed at all: every JSON-reading element on that step reports `skipped`, with the reason, instead of paying for - or failing on - a parse of an oversized body. A body that parses but nests deeper than 100 levels is skipped the same way, whatever its size; that depth is fixed, not a setting. The one shared parse per step is reused by every such element, so this is a per-step cost, not a per-element one. |
 | `maxSampleBodyBytes` | `32768`  | 0–104857600  | Largest response body kept for a single captured **load-run** sample. Bigger bodies are stored truncated and marked. Deliberately far below `maxTraceBodyBytes`: a design run stores one exchange the user asked for, a load run stores tens nobody asked for individually. `0` keeps headers and metadata and no body. |
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
@@ -4810,18 +4810,35 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
-**CORS is on by default, with no setting to turn it off** - the same reflected
-`Access-Control-Allow-Origin` / `-Allow-Credentials` / `Vary` pair a mock
-server sends (see [Mock Server](#mock-server)), so a browser-hosted sender can
-read the canned response. A real preflight (a request carrying
-`Access-Control-Request-Method`) is answered `204` and never reaches the
-capture, the canned delay or the canned status - a preflight must get a 2xx
-or the browser aborts before the real request arrives, so a canned response
-configured with a non-2xx status (to exercise a sender's retry path) would
-otherwise break every browser-hosted sender silently. A header the canned
+**CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
+mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
+sender can read the canned response:
+
+- **None listed (the default)**: every answer carries
+  `Access-Control-Allow-Origin: *` and `Access-Control-Expose-Headers: *`,
+  whatever the request's `Origin`, and never `Access-Control-Allow-Credentials`
+  or `Vary`. Every page in the browser can read the canned response; none can
+  read one sent with the user's cookies.
+- **A list**: a request whose `Origin` is a listed origin gets that `Origin`
+  echoed, `Access-Control-Allow-Credentials: true` and the rest of the answer
+  below. Any other request - an unlisted origin, the literal `null` a sandboxed
+  frame or `file://` page sends, no `Origin` at all - is still captured and
+  answered, with no `Access-Control-*` header, so the browser keeps the answer
+  from the page. `Vary: Origin` is on every answer under a list. Origins are
+  compared canonically: scheme and host case-folded, a default port dropped, so
+  `https://App.Example:443` matches a listed `https://app.example`.
+
+A real preflight (a request carrying `Access-Control-Request-Method`) is
+answered `204` and never reaches the capture, the canned delay or the canned
+status - a preflight must get a 2xx or the browser aborts before the real
+request arrives, so a canned response configured with a non-2xx status (to
+exercise a sender's retry path) would otherwise break every browser-hosted
+sender silently. It carries the grant above (and `Access-Control-Allow-Methods`
+/ `-Allow-Headers` echoing what was asked, `Access-Control-Max-Age: 600`), or
+under a list for an unlisted origin no CORS header at all. A header the canned
 response sets that names `Access-Control-*` or `Vary` is dropped rather than
-echoed, since the engine already answered those; a credentialed request
-(`Origin` present and not the literal `null`) rewrites a wildcard
+echoed, since the engine already answered those and a replayed grant would undo
+a refusal; a credentialed answer (a listed origin) rewrites the wildcard
 `Access-Control-Expose-Headers` into the canned response's own header names,
 per the Fetch spec's rule that `*` there is a literal name, not a wildcard,
 under credentials.
@@ -4837,6 +4854,7 @@ inbox on a free port that answers `200` with no body.
   "port": 0,
   "bind": "127.0.0.1",
   "confirmNonLoopback": false,
+  "allowedOrigins": [],
   "response": {
     "status": 200,
     "body": "",
@@ -4853,12 +4871,15 @@ inbox on a free port that answers `200` with no body.
 | `response.status` | 100-599 |
 | `response.headers` | String values only; a `Content-Type` here is used verbatim |
 | `response.delayMs` | 0-30000, applied before every reply |
+| `allowedOrigins` | Default `[]` (CORS `*`, no credentials). Up to 32 origins granted credentialed CORS, each `http://` or `https://` plus a host and an optional port, at most 512 bytes: no path (a trailing `/` included), query, fragment, user name or password, no `*` and not `null`. Stored and echoed canonical (scheme and host lowercased, a default port dropped); fixed for the inbox's life, `PUT` does not change it |
 
 An out-of-range value is a `400` naming the field rather than a fallback to the
 default: a listener quietly answering something other than what it was asked to
 is invisible on both sides of the wire. A bind that fails is a `409` with code
 `inbox_bind_failed`; a non-loopback bind without confirmation is a `400` with
-code `inbox_non_loopback_bind`.
+code `inbox_non_loopback_bind`. An `allowedOrigins` that is not an array, holds
+too many entries, or holds one that is not an origin is a `400` `bad_request`
+naming the entry (`allowedOrigins[1]`) and what is wrong with it.
 
 A `port` another engine listener is already running on - an inbox or a mock
 issuer - is refused with that same `409`, naming the holder ("`inbox inbox_2f1c`
@@ -4880,6 +4901,7 @@ this way, since the kernel does not hand out a port it is already using.
   "running": true,
   "loopback": true,
   "captureCount": 0,
+  "allowedOrigins": [],
   "response": { "status": 200, "body": "", "headers": {}, "delayMs": 0 }
 }
 ```
@@ -5071,25 +5093,39 @@ outcomes are distinct rather than one blanket 404:
 | The path matches, the method does not | 404 | `mock_method_mismatch` | The matching path template and the methods it *is* served for |
 | A route matched but its request has no saved example | 501 | `mock_no_example` | The request's name, and that an example must be saved or imported |
 
-**CORS is on by default, with no setting to turn it off.** A mock server
+**CORS follows the mock's `allowedOrigins`** (issue #2367). A mock server
 answers whatever calls it - most often a browser page on another origin, not
-only curl - so every response carries `Access-Control-Allow-Origin`, echoing
-the request's `Origin` header (with `Access-Control-Allow-Credentials: true`
-and `Vary: Origin`) when present and not the literal `null` a sandboxed frame
-or `file://` page sends, or `*` otherwise, plus `Access-Control-Expose-Headers:
-*` so a page's `fetch` can read a header the example set - rewritten to the
-example's own header names on a credentialed response, since the Fetch spec
-reads `*` there as a literal name, not a wildcard, once credentials are in
-play. A header the example itself carries under `Access-Control-*` or `Vary`
-is dropped rather than echoed, since the engine already answered those. This
-applies to a miss too - a 404 with no CORS headers reads in a browser as an
-opaque "CORS error" instead of the `mock_no_route` / `mock_method_mismatch` /
-`mock_no_example` body above.
+only curl - and what it answers with is often a recorded response, so which
+pages may read it is the caller's to state:
+
+- **None listed (the default)**: every response carries
+  `Access-Control-Allow-Origin: *`, whatever the request's `Origin`, plus
+  `Access-Control-Expose-Headers: *` so a page's `fetch` can read a header the
+  example set, and never `Access-Control-Allow-Credentials` or `Vary`. Every
+  page in the browser can read the mock; none can read a response sent with
+  the user's cookies.
+- **A list**: a request whose `Origin` is a listed origin gets that `Origin`
+  echoed with `Access-Control-Allow-Credentials: true`, and
+  `Access-Control-Expose-Headers` names the example's own headers, since the
+  Fetch spec reads `*` there as a literal name, not a wildcard, once
+  credentials are in play. Any other request - an unlisted origin, the literal
+  `null` a sandboxed frame or `file://` page sends, no `Origin` at all - is
+  still served, with no `Access-Control-*` header, so the browser keeps the
+  response from the page. `Vary: Origin` is on every response under a list.
+  Origins are compared canonically: scheme and host case-folded, a default port
+  dropped, so `https://App.Example:443` matches a listed `https://app.example`.
+
+A header the example itself carries under `Access-Control-*` or `Vary` is
+dropped rather than echoed, since the engine already answered those and a
+replayed grant would undo a refusal. The grant applies to a miss too - a 404
+with no CORS headers reads in a browser as an opaque "CORS error" instead of
+the `mock_no_route` / `mock_method_mismatch` / `mock_no_example` body above.
 
 A **real preflight** - a request carrying `Access-Control-Request-Method` -
-is always answered synthetically (`204`, `Access-Control-Allow-Methods` /
-`-Allow-Headers` echoing what the browser asked for,
-`Access-Control-Max-Age: 600`), whether or not a route is stored for that
+is always answered synthetically (`204`, with the grant above plus
+`Access-Control-Allow-Methods` / `-Allow-Headers` echoing what the browser
+asked for and `Access-Control-Max-Age: 600`, or under a list for an unlisted
+origin no CORS header at all), whether or not a route is stored for that
 path under `OPTIONS`: breaking the preflight to surface a stored route's
 `404`/`501` would break the browser request behind it for nothing. It does
 not count toward a route's `hits` or appear in `GET /mock/:mockId/activity`.
@@ -5109,14 +5145,22 @@ on that join.
   "collectionId": "col_abc123",
   "port": 0,
   "latencyMs": 0,
-  "errorRatePct": 0
+  "errorRatePct": 0,
+  "allowedOrigins": []
 }
 ```
 
 `collectionId` is required. `port` 0 (the default) binds a free one.
 `latencyMs` (0 - 30000) delays every answer; `errorRatePct` (0 - 100) replaces
 that share of answers with a synthesized `500` carrying `mock_injected_error`.
-Every out-of-range value is a `400` rather than a clamp.
+`allowedOrigins` (default `[]`) lists up to 32 origins granted credentialed
+CORS (see above), each `http://` or `https://` plus a host and an optional
+port, at most 512 bytes: no path (a trailing `/` included), query, fragment,
+user name or password, no `*` and not `null`. It is stored and echoed
+canonical (scheme and host lowercased, a default port dropped). Every
+out-of-range value is a `400` rather than a clamp, and an `allowedOrigins`
+entry that is not an origin is a `400` `bad_request` naming the entry
+(`allowedOrigins[1]`) and what is wrong with it.
 
 **Response:**
 ```json
@@ -5130,7 +5174,8 @@ Every out-of-range value is a `400` rather than a clamp.
   "errorRatePct": 0,
   "routeCount": 12,
   "routesWithoutExample": 3,
-  "createdAt": 1735689600000
+  "createdAt": 1735689600000,
+  "allowedOrigins": []
 }
 ```
 
@@ -6800,11 +6845,15 @@ whose config set `thresholds.failRun: true` and whose budgets it missed ends `fa
 flag, or on a run that met every budget, a failing budget is reported but
 never changes the terminal status.
 
-Each check carries `evaluated`. A latency percentile needs a completed request
-to mean anything, so a run that recorded none for that metric (every request
-errored before a response arrived) reports `evaluated: false` and omits
-`actual` entirely rather than the default `0`, which would otherwise read as a
-measured 0ms and trivially satisfy an "at most" ceiling. An unevaluated check
+Each check carries `evaluated`. A latency percentile needs a timed request
+to mean anything, so a run that recorded none (every request was refused
+before the wire, cancelled by a Stop or failed before any transfer ran)
+reports `evaluated: false` and omits `actual` entirely rather than the default
+`0`, which would otherwise read as a measured 0ms and trivially satisfy an "at
+most" ceiling. A request that timed out or lost its connection after the
+transfer began *is* timed (see [Latency
+population](#latency-population)), so a run where every request timed out is
+evaluated and its percentiles sit at the timeout. An unevaluated check
 counts toward `failed`: a budget the run could not measure was not met. The
 error rate and the throughput floor have no such gap - `maxErrorRatePct` is
 0/0-safe by request count, and a starved `minThroughputRps` already fails on
@@ -7713,7 +7762,13 @@ counts. **`httpErrors`** is the responses that arrived with a 4xx or 5xx;
 the step's latency includes them, and the iteration carries on to the next
 step. **`noResponse`** is the executions that got nothing back (a transport
 error, booked under status 0 like the run's own distribution, or a
-data-binding failure that sent nothing); only these end the iteration. At the
+data-binding failure that sent nothing); only these end the iteration. A
+`noResponse` execution whose transfer ran (a timeout, a reset, a DNS or TLS
+failure) is also in the step's latency, so a step that times out reports its
+timeout in `p99` and `max`; one that never reached the wire (a data-binding
+failure, a refused header, a skip) adds a count and no duration. The step's
+histogram follows the same population as the run's, and `includeScriptTime`
+applies to a failed step as it does to an answered one (issue #2384). At the
 top of the section, `errored` is the iteration-abort count (the sum of every
 step's `noResponse`), `failed` is the sum of every step's `httpErrors`, and
 `passed` is `stepsExecuted` less both. Failed assertions and script tests are
@@ -7999,8 +8054,12 @@ one number - the MCP tool's cap does.
 The search steers by the published metric tick - the same numbers `GET
 /runs/:id/live` streams - rather than sampling the collector itself, so the
 controller and the dashboard cannot disagree about a level. Windows in which
-nothing completed are not judged: their percentiles are the empty-window zeros
-and reading those as "answered instantly" would climb straight past the limit.
+no request was timed are not judged: their percentiles are the empty-window
+zeros and reading those as "answered instantly" would climb straight past the
+limit. A request that timed out is timed (see [Latency
+population](#latency-population)), so a window of nothing but timeouts has
+samples, is judged, and reports a p99 near the timeout - the level fails its
+latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
 windowed p99 and a sequence has one per step.
 
@@ -8095,6 +8154,37 @@ cancellation is exempt. When a run reaches its natural end, a request still in
 flight after its own timeout plus a 2s grace is cancelled too, and that one
 never answered: it stays an error, under status code `0`, and its stored error
 record carries `error_type` `cancelled` (`errors.types` in the report).
+
+### Latency population
+
+A load run's latency figures all describe one set of requests: every request
+whose **transfer ran**, answered or not. That is a response of any status
+(a 4xx or 5xx included) and a request that failed after the transfer began,
+where the duration is the time until it gave up (a timeout is about its
+timeout; a reset, a DNS or TLS failure and a body over the byte cap count
+the same way). The set feeds the report's `latency` block (`p50` to `p999`,
+`max`), the live tick's windowed `latencyP50Ms` / `latencyP95Ms` /
+`latencyP99Ms`, `avgLatencyMs` and `avgQueueWaitMs`, the exports, and the
+`latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
+The mean is the sum over the set divided by the set's size, so it agrees
+with the percentiles and the max. It is not divided by `totalRequests`.
+
+Left out, because they have no duration to report:
+
+- a request a Stop cancelled (`cancelled`), and a request cancelled at a run's
+  natural end after its timeout plus the grace, which is an error with no
+  duration;
+- a request refused before the wire: one dropped at the `maxInFlight` cap
+  (`droppedRequests`), an invalid URL or an unsendable header, a residual
+  `{{token}}` or file-rule refusal, a data-binding failure.
+
+So a run where 5% of requests hit a 2000 ms timeout reports a p99 and `max`
+near 2000 ms, and a `latencyP99Ms` budget below that fails it. `totalRequests`,
+`errorRate`, `httpErrors`, `noResponse` and `cancelled` do not depend on this
+set. The per-phase histograms of the [timing breakdown](#get-runsrunidreport)
+stay answered-only: a request that failed has no connect, TLS or first-byte
+split to report. A scenario step's histogram follows the same rule as the
+run's.
 
 ### GET /runs/:runId/metrics
 
@@ -8356,9 +8446,9 @@ no frame.
 | `activeConnections` | Current in-flight requests |
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
-| `avgLatencyMs` | Mean **perceived** latency |
-| `avgQueueWaitMs` | Mean time queued inside the generator before the wire |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
+| `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
+| `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |
@@ -8831,9 +8921,11 @@ the same figures the live tick and the report show; `httpErrors` and
 counted in none of them.
 
 `avgLatencyMs` is the same average the final report and the live ticks show:
-the latency sum over the requests that contributed to it (successes). It is not
-divided by `totalRequests`, which would report a lower figure here than
-everywhere else for the same run.
+the latency sum over the [latency population](#latency-population), divided by
+the number of requests in it. It is not divided by `totalRequests` (which counts
+requests that carry no latency, so it would report a lower figure here than
+everywhere else for the same run) nor by the success count (a timeout's
+duration is in the sum).
 
 A run that is already finished answers `{"status": "<status>", "runId": ...,
 "message": "Run already <status>"}`; one that is not in memory answers

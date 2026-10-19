@@ -264,6 +264,26 @@ void MetricsCollector::atomic_add_double (std::atomic<double>& target, double va
     }
 }
 
+void MetricsCollector::record_latency_sample (double latency_ms, double queue_wait_ms) {
+    atomic_add_double (total_latency_sum_, latency_ms);
+    atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
+
+    // Record latency in both histograms. Every event-loop worker thread calls
+    // this on its own thread, so the atomic recorder API is required - the
+    // plain hdr_record_value / hdr_interval_recorder_record_value pair is a
+    // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
+    // tears min/max under concurrent writers.
+    // Convert milliseconds to microseconds for histogram precision
+    const int64_t latency_us =
+    std::max<int64_t> (static_cast<int64_t> (latency_ms * 1000.0), 1);
+    hdr_record_value_atomic (latency_histogram_, latency_us);
+    // Also feed the rolling-window recorder for the live per-tick percentiles.
+    hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
+
+    // Last, and release: it publishes the sums above to latency_samples().
+    latency_samples_.fetch_add (1, std::memory_order_release);
+}
+
 bool MetricsCollector::claim_status_exemplar (int status_code) {
     if (!config_.capture_response_bodies) {
         return false;
@@ -332,23 +352,11 @@ const Response* capture_source,
 const Timing* phases) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
-    atomic_add_double (total_latency_sum_, latency_ms);
-    atomic_add_double (total_queue_wait_sum_, queue_wait_ms);
 
     // Track the per-code count (lock-free for in-range codes).
     record_status_code (status_code);
 
-    // Record latency in both histograms. Every event-loop worker thread calls
-    // this on its own thread, so the atomic recorder API is required - the
-    // plain hdr_record_value / hdr_interval_recorder_record_value pair is a
-    // non-atomic `counts[i] += 1; total_count += 1`, which loses increments and
-    // tears min/max under concurrent writers.
-    // Convert milliseconds to microseconds for histogram precision
-    const int64_t latency_us =
-    std::max<int64_t> (static_cast<int64_t> (latency_ms * 1000.0), 1);
-    hdr_record_value_atomic (latency_histogram_, latency_us);
-    // Also feed the rolling-window recorder for the live per-tick percentiles.
-    hdr_interval_recorder_record_value_atomic (&interval_recorder_, latency_us);
+    record_latency_sample (latency_ms, queue_wait_ms);
 
     // Per-phase bank, fed before the retention gate below and independently of
     // it: a phase distribution drawn from the completions that happened to be
@@ -651,7 +659,8 @@ size_t step_index) const {
 void MetricsCollector::record_error (ErrorCode code,
 const std::string& message,
 const std::string& trace_data,
-const Response* capture_source) {
+const Response* capture_source,
+std::optional<AttemptDuration> attempt) {
     // Update atomic counters (lock-free)
     total_requests_.fetch_add (1, std::memory_order_relaxed);
     const size_t error_index = total_errors_.fetch_add (1, std::memory_order_relaxed);
@@ -662,6 +671,10 @@ const Response* capture_source) {
     // count, and the report's failed/errorRate tallies (recomputed from the
     // distribution) account for them instead of silently dropping to zero.
     record_status_code (0);
+
+    if (attempt) {
+        record_latency_sample (attempt->latency_ms, attempt->queue_wait_ms);
+    }
 
     // Store the error record while the store has room. Past the cap the record
     // is dropped but counted - total_errors_ and the status-code distribution

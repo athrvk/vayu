@@ -344,6 +344,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			routeCount: 4,
 			routesWithoutExample: 0,
 			createdAt: "2026-08-18T09:00:00Z",
+			allowedOrigins: [],
 		}),
 		listMockServers: vi.fn().mockResolvedValue({ data: [] }),
 		getMockServerRoutes: vi.fn().mockResolvedValue({
@@ -368,6 +369,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			running: true,
 			loopback: true,
 			captureCount: 0,
+			allowedOrigins: [],
 			response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		}),
 		listInboxes: vi.fn().mockResolvedValue({
@@ -379,6 +381,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 					running: true,
 					loopback: true,
 					captureCount: 3,
+					allowedOrigins: [],
 					response: { status: 200, body: "", headers: {}, delayMs: 0 },
 				},
 			],
@@ -7665,6 +7668,9 @@ describe("mock server tools", () => {
 		expect(payload).toEqual({ collectionId: "col_1", latencyMs: 250 });
 		expect(Object.keys(payload as object)).not.toContain("port");
 		expect(Object.keys(payload as object)).not.toContain("errorRatePct");
+		// Absent means the engine's any-origin default; a `[]` the caller never
+		// wrote would be a policy statement they did not make.
+		expect(Object.keys(payload as object)).not.toContain("allowedOrigins");
 		const body = JSON.parse(firstText(res)) as Record<string, unknown>;
 		expect(body.mockId).toBe("mock_1");
 		expect(body.url).toBe("http://127.0.0.1:45010");
@@ -7673,7 +7679,13 @@ describe("mock server tools", () => {
 
 	test("start forwards every knob under the engine's own names", async () => {
 		const client = fakeClient();
-		const args = { collectionId: "col_1", port: 45010, latencyMs: 100, errorRatePct: 25 };
+		const args = {
+			collectionId: "col_1",
+			port: 45010,
+			latencyMs: 100,
+			errorRatePct: 25,
+			allowedOrigins: ["https://app.example.com", "http://localhost:5173"],
+		};
 		const res = await dispatchTool("start_mock_server", args, ctxWith(client));
 		expect(res.isError).toBeFalsy();
 		// Keyed exactly as `parse_mock_start` reads them - a rename here is a knob
@@ -7840,6 +7852,12 @@ describe("mock server tools", () => {
 		expect(shape.errorRatePct.safeParse(101).success).toBe(false);
 		expect(shape.errorRatePct.safeParse(100).success).toBe(true);
 		expect(shape.latencyMs.safeParse(-1).success).toBe(false);
+		// The origin list's shape is the schema's; what makes an entry an origin,
+		// and how many may be listed, is the engine's to refuse by name.
+		expect(shape.allowedOrigins.safeParse(["https://app.example.com"]).success).toBe(true);
+		expect(shape.allowedOrigins.safeParse([]).success).toBe(true);
+		expect(shape.allowedOrigins.safeParse("https://app.example.com").success).toBe(false);
+		expect(shape.allowedOrigins.safeParse([42]).success).toBe(false);
 		// The collection is the one thing a mock cannot be started without.
 		expect(z.object(shape).safeParse({}).success).toBe(false);
 		expect(z.object(shape).safeParse({ collectionId: "col_1" }).success).toBe(true);
@@ -8370,11 +8388,41 @@ describe("webhook inbox tools", () => {
 
 		test("the schema does not offer a bind at all", () => {
 			const schema = byName().get("start_webhook_inbox")?.inputSchema ?? {};
-			expect(Object.keys(schema).sort()).toEqual(["port", "response"]);
+			expect(Object.keys(schema).sort()).toEqual(["allowedOrigins", "port", "response"]);
 		});
 	});
 
 	describe("start_webhook_inbox", () => {
+		test("forwards allowedOrigins and still never a bind", async () => {
+			const client = fakeClient();
+			const origins = ["https://app.example.com", "http://localhost:5173"];
+			const res = await dispatchTool(
+				"start_webhook_inbox",
+				{ port: 45002, allowedOrigins: origins, bind: "0.0.0.0", confirmNonLoopback: true },
+				ctxWith(client)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(forwarded(client, "startInbox")[0]).toEqual({
+				port: 45002,
+				allowedOrigins: origins,
+			});
+		});
+
+		test("sends no allowedOrigins when the caller named none", async () => {
+			const client = fakeClient();
+			await dispatchTool("start_webhook_inbox", { port: 45003 }, ctxWith(client));
+			expect(forwarded(client, "startInbox")[0]).not.toHaveProperty("allowedOrigins");
+		});
+
+		test("the schema takes an array of strings and leaves the origin rules to the engine", () => {
+			const shape = byName().get("start_webhook_inbox")?.inputSchema as Record<
+				string,
+				z.ZodType
+			>;
+			expect(shape.allowedOrigins.safeParse(["https://app.example.com"]).success).toBe(true);
+			expect(shape.allowedOrigins.safeParse("https://app.example.com").success).toBe(false);
+		});
+
 		test("forwards only the canned-response fields the caller named", async () => {
 			const client = fakeClient();
 			const res = await dispatchTool(

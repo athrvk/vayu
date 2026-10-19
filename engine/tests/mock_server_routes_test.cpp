@@ -24,6 +24,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -104,6 +105,58 @@ TEST (MockParseStart, ReadsAndBoundsEveryTuningField) {
         body.update (bad);
         EXPECT_FALSE (vayu::http::parse_mock_start (body).has_value ()) << body.dump ();
     }
+}
+
+TEST (MockParseStart, AllowedOriginsDefaultsToEmptyAndIsStoredCanonical) {
+    const json base   = { { "collectionId", "col_1" } };
+    const auto absent = vayu::http::parse_mock_start (base);
+    ASSERT_HAS_VALUE (absent);
+    EXPECT_TRUE (absent->allowed_origins.empty ());
+
+    json with_null              = base;
+    with_null["allowedOrigins"] = nullptr;
+    const auto null_list        = vayu::http::parse_mock_start (with_null);
+    ASSERT_HAS_VALUE (null_list);
+    EXPECT_TRUE (null_list->allowed_origins.empty ());
+
+    json listed = base;
+    listed["allowedOrigins"] = { "HTTPS://App.Example.Test:443", "http://localhost:5173" };
+    const auto parsed = vayu::http::parse_mock_start (listed);
+    ASSERT_HAS_VALUE (parsed);
+    EXPECT_EQ (parsed->allowed_origins,
+    (std::vector<std::string>{ "https://app.example.test", "http://localhost:5173" }));
+}
+
+TEST (MockParseStart, RefusesAnAllowedOriginsEntryThatIsNotAnOrigin) {
+    const std::string too_long = "https://" +
+    std::string (mock_constants::MAX_ALLOWED_ORIGIN_LENGTH, 'a') + ".test";
+    json too_many = json::array ();
+    for (std::size_t i = 0; i <= mock_constants::MAX_ALLOWED_ORIGINS; ++i) {
+        too_many.push_back ("https://app" + std::to_string (i) + ".example.test");
+    }
+    for (const json& bad : { json ("https://app.example.test"), json::object (),
+         json::array ({ "*" }), json::array ({ "https://*.example.test" }),
+         json::array ({ "https://app.example.test/path" }),
+         json::array ({ "" }), json::array ({ "null" }), json::array ({ 7 }),
+         json::array ({ "https://app.example.test", "ftp://app.example.test" }),
+         json::array ({ too_long }), too_many }) {
+        json body              = { { "collectionId", "col_1" } };
+        body["allowedOrigins"] = bad;
+        const auto refused     = vayu::http::parse_mock_start (body);
+        ASSERT_FALSE (refused.has_value ()) << body.dump ();
+        EXPECT_EQ (refused.error ().http_status, 400) << bad.dump ();
+        EXPECT_EQ (refused.error ().code, "bad_request") << bad.dump ();
+        EXPECT_NE (refused.error ().message.find ("allowedOrigins"), std::string::npos)
+        << refused.error ().message;
+    }
+
+    // The refusal names the entry that failed, not only the field.
+    json body = { { "collectionId", "col_1" } };
+    body["allowedOrigins"] = { "https://app.example.test", "https://app.example.test/x" };
+    const auto refused = vayu::http::parse_mock_start (body);
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_NE (refused.error ().message.find ("allowedOrigins[1]"), std::string::npos)
+    << refused.error ().message;
 }
 
 // ---------------------------------------------------------------------------
@@ -755,11 +808,25 @@ TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNot
 // ---------------------------------------------------------------------------
 // CORS: a mock server answers a browser page on another origin, not only
 // curl. A preflight on a path with no stored OPTIONS route is synthesized
-// rather than served as a miss; every other response, hit or miss, carries
-// the same reflected Origin/credentials pair.
+// rather than served as a miss. Under the default policy every response, hit
+// or miss, is `*` with no credentials whatever the Origin; under an
+// `allowedOrigins` list a listed Origin is echoed with credentials and any
+// other gets no Access-Control-* header at all (#2367).
 // ---------------------------------------------------------------------------
 
-TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteReflectsWhatWasAsked) {
+/// True when any response header is a CORS one.
+bool has_cors_header (const httplib::Response& response) {
+    for (const auto& [name, value] : response.headers) {
+        if (name.starts_with ("Access-Control-")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+constexpr const char* LISTED_ORIGIN = "https://app.example.test";
+
+TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteAnswersWhatWasAsked) {
     seed_pet_store ();
     MockServerManager manager;
     MockStartRequest request;
@@ -772,17 +839,17 @@ TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteReflectsWhatWasAsked) 
     client.set_read_timeout (5);
 
     const httplib::Headers preflight_headers = {
-        { "Origin", "https://app.example.test" },
+        { "Origin", LISTED_ORIGIN },
         { "Access-Control-Request-Method", "POST" },
         { "Access-Control-Request-Headers", "X-Custom-Header" },
     };
     const auto preflight = client.Options ("/pets", preflight_headers);
     ASSERT_TRUE (preflight) << "no response from the mock";
     EXPECT_EQ (preflight->status, 204);
-    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
-    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
-    EXPECT_EQ (preflight->get_header_value ("Vary"), "Origin");
+    // The default policy never reads the Origin: the wildcard, no credentials.
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (preflight->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (preflight->has_header ("Vary"));
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Custom-Header");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
@@ -817,10 +884,15 @@ TEST_F (MockServerTest, AServedResponseWithNoOriginGetsTheWildcard) {
     EXPECT_EQ (listed->status, 200);
     EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
     EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (listed->has_header ("Vary"));
     EXPECT_EQ (listed->get_header_value ("Access-Control-Expose-Headers"), "*");
 }
 
-TEST_F (MockServerTest, AServedResponseWithAnOriginEchoesItAndAllowsCredentials) {
+// The default used to echo any Origin with Allow-Credentials: true, so every
+// page in the browser could read a mock's answers with the user's cookies.
+// Mutation check: send credentials from the empty-list branch of
+// apply_cors_origin and this goes red.
+TEST_F (MockServerTest, AnOriginUnderTheDefaultPolicyGetsTheWildcardAndNoCredentials) {
     seed_pet_store ();
     MockServerManager manager;
     MockStartRequest request;
@@ -832,33 +904,35 @@ TEST_F (MockServerTest, AServedResponseWithAnOriginEchoesItAndAllowsCredentials)
     client.set_connection_timeout (2);
     client.set_read_timeout (5);
 
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
+    const httplib::Headers with_origin = { { "Origin", "https://evil.example" } };
     const auto listed = client.Get ("/pets", with_origin);
     ASSERT_TRUE (listed);
-    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
-    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Credentials"), "true");
-    EXPECT_EQ (listed->get_header_value ("Vary"), "Origin");
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
+    EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+    EXPECT_FALSE (listed->has_header ("Vary"));
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Expose-Headers"), "*");
 }
 
-TEST_F (MockServerTest, AMissStillCarriesTheRequestingOriginSoTheRealErrorReachesTheBrowser) {
+TEST_F (MockServerTest, AMissStillCarriesCorsSoTheRealErrorReachesTheBrowser) {
     seed_pet_store ();
     MockServerManager manager;
     MockStartRequest request;
-    request.collection_id = "col_root";
-    const auto started    = manager.start (*db_, request);
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
     ASSERT_TRUE (started.ok) << started.error_message;
 
     httplib::Client client ("127.0.0.1", started.info.port);
     client.set_connection_timeout (2);
     client.set_read_timeout (5);
 
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
-    const auto unknown = client.Get ("/orders", with_origin);
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
+    const auto unknown                 = client.Get ("/orders", with_origin);
     ASSERT_TRUE (unknown);
     EXPECT_EQ (unknown->status, 404);
-    EXPECT_EQ (unknown->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
+    EXPECT_EQ (unknown->get_header_value ("Access-Control-Allow-Origin"), LISTED_ORIGIN);
+    EXPECT_EQ (unknown->get_header_value ("Access-Control-Allow-Credentials"), "true");
 }
 
 TEST_F (MockServerTest, APreflightForAPathWithAStoredOptionsRouteIsServedForReal) {
@@ -880,13 +954,12 @@ TEST_F (MockServerTest, APreflightForAPathWithAStoredOptionsRouteIsServedForReal
     client.set_connection_timeout (2);
     client.set_read_timeout (5);
 
-    const httplib::Headers preflight_headers = { { "Origin", "https://app.example.test" } };
+    const httplib::Headers preflight_headers = { { "Origin", LISTED_ORIGIN } };
     const auto preflight = client.Options ("/pets", preflight_headers);
     ASSERT_TRUE (preflight);
     EXPECT_EQ (preflight->status, 200);
     EXPECT_EQ (preflight->body, R"({"documented":true})");
-    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"), "*");
 }
 
 TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
@@ -898,7 +971,7 @@ TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
     seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
     seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
     json::array ({ json{ { "key", "Access-Control-Allow-Origin" },
-    { "value", "*" }, { "enabled", true } } }));
+    { "value", "https://old.example.test" }, { "enabled", true } } }));
 
     MockServerManager manager;
     MockStartRequest request;
@@ -910,12 +983,37 @@ TEST_F (MockServerTest, AnExamplesOwnCorsHeaderIsNotDuplicatedByTheListener) {
     client.set_connection_timeout (2);
     client.set_read_timeout (5);
 
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
-    const auto listed = client.Get ("/pets", with_origin);
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
+    const auto listed                  = client.Get ("/pets", with_origin);
     ASSERT_TRUE (listed);
     EXPECT_EQ (listed->headers.count ("Access-Control-Allow-Origin"), 1u);
-    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"),
-    "https://app.example.test");
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
+}
+
+TEST_F (MockServerTest, AnExamplesOwnCorsHeaderGrantsNothingToAnUnlistedOrigin) {
+    // Replaying a stored Access-Control-Allow-Origin would hand the page the
+    // very grant the policy just refused it.
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "Access-Control-Allow-Origin" },
+    { "value", "https://evil.example" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers evil = { { "Origin", "https://evil.example" } };
+    const auto listed           = client.Get ("/pets", evil);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_FALSE (has_cors_header (*listed));
 }
 
 TEST_F (MockServerTest, CredentialedExposeHeadersNamesTheExamplesOwnHeadersNotAWildcard) {
@@ -925,27 +1023,30 @@ TEST_F (MockServerTest, CredentialedExposeHeadersNamesTheExamplesOwnHeadersNotAW
 
     MockServerManager manager;
     MockStartRequest request;
-    request.collection_id = "col_root";
-    const auto started    = manager.start (*db_, request);
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
     ASSERT_TRUE (started.ok) << started.error_message;
 
     httplib::Client client ("127.0.0.1", started.info.port);
     client.set_connection_timeout (2);
     client.set_read_timeout (5);
 
-    // Credentials mode "include" (an Origin was sent): the Fetch spec reads
-    // "*" here as the literal header name "*", not a wildcard, so a
+    // A listed origin is answered with credentials, and the Fetch spec then
+    // reads "*" here as the literal header name "*", not a wildcard, so a
     // credentialed page could read no example header at all if this stayed
     // "*" - it must name X-Custom instead.
-    const httplib::Headers with_origin = { { "Origin", "https://app.example.test" } };
-    const auto credentialed = client.Get ("/pets", with_origin);
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
+    const auto credentialed            = client.Get ("/pets", with_origin);
     ASSERT_TRUE (credentialed);
     EXPECT_EQ (credentialed->get_header_value ("Access-Control-Expose-Headers"), "X-Custom");
 
-    // No Origin: not a credentialed fetch, and the wildcard is exactly right.
+    // No Origin under a list: not a CORS request, so nothing is granted and
+    // there is no Expose-Headers to rewrite.
     const auto anonymous = client.Get ("/pets");
     ASSERT_TRUE (anonymous);
-    EXPECT_EQ (anonymous->get_header_value ("Access-Control-Expose-Headers"), "*");
+    EXPECT_FALSE (has_cors_header (*anonymous));
+    EXPECT_EQ (anonymous->get_header_value ("Vary"), "Origin");
 }
 
 TEST_F (MockServerTest, APlainOptionsWithNoPreflightHeaderIsResolvedThroughTheRouteTable) {
@@ -994,6 +1095,165 @@ TEST_F (MockServerTest, ANullOriginIsTreatedAsNonCredentialed) {
     ASSERT_TRUE (listed);
     EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), "*");
     EXPECT_FALSE (listed->has_header ("Access-Control-Allow-Credentials"));
+}
+
+TEST_F (MockServerTest, AListedOriginIsEchoedWithCredentialsOnAResponseAndAPreflight) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN, "http://localhost:5173" };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers with_origin = { { "Origin", LISTED_ORIGIN } };
+    const auto listed                  = client.Get ("/pets", with_origin);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), LISTED_ORIGIN);
+    EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (listed->get_header_value ("Vary"), "Origin");
+
+    const auto preflight = client.Options ("/pets",
+    httplib::Headers{ { "Origin", "http://localhost:5173" },
+    { "Access-Control-Request-Method", "PUT" } });
+    ASSERT_TRUE (preflight);
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"),
+    "http://localhost:5173");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "PUT");
+}
+
+// Mutation check: make apply_cors_origin echo every Origin it is sent again
+// and both halves go red.
+TEST_F (MockServerTest, AnUnlistedOriginGetsNoCorsHeaderOnAResponseOrAPreflight) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // The mock still answers - it is the browser that keeps the body from the
+    // page, because nothing grants the page's origin.
+    const httplib::Headers evil = { { "Origin", "https://evil.example" } };
+    const auto listed           = client.Get ("/pets", evil);
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200);
+    EXPECT_EQ (listed->body, R"([{"id":1}])");
+    EXPECT_FALSE (has_cors_header (*listed));
+    EXPECT_EQ (listed->get_header_value ("Vary"), "Origin");
+
+    // A preflight is still browser plumbing and still a 204, only one that
+    // grants nothing, so the browser never sends the request behind it.
+    const auto preflight = client.Options ("/pets",
+    httplib::Headers{ { "Origin", "https://evil.example" },
+    { "Access-Control-Request-Method", "POST" },
+    { "Access-Control-Request-Headers", "X-Custom-Header" } });
+    ASSERT_TRUE (preflight);
+    EXPECT_EQ (preflight->status, 204);
+    EXPECT_FALSE (has_cors_header (*preflight));
+
+    // A listed origin's subdomain or another scheme is a different origin.
+    for (const char* other : { "https://sub.app.example.test",
+         "http://app.example.test", "https://app.example.test:8443" }) {
+        const auto other_origin_res =
+        client.Get ("/pets", httplib::Headers{ { "Origin", other } });
+        ASSERT_TRUE (other_origin_res) << other;
+        EXPECT_FALSE (has_cors_header (*other_origin_res)) << other;
+    }
+}
+
+TEST_F (MockServerTest, ANullOriginIsNeverListed) {
+    // `null` cannot be configured (parse_mock_start refuses it), and an
+    // inbound `null` canonicalises to nothing, so no list can match it.
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id   = "col_root";
+    request.allowed_origins = { LISTED_ORIGIN };
+    const auto started      = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto listed = client.Get ("/pets", httplib::Headers{ { "Origin", "null" } });
+    ASSERT_TRUE (listed);
+    EXPECT_FALSE (has_cors_header (*listed));
+}
+
+TEST_F (MockServerTest, AnOriginMatchesItsListedEntryWhateverItsSpelling) {
+    seed_pet_store ();
+    const auto parsed = vayu::http::parse_mock_start (json{ { "collectionId", "col_root" },
+    { "allowedOrigins", json::array ({ "HTTPS://App.Example.Test:443" }) } });
+    ASSERT_HAS_VALUE (parsed);
+    ASSERT_EQ (parsed->allowed_origins.size (), 1u);
+    EXPECT_EQ (parsed->allowed_origins.front (), LISTED_ORIGIN);
+
+    MockServerManager manager;
+    const auto started = manager.start (*db_, *parsed);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // The request's own spelling is what is echoed: a browser compares the
+    // header byte for byte against the origin it sent.
+    for (const char* spelling :
+    { "https://app.example.test", "https://APP.example.test:443" }) {
+        const auto listed =
+        client.Get ("/pets", httplib::Headers{ { "Origin", spelling } });
+        ASSERT_TRUE (listed) << spelling;
+        EXPECT_EQ (listed->get_header_value ("Access-Control-Allow-Origin"), spelling);
+        EXPECT_EQ (
+        listed->get_header_value ("Access-Control-Allow-Credentials"), "true");
+    }
+}
+
+TEST_F (MockServerTest, StartAndListEchoTheAllowedOrigins) {
+    seed_pet_store ();
+    MockServerManager manager;
+
+    MockStartRequest open;
+    open.collection_id   = "col_root";
+    const auto open_mock = manager.start (*db_, open);
+    ASSERT_TRUE (open_mock.ok) << open_mock.error_message;
+    const auto open_wire = vayu::http::mock_server_info_json (open_mock.info);
+    ASSERT_TRUE (open_wire.contains ("allowedOrigins"));
+    EXPECT_EQ (open_wire["allowedOrigins"], json::array ());
+
+    MockStartRequest restricted;
+    restricted.collection_id   = "col_root";
+    restricted.allowed_origins = { LISTED_ORIGIN };
+    const auto restricted_mock = manager.start (*db_, restricted);
+    ASSERT_TRUE (restricted_mock.ok) << restricted_mock.error_message;
+    EXPECT_EQ (
+    vayu::http::mock_server_info_json (restricted_mock.info)["allowedOrigins"],
+    json::array ({ LISTED_ORIGIN }));
+
+    // GET /mock answers from the same record, through the same wire shape.
+    const auto listed = manager.list ();
+    ASSERT_EQ (listed.size (), 2u);
+    for (const auto& info : listed) {
+        const json expected = info.mock_id == restricted_mock.info.mock_id ?
+        json::array ({ LISTED_ORIGIN }) :
+        json::array ();
+        EXPECT_EQ (vayu::http::mock_server_info_json (info)["allowedOrigins"], expected)
+        << info.mock_id;
+    }
 }
 
 TEST_F (MockServerTest, APreflightIsExemptFromLatencyTheErrorRollAndActivity) {
