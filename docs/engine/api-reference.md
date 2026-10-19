@@ -7923,6 +7923,14 @@ crash guards, not policy: each client caps itself far lower (the load dialog
 offers `concurrency` &le; 1000; the MCP `start_load_run` tool has a
 user-settable cap in Settings).
 
+**The defaults** an absent field takes are the `run_config::DEFAULT_*`
+constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a
+constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run
+(closed loop when no `rps`/`targetRps` paces it) and 10 for an `iterations`
+run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
+`capacity` run's `duration` defaults to its own 300 s search deadline instead.
+None of them is written to the stored snapshot; only what the body carried is.
+
 **`constant_rps` needs a rate.** A `mode` of `constant_rps` with neither `rps`
 nor `targetRps` positive (`rps` is read first, and `targetRps` when `rps` is
 absent or `0`) is a `400` with `error.code` `invalid_run_config`. It used to run
@@ -8659,13 +8667,22 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these fourteen snapshot keys: `url`, `method`,
-`mode`, `duration`, `concurrency`, `startConcurrency`, `rampUpDuration`,
-`comment`, `followRedirects`, `maxRedirects`, `requestName`, `dataFileName`,
-`dataFileHash`, and `httpVersion`.
-The first thirteen are each **omitted** when absent from the snapshot (a
+**`summary`** carries exactly these sixteen snapshot keys: `url`, `method`,
+`mode`, `duration`, `concurrency`, `iterations`, `targetRps`,
+`startConcurrency`, `rampUpDuration`, `comment`, `followRedirects`,
+`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`, and
+`httpVersion`.
+The first fifteen are each **omitted** when absent from the snapshot (a
 malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
-alone is always present. `startConcurrency` and `rampUpDuration` (issue #1935)
+alone is always present. `iterations` and `targetRps` (issue #2437) are what
+the run was sent, never a default the engine filled in: an iterations run's
+request count, and a paced run's rate. `targetRps` is the one rename - the
+`POST /runs` body may name the rate `rps` or `targetRps`, the row reports it
+as `targetRps` (the value of `targetRps` when both were sent), and the
+report's `configuration` does the same. A field the run was not sent has no key
+here even though the engine ran its default (see
+[POST /runs](#post-runs)); a client that wants a default
+visible sends it. `startConcurrency` and `rampUpDuration` (issue #1935)
 are the ramp-up knobs, so only a `ramp_up` run has them, e.g.
 `"startConcurrency": 2, "rampUpDuration": "10s"` beside `"concurrency": 50`;
 they are the same two keys the report's `configuration` carries. `requestName`
@@ -8682,7 +8699,7 @@ script sandbox's `pm.info.requestName`. `dataFileName` and `dataFileHash`
 (issue #2051) name the file a single-request run's `data` rows came from, by
 display name and SHA-256 of its bytes (64 lowercase hex), never its path; a run
 sent without a file name has neither. Every run since issue #1488 adds a
-fifteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+seventeenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -8698,7 +8715,7 @@ lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
-the full `configSnapshot`, which already holds every key above. The same fourteen
+the full `configSnapshot`, which already holds every key above. The same sixteen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
 with, since both are built by one function; that row carries no
 `resultSummary`.
@@ -8706,7 +8723,7 @@ with, since both are built by one function; that row carries no
 A **collection run** (`type: "scenario"`) carries none of the single-request
 keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
 single `url`, `method` or `mode` to report. Its row instead carries a
-sixteenth key, `scenario`, present on scenario runs only:
+eighteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -8726,7 +8743,7 @@ six keys is omitted when the stored snapshot has no such key: `dataFileName` and
 `dataFileHash` (issue #2051) are the data file a run's `scenario.data` came
 from, so a run sent without one has neither.
 
-**`hasWarnings`** (issue #1527) is `summary`'s seventeenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s nineteenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
@@ -9127,6 +9144,7 @@ named it.
       "mode": "constant_rps",
       "duration": "60s",
       "concurrency": 100,
+      "targetRps": 500,
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
@@ -9535,13 +9553,15 @@ readings are served separately by
 than 0.15.0. The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
-snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
+snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`,
 `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
-each omitted when absent) plus `httpVersion`, which is always present with the
+each omitted when absent, and recording what the run was sent, never a default
+the engine filled in; issue #2437) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
 above), and `acceptEncoding` (issue #1488), read out of the snapshot's
 `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
-of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
+of the same name. `rps` in the raw snapshot is renamed to `targetRps` here
+(the value of `targetRps` when both were sent), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
 `dataFileHash` (issue #2051) the file it came from, by display name and
 SHA-256 of its bytes, never its path. A single-request run's are read off the

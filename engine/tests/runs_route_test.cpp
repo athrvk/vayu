@@ -316,6 +316,56 @@ TEST_F (RunsRouteTest, SummaryCarriesAcceptEncodingWhenSnapshotHasIt) {
     EXPECT_EQ (body["data"][2]["summary"]["acceptEncoding"], true);
 }
 
+// An iterations run's count and a paced run's rate are part of what the run
+// was, so the list row carries them (issue #2437); `rps` is the body's other
+// spelling of the rate and reads as `targetRps` in the row, as in the report.
+// Mutation check: drop `iterations` from `build_run_summary`'s key list, or the
+// `add_target_rps` call, and this reds.
+TEST_F (RunsRouteTest, SummaryCarriesIterationsAndTargetRpsUnderTheOneName) {
+    seed ({ .id = "run_iters",
+    .config_snapshot = R"({"url":"https://a/","mode":"iterations","iterations":500,"concurrency":10})" });
+    seed ({ .id = "run_target",
+    .start_time = 1,
+    .config_snapshot = R"({"url":"https://b/","mode":"constant_rps","targetRps":120})" });
+    seed ({ .id = "run_rps",
+    .start_time = 2,
+    .config_snapshot = R"({"url":"https://c/","mode":"constant_rps","rps":75.5})" });
+    seed ({ .id      = "run_both",
+    .start_time      = 3,
+    .config_snapshot = R"({"url":"https://d/","rps":10,"targetRps":20})" });
+    seed ({ .id = "run_null_rate",
+    .start_time = 4,
+    .config_snapshot = R"({"url":"https://e/","rps":null,"targetRps":null,"iterations":null})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    // Newest first: run_null_rate, run_both, run_rps, run_target, run_iters.
+    ASSERT_EQ (body["data"].size (), 5u);
+
+    const auto& nulls = body["data"][0]["summary"];
+    EXPECT_FALSE (nulls.contains ("iterations"));
+    EXPECT_FALSE (nulls.contains ("targetRps"));
+    EXPECT_FALSE (nulls.contains ("rps"));
+
+    // ASSERT before each read: operator[] on a missing key of a const json
+    // aborts the process rather than reporting a diff.
+    ASSERT_TRUE (body["data"][1]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][1]["summary"]["targetRps"], 20);
+    EXPECT_FALSE (body["data"][1]["summary"].contains ("rps"));
+
+    const auto& renamed = body["data"][2]["summary"];
+    ASSERT_TRUE (renamed.contains ("targetRps"));
+    EXPECT_EQ (renamed["targetRps"], 75.5);
+    EXPECT_FALSE (renamed.contains ("rps"));
+
+    ASSERT_TRUE (body["data"][3]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][3]["summary"]["targetRps"], 120);
+    EXPECT_FALSE (body["data"][3]["summary"].contains ("iterations"));
+
+    ASSERT_TRUE (body["data"][4]["summary"].contains ("iterations"));
+    EXPECT_EQ (body["data"][4]["summary"]["iterations"], 500);
+    EXPECT_FALSE (body["data"][4]["summary"].contains ("targetRps"));
+}
+
 // A collection run's row has no url and no method - its work is a sequence -
 // so `scenario` is the only thing on it that says what ran. The step manifest
 // itself stays off the row: it is the size of the plan, and the row is the part
@@ -1042,6 +1092,41 @@ TEST (RunReportConfigTest, CarriesTheDataFileBesideTheRowCount) {
     json::parse (R"({"mode":"once","dataRowCount":2})"));
     EXPECT_FALSE (unnamed.contains ("dataFileName"));
     EXPECT_FALSE (unnamed.contains ("dataFileHash"));
+}
+
+// An iterations run's count, beside the other tuning knobs (issue #2437).
+// Mutation check: drop `iterations` from `build_run_report_config`'s key list
+// and this reds.
+TEST (RunReportConfigTest, CarriesIterationsOnlyWhenTheSnapshotHasThem) {
+    const auto config_obj = vayu::http::routes::build_run_report_config (
+    json::parse (R"({"mode":"iterations","iterations":250,"concurrency":10})"));
+    EXPECT_EQ (config_obj.value ("iterations", 0), 250);
+    EXPECT_EQ (config_obj.value ("concurrency", 0), 10);
+
+    const auto without = vayu::http::routes::build_run_report_config (
+    json::parse (R"({"mode":"constant_concurrency"})"));
+    EXPECT_FALSE (without.contains ("iterations"));
+}
+
+// `rps` is the POST /runs body's other spelling of `targetRps`; the report
+// names the rate one way, and `targetRps` wins when both were sent.
+TEST (RunReportMetadataTest, ConfigurationNamesTheRateTargetRps) {
+    vayu::db::Run run;
+    run.config_snapshot = R"({"mode":"constant_rps","rps":40})";
+    auto configuration =
+    vayu::http::routes::build_report_metadata ("run_1", run)["configuration"];
+    EXPECT_EQ (configuration.value ("targetRps", 0), 40);
+    EXPECT_FALSE (configuration.contains ("rps"));
+
+    run.config_snapshot = R"({"mode":"constant_rps","rps":40,"targetRps":60})";
+    configuration =
+    vayu::http::routes::build_report_metadata ("run_2", run)["configuration"];
+    EXPECT_EQ (configuration.value ("targetRps", 0), 60);
+
+    run.config_snapshot = R"({"mode":"constant_concurrency"})";
+    configuration =
+    vayu::http::routes::build_report_metadata ("run_3", run)["configuration"];
+    EXPECT_FALSE (configuration.contains ("targetRps"));
 }
 
 // The budgets a run carried over rather than set (issue #2195), echoed as the
