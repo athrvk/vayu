@@ -21,6 +21,11 @@
  * enough of the protocol for these tests and no more: no CONNECT tunnelling
  * (the tunnel case here is a *refusal*, which needs no upstream at all), no
  * keep-alive reuse across targets, no authentication challenge.
+ *
+ * `MockTlsProxy` is the same forwarder behind a TLS listener, for an `https://`
+ * proxy URL (#2469). It still forwards absolute-form requests to a plain-HTTP
+ * origin and still does no CONNECT: what it exists to exercise is the handshake
+ * with the *proxy*, which is a different trust decision from the origin's.
  */
 
 #include <httplib.h>
@@ -34,21 +39,24 @@
 #include <vector>
 
 #include "task_queue.hpp"
+#include "tls_server.hpp"
 
 namespace vayu::tests {
 
-class MockProxy {
+/// The proxy behaviour both listeners below share: the CONNECT refusal, the
+/// absolute-form forward, and the record of what arrived.
+class ProxyForwarder {
     public:
-    MockProxy () {
-        svr.new_task_queue = vayu::tests::pooled_task_queue (16);
-
+    /// Wires the forwarding behaviour onto @p server, which must outlive
+    /// every request this forwarder is asked to answer.
+    void install (httplib::Server& server) {
         // CONNECT never reaches the routing table - httplib dispatches only the
         // body-carrying methods - so the tunnel case is answered here, before
         // routing. Refusing it with a 407 is exactly the shape that used to
         // surface as `INTERNAL_ERROR`: curl reports the refusal as
         // `CURLE_RECV_ERROR` and only `CURLINFO_HTTP_CONNECTCODE` remembers
         // that a proxy said no.
-        svr.set_pre_routing_handler (
+        server.set_pre_routing_handler (
         [this] (const httplib::Request& req, httplib::Response& res) {
             if (req.method != "CONNECT") {
                 return httplib::Server::HandlerResponse::Unhandled;
@@ -60,31 +68,12 @@ class MockProxy {
             return httplib::Server::HandlerResponse::Handled;
         });
 
-        svr.Get (R"(.*)", [this] (const httplib::Request& req, httplib::Response& res) {
+        server.Get (R"(.*)", [this] (const httplib::Request& req, httplib::Response& res) {
             forward (req, res);
         });
-        svr.Post (R"(.*)", [this] (const httplib::Request& req, httplib::Response& res) {
+        server.Post (R"(.*)", [this] (const httplib::Request& req, httplib::Response& res) {
             forward (req, res);
         });
-
-        port   = svr.bind_to_any_port ("127.0.0.1");
-        thread = std::thread ([this] () { svr.listen_after_bind (); });
-        svr.wait_until_ready ();
-    }
-
-    ~MockProxy () {
-        svr.stop ();
-        if (thread.joinable ())
-            thread.join ();
-    }
-    MockProxy (const MockProxy&)            = delete;
-    MockProxy& operator= (const MockProxy&) = delete;
-    MockProxy (MockProxy&&)                 = delete;
-    MockProxy& operator= (MockProxy&&)      = delete;
-
-    /// What to put in `TransportPolicy::proxy_url`.
-    std::string url () const {
-        return "http://127.0.0.1:" + std::to_string (port);
     }
 
     /// The header this proxy stamps on every response it forwards. A response
@@ -190,11 +179,117 @@ class MockProxy {
         res.set_header ("Via", VIA_VALUE);
     }
 
+    mutable std::mutex mutex;
+    std::vector<std::string> targets;
+};
+
+class MockProxy {
+    public:
+    MockProxy () {
+        svr.new_task_queue = vayu::tests::pooled_task_queue (16);
+        forwarder.install (svr);
+
+        port   = svr.bind_to_any_port ("127.0.0.1");
+        thread = std::thread ([this] () { svr.listen_after_bind (); });
+        svr.wait_until_ready ();
+    }
+
+    ~MockProxy () {
+        svr.stop ();
+        if (thread.joinable ())
+            thread.join ();
+    }
+    MockProxy (const MockProxy&)            = delete;
+    MockProxy& operator= (const MockProxy&) = delete;
+    MockProxy (MockProxy&&)                 = delete;
+    MockProxy& operator= (MockProxy&&)      = delete;
+
+    /// What to put in `TransportPolicy::proxy_url`.
+    std::string url () const {
+        return "http://127.0.0.1:" + std::to_string (port);
+    }
+
+    static constexpr const char* VIA_VALUE = ProxyForwarder::VIA_VALUE;
+
+    /// The absolute-form targets this proxy was asked for, in arrival order.
+    /// curl writes an absolute-form request line only when it is proxying, so
+    /// a non-empty list *is* the proof of traversal.
+    std::vector<std::string> seen () const {
+        return forwarder.seen ();
+    }
+
+    std::size_t count () const {
+        return forwarder.count ();
+    }
+
+    private:
+    ProxyForwarder forwarder;
     httplib::Server svr;
     std::thread thread;
     int port = 0;
-    mutable std::mutex mutex;
-    std::vector<std::string> targets;
+};
+
+/**
+ * @brief A forwarding proxy that speaks TLS to its client, its certificate
+ *        signed by @p ca and carrying an `IP:127.0.0.1` SAN (#2469).
+ *
+ * The listener is `httplib::SSLServer`, so a client that does not trust @p ca
+ * never completes the handshake and `count ()` stays 0 - the refusal is the
+ * assertion, as for `TlsServer`. The leaf names no CRL distribution point: every
+ * backend in the build is OpenSSL, which does not revocation-check unless told
+ * to (`tls_server.hpp`).
+ */
+class MockTlsProxy {
+    public:
+    explicit MockTlsProxy (const TestCertificateAuthority& ca)
+    : identity_ (ca.issue ("127.0.0.1", "IP:127.0.0.1,DNS:localhost")),
+      cert_pem_ (identity_.pem ()), key_pem_ (identity_.key_pem ()),
+      svr_ (httplib::SSLServer::PemMemory{ cert_pem_.c_str (), cert_pem_.size (),
+      key_pem_.c_str (), key_pem_.size (), nullptr, 0, nullptr }) {
+        if (!svr_.is_valid ()) {
+            tls_detail::fail ("the TLS proxy refused its own certificate");
+        }
+        svr_.new_task_queue = vayu::tests::pooled_task_queue (16);
+        forwarder_.install (svr_);
+
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+
+    ~MockTlsProxy () {
+        svr_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+    MockTlsProxy (const MockTlsProxy&)            = delete;
+    MockTlsProxy& operator= (const MockTlsProxy&) = delete;
+    MockTlsProxy (MockTlsProxy&&)                 = delete;
+    MockTlsProxy& operator= (MockTlsProxy&&)      = delete;
+
+    /// What to put in `TransportPolicy::proxy_url`.
+    std::string url () const {
+        return "https://127.0.0.1:" + std::to_string (port_);
+    }
+
+    /// The absolute-form targets this proxy was asked for, as `MockProxy::seen`.
+    std::vector<std::string> seen () const {
+        return forwarder_.seen ();
+    }
+
+    std::size_t count () const {
+        return forwarder_.count ();
+    }
+
+    private:
+    ProxyForwarder forwarder_;
+    CertificateAndKey identity_;
+    std::string cert_pem_;
+    std::string key_pem_;
+    httplib::SSLServer svr_;
+    std::thread thread_;
+    int port_ = 0;
 };
 
 } // namespace vayu::tests

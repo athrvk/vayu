@@ -123,7 +123,10 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
     "The proxy to route through when Proxy is set to Manual, written the way "
     "curl takes it: scheme://user:password@host:port. The scheme selects the "
     "kind - http, https, socks4, socks4a, socks5, socks5h - and credentials in "
-    "the URL are sent as basic proxy authentication.",
+    "the URL are sent as basic proxy authentication. An https proxy is "
+    "verified against the same trust as the target - this computer's "
+    "certificates plus Custom CA Certificates - and the same Verify TLS "
+    "certificate switch.",
     "network_performance", "", std::nullopt, std::nullopt, std::nullopt, now }));
 
     // The resolved system proxy (issue #708). Written by the app's main

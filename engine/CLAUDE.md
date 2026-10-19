@@ -815,7 +815,14 @@ logged as a warning: it means a client skipped composition.
   needs Chromium); empty there falls back to `environment`, never `off`. Add a
   transport option there, never to a driver. Every mode writes `CURLOPT_PROXY`
   because handles are reused, and `ca_bundle_path` writes `CURLOPT_CAINFO` the
-  same way, empty included. That bundle is materialised from
+  same way, empty included. The applier sets **both TLS legs** (#2469): the
+  `CURLOPT_PROXY_*` twins of CAINFO, SSL_OPTIONS, SSL_VERIFYPEER and
+  SSL_VERIFYHOST take the same values as the target's, because libcurl does not
+  inherit them, so an `https://` proxy is verified against the same trust and
+  the same `verifySSL`. Never a `CURLOPT_PROXY_SSLCERT`: the client-certificate
+  registry holds identities for origins. `curl_to_error` words a refused proxy
+  certificate as the proxy's (`CURLINFO_PROXY_SSL_VERIFYRESULT`), still
+  `SslError`. That bundle is materialised from
   `customCaCertificates` beside the database and **extends** the platform's
   trust: on an OpenSSL build CAINFO is the whole store, so the file is the
   system anchors plus the user's. A proxy-hop failure is
