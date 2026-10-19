@@ -37,6 +37,7 @@
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/ordered_json.hpp"
 #include "vayu/utils/parse.hpp"
@@ -967,9 +968,8 @@ std::string graphql_content (const json* graphql) {
             // Postman writes "" for an empty pane; Vayu omits the key entirely.
             out.erase ("variables");
         } else {
-            json parsed = json::parse (text, nullptr, false);
-            if (!parsed.is_discarded ()) {
-                out["variables"] = std::move (parsed);
+            if (auto parsed = utils::parse_ordered_json (text, utils::ORDERED_JSON_UNBOUNDED)) {
+                out["variables"] = std::move (*parsed);
             }
         }
     }
@@ -2089,9 +2089,8 @@ std::string to_graphql_envelope (const std::string& body) {
     }
     std::string trimmed =
     body.substr (begin, body.find_last_not_of (" \t\n\r\f\v") - begin + 1);
-    const json parsed = json::parse (trimmed, nullptr, false);
-    if (!parsed.is_discarded () && parsed.is_object () &&
-    as_str (prop (&parsed, "query")) != nullptr) {
+    const auto parsed = utils::parse_ordered_json (trimmed, utils::ORDERED_JSON_UNBOUNDED);
+    if (parsed && parsed->is_object () && as_str (prop (&*parsed, "query")) != nullptr) {
         return trimmed; // Already an envelope; do not double-wrap it.
     }
     return js_json_compact (json{ { "query", body } });
@@ -4224,8 +4223,12 @@ bool postman_source_stands (const nlohmann::json& auth) {
     own.erase ("postman");
     // Key order aside: both sides compare as sorted-key documents, the shape
     // the stored column and a route's parsed body already have.
-    const nlohmann::json remapped = nlohmann::json::parse (
-    postman_auth_mapping (nlohmann::ordered_json::parse (found->dump ())).dump ());
+    // `auth` is a client's, so the source block goes through the linear parser.
+    const auto source = vayu::utils::invariant_value (
+    vayu::utils::parse_ordered_json (found->dump (), vayu::utils::ORDERED_JSON_UNBOUNDED),
+    "a parsed document dumps as one strict JSON document");
+    const nlohmann::json remapped =
+    nlohmann::json::parse (postman_auth_mapping (source).dump ());
     return remapped == own;
 }
 

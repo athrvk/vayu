@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstddef>
 #include <ctime>
 #include <optional>
@@ -25,6 +26,7 @@
 #include "optional_assert.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/postman_export.hpp"
+#include "wide_json.hpp"
 
 namespace {
 
@@ -404,6 +406,24 @@ TEST (PostmanExport, GraphqlVariablesAreThePanesText) {
     ordered no_vars =
     body_of ({ { "mode", "graphql" }, { "content", R"({"query":"q"})" } });
     EXPECT_EQ (no_vars["graphql"]["variables"], "");
+}
+
+// The stored GraphQL body is the user's text; reading its envelope is a parse
+// of whatever they wrote (#2497). Mutation check: parse with
+// `nlohmann::ordered_json::parse` in `graphql_body` and this runs for minutes
+// and fails the budget.
+TEST (PostmanExport, AGraphqlVariablesObjectOfAHundredThousandMembersIsReadInLinearTime) {
+    const std::string content =
+    R"({"query":"{ me }","variables":)" + vayu::tests::wide_object_json () + "}";
+
+    const auto started = std::chrono::steady_clock::now ();
+    ordered body = body_of ({ { "mode", "graphql" }, { "content", content } });
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_EQ (body["graphql"]["query"], "{ me }");
+    EXPECT_EQ (
+    body["graphql"]["variables"].get<std::string> ().rfind ("{\n    \"k0\": 0,", 0), 0u);
 }
 
 TEST (PostmanExport, UrlencodedRowsAreTypedText) {

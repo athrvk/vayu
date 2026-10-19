@@ -16,9 +16,9 @@
  * which scans every member already read to find a repeated key, so an object of
  * n members costs O(n^2). A hundred thousand short keys is about a megabyte of
  * text and tens of seconds of one core. Every parse of text a server, an
- * imported file or a client body chose therefore goes through `parse_ordered_json`;
- * text the engine wrote itself (a stored row it serialised) may keep using
- * `ordered_json::parse`.
+ * imported file or a client body chose therefore goes through `parse_ordered_json`,
+ * a stored row included: its members are a client's. Only text the engine wrote
+ * itself, at a size no client chose, may keep using `ordered_json::parse`.
  */
 
 #include <cstddef>
