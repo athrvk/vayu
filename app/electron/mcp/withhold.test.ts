@@ -650,6 +650,48 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	describe("a base64 body (#2458)", () => {
+		// Nine zero bytes encode as twelve `A`s, so a four-character secret of
+		// base64 letters matches the encoding by coincidence alone.
+		const encoded = Buffer.alloc(9).toString("base64");
+		const coincidence: RunOutputRule = { forms: secretForms(["AAAA"]), apiKeyHeaders: [] };
+
+		test("is passed through unsearched, live and stored, so it still decodes", () => {
+			const live = { body: null, bodyRaw: encoded, bodyEncoding: "base64" };
+			const stored = { body: encoded, bodyEncoding: "base64" };
+			expect(withholdRunOutput(live, coincidence)).toEqual(live);
+			expect(withholdRunOutput(stored, coincidence)).toEqual(stored);
+			expect(atob(encoded)).toBe("\0".repeat(9));
+		});
+
+		test("leaves the rest of its record masked", () => {
+			const out = withholdRunOutput(
+				{
+					bodyRaw: encoded,
+					bodyEncoding: "base64",
+					headers: { "set-cookie": "sid=1" },
+					note: "AAAA",
+				},
+				coincidence
+			);
+			expect(out).toEqual({
+				bodyRaw: encoded,
+				bodyEncoding: "base64",
+				headers: { "set-cookie": REDACTED_MARKER },
+				note: REDACTED_MARKER,
+			});
+		});
+
+		test("is a text body's rule only when it says base64", () => {
+			for (const bodyEncoding of ["utf8", undefined]) {
+				const out = withholdRunOutput({ bodyRaw: encoded, bodyEncoding }, coincidence) as {
+					bodyRaw: string;
+				};
+				expect(out.bodyRaw).toContain(REDACTED_MARKER);
+			}
+		});
+	});
+
 	test("does not read a member named like a header set as one unless it holds headers", () => {
 		const node = { disabledSystemHeaders: ["Cookie"], headers: "Cookie: x" };
 		expect(withholdRunOutput(node, rule)).toEqual(node);
