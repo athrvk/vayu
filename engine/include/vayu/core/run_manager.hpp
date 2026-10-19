@@ -1236,6 +1236,14 @@ struct RunSummaryInputs {
     double queue_wait_avg_ms = 0.0;
     size_t bytes_sent        = 0;
     size_t bytes_received    = 0;
+    // What the run submitted, what its mode set out to submit (0 for an
+    // open-ended one), and the window it submitted in: load start to the
+    // executor's return, before the drain `test_duration_s` includes (#2392).
+    // `send_rate` divides by that window; `rps` and `throughput` divide
+    // completions by `test_duration_s`.
+    size_t requests_sent      = 0;
+    size_t requests_expected  = 0;
+    double sending_duration_s = 0.0;
     std::map<int, size_t> status_codes;
     MetricsCollector::Percentiles latency; // min/max/p50..p999, whole-run
     double latency_avg_ms = 0.0; // Mean latency; the histogram does not carry it

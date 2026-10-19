@@ -1626,4 +1626,14 @@ std::unique_ptr<LoadStrategy> LoadStrategy::create (const nlohmann::json& config
     return std::make_unique<ConstantLoadStrategy> ();
 }
 
+// Beside `create` because it reads the same mapping: a mode this file does not
+// know falls back the way `create` does.
+bool returns_at_send_deadline (const nlohmann::json& config) {
+    const auto type = parse_load_test_type (config.value ("mode", "constant_rps"));
+    if (!type) {
+        return !config.contains ("iterations");
+    }
+    return *type != LoadTestType::Iterations;
+}
+
 } // namespace vayu::core

@@ -185,7 +185,7 @@ Three things worth knowing about where it sits:
   (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
   (`POST /workspace/backup`'s `VACUUM INTO` is the one that runs on its own separate connection, since
   it writes a different file.) Nothing contends for it: `init` runs before the HTTP listener
-  starts, and the lock file has already refused a second engine.
+  starts, and the instance lock has already refused a second engine.
 - **The `VACUUM` is followed by a `wal_checkpoint(TRUNCATE)`.** Under WAL the rewritten image
   lands in the `-wal` file and the database is not resized until a checkpoint copies it back, so
   without it the pass would free every page it set out to and leave the file exactly as large as
@@ -247,7 +247,7 @@ columns dead data and the cut a real migration rather than another additive pass
 its `scriptsFoldedIntoElements` marker and its `.pre-elements-fold.bak` snapshot are gone; `PRAGMA
 user_version` is the marker now.
 
-`migrate_before_sync (path)` (`engine/src/db/db_maintenance.cpp`, declared in `database_impl.hpp`
+`migrate_before_sync (path, busy_timeout)` (`engine/src/db/db_maintenance.cpp`, declared in `database_impl.hpp`
 so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call it before *any*
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
@@ -274,7 +274,13 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
    migration without a duplicate), and write the row back. A database neither table needs folding
    for (a fresh install, or one some other path already brought to this shape) skips the backup and
    the transaction. A fold failure rolls the transaction back and throws, naming the SQLite message
-   that caused it.
+   that caused it. A refused `BEGIN IMMEDIATE` (another writer holds the lock), a refused stamp and
+   a failed `COMMIT` are treated the same way: each throws that message through the same
+   `exec_or_throw` helper (a failed `COMMIT` is rolled back first), and the stamp-only path throws
+   on a failed stamp too. The file is left as it was, scripts still in their columns and
+   `user_version` unmoved, so the next start runs the migration again. The constructor's first call
+   is unguarded and the probe's call classifies the throw as unavailable, never corrupt, so neither
+   path quarantines the file.
 3. **Stamp `user_version = SCHEMA_VERSION`.** Both writes (the no-fold path and the fold's
    commit) go through one helper, `stamp_schema_version`, so a bump of the constant is a bump of
    every stamp. Only after this returns does `sync_schema ()` see a mapping with no
@@ -1189,7 +1195,9 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
 it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
 killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
-failed and leaves `end_time` as recorded, so an unseeded row would report a duration spanning
+failed and leaves `end_time` as recorded (safe without an owner column because the engine holds
+the instance lock before the database opens, so no live engine owns the rows it meets - issue
+#2422), so an unseeded row would report a duration spanning
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
 future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
 (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
@@ -1246,6 +1254,7 @@ default, so `sync_schema()` can
 {
   "total_requests": 100, "cancelled": 0, "rps": 50.0, "send_rate": 51.0, "throughput": 49.5,
   "test_duration": 2.0, "setup_overhead": 0.25,
+  "requests_sent": 102, "requests_expected": 100, "sending_duration": 2.0,
   "peak_concurrency": 8, "dropped_requests": 2, "queue_wait_avg": 1.5,
   "bytes_sent": 1024, "bytes_received": 8192,
   "status_codes": { "200": 90, "500": 7, "0": 3 },
@@ -1289,6 +1298,18 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`requests_sent`, `requests_expected` and `sending_duration` (issue #2392) are what the run
+submitted, what its mode set out to submit (`targetRps` x `duration` for a rate-limited run, the
+iteration count for an `iterations` one, `0` for an open-ended mode), and the seconds it
+submitted in: load start to the moment it stopped submitting, before the end-of-run drain that
+`test_duration` includes. An `iterations` run that reached its own end stores its whole
+`test_duration` there instead (see the report's
+[two clocks](api-reference.md#get-runsrunidreport)). `send_rate` is `requests_sent` over
+`sending_duration`; `rps` and `throughput` stay completed requests over `test_duration`, and so
+does every threshold that reads them. A failed run stores its wall-clock `test_duration` in
+`sending_duration` too. Always written, zeros included: a summary with no `sending_duration` key
+predates the issue, and the report keeps that run's old rate-fidelity formula.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
 report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`
@@ -1700,7 +1721,10 @@ which query parameter is a credential, so a reader that masks one (the MCP serve
 go on without them. Each is **absent**, never empty, when auth wrote none of that kind and on every
 row written before #1835; the stored `url` and `rawRequest` stay raw beside them. The live
 `POST /execute` answer carries the same two keys at its top level (#1845), written by the same
-function.
+function. That function also writes **`authNotice`** (string, #2474) when the request's auth mode
+is one Vayu stores but does not execute (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`,
+`jwt`): the request went out without authentication and the notice says so, naming the mode.
+Absent when empty, on the same rule.
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `data_retention`, default 5 MiB) before storage, so downloading one 50 MB response does

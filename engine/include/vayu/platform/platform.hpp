@@ -19,6 +19,7 @@
  */
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -73,27 +74,52 @@ bool is_process_running (int pid);
 // ============================================================================
 
 /**
- * @brief Opaque handle type for file locks
- * On Windows: HANDLE, On Unix: int (file descriptor)
+ * @brief Opaque handle type for the single-instance lock
+ * On Windows: the lock file's HANDLE. On POSIX: two descriptors, the
+ * directory holding the lock file (the guard) and the lock file itself (the
+ * PID record); `directory` is -1 when the lock is `LockAcquisition::FileOnly`.
  */
 #if VAYU_PLATFORM_WINDOWS
 using LockHandle                         = void*;
 constexpr LockHandle INVALID_LOCK_HANDLE = nullptr;
 #else
-using LockHandle                         = int;
-constexpr LockHandle INVALID_LOCK_HANDLE = -1;
+struct LockHandle {
+    int directory = -1;
+    int file      = -1;
+
+    bool operator== (const LockHandle&) const = default;
+};
+constexpr LockHandle INVALID_LOCK_HANDLE{};
 #endif
 
+/// What `acquire_file_lock` holds when it returns.
+enum class LockAcquisition : std::uint8_t {
+    /// Nothing: another holder has it, or a path could not be opened.
+    Refused,
+    /// The full guard. Deleting the lock file does not release it.
+    Held,
+    /// POSIX only: the filesystem refused to lock the directory (`ENOTSUP`,
+    /// `EINVAL`, some network volumes), so only the lock file is locked and
+    /// unlinking it would let a second holder in.
+    FileOnly,
+};
+
 /**
- * @brief Acquire an exclusive lock on a file
- * @param path Path to the lock file
- * @param handle Output parameter for the lock handle
- * @return true if lock acquired successfully, false otherwise
+ * @brief Acquire the exclusive, non-blocking single-instance lock
+ * @param path Path to the lock file, created if it does not exist
+ * @param handle Output parameter for the lock handle, invalid unless held
+ * @return What is held; `Refused` leaves nothing open
  *
- * The lock file will be created if it doesn't exist.
- * The lock is exclusive and non-blocking (fails immediately if locked).
+ * POSIX: `flock` on the directory containing @p path, then on the file. The
+ * guard has to be the directory (issue #2422): a `flock` lives on an inode, so
+ * once something unlinks the file, a newcomer's `O_CREAT` makes a new inode
+ * whose lock is free. Re-checking the path's inode after locking would not
+ * help, because only the holder could run that check, never the newcomer. The
+ * file is still locked so an engine older than the directory lock, which takes
+ * only the file, and this one exclude each other. Windows: the file is opened
+ * with share mode 0, so it cannot be deleted while held, and byte-locked.
  */
-bool acquire_file_lock (const std::string& path, LockHandle& handle);
+[[nodiscard]] LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle);
 
 /**
  * @brief Write the current PID to the lock file
@@ -111,8 +137,9 @@ bool write_pid_to_lock (LockHandle handle);
 bool read_pid_from_lock (const std::string& path, int& pid);
 
 /**
- * @brief Release a previously acquired file lock
- * @param handle Lock handle from acquire_file_lock
+ * @brief Release a previously acquired file lock, the file before the
+ *        directory on POSIX
+ * @param handle Lock handle from acquire_file_lock, invalid afterwards
  */
 void release_file_lock (LockHandle& handle);
 

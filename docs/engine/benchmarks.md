@@ -353,7 +353,11 @@ constant across the comparison rather than a lever in it.
 **Pacing.** `constant_rps` runs of 20 s at 200 and 400 RPS (the `sleep_for`
 leg, below the ~500 RPS point where a tick's remainder is spun instead) and at
 1500 RPS (the spin leg, 1 ms ticks), 3 rounds, the two arms alternated within
-each round. The achieved rate is the report's `sendRate`. The spread is read
+each round. The achieved rate is the report's `sendRate`, which both engines
+divided by `testDuration`, the end-of-run drain included; against this target
+the drain is about one request's latency, milliseconds against a 20 s run, so
+the rates below sit well within 0.1% of the sending-window figure
+[#2392](https://github.com/athrvk/vayu/issues/2392) reports. The spread is read
 off the *receiving* side rather than the engine's counters: the target is the
 same 11-byte `/fast` as `scripts/test/mock-server.go` with one addition, a
 monotonic arrival timestamp per request, and the gaps between consecutive
@@ -950,7 +954,12 @@ carrying the fraction to the next tick. Rate fidelity therefore does not depend
 on the tick length (1ms above 1000 RPS, the request interval below it) - timer
 jitter is corrected on the following tick, and a rate like 1500 RPS is delivered
 as asked rather than floored to the nearest 1000. Comparing against wrk/vegeta
-at a fixed rate, `sent + dropped` should equal `targetRps × duration`.
+at a fixed rate, `sent + dropped` should equal `targetRps × duration`. The
+report's rate fidelity is that same count since
+[#2392](https://github.com/athrvk/vayu/issues/2392): `rateControl.achievement`
+is `requestsSent / requestsExpected`, with `requestsExpected` =
+`targetRps × duration`, and `sendRate` divides by the sending window, so
+neither is diluted by the drain that lets the last requests answer.
 
 **How a tick waits.** Rate fidelity is not arrival *regularity*, and the two
 have different mechanisms. Since [#1370](https://github.com/athrvk/vayu/issues/1370)

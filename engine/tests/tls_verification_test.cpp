@@ -58,16 +58,21 @@
 #include <string>
 #include <system_error>
 
+#include "echo_server.hpp"
 #include "optional_assert.hpp"
+#include "proxy_server.hpp"
 #include "temp_database.hpp"
 #include "tls_server.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/event_loop.hpp"
 #include "vayu/http/transport_policy.hpp"
 
 namespace vayu::http {
 namespace {
 
+using vayu::tests::EchoServer;
+using vayu::tests::MockTlsProxy;
 using vayu::tests::TestCertificateAuthority;
 using vayu::tests::TlsServer;
 
@@ -244,6 +249,164 @@ TEST_F (CustomCaVerificationTest, TheAddedCaExtendsTheStoreRatherThanReplacingIt
     << "a second anchor cost the first its trust: " << to_string (response.error_code)
     << ": " << response.error_message;
     EXPECT_EQ (response.status_code, 200);
+}
+
+// ---------------------------------------------------------------------------
+// An https:// proxy is verified like the origin (issue #2469)
+// ---------------------------------------------------------------------------
+
+/**
+ * The proxy's own TLS handshake, which libcurl decides with options of its own
+ * (`CURLOPT_PROXY_*`) that default to the backend's store, not to what the
+ * origin leg was given. The target here is plain HTTP on purpose: nothing but
+ * the proxy leg can fail, so a refusal is the proxy's certificate and a
+ * success went through it.
+ *
+ * Every case runs twice, once per path that applies the policy - the design
+ * send and the load `EventLoop` - because they are two call sites of the one
+ * applier and a handle built for either is a handle the user's setting has to
+ * reach.
+ */
+class ProxyTlsVerificationTest : public CustomCaVerificationTest {
+    protected:
+    /// What the settings resolve to when the proxy is the one under test: manual
+    /// mode, so the environment's own proxy cannot decide the case.
+    TransportPolicy through (const MockTlsProxy& proxy) {
+        set_config ("proxyMode", "manual");
+        set_config ("proxyUrl", proxy.url ());
+        return resolve_transport_policy (*db_);
+    }
+
+    static Request request_to (const EchoServer& echo, bool verify_ssl) {
+        Request request    = get_request (echo.url ());
+        request.verify_ssl = verify_ssl;
+        return request;
+    }
+
+    /// The design send, reported the way a transport failure arrives there.
+    static Response
+    design_send (const TransportPolicy& transport, const EchoServer& echo, bool verify_ssl) {
+        ClientConfig config;
+        config.transport = transport;
+        Client client (config);
+        auto result = client.send (request_to (echo, verify_ssl));
+        EXPECT_TRUE (result.is_ok ())
+        << "the send was never attempted: " << result.error ().message;
+        return result.is_ok () ? result.value () : Response{};
+    }
+
+    /// The same request through a load `EventLoop`, read the way the design
+    /// send is: a transport failure there is a status-0 `Response` carrying
+    /// the code, and an error arm is folded into the same shape so a case
+    /// cannot pass by failing in a different place.
+    static Response
+    load_send (const TransportPolicy& transport, const EchoServer& echo, bool verify_ssl) {
+        EventLoopConfig config;
+        config.transport = transport;
+        EventLoop loop (config);
+        loop.start ();
+        auto batch = loop.execute_batch ({ request_to (echo, verify_ssl) });
+        loop.stop ();
+        const auto& result = batch.responses.front ();
+        if (result.is_ok ()) {
+            return result.value ();
+        }
+        Response failed;
+        failed.error_code    = result.error ().code;
+        failed.error_message = result.error ().message;
+        return failed;
+    }
+
+    static void expect_proxy_certificate_refusal (ErrorCode code, const std::string& message) {
+        EXPECT_EQ (code, ErrorCode::SslError) << to_string (code) << ": " << message;
+        EXPECT_NE (message.find ("proxy's certificate"), std::string::npos)
+        << "the refusal does not say whose certificate it was: " << message;
+    }
+};
+
+TEST_F (ProxyTlsVerificationTest, ADesignSendVerifiesAnHttpsProxyAgainstThePastedCa) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+    set_custom_ca (ca.pem ());
+
+    const Response response = design_send (through (proxy), echo, true);
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "the proxy's certificate was not accepted with its CA pasted: "
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (proxy.count (), 1u) << "the request did not take the proxy";
+    EXPECT_EQ (echo.requests_seen (), 1);
+}
+
+TEST_F (ProxyTlsVerificationTest, ADesignSendRefusesAnHttpsProxyWhoseCaWasNotPasted) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+
+    const Response response = design_send (through (proxy), echo, true);
+
+    EXPECT_EQ (response.status_code, 0)
+    << "an untrusted proxy certificate was accepted";
+    expect_proxy_certificate_refusal (response.error_code, response.error_message);
+    EXPECT_EQ (proxy.count (), 0u);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+TEST_F (ProxyTlsVerificationTest, ADesignSendWithVerificationOffAcceptsAnUntrustedHttpsProxy) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+
+    const Response response = design_send (through (proxy), echo, false);
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "Verify TLS certificate is off and the proxy was still refused: "
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (proxy.count (), 1u);
+}
+
+TEST_F (ProxyTlsVerificationTest, ALoadRunVerifiesAnHttpsProxyAgainstThePastedCa) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+    set_custom_ca (ca.pem ());
+
+    const Response response = load_send (through (proxy), echo, true);
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (proxy.count (), 1u);
+}
+
+TEST_F (ProxyTlsVerificationTest, ALoadRunRefusesAnHttpsProxyWhoseCaWasNotPasted) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+
+    const Response response = load_send (through (proxy), echo, true);
+
+    EXPECT_EQ (response.status_code, 0)
+    << "an untrusted proxy certificate was accepted";
+    expect_proxy_certificate_refusal (response.error_code, response.error_message);
+    EXPECT_EQ (proxy.count (), 0u);
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+TEST_F (ProxyTlsVerificationTest, ALoadRunWithVerificationOffAcceptsAnUntrustedHttpsProxy) {
+    TestCertificateAuthority ca;
+    MockTlsProxy proxy (ca);
+    EchoServer echo;
+
+    const Response response = load_send (through (proxy), echo, false);
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (proxy.count (), 1u);
 }
 
 // ---------------------------------------------------------------------------

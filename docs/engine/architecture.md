@@ -539,8 +539,11 @@ applied to the outgoing request rather than being left to the UI. This lives in
   auth. Both `POST /execute` and `POST /runs` go through it.
 - **`auth_resolver`** (`apply_auth` / `preflight_auth` / `plan_auth_refresh`) - a
   typed `Auth` variant with an exhaustive per-mode handler: bearer/basic/api-key
-  are injected inline; `oauth2` delegates to the token client. A user-supplied
-  `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
+  are injected inline; `oauth2` delegates to the token client; a mode stored but
+  not executed (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`) sends
+  the request without auth and sets `Request::auth_notice`, which the
+  `/execute` answer and the stored trace carry as `authNotice` (#2474). A
+  user-supplied `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
   `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
   into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
@@ -1311,7 +1314,7 @@ data/
 │   ├── engine_<stamp>.log   # One file per daemon start (UTC timestamps inside, %Y%m%d_%H%M%S in the name)
 │   ├── engine_<stamp>.log.1 # The rotated half of a file that reached the size cap
 │   └── cli_<stamp>.log      # vayu-cli writes here too, under its own data directory
-└── vayu.lock            # Single-instance lock file
+└── vayu.lock            # The running engine's PID; the single-instance guard is on data/ itself (POSIX)
 ```
 
 On Linux and macOS the daemon runs `vayu::platform::prepare_data_directory`
@@ -1435,7 +1438,14 @@ record shape, the category list, the redaction rule and the file layout
   (`validate_transferable`) refuses a binary body no plan checked. A record
   of a send keeps `bodyFile {fileName, size, sha256}`, never the bytes or the
   path. See [api-reference.md](api-reference.md#file-references-binary-bodies-and-file-parts).
-- **Single instance**: File lock prevents multiple daemon instances
+- **Single instance**: one engine per data directory, held from before the
+  database opens until after it closes (`InstanceLock` in `daemon.cpp`). On
+  Linux and macOS it is a `flock` on the data directory plus one on
+  `vayu.lock`, so deleting the file does not let a second engine in (issue
+  #2422); a filesystem that cannot lock a directory falls back to the file
+  alone and logs a warning. On Windows `vayu.lock` is held with share mode 0
+  and cannot be deleted while held. See
+  [lock-file-handling.md](../lock-file-handling.md).
 - **Secret handling (v1 posture)**: auth credentials and cached OAuth 2.0 tokens
   are stored in **plaintext** in SQLite; `runs.config_snapshot` withholds the
   composed request's credentials before persistence (`auth` down to `{mode}`,
@@ -1480,7 +1490,9 @@ record shape, the category list, the redaction rule and the file layout
   of the query parameter auth appended) and `request.authHeaders`, each absent
   when auth wrote none (#1835); the live `POST /execute` answer carries the
   same two keys at its top level, so `run_request` masks what it returns by the
-  same rule (#1845). What
+  same rule (#1845). Beside them, `authNotice` says when an auth mode Vayu does
+  not execute sent the request without authentication (#2474); it carries no
+  credential and is not masked. What
   bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.
 

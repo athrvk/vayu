@@ -1460,6 +1460,7 @@ replay puts the run's recorded list back on its seeded rows.
   bodyEncoding: "utf8",
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
+  // authNotice: "auth mode 'ntlm' is not executed by Vayu; ..."  (absent here)
   clientCertificate: "",
   bodyCapped: false,
   headerLines: [{ name: "Content-Type", value: "application/json" }],
@@ -1504,6 +1505,17 @@ it is true. Load runs carry the whole-run count as
 the requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
 ([#215](https://github.com/athrvk/vayu/issues/215)).
+
+`authNotice` is the engine's sentence for a request whose auth mode it stores but
+does not execute (`digest`, `ntlm`, ...), which is sent without authentication
+(issue #2474). The key is **absent** when there is nothing to say, on the live
+body and in the stored trace alike; the trace holds it on `trace.request`, so a
+failed exchange with no `response` node still has it, and a streaming send
+carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
+both set `ResponseState.authNotice` (an empty string reads as absent), held
+together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
+warning `Callout` between the status band and the tabs, so it shows on every
+tab and on a 401 from the target, which is the response it explains.
 
 `clientCertificate` names the client-certificate registry entry the exchange
 presented, as `host` or `host:port`, and `""` when none matched (issue #707).

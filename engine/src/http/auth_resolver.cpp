@@ -253,6 +253,9 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("http",
             "apply_auth: mode '" + a.mode + "' is not executable; sending request without auth");
+            // Sent, never refused: an imported request must still run (#2474).
+            req.auth_notice = "auth mode '" +
+            a.mode + "' is not executed by Vayu; the request was sent without authentication";
             return {};
         }
     },

@@ -175,7 +175,10 @@ Electron-hosted transport each leave a `src: "mcp"` record; see
 
 Two things need the person or the client to hear from the server mid-session:
 a confirmation question before a destructive tool runs (elicitation), and word
-that `tools/list` changed when a Settings change alters it.
+that `tools/list` changed when a Settings change alters it. That is any change
+to what the list answers, not only to which tools it names: the Reveal secrets
+toggle lists the same tools and rewrites their descriptions (a tool's
+withholding pointer is dropped with it, #2441), so it fires the notice too.
 
 | Client | Confirmation question | `tools/list` changed |
 | ------ | --------------------- | -------------------- |
@@ -258,7 +261,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_collections`     | read     | `GET /collections`                           | - (secret variables and auth credentials withheld unless revealed; a declared data-file contract rides as `dataSchema: { columns, fileName, declaredAt }`; a collection with none has no `dataSchema` key, never the engine's `{}`; the file the app remembers for it rides as `dataFile: { path, fileName, hash }`, HTTP transport only - see [Data files](#data-files)) |
 | `list_requests`        | read     | `GET /requests?collectionId=`                | - (auth credentials, credential-header values, a URL's password and credential query values, and credential `params` rows withheld unless revealed) |
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
-| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
+| `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
@@ -271,9 +274,9 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
-| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
-| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
-| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
+| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
@@ -301,17 +304,17 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
-| `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the returned row has secret values withheld unless revealed |
+| `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
 | `delete_environment`   | write    | `GET /environments` (scan) + `DELETE /environments/:id` | write toggle + confirm (the prompt names the variable count) |
 | `get_globals`          | read     | `GET /globals`                               | - (answers an empty set, never a 404; secret values withheld unless revealed) |
-| `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (secret values withheld unless revealed) |
+| `resolve_variables`    | read     | `GET /globals` + `GET /collections` + `GET /environments` - composes, no single endpoint answers it | - (omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused, the rule every send follows; secret values withheld unless revealed) |
 | `update_globals`       | write    | `GET /globals` + `POST /globals` (fetch-merge) | write toggle; `POST` replaces the blob, so the read is what makes it a merge; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `get_cookies`          | read     | `GET /cookies`                               | - (values withheld unless revealed) |
 | `clear_cookies`        | write    | `DELETE /cookies[?environmentId=]`           | write toggle; omitted clears every jar, `null` the no-environment jar, an id that environment's |
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1618,6 +1621,19 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
 
 `run_request` / `start_load_run` take optional `environmentId` and
 `collectionId` to scope resolution; both are forwarded to `POST /compose`.
+Every tool that composes with an environment - those two (`start_load_run`'s
+`scenario` branch included), `run_collection`, `run_collection_smoke` and
+`get_graphql_schema` - picks it by the rule `resolve_variables` follows, in one
+helper (`resolveEnvironmentId`, issue #2480): an omitted `environmentId` is the
+**active** environment, as the app's Send does; `"none"` is no environment; and
+an id no environment has is refused with `No environment with id "<id>".`
+before anything is composed or sent, where `POST /compose` alone would degrade
+it to an empty scope and send every environment token literally. The
+environment picked is also the one the send's cookie jar, its History row and,
+with write access on, its scripts' environment writes belong to, so a call that
+names none lands in the active environment's jar and row exactly as the user's
+own Send does. `clear_cookies` keeps its own contract: omitted there means every
+jar.
 An unknown `requestId` is the engine's definitive 404, surfaced as a readable
 "no saved request with id" tool error.
 
@@ -1663,7 +1679,10 @@ variable-writing or -listing tool - `get_globals`, `update_globals`,
 `create_collection`, `update_collection` - carries one shared sentence
 (`VARIABLE_PRECEDENCE_SENTENCE`) plus that tier's own position in the order and
 a pointer to the resource; `precedenceNote()` builds both pieces from one
-place. A table-driven scan in `tools.test.ts` runs over every variable tool's
+place. The sentence is shorter than the budget guard's repetition limit on
+purpose (see [The size of `tools/list` is
+budgeted](#the-size-of-toolslist-is-budgeted)): it is the one rule restated in
+every one of those tools. A table-driven scan in `tools.test.ts` runs over every variable tool's
 description and fails on one that omits the sentence, so a new variable tool
 cannot ship silent about where its tier sits.
 
@@ -1678,6 +1697,12 @@ and a list built by skipping disabled rows could not give it. A name whose
 every definition is disabled resolves to nothing at all, not to an empty
 string: the tool reports `resolved: false` with no value, because a
 present-and-empty answer would read as a different fact.
+
+Its context is chosen the way a send's is, by the same code: an omitted
+`environmentId` is the active environment, `"none"` resolves as if none were
+active, and an id no environment has is refused. So the value
+`resolve_variables` reports for a name is the value `run_request` sends for it
+in the same context.
 
 Secret values are withheld from `resolve_variables`'s report
 (`valueWithheld: true`) the way every other read withholds them, unless the
@@ -1884,9 +1909,14 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 
 `summarize_run`, `compare_runs` and `diagnose_errors` each state the engine's one
 error definition in their text, from `error-definition.ts`'s
-`RUN_ERROR_DEFINITION_SENTENCE` (issue #2124); so do the descriptions of
-`get_live_metrics`, `compare_runs`, `get_run_report`, `get_run_timeseries`,
-`export_run_report` and the `vayu://run/{runId}/report` resource. An agent reading `errorRate` is told
+`RUN_ERROR_DEFINITION_SENTENCE` (issue #2124), and so does the
+`vayu://run/{runId}/report` resource. Of the tool descriptions only
+`get_run_report` carries the whole sentence; `get_live_metrics`,
+`compare_runs`, `get_run_timeseries` and `export_run_report` carry
+`RUN_ERROR_DEFINITION_POINTER`, one line giving the two halves of the
+definition and naming `get_run_report` for the rest, because the sentence
+repeated in five descriptions was most of what `tools/list` spent on it
+(#2441). An agent reading `errorRate` is told
 what counts: a status outside 2xx/3xx or no response, a 3xx being a success, with
 the `httpErrors` / `noResponse` split beside the count. The fields themselves are
 the engine's, passed through unchanged (see [What counts as an
@@ -1949,7 +1979,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
     - An **omitted** field is judged as the default the tool sends for it
       ([Load defaults](#load-defaults)), not as "unbounded": an omitted
       `concurrency` on a constant run is 100 virtual users, so a **Max virtual
-      users** under 100 refuses it with the same message a stated 100 gets. An
+      users** under 100 refuses it with the same message a stated 100 gets, and
+      so does an omitted `concurrency` on a `capacity` run, whose search climbs
+      to 100 (#2493). An
       omitted `duration` is the mode's default (60s, or 300s for `capacity`)
       unless `maxDurationSeconds` is shorter, in which case the cap is sent in
       its place and the run is bounded by it.
@@ -1995,8 +2027,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   that to the SDK across an upgrade. The
   server instructions say the same thing up front, in the sessions where the
   toggle is off. Withholding the schema rather than only the call is what makes
-  the toggle free: those tools are ~40% of the tool payload
-  an agent is sent, and on a default install none of them could have succeeded.
+  the toggle free: those tools are 66,077 of the 181,447 bytes (36%) of the
+  `tools/list` an agent is sent (app host, reveal off, measured at #2441), and
+  on a default install none of them could have succeeded.
   Write access is a separate grant from reveal: a script stored by a write tool
   (`create_request` / `update_request` / `create_collection` /
   `update_collection`, or an import) is not refused while reveal is off, and
@@ -2111,7 +2144,7 @@ takes the strategies' defaults, named in `run_config` and `capacity` in
 | `constant_concurrency`, `constant_rps` | 100, none when `targetRps` paces the run | - | 60s | - | - |
 | `ramp_up` | 100 | 1 | 60s | 10s | - |
 | `iterations` | 10 | - | none (never read) | - | 1000 |
-| `capacity` | the engine's own search ceiling | the engine's own | 300s | - | - |
+| `capacity` | 100, the search ceiling | the engine's own | 300s | - | - |
 
 A scenario run (`scenario`) takes its executor's own defaults
 (`execute_scenario_load`, `engine/src/core/scenario_load.cpp`): 10 virtual
@@ -2169,7 +2202,7 @@ whatever encoding it went out in; an agent reads `<redacted>` there instead:
 | ---- | --------- | ------- |
 | The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked, and a base64 body (`bodyEncoding: "base64"`, #2458) is searched as the bytes it decodes to, never as its base64 text, where a match is coincidence: each form is matched as UTF-8 bytes and as Latin-1 bytes, the marker replaces the bytes it matched, and the body is re-encoded so it still decodes (`bodySize` / `bodyBytes` keep the engine's count; a body with no match comes back unchanged) | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run` (its `mode` / `duration` echo; the projection carries no other stored text), `export_run_report` (the document text), `get_run_samples`, `list_runs`, `get_inbox_captures`, `get_mock_activity` (each entry's `path`), `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines; every row's `url` is also withheld as a saved request's is, in the table above, so a credential typed literally into it does not pass), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
 | The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list (a response's `headerLines` included) and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
-| The value of the query parameter auth wrote into the request at send time, named by the trace's `request.authQueryParam` (an OAuth 2.0 token or an API key placed in the query; the engine's raw, unencoded name), in the sibling `url` and in the request line of the sibling `rawRequest`; and the headers named by `request.authHeaders`, in the sibling `headers`, `sentHeaders` and `rawRequest` header block, beside the names above (#1835). `run_request`'s answer carries both keys at its top level (#1845), where the record has no `url` and `requestHeaders` stands for `headers` | `<redacted>` after the name | the same |
+| The value of the query parameter auth wrote into the request at send time, named by the trace's `request.authQueryParam` (an OAuth 2.0 token or an API key placed in the query; the engine's raw, unencoded name), in the sibling `url` and in the request line of the sibling `rawRequest`; and the headers named by `request.authHeaders`, in the sibling `headers`, `sentHeaders` and `rawRequest` header block, beside the names above (#1835). `run_request`'s answer carries both keys at its top level (#1845), where the record has no `url` and `requestHeaders` stands for `headers`. The `authNotice` beside them (#2474), saying an auth mode Vayu does not execute sent the request without authentication, is a plain string naming the mode, carries no credential and is not masked | `<redacted>` after the name | the same |
 | The value of a credential-named query parameter (`SENSITIVE_PARAM_NAMES`, the saved-request rule above, whole name and case-insensitive) in the `url` of a record and in the request line of a `rawRequest`, whether it was typed into the saved URL, came from a `Params` row or was written by auth: a credential that is no secret variable and no stored auth credential has no form to match, so the name is what masks it (#1909). `?api_key=LIT&page=2` reads `?api_key=<redacted>&page=2`; `api_key2`, an empty value and a lone `{{variable}}` are shown as written. Only the query between the first `?` and the first `#` is read, so a fragment parameter is not masked here | `<redacted>` after the name | every read of run output above, and `delete_run`'s confirmation prompt, whose subject line names the run by its `url` |
 | The planned run's `auth` block, composed with the stored or inherited credential in it | as a stored row's: the member dropped, `<member>Withheld: true` | `start_load_run`'s confirmation preview |
 
@@ -2185,7 +2218,8 @@ engine fetched, is masked by *where* it went instead: the stored trace names the
 query parameter (`request.authQueryParam`) and the headers
 (`request.authHeaders`) auth wrote, `run_request`'s live answer names them as
 `authQueryParam` and `authHeaders` at its top level (#1845), and the masking
-reads them per record. The
+reads them per record. `run_request` passes the engine's top-level `authNotice`
+(#2474) through as it came, unmasked. The
 parameter is matched on its whole name, case-sensitively, in the URL's query
 (between the first `?` and the first `#`) and in the request line only, as the
 engine wrote it: raw, or percent-encoded as `encode_query_component` writes a
@@ -2231,10 +2265,18 @@ carrying a withheld marker (a `<member>Withheld` member, top level, under
 `config` or in its `postman` source, or a `valueWithheld` row in that source)
 is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
-authenticate with nothing. The server instructions state the withholding in
-every session where reveal is off, beside the write gate's sentence and for the
-same reason, and each tool that carries one of the rows above says so in its
-own description. The projection lives in `withhold.ts`.
+authenticate with nothing. The server instructions state the withholding rules
+once, in full, in every session where reveal is off, beside the write gate's
+sentence and for the same reason, and the run and config resources repeat the
+rule for their own output. Each tool that carries one of the rows above gets
+one line in its own description (`withheldPointer(config, kind)` in
+`withhold.ts`: what its result reads in place of a secret, and that the
+instructions give the rules), so an agent that never reads the instructions
+still learns that the marker means "withheld", not "missing". The line is
+empty when reveal is on, and so are the instructions' rules: a session gets
+the rules exactly when its tools carry the pointer, and with reveal on no
+description says `Withheld` or `<redacted>`. The projection lives in
+`withhold.ts`.
 
 A script an agent sends is not a path: it is refused while reveal is off
 (see *Scripts an agent supplies are refused*, above). A script an agent
@@ -2289,14 +2331,14 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | ------------------ | ---------------------------------------------------------------------------- |
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing. Each takes the session's `host` so its refusal names that host's remedy. |
-| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a static description per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
+| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a description's tokens per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
 | `http-versions.ts` | The `httpVersion` value list the Zod schemas enumerate.                     |
 | `tools.ts`         | Tool registry: `TOOLS`, spread from the `tools/*.tools.ts` files in registry order, + `dispatchTool`, the one dispatch path `server.ts` and the tests share. Re-exports what callers import from `tools/`, so `./tools.js` stays the registry's one public surface. |
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
-| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. |
+| `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
 | `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
@@ -2468,9 +2510,11 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | What `sync_spec`'s safe policy declined              | no setting: a person ticks it under Collection -> Spec -> Sync in the desktop app | Collection -> Spec -> Sync |
 
 The server instructions' write and reveal gate sentences read the host the same
-way, and so do the tool, resource and prompt descriptions. A description is a
-static string built at module load, so it names its remedy with a token from
-`remedy.ts` (`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
+way, and so do the tool, resource and prompt descriptions. A description is
+built at module load or, for a tool whose wording depends on the session (the
+withholding pointer, #2441), from the config at registration; either way it
+does not know the host, so it names its remedy with a token from `remedy.ts`
+(`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
 `REVEAL_SETTING_TOKEN` ends each withheld-output sentence in `withhold.ts`, and
 the Files, authority, data-file, proxy and Sync remedies above have one each).
 `server.ts` fills the tokens in per session: the whole `tools/list` answer (a
@@ -2539,6 +2583,22 @@ serves both eras from one factory, so a 2025-era client keeps what it had and a
 [What is live on each transport](#what-is-live-on-each-transport)). A stateful
 2025-era server - real sessions, a GET stream each, servers mutated on toggle -
 is not built: it would grow the mechanism the spec retired.
+
+### The size of `tools/list` is budgeted
+
+Every session pays for the whole `tools/list` answer before it does anything,
+so its size is held by `tool-list-budget.test.ts`, which builds the real
+registry through the real server (app host) for each writes-off/on and
+reveal-off/on pair. Measured at #2441 (reveal off): 115,370 bytes with writes
+off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
+5% above the measured sizes. The same file fails on a sentence of 150 or more
+characters that more than three descriptions repeat (a rule that long belongs
+in the server instructions, with a one-line pointer in the tool: the
+withholding rules and the error definition moved that way, and
+`VARIABLE_PRECEDENCE_SENTENCE` stays under 150 so its deliberate repetition
+passes), and on any `Withheld` or `<redacted>` in a description of a session
+with reveal on. A tool that adds output schemas (#2445) or a long description
+lands under the caps or raises them in its own diff.
 
 ## Deferred
 

@@ -1420,6 +1420,13 @@ export interface RunResultTrace {
 		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
 		 */
 		bodyFile?: unknown;
+		/**
+		 * The auth mode was not executed and the request went out without
+		 * authentication - see {@link HttpResponse.authNotice} (issue #2474).
+		 * Written on the request node because it describes what was sent, so it
+		 * is present on a failed exchange (no `response` node) too.
+		 */
+		authNotice?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -2106,6 +2113,17 @@ export interface HttpResponse {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
+	 * The request's auth mode is one the engine stores but does not execute
+	 * (`digest`, `ntlm`, ...), so it was sent without authentication
+	 * (issue #2474). A sentence naming the mode, written by
+	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
+	 * key and to `trace.request.authNotice` from one place. **Absent** when
+	 * there is nothing to say - an executed mode, no auth, or an engine older
+	 * than the key - and on a streaming send, which is answered before it
+	 * exists: only its stored trace carries it.
+	 */
+	authNotice?: string;
+	/**
 	 * Which client-certificate registry entry this exchange presented, as
 	 * `host` or `host:port`; `""` when none matched (issue #707). Always
 	 * present on a live body, like `httpVersion` above and for the same reason:
@@ -2499,10 +2517,19 @@ export interface RunReport {
 		errorRate: number;
 		totalDurationSeconds: number;
 		avgRps: number;
+		/** Requests sent over `sendingDurationSeconds`, not over the drain (#2392). */
 		sendRate?: number;
+		/** Completions over the whole `testDuration`, including the end-of-run drain. */
 		throughput?: number;
 		backpressure?: number;
+		/** Load start to the last request settling: includes the drain. */
 		testDuration?: number;
+		/**
+		 * Load start to the moment the run stopped submitting, before the drain
+		 * (#2392). Absent from a run stored by an older engine, whose `sendRate`
+		 * divided by `testDuration`.
+		 */
+		sendingDurationSeconds?: number;
 		setupOverhead?: number;
 		peakConcurrency?: number;
 		droppedRequests?: number;
@@ -2550,8 +2577,13 @@ export interface RunReport {
 	};
 	rateControl?: {
 		targetRps: number;
+		/** Requests sent over the sending window (#2392). */
 		actualRps: number;
+		/** Percent: `requestsSent / requestsExpected`, or the stored formula on an older run. */
 		achievement: number;
+		/** Run totals behind `achievement`; absent from a run stored before #2392. */
+		requestsSent?: number;
+		requestsExpected?: number;
 	};
 	/**
 	 * Two independent halves, either of which can be present without the other.

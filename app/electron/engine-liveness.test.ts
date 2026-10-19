@@ -86,6 +86,13 @@ function stubProcessName(output: string) {
 	vi.mocked(execSync).mockReturnValue(output);
 }
 
+/** The name-verification subprocess cannot run: `ps` missing, `tasklist` failing. */
+function nameCheckFails() {
+	vi.mocked(execSync).mockImplementation(() => {
+		throw new Error("command not found");
+	});
+}
+
 beforeEach(() => {
 	vi.mocked(execSync).mockReset();
 	vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -101,7 +108,7 @@ describe("engine aliveness probe - the cheap half", () => {
 		stubPlatform("win32");
 		const kill = stubProcessTable({ alive: [LIVE_PID] });
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(DEAD_PID)).toBe(false);
+		expect(defaultSidecarSystem.engineProcessState(DEAD_PID)).toBe("not-engine");
 
 		// The whole point: the dominant boot case - a stale lock file - is
 		// answered by a signal-0 probe, and tasklist is never reached.
@@ -113,7 +120,7 @@ describe("engine aliveness probe - the cheap half", () => {
 		stubPlatform("linux");
 		const kill = stubProcessTable({ alive: [LIVE_PID] });
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(DEAD_PID)).toBe(false);
+		expect(defaultSidecarSystem.engineProcessState(DEAD_PID)).toBe("not-engine");
 
 		expect(kill).toHaveBeenCalledWith(DEAD_PID, 0);
 		expect(execSync).not.toHaveBeenCalled();
@@ -126,7 +133,7 @@ describe("engine aliveness probe - the cheap half", () => {
 		// A garbled or truncated lock file is the source here, and on Unix a
 		// zero or negative target is a *process group* - this app's own.
 		for (const notAPid of [0, -1, -LIVE_PID, Number.NaN, 1.5]) {
-			expect(defaultSidecarSystem.isEngineProcessAlive(notAPid)).toBe(false);
+			expect(defaultSidecarSystem.engineProcessState(notAPid)).toBe("not-engine");
 			expect(defaultSidecarSystem.killEngineProcess(notAPid)).toBe(false);
 		}
 
@@ -142,7 +149,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessName(STRANGER_ROW);
 
 		// PID reuse is the reason the subprocess exists: alive is not enough.
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(false);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("not-engine");
 		expect(execSync).toHaveBeenCalledOnce();
 		expect(vi.mocked(execSync).mock.calls[0][0]).toContain(`PID eq ${LIVE_PID}`);
 	});
@@ -152,7 +159,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessTable({ alive: [LIVE_PID] });
 		stubProcessName(ENGINE_ROW);
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("engine");
 	});
 
 	it("hides the console window the name check would otherwise flash", () => {
@@ -160,7 +167,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessTable({ alive: [LIVE_PID] });
 		stubProcessName(ENGINE_ROW);
 
-		defaultSidecarSystem.isEngineProcessAlive(LIVE_PID);
+		defaultSidecarSystem.engineProcessState(LIVE_PID);
 
 		expect(vi.mocked(execSync).mock.calls[0][1]).toMatchObject({ windowsHide: true });
 	});
@@ -170,7 +177,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessTable({ alive: [LIVE_PID] });
 		stubProcessName(NO_SUCH_TASK);
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(false);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("not-engine");
 	});
 
 	it("name-verifies a live PID off Windows", () => {
@@ -178,7 +185,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessTable({ alive: [LIVE_PID] });
 		stubProcessName("vayu-engine\n");
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("engine");
 		expect(vi.mocked(execSync).mock.calls[0][0]).toContain(`ps -p ${LIVE_PID}`);
 	});
 
@@ -188,7 +195,7 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessName("vayu-engine\n");
 
 		// EPERM says something holds the PID; only the name says whose it is.
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("engine");
 		expect(execSync).toHaveBeenCalledOnce();
 	});
 
@@ -202,19 +209,23 @@ describe("engine aliveness probe - the name half", () => {
 		stubProcessName(ENGINE_ROW);
 
 		// Reading this as "dead" would delete a live engine's lock file.
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(true);
+		expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("engine");
 		expect(execSync).toHaveBeenCalledOnce();
 	});
 
-	it("treats a name it could not read as not-the-engine", () => {
-		stubPlatform("linux");
-		stubProcessTable({ alive: [LIVE_PID] });
-		vi.mocked(execSync).mockImplementation(() => {
-			throw new Error("ps: command not found");
-		});
+	// #2422: "not-engine" here deleted a live engine's lock. Mutation check:
+	// answer "not-engine" from the name check's catch and both cases red.
+	it.each(["linux", "win32"] as const)(
+		"answers unknown, not not-the-engine, for a name it could not read on %s",
+		(platform) => {
+			stubPlatform(platform);
+			stubProcessTable({ alive: [LIVE_PID] });
+			nameCheckFails();
 
-		expect(defaultSidecarSystem.isEngineProcessAlive(LIVE_PID)).toBe(false);
-	});
+			expect(defaultSidecarSystem.engineProcessState(LIVE_PID)).toBe("unknown");
+			expect(execSync).toHaveBeenCalledOnce();
+		}
+	);
 });
 
 describe("engine kill path", () => {
@@ -234,6 +245,20 @@ describe("engine kill path", () => {
 		expect(defaultSidecarSystem.killEngineProcess(LIVE_PID)).toBe(true);
 		expect(kill).toHaveBeenCalledWith(LIVE_PID, "SIGKILL");
 	});
+
+	it.each(["linux", "win32"] as const)(
+		"never kills a live PID whose name it could not read on %s",
+		(platform) => {
+			stubPlatform(platform);
+			const kill = stubProcessTable({ alive: [LIVE_PID] });
+			nameCheckFails();
+
+			expect(defaultSidecarSystem.killEngineProcess(LIVE_PID)).toBe(false);
+			expect(kill).not.toHaveBeenCalledWith(LIVE_PID, "SIGKILL");
+			// The name check is the only subprocess: no taskkill followed it.
+			expect(execSync).toHaveBeenCalledOnce();
+		}
+	);
 
 	it("leaves a stranger on a recycled PID alone", () => {
 		stubPlatform("linux");

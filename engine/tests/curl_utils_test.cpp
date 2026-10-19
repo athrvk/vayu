@@ -459,3 +459,21 @@ TEST (CurlToError, AnUnclassifiableCodeIsStillAnInternalError) {
     EXPECT_EQ (curl_to_error (nullptr, CURLE_OUT_OF_MEMORY, errors).code,
     vayu::ErrorCode::InternalError);
 }
+
+// A verification failure with no proxy leg behind it is the target's, and its
+// message must not blame the proxy (#2469). A fresh handle reports 0 for
+// `CURLINFO_PROXY_SSL_VERIFYRESULT`, which is what a direct or http:// proxy
+// transfer reads. The positive half needs a real handshake and lives in
+// tls_verification_test.cpp (`ProxyTlsVerificationTest`).
+TEST (CurlToError, ATargetsVerificationFailureDoesNotBlameTheProxy) {
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    const vayu::http::CurlErrorBuffer errors;
+    for (CURL* handle : { static_cast<CURL*> (nullptr), curl }) {
+        const vayu::Error error =
+        curl_to_error (handle, CURLE_PEER_FAILED_VERIFICATION, errors);
+        EXPECT_EQ (error.code, vayu::ErrorCode::SslError);
+        EXPECT_EQ (error.message.find ("proxy"), std::string::npos) << error.message;
+    }
+    curl_easy_cleanup (curl);
+}

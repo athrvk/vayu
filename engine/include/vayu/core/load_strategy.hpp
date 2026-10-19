@@ -199,6 +199,21 @@ duration_field_ms (const nlohmann::json& config, const std::string& key, int64_t
 [[nodiscard]] double requested_rps (const nlohmann::json& config);
 
 /**
+ * @brief Whether the executor a run config selects returns at a submission
+ *        deadline (#2392): every mode bounded by `duration`, on either load
+ *        shape.
+ *
+ * False for `iterations`, single-request (including an unrecognised mode
+ * carrying `iterations`, which `LoadStrategy::create` reads as one) and
+ * scenario alike: that closed loop
+ * returns on its last submission while the batch before it is still in flight,
+ * so a window measured to the return counts that batch without the service
+ * time that paced every earlier one. The run's sending window is then its
+ * whole duration instead.
+ */
+[[nodiscard]] bool returns_at_send_deadline (const nlohmann::json& config);
+
+/**
  * @brief Why a run payload's top-level `elements` override cannot run, or
  *        `nullopt` if it can (issue #1495).
  *

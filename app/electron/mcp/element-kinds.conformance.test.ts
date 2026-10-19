@@ -23,7 +23,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { STATIC_RESOURCES, type ElementKindEntry } from "./resources.js";
-import { elementSchema, TOOLS, type ToolContext } from "./tools.js";
+import {
+	elementSchema,
+	resolveDescription,
+	TOOLS,
+	type McpTool,
+	type ToolContext,
+} from "./tools.js";
+import { resolveSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
 
 const [fixturePath] = ENGINE_READING_GUARDS.mcpElementKinds.paths.map(fromRepoRoot);
@@ -63,13 +70,16 @@ function kindLiteralsIn(text: string): string[] {
 	return text.match(pattern) ?? [];
 }
 
+/** @p tool's description as a default session lists it. */
+const listedText = (tool: McpTool) => resolveDescription(tool, resolveSafetyConfig());
+
 describe("every element kind a tool schema names is a real registry kind", () => {
 	test.each(
 		TOOLS.map((tool) => {
 			const fieldText = Object.values(tool.inputSchema)
 				.map((field) => field.description ?? "")
 				.join("\n");
-			const mentioned = [...new Set(kindLiteralsIn(`${tool.description}\n${fieldText}`))];
+			const mentioned = [...new Set(kindLiteralsIn(`${listedText(tool)}\n${fieldText}`))];
 			return [tool.name, mentioned] as const;
 		}).filter(([, mentioned]) => mentioned.length > 0)
 	)("%s names only kinds the registry has (%j)", (_name, mentioned) => {
@@ -98,7 +108,7 @@ describe("every element kind a tool schema names is a real registry kind", () =>
 			const fieldText = Object.values(tool.inputSchema)
 				.map((field) => field.description ?? "")
 				.join("\n");
-			return kindLiteralsIn(`${tool.description}\n${fieldText}`).length > 0;
+			return kindLiteralsIn(`${listedText(tool)}\n${fieldText}`).length > 0;
 		});
 		expect(anyMentioned).toBe(true);
 	});

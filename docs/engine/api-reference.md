@@ -933,7 +933,7 @@ reuses a pooled connection only when its proxy configuration matches.
 | Key | Default | Values | Effect |
 |-----|---------|--------|--------|
 | `proxyMode` | `environment` | `environment`, `system`, `manual`, `off` | Where the proxy comes from. `environment` is libcurl's own `http_proxy` / `https_proxy` pickup - what a terminal-launched engine already got, and what a desktop launch usually inherits nothing of. `system` uses `proxySystemUrl`, which the app resolves from the operating system. `manual` uses `proxyUrl`. `off` sends direct and **also** disables the environment pickup. |
-| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. |
+| `proxyUrl` | `""` | curl-shaped URL | The proxy for `manual` mode: `scheme://user:password@host:port`. The scheme selects the kind (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`, `socks5t`); a scheme-less `host:port` means `http://`. Credentials in the URL become basic proxy authentication. An `https` proxy is verified against the same trust as the target (the platform's anchors plus `customCaCertificates`) and the request's `verifySSL` - see [TLS trust settings](#tls-trust-settings). |
 | `proxySystemUrl` | `""` | curl-shaped URL | The proxy for `system` mode, **written by the app, not typed by the user**. The Electron main process resolves the OS proxy through Chromium and stores the answer here at startup, when the machine wakes, and when the renderer sees the network change. Empty means nothing resolved - see the fallback below. Validated exactly as `proxyUrl` is, under every mode. |
 | `proxyBypass` | `""` | comma-separated hosts | Hosts that skip the proxy, passed to curl's `NOPROXY` verbatim: a leading dot matches a domain and everything under it, a single `*` bypasses everything. |
 
@@ -1133,6 +1133,18 @@ all keep the code they had (issue #802).
 Per-request, `verifySSL: false` turns verification off for one endpoint
 entirely (see [POST /execute](#post-execute)); trusting the authority here is
 the answer that keeps verification on everywhere else.
+
+**An `https://` proxy is a second TLS handshake with the same trust.** libcurl
+decides the proxy's certificate with options of its own
+(`CURLOPT_PROXY_CAINFO`, `CURLOPT_PROXY_SSL_OPTIONS`,
+`CURLOPT_PROXY_SSL_VERIFYPEER` / `_VERIFYHOST`) that do not inherit what the
+target's handshake was given, so the engine writes each of them from the same
+values as its target-side twin: a proxy whose certificate a pasted authority
+signed verifies, and `verifySSL: false` covers the proxy leg as well as the
+target. No client certificate from the registry is ever offered to a proxy - an
+entry names a host the user trusts with that identity, and a proxy is not it. A
+proxy certificate that is refused is an `SSL_ERROR` whose message says the
+*proxy's* certificate was not accepted, so the target's is not blamed.
 
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
@@ -5316,6 +5328,7 @@ hits the wire:
 | `basic` | `Authorization: Basic <base64(user:pass)>` |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
+| any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
 **When it is applied.** As the request is built, before any pre-request script
 runs - so the script's `pm.request` holds the header - unless a credential
@@ -5625,7 +5638,10 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   before resolution - how an override like "retarget this saved request at
   another URL" works. Given alone, `collectionId` scopes the variable chain and
   the `inherit` walk. Unknown scope ids degrade to an empty scope rather than
-  erroring - composition works with no collection or environment at all.
+  erroring - composition works with no collection or environment at all. That
+  rule is for the app and direct callers: the MCP server checks an
+  `environmentId` against `GET /environments` before composing and refuses one
+  that names no environment ([MCP](mcp.md)).
 
 #### Query encoding
 
@@ -6638,6 +6654,22 @@ before the field; the values beside them stay raw. A streaming send answers
 `202` before any of this exists, so only its stored trace carries them. A
 pre-request script that retargets the URL can leave `authQueryParam` naming a
 parameter the final URL no longer carries.
+
+**And they say when auth was not sent at all** (#2474): `authNotice`, a plain
+string, appears when the request's `auth.mode` is one the engine stores but does
+not execute (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`; an
+import can bring any of them in). The request is still sent, without
+authentication, and the notice says so, naming the mode:
+
+```json
+"authNotice": "auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication"
+```
+
+It follows the same rules as the two keys above: one writer for both homes,
+**absent** when empty (every executed mode, and no auth), absent on rows
+written before the field, and on a streaming send only in the stored trace.
+A collection run's stored step traces carry it through the same trace writer;
+a load run sends such a request the same way and raises no run warning for it.
 
 **`consoleLogs` entries carry their own source and level.** `source` is which of
 the request's two scripts wrote the line (`"pre"` for the pre-request script,
@@ -8545,7 +8577,11 @@ Until then the run is still setting up, and every frame carries
 by it. The last frame, published just after load ends, therefore reads within
 a fraction of a second of the report's `testDuration`. An engine older than that issue
 counted from when the run was registered, so a slow setup ran its live clock
-ahead of the report and dragged the rates down.
+ahead of the report and dragged the rates down. The last frame's `sendRate` is
+still not the report's: the report divides requests sent by the sending
+window, which ends before the end-of-run drain, where a live frame divides by
+everything elapsed so far ([`GET /runs/:runId/report`](#get-runsrunidreport),
+issue #2392).
 
 **A scenario run streams `step` events instead of `metrics` ticks.** One per
 step execution, on the same ring and the same monotonic `id:` numbering, so
@@ -9315,7 +9351,7 @@ named it.
       "mode": "constant_rps",
       "duration": "60s",
       "concurrency": 100,
-      "targetRps": 500,
+      "targetRps": 100,
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
@@ -9338,26 +9374,28 @@ named it.
     "noResponseRequests": 0,
     "cancelledRequests": 0,
     "errorRate": 0.5,
-    "totalDurationSeconds": 60.0,
-    "avgRps": 100.0,
-    "testDuration": 60.0,
+    "totalDurationSeconds": 60.4,
+    "avgRps": 99.34,
+    "testDuration": 60.4,
     "sendRate": 100.0,
-    "throughput": 99.5,
+    "throughput": 99.34,
     "setupOverhead": 0.12,
     "peakConcurrency": 100,
     "droppedRequests": 0,
     "avgQueueWaitMs": 0.4,
     "bytesSent": 192000,
     "bytesReceived": 7680000,
-    "throughputBytesPerSec": 128000,
-    "httpVersionDowngraded": 0
+    "throughputBytesPerSec": 127152.32,
+    "httpVersionDowngraded": 0,
+    "sendingDurationSeconds": 60.0
   },
   "latency": {
     "min": 12.3, "max": 1250.5, "avg": 42.1, "median": 38.5,
     "p50": 38.5, "p75": 45.2, "p90": 78.3, "p95": 95.1, "p99": 156.7, "p999": 450.2
   },
   "statusCodes": [[200, 5970], [500, 30]],
-  "rateControl": { "targetRps": 100, "actualRps": 99.5, "achievement": 99.5 },
+  "rateControl": { "targetRps": 100, "actualRps": 100.0, "achievement": 100.0,
+                   "requestsSent": 6000, "requestsExpected": 6000 },
   "errors": {
     "total": 30,
     "withDetails": 30,
@@ -9440,6 +9478,37 @@ named it.
   "resultsCap": 100
 }
 ```
+
+**Two clocks, and which rate reads which** (issue #2392). `testDuration` (and
+`totalDurationSeconds`, the same figure) is the wall time from load start - the
+instant of the first submission - to the last request settling, so it includes
+the end-of-run drain, in which requests still in flight at the deadline are let
+answer (up to their `timeout` plus a grace). `avgRps` and `throughput` are
+completed requests over that wall time: they describe what the target served,
+and a run whose requests outlive its deadline reads below its target there by
+design. `sendRate` and `rateControl` describe what the generator sent, and
+divide by `sendingDurationSeconds`: load start to the moment the run stopped
+submitting, before the drain. `rateControl.achievement` is
+`requestsSent / requestsExpected x 100`, the pacer's own count with
+`requestsExpected` = `targetRps` x `duration`, and `rateControl.actualRps` is
+`requestsSent / sendingDurationSeconds`. `rateControl.requestsSent` and
+`requestsExpected` are the run totals behind the live `metrics` frame's fields of
+the same name. A shortfall there is not only a slow generator: a request
+dropped at the `maxInFlight` cap (`droppedRequests`) was never sent, and a Stop
+ends the sending early, so a stopped run's achievement is the share of its plan
+it reached. The app's live Rate fidelity card instead divides by what the
+target owed up to now (`targetRps` times the time spent sending, capped at the
+duration), so on a Stop it reads the pace and the stored report reads the plan.
+
+An `iterations` run, single-request or scenario, is the one exception: its
+loop returns on its last submission with the batch before it still in flight,
+so a window measured to that point would overstate the rate it sustained. Its
+`sendingDurationSeconds` is its whole `testDuration`, unless a Stop ended it,
+in which case the measured window stands. A run stored before issue #2392 has
+neither `sendingDurationSeconds` nor the two counts: its `sendRate` divided by
+`testDuration`, and its `rateControl` keeps the formula it was stored with,
+`actualRps` the completed rate and `achievement` = `actualRps / targetRps x
+100`.
 
 **`statusCodes` and `errors.byStatusCode` are `[[code, count], ...]` pairs** on
 the wire, in ascending code order, not objects: each is a `std::map<int,

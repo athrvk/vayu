@@ -10,7 +10,8 @@
  * @brief The live `POST /execute` answer carries which parts of the request
  *        auth wrote (#1845), the twin of the stored trace's
  *        `request.authQueryParam` / `request.authHeaders`
- *        (`execution_trace_test.cpp`, #1835).
+ *        (`execution_trace_test.cpp`, #1835), and `authNotice` when the auth
+ *        mode was not executed at all (#2474).
  *
  * A reader that masks the answer (the MCP server's `run_request`) cannot tell
  * an engine-placed credential from any other query parameter by looking at
@@ -110,6 +111,36 @@ class ExecuteAuthProvenanceTest : public ::testing::Test {
         return json::parse (response->body, nullptr, false);
     }
 
+    /// The stored trace of the one result this test's one send wrote.
+    json stored_trace () const {
+        const auto runs = db_->get_all_runs ();
+        if (runs.size () != 1) {
+            ADD_FAILURE () << "expected one run, found " << runs.size ();
+            return json::object ();
+        }
+        const auto results = db_->get_results (runs.front ().id);
+        if (results.size () != 1) {
+            ADD_FAILURE () << "expected one result, found " << results.size ();
+            return json::object ();
+        }
+        return json::parse (results.front ().trace_data, nullptr, false);
+    }
+
+    /// Send with an auth block in @p mode, which Vayu stores but does not
+    /// execute, and expect it on the wire bare and named in both records.
+    void expect_sent_without_auth (const std::string& mode) const {
+        const vayu::tests::EchoServer echo;
+        const auto answer = execute (echo,
+        { { "mode", mode }, { "username", "user" }, { "password", "pass" } });
+
+        EXPECT_FALSE (echo.has_header ("Authorization"));
+        const std::string notice = answer.value ("authNotice", "");
+        EXPECT_NE (notice.find ("'" + mode + "'"), std::string::npos) << answer.dump ();
+        const json trace = stored_trace ();
+        ASSERT_TRUE (trace.contains ("request")) << trace.dump ();
+        EXPECT_EQ (trace.at ("request").value ("authNotice", ""), notice);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     httplib::Server svr_;
     std::thread thread_;
@@ -160,6 +191,7 @@ TEST_F (ExecuteAuthProvenanceTest, ASendWithNoAuthAnswersNeitherKey) {
     ASSERT_TRUE (answer.contains ("rawRequest")) << answer.dump ();
     EXPECT_FALSE (answer.contains ("authQueryParam")) << answer.dump ();
     EXPECT_FALSE (answer.contains ("authHeaders")) << answer.dump ();
+    EXPECT_FALSE (answer.contains ("authNotice")) << answer.dump ();
 }
 
 // A bearer token is a header auth wrote, but not one `apply_auth` names: the
@@ -170,6 +202,22 @@ TEST_F (ExecuteAuthProvenanceTest, ABearerTokenRecordsNoProvenance) {
 
     EXPECT_FALSE (answer.contains ("authQueryParam")) << answer.dump ();
     EXPECT_FALSE (answer.contains ("authHeaders")) << answer.dump ();
+    EXPECT_FALSE (answer.contains ("authNotice")) << answer.dump ();
+    const json trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("request")) << trace.dump ();
+    EXPECT_FALSE (trace.at ("request").contains ("authNotice")) << trace.dump ();
+}
+
+// #2474: a mode Vayu does not execute is sent without auth, and both the live
+// answer and the stored trace say so. Mutation checks: drop the `auth_notice`
+// assignment in `apply_auth`, or the `authNotice` write in
+// `record_auth_provenance`, and these red.
+TEST_F (ExecuteAuthProvenanceTest, AnNtlmSendSaysItWentWithoutAuth) {
+    expect_sent_without_auth ("ntlm");
+}
+
+TEST_F (ExecuteAuthProvenanceTest, ADigestSendSaysItWentWithoutAuth) {
+    expect_sent_without_auth ("digest");
 }
 
 // --- auth applied after the pre-request script (#2473) ----------------------

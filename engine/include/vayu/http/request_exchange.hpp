@@ -156,12 +156,13 @@ nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response);
 
 /**
- * Record which parts of @p request `apply_auth` wrote onto @p node, the two
- * keys a reader that masks credentials cannot recover from the URL or the
- * header set (#1835): `authQueryParam` (the raw name of the query parameter)
- * and `authHeaders` (the header names). Each is omitted when auth wrote none of
- * that kind - unlike `serialize (Response)`'s always-present fields - and a
- * reader treats absent as "nothing written".
+ * Record what `apply_auth` did to @p request onto @p node: the two keys a
+ * reader that masks credentials cannot recover from the URL or the header set
+ * (#1835), `authQueryParam` (the raw name of the query parameter) and
+ * `authHeaders` (the header names), and `authNotice`, the sentence saying the
+ * auth mode was not executed and the request went without it (#2474). Each is
+ * omitted when empty - unlike `serialize (Response)`'s always-present fields -
+ * and a reader treats absent as "nothing written".
  *
  * One writer, two homes: `build_result_trace` calls it on the trace's `request`
  * node, and `POST /execute` calls it on the top level of its answer (#1845), so

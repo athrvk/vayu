@@ -26,6 +26,14 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 	const mode = resolveMode(cfg.mode);
 	const targetRps = report.rateControl?.targetRps ?? cfg.targetRps;
 	const actualRps = report.rateControl?.actualRps ?? s.avgRps;
+	// The report's own percentage when it has one, so this card and the History
+	// tile state one definition (#2392); a report without `rateControl` is
+	// judged by the ratio the card always drew.
+	const rateAchievementPct =
+		report.rateControl?.achievement ??
+		(targetRps && targetRps > 0 && actualRps !== undefined
+			? (actualRps / targetRps) * 100
+			: undefined);
 	const peak = s.peakConcurrency ?? 0;
 	const duration = s.testDuration ?? s.totalDurationSeconds ?? 0;
 
@@ -34,6 +42,7 @@ export function reportToDerived(report: RunReport): DashboardDerived {
 		isCompleted: true,
 		targetRps,
 		actualRps,
+		rateAchievementPct,
 		sendRate: s.sendRate,
 		throughput: s.throughput,
 		currentRps: actualRps ?? 0,

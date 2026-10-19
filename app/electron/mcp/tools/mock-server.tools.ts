@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { runOutputShape, WITHHELD_MOCK_ACTIVITY_SENTENCE } from "../withhold.js";
+import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import { callEngine, engineErrorResult, jsonResult, requireStr, withCaveat } from "./kit.js";
 import { mockServerCaveat, mockServerStartPayload } from "./mock-server.js";
@@ -124,9 +124,9 @@ export const MOCK_SERVER_TOOLS: McpTool[] = [
 		name: "get_mock_activity",
 		category: "read",
 		invalidates: [],
-		description:
-			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty. " +
-			WITHHELD_MOCK_ACTIVITY_SENTENCE,
+		description: (config) =>
+			"What one mock server has served, newest first: method, path, the matched request and example (or unmatched/no-example), status, and whether the response was an injected failure. Discarded when the mock stops, like get_mock_routes' table - a fresh get_mock_activity right after start_mock_server is always empty." +
+			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get mock server activity",
 			readOnlyHint: true,

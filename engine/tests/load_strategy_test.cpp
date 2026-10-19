@@ -1346,6 +1346,22 @@ TEST_F (LoadStrategyTest, CapacityModeIsSelectedByTheFactory) {
     EXPECT_STREQ (vayu::to_string (vayu::LoadTestType::Capacity), "capacity");
 }
 
+// #2392: only an `iterations` run is denied its measured sending window, and an
+// unrecognised mode falls back exactly as `create` does.
+TEST (ReturnsAtSendDeadline, IsFalseOnlyForAnIterationsRun) {
+    using vayu::core::returns_at_send_deadline;
+    for (const char* mode : { "constant_rps", "constant_concurrency", "ramp_up", "capacity" }) {
+        EXPECT_TRUE (returns_at_send_deadline ({ { "mode", mode } })) << mode;
+    }
+    EXPECT_FALSE (returns_at_send_deadline ({ { "mode", "iterations" } }));
+    EXPECT_FALSE (returns_at_send_deadline (
+    { { "mode", "iterations" }, { "scenario", { { "source", "collection" } } } }));
+    EXPECT_TRUE (returns_at_send_deadline (nlohmann::json::object ()));
+    EXPECT_FALSE (
+    returns_at_send_deadline ({ { "mode", "legacy" }, { "iterations", 10 } }));
+    EXPECT_TRUE (returns_at_send_deadline ({ { "mode", "legacy" } }));
+}
+
 // A 500ms endpoint cannot meet a 100ms p99 at any concurrency, so the search
 // gives up at its very first level - and says so with the level that breached,
 // not with a headline it never measured.

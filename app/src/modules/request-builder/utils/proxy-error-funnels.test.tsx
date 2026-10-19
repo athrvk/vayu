@@ -102,6 +102,19 @@ describe("the response pane", () => {
 		expect(screen.getByText(/Custom CA Certificates/)).toBeInTheDocument();
 		expect(screen.getByText(/Verify TLS certificate/)).toBeInTheDocument();
 	});
+
+	it("says an https proxy's certificate answers to the same two settings", () => {
+		// The engine's verdict on a proxy certificate is the same SSL_ERROR code,
+		// so the hint is where a reader learns the proxy is covered too (#2469).
+		render(
+			<ClientErrorView
+				errorCode="SSL_ERROR"
+				errorMessage="The proxy's certificate was not accepted"
+			/>
+		);
+
+		expect(screen.getByText(/https proxy's own certificate is checked/)).toBeInTheDocument();
+	});
 });
 
 // The redirect-loop and content-encoding codes (#2462) take the same two

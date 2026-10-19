@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <set>
 #include <sstream>
@@ -32,6 +33,14 @@
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::db {
+
+// Defined in src/db/db_maintenance.cpp and declared in the internal
+// `database_impl.hpp`, which `db_layout_test.cpp` keeps out of tests; the
+// `on_connection` seam is the reason this one is called directly.
+void migrate_before_sync (const std::string& path,
+std::chrono::milliseconds busy_timeout,
+const std::function<void (sqlite3*)>& on_connection);
+
 namespace {
 constexpr const char* TEST_DB_PATH = "test_vayu.db";
 
@@ -2213,6 +2222,156 @@ TEST_F (DatabaseTest, MigratesPreCutoverScriptColumnsIntoElements) {
     EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
     EXPECT_EQ (elements[1]["kind"], "script.post");
     EXPECT_EQ (elements[1]["config"]["script"], "pm.test('ok', () => {});");
+}
+
+namespace {
+
+/// A commit hook that refuses every commit: SQLite turns the `COMMIT` (and an
+/// autocommit write) into a rollback and reports `SQLITE_CONSTRAINT`.
+int refuse_every_commit (void*) {
+    return 1;
+}
+
+/// Records each statement the connection starts, so a test can say which
+/// ones never ran.
+int record_statement (unsigned, void* context, void*, void* statement_sql) {
+    static_cast<std::vector<std::string>*> (context)->emplace_back (
+    static_cast<const char*> (statement_sql));
+    return 0;
+}
+
+/// A version-0 workspace the way an engine older than #1514 left it: the
+/// legacy script columns back on both tables and a script on `req_1`.
+void seed_unmigrated_script_row () {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+        Collection col;
+        col.id    = "col_1";
+        col.name  = "C";
+        col.order = 0;
+        db.create_collection (col);
+        Request r;
+        r.id            = "req_1";
+        r.collection_id = "col_1";
+        r.name          = "R";
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test";
+        r.order         = 0;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db.save_request (r);
+    }
+    add_legacy_script_columns (TEST_DB_PATH);
+    set_legacy_scripts (TEST_DB_PATH, "requests", "req_1",
+    "pm.environment.set('x', 1);", "pm.test('ok', () => {});");
+    set_user_version (TEST_DB_PATH, 0);
+}
+
+/// `req_1`'s legacy `pre_request_script`, read straight from the file.
+std::string read_legacy_pre_script () {
+    sqlite3* handle = nullptr;
+    EXPECT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+    sqlite3_stmt* stmt = nullptr;
+    EXPECT_EQ (sqlite3_prepare_v2 (handle, "SELECT pre_request_script FROM requests WHERE id = 'req_1'",
+               -1, &stmt, nullptr),
+    SQLITE_OK);
+    std::string script;
+    if (sqlite3_step (stmt) == SQLITE_ROW) {
+        script = vayu::db::column_text (stmt, 0);
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return script;
+}
+
+} // namespace
+
+// A failed COMMIT must refuse the start with the scripts still in the file:
+// the next `sync_schema ()` drops the columns, so a migration that returned
+// normally would leave them nowhere but the unvalidated pre-migration copy.
+// Mutation check: drop the result of the `COMMIT` in `apply_migration_rows`
+// and the throw never comes.
+TEST_F (DatabaseTest, AFailedCommitDuringTheScriptFoldRefusesAndKeepsTheScripts) {
+    seed_unmigrated_script_row ();
+
+    EXPECT_THROW (
+    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
+    [] (sqlite3* connection) {
+        sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
+    }),
+    std::runtime_error);
+
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 0);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    EXPECT_EQ (read_legacy_pre_script (), "pm.environment.set('x', 1);");
+
+    // The file is as the failed start found it, so the next start folds.
+    Database retry (TEST_DB_PATH);
+    retry.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    auto folded = retry.get_request ("req_1");
+    ASSERT_HAS_VALUE (folded);
+    const auto elements = nlohmann::json::parse (folded->elements);
+    ASSERT_EQ (elements.size (), 2u) << folded->elements;
+    EXPECT_EQ (elements[0]["config"]["script"], "pm.environment.set('x', 1);");
+}
+
+// A `BEGIN IMMEDIATE` another writer blocks must refuse before a row is
+// touched. The statement log is what tells that apart from a fold whose
+// first `UPDATE` hits the same lock: both throw, only the second ran one.
+// Mutation check: drop the result of the `BEGIN IMMEDIATE` and the log holds
+// an `UPDATE`.
+TEST_F (DatabaseTest, AFailedBeginRefusesBeforeTouchingRows) {
+    seed_unmigrated_script_row ();
+
+    sqlite3* holder = nullptr;
+    ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &holder), SQLITE_OK);
+    ASSERT_EQ (sqlite3_exec (holder, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr), SQLITE_OK);
+
+    std::vector<std::string> statements;
+    EXPECT_THROW (
+    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
+    [&statements] (sqlite3* connection) {
+        sqlite3_trace_v2 (connection, SQLITE_TRACE_STMT, record_statement, &statements);
+    }),
+    std::runtime_error);
+    sqlite3_exec (holder, "ROLLBACK;", nullptr, nullptr, nullptr);
+    sqlite3_close (holder);
+
+    const auto began = std::ranges::count_if (statements,
+    [] (const std::string& sql) { return sql.starts_with ("BEGIN IMMEDIATE"); });
+    EXPECT_EQ (began, 1) << "the refusal did not come from the BEGIN";
+    for (const auto& sql : statements) {
+        EXPECT_FALSE (sql.starts_with ("UPDATE")) << "a row was written: " << sql;
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 0);
+    EXPECT_TRUE (table_has_column (TEST_DB_PATH, "requests", "pre_request_script"));
+    EXPECT_EQ (read_legacy_pre_script (), "pm.environment.set('x', 1);");
+}
+
+// The stamp-only branch has no transaction of its own to fail at COMMIT: a
+// stamp SQLite refuses must still throw, or the version never moves and
+// every start re-runs the plan. Mutation check: drop the result in
+// `stamp_schema_version`.
+TEST_F (DatabaseTest, AFailedStampOnTheStampOnlyBranchThrows) {
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    set_user_version (TEST_DB_PATH, 2);
+
+    EXPECT_THROW (
+    vayu::db::migrate_before_sync (TEST_DB_PATH, std::chrono::milliseconds (50),
+    [] (sqlite3* connection) {
+        sqlite3_commit_hook (connection, refuse_every_commit, nullptr);
+    }),
+    std::runtime_error);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 2);
+
+    Database retry (TEST_DB_PATH);
+    retry.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
 }
 
 // A database the additive #1513 repair pass already folded (elements already

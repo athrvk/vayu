@@ -96,6 +96,62 @@ describe("reportToDerived", () => {
 		expect(d.breakpoint.sloMs).toBeNull(); // a report holds no per-tick series, so no SLO was judged
 	});
 
+	describe("rate fidelity (#2392)", () => {
+		// Completions over the whole wall time (drain included) read 195 here; the
+		// generator sent every request it owed, over the sending window.
+		const sentAll: RunReport["rateControl"] = {
+			targetRps: 200,
+			actualRps: 200,
+			achievement: 100,
+			requestsSent: 600,
+			requestsExpected: 600,
+		};
+
+		it("takes the rate and the percentage from the sending window's figures", () => {
+			const d = reportToDerived(baseReport({ rateControl: sentAll }));
+
+			expect(d.actualRps).toBe(200);
+			expect(d.rateAchievementPct).toBe(100);
+			// The completions-over-wall-time figures stay what they were.
+			expect(d.throughput).toBe(190);
+		});
+
+		it("keeps a report stored before the counts on its stored rate and percentage", () => {
+			const d = reportToDerived(
+				baseReport({ rateControl: { targetRps: 200, actualRps: 192, achievement: 96 } })
+			);
+
+			expect(d.actualRps).toBe(192);
+			expect(d.rateAchievementPct).toBe(96);
+		});
+
+		it("falls back to average rps over the target for a report with no rateControl", () => {
+			const d = reportToDerived(baseReport({ rateControl: undefined }));
+
+			expect(d.targetRps).toBe(200);
+			expect(d.actualRps).toBe(195);
+			expect(d.rateAchievementPct).toBeCloseTo(97.5);
+		});
+
+		it("has no percentage when there is no target to be a share of", () => {
+			const d = reportToDerived(
+				baseReport({
+					rateControl: undefined,
+					metadata: {
+						runId: "r4",
+						runType: "load",
+						status: "completed",
+						startTime: 0,
+						endTime: 1,
+						configuration: { mode: "constant_concurrency", concurrency: 10 },
+					},
+				})
+			);
+
+			expect(d.rateAchievementPct).toBeUndefined();
+		});
+	});
+
 	it("shows the dropped card only when a rate-limited run actually dropped requests", () => {
 		expect(reportToDerived(baseReport()).showDropped).toBe(false); // 0 drops
 		const withDrops = baseReport({

@@ -388,6 +388,7 @@ export default function LoadTestDashboard() {
 					targetRps={loadTestConfig?.targetRps}
 					concurrency={loadTestConfig?.concurrency}
 					mode={loadTestConfig?.mode}
+					runDurationSeconds={durationSeconds(loadTestConfig?.duration) ?? undefined}
 					rampConfig={rampConfig}
 				/>
 			</div>
