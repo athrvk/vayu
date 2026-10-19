@@ -2664,6 +2664,60 @@ std::initializer_list<const char*> request_ids) {
     return out;
 }
 
+/// Every row @p sql answers on @p handle, its columns joined by `|`, SQL NULL
+/// spelled `NULL` so it cannot read as an empty default.
+std::vector<std::string> pragma_rows (sqlite3* handle, const std::string& sql) {
+    std::vector<std::string> rows;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << sql << ": " << sqlite3_errmsg (handle);
+        return rows;
+    }
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        std::string row;
+        for (int i = 0; i < sqlite3_column_count (stmt); ++i) {
+            const auto* text = vayu::db::column_text (stmt, i);
+            row += (i == 0 ? "" : "|") + std::string (text != nullptr ? text : "NULL");
+        }
+        rows.push_back (std::move (row));
+    }
+    sqlite3_finalize (stmt);
+    return rows;
+}
+
+/// @p table as SQLite describes it: each column from `PRAGMA table_xinfo`
+/// (name, type, NOT NULL, default, key, hidden), then each index as its
+/// uniqueness, origin, partiality and columns, sorted, without the names
+/// SQLite numbers for itself.
+std::vector<std::string> table_shape (const std::string& path, const std::string& table) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "cannot open " << path;
+        sqlite3_close (handle);
+        return {};
+    }
+    std::vector<std::string> shape =
+    pragma_rows (handle, "PRAGMA table_xinfo(\"" + table + "\")");
+    std::vector<std::string> indexes;
+    for (const std::string& entry :
+    pragma_rows (handle, "PRAGMA index_list(\"" + table + "\")")) {
+        // seq|name|unique|origin|partial
+        const auto after_seq  = entry.find ('|') + 1;
+        const auto after_name = entry.find ('|', after_seq);
+        const std::string name = entry.substr (after_seq, after_name - after_seq);
+        std::string summary = "index " + entry.substr (after_name + 1);
+        for (const std::string& column :
+        pragma_rows (handle, "PRAGMA index_info(\"" + name + "\")")) {
+            summary += " " + column;
+        }
+        indexes.push_back (std::move (summary));
+    }
+    sqlite3_close (handle);
+    std::sort (indexes.begin (), indexes.end ());
+    shape.insert (shape.end (), indexes.begin (), indexes.end ());
+    return shape;
+}
+
 } // namespace
 
 // Before version 4 the editor was the one writer that left the key out, so an
@@ -2803,6 +2857,37 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseGrantsThePathsStoredAsChosen) {
     EXPECT_TRUE (sendable ("req_again"));
     EXPECT_FALSE (sendable ("req_true"));
     EXPECT_FALSE (sendable ("req_absent"));
+    std::filesystem::remove_all ("trust-migration");
+}
+
+// `FILE_GRANTS_DDL` creates `file_grants` before `sync_schema ()` first sees
+// it, so a migrated workspace keeps that table for good. A difference
+// `sync_schema ()` acts on (NOT NULL, a default, the key) rebuilds it empty,
+// which the surviving grant catches; one it ignores (a type, UNIQUE) leaves
+// the migrated table unlike a fresh one, which the shape comparison catches.
+// Mutation checks: drop NOT NULL from `created_at` in `FILE_GRANTS_DDL` and
+// the grant is gone; drop UNIQUE from `path` and the indexes differ.
+TEST_F (DatabaseTest, TheMigrationCreatesFileGrantsAsTheMappingDoes) {
+    constexpr const char* FRESH_DB_PATH = "test_vayu_fresh.db";
+    vayu::tests::remove_database_files (FRESH_DB_PATH);
+    std::filesystem::remove_all ("trust-migration");
+    const std::string chosen = trust_file ("chosen.bin");
+    seed_workspace (TEST_DB_PATH, 5, [&] (Database& db) {
+        save_body (db, "req_false", binary_body (chosen, "false"));
+    });
+    {
+        Database migrated (TEST_DB_PATH);
+        migrated.init ();
+        Database fresh (FRESH_DB_PATH);
+        fresh.init ();
+    }
+
+    EXPECT_EQ (granted_paths (TEST_DB_PATH), std::vector<std::string>{ chosen })
+    << "sync_schema () rebuilt the table the migration created";
+    const auto migrated_shape = table_shape (TEST_DB_PATH, "file_grants");
+    EXPECT_FALSE (migrated_shape.empty ()) << "no file_grants table to compare";
+    EXPECT_EQ (migrated_shape, table_shape (FRESH_DB_PATH, "file_grants"));
+    vayu::tests::remove_database_files (FRESH_DB_PATH);
     std::filesystem::remove_all ("trust-migration");
 }
 
