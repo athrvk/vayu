@@ -161,9 +161,10 @@ export const MOVE_TOOLS: McpTool[] = [
 					});
 				}
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.reorder(batch, signal),
 				secretsShape(ctx, withholdReorderRows)
 			);

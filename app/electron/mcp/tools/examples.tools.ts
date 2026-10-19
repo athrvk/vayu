@@ -52,6 +52,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const requestId = requireStr(args, "requestId");
 			return callEngine(
+				ctx,
 				() => ctx.client.listRequestExamples(requestId, signal),
 				(rows) => boundExampleBodies(secretsShape(ctx, withholdRowListSecrets)(rows))
 			);
@@ -104,6 +105,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			// imported rows must not be handed one it did not write (#588, #722).
 			payload.origin = "user";
 			return callEngine(
+				ctx,
 				() => ctx.client.createRequestExample(requestId, payload, signal),
 				echoShape(ctx)
 			);
@@ -150,6 +152,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				);
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.updateRequestExample(requestId, exampleId, payload, signal),
 				echoShape(ctx)
 			);
@@ -190,7 +193,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 					(row) => isRecord(row) && row.id === exampleId
 				) as Record<string, unknown> | undefined;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (!stored) {
 				return errorResult(`No example with id "${exampleId}" on request "${requestId}".`);
@@ -209,7 +212,9 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_request_example again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteRequestExample(requestId, exampleId, signal));
+			return callEngine(ctx, () =>
+				ctx.client.deleteRequestExample(requestId, exampleId, signal)
+			);
 		},
 	},
 ];

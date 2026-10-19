@@ -43,7 +43,7 @@ export const TRASH_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listTrash(signal)),
+		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listTrash(signal)),
 	},
 	{
 		name: "restore_trash_entry",
@@ -82,7 +82,7 @@ export const TRASH_TOOLS: McpTool[] = [
 				) {
 					return errorResult(trashRefusalMessage(err));
 				}
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const result = jsonResult(echoShape(ctx)(restored));
 			// A moved folder is worth telling the caller about - it is not where it
@@ -124,7 +124,7 @@ export const TRASH_TOOLS: McpTool[] = [
 				entry = await readTrashEntry(ctx.client, id, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const subject = describeTrashEntry(entry);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -138,7 +138,7 @@ export const TRASH_TOOLS: McpTool[] = [
 					"This is a preview. To purge it, call purge_trash_entry again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.purgeTrashEntry(id, signal));
+			return callEngine(ctx, () => ctx.client.purgeTrashEntry(id, signal));
 		},
 	},
 ];

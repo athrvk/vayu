@@ -44,7 +44,7 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
-			callEngine(() => ctx.client.listClientCertificates(signal)),
+			callEngine(ctx, () => ctx.client.listClientCertificates(signal)),
 	},
 	{
 		name: "diagnose_connection",
@@ -67,13 +67,13 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		},
 		handler: async (args, ctx, signal) => {
 			const url = requireStr(args, "url");
-			const gate = checkAllowlist(url, ctx.config);
+			const gate = checkAllowlist(url, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			let answer: unknown;
 			try {
 				answer = await ctx.client.diagnoseConnection(url, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const outcome = asRecord(answer).outcome;
 			const hint =

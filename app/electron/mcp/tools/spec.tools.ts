@@ -109,7 +109,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				try {
 					collection = await ctx.client.getCollection(collectionId, signal);
 				} catch (err) {
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 				if (collection === null) {
 					return errorResult(`No collection with id "${collectionId}".`);
@@ -159,7 +159,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				};
 				return jsonResult(value);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -205,7 +205,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// collection that binds nothing and says to bind it first, a 404
 				// names the collection, and a 409 names the binding whose document
 				// the store no longer holds.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const diff = asRecord(answer);
 			const added = boundedBucket(diff.added, (entry) => ({
@@ -321,7 +321,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// nothing and says to bind it first, a 404 names the collection,
 				// and a 409 says a row the comparison was made against has since
 				// gone - which is a re-check, not a bad request.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeSync(outcome)}`);
 		},
@@ -345,7 +345,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				summary = summarizeImportTree(await ctx.client.parseImport(payload, signal));
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(summary), `\n\n${describeImportPreview(summary)}`);
 		},
@@ -384,7 +384,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// The engine's own sentence: "Unrecognised format" for a file no
 				// format claims, a read failure naming the line for one that is
 				// broken, and the cap by name for one that is too large.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeImport(outcome)}`);
 		},
@@ -422,7 +422,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				preview = await previewSpecBind(ctx.client, collectionId, content, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(preview), `\n\n${describeBindPreview(preview)}`);
 		},
@@ -489,7 +489,7 @@ export const SPEC_TOOLS: McpTool[] = [
 					signal
 				);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			return withCaveat(jsonResult(outcome), `\n\n${describeBind(outcome)}`);
 		},
@@ -534,7 +534,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// The engine's own sentence, which is the useful one here: a 404
 				// names the collection, and a 409 names the binding whose document
 				// it could not read and says unbinding would export a skeleton.
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
@@ -578,7 +578,7 @@ export const SPEC_TOOLS: McpTool[] = [
 				// makes for them.
 				exported = await ctx.client.exportPostman(collectionId, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const answer = isRecord(exported) ? exported : {};
 			const text = typeof answer.text === "string" ? answer.text : "";
@@ -624,7 +624,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			try {
 				collection = await ctx.client.getCollection(collectionId, signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (collection === null) {
 				return errorResult(`No collection with id "${collectionId}".`);
@@ -646,6 +646,7 @@ export const SPEC_TOOLS: McpTool[] = [
 			// tab's Unbind sends, so the two paths cannot come to mean different
 			// things.
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateCollection(collectionId, { openapi: null }, signal),
 				collectionEchoShape(ctx)
 			);

@@ -100,7 +100,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.startInbox(inboxStartPayload(args), signal)),
+			callEngine(ctx, () => ctx.client.startInbox(inboxStartPayload(args), signal)),
 	},
 	{
 		name: "list_webhook_inboxes",
@@ -115,7 +115,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listInboxes(signal)),
+		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listInboxes(signal)),
 	},
 	{
 		name: "stop_webhook_inbox",
@@ -135,7 +135,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			inboxId: z.string().describe("Inbox ID to stop (from start_webhook_inbox)."),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.stopInbox(requireStr(args, "inboxId"), signal)),
+			callEngine(ctx, () => ctx.client.stopInbox(requireStr(args, "inboxId"), signal)),
 	},
 	{
 		name: "delete_webhook_inbox",
@@ -170,7 +170,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				if (!isRecord(found)) return errorResult(`No webhook inbox with id "${inboxId}".`);
 				inbox = found;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const subject = describeInbox(inboxId, inbox);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -184,7 +184,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_webhook_inbox again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteInbox(inboxId, signal));
+			return callEngine(ctx, () => ctx.client.deleteInbox(inboxId, signal));
 		},
 	},
 	{
@@ -232,6 +232,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			const offset = optionalOffset(args, "offset");
 			const withhold = await runOutputShape(ctx, signal);
 			return pagedRead(
+				ctx,
 				() => ctx.client.getInboxCaptures(inboxId, limit, offset, signal),
 				"captures",
 				(page) => boundInboxCaptures(withhold(page))
@@ -260,7 +261,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
 			const inboxId = requireStr(args, "inboxId");
-			return callEngine(() => ctx.client.clearInboxCaptures(inboxId, signal));
+			return callEngine(ctx, () => ctx.client.clearInboxCaptures(inboxId, signal));
 		},
 	},
 	{
@@ -314,7 +315,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 					'Name at least one of "status", "body", "headers" or "delayMs" to change.'
 				);
 			}
-			return callEngine(() => ctx.client.updateInboxResponse(inboxId, response, signal));
+			return callEngine(ctx, () => ctx.client.updateInboxResponse(inboxId, response, signal));
 		},
 	},
 ];

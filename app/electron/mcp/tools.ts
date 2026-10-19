@@ -26,6 +26,7 @@
  * re-exported here.
  */
 
+import { settingRemedy } from "./remedy.js";
 import { MaskingIncompleteError } from "./withhold.js";
 import type { McpTool, McpToolInfo, ToolContext, ToolResult } from "./tools/contract.js";
 import {
@@ -200,7 +201,9 @@ export async function dispatchTool(
 	// Tools the user switched off in Settings are rejected (and are also omitted
 	// from tools/list, so a well-behaved client won't call them).
 	if (ctx.config.disabledTools.includes(name)) {
-		return errorResult(`Tool "${name}" is disabled in Vayu Settings → MCP.`);
+		return errorResult(
+			`Tool "${name}" is disabled. To use it, ask the user to ${settingRemedy("disabledTools", ctx.host)}.`
+		);
 	}
 	let result: ToolResult;
 	try {

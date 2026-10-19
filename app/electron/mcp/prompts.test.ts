@@ -35,7 +35,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 }
 
 function ctxWith(client: EngineClient): ToolContext {
-	return { client, config: resolveSafetyConfig() };
+	return { client, config: resolveSafetyConfig(), host: "app" };
 }
 
 function prompt(name: string) {
@@ -178,6 +178,7 @@ describe("run output in prompts", () => {
 		prompt(name).build(args, {
 			client: reportClient(),
 			config: resolveSafetyConfig({ revealSecretsToAgents: reveal }),
+			host: "app",
 		});
 
 	test.each(["summarize_run", "diagnose_errors"])(
@@ -203,7 +204,10 @@ describe("run output in prompts", () => {
 				new Error("engine hiccup")
 			);
 			await expect(
-				prompt(name).build({ runId: "run_1" }, { client, config: resolveSafetyConfig() })
+				prompt(name).build(
+					{ runId: "run_1" },
+					{ client, config: resolveSafetyConfig(), host: "app" }
+				)
 			).rejects.toThrow(/the environments lookup .*failed \(engine hiccup\)/);
 		}
 	);

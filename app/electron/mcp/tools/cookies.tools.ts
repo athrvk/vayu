@@ -32,6 +32,7 @@ export const COOKIE_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getCookies(signal),
 				secretsShape(ctx, withholdCookieValues)
 			),
@@ -72,7 +73,7 @@ export const COOKIE_TOOLS: McpTool[] = [
 			}
 			const scope: string | null | undefined =
 				stated === null ? null : str(args, "environmentId");
-			return callEngine(() => ctx.client.clearCookies(scope, signal));
+			return callEngine(ctx, () => ctx.client.clearCookies(scope, signal));
 		},
 	},
 ];

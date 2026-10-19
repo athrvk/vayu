@@ -33,6 +33,7 @@ import {
 	type ToolContext,
 	type ToolResult,
 } from "./tools.js";
+import type { McpHost } from "./tools/contract.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { VARIABLE_PRECEDENCE_SENTENCE, VARIABLE_RESOLUTION_URI } from "./variable-origins.js";
@@ -397,8 +398,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 	} as unknown as EngineClient;
 }
 
-function ctxWith(client: EngineClient, safety?: Partial<McpSafetyConfig>): ToolContext {
-	return { client, config: resolveSafetyConfig(safety) };
+function ctxWith(
+	client: EngineClient,
+	safety?: Partial<McpSafetyConfig>,
+	host: McpHost = "app"
+): ToolContext {
+	return { client, config: resolveSafetyConfig(safety), host };
 }
 
 const firstText = (r: { content: Array<{ text: string }> }) => r.content[0].text;
@@ -1589,7 +1594,7 @@ describe("environments, globals and the cookie jar", () => {
 				expect(res.isError).toBe(true);
 				expect(firstText(res)).toContain("token");
 				expect(firstText(res)).toContain("Reveal secrets to agents");
-				expect(firstText(res)).toContain("Settings > MCP");
+				expect(firstText(res)).toContain("Vayu Settings → MCP");
 				expect(write(client)).not.toHaveBeenCalled();
 			});
 
@@ -7483,12 +7488,12 @@ describe("start_load_run rejects an unusable concurrency at the schema", () => {
  * re-firing a request that already ran.
  */
 describe("engine transport failures are told apart", () => {
-	async function runRequestFailingWith(err: unknown) {
+	async function runRequestFailingWith(err: unknown, host: McpHost = "app") {
 		const client = fakeClient({ executeRequest: vi.fn().mockRejectedValue(err) });
 		return dispatchTool(
 			"run_request",
 			{ url: "https://api.example.com/slow" },
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"] }, host)
 		);
 	}
 
@@ -7513,12 +7518,23 @@ describe("engine transport failures are told apart", () => {
 		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
 	});
 
-	test("a genuinely unreachable engine still says so", async () => {
+	test("a genuinely unreachable engine says so, naming the app for the app host", async () => {
 		const res = await runRequestFailingWith(
-			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876")
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"app"
 		);
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/Make sure the Vayu app is running/);
+	});
+
+	test("a genuinely unreachable engine says so, naming the process for the CLI host", async () => {
+		const res = await runRequestFailingWith(
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"cli"
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/Start vayu-engine, or point VAYU_ENGINE_URL/);
+		expect(firstText(res)).not.toMatch(/Vayu app/);
 	});
 });
 
@@ -7774,7 +7790,7 @@ describe("mock issuer tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockIssuer).not.toHaveBeenCalled();
 		expect(client.listMockIssuers).not.toHaveBeenCalled();
@@ -8151,7 +8167,7 @@ describe("mock server tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockServer).not.toHaveBeenCalled();
 		expect(client.stopMockServer).not.toHaveBeenCalled();

@@ -29,6 +29,8 @@ import {
 } from "@modelcontextprotocol/server";
 import { TOOLS, dispatchTool, isListed, withheldWriteRefusal, type ToolContext } from "./tools.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
+import type { McpHost } from "./tools/contract.js";
+import { settingRemedy } from "./remedy.js";
 import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
@@ -85,12 +87,15 @@ const INSTRUCTIONS_HEAD =
  * Withholding the write tools (#1429) took the handlers' "turn on write access"
  * refusal off the wire with them: the SDK rejects an unregistered name before
  * dispatch, so an agent on a default install saw no write tool and no reason
- * for its absence (#1431). It names the setting, and no tool.
+ * for its absence (#1431). It names how the host lifts the gate, and no tool.
  */
-const WRITE_GATE_SENTENCE =
-	"Write access is off in this session, so no write tool is listed: a task that " +
-	"needs one is blocked on the user turning on Write access in Vayu Settings → " +
-	"MCP, after which they appear in `tools/list`. ";
+function writeGateSentence(host: McpHost): string {
+	return (
+		"Write access is off in this session, so no write tool is listed: a task that " +
+		`needs one is blocked until the user chooses to ${settingRemedy("allowWrites", host)}, ` +
+		"after which they appear in `tools/list`. "
+	);
+}
 
 /** Every resource the server registers, derived so the sentence cannot lag the list. */
 const RESOURCE_URIS = [...STATIC_RESOURCES.map((r) => r.uri), RUN_REPORT_RESOURCE.uriTemplate];
@@ -119,26 +124,28 @@ const INSTRUCTIONS_TAIL =
  * not know why it is there reads it as missing data rather than as a setting a
  * person can change (#1805).
  */
-const REVEAL_GATE_SENTENCE =
-	"Secret values are withheld in this session: a secret variable or a cookie reads as " +
-	"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
-	"URL's credentials as `credentialsWithheld: true`. A saved request's `url` loses " +
-	"its password and its credential query values, and a Params row naming one reads " +
-	"`valueWithheld: true`. A request that references a " +
-	"secret still sends with it, because the engine resolves it, and what the run " +
-	"recorded reads `<redacted>` wherever that value or a credential header's value " +
-	"appears. A script you supply when sending a request or starting a load run " +
-	"(preRequestScript, postRequestScript, tests, or a script.* element) is refused, " +
-	"because a script reads every variable. A task that needs the " +
-	"value itself is blocked on the user turning on Reveal secrets to agents in Vayu " +
-	"Settings → MCP. ";
+function revealGateSentence(host: McpHost): string {
+	return (
+		"Secret values are withheld in this session: a secret variable or a cookie reads as " +
+		"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
+		"URL's credentials as `credentialsWithheld: true`. A saved request's `url` loses " +
+		"its password and its credential query values, and a Params row naming one reads " +
+		"`valueWithheld: true`. A request that references a " +
+		"secret still sends with it, because the engine resolves it, and what the run " +
+		"recorded reads `<redacted>` wherever that value or a credential header's value " +
+		"appears. A script you supply when sending a request or starting a load run " +
+		"(preRequestScript, postRequestScript, tests, or a script.* element) is refused, " +
+		"because a script reads every variable. A task that needs the " +
+		`value itself is blocked until the user chooses to ${settingRemedy("revealSecretsToAgents", host)}. `
+	);
+}
 
 /** The server instructions for one session, gated on that session's config. */
-function instructionsFor(config: ToolContext["config"]): string {
+function instructionsFor(config: ToolContext["config"], host: McpHost): string {
 	return (
 		INSTRUCTIONS_HEAD +
-		(config.allowWrites ? "" : WRITE_GATE_SENTENCE) +
-		(config.revealSecretsToAgents ? "" : REVEAL_GATE_SENTENCE) +
+		(config.allowWrites ? "" : writeGateSentence(host)) +
+		(config.revealSecretsToAgents ? "" : revealGateSentence(host)) +
 		INSTRUCTIONS_TAIL
 	);
 }
@@ -186,7 +193,7 @@ export function createMcpServer(
 		// No `capabilities` here: declaring `tools` up front makes the SDK install
 		// its `tools/call` handler at construction, before the capture below can
 		// see it. Registration declares what is registered.
-		{ instructions: instructionsFor(baseCtx.config) }
+		{ instructions: instructionsFor(baseCtx.config, baseCtx.host) }
 	);
 	// Before the first registration, which otherwise defaults each to true. The
 	// resource and prompt lists change under no client: the prompts are fixed,

@@ -58,7 +58,11 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
-			callEngine(() => ctx.client.getGlobals(signal), secretsShape(ctx, withholdRowSecrets)),
+			callEngine(
+				ctx,
+				() => ctx.client.getGlobals(signal),
+				secretsShape(ctx, withholdRowSecrets)
+			),
 	},
 	{
 		name: "resolve_variables",
@@ -112,7 +116,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 				// A bad id is the caller's mistake and must not be reported as an
 				// engine failure - the same split `pagedRead`'s callers keep.
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 
 			const variables = resolveVariableReports(
@@ -171,15 +175,16 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			try {
 				stored = await ctx.client.getGlobals(signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const merged = mergeVariables(
 				isRecord(stored) ? stored.variables : undefined,
 				patch,
 				removals,
-				ctx.config.revealSecretsToAgents
+				ctx
 			);
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.saveGlobals({ variables: merged.variables }, signal),
 				echoShape(ctx)
 			);

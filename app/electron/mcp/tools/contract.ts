@@ -163,9 +163,18 @@ export interface StartedRun {
 	kind: "load" | "collection";
 }
 
+/**
+ * Which process serves the session: the Electron app, which has Settings screens
+ * and a window, or the stdio CLI, which has only environment variables. Every
+ * sentence that sends the user somewhere to lift a refusal reads it (`remedy.ts`).
+ */
+export type McpHost = "app" | "cli";
+
 export interface ToolContext {
 	client: EngineClient;
 	config: McpSafetyConfig;
+	/** Required, so a new host cannot forget to say which one it is. */
+	host: McpHost;
 	/**
 	 * Present when the person can be asked on this call; lets a tool ask them to
 	 * confirm (`confirmDestructive`). Absent → the tool falls back to its

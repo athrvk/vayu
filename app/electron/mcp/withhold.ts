@@ -53,8 +53,11 @@ interface RevealContext {
 
 type Projection = (value: unknown) => unknown;
 
+/** The setting's name, which reads the same on both hosts. */
+const REVEAL_SETTING_NAME = "Reveal secrets to agents";
+
 /** Where the setting lives, in the words every withholding description uses. */
-export const REVEAL_SETTING = "Reveal secrets to agents (Vayu Settings → MCP)";
+export const REVEAL_SETTING = `${REVEAL_SETTING_NAME} (Vayu Settings → MCP)`;
 
 /** What a read carrying variables says about the secret ones. */
 export const WITHHELD_VARIABLE_SENTENCE = `A variable flagged \`secret\` comes back with \`valueWithheld: true\` in place of its value unless the user has turned on ${REVEAL_SETTING}; a request that references it still sends with it, because the engine resolves it.`;
@@ -1244,7 +1247,7 @@ export class MaskingIncompleteError extends Error {
 		const detail = reason instanceof Error ? reason.message : String(reason);
 		super(
 			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
-				`With ${REVEAL_SETTING} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
+				`With ${REVEAL_SETTING_NAME} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
 				`Retry once the engine answers; a call that sent a request has already sent it, so check list_runs before sending it again.`
 		);
 		this.name = "MaskingIncompleteError";

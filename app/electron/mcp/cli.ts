@@ -25,10 +25,11 @@ import { createMcpServer } from "./server.js";
 import { EngineClient } from "./engine-client.js";
 import { buildSafetyConfigFromEnv, formatSafetyEnvNotices } from "./config.js";
 import type { ToolContext } from "./tools.js";
+import { ENGINE_URL_ENV_VAR } from "./remedy.js";
 import { createLogger, applyFloorFromEngine } from "../log.js";
 
 async function main(): Promise<void> {
-	const engineBaseUrl = process.env.VAYU_ENGINE_URL ?? "http://127.0.0.1:9876";
+	const engineBaseUrl = process.env[ENGINE_URL_ENV_VAR] ?? "http://127.0.0.1:9876";
 	const version = process.env.VAYU_VERSION ?? "0.0.0";
 
 	const log = createLogger("mcp", {
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
 	for (const notice of formatSafetyEnvNotices(envSafety)) {
 		log.warn("mcp", notice);
 	}
-	const contextProvider = (): ToolContext => ({ client, config, log });
+	const contextProvider = (): ToolContext => ({ client, config, log, host: "cli" });
 
 	// One server per connection, for whichever era the client opens with. The
 	// config is fixed for the process, so the tool list never changes under a

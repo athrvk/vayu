@@ -227,7 +227,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 			if (args.verifySSL === false) return errorResult(INSECURE_TLS_REFUSAL);
 			// The same posture for the same reason: a script is refused before the
 			// compose that would carry it, not after an exchange that ran it (#1834).
-			refuseAgentScripts(args, ctx.config.revealSecretsToAgents, elementsArg(args));
+			refuseAgentScripts(args, ctx, elementsArg(args));
 			// An empty `url` names no target, the same as an absent one.
 			const url = str(args, "url") || undefined;
 			const linkId = str(args, "requestId");
@@ -254,10 +254,10 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			if (sendsSaved) appendAdHocElements(payload, args);
-			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config);
+			const gate = checkAllowlist(String(payload.url ?? ""), ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 			// By id the engine stamped it already; ad hoc it is only the History link.
 			if (linkId !== undefined) payload.requestId = linkId;

@@ -163,6 +163,7 @@ export function runListQuery(args: Record<string, unknown>): RunListQuery {
  * (it reads `pagination`, which a body bound does not touch).
  */
 export async function pagedRead(
+	ctx: ToolContext,
 	fn: () => Promise<unknown>,
 	noun: string,
 	shape?: (value: unknown) => unknown
@@ -171,7 +172,7 @@ export async function pagedRead(
 	try {
 		answer = await fn();
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 	const caveat = pageCaveat(answer, noun);
 	return withCaveat(jsonResult(shape ? shape(answer) : answer), caveat);

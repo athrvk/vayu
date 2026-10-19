@@ -140,7 +140,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				}
 				if (elements.length > 0) payload.elements = elements;
 			}
-			return callEngine(() => ctx.client.createRequest(payload, signal), echoShape(ctx));
+			return callEngine(ctx, () => ctx.client.createRequest(payload, signal), echoShape(ctx));
 		},
 	},
 	{
@@ -286,7 +286,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 						unknown
 					>;
 				} catch (err) {
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 				let elements = stored.elements;
 				for (const [which, script] of scriptEdits) {
@@ -298,6 +298,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				payload.elements = elementsGiven;
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.updateRequest(requestId, payload, signal),
 				echoShape(ctx)
 			);
@@ -335,7 +336,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 				if (err instanceof EngineRequestError && err.status === 404) {
 					return errorResult(`No saved request with id "${requestId}".`);
 				}
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const name =
 				typeof stored.name === "string" && stored.name !== "" ? stored.name : requestId;
@@ -357,7 +358,7 @@ export const REQUEST_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_request again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteRequest(requestId, signal));
+			return callEngine(ctx, () => ctx.client.deleteRequest(requestId, signal));
 		},
 	},
 ];

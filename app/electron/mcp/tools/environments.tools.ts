@@ -72,14 +72,18 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			// Merged against nothing, which is what turns the string form into a
 			// stored entry and enforces "a new variable carries a value" - on a
 			// create every variable is new.
-			const merged = mergeVariables({}, patch, [], ctx.config.revealSecretsToAgents);
+			const merged = mergeVariables({}, patch, [], ctx);
 			// No `id`: the engine assigns every id it stores and answers a body
 			// carrying one with a 400 (issue #97), so the tool does not offer a
 			// field it would only have to refuse.
 			const payload: Record<string, unknown> = { name, variables: merged.variables };
 			const description = str(args, "description");
 			if (description !== undefined) payload.description = description;
-			return callEngine(() => ctx.client.createEnvironment(payload, signal), echoShape(ctx));
+			return callEngine(
+				ctx,
+				() => ctx.client.createEnvironment(payload, signal),
+				echoShape(ctx)
+			);
 		},
 	},
 	{
@@ -127,14 +131,9 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				existing = ((await ctx.client.getEnvironment(environmentId, signal)) ??
 					{}) as Record<string, unknown>;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
-			const merged = mergeVariables(
-				existing.variables,
-				patch,
-				removals,
-				ctx.config.revealSecretsToAgents
-			);
+			const merged = mergeVariables(existing.variables, patch, removals, ctx);
 			// PUT carries the id in the path, so the body is the patch only. The
 			// name is still sent because the engine treats it as having no
 			// default - omitting it would keep the stored name, but sending the
@@ -144,6 +143,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				variables: merged.variables,
 			};
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateEnvironment(environmentId, payload, signal),
 				echoShape(ctx)
 			);
@@ -186,6 +186,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				// would be a second definition of the same rule. No `name` - absent
 				// on a PUT means keep.
 				return callEngine(
+					ctx,
 					() => ctx.client.updateEnvironment(environmentId, { isActive: true }, signal),
 					echoShape(ctx)
 				);
@@ -201,7 +202,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				active = rows.find((row) => isRecord(row) && row.isActive === true) as
 					Record<string, unknown> | undefined;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const activeId = active && typeof active.id === "string" ? active.id : undefined;
 			if (activeId === undefined) {
@@ -212,6 +213,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				);
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.updateEnvironment(activeId, { isActive: false }, signal),
 				echoShape(ctx)
 			);
@@ -249,7 +251,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 					return errorResult(`No environment with id "${environmentId}".`);
 				environment = found;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const subject = describeEnvironment(environmentId, environment);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -263,7 +265,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_environment again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteEnvironment(environmentId, signal));
+			return callEngine(ctx, () => ctx.client.deleteEnvironment(environmentId, signal));
 		},
 	},
 ];

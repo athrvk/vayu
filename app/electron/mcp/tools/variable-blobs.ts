@@ -28,6 +28,7 @@ import {
 	VARIABLE_RESOLUTION_URI,
 } from "../variable-origins.js";
 import type { ToolContext } from "./contract.js";
+import { settingRemedy } from "../remedy.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
 /**
@@ -230,7 +231,7 @@ interface MergedVariables {
  * that is not usable either (a bare string off disk, `lib/variable-resolution.ts`
  * D17), since there is no value there to keep.
  *
- * With `revealSecrets` off, `secret: false` over a stored `secret: true` is
+ * With `revealSecretsToAgents` off, `secret: false` over a stored `secret: true` is
  * refused (#1809): the call would turn a withheld value into one the next read
  * returns, which is the switch the user has not thrown. `secret: true` and every
  * other edit pass, and so does everything once reveal is on. Removing and
@@ -240,7 +241,7 @@ export function mergeVariables(
 	stored: unknown,
 	patch: Record<string, unknown> | undefined,
 	removals: readonly string[],
-	revealSecrets: boolean
+	ctx: ToolContext
 ): MergedVariables {
 	const merged: Record<string, unknown> = isRecord(stored) ? { ...stored } : {};
 	const absentRemovals: string[] = [];
@@ -283,9 +284,9 @@ export function mergeVariables(
 				`"${name}" has no stored value to keep, so this call has to give it one: pass a string, or an object carrying "value".`
 			);
 		}
-		if (!revealSecrets && stated.secret === false && base.secret === true) {
+		if (!ctx.config.revealSecretsToAgents && stated.secret === false && base.secret === true) {
 			throw new ToolArgError(
-				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - the user can turn it on in Vayu Settings > MCP, or clear the flag in the Variables drawer.`
+				`"${name}" is a secret, and this call would make it readable. Agents cannot clear "secret" while Reveal secrets to agents is off - ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}, or to clear the flag in the app's Variables drawer.`
 			);
 		}
 		merged[name] = { enabled: true, ...base, ...stated };

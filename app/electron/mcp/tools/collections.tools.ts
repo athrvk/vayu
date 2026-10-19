@@ -91,12 +91,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			// create every variable is new, which is what turns the string form
 			// into a stored entry and enforces "a new variable carries a value".
 			if (patch !== undefined)
-				payload.variables = mergeVariables(
-					{},
-					patch,
-					[],
-					ctx.config.revealSecretsToAgents
-				).variables;
+				payload.variables = mergeVariables({}, patch, [], ctx).variables;
 			const elementsGiven = elementsArg(args);
 			const scriptEdits = readScriptEdits(args);
 			if (elementsGiven !== undefined && scriptEdits.length > 0) {
@@ -117,6 +112,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				if (elements.length > 0) payload.elements = elements;
 			}
 			return callEngine(
+				ctx,
 				() => ctx.client.createCollection(payload, signal),
 				collectionEchoShape(ctx)
 			);
@@ -204,15 +200,10 @@ export const COLLECTION_TOOLS: McpTool[] = [
 					existing = ((await ctx.client.getCollection(collectionId, signal)) ??
 						{}) as Record<string, unknown>;
 				} catch (err) {
-					return engineErrorResult(err);
+					return engineErrorResult(err, ctx);
 				}
 				if (patch !== undefined || removals.length > 0) {
-					const merged = mergeVariables(
-						existing.variables,
-						patch,
-						removals,
-						ctx.config.revealSecretsToAgents
-					);
+					const merged = mergeVariables(existing.variables, patch, removals, ctx);
 					payload.variables = merged.variables;
 					absentRemovals = merged.absentRemovals;
 				}
@@ -228,6 +219,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				payload.elements = elementsGiven;
 			}
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.updateCollection(collectionId, payload, signal),
 				collectionEchoShape(ctx)
 			);
@@ -264,7 +256,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				scope = await readCascadeScope(ctx.client, collectionId, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const cascade = describeCascade(scope);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -278,7 +270,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_collection again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			const result = await callEngine(() =>
+			const result = await callEngine(ctx, () =>
 				ctx.client.deleteCollection(collectionId, signal)
 			);
 			// The counts describe what was destroyed, so they belong only on a

@@ -81,6 +81,7 @@ describe("prompts that ask about errors", () => {
 	const ctx: ToolContext = {
 		client,
 		config: resolveSafetyConfig({ revealSecretsToAgents: true }),
+		host: "app",
 	};
 
 	test.each([

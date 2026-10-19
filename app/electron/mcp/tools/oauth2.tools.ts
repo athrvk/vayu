@@ -60,12 +60,13 @@ export const OAUTH2_TOOLS: McpTool[] = [
 			for (const key of ["accessTokenUrl", "refreshTokenUrl"]) {
 				const url = str(config, key);
 				if (url === undefined || url === "") continue;
-				const gate = checkAllowlist(url, ctx.config);
+				const gate = checkAllowlist(url, ctx.config, ctx.host);
 				if (!gate.ok) return errorResult(`${key}: ${gate.error!}`);
 			}
 			const payload: Record<string, unknown> = { config };
 			if (args.force === true) payload.force = true;
 			return callEngine(
+				ctx,
 				() => ctx.client.fetchOAuth2Token(payload, signal),
 				(answer) => projectOAuth2Token(answer)
 			);
@@ -86,6 +87,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		inputSchema: { cacheKey: oauth2CacheKeyInput },
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getOAuth2TokenStatus(requireStr(args, "cacheKey"), signal),
 				(answer) => projectOAuth2Status(answer)
 			),
@@ -107,7 +109,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			return callEngine(() =>
+			return callEngine(ctx, () =>
 				ctx.client.clearOAuth2Token(requireStr(args, "cacheKey"), signal)
 			);
 		},

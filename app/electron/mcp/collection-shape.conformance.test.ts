@@ -41,6 +41,7 @@ function ctxWith(
 	return {
 		client: client as unknown as EngineClient,
 		config: resolveSafetyConfig({ allowWrites: true }),
+		host: "app",
 		...extra,
 	};
 }
@@ -259,6 +260,7 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 				listCollections: vi.fn().mockResolvedValue([DECLARED]),
 			} as unknown as EngineClient,
 			config: resolveSafetyConfig({ allowWrites: false }),
+			host: "app",
 			dataFileLocation: remembered,
 		};
 		const result = await dispatchTool("list_collections", {}, ctx);

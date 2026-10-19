@@ -113,7 +113,7 @@ export const READ_TOOLS: McpTool[] = [
 					? structuredResult(value)
 					: structuredResult({ status: "unknown", raw: value ?? null });
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},
@@ -171,6 +171,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				async () =>
 					withCurrentDataFileHashes(
 						presentCollections(await ctx.client.listCollections(signal), ctx),
@@ -199,6 +200,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: { collectionId: z.string().describe("Collection ID to list.") },
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.listRequests(requireStr(args, "collectionId"), signal),
 				secretsShape(ctx, withholdRowListSecrets)
 			),
@@ -227,6 +229,7 @@ export const READ_TOOLS: McpTool[] = [
 		},
 		handler: (args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getRequest(requireStr(args, "requestId"), signal),
 				secretsShape(ctx, withholdRowSecrets)
 			),
@@ -251,6 +254,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.listEnvironments(signal),
 				secretsShape(ctx, withholdRowListSecrets)
 			),
@@ -325,6 +329,7 @@ export const READ_TOOLS: McpTool[] = [
 			// try it would be reported as an engine failure.
 			const query = runListQuery(args);
 			return pagedRead(
+				ctx,
 				() => ctx.client.listRuns(query, signal),
 				"runs",
 				await runOutputShape(ctx, signal)
@@ -423,6 +428,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunSamples(runId, limit, offset, signal),
 				"captured samples",
 				await runOutputShape(ctx, signal)
@@ -471,6 +477,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunTimeSeries(runId, limit, offset, signal),
 				"ticks"
 			);
@@ -517,6 +524,7 @@ export const READ_TOOLS: McpTool[] = [
 			);
 			const offset = optionalOffset(args, "offset");
 			return pagedRead(
+				ctx,
 				() => ctx.client.getRunMonitorSeries(runId, limit, offset, signal),
 				"monitor samples"
 			);
@@ -538,6 +546,7 @@ export const READ_TOOLS: McpTool[] = [
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
 			callEngine(
+				ctx,
 				() => ctx.client.getConfig(signal),
 				secretsShape(ctx, withholdConfigCredentials)
 			),

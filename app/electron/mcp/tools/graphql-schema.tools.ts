@@ -93,10 +93,10 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				composed = await composeViaEngine(ctx.client, composeBody, signal);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const url = String(composed.url ?? "");
-			const gate = checkAllowlist(url, ctx.config);
+			const gate = checkAllowlist(url, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 
 			const payload = await introspectionPayload(composed, str(args, "environmentId"));
@@ -104,7 +104,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 			try {
 				answer = await ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const read = readIntrospectionAnswer(answer, url);
 			if ("error" in read) return errorResult(read.error);
