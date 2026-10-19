@@ -648,6 +648,20 @@ struct Response {
     Timing timing;
 
     /**
+     * @brief True when libcurl ran a transfer for this response, so `timing`
+     *        is a measurement - answered or not (#2384).
+     *
+     * Set by each driver where it stamps `timing` after a transfer
+     * (`extract_response`, `Client::send`, `consume_sse_stream`), and false on
+     * a response built for a request that never left: `error_response`, a
+     * residual or file-rule refusal, a default `Response`. It decides which
+     * failures join a run's latency population. `timing.total_ms > 0` cannot
+     * say it: a refusal reads 0 and so could a real transfer under a coarse
+     * clock.
+     */
+    bool transfer_attempted = false;
+
+    /**
      * @brief The protocol actually negotiated for this transfer, e.g.
      * "HTTP/1.1" or "HTTP/2" - read from CURLINFO_HTTP_VERSION after the
      * transfer completes.

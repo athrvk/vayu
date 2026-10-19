@@ -627,6 +627,7 @@ Result<Response> Client::send (const Request& request) {
     // Per-phase durations, clamped and TLS-collapsed by the shared helper -
     // the event loop had drifted from this code and rendered negative TLS ms.
     detail::apply_phase_timings (response.timing, phase_times);
+    response.transfer_attempted = true;
 
     // Negotiated protocol (try to get even on errors, same as timing above -
     // a transfer that fails after the connection was established still knows

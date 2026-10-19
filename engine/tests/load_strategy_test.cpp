@@ -34,6 +34,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/routes.hpp"
 
 namespace {
@@ -613,6 +614,9 @@ TEST_F (LoadStrategyTest, StopCancelledResultIsCountedApartFromErrors) {
     const auto& mc = *context->metrics_collector;
     EXPECT_EQ (mc.cancelled (), 1u);
     EXPECT_EQ (mc.total_errors (), 0u);
+    EXPECT_EQ (mc.latency_count (), 0)
+    << "a cancelled request is in no latency figure";
+    EXPECT_EQ (mc.latency_samples (), 0u);
     EXPECT_EQ (context->total_requests (), 0u);
     EXPECT_EQ (context->in_flight (), 0u);
     EXPECT_TRUE (mc.status_code_distribution ().empty ())
@@ -638,6 +642,8 @@ TEST_F (LoadStrategyTest, DrainDeadlineCancellationIsStillAnError) {
     const auto& mc = *context->metrics_collector;
     EXPECT_EQ (mc.cancelled (), 0u);
     EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_EQ (mc.latency_count (), 0)
+    << "an Error carries no transfer to time";
     EXPECT_EQ (context->total_requests (), 1u);
     EXPECT_EQ (context->in_flight (), 0u);
     const auto dist = mc.status_code_distribution ();
@@ -718,6 +724,61 @@ TEST_F (LoadStrategyTest, HttpErrorResponseMovesTheLiveFailedCount) {
     EXPECT_EQ (stats["noResponse"].get<size_t> (), 0u);
     EXPECT_DOUBLE_EQ (stats["errorRate"].get<double> (), 100.0);
     EXPECT_DOUBLE_EQ (stats["avgLatencyMs"].get<double> (), 12.0);
+}
+
+namespace {
+/** A transfer the event loop ran that hit its timeout after @p total_ms. */
+vayu::Response timed_out_response (double total_ms) {
+    vayu::Response response;
+    response.error_code         = vayu::ErrorCode::Timeout;
+    response.error_message      = "Operation timed out";
+    response.timing.total_ms    = total_ms;
+    response.transfer_attempted = true;
+    return response;
+}
+} // namespace
+
+// #2384: a timeout is the slowest outcome a request can have, and it lands in
+// the run's latency histogram at its own duration beside the answers - while
+// still counting as the no-response error it is. Mutation-check: drop the
+// `attempt` pass-through in record_failed_response and this fails.
+TEST_F (LoadStrategyTest, ATimedOutTransferJoinsTheLatencyHistogram) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-timeout-latency", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (
+    context, db, vayu::Result<vayu::Response> (timed_out_response (2000.0)));
+
+    auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_EQ (mc.latency_count (), 1);
+    EXPECT_DOUBLE_EQ (mc.average_latency (), 2000.0);
+    EXPECT_NEAR (mc.calculate_percentiles ().max, 2000.0, 2.0);
+    const auto stats = mc.get_current_stats (0, 1.0, 1);
+    EXPECT_EQ (stats["noResponse"].get<size_t> (), 1u);
+}
+
+// A failure built for a request that never left - here the pre-send gate's
+// `error_response` - has no duration, and stays out of every latency figure
+// while still counting as an error.
+TEST_F (LoadStrategyTest, ARequestRefusedBeforeTheWireIsAnErrorWithNoLatency) {
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "test-refused-latency", nlohmann::json{ { "mode", "constant_rps" } });
+    vayu::db::Database db (TEST_DB_PATH);
+
+    context->requests_sent++;
+    vayu::core::handle_result (context, db,
+    vayu::Result<vayu::Response> (vayu::http::detail::error_response (
+    vayu::Error{ vayu::ErrorCode::InvalidUrl, "Cannot send this request" })));
+
+    const auto& mc = *context->metrics_collector;
+    EXPECT_EQ (mc.total_errors (), 1u);
+    EXPECT_EQ (context->in_flight (), 0u);
+    EXPECT_EQ (mc.latency_count (), 0);
+    EXPECT_EQ (mc.latency_samples (), 0u);
 }
 
 // ============================================================================

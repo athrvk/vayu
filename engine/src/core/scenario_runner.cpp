@@ -886,11 +886,17 @@ ScenarioStepStore& store) {
     // Only a step that actually sent counts towards coverage - or, on the
     // same terms, towards the run's threshold inputs (issue #1564): a
     // skipped step exercised no operation and made no request, so it belongs
-    // in neither an error-rate denominator nor a latency percentile.
+    // in neither an error-rate denominator nor a latency percentile. A step
+    // refused at the wire's edge (the residual pass, the file rule, the
+    // pre-send gate) is an errored request with no duration, so it is counted
+    // but not timed; a transport failure that ran keeps its duration, the
+    // load path's population (#2384).
     if (exchange.sent) {
         coverage.record (step.index, record.status_code);
         ++summary.status_codes[record.status_code];
-        summary.latencies.push_back (record.latency_ms);
+        if (exchange.response.transfer_attempted) {
+            summary.latencies.push_back (record.latency_ms);
+        }
     }
     if (record.tests) {
         summary.assertions.passed += record.tests->passed;
@@ -1416,8 +1422,11 @@ RunManager& manager) {
     // fields (peak concurrency, dropped requests, a load run's queue wait)
     // describe a concurrent load run this run mode has no counterpart for.
     RunSummaryInputs threshold_inputs;
-    threshold_inputs.total_requests = summary.latencies.size ();
-    threshold_inputs.status_codes   = summary.status_codes;
+    // Off the status tally, not the latencies: a step refused before the wire
+    // is a request with no duration.
+    threshold_inputs.total_requests =
+    vayu::count_status_failures (summary.status_codes).total;
+    threshold_inputs.status_codes = summary.status_codes;
     threshold_inputs.latency = percentiles_from_latencies (summary.latencies);
     threshold_inputs.throughput = summary.duration_s > 0 ?
     static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :

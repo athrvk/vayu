@@ -327,6 +327,19 @@ enum class SuccessTraceReason : std::uint8_t {
 };
 
 /**
+ * @brief How long a failed request's transfer took, for record_error (#2384).
+ *
+ * The latency population is every request whose transfer ran - answered or
+ * not - so a timeout lands in the percentiles at about its timeout. A failure
+ * that never reached the wire (`Response::transfer_attempted` false) has no
+ * duration to give and passes none.
+ */
+struct AttemptDuration {
+    double latency_ms    = 0.0;
+    double queue_wait_ms = 0.0;
+};
+
+/**
  * @brief High-performance in-memory metrics collector
  *
  * Thread-safe for concurrent writes from multiple HTTP callback threads.
@@ -493,11 +506,16 @@ class MetricsCollector {
      * Thread-safe. The error counters and the status-code distribution always
      * see every error; the individual record is stored only while the store is
      * below config_.max_errors (see errors_dropped).
+     *
+     * @param attempt the failed transfer's duration, which joins the latency
+     *        population exactly as record_success's does. Absent for a request
+     *        that never left (see AttemptDuration).
      */
     void record_error (ErrorCode code,
     const std::string& message,
-    const std::string& trace_data  = "",
-    const Response* capture_source = nullptr);
+    const std::string& trace_data          = "",
+    const Response* capture_source         = nullptr,
+    std::optional<AttemptDuration> attempt = std::nullopt);
 
     /**
      * @brief Record a request a user Stop cancelled before it answered (#2136).
@@ -759,8 +777,7 @@ class MetricsCollector {
      * @brief Requests that got no response: the transport failures
      *        record_error saw.
      *
-     * success_count() subtracts it, so every average below divides by the
-     * requests that recorded a latency. It is not the error count any surface
+     * success_count() subtracts it. It is not the error count any surface
      * reports - that also counts an HTTP 4xx or 5xx, and is
      * `vayu::count_status_failures` over status_code_distribution() (#2124).
      */
@@ -782,8 +799,7 @@ class MetricsCollector {
      * total_requests_ and total_errors_ are separate relaxed atomics that
      * record_error bumps one after the other, so a reader can observe the error
      * increment before its paired request increment. The subtraction is
-     * therefore guarded: unguarded it wraps to a huge size_t, which passes the
-     * `> 0` denominator checks below and drives every average toward zero.
+     * therefore guarded: unguarded it wraps to a huge size_t.
      */
     [[nodiscard]] size_t success_count () const {
         size_t total  = total_requests ();
@@ -791,17 +807,31 @@ class MetricsCollector {
         return total > errors ? total - errors : 0;
     }
 
+    /**
+     * @brief Requests in the latency population: every answer, and every
+     *        failure whose transfer ran (#2384).
+     *
+     * The averages below divide by this, so the mean describes the same
+     * requests the histogram's percentiles and max do. Acquire pairs with the
+     * release in record_latency_sample: a reader that sees a sample counted
+     * also sees its sums, so the mean can run one in-flight sample high, never
+     * toward zero.
+     */
+    [[nodiscard]] size_t latency_samples () const {
+        return latency_samples_.load (std::memory_order_acquire);
+    }
+
     [[nodiscard]] double total_latency_sum () const {
         return total_latency_sum_.load (std::memory_order_relaxed);
     }
 
     [[nodiscard]] double average_latency () const {
-        size_t count = success_count ();
+        const size_t count = latency_samples ();
         return count > 0 ? total_latency_sum () / static_cast<double> (count) : 0.0;
     }
 
     [[nodiscard]] double average_queue_wait () const {
-        size_t count = success_count ();
+        const size_t count = latency_samples ();
         return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
         static_cast<double> (count) :
                            0.0;
@@ -1043,6 +1073,8 @@ class MetricsCollector {
     std::atomic<double> total_latency_sum_{ 0.0 };
     std::atomic<size_t> dropped_requests_{ 0 };
     std::atomic<double> total_queue_wait_sum_{ 0.0 };
+    // The two sums' denominator, bumped after them; see latency_samples().
+    std::atomic<size_t> latency_samples_{ 0 };
     std::atomic<size_t> total_bytes_sent_{ 0 };
     std::atomic<size_t> total_bytes_recv_{ 0 };
     std::atomic<size_t> http_version_downgraded_{ 0 };
@@ -1065,8 +1097,8 @@ class MetricsCollector {
     struct hdr_histogram* latency_histogram_{ nullptr };
 
     // Phaser-based interval recorder for the windowed (rolling) percentiles that
-    // the live/history per-tick series consume. record_success records here in
-    // parallel with the cumulative histogram; the producer thread
+    // the live/history per-tick series consume. record_latency_sample records
+    // here in parallel with the cumulative histogram; the producer thread
     // sample-and-recycles it once per tick (sample_window_percentiles). The
     // phaser orders the reader's swap against writers - it is not mutual
     // exclusion between writers, so the write itself must be the atomic variant.
@@ -1280,6 +1312,11 @@ class MetricsCollector {
     // Increment the count for a status code. Lock-free for codes in
     // [0, STATUS_CODE_SLOTS); falls back to the overflow map otherwise.
     void record_status_code (int status_code);
+
+    // One request into the latency population: both sums, both histograms,
+    // then the sample count. The one path record_success and record_error
+    // share, so the mean and the percentiles cannot count different requests.
+    void record_latency_sample (double latency_ms, double queue_wait_ms);
 };
 
 } // namespace vayu::core
