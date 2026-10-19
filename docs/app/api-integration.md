@@ -173,8 +173,9 @@ apiService.getRequestDefaults(scope?: RequestDefaultsScope): Promise<RequestDefa
 ```
 
 `getRequestDefaults` reads what the engine will add to a request that names none
-of it (issue #1229) - a `User-Agent`, a negotiated `Accept-Encoding`, and an
-opt-in correlation id - as `{headers: [{name, value?, generated, configKey?}]}`.
+of it (issue #1229) - a `User-Agent`, a negotiated `Accept-Encoding`, an
+opt-in correlation id, and an `Expect: 100-continue` row while
+`sendExpectContinue` is on (issue #2468) - as `{headers: [{name, value?, generated, configKey?}]}`.
 A row with `generated: true` carries no `value`: it is made fresh per transfer.
 The set is **read, never derived**: the engine resolves it (its libcurl decides
 which encodings can even be asked for), so a renderer working it out from the
@@ -211,7 +212,8 @@ rather than offering a tick that could not turn it back on.
 disagree - `negotiateCompression` governs a design send's `Accept-Encoding`
 and `loadNegotiateCompression` governs a load run's - so the load-test dialog
 reads both and names the difference rather than starting a run whose headers
-silently do not match what the tab just showed.
+silently do not match what the tab just showed. `sendExpectContinue` is one key
+for both scopes, so it never makes them disagree.
 
 #### Cookie jar
 

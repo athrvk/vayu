@@ -424,6 +424,23 @@ bool libcurl_defaults_content_type (const Request& request) {
     return request.method == HttpMethod::POST;
 }
 
+/// True when the list must carry the removal line `Expect:` (issue #2468).
+/// libcurl adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and then
+/// waits a second for an interim reply a server may never send, so it stays
+/// only where `sendExpectContinue` is on. @p lists_expect is a typed Expect
+/// that reached the list: the way to send one on purpose, sent as typed. A
+/// typed row left blank never gets there (`append` drops it), which is the gap
+/// libcurl fills, so it does not count. Refusing the declared row removes
+/// libcurl's own line when the policy would have let it stay.
+bool removes_libcurl_expect (const Request& request,
+const DefaultHeaderPolicy& policy,
+bool lists_expect) {
+    if (lists_expect) {
+        return false;
+    }
+    return !policy.expect_continue || suppresses_default_header (request, "Expect");
+}
+
 } // namespace
 
 curl_slist* build_request_header_list (const Request& request,
@@ -460,15 +477,19 @@ Headers* sent) {
     };
 
     bool lists_content_type = false;
+    bool lists_expect       = false;
     for (const auto& [key, value] : request.headers) {
         if (suppresses_request_header (request, key)) {
             // Not sent, so not reported as sent either - libcurl writes the
             // multipart Content-Type, boundary and all.
             continue;
         }
-        if (append (key, value) && CaseInsensitiveLess::equal (key, "Content-Type")) {
-            lists_content_type = true;
+        if (!append (key, value)) {
+            continue;
         }
+        lists_content_type =
+        lists_content_type || CaseInsensitiveLess::equal (key, "Content-Type");
+        lists_expect = lists_expect || CaseInsensitiveLess::equal (key, "Expect");
     }
 
     // The Content-Type the body mode implies, when the request declares none.
@@ -504,6 +525,11 @@ Headers* sent) {
     // instead, appended directly for the reason the Content-Type one is.
     if (!request.headers.contains ("Accept") && suppresses_default_header (request, "Accept")) {
         list = curl_slist_append (list, "Accept:");
+    }
+
+    // Appended directly and unrecorded, like the other removal lines above.
+    if (removes_libcurl_expect (request, policy, lists_expect)) {
+        list = curl_slist_append (list, "Expect:");
     }
 
     if (negotiates_compression (request, policy)) {

@@ -1009,8 +1009,8 @@ matches them on the **origin** host, never the proxy hop.
 
 #### Default request headers
 
-Four `network_performance` entries decide what Vayu adds to a request nobody
-wrote it into (issue #1229). They are read at the top of a request or a run, so
+Five `network_performance` entries decide what Vayu adds to a request nobody
+wrote it into (issue #1229, and #2468 for the Expect header). They are read at the top of a request or a run, so
 a change applies to the next send; a load run reads them once at run start, as
 it does the proxy policy.
 
@@ -1018,6 +1018,7 @@ it does the proxy policy.
 |-----|---------|--------|--------|
 | `negotiateCompression` | `true` | boolean | Ask for a compressed response on a Send, a collection or scenario run, and a script's own `pm.sendRequest`. The value advertised is what *this* libcurl can decode, read off `curl_version_info` - `gzip, deflate` plus `br` and `zstd` where the build has them - and libcurl decodes the response before the engine sees it. Off sends no `Accept-Encoding` at all. |
 | `loadNegotiateCompression` | `true` | boolean | The same decision for a load run, separate because compression is part of what a load test measures: off measures a server's uncompressed ceiling, on measures what its clients actually get. |
+| `sendExpectContinue` | `false` | boolean | Let libcurl send `Expect: 100-continue` on a large body. libcurl adds that header on its own to an HTTP/1.1 body over 1 MiB (1048577 bytes and up) and then waits about a second for an interim reply a server that ignores the header never sends, so with this off the engine removes it with libcurl's `Expect:` removal line and the transfer sends the body at once. One key for a Send, a collection run and a load run alike. The removal line is not a sent header, so it is not in `requestHeaders`. |
 | `correlationIdEnabled` | `false` | boolean | Send a header carrying a fresh identifier with every request, so one send - or one iteration of a load run - can be found in a server's log. Off by default: it is a header the target did not ask for. |
 | `correlationIdHeader` | `X-Vayu-Request-Id` | header name | Which name that identifier goes out under. Vendor-namespaced by default so it collides with nothing a gateway defines; set it to `X-Request-ID` or `X-Correlation-ID` for infrastructure that reads one of those. `POST /config` refuses a value that is not a header name (RFC 9110 token), because a broken name would otherwise put a broken line on every request afterwards. |
 
@@ -1040,6 +1041,17 @@ added:
 
 The correlation id is generated **per transfer**, not per composition, so every
 iteration of a load run carries its own.
+
+**`Expect` is the one default the engine takes away rather than adds.** With
+`sendExpectContinue` off, a request that names no `Expect` gets libcurl's
+removal line, whatever its size or verb. A typed `Expect: 100-continue` is the
+way to send one on purpose: it goes out as typed with the key off, and is
+recorded in `requestHeaders`. A typed `Expect` with a blank value is dropped
+like any value-less header and does not let libcurl's own back in. With the key
+on nothing is appended, so libcurl decides (over 1 MiB, on HTTP/1.1), and the
+`Expect` row `GET /request-defaults` declares is the one a send refuses with
+`disabledDefaultHeaders`, which removes libcurl's line again. With the key off
+that refusal changes nothing: the line is already removed.
 
 **Every size the API reports is the bytes Vayu holds** - `bodySize`, a stored
 trace's `bodyBytes`, a load sample's `body_bytes`. With negotiation on those are
@@ -1162,10 +1174,15 @@ config entries above.
   "headers": [
     { "name": "User-Agent", "value": "Vayu/0.25.0", "generated": false },
     { "name": "Accept-Encoding", "value": "gzip, deflate", "configKey": "negotiateCompression", "generated": false },
-    { "name": "X-Vayu-Request-Id", "generated": true, "configKey": "correlationIdEnabled" }
+    { "name": "X-Vayu-Request-Id", "generated": true, "configKey": "correlationIdEnabled" },
+    { "name": "Expect", "value": "100-continue", "configKey": "sendExpectContinue", "generated": false }
   ]
 }
 ```
+
+The `Expect` row appears only while `sendExpectContinue` is on, under both
+scopes, and describes what libcurl may send above 1 MiB rather than a header on
+every request.
 
 A default that is switched off is **absent** rather than listed as disabled.
 `generated: true` means the value is made per send, so the row carries no
