@@ -781,7 +781,10 @@ logged as a warning: it means a client skipped composition.
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
-  which is what makes it decode. Add a default there, never in a driver. A
+  which is what makes it decode. The engine never leaves libcurl a default to
+  fill (#2464): `text` derives `text/plain`, and where nothing declares a
+  Content-Type on a POSTFIELDS body or a bodyless POST the list carries
+  libcurl's removal line. Add a default there, never in a driver. A
   load or collection run's `config_snapshot` records the resolved decision
   too (#1488), for a later run's report to compare against - never re-applied
   to a send, the one deliberate exception to "none of it is stored".

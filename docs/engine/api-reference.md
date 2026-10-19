@@ -368,7 +368,7 @@ so a body that round-trips through storage sends the same bytes.
 
 | `mode` | Carries | On the wire |
 |---|---|---|
-| `none` | nothing | no body |
+| `none` | nothing | no body; a `POST` sends `Content-Length: 0` and no Content-Type |
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
@@ -386,13 +386,14 @@ but never sent, so switching one back on needs no re-compose; `{{variables}}`
 resolve inside `key`, `value`, and a file reference's `src` / `fileName` /
 `contentType` (a file part's, or a binary body's `file`) during composition.
 
-Five Content-Type rules follow from the encoding:
+The Content-Type rules follow from the encoding:
 
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
 - `json` sets `Content-Type: application/json` under the same rule (issue #889).
-  It did **not** until then, and libcurl's default for a POST carrying a body is
+  It did **not** until then, and libcurl's default for a `CURLOPT_POSTFIELDS`
+  body (every mode but `form-data` and a streamed `binary`, on every verb) is
   `application/x-www-form-urlencoded` - so a request whose `body.mode` said
   `json` went out declaring itself a form. The app's body panel wrote the header
   row for a request built in the UI, which is why it survived: every request
@@ -403,9 +404,15 @@ Five Content-Type rules follow from the encoding:
   rule - a Content-Type the caller wrote wins. `graphql` only on the method
   that carries a body at all: a GraphQL `GET` has no body and derives no
   Content-Type, since there is nothing to describe (see below).
+- `text` sets `Content-Type: text/plain` under the same rule (issue #2464).
+  Until then it derived nothing, by decision - `text/csv`, a JWT and a raw
+  signature are all `text` - but an author who wrote no header got libcurl's
+  form type rather than no type. Postman and Bruno send `text/plain` for the
+  same body. A typed row (`text/csv`, `application/jwt`) still wins, and
+  `disabledSystemHeaders: ["content-type"]` sends none.
 - `xml` sets `Content-Type: application/xml`, again only when the caller
   declared none. It has no envelope and nothing is done to `content`; the header
-  is the whole of what the mode adds over `text`, which is why an endpoint
+  is the whole of what sets the mode apart from `text`, which is why an endpoint
   expecting `application/soap+xml` keeps the header it was given.
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
@@ -414,16 +421,22 @@ Five Content-Type rules follow from the encoding:
 - `binary` derives its Content-Type from the file, in four tiers, an empty
   string counting as absent at each: an enabled `Content-Type` header row, then
   `file.contentType`, then the type the file's extension names (one engine
-  table of common types), then `application/octet-stream`. A binary body never
-  goes out as libcurl's `x-www-form-urlencoded` default. `POST /compose` writes
+  table of common types), then `application/octet-stream`. `POST /compose` writes
   the effective type into an empty `file.contentType` (unless a non-blank
   `Content-Type` header row is present, which wins at send anyway), so the
   composed payload - and a snippet generated from it - names the type the send
   uses.
 
-`text` derives nothing, and that is a decision rather than a gap:
-`text/plain`, `text/csv`, a JWT and a raw signature are all `text`, so there is
-no single right answer and the header stays the author's.
+**No request goes out under libcurl's `x-www-form-urlencoded` default**
+(issue #2464). libcurl writes that type into any `CURLOPT_POSTFIELDS` body,
+and into a bodyless `POST`, whenever the header list names no Content-Type. So
+where nothing declares one - a `content-type` refusal in
+`disabledSystemHeaders`, a typed `Content-Type` row left blank (on any mode but
+`binary`, where a blank row is absent), a body mode of `none` on a `POST` - the
+engine hands libcurl its removal line instead, and the request carries no
+Content-Type at all, as Postman sends a bodyless `POST`. A bodyless `PUT`,
+`PATCH` or `GET` never had one. The removal line is not a sent header and is
+not in `requestHeaders`.
 
 #### The `graphql` envelope
 
@@ -6412,11 +6425,13 @@ transfer's last outbound header frame and followed by the request body. So it
 carries what libcurl added on its own - the `Cookie` line the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`.
+`requestHeaders`. The app's Headers tab lists those additions in an "Added by
+libcurl" group parsed from this block, so the tab shows the whole wire while
+the script-visible record stays the engine's.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
 issued them. It carries what the engine derives at send time - the body-implied
-`Content-Type`, and every [default header](#default-request-headers) this send
+`Content-Type` (`text/plain` for a `text` body since issue #2464), and every [default header](#default-request-headers) this send
 adds (the `User-Agent`, the negotiated `Accept-Encoding`, an enabled
 correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
 itself with the boundary. It
