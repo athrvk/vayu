@@ -56,14 +56,15 @@ vi.mock("electron", () => ({
 	},
 }));
 
-// Only `spawn`, so the default system's spawn options can be read; `execSync`
-// stays real for the PID probes.
+// `spawn`, so the default system's spawn options can be read; `execSync`, so
+// the default system's process-name check answers what a test says it does.
 vi.mock("child_process", async (importOriginal) => ({
 	...(await importOriginal<typeof import("child_process")>()),
 	spawn: vi.fn(),
+	execSync: vi.fn(),
 }));
 
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
 import {
 	EngineSidecar,
 	EngineNotReadyError,
@@ -153,7 +154,9 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 			state.healthy = true;
 			return child as unknown as ChildProcess;
 		}),
-		isEngineProcessAlive: vi.fn((pid: number) => state.alivePids.has(pid)),
+		engineProcessState: vi.fn((pid: number) =>
+			state.alivePids.has(pid) ? ("engine" as const) : ("not-engine" as const)
+		),
 		killEngineProcess: vi.fn((pid: number) => {
 			const killed = state.alivePids.delete(pid);
 			if (killed) state.healthy = false;
@@ -389,6 +392,99 @@ describe("EngineSidecar - an engine already running at start", () => {
 		expect((cause as Error).message).not.toBe("");
 		expect(message).not.toMatch(/please/i);
 	});
+});
+
+/*
+ * #2422: a lock is removed only when its PID is proven not to be an engine. A
+ * live PID whose name the OS would not give (`ps` missing in a minimal
+ * container, `tasklist` failing) used to read as "not an engine", and startup
+ * deleted a live engine's lock. The real classification runs here, against a
+ * stubbed process table and name check; the rest of the system is the fake.
+ * Mutation check: answer "not-engine" from the name check's catch and the
+ * keeps-the-lock cases red on the lock file being gone.
+ */
+describe("EngineSidecar - the lock of a PID it cannot classify", () => {
+	const realPlatform = process.platform;
+	const lockPath = () => join(fake.userData, ENGINE_LOCK_FILE);
+
+	/** Signal 0 finds `alive` and nothing else; every other PID is ESRCH. */
+	function stubProcessTable(alive: number[]) {
+		return vi.spyOn(process, "kill").mockImplementation((pid: number) => {
+			if (alive.includes(pid)) return true;
+			const err: NodeJS.ErrnoException = new Error("ESRCH");
+			err.code = "ESRCH";
+			throw err;
+		});
+	}
+
+	/** The fake system, with the real PID classification and the real kill. */
+	function systemWithRealProbe() {
+		return fakeSystem({
+			engineProcessState: defaultSidecarSystem.engineProcessState,
+			killEngineProcess: defaultSidecarSystem.killEngineProcess,
+		});
+	}
+
+	beforeEach(() => {
+		vi.mocked(execSync).mockReset();
+		writeFileSync(lockPath(), `${ADOPTED_PID}\n`);
+	});
+	afterEach(() => stubPlatform(realPlatform));
+
+	it.each(["linux", "win32"] as const)(
+		"keeps the lock of a live PID whose name it could not read, and kills nothing, on %s",
+		async (platform) => {
+			stubPlatform(platform);
+			const kill = stubProcessTable([ADOPTED_PID]);
+			vi.mocked(execSync).mockImplementation(() => {
+				throw new Error("command not found");
+			});
+			const { system } = systemWithRealProbe();
+			const sidecar = new EngineSidecar([TEST_PORT], system);
+
+			await sidecar.start();
+
+			expect(existsSync(lockPath())).toBe(true);
+			expect(kill).not.toHaveBeenCalledWith(ADOPTED_PID, "SIGKILL");
+			const commands = vi.mocked(execSync).mock.calls.map(([command]) => String(command));
+			expect(commands.some((command) => command.includes("taskkill"))).toBe(false);
+			// Bounded: the wait and the refused kill end, and this session's
+			// engine is spawned for the engine's own lock to admit or refuse.
+			expect(system.spawnEngine).toHaveBeenCalledOnce();
+		}
+	);
+
+	it.each(["linux", "win32"] as const)(
+		"removes the lock of a dead PID without asking for its name on %s",
+		async (platform) => {
+			stubPlatform(platform);
+			stubProcessTable([]);
+			const { system } = systemWithRealProbe();
+
+			await new EngineSidecar([TEST_PORT], system).start();
+
+			expect(existsSync(lockPath())).toBe(false);
+			expect(execSync).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		["linux", "postgres\n"],
+		["win32", '"notepad.exe","4242","Console","1","12,345 K"\n'],
+	] as const)(
+		"removes the lock of a live PID that is not an engine on %s",
+		async (platform, name) => {
+			stubPlatform(platform);
+			stubProcessTable([ADOPTED_PID]);
+			vi.mocked(execSync).mockReturnValue(name);
+			const { system } = systemWithRealProbe();
+
+			await new EngineSidecar([TEST_PORT], system).start();
+
+			expect(existsSync(lockPath())).toBe(false);
+			expect(execSync).toHaveBeenCalledOnce();
+		}
+	);
 });
 
 /*
