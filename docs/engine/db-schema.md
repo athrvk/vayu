@@ -37,17 +37,39 @@ name which file defines each member.
 `Database::Database` (`engine/src/db/database.cpp`) reads `PRAGMA user_version` before anything
 else - a version newer than this engine's throws immediately and the constructor fails outright
 (see [the script-to-elements migration](#the-script-to-elements-migration-issue-1514)); that is
-not corruption, and none of the recovery below applies to it. Past that gate it runs `sync_schema()`
-before anything else uses the database, and what it does next depends on whether that succeeded:
+not corruption, and none of the recovery below applies to it. Past that gate it probes the file -
+opens it and runs `sync_schema()` before anything else uses the database - and sorts the answer
+three ways (issue #2420):
+
+- **Valid**: the probe finished.
+- **Corrupt**: a file with no SQLite header (checked without opening it, see below), or a probe
+  that failed with `SQLITE_CORRUPT` (11) or `SQLITE_NOTADB` (26). Only this answer reaches the
+  recovery branch.
+- **Unavailable**: any other failure - `SQLITE_BUSY` or `SQLITE_LOCKED` (another connection holds
+  the file), `SQLITE_FULL`, `SQLITE_READONLY`, `SQLITE_IOERR`, `SQLITE_CANTOPEN`, a filesystem
+  error, a migration step that failed. None of these says anything about the file, so none of
+  them may quarantine it.
+
+Every connection the constructor opens - the migration's, the probe's, the one it keeps - waits
+`BUSY_TIMEOUT_MS` (10 s) for another connection's lock before its first statement, the same
+wait `init()` applies from `dbBusyTimeout` afterwards, so a lock that is let go within that
+window costs a slower start rather than a refusal. What happens next:
 
 | Outcome | What happens to the files | What is recorded |
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
+| Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
 | Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy | Nothing |
-| Fails, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
-| Fails, `<db>.bak` fails the same validation | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
-| Fails, there is no backup | The corrupt file set is quarantined and a fresh empty database is created | `started_fresh_quarantined` |
-| Fails, and the quarantine rename fails too | `<db>`, `<db>-wal` and `<db>-shm` are **deleted** so the daemon can still start | `deleted_corrupt` |
+| Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
+| Corrupt, `<db>.bak` is corrupt too | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
+| Corrupt, `<db>.bak` cannot be examined | Nothing is touched and the daemon does not start, naming the backup: whether it would restore is unknown | (the exception, naming the backup) |
+| Corrupt, there is no backup | The corrupt file set is quarantined and a fresh empty database is created | `started_fresh_quarantined` |
+| Corrupt, and the quarantine rename fails too | `<db>`, `<db>-wal` and `<db>-shm` are **deleted** so the daemon can still start | `deleted_corrupt` |
+
+The refusal reaches the daemon's `main`, which prints it on stderr and exits 1 - the same path the
+newer-schema refusal takes. A snapshot the backup refresh cannot examine is discarded with a reason
+that says so (`the snapshot could not be examined: ...`), and the previous `<db>.bak` stands, as it
+does for one that did not validate.
 
 Starting fresh is deliberate - the alternative is a daemon that fails to start
 on every launch forever - but it is total: collections, requests, environments,
@@ -69,7 +91,7 @@ up looking like a fresh install.
 
 ### The quarantine (issue #984)
 
-A database that fails validation is **moved, not deleted**: `<db>` becomes
+A database that is corrupt is **moved, not deleted**: `<db>` becomes
 `<db>.corrupt-<epoch-ms>` with its `-wal` and `-shm` sidecars renamed alongside.
 SQLite's own tooling can usually pull most rows back out of a damaged file, and
 only while the file exists:
@@ -86,9 +108,14 @@ Two rules bound it:
   says this has happened before.
 - **The backup is validated before it is trusted.** It gets the same open plus
   `sync_schema()` probe the main file gets - which also migrates a backup taken
-  by an older build before it is committed to. A backup that fails is left
+  by an older build before it is committed to. A corrupt backup is left
   exactly where it is rather than written over the original, which is what
-  `backup_also_corrupt` records.
+  `backup_also_corrupt` records; one that cannot be examined stops the start
+  before the original is moved.
+
+A quarantined set is the whole file as it was, so when the file was in fact
+healthy, putting it back by hand undoes the recovery: see
+[architecture.md](architecture.md#restoring).
 
 One implementation detail worth knowing before changing the order of that code:
 the validation probe cannot be the first thing to touch the file. SQLite
@@ -226,8 +253,8 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 
 1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `6`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
-   try-catch, so the exception reaches the daemon's own startup failure path rather than being read
-   as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
+   try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
+   rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
    is a fast no-op. `0` (every database written before this issue, folded by #1513's pass or not)
    proceeds to fold. `1` and `2` have no script column left, so they skip the fold and are only stamped.
 2. **Fold, if either table still has a script column.** For each of `requests` and `collections`

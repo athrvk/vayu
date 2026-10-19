@@ -34,6 +34,7 @@
 #include <sqlite_orm/sqlite_orm.h>
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -632,7 +633,10 @@ struct Database::Impl {
         }
     }
 
-    Impl (const std::string& path)
+    /// @param busy_timeout how long a statement on this connection waits for
+    ///        another connection's lock before failing with `SQLITE_BUSY`,
+    ///        until `Database::init` applies `dbBusyTimeout` (issue #2420).
+    Impl (const std::string& path, std::chrono::milliseconds busy_timeout)
     : storage (make_vayu_storage (path)), opened_file (path) {
         std::filesystem::path db_path (path);
         if (db_path.has_parent_path ()) {
@@ -643,7 +647,12 @@ struct Database::Impl {
         // per-connection state. Only `cache_size` is configurable; the other
         // three are engine defaults with no user story (their config entries
         // were retired in #519) and stay compile-time constants.
-        storage.on_open = [this] (sqlite3* db) {
+        storage.on_open = [this, busy_timeout] (sqlite3* db) {
+            // First, before any statement that can meet another connection's
+            // lock: without it a contended `journal_mode` or `sync_schema`
+            // fails at once instead of waiting (issue #2420).
+            sqlite3_busy_timeout (db, static_cast<int> (busy_timeout.count ()));
+
             // The storage's one connection (`open_forever` below), recorded so
             // `Database::init` can re-apply `cache_size` to it once the config
             // row that sizes it can be read.
@@ -687,6 +696,17 @@ struct Database::Impl {
             }
         };
 
+        // One connection for the storage's lifetime. Without this sqlite_orm
+        // opens a connection per call outside a transaction and closes it after,
+        // and closing the last connection of a WAL database checkpoints and
+        // deletes the `-wal`: every endpoint re-ran `on_open` above, re-parsed
+        // the schema and re-created the WAL (measured: 42 opens of the file
+        // between exec and six requests). Sharing one connection across threads
+        // is safe here because every `Database::` member holds `impl_->mutex`
+        // around its storage access, which is also what already made the
+        // connection sqlite_orm shares for the length of a transaction safe.
+        storage.open_forever ();
+
         // Durability, applied here rather than in `Database::init` - which is
         // where it used to be applied *only* (issue #838).
         //
@@ -704,27 +724,19 @@ struct Database::Impl {
         // in a table this connection has not created yet. `init` re-applies
         // whatever `dbSynchronous` holds once it can read it, so a user who
         // raised the setting still gets it for the process's whole working
-        // life - only the schema sync and the seed run at the default, and
-        // the constructor takes a `.bak` copy of the previous file before
-        // either of them touches it.
+        // life - only the schema sync and the seed run at the default.
         //
         // Set through `storage.pragma` rather than the callback above because
         // sqlite_orm remembers these two and re-applies them to every
         // connection it opens - which is exactly why `cache_size`, which it
         // does not remember, is in the callback instead.
+        //
+        // After `open_forever`, never before: a pragma issued with no open
+        // connection opens one of its own, and sqlite_orm re-applies a
+        // remembered `journal_mode` to a new connection *ahead of* `on_open`,
+        // so it would run before the busy timeout is set.
         storage.pragma.journal_mode (journal_mode::WAL);
         storage.pragma.synchronous (vayu::core::constants::database::SYNCHRONOUS);
-
-        // One connection for the storage's lifetime. Without this sqlite_orm
-        // opens a connection per call outside a transaction and closes it after,
-        // and closing the last connection of a WAL database checkpoints and
-        // deletes the `-wal`: every endpoint re-ran `on_open` above, re-parsed
-        // the schema and re-created the WAL (measured: 42 opens of the file
-        // between exec and six requests). Sharing one connection across threads
-        // is safe here because every `Database::` member holds `impl_->mutex`
-        // around its storage access, which is also what already made the
-        // connection sqlite_orm shares for the length of a transaction safe.
-        storage.open_forever ();
     }
 };
 
@@ -738,7 +750,7 @@ bool copy_db_files (const std::filesystem::path& src, const std::filesystem::pat
 void recover_database (const std::filesystem::path& db_file,
 const std::filesystem::path& backup_file,
 const std::string& db_path,
-const std::function<bool (const std::string&)>& probe);
-void migrate_before_sync (const std::string& path);
+const std::function<ProbeResult (const std::string&)>& probe);
+void migrate_before_sync (const std::string& path, std::chrono::milliseconds busy_timeout);
 
 } // namespace vayu::db

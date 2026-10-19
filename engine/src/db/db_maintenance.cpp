@@ -121,13 +121,16 @@ std::optional<fs::path> quarantine_db_files (const fs::path& original) {
  *
  * The backup's `VACUUM INTO` runs on one of these rather than on the
  * connection every write is serialized on, so a large copy does not hold that
- * connection (and the DB mutex) for its length; the flags and the busy timeout
- * are decided here once rather than per caller.
+ * connection (and the DB mutex) for its length; the flags are decided here
+ * once rather than per caller. The busy timeout is the caller's: the
+ * constructor's migration waits as long as its probe does (issue #2420).
  *
  * @return the connection, or `nullptr` with @p error set to what SQLite
  *         refused. The caller owns what it gets and closes it.
  */
-sqlite3* open_workspace_connection (const std::string& path, std::string& error) {
+sqlite3* open_workspace_connection (const std::string& path,
+std::chrono::milliseconds busy_timeout,
+std::string& error) {
     sqlite3* connection = nullptr;
     // Read-write rather than read-only: under WAL a reader still writes the
     // `-shm` index, and a read-only open of a database whose WAL has not been
@@ -139,7 +142,7 @@ sqlite3* open_workspace_connection (const std::string& path, std::string& error)
         sqlite3_close (connection);
         return nullptr;
     }
-    sqlite3_busy_timeout (connection, vayu::core::constants::database::BUSY_TIMEOUT_MS);
+    sqlite3_busy_timeout (connection, static_cast<int> (busy_timeout.count ()));
     return connection;
 }
 
@@ -855,24 +858,30 @@ bool copy_db_files (const fs::path& src, const fs::path& dst) {
 }
 
 /**
- * What a start does when the database it found will not open.
+ * What a start does when the database it found is corrupt.
  *
  * The backup is validated *before* the corrupt original is touched, so a start
  * that finds both files broken still has both of them afterwards.
  *
- * @param probe whether a database at a path opens and carries this build's
- *        schema - the constructor's own, because only it can name `Impl`.
+ * @param probe what a database at a path is - the constructor's own, because
+ *        only it can name `Impl`.
+ * @throws std::runtime_error when the backup cannot be examined (issue
+ *         #2420): whether it would restore is unknown, so nothing is moved.
  */
 void recover_database (const fs::path& db_file,
 const fs::path& backup_file,
 const std::string& db_path,
-const std::function<bool (const std::string&)>& probe) {
-    // The backup is validated *before* the corrupt original is touched, so
-    // a start that finds both files broken still has both of them
-    // afterwards.
+const std::function<ProbeResult (const std::string&)>& probe) {
     const bool backup_exists = fs::exists (backup_file);
-    const bool backup_valid  = backup_exists &&
-    has_sqlite_header (backup_file) && probe (backup_file.string ());
+    bool backup_valid        = false;
+    if (backup_exists && has_sqlite_header (backup_file)) {
+        const ProbeResult backup = probe (backup_file.string ());
+        if (backup.verdict == ProbeResult::Verdict::Unavailable) {
+            throw std::runtime_error (
+            unavailable_database_message (backup_file.string (), backup));
+        }
+        backup_valid = backup.verdict == ProbeResult::Verdict::Valid;
+    }
     if (backup_exists && !backup_valid) {
         vayu::utils::log_error ("db",
         "The backup at " + backup_file.string () +
@@ -946,7 +955,7 @@ const std::function<bool (const std::string&)>& probe) {
  *         transaction is rolled back first, so a throw here never leaves a
  *         half-migrated file).
  */
-void migrate_before_sync (const std::string& path) {
+void migrate_before_sync (const std::string& path, std::chrono::milliseconds busy_timeout) {
     if (!fs::exists (path)) {
         return; // A fresh install: sync_schema creates the new mapping outright.
     }
@@ -963,7 +972,7 @@ void migrate_before_sync (const std::string& path) {
     }
 
     std::string error;
-    sqlite3* raw_connection = open_workspace_connection (path, error);
+    sqlite3* raw_connection = open_workspace_connection (path, busy_timeout, error);
     if (raw_connection == nullptr) {
         // Not this pass's question to answer - the probe this runs ahead of
         // is what decides whether the file is usable at all.
@@ -1094,16 +1103,16 @@ void Database::init () {
     impl_->storage.pragma.synchronous (synchronous);
 
     // Get busy timeout in milliseconds
-    int busy_timeout =
-    get_config_int ("dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS);
-    impl_->storage.pragma.busy_timeout (busy_timeout);
+    impl_->storage.pragma.busy_timeout (get_config_int (
+    "dbBusyTimeout", vayu::core::constants::database::BUSY_TIMEOUT_MS));
 
-    // Both values are read back from the connection rather than echoed from the
-    // config row: what the engine asked for and what SQLite holds are two
+    // All three are read back from the connection rather than echoed from the
+    // config rows: what the engine asked for and what SQLite holds are two
     // different statements, and only the second one is worth logging.
     vayu::utils::log_debug ("db", "Database initialized with WAL mode",
     { { "cacheKb", applied_cache_size_bytes () / 1024 },
-    { "busyTimeoutMs", busy_timeout }, { "synchronous", applied_synchronous () } });
+    { "busyTimeoutMs", applied_busy_timeout_ms () },
+    { "synchronous", applied_synchronous () } });
 
     // Close out runs abandoned by a previous process before pruning, so an
     // orphan becomes a terminal (and therefore prunable) row in the same
@@ -1416,7 +1425,8 @@ std::string vacuum_into (const std::string& source,
 const std::string& destination,
 const std::function<bool (sqlite3*)>& on_connection = {}) {
     std::string message;
-    sqlite3* connection = open_workspace_connection (source, message);
+    sqlite3* connection = open_workspace_connection (source,
+    std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS), message);
     if (connection == nullptr) {
         return message;
     }
@@ -1508,21 +1518,30 @@ int64_t prune_backup_files (const fs::path& directory, int keep) {
 // *this engine* can open the file it is about to commit to. The refresh of
 // that `.bak` asks it of its own snapshot too, before the snapshot replaces
 // the backup it would otherwise have to be trusted over.
-bool Database::probe_database (const std::string& path) {
+//
+// Only `SQLITE_CORRUPT` and `SQLITE_NOTADB` say the file is bad
+// (`classify_probe_failure`); a lock, a full disk or a read-only directory
+// says nothing about it and must never send it to the quarantine (#2420).
+ProbeResult Database::probe_database (const std::string& path,
+std::chrono::milliseconds busy_timeout) {
     try {
         // Ahead of `Impl`'s own construction, never after: `Impl`'s
         // constructor already opens a connection and sets
         // `journal_mode`, and `sync_schema ()` below is what would
         // `DROP COLUMN` the pre-cutover script columns before this
         // migration ever got to read them (issue #1514).
-        migrate_before_sync (path);
-        Impl probe (path);
+        migrate_before_sync (path, busy_timeout);
+        Impl probe (path, busy_timeout);
         probe.storage.sync_schema ();
-        return true;
+        return {};
     } catch (const std::exception& e) {
-        vayu::utils::log_error (
-        "db", "Database validation failed for " + path + ": " + e.what ());
-        return false;
+        const ProbeResult found = classify_probe_failure (e);
+        const char* what = found.verdict == ProbeResult::Verdict::Corrupt ?
+        "Database validation failed (corrupt) for " :
+        "Database could not be examined for ";
+        vayu::utils::log_error ("db", what + path + ": " + found.reason,
+        { { "sqliteCode", found.sqlite_code } });
+        return found;
     }
 }
 
@@ -1567,10 +1586,18 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
             remove_db_file_set (snapshot);
             return std::unexpected ("the snapshot did not complete: " + refusal);
         }
-        if (!probe_database (snapshot.string ())) {
+        // Either way the previous backup stands. The snapshot is this call's
+        // own scratch file, not a copy anyone else has, so it goes whatever
+        // stopped the probe; the reason says which, because "did not
+        // validate" for a full disk would read as a damaged workspace.
+        const ProbeResult checked = probe_database (snapshot.string (),
+        std::chrono::milliseconds (vayu::core::constants::database::BUSY_TIMEOUT_MS));
+        if (checked.verdict != ProbeResult::Verdict::Valid) {
             remove_db_file_set (snapshot);
-            return std::unexpected (
-            std::string ("the snapshot did not validate"));
+            const char* why = checked.verdict == ProbeResult::Verdict::Corrupt ?
+            "the snapshot did not validate: " :
+            "the snapshot could not be examined: ";
+            return std::unexpected (why + checked.reason);
         }
 
         // A `-wal` beside the backup belongs to the copy being replaced: the
@@ -1751,6 +1778,11 @@ int Database::applied_synchronous () const {
     // takes the mutex the rest of the storage access does.
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.pragma.synchronous ();
+}
+
+int Database::applied_busy_timeout_ms () const {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return impl_->storage.pragma.busy_timeout ();
 }
 
 } // namespace vayu::db

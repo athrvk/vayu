@@ -22,6 +22,8 @@
 #include <utility>
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
+#include <sqlite_orm/sqlite_orm.h>
 
 #include "vayu/utils/logger.hpp"
 
@@ -71,6 +73,37 @@ std::optional<RecoveryOutcome> recovery_outcome_from_string (const std::string& 
         return RecoveryOutcome::StartedFreshQuarantined;
     }
     return std::nullopt;
+}
+
+ProbeResult classify_probe_failure (const std::exception& error) {
+    ProbeResult found{ ProbeResult::Verdict::Unavailable, 0, error.what () };
+    const auto* system_error = dynamic_cast<const std::system_error*> (&error);
+    if (system_error == nullptr ||
+    system_error->code ().category () != sqlite_orm::get_sqlite_error_category ()) {
+        return found;
+    }
+    found.sqlite_code = system_error->code ().value ();
+    // sqlite_orm's `what ()` is "<sqlite3_errmsg>: <sqlite3_errstr>", which
+    // says "database is locked" twice whenever the two agree.
+    const std::string generic = system_error->code ().message ();
+    if (found.reason == generic + ": " + generic) {
+        found.reason = generic;
+    }
+    if (found.sqlite_code == SQLITE_CORRUPT || found.sqlite_code == SQLITE_NOTADB) {
+        found.verdict = ProbeResult::Verdict::Corrupt;
+    }
+    return found;
+}
+
+std::string unavailable_database_message (const std::string& path, const ProbeResult& found) {
+    std::string cause = found.reason;
+    if (found.sqlite_code != 0) {
+        cause += " (SQLite result code " + std::to_string (found.sqlite_code) + ")";
+    }
+    return "The database at " + path + " could not be examined: " + cause +
+    ". Another program has the database open, or the disk is full or "
+    "read-only; nothing was changed. Close the other program or free the "
+    "disk, then start Vayu again.";
 }
 
 std::string recovery_marker_path (const std::string& db_path) {

@@ -202,7 +202,12 @@ vayu-cli run request.json
 
 The daemon exits **1** if it cannot take its port, naming the address on
 stderr - another process is listening there. Use `--port` to pick a different
-one, and `--daemon` to point the CLI at it. An ordinary shutdown exits **0**.
+one, and `--daemon` to point the CLI at it. It also exits **1** when its
+database cannot be opened safely - one written by a newer Vayu, or one it cannot
+examine because another program holds it or the disk is full or read-only -
+naming the database on stderr and changing nothing
+([db-schema.md](db-schema.md#startup-validation-backup-and-recovery)). An
+ordinary shutdown exits **0**.
 
 Its arguments are checked before anything starts, and one that cannot be acted
 on is refused on stderr with exit code **1** rather than dropped:
