@@ -165,11 +165,11 @@ function revealGateSentence(host: McpHost): string {
 		"and response alike; in place of what auth wrote at send time (an OAuth 2.0 token " +
 		"or an API key, whatever its source) in the request's `url`, header maps and " +
 		"`rawRequest`; and in place of a credential-named query value (matched on the whole " +
-		"name, however it got there) in that `url` and request line. A base64 body " +
+		"name, however it got there; an empty value or a pure {{variable}} reference is shown as written) in that `url` and request line. A base64 body " +
 		'(`bodyEncoding: "base64"`) is searched as the bytes it decodes to, matched as ' +
 		"UTF-8 and as Latin-1, and stays base64 that decodes, with " +
 		"`<redacted>` in place of those bytes. Everything else is kept - shape, order and " +
-		"the engine's size fields - and the request was sent with the real values. If a " +
+		"the engine's size fields, which still count the bytes it read - and the request was sent with the real values. If a " +
 		"lookup the masking needs fails, the call answers an error naming it and none of the " +
 		"result. A load run's confirmation preview shows the run as it will be recorded: " +
 		"secrets `<redacted>`, the `auth` block's credentials `<member>Withheld: true`. " +

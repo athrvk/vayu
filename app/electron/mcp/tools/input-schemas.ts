@@ -75,7 +75,7 @@ export const ENGINE_DEFAULT_HEADERS_SENTENCE =
 
 /** What `start_load_run` and `run_collection_smoke` say about the engine's default headers. */
 export const ENGINE_DEFAULT_HEADERS_POINTER =
-	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id to a request that does not name them; run_request states the rule.";
+	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id to a request that does not name them; a header you write under that name wins; run_request states the rule.";
 
 /**
  * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.
