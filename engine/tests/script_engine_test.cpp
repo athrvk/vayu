@@ -2251,10 +2251,11 @@ TEST_F (ScriptEngineTest, EnvironmentSet) {
 }
 
 // Regression for #110: pm.*.set() on an existing key must preserve the
-// variable's secret flag, enabled flag and type - only the value changes. The
-// pre-fix whole-record replace silently un-masked a secret variable in the UI
-// and reset its type. Mutation-check: restore the Variable{value,false,true}
-// assignment in set_variable_preserving and the secret/type asserts here fail.
+// variable's secret flag and type - only the value changes (and `enabled` is
+// ticked, see SetOnADisabledRowMakesItReadable). The pre-fix whole-record
+// replace silently un-masked a secret variable in the UI and reset its type.
+// Mutation-check: restore the Variable{value,false,true} assignment in
+// set_variable_preserving and the secret/type asserts here fail.
 TEST_F (ScriptEngineTest, SetPreservesSecretFlagAndType) {
     env["token"] = Variable{ "old", true, true, "json" };
 
@@ -2267,8 +2268,108 @@ TEST_F (ScriptEngineTest, SetPreservesSecretFlagAndType) {
     EXPECT_TRUE (result.success);
     EXPECT_EQ (env["token"].value, "rotated"); // value updated
     EXPECT_TRUE (env["token"].secret);         // secret preserved
-    EXPECT_TRUE (env["token"].enabled);        // enabled preserved
-    EXPECT_EQ (env["token"].type, "json");     // type preserved
+    EXPECT_TRUE (env["token"].enabled);
+    EXPECT_EQ (env["token"].type, "json"); // type preserved
+}
+
+// #2479: a set is a write of a value the script means to use, so it ticks a row
+// the user had unticked. Left unticked, the script's own get/has/replaceIn and
+// the execute-time residual pass look past the row it just wrote.
+TEST_F (ScriptEngineTest, SetOnADisabledRowMakesItReadable) {
+    env["token"] = Variable{ "old", false, false };
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('token', 'new');
+        pm.environment.set('got', String(pm.environment.get('token')));
+        pm.environment.set('has', String(pm.environment.has('token')));
+        pm.environment.set('repl', pm.variables.replaceIn('[{{token}}]'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["got"].value, "new");
+    EXPECT_EQ (env["has"].value, "true");
+    EXPECT_EQ (env["repl"].value, "[new]");
+    EXPECT_TRUE (env["token"].enabled);
+}
+
+// Ticking the row changes nothing else about it.
+TEST_F (ScriptEngineTest, SetOnADisabledRowKeepsItsSecretFlagTypeAndCreationTime) {
+    Variable disabled{ "old", true, false, "json" };
+    disabled.created_at = 1784967810149;
+    env["token"]        = disabled;
+
+    auto result =
+    engine.execute_prerequest ("pm.environment.set('token', 'new');", request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["token"].value, "new");
+    EXPECT_TRUE (env["token"].enabled);
+    EXPECT_TRUE (env["token"].secret);
+    EXPECT_EQ (env["token"].type, "json");
+    EXPECT_EQ (env["token"].created_at, 1784967810149);
+}
+
+// The same for the other two scopes' setters, which share the helper.
+TEST_F (ScriptEngineTest, GlobalsAndCollectionSetOnADisabledRowMakeItReadable) {
+    Environment globals;
+    globals["g"] = Variable{ "old", false, false };
+    Environment collVars;
+    collVars["c"] = Variable{ "old", false, false };
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &collVars;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('g', 'new-g');
+        pm.collectionVariables.set('c', 'new-c');
+        pm.environment.set('gGot', String(pm.globals.get('g')));
+        pm.environment.set('cGot', String(pm.collectionVariables.get('c')));
+        pm.environment.set('repl', pm.variables.replaceIn('{{g}}/{{c}}'));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (globals["g"].enabled);
+    EXPECT_TRUE (collVars["c"].enabled);
+    EXPECT_EQ (env["gGot"].value, "new-g");
+    EXPECT_EQ (env["cGot"].value, "new-c");
+    EXPECT_EQ (env["repl"].value, "new-g/new-c");
+}
+
+// A set lands in the leaf: a row an ancestor collection holds unticked stays
+// as it was, and the leaf gains its own enabled key.
+TEST_F (ScriptEngineTest, CollectionSetOverADisabledAncestorRowLandsEnabledInTheLeaf) {
+    std::vector<Environment> ancestors (1);
+    ancestors[0]["token"] = Variable{ "from-root", false, false };
+    Environment leaf;
+    Environment globals;
+
+    ScriptContext ctx;
+    ctx.request             = &request;
+    ctx.environment         = &env;
+    ctx.globals             = &globals;
+    ctx.collectionVariables = &leaf;
+    ctx.collectionAncestors = &ancestors;
+
+    auto result = engine.execute (R"JS(
+        pm.globals.set('before', String(pm.collectionVariables.has('token')));
+        pm.collectionVariables.set('token', 'from-leaf');
+        pm.globals.set('after', String(pm.collectionVariables.get('token')));
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (globals["before"].value, "false");
+    EXPECT_EQ (globals["after"].value, "from-leaf");
+    ASSERT_EQ (leaf.count ("token"), 1U);
+    EXPECT_TRUE (leaf["token"].enabled);
+    EXPECT_EQ (leaf["token"].value, "from-leaf");
+    EXPECT_EQ (ancestors[0]["token"].value, "from-root");
+    EXPECT_FALSE (ancestors[0]["token"].enabled);
 }
 
 // A brand-new key still gets the current defaults (not secret, enabled, string).

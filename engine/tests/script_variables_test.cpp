@@ -275,6 +275,28 @@ TEST_F (PersistScriptVariablesTest, AScriptWriteKeepsTheOrderingKeyOfEveryOtherV
     EXPECT_EQ (stored_globals_variables (), APP_BLOB);
 }
 
+// A set on a row the user unticked ticks it (#2479), which is a change to more
+// than the value, so the stored row is written whole - and still carries the
+// secret flag, type and creation time the script never touched.
+TEST_F (PersistScriptVariablesTest, ASetOnADisabledRowStoresItEnabledWithTheNewValue) {
+    auto environment = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (environment);
+    environment->variables =
+    R"({"token":{"value":"old","enabled":false,"secret":true,"type":"json","createdAt":1784967810149}})";
+    db_->save_environment (*environment);
+
+    auto scopes = load ();
+    run_script (scopes, "pm.environment.set('token', 'new');");
+    persist_script_variables (*db_, scopes);
+
+    auto stored = json::parse (stored_environment_variables ());
+    EXPECT_EQ (stored["token"]["value"], "new");
+    EXPECT_EQ (stored["token"]["enabled"], true);
+    EXPECT_EQ (stored["token"]["secret"], true);
+    EXPECT_EQ (stored["token"]["type"], "json");
+    EXPECT_EQ (stored["token"]["createdAt"], 1784967810149LL);
+}
+
 // A run with no environment and no request must not touch the scopes it has no
 // business writing, and must not fail on the lookups that return nothing.
 TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyGlobals) {

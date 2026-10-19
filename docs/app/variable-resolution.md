@@ -930,6 +930,8 @@ later. So the canonical pattern now works: `pm.environment.set("token", …)` in
 a pre-request script **does** reach `Bearer {{token}}` in the same send, as
 long as nothing answered `{{token}}` at compose time - a value composition
 already substituted is finished text, and this second pass does not touch it.
+The same holds when `token` exists as an **unticked** row: composition looks
+past it, and the `set` ticks the row again (#2479), so the second pass finds it.
 A script that must change a value composition already resolved still edits
 `pm.request` directly (the write-back is applied to the outgoing request).
 

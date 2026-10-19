@@ -636,6 +636,22 @@ TEST_F (ResidualTokenExchangeTest, AVariableThePreRequestScriptSetsReachesTheWir
     EXPECT_EQ (server_->body (), R"({"tenant":"acme"})");
 }
 
+/// A row the user unticked is invisible to the pass, so a script that sets it
+/// has to make it live or the token goes out literal (#2479).
+TEST_F (ResidualTokenExchangeTest, ADisabledRowThePreRequestScriptSetsReachesTheWire) {
+    vayu::Request request;
+    request.url                      = server_->url () + "/users";
+    request.headers["Authorization"] = "Bearer {{token}}";
+
+    ScriptVariableScopes scopes;
+    scopes.environment["token"] = vayu::Variable{ "old", false, false };
+    auto outcome =
+    send (std::move (request), scopes, "pm.environment.set(\"token\", \"new\");");
+
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer new");
+}
+
 /// The same rule one step further on: a scenario step reaches the pass with the
 /// previous steps' writes in the scopes, and no script of its own to run.
 TEST_F (ResidualTokenExchangeTest, AVariableAnEarlierStepSetIsResolvedWithNoScriptOfItsOwn) {
