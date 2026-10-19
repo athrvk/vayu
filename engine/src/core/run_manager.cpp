@@ -1493,6 +1493,7 @@ struct RunTotals {
     size_t completed        = 0;
     double actual_rps       = 0.0;
     double total_duration_s = 0.0;
+    double sending_window_s = 0.0;
     double setup_overhead_s = 0.0;
     double latency_avg_ms   = 0.0;
     MetricsCollector::Percentiles latency;
@@ -1561,14 +1562,18 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.total_requests   = totals.completed;
     inputs.cancelled        = context->metrics_collector->cancelled ();
     inputs.rps              = totals.actual_rps;
-    inputs.send_rate        = totals.total_duration_s > 0 ?
-           static_cast<double> (context->requests_sent.load ()) / totals.total_duration_s :
-           0.0;
     inputs.throughput       = totals.actual_rps;
     inputs.test_duration_s  = totals.total_duration_s;
     inputs.setup_overhead_s = totals.setup_overhead_s;
     inputs.peak_concurrency = context->peak_in_flight.load ();
     inputs.dropped_requests = context->metrics_collector->dropped_requests ();
+    // Over the window the run sent in, which leaves out the drain (#2392).
+    inputs.requests_sent      = context->requests_sent.load ();
+    inputs.requests_expected  = context->requests_expected.load ();
+    inputs.sending_duration_s = totals.sending_window_s;
+    inputs.send_rate          = totals.sending_window_s > 0 ?
+             static_cast<double> (inputs.requests_sent) / totals.sending_window_s :
+             0.0;
     inputs.queue_wait_avg_ms = context->metrics_collector->average_queue_wait ();
     inputs.bytes_sent     = context->metrics_collector->total_bytes_sent ();
     inputs.bytes_received = context->metrics_collector->total_bytes_received ();
@@ -1930,6 +1935,20 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
 }
 
 /**
+ * The window a run's send rate and rate fidelity divide by (#2392): @p
+ * measured_s, load start to the executor's return, which leaves out the drain
+ * that @p total_duration_s includes. An `iterations` run that reached its own
+ * end gets @p total_duration_s instead (`returns_at_send_deadline` says why); a
+ * stopped one returned when it saw the Stop, so its measured window stands.
+ */
+double sending_window_seconds (const RunContext& context, double measured_s, double total_duration_s) {
+    if (context.should_stop || returns_at_send_deadline (context.config)) {
+        return measured_s;
+    }
+    return total_duration_s;
+}
+
+/**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
  * the stored summary and the terminal status.
  *
@@ -1940,6 +1959,7 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
 void finish_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 double total_duration_s,
+double sending_window_s,
 double setup_overhead_s,
 double target_rps,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
@@ -2011,7 +2031,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     bool summary_stored = false;
     try {
         const RunTotals totals{ completed, actual_rps, total_duration_s,
-            setup_overhead_s, avg_latency, percentiles };
+            sending_window_s, setup_overhead_s, avg_latency, percentiles };
         inputs = collect_summary_inputs (
         context, totals, validation, schema_totals, scenario_state);
         inputs.lifecycle =
@@ -2147,6 +2167,8 @@ RunManager& manager) {
             manager.retain_run (context->run_id);
             return;
         }
+        // Before the drain below, which sends nothing.
+        const auto send_end = std::chrono::steady_clock::now ();
 
         // How the run lets go of the event loop depends on why it is ending.
         //
@@ -2178,6 +2200,8 @@ RunManager& manager) {
         auto test_end = std::chrono::steady_clock::now ();
         double total_duration_s =
         std::chrono::duration<double> (test_end - test_start).count ();
+        const double sending_window_s = sending_window_seconds (*context,
+        std::chrono::duration<double> (send_end - test_start).count (), total_duration_s);
 
         // Update end_time in DB immediately to reflect actual test end
         // (not after cleanup/metrics thread join)
@@ -2197,8 +2221,8 @@ RunManager& manager) {
         const double setup_overhead_s =
         std::chrono::duration<double> (cleanup_end - test_end).count ();
 
-        finish_load_test (context, db, total_duration_s, setup_overhead_s,
-        target_rps, scenario_state);
+        finish_load_test (context, db, total_duration_s, sending_window_s,
+        setup_overhead_s, target_rps, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run
@@ -2228,9 +2252,6 @@ RunManager& manager) {
             inputs.rps                     = elapsed_s > 0 ?
                                 static_cast<double> (inputs.total_requests) / elapsed_s :
                                 0.0;
-            inputs.send_rate               = elapsed_s > 0 ?
-                          static_cast<double> (context->requests_sent.load ()) / elapsed_s :
-                          0.0;
             inputs.throughput              = inputs.rps;
             inputs.test_duration_s         = elapsed_s;
             inputs.peak_concurrency        = context->peak_in_flight.load ();
@@ -2245,6 +2266,12 @@ RunManager& manager) {
             inputs.stream                  = mc.stream_totals ();
             inputs.retention               = read_retention (mc);
             inputs.http_version_downgraded = mc.http_version_downgraded ();
+            // No drain was timed apart here, so the window is the elapsed time.
+            inputs.requests_sent      = context->requests_sent.load ();
+            inputs.requests_expected  = context->requests_expected.load ();
+            inputs.sending_duration_s = elapsed_s;
+            inputs.send_rate =
+            elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
             if (context->auth_refresh) {
                 inputs.auth = context->auth_refresh->summary ();
             }
@@ -2335,6 +2362,12 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     summary["queue_wait_avg"]   = inputs.queue_wait_avg_ms;
     summary["bytes_sent"]       = inputs.bytes_sent;
     summary["bytes_received"]   = inputs.bytes_received;
+    // Always written, zeros included: the report reads an absent
+    // `sending_duration` as a run stored before #2392 and keeps that run's
+    // old rate-fidelity formula.
+    summary["requests_sent"]     = inputs.requests_sent;
+    summary["requests_expected"] = inputs.requests_expected;
+    summary["sending_duration"]  = inputs.sending_duration_s;
     // Always written, including the 0 case. An absent key means "an engine too
     // old to have looked", which apply_stored_summary must be able to tell from
     // "looked, and every request got the protocol it asked for".

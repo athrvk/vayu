@@ -134,7 +134,8 @@
             "bytesSent": {"type": "number"},
             "bytesReceived": {"type": "number"},
             "httpVersionDowngraded": {"type": "number"},
-            "throughputBytesPerSec": {"type": "number"}
+            "throughputBytesPerSec": {"type": "number"},
+            "sendingDurationSeconds": {"description": "The window sendRate and rateControl divide by: load start to the end of sending, the end-of-run drain excluded (issue #2392). Absent for a run stored before it.", "type": "number"}
           }
         },
         "latency": {
@@ -162,7 +163,9 @@
           "properties": {
             "targetRps": {"type": "number"},
             "actualRps": {"type": "number"},
-            "achievement": {"type": "number"}
+            "achievement": {"type": "number"},
+            "requestsSent": {"description": "Absent for a run stored before issue #2392, as is requestsExpected.", "type": "number"},
+            "requestsExpected": {"type": "number"}
           }
         },
         "errors": {

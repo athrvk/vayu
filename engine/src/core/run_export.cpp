@@ -157,16 +157,16 @@ const json& member (const json& source, std::string_view key) {
 
 // --- report sections ---------------------------------------------------------
 
-constexpr auto SUMMARY_KEYS =
-std::to_array<std::string_view> ({ "totalRequests", "successfulRequests",
-"failedRequests", "httpErrorRequests", "noResponseRequests", "cancelledRequests",
-"errorRate", "totalDurationSeconds", "avgRps", "testDuration", "sendRate",
-"throughput", "setupOverhead", "peakConcurrency", "droppedRequests", "avgQueueWaitMs",
-"bytesSent", "bytesReceived", "httpVersionDowngraded", "throughputBytesPerSec" });
+constexpr auto SUMMARY_KEYS = std::to_array<std::string_view> (
+{ "totalRequests", "successfulRequests", "failedRequests", "httpErrorRequests",
+"noResponseRequests", "cancelledRequests", "errorRate", "totalDurationSeconds",
+"avgRps", "testDuration", "sendRate", "throughput", "setupOverhead",
+"peakConcurrency", "droppedRequests", "avgQueueWaitMs", "bytesSent", "bytesReceived",
+"httpVersionDowngraded", "throughputBytesPerSec", "sendingDurationSeconds" });
 constexpr auto LATENCY_KEYS = std::to_array<std::string_view> (
 { "min", "max", "avg", "median", "p50", "p75", "p90", "p95", "p99", "p999" });
-constexpr auto RATE_CONTROL_KEYS =
-std::to_array<std::string_view> ({ "targetRps", "actualRps", "achievement" });
+constexpr auto RATE_CONTROL_KEYS = std::to_array<std::string_view> (
+{ "targetRps", "actualRps", "achievement", "requestsSent", "requestsExpected" });
 constexpr auto ERRORS_KEYS = std::to_array<std::string_view> ({ "total", "withDetails" });
 constexpr auto TIMING_AVERAGE_KEYS = std::to_array<std::string_view> (
 { "avgDnsMs", "avgConnectMs", "avgTlsMs", "avgFirstByteMs", "avgDownloadMs" });
