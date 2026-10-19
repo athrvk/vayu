@@ -45,6 +45,7 @@ import {
 	type EngineClient,
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
+import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
@@ -2285,7 +2286,7 @@ describe("document CRUD parity", () => {
 				ctxWith(client, allow)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toBe(INSECURE_TLS_REFUSAL);
+			expect(firstText(res)).toBe(resolveRemedyTokens(INSECURE_TLS_REFUSAL, "app"));
 			// Refused *before* composition, so nothing was even resolved - a
 			// refusal after the exchange would be a request already sent.
 			expect(client.composeRequest).not.toHaveBeenCalled();
@@ -5990,7 +5991,10 @@ describe("dispatchTool", () => {
 		test("the descriptions say what is refused and where the setting lives", () => {
 			for (const name of ["run_request", "start_load_run"]) {
 				const description = TOOLS.find((t) => t.name === name)!.description;
-				expect(description).toContain("Reveal secrets to agents");
+				expect(description).toContain(REVEAL_SETTING_TOKEN);
+				expect(resolveRemedyTokens(description, "app")).toContain(
+					"Reveal secrets to agents"
+				);
 				expect(description).toMatch(/script you supply here .* is refused/);
 			}
 		});
@@ -13175,7 +13179,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(firstText(res)).toContain("saved request by id");
 		expect(client.composeRequest).not.toHaveBeenCalled();
 		expect(client.executeRequest).not.toHaveBeenCalled();
@@ -13197,7 +13201,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 

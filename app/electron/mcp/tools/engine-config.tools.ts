@@ -14,7 +14,13 @@
 import { z } from "zod";
 import { secretsShape, withholdConfigCredentials } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import { engineRestartRemedy, settingRemedy } from "../remedy.js";
+import {
+	GUARDED_WRITE_SENTENCE,
+	NETWORK_SETTINGS_TOKEN,
+	RESTART_ENGINE_TOKEN,
+	engineRestartRemedy,
+	settingRemedy,
+} from "../remedy.js";
 import { engineErrorResult, errorResult } from "./kit.js";
 import { configUpdateSchema, isNetworkConfigKey, restartRequiredAmong } from "./output-schemas.js";
 
@@ -24,7 +30,13 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["config"],
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings, and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings to be enabled there; a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
+			"Update one or more engine configuration entries. " +
+			GUARDED_WRITE_SENTENCE +
+			", and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings (to enable them, " +
+			NETWORK_SETTINGS_TOKEN +
+			"); a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (" +
+			RESTART_ENGINE_TOKEN +
+			").",
 		annotations: {
 			title: "Update engine config",
 			readOnlyHint: false,

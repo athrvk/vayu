@@ -13,7 +13,7 @@
  */
 
 import { type EngineClient, EngineRequestError } from "../engine-client.js";
-import { REVEAL_SETTING, runOutputShape, withheldAuthMembers } from "../withhold.js";
+import { runOutputShape, withheldAuthMembers } from "../withhold.js";
 import type { ToolContext, ToolResult } from "./contract.js";
 import {
 	engineErrorResult,
@@ -27,7 +27,7 @@ import {
 	ToolArgError,
 } from "./kit.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
-import { settingRemedy } from "../remedy.js";
+import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 
 /**
  * The request fields an agent stated directly, raw - and *only* the ones it
@@ -297,7 +297,7 @@ function carriesScript(entry: unknown): boolean {
  * that tool.
  */
 export function agentScriptGateSentence(carriers: string): string {
-	return `Unless the user has turned on ${REVEAL_SETTING}, a script you supply here (${carriers}) is refused before anything is sent, because a script reads every variable, secret ones included; a blank script is not refused.`;
+	return `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, a script you supply here (${carriers}) is refused before anything is sent, because a script reads every variable, secret ones included; a blank script is not refused.`;
 }
 
 /**

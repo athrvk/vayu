@@ -189,7 +189,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				.enum(HTTP_VERSIONS)
 				.optional()
 				.describe(
-					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s Settings tab picker.'
+					'Protocol to negotiate: "auto" | "http1.1" | "http2" (default "auto"). Mirrors the request builder\'s protocol picker.'
 				),
 			verifySSL: verifySSLSendInput,
 			requestId: z

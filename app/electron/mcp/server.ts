@@ -30,7 +30,7 @@ import {
 import { TOOLS, dispatchTool, isListed, withheldWriteRefusal, type ToolContext } from "./tools.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import type { McpHost } from "./tools/contract.js";
-import { settingRemedy } from "./remedy.js";
+import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
 import { SERVER_ICONS } from "./server-icon.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE, extractRunIds } from "./resources.js";
 import { PROMPTS } from "./prompts.js";
@@ -205,7 +205,7 @@ export function createMcpServer(
 		prompts: { listChanged: false },
 	});
 
-	const sdkCallTool = captureCallToolHandler(mcp);
+	const takeToolHandlers = captureToolHandlers(mcp);
 
 	for (const tool of TOOLS) {
 		if (!isListed(tool, baseCtx.config)) continue;
@@ -233,7 +233,9 @@ export function createMcpServer(
 		);
 	}
 
-	answerWithheldWriteCalls(mcp, baseCtx, sdkCallTool());
+	const { list: sdkListTools, call: sdkCallTool } = takeToolHandlers();
+	resolveRemedyInToolList(mcp, baseCtx.host, sdkListTools);
+	answerWithheldWriteCalls(mcp, baseCtx, sdkCallTool);
 
 	registerResources(mcp, baseCtx);
 	registerPrompts(mcp, baseCtx);
@@ -294,20 +296,26 @@ interface EnvelopeView {
 }
 
 /**
- * A `tools/call` handler as the SDK's `Server` holds it.
+ * A `tools/call` or `tools/list` handler as the SDK's `Server` holds it.
  *
- * Deliberately loose in its request type: the wrapper below reads one field and
- * forwards the rest untouched, and restating the SDK's request shape here is a
+ * Deliberately loose in its request type: the wrappers below read one field and
+ * forward the rest untouched, and restating the SDK's request shape here is a
  * second copy of it to drift.
  */
-type CallToolHandler = (
+type ToolHandler = (
 	request: { params: { name: string } },
 	ctx: unknown
 ) => unknown | Promise<unknown>;
 
+/** The two handlers `registerTool` installs, as captured. */
+interface ToolHandlers {
+	list: ToolHandler | undefined;
+	call: ToolHandler | undefined;
+}
+
 /**
- * Watch for the `tools/call` handler `registerTool` installs, and return a
- * getter for it.
+ * Watch for the `tools/call` and `tools/list` handlers `registerTool` installs,
+ * and return a getter for them.
  *
  * The SDK offers no pre-dispatch hook (2.3.1): its handler looks the name up in
  * its own registry and rejects before anything of Vayu's runs, and its
@@ -321,15 +329,16 @@ type CallToolHandler = (
  * holds this to the SDK across an upgrade is the protocol test that calls a
  * withheld name and reads the answer.
  */
-function captureCallToolHandler(mcp: McpServer): () => CallToolHandler | undefined {
+function captureToolHandlers(mcp: McpServer): () => ToolHandlers {
 	const server = mcp.server as unknown as {
-		setRequestHandler: (method: string, handler: CallToolHandler) => void;
+		setRequestHandler: (method: string, handler: ToolHandler) => void;
 	};
 	const install = server.setRequestHandler.bind(server);
-	let captured: CallToolHandler | undefined;
+	const captured: ToolHandlers = { list: undefined, call: undefined };
 
-	server.setRequestHandler = (method: string, handler: CallToolHandler) => {
-		if (method === "tools/call") captured = handler;
+	server.setRequestHandler = (method: string, handler: ToolHandler) => {
+		if (method === "tools/call") captured.call = handler;
+		if (method === "tools/list") captured.list = handler;
 		install(method, handler);
 	};
 
@@ -337,6 +346,29 @@ function captureCallToolHandler(mcp: McpServer): () => CallToolHandler | undefin
 		delete (server as Partial<typeof server>).setRequestHandler;
 		return captured;
 	};
+}
+
+/**
+ * Fill every remedy token in the `tools/list` answer with the host's wording.
+ *
+ * Descriptions are static strings, and the SDK converts each tool's Zod schema
+ * to JSON Schema only when it answers the list, so a token in a parameter's
+ * description is out of reach of anything done at registration. Resolving the
+ * answer covers a tool's description, its parameters' and its output schema
+ * in one place.
+ */
+function resolveRemedyInToolList(
+	mcp: McpServer,
+	host: McpHost,
+	sdkListTools: ToolHandler | undefined
+): void {
+	if (!sdkListTools) return;
+	const server = mcp.server as unknown as {
+		setRequestHandler: (method: string, handler: ToolHandler) => void;
+	};
+	server.setRequestHandler("tools/list", async (request, callCtx) =>
+		resolveRemedyTokens(await sdkListTools(request, callCtx), host)
+	);
 }
 
 /**
@@ -353,11 +385,11 @@ function captureCallToolHandler(mcp: McpServer): () => CallToolHandler | undefin
 function answerWithheldWriteCalls(
 	mcp: McpServer,
 	ctx: ToolContext,
-	sdkCallTool: CallToolHandler | undefined
+	sdkCallTool: ToolHandler | undefined
 ): void {
 	if (ctx.config.allowWrites || !sdkCallTool) return;
 	const server = mcp.server as unknown as {
-		setRequestHandler: (method: string, handler: CallToolHandler) => void;
+		setRequestHandler: (method: string, handler: ToolHandler) => void;
 	};
 	server.setRequestHandler("tools/call", (request, callCtx) => {
 		const refusal = withheldWriteRefusal(request.params.name, ctx);
@@ -369,7 +401,7 @@ function answerWithheldWriteCalls(
 function registerResources(mcp: McpServer, ctx: ToolContext): void {
 	const meta = (title: string, description: string) => ({
 		title,
-		description,
+		description: resolveRemedyTokens(description, ctx.host),
 		mimeType: "application/json",
 	});
 

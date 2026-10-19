@@ -37,6 +37,7 @@ import {
 	removeVariablesInput,
 	variablesInput,
 } from "./variable-blobs.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const VARIABLE_TOOLS: McpTool[] = [
 	{
@@ -140,7 +141,9 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. " +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			precedenceNote(
 				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
 			) +

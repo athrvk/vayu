@@ -36,6 +36,7 @@ import {
 	inboxStartPayload,
 	MAX_INBOX_CAPTURE_LIMIT,
 } from "./webhook-inbox.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 	{
@@ -142,7 +143,9 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["service"],
 		description:
-			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation - if the client supports elicitation the user is prompted with how many captures go with it, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and the captures are the part that cannot be recreated. To keep them, use stop_webhook_inbox instead.",
+			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation - if the client supports elicitation the user is prompted with how many captures go with it, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and the captures are the part that cannot be recreated. To keep them, use stop_webhook_inbox instead.",
 		annotations: {
 			title: "Delete webhook inbox",
 			readOnlyHint: false,
@@ -244,7 +247,9 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["service"],
 		description:
-			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. GUARDED: requires write access to be enabled in Vayu Settings; unlike delete_webhook_inbox it needs no confirmation, because the inbox survives and the next trigger records again. The captures themselves do not come back.",
+			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. " +
+			GUARDED_WRITE_SENTENCE +
+			"; unlike delete_webhook_inbox it needs no confirmation, because the inbox survives and the next trigger records again. The captures themselves do not come back.",
 		annotations: {
 			title: "Clear inbox captures",
 			readOnlyHint: false,

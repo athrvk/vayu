@@ -19,8 +19,9 @@ import { describe, it, expect, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { createMcpServer } from "./server.js";
-import { dispatchTool, type ToolContext } from "./tools.js";
+import { TOOLS, dispatchTool, toolCatalog, type ToolContext } from "./tools.js";
 import type { McpHost } from "./tools/contract.js";
+import { GUARDED_WRITE_SENTENCE, resolveRemedyTokens } from "./remedy.js";
 import type { EngineClient } from "./engine-client.js";
 
 /** What names the other host's remedy: never allowed to reach a CLI session. */
@@ -191,6 +192,30 @@ const GUARDS: readonly Guard[] = [
 			),
 	},
 	{
+		name: "per-call TLS downgrade",
+		cliNames: ["customCaCertificates", "VAYU_MCP_ALLOW_NETWORK_SETTINGS"],
+		appNames: ["Vayu Settings > Network & connectivity"],
+		trigger: (host) =>
+			refusal(
+				host,
+				"run_request",
+				{ url: "https://api.example.com/x", verifySSL: false },
+				ALLOWED
+			),
+	},
+	{
+		name: "inline file body",
+		cliNames: ["no setting that allows a folder"],
+		appNames: ["Settings > Files"],
+		trigger: (host) =>
+			refusal(
+				host,
+				"run_request",
+				{ url: "https://api.example.com/x", file: { src: "/a" } },
+				ALLOWED
+			),
+	},
+	{
 		name: "tool switched off",
 		cliNames: ["VAYU_MCP_DISABLED_TOOLS"],
 		appNames: [SETTINGS_PATH],
@@ -216,7 +241,7 @@ const GUARDS: readonly Guard[] = [
 
 describe("guard and outage messages, per host", () => {
 	it("scans a non-empty list of guards", () => {
-		expect(GUARDS.length).toBeGreaterThanOrEqual(14);
+		expect(GUARDS.length).toBeGreaterThanOrEqual(16);
 	});
 
 	describe.each(GUARDS)("$name", (guard) => {
@@ -287,5 +312,120 @@ describe("server instructions, per host", () => {
 		expect(text).toContain("turn on Write access in Vayu Settings → MCP");
 		expect(text).toContain("turn on Reveal secrets to agents in Vayu Settings → MCP");
 		expect(text).not.toContain("VAYU_MCP_");
+	});
+});
+
+/** Every string under @p value with the path that reaches it. */
+function stringsOf(value: unknown, path: string, out: [string, string][] = []): [string, string][] {
+	if (typeof value === "string") out.push([path, value]);
+	else if (Array.isArray(value))
+		value.forEach((item, i) => stringsOf(item, `${path}[${i}]`, out));
+	else if (value && typeof value === "object") {
+		for (const [key, item] of Object.entries(value)) stringsOf(item, `${path}.${key}`, out);
+	}
+	return out;
+}
+
+/** Everything a client can list in a session: tools (schemas included), resources and prompts. */
+async function listEverything(host: McpHost, safety: Partial<McpSafetyConfig>) {
+	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	const server = createMcpServer({ name: "vayu", version: "test" }, () =>
+		ctxFor(host, safety, fakeClient({ listRuns: async () => [] }))
+	);
+	await server.connect(serverTransport);
+	const client = new Client({ name: "test-client", version: "1.0.0" });
+	await client.connect(clientTransport);
+	const [tools, resources, prompts] = await Promise.all([
+		client.listTools(),
+		client.listResources(),
+		client.listPrompts(),
+	]);
+	await server.close();
+	return { tools: tools.tools, resources: resources.resources, prompts: prompts.prompts };
+}
+
+/** The paths of every listed string that matches @p pattern, so a failure names the tool. */
+function offenders(listing: Awaited<ReturnType<typeof listEverything>>, pattern: RegExp): string[] {
+	const named: [string, unknown][] = [
+		...listing.tools.map((t): [string, unknown] => [`tool ${t.name}`, t]),
+		...listing.resources.map((r): [string, unknown] => [`resource ${r.name}`, r]),
+		...listing.prompts.map((p): [string, unknown] => [`prompt ${p.name}`, p]),
+	];
+	return named.flatMap(([name, item]) =>
+		stringsOf(item, name)
+			.filter(([, text]) => pattern.test(text))
+			.map(([path]) => path)
+	);
+}
+
+/** The write-gate descriptions the registry declares, so the scan cannot shrink unnoticed. */
+const GUARDED_TOOL_COUNT = TOOLS.filter((t) => t.description.includes("GUARDED")).length;
+
+describe("tools/list, resources and prompts, per host", () => {
+	it("registers at least the 31 GUARDED descriptions", () => {
+		expect(GUARDED_TOOL_COUNT).toBeGreaterThanOrEqual(31);
+	});
+
+	describe.each([true, false])("CLI session, writes %s", (allowWrites) => {
+		it("never names Settings or the Vayu app, and leaves no token unresolved", async () => {
+			const listing = await listEverything("cli", { allowWrites });
+			expect(listing.tools.length).toBeGreaterThan(0);
+			expect(listing.resources.length).toBeGreaterThan(0);
+			expect(listing.prompts.length).toBeGreaterThan(0);
+			const guarded = listing.tools.filter((t) => t.description?.includes("GUARDED"));
+			// With writes off the write tools are not listed, so only the gates
+			// that are not the write gate remain.
+			expect(guarded.length).toBeGreaterThan(0);
+			if (allowWrites) expect(guarded.length).toBe(GUARDED_TOOL_COUNT);
+			else expect(guarded.length).toBeLessThan(GUARDED_TOOL_COUNT);
+			expect(offenders(listing, APP_ONLY_WORDING)).toEqual([]);
+			expect(offenders(listing, /\{\{remedy:/)).toEqual([]);
+		});
+
+		it("names the variable that lifts each gate it describes", async () => {
+			const { tools } = await listEverything("cli", { allowWrites });
+			const description = (name: string) => tools.find((t) => t.name === name)?.description;
+			expect(description("get_cookies")).toContain("VAYU_MCP_REVEAL_SECRETS=true");
+			if (!allowWrites) return;
+			expect(description("create_collection")).toContain("VAYU_MCP_ALLOW_WRITES=true");
+			expect(description("update_engine_config")).toContain(
+				"VAYU_MCP_ALLOW_NETWORK_SETTINGS=true"
+			);
+			expect(description("update_engine_config")).toContain("restart vayu-engine");
+			const fileBody = tools.find((t) => t.name === "create_request")?.inputSchema.properties;
+			expect(JSON.stringify(fileBody)).toContain("no setting that allows a folder");
+		});
+	});
+
+	it("keeps the Settings sentence in an app session", async () => {
+		const listing = await listEverything("app", { allowWrites: true });
+		const guarded = listing.tools.filter((t) => t.description?.includes("GUARDED"));
+		expect(guarded.length).toBe(GUARDED_TOOL_COUNT);
+		const gate = resolveRemedyTokens(GUARDED_WRITE_SENTENCE, "app");
+		expect(gate).toContain("Vayu Settings → MCP");
+		const writeGated = guarded.filter((t) => t.description?.includes(gate));
+		expect(writeGated.length).toBe(
+			TOOLS.filter((t) => t.description.includes(GUARDED_WRITE_SENTENCE)).length
+		);
+		expect(writeGated.length).toBeGreaterThanOrEqual(28);
+		expect(offenders(listing, /\{\{remedy:/)).toEqual([]);
+		const get = (name: string) => listing.tools.find((t) => t.name === name)?.description;
+		expect(get("get_cookies")).toContain(
+			"turn on Reveal secrets to agents in Vayu Settings → MCP"
+		);
+		expect(get("update_engine_config")).toContain("Vayu Settings → restart engine");
+		expect(listing.resources.map((r) => r.description).join("\n")).toContain(
+			"Vayu Settings → MCP"
+		);
+		expect(JSON.stringify(listing.tools)).not.toContain("VAYU_MCP_");
+	});
+
+	it("shows the Settings app wording in the app's own tool catalog", () => {
+		const catalog = toolCatalog();
+		expect(catalog.length).toBeGreaterThan(0);
+		for (const entry of catalog) expect(entry.description).not.toMatch(/\{\{remedy:/);
+		expect(catalog.find((t) => t.name === "create_collection")?.description).toContain(
+			"turn on Write access in Vayu Settings → MCP"
+		);
 	});
 });

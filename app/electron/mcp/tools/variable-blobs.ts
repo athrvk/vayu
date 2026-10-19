@@ -28,7 +28,7 @@ import {
 	VARIABLE_RESOLUTION_URI,
 } from "../variable-origins.js";
 import type { ToolContext } from "./contract.js";
-import { settingRemedy } from "../remedy.js";
+import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 import { isRecord, ToolArgError } from "./kit.js";
 
 /**
@@ -49,7 +49,7 @@ const VARIABLE_INPUT = z.union([
 			.boolean()
 			.optional()
 			.describe(
-				"Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (`valueWithheld: true`) unless the user has turned on Reveal secrets to agents in Vayu Settings → MCP. `true` is always accepted; `false` over a stored secret is refused unless that setting is on, because it would make the value readable."
+				`Treat this variable as a secret: masked in the Vayu UI, and withheld from MCP reads (\`valueWithheld: true\`) unless the user has chosen to ${REVEAL_SETTING_TOKEN}. \`true\` is always accepted; \`false\` over a stored secret is refused unless that setting is on, because it would make the value readable.`
 			),
 		type: z
 			.enum(["string", "number", "boolean", "json"])
@@ -68,7 +68,7 @@ export function variablesInput(subject: string) {
 		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on in Vayu Settings → MCP. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on (the user can ${REVEAL_SETTING_TOKEN}). Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
 }
 

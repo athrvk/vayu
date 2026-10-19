@@ -33,6 +33,7 @@
  */
 
 import type { DataFileLocation } from "../data-file-locations.js";
+import { DATA_FILE_LOCATION_TOKEN } from "./remedy.js";
 
 /** The pieces of the tool context this module reads. */
 interface DataFileLookup {
@@ -124,5 +125,4 @@ async function withCurrentHash(
 }
 
 /** What list_collections and `vayu://collections` say about the field. */
-export const DATA_CONTRACT_SENTENCE =
-	"A collection with a declared data-file contract (the Data tab) carries `dataSchema: { columns, fileName, declaredAt }` - the columns each row of a run's `data` is expected to supply; a collection with none has no `dataSchema` key. When the Vayu app remembers where that file is on this machine, the row also carries `dataFile: { path, fileName, hash }`, `hash` being the SHA-256 of the file's bytes as they are on disk now (the hash the app last read it with when the file cannot be read; never an error): read the file yourself to build the `data` rows, and send its name and hash with them as `dataFileName` / `dataFileHash`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. Vayu never returns the file's rows.";
+export const DATA_CONTRACT_SENTENCE = `A collection with a declared data-file contract (the Data tab) carries \`dataSchema: { columns, fileName, declaredAt }\` - the columns each row of a run's \`data\` is expected to supply; a collection with none has no \`dataSchema\` key. When ${DATA_FILE_LOCATION_TOKEN}, the row also carries \`dataFile: { path, fileName, hash }\`, \`hash\` being the SHA-256 of the file's bytes as they are on disk now (the hash the app last read it with when the file cannot be read; never an error): read the file yourself to build the \`data\` rows, and send its name and hash with them as \`dataFileName\` / \`dataFileHash\`. A past run names the file it used the same way (list_runs), so comparing the hashes tells you whether the file is still the same. Vayu never returns the file's rows.`;

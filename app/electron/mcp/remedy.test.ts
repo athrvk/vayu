@@ -8,9 +8,19 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_MCP_SAFETY_CONFIG, SAFETY_ENV_VARS, type McpSafetyConfig } from "./config.js";
 import {
+	BINARY_FILE_ACCESS_TOKEN,
+	DATA_FILE_LOCATION_TOKEN,
 	ENGINE_URL_ENV_VAR,
+	GUARDED_WRITE_SENTENCE,
+	NETWORK_SETTINGS_TOKEN,
+	PROXY_SETTINGS_TOKEN,
+	RESTART_ENGINE_TOKEN,
+	REVEAL_SETTING_TOKEN,
+	SPEC_SYNC_TOKEN,
+	TRUST_AUTHORITY_TOKEN,
 	engineDownRemedy,
 	engineRestartRemedy,
+	resolveRemedyTokens,
 	settingRemedy,
 } from "./remedy.js";
 
@@ -89,5 +99,55 @@ describe("engineRestartRemedy", () => {
 		expect(engineRestartRemedy("app")).toBe(
 			"Vayu Settings → restart engine, or relaunch the app"
 		);
+	});
+});
+
+describe("resolveRemedyTokens", () => {
+	const TOKENS = {
+		GUARDED_WRITE_SENTENCE,
+		REVEAL_SETTING_TOKEN,
+		NETWORK_SETTINGS_TOKEN,
+		RESTART_ENGINE_TOKEN,
+		BINARY_FILE_ACCESS_TOKEN,
+		TRUST_AUTHORITY_TOKEN,
+		DATA_FILE_LOCATION_TOKEN,
+		PROXY_SETTINGS_TOKEN,
+		SPEC_SYNC_TOKEN,
+	};
+
+	it.each(Object.entries(TOKENS))("resolves %s for both hosts", (_name, token) => {
+		expect(token).toContain("{{remedy:");
+		for (const host of ["app", "cli"] as const) {
+			const text = resolveRemedyTokens(token, host);
+			expect(text.length).toBeGreaterThan(0);
+			expect(text).not.toContain("{{remedy:");
+		}
+		expect(resolveRemedyTokens(token, "cli")).not.toMatch(/Settings|Vayu app/);
+		expect(resolveRemedyTokens(token, "app")).not.toBe(resolveRemedyTokens(token, "cli"));
+	});
+
+	it("puts the same sentence settingRemedy gives into a gate", () => {
+		expect(resolveRemedyTokens(GUARDED_WRITE_SENTENCE, "cli")).toBe(
+			`GUARDED: requires write access (to enable it, ${settingRemedy("allowWrites", "cli")})`
+		);
+		expect(resolveRemedyTokens(REVEAL_SETTING_TOKEN, "app")).toBe(
+			settingRemedy("revealSecretsToAgents", "app")
+		);
+	});
+
+	it("walks arrays and objects and leaves every other value alone", () => {
+		const input = {
+			a: [REVEAL_SETTING_TOKEN, 3, null, true],
+			b: { c: GUARDED_WRITE_SENTENCE },
+		};
+		const out = resolveRemedyTokens(input, "cli");
+		expect(JSON.stringify(out)).not.toContain("{{remedy:");
+		expect(out.a.slice(1)).toEqual([3, null, true]);
+		expect(input.b.c).toContain("{{remedy:");
+	});
+
+	it("leaves braces it does not own, so a user's text is never rewritten", () => {
+		const text = "Variable {{remedy:nothing}} and {{token}} stay as written.";
+		expect(resolveRemedyTokens(text, "cli")).toBe(text);
 	});
 });

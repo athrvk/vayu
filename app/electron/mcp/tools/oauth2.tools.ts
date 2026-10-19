@@ -21,6 +21,7 @@ import {
 	projectOAuth2Status,
 	projectOAuth2Token,
 } from "./oauth2.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const OAUTH2_TOOLS: McpTool[] = [
 	{
@@ -97,7 +98,9 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["oauth"],
 		description:
-			"Drop the cached token for a cache key, so the next request that uses that config acquires a fresh one - the tool equivalent of the auth tab's Clear button. Use it when a provider has revoked or rotated credentials and the cache is still serving the old token. Idempotent: clearing a key nothing is cached under reports `deleted: false` rather than failing. No confirmation - nothing saved is lost, only a credential a re-fetch restores. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Drop the cached token for a cache key, so the next request that uses that config acquires a fresh one - the tool equivalent of the auth tab's Clear button. Use it when a provider has revoked or rotated credentials and the cache is still serving the old token. Idempotent: clearing a key nothing is cached under reports `deleted: false` rather than failing. No confirmation - nothing saved is lost, only a credential a re-fetch restores. " +
+			GUARDED_WRITE_SENTENCE +
+			".",
 		annotations: {
 			title: "Clear OAuth 2.0 token",
 			readOnlyHint: false,

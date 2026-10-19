@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { BINARY_FILE_ACCESS_TOKEN } from "../remedy.js";
 import { isRecord, str, ToolArgError } from "./kit.js";
 
 /** The body modes whose content is a field list rather than a string. */
@@ -64,7 +65,7 @@ export const fileRefInput = z
 	})
 	.optional()
 	.describe(
-		'The file a `bodyType: "binary"` body sends, instead of `body`. Stored as a path: the engine sends it only once the user picks that file in the request editor of the Vayu app, or when it lies under a folder they allowed in Settings > Files. Nothing an agent sends can choose a file for the user.'
+		`The file a \`bodyType: "binary"\` body sends, instead of \`body\`. Stored as a path: the engine sends it only once ${BINARY_FILE_ACCESS_TOKEN}. Nothing an agent sends can choose a file for the user.`
 	);
 
 /**
@@ -83,8 +84,7 @@ export const inlineFileInput = z
  * Why a file body cannot be sent inline, and what to do instead. Shared by
  * every tool that sends an ad-hoc request, so the advice cannot drift.
  */
-export const INLINE_FILE_REFUSAL =
-	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - run_request with `requestId` and no `url`, start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. The engine sends a file only once the user picks it in the request editor or it lies under an allowed folder in Settings > Files.';
+export const INLINE_FILE_REFUSAL = `A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and \`file\`) and run the saved request by id - run_request with \`requestId\` and no \`url\`, start_load_run with \`requestId\`, or run_collection / run_collection_smoke over its collection. The engine sends a file only once ${BINARY_FILE_ACCESS_TOKEN}.`;
 
 /**
  * The body a write tool stores, from the `body` / `bodyType` / `file`

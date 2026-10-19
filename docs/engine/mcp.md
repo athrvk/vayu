@@ -2227,7 +2227,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | ------------------ | ---------------------------------------------------------------------------- |
 | `config.ts`        | `McpSafetyConfig`, safe defaults, input sanitizer, host normalizer.          |
 | `safety.ts`        | Pure guards: allowlist, load caps, duration parsing. Each takes the session's `host` so its refusal names that host's remedy. |
-| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
+| `remedy.ts`        | What a refusal tells the user to do, per host (`app` or `cli`): `settingRemedy(key, host)` for every safety field, `engineDownRemedy`, `engineRestartRemedy`, and the tokens (`GUARDED_WRITE_SENTENCE`, `REVEAL_SETTING_TOKEN`, ...) plus `resolveRemedyTokens` that fill a static description per host. The only place either wording lives; the CLI's is built from `SAFETY_ENV_VARS`. |
 | `engine-client.ts` | Thin `fetch` client to the engine REST API + SSE metrics snapshot.          |
 | `compare.ts`       | Pure two-report diff for `compare_runs`. Mirrored by the renderer's `src/lib/run-compare.ts` (neither process can import the other's source) and by the engine's run-report export (`engine/src/core/run_compare.cpp`); all three replay `engine/tests/fixtures/run-compare-conformance.json`, and `compare.conformance.test.ts` fails on any divergence, including the order and wording of the `comparability` list. Reads the status mix in **both** wire shapes: the renderer's transformed record and the engine's own array of `[code, count]` pairs (`std::map<int, size_t>` cannot serialize as a JSON object), which is what this path gets from a raw `GET /runs/:id/report`. |
 | `variable-origins.ts` | The resolution model the `vayu://variables/resolution` resource serves, and the winner-plus-shadowed computation behind `resolve_variables`. Mirrors the renderer's `src/lib/variable-resolution.ts` and `useVariableResolver.ts` for the same reason `compare.ts` does; `variable-origins.conformance.test.ts` replays the engine's fixture through both and fails on divergence. Resolves no `{{tokens}}` - see [Variables](#variables). |
@@ -2400,12 +2400,29 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
 | A tool switched off                                  | `VAYU_MCP_DISABLED_TOOLS`               | Settings → MCP, Tools                |
 | Engine unreachable                                   | start `vayu-engine`, or `VAYU_ENGINE_URL` | make sure the Vayu app is running  |
+| `verifySSL: false` on a one-off send                 | add the authority to the engine's `customCaCertificates` through `update_engine_config`, which needs `VAYU_MCP_ALLOW_WRITES` and `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | Settings > Network & connectivity |
+| A `binary` body's file path                          | no setting: the stdio server has no request editor to pick a file in and nothing that allows a folder, so only a folder the engine already allows works | the request editor, or Settings > Files |
+| A collection's remembered data file (`dataFile`)     | never present: `dataFileLocation` is absent on stdio, so no path is remembered; ask the user for it | the app remembers the path |
+| What `sync_spec`'s safe policy declined              | no setting: a person ticks it under Collection -> Spec -> Sync in the desktop app | Collection -> Spec -> Sync |
 
 The server instructions' write and reveal gate sentences read the host the same
-way. `remedy.test.ts` iterates `SAFETY_ENV_VARS`, so a safety field added without
+way, and so do the tool, resource and prompt descriptions. A description is a
+static string built at module load, so it names its remedy with a token from
+`remedy.ts` (`GUARDED_WRITE_SENTENCE` opens each of the write tools' gates,
+`REVEAL_SETTING_TOKEN` ends each withheld-output sentence in `withhold.ts`, and
+the Files, authority, data-file, proxy and Sync remedies above have one each).
+`server.ts` fills the tokens in per session: the whole `tools/list` answer (a
+tool's description, its parameters' descriptions and its output schema) and each
+resource's description. `toolCatalog()`, which feeds the app's Settings tool
+list, always resolves for `app`, and `dispatchTool` resolves a token in a
+refusal's text (`INLINE_FILE_REFUSAL`, `INSECURE_TLS_REFUSAL`). Only tokens
+`remedy.ts` defines are replaced, so braces in a user's own text pass through.
+`remedy.test.ts` iterates `SAFETY_ENV_VARS`, so a safety field added without
 a variable fails there, and `server-host.test.ts` drives each refusal through the
 real dispatch for both hosts and asserts a CLI message never says "Settings" or
-"Vayu app".
+"Vayu app". It also lists every tool (parameter descriptions included), resource and
+prompt for a CLI session with writes on and off and fails on either phrase, or on
+a token left unresolved, naming the tool.
 
 Both entry points sanitize their input through the same function
 (`sanitizeSafetyInput` in `electron/mcp/config.ts`), so the environment is held to

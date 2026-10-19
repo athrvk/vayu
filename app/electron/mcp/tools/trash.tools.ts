@@ -28,6 +28,7 @@ import {
 	writesDisabled,
 } from "./kit.js";
 import { describeTrashEntry, readTrashEntry, trashRefusalMessage, type TrashRow } from "./trash.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const TRASH_TOOLS: McpTool[] = [
 	{
@@ -53,7 +54,9 @@ export const TRASH_TOOLS: McpTool[] = [
 		// move_item's pair carries.
 		invalidates: ["collection", "request"],
 		description:
-			"Put a deleted collection or saved request back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash). GUARDED: requires write access to be enabled in Vayu Settings. This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. An id the trash does not hold - a live row, or one already purged - is a 404.",
+			"Put a deleted collection or saved request back from Vayu's Trash, with everything its delete took along - a restored collection's whole subtree returns too, scoped to that one delete's cohort (see list_trash). " +
+			GUARDED_WRITE_SENTENCE +
+			". This is NOT destructive - it restores data rather than removing it - so there is no confirmation step. A collection whose parent is gone, or is itself still in the trash, comes back at the top level instead of where it was (`reparentedToRoot: true` in the result); a request has no such fallback, so restoring one whose collection is itself deleted or gone is refused with a 409 naming the collection to restore first. An id the trash does not hold - a live row, or one already purged - is a 404.",
 		annotations: {
 			title: "Restore from Trash",
 			readOnlyHint: false,
@@ -100,7 +103,9 @@ export const TRASH_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["collection", "request"],
 		description:
-			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own. THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request already did, and once it runs the row is gone the way a delete used to be before Trash existed. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An id the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
+			"Permanently destroy one entry in Vayu's Trash, with its whole subtree - requests, and the examples they own. THERE IS NO UNDO: this is the Trash's own hard delete, on top of the soft delete delete_collection / delete_request already did, and once it runs the row is gone the way a delete used to be before Trash existed. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation: if the client supports elicitation the user is prompted with the entry's name and what it holds; otherwise call once for a preview, then again with `confirmed: true`. An id the trash does not hold is a 404, which also stops a mistyped id from destroying anything live.",
 		annotations: {
 			title: "Purge from Trash",
 			readOnlyHint: false,

@@ -14,6 +14,7 @@ import { z } from "zod";
 import { secretsShape, WITHHELD_COOKIE_SENTENCE, withholdCookieValues } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import { callEngine, errorResult, str, writesDisabled } from "./kit.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const COOKIE_TOOLS: McpTool[] = [
 	{
@@ -42,7 +43,9 @@ export const COOKIE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["cookie"],
 		description:
-			"Drop stored cookies, so the next request starts a fresh session - the tool equivalent of Settings -> General -> Cookies. Omit environmentId to clear every jar, pass an id to clear that environment's, or pass null to clear the jar used when no environment is selected. Returns how many cookies were dropped. No confirmation: nothing saved is lost, only session state a re-login restores. GUARDED: requires write access to be enabled in Vayu Settings.",
+			"Drop stored cookies, so the next request starts a fresh session. Omit environmentId to clear every jar, pass an id to clear that environment's, or pass null to clear the jar used when no environment is selected. Returns how many cookies were dropped. No confirmation: nothing saved is lost, only session state a re-login restores. " +
+			GUARDED_WRITE_SENTENCE +
+			".",
 		annotations: {
 			title: "Clear cookie jars",
 			readOnlyHint: false,
