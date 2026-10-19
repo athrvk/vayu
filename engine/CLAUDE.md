@@ -822,7 +822,7 @@ logged as a warning: it means a client skipped composition.
   the same `verifySSL`. Never a `CURLOPT_PROXY_SSLCERT`: the client-certificate
   registry holds identities for origins. `curl_to_error` words a refused proxy
   certificate as the proxy's (`CURLINFO_PROXY_SSL_VERIFYRESULT`), still
-  `SslError`. That bundle is materialised from
+  `SslError`. The bundle is materialised from
   `customCaCertificates` beside the database and **extends** the platform's
   trust: on an OpenSSL build CAINFO is the whole store, so the file is the
   system anchors plus the user's. A proxy-hop failure is

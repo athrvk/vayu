@@ -1140,7 +1140,7 @@ decides the proxy's certificate with options of its own
 `CURLOPT_PROXY_SSL_VERIFYPEER` / `_VERIFYHOST`) that do not inherit what the
 target's handshake was given, so the engine writes each of them from the same
 values as its target-side twin: a proxy whose certificate a pasted authority
-signed verifies, and `verifySSL: false` now covers the proxy leg as well as the
+signed verifies, and `verifySSL: false` covers the proxy leg as well as the
 target. No client certificate from the registry is ever offered to a proxy - an
 entry names a host the user trusts with that identity, and a proxy is not it. A
 proxy certificate that is refused is an `SSL_ERROR` whose message says the
