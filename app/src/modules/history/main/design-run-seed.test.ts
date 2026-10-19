@@ -623,7 +623,7 @@ describe("seedFromRun, binary bodies", () => {
 		} as Partial<Run>);
 	}
 
-	it("seeds the file reference, its trust flag included", () => {
+	it("seeds the file reference, the engine's derived flag included", () => {
 		const { request } = seedFromRun(
 			binaryRun({ src: "/data/a.bin", contentType: "image/png", unresolved: true }),
 			liveRequest
@@ -640,28 +640,26 @@ describe("seedFromRun, binary bodies", () => {
 	it("seeds an empty pick when the snapshot holds no file object", () => {
 		const { request } = seedFromRun(binaryRun("not-an-object"), liveRequest);
 
-		expect(request.binaryFile).toEqual({ src: "", unresolved: true });
+		expect(request.binaryFile).toEqual({ src: "" });
 	});
 
+	// `GET /runs/:id` derives the flag on the read (#2356); the seed keeps the
+	// answer as read and invents none for a value that is not one.
 	it.each([
 		[false, false],
 		[true, true],
-		[undefined, true],
-		["yes", true],
-	])("seeds a recorded unresolved %s as %s", (recorded, seeded) => {
+		[undefined, undefined],
+		["yes", undefined],
+	])("seeds a derived unresolved %s as %s", (derived, seeded) => {
 		const { request } = seedFromRun(
-			binaryRun({ src: "/data/a.bin", unresolved: recorded }),
+			binaryRun({ src: "/data/a.bin", unresolved: derived }),
 			liveRequest
 		);
 
 		expect(request.binaryFile?.unresolved).toBe(seeded);
 	});
 
-	it.each([
-		[false, false],
-		[true, true],
-		[undefined, true],
-	])("seeds a form-data file part recorded with %s as %s", (recorded, seeded) => {
+	it.each([[false], [true]])("seeds a form-data file part derived %s as read", (derived) => {
 		const base = run();
 		const { request } = seedFromRun(
 			run({
@@ -676,7 +674,7 @@ describe("seedFromRun, binary bodies", () => {
 								enabled: true,
 								type: "file",
 								src: "/a",
-								unresolved: recorded,
+								unresolved: derived,
 							},
 						],
 					},
@@ -685,7 +683,7 @@ describe("seedFromRun, binary bodies", () => {
 			liveRequest
 		);
 
-		expect(request.formData?.[0]).toHaveProperty("unresolved", seeded);
+		expect(request.formData?.[0]).toHaveProperty("unresolved", derived);
 	});
 
 	it("reads what was sent off the trace's request node", () => {

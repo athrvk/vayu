@@ -710,63 +710,58 @@ describe("applyRunToRequest, binary bodies", () => {
 
 		expect(patch.body).toEqual({
 			mode: "binary",
-			// The run recorded no flag, which the engine reads as not chosen here.
-			file: { src: "/data/a.bin", contentType: "image/png", unresolved: true },
+			file: { src: "/data/a.bin", contentType: "image/png" },
 		});
 		expect(patch.bodyType).toBe("binary");
 	});
 
-	it.each([
-		[false, false],
-		[true, true],
-	])("writes a recorded unresolved %s back as %s", (recorded, written) => {
+	// The run read carries the engine's derived answer; the write it feeds
+	// sends none, whatever the answer was (#2356).
+	it.each([[false], [true]])("writes no flag back for a recorded %s", (recorded) => {
 		const live = liveRequest();
 		const patch = applyRunToRequest(
 			seedFromRun(binaryRun({ src: "/data/a.bin", unresolved: recorded }), live),
 			live
 		);
 
-		expect(patch.body).toEqual({
-			mode: "binary",
-			file: { src: "/data/a.bin", unresolved: written },
-		});
+		expect(patch.body).toEqual({ mode: "binary", file: { src: "/data/a.bin" } });
 	});
 
-	it.each([
-		[false, false],
-		[true, true],
-		[undefined, true],
-	])("writes a form-data file part recorded with %s back as %s", (recorded, written) => {
-		const live = liveRequest();
-		const base = run();
-		const formRun = run({
-			configSnapshot: {
-				...base.configSnapshot,
-				body: {
-					mode: "form-data",
-					fields: [
-						{
-							key: "f",
-							value: "",
-							enabled: true,
-							type: "file",
-							src: "/a",
-							unresolved: recorded,
-						},
-					],
+	it.each([[false], [true], [undefined]])(
+		"writes a form-data file part recorded with %s back without a flag",
+		(recorded) => {
+			const live = liveRequest();
+			const base = run();
+			const formRun = run({
+				configSnapshot: {
+					...base.configSnapshot,
+					body: {
+						mode: "form-data",
+						fields: [
+							{
+								key: "f",
+								value: "",
+								enabled: true,
+								type: "file",
+								src: "/a",
+								unresolved: recorded,
+							},
+						],
+					},
 				},
-			},
-		} as Partial<Run>);
+			} as Partial<Run>);
 
-		const patch = applyRunToRequest(seedFromRun(formRun, live), live);
+			const patch = applyRunToRequest(seedFromRun(formRun, live), live);
 
-		const body = patch.body as unknown as { fields: Record<string, unknown>[] };
-		expect(body.fields[0]).toHaveProperty("unresolved", written);
-	});
+			const body = patch.body as unknown as { fields: Record<string, unknown>[] };
+			expect(body.fields[0]).toMatchObject({ type: "file", src: "/a" });
+			expect(body.fields[0]).not.toHaveProperty("unresolved");
+		}
+	);
 
 	it("keeps the saved body when the run recorded no path", () => {
 		const live = liveRequest({
-			body: { mode: "binary", file: { src: "/mine/keep.bin", unresolved: false } },
+			body: { mode: "binary", file: { src: "/mine/keep.bin" } },
 			bodyType: "binary",
 		});
 		const seed = seedFromRun(binaryRun({ fileName: "a.bin" }), live);

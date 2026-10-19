@@ -30,6 +30,7 @@ import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
 import { useCopy } from "@/hooks/useCopy";
 import { collectionReference } from "@/lib/agent-reference";
+import { withoutBodyFileTrust } from "@/lib/file-trust";
 import type { CollectionTreeCrudSlice } from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
@@ -401,6 +402,7 @@ export function useTreeCrud({
 				const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
 				const copy = await createRequestMutation.mutateAsync({
 					...rest,
+					body: withoutBodyFileTrust(rest.body),
 					name: `${request.name} (Copy)`,
 				});
 				openTab({ type: "request", entityId: copy.id });

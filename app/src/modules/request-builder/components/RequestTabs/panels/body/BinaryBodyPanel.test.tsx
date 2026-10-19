@@ -9,17 +9,17 @@
  */
 
 /**
- * The binary body editor, by what it writes.
+ * The binary body editor, by what it writes and what it warns about.
  *
- * The trust rule hangs on one flag: the engine sends a file nobody chose in
- * the editor only from an allowed folder, and reads an absent flag as not
- * chosen. So what is pinned here is that every write states it: `false` for a
- * pick, a drop or a typed path - all of them the user, here - and `true` for a
- * pick outside Electron (a name and no path) or an emptied path, and
- * that the banner offering the two ways out appears exactly when the engine
+ * The engine sends a file picked on this machine or one under an allowed
+ * folder, and says which on every read (`unresolved`, #2356). The editor shows
+ * that answer, and between reads holds one of its own: a pick or a drop sets
+ * `false` (the pick is the grant), a typed path sets nothing and reads as not
+ * chosen. The banner offering the two ways out appears exactly when the engine
  * would refuse.
  */
 
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
@@ -70,6 +70,39 @@ function renderPanel(file: FileRef, headers: KeyValueItem[] = []) {
 	);
 }
 
+/** The panel over live state, so a write shows on screen as it would in the editor. */
+function renderLive(initial: FileRef) {
+	function Live() {
+		const [file, setFile] = useState(initial);
+		const request = {
+			...createDefaultRequestState(),
+			bodyMode: "binary" as const,
+			binaryFile: file,
+		};
+		const value = {
+			request,
+			updateField: (field: string, next: FileRef) => {
+				if (field === "binaryFile") setFile(next);
+			},
+			resolveString: (s: string) => s,
+			getAllVariables: () => ({}),
+			getVariableOrigins: () => [],
+			writableScopes: [],
+			updateVariable: () => {},
+		} as unknown as RequestBuilderContextValue;
+		return (
+			<RequestBuilderContext.Provider value={value}>
+				<BinaryBodyPanel />
+			</RequestBuilderContext.Provider>
+		);
+	}
+	return render(
+		<TooltipProvider>
+			<Live />
+		</TooltipProvider>
+	);
+}
+
 /** The last `binaryFile` the panel wrote. */
 function written(): FileRef {
 	const calls = updateField.mock.calls.filter(([field]) => field === "binaryFile");
@@ -114,13 +147,14 @@ describe("choosing the file", () => {
 		});
 	});
 
-	it("a pick with no path to take stays unresolved", () => {
+	it("a pick with no path to take leaves no flag", () => {
 		vi.stubGlobal("electronAPI", undefined);
 		const { container } = renderPanel({ src: "", unresolved: true });
 
 		pickThroughInput(container, new File(["x"], "a.bin"));
 
-		expect(written()).toEqual({ src: "", fileName: "a.bin", unresolved: true });
+		expect(written()).toEqual({ src: "", fileName: "a.bin" });
+		expect(written().unresolved).toBeUndefined();
 	});
 
 	it("a drop is a pick", () => {
@@ -138,35 +172,29 @@ describe("choosing the file", () => {
 		});
 	});
 
-	it("a typed path is the user's choice too", () => {
-		renderPanel({ src: "/imported/a.bin", fileName: "a.bin", unresolved: true });
+	// Typing a path is not picking it (#2356): the engine's earlier answer
+	// belonged to the old path, and a typed one has none until the next read.
+	it("a typed path drops the engine's answer and claims none", () => {
+		renderPanel({ src: "/imported/a.bin", fileName: "a.bin", unresolved: false });
 
 		fireEvent.change(screen.getByLabelText("File path"), {
 			target: { value: "/mine/b.bin" },
 		});
 
-		expect(written()).toEqual({ src: "/mine/b.bin", unresolved: false });
-	});
-
-	it("an emptied path is no choice at all", () => {
-		renderPanel({ src: "/mine/a.bin", unresolved: false });
-
-		fireEvent.change(screen.getByLabelText("File path"), { target: { value: "" } });
-
-		expect(written()).toEqual({ src: "", unresolved: true });
+		expect(written()).toEqual({ src: "/mine/b.bin" });
+		expect(written()).not.toHaveProperty("unresolved");
 	});
 
 	it("a Content-Type typed here is written, and clearing it removes it", () => {
 		renderPanel({ src: "/a.bin", unresolved: false });
 		const field = screen.getByLabelText("Content-Type");
-
 		fireEvent.change(field, { target: { value: "image/png" } });
 		expect(written()).toEqual({ src: "/a.bin", contentType: "image/png", unresolved: false });
 	});
 });
 
 describe("the unresolved banner", () => {
-	it("offers Relink and Allow folder for a path nobody chose here", () => {
+	it("offers Relink and Allow folder for a path the engine says it would refuse", () => {
 		vi.stubGlobal("electronAPI", { allowFolder: vi.fn() });
 		renderPanel({ src: "/imported/data/a.bin", unresolved: true });
 
@@ -175,11 +203,35 @@ describe("the unresolved banner", () => {
 		expect(screen.getByRole("button", { name: "Allow folder..." })).toBeInTheDocument();
 	});
 
-	it("is absent for a path chosen here", () => {
+	it("is absent for a path the engine says it would send", () => {
 		renderPanel({ src: "/home/me/a.bin", unresolved: false });
 
 		expect(screen.queryByText("Not chosen on this machine")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Relink" })).toBeNull();
+	});
+
+	it("appears for a typed path, and a pick clears it", () => {
+		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/me/b.bin" });
+		const { container } = renderLive({ src: "" });
+		expect(screen.queryByText("Not chosen on this machine")).toBeNull();
+
+		fireEvent.change(screen.getByLabelText("File path"), {
+			target: { value: "/home/me/b.bin" },
+		});
+		expect(screen.getByText("Not chosen on this machine")).toBeInTheDocument();
+
+		pickThroughInput(container, new File(["x"], "b.bin"));
+		expect(screen.queryByText("Not chosen on this machine")).toBeNull();
+	});
+
+	it("is absent after a pick, before the engine has answered", () => {
+		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/me/a.bin" });
+		const { container } = renderLive({ src: "/elsewhere/a.bin", unresolved: true });
+		expect(screen.getByText("Not chosen on this machine")).toBeInTheDocument();
+
+		pickThroughInput(container, new File(["x"], "a.bin"));
+
+		expect(screen.queryByText("Not chosen on this machine")).toBeNull();
 	});
 
 	it("appears for a path with a variable even when chosen here", () => {

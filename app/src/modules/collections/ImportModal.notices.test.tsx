@@ -222,9 +222,10 @@ describe("the import preview's notices", () => {
 });
 
 /**
- * Imported file paths are unresolved, so the engine sends them only from an
- * allowed folder. The preview offers each distinct folder once, and its action
- * posts that folder - one click for a collection exported on this machine.
+ * The parse answers each imported path `unresolved` when the engine would
+ * refuse it (#2356). The preview offers each such path's folder once, and its
+ * action opens the picker there - one choice for a collection exported on this
+ * machine.
  */
 describe("the import preview's file folders", () => {
 	beforeEach(() => {

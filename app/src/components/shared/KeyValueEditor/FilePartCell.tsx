@@ -14,17 +14,18 @@
  * the file the part will upload - its name, and its path in the tooltip, since
  * two `avatar.png` from different directories are not the same upload.
  *
- * **A path the app did not choose is marked.** An imported part carries the
- * path from whoever exported the collection, which usually does not exist on
- * this machine; the renderer cannot check (it has no filesystem access - the
- * engine reads the file, and refuses the request by name when it cannot). So
- * the row says the path is unverified until the user picks a file here, which
- * is the only event that proves it exists. See `FormFieldEntry.unresolved`.
+ * **A path nobody picked here is marked.** An imported or pasted part carries
+ * the path from whoever wrote it, which usually does not exist on this
+ * machine, and the engine sends it only once it is picked here or lies under
+ * an allowed folder. The mark reads the engine's answer (`unresolved`, derived
+ * on every read) and, before one arrives, treats the path as not chosen; a
+ * pick clears it (`lib/file-trust.ts`).
  */
 
 import { FileUp, TriangleAlert } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
 import { fileBaseName } from "@/lib/file-path";
+import { isUnresolved } from "@/lib/file-trust";
 import { cn } from "@/lib/utils";
 import { useFilePick, type PickedFile } from "../file-pick";
 
@@ -51,7 +52,7 @@ export default function FilePartCell({
 	const chosen = Boolean(name);
 	// A part that names nothing has no path to doubt - it reads "Choose file",
 	// like a row turned into a file part by hand - whatever its flag says.
-	const unverified = Boolean(unresolved) && chosen;
+	const unverified = isUnresolved(unresolved) && chosen;
 
 	const label = chosen ? name : "Choose file";
 	const button = (

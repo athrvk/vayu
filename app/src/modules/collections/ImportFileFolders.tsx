@@ -9,13 +9,13 @@
  * What an import's file references need, with the one action that settles
  * most of them.
  *
- * Every path an import carries is `unresolved`: nobody chose it on this
- * machine, so the engine sends it only from a folder allowed in Settings >
- * Files. A collection exported on this same machine names files that are
- * right here, and relinking them one request at a time is the chore this
- * exists to remove - so the preview lists each distinct folder the paths sit
- * in, with an "Allow folder..." beside it. It opens the system picker at that
- * folder for the user to confirm, because a folder is allowed only when a
+ * The parse answers `unresolved` for every imported path the engine would
+ * refuse here - neither picked on this machine nor under a folder allowed in
+ * Settings > Files. A collection exported on this same machine names files
+ * that are right here, and relinking them one request at a time is the chore
+ * this exists to remove - so the preview lists each distinct folder the paths
+ * sit in, with an "Allow folder..." beside it. It opens the system picker at
+ * that folder for the user to confirm, because a folder is allowed only when a
  * person chose it there (#2356, `useAllowFolder`); outside Electron there is no
  * picker and no action. A folder that does not exist here cannot be chosen,
  * which is the honest answer for a collection from another computer: relink

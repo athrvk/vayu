@@ -65,7 +65,7 @@ import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-he
 import { isPathRow } from "@/modules/request-builder/utils/path-variables";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { toFileRef } from "@/modules/request-builder/utils/execute-mapping";
-import { withFileTrust } from "@/lib/file-trust";
+import { withoutFileTrust } from "@/lib/file-trust";
 import {
 	DEFAULT_DISABLE_COOKIES,
 	DEFAULT_DISABLE_URL_ENCODING,
@@ -238,7 +238,7 @@ function items(value: KeyValueItem[] | undefined): FormFieldEntry[] {
 function bodyFromSeed(request: Partial<RequestState>): RequestBody {
 	const mode = request.bodyMode ?? "none";
 	if (mode === "form-data") {
-		return { mode: "form-data", fields: withFileTrust(items(request.formData)) };
+		return { mode: "form-data", fields: withoutFileTrust(items(request.formData)) };
 	}
 	if (mode === "x-www-form-urlencoded") {
 		return { mode: "x-www-form-urlencoded", fields: items(request.urlEncoded) };

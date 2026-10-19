@@ -134,8 +134,9 @@ describe("picking a file", () => {
 		});
 	});
 
-	it("states unresolved false, because the pick is what proves the path", () => {
-		// Stated rather than cleared: the engine reads an absent flag as true.
+	it("replaces the engine's answer with a pick's false", () => {
+		// The pick is the grant (#2356), so the row reads as chosen until the
+		// engine answers for the new path on the next read.
 		vi.stubGlobal("electronAPI", { getFilePath: () => "/home/ada/portrait.png" });
 		const { container, onChange } = editor([{ ...fileRow, unresolved: true }]);
 
@@ -144,16 +145,18 @@ describe("picking a file", () => {
 		expect(onChange.mock.calls[0][0][0].unresolved).toBe(false);
 	});
 
-	it("keeps the row unresolved when there is no path to take", () => {
+	it("claims nothing when there is no path to take", () => {
 		// Outside Electron (and for a drag-and-drop of remote content) there is no
-		// path - a filename alone is not something the engine can open, and the
-		// row has to keep saying so.
+		// path - a filename alone is nothing the engine can open, and the row
+		// keeps marking it.
 		vi.stubGlobal("electronAPI", undefined);
-		const { container, onChange } = editor([{ ...fileRow, src: "" }]);
+		const { container, onChange } = editor([{ ...fileRow, src: "", unresolved: false }]);
 
 		pick(container, new File(["x"], "portrait.png", { type: "image/png" }));
 
-		expect(onChange.mock.calls[0][0][0]).toMatchObject({ src: "", unresolved: true });
+		const row = onChange.mock.calls[0][0][0];
+		expect(row).toMatchObject({ src: "", fileName: "portrait.png" });
+		expect(row.unresolved).toBeUndefined();
 	});
 });
 
@@ -165,21 +168,20 @@ describe("what a file row shows", () => {
 		expect(container.querySelectorAll('input[type="text"]').length).toBeLessThan(2);
 	});
 
-	it("marks a row whose path this app never chose", () => {
-		const { container } = editor([{ ...fileRow, unresolved: true }]);
-		expect(
-			container.querySelector('[aria-label="File path not verified on this machine"]')
-		).not.toBeNull();
-
-		const { container: resolved } = editor([{ ...fileRow, unresolved: false }]);
-		expect(
-			resolved.querySelector('[aria-label="File path not verified on this machine"]')
-		).toBeNull();
+	it.each([
+		["the engine would refuse", true, true],
+		["the engine has not answered for", undefined, true],
+		["the engine would send", false, false],
+	])("marks a path %s: %s -> %s", (_label, unresolved, marked) => {
+		const { container } = editor([{ ...fileRow, unresolved }]);
+		const mark = container.querySelector(
+			'[aria-label="File path not verified on this machine"]'
+		);
+		expect(mark !== null).toBe(marked);
 	});
 
 	it("does not mark a part that names no file, whatever its flag", () => {
-		// Unresolved is what such a part sends - nothing was chosen - but there
-		// is no path to doubt, so it reads "Choose file" and nothing more.
+		// No path to doubt, so it reads "Choose file" and nothing more.
 		const { container } = editor([
 			{ ...fileRow, src: "", fileName: undefined, unresolved: true },
 		]);
