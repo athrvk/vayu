@@ -214,6 +214,26 @@ constexpr int64_t MAX_ITERATIONS = 2147483647;
 /// past it the pacing interval is under a microsecond, finer than any tick
 /// the generator can keep.
 constexpr int64_t MAX_TARGET_RPS = 1000000;
+/// Virtual users a constant or ramp-up run holds when the config names no
+/// `concurrency`. A constant run with no `targetRps` is closed-loop at this
+/// width, so an omitted rate runs unpaced. The MCP tool resolves its own table
+/// from these values (`safety.test.ts` reads this line), so a change here is a
+/// change to what an agent's un-configured run does.
+constexpr int64_t DEFAULT_CONCURRENCY = 100;
+/// Length of a constant or ramp-up run when the config names no `duration`.
+constexpr int64_t DEFAULT_DURATION_MS = 60000;
+/// Request count of an iterations run when the config names no `iterations`.
+constexpr int64_t DEFAULT_ITERATIONS = 1000;
+/// Virtual users of an iterations run when the config names no `concurrency`.
+/// Narrower than `DEFAULT_CONCURRENCY` because the run is bounded by its
+/// request count, not by a clock.
+constexpr int64_t DEFAULT_ITERATIONS_CONCURRENCY = 10;
+/// Time a ramp-up run spends climbing when the config names no
+/// `rampUpDuration`.
+constexpr int64_t DEFAULT_RAMP_DURATION_MS = 10000;
+/// Virtual users a ramp-up run starts from when the config names no
+/// `startConcurrency`.
+constexpr int64_t DEFAULT_START_CONCURRENCY = 1;
 } // namespace run_config
 
 /**
