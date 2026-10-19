@@ -166,6 +166,7 @@ add_executable(vayu_tests
     operation_match_test.cpp
     path_variables_test.cpp
     auth_header_precedence_test.cpp
+    redirect_credentials_test.cpp
     query_encoding_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
