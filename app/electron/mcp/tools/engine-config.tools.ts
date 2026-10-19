@@ -14,6 +14,13 @@
 import { z } from "zod";
 import { secretsShape, withholdConfigCredentials } from "../withhold.js";
 import type { McpTool } from "./contract.js";
+import {
+	GUARDED_WRITE_SENTENCE,
+	NETWORK_SETTINGS_TOKEN,
+	RESTART_ENGINE_TOKEN,
+	engineRestartRemedy,
+	settingRemedy,
+} from "../remedy.js";
 import { engineErrorResult, errorResult } from "./kit.js";
 import { configUpdateSchema, isNetworkConfigKey, restartRequiredAmong } from "./output-schemas.js";
 
@@ -23,7 +30,13 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["config"],
 		description:
-			"Update one or more engine configuration entries. GUARDED: requires write access to be enabled in Vayu Settings, and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings to be enabled there; a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (Vayu Settings → restart engine, or relaunch).",
+			"Update one or more engine configuration entries. " +
+			GUARDED_WRITE_SENTENCE +
+			", and the network entries - every `proxy*` key and `customCaCertificates` - additionally require Network settings (to enable them, " +
+			NETWORK_SETTINGS_TOKEN +
+			"); a batch naming one without it is refused whole. Pass `entries` as a map of config key to new value; the engine validates types/ranges and rejects the whole batch on any invalid value. Some keys require an engine RESTART to take effect - the result lists those under `restartRequired`; they are saved but the running engine keeps the old value until the user restarts it (" +
+			RESTART_ENGINE_TOKEN +
+			").",
 		annotations: {
 			title: "Update engine config",
 			readOnlyHint: false,
@@ -40,7 +53,7 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			if (!ctx.config.allowWrites) {
 				return errorResult(
-					"Config writes are disabled. Turn on write access in Vayu Settings → MCP to allow this."
+					`Config writes are disabled. To allow this, ask the user to ${settingRemedy("allowWrites", ctx.host)}.`
 				);
 			}
 			const entries = args.entries;
@@ -50,7 +63,7 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 			const network = Object.keys(entries).filter(isNetworkConfigKey);
 			if (network.length > 0 && !ctx.config.allowNetworkSettings) {
 				return errorResult(
-					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on in Vayu Settings → MCP as well as write access. Nothing was changed.`
+					`Network settings are not open to agents: ${network.join(", ")} decide where every request goes and which certificate authorities Vayu trusts, so they need Network settings turned on as well as write access: ask the user to ${settingRemedy("allowNetworkSettings", ctx.host)}. Nothing was changed.`
 				);
 			}
 			try {
@@ -76,7 +89,7 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 					const note =
 						`Updated ${changedKeys.length} config key(s). ⚠ Restart required for: ` +
 						`${restartRequired.join(", ")}. These are saved, but the running engine keeps ` +
-						`the old values until it is restarted (Vayu Settings → restart engine, or relaunch the app).`;
+						`the old values until it is restarted (${engineRestartRemedy(ctx.host)}).`;
 					return {
 						content: [
 							{ type: "text", text: `${note}\n\n${JSON.stringify(result, null, 2)}` },
@@ -89,7 +102,7 @@ export const ENGINE_CONFIG_TOOLS: McpTool[] = [
 					structuredContent: result,
 				};
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 		},
 	},

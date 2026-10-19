@@ -9,7 +9,9 @@
  * Utility functions for response body type detection and formatting
  */
 
+import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
+import { mediaTypeOf, type MediaType } from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
 
 /**
@@ -17,63 +19,12 @@ import type { BodyType } from "./types";
  */
 export function detectBodyType(headers: Record<string, string>, body: string): BodyType {
 	const contentType = headers["content-type"] || headers["Content-Type"] || "";
-	const lowerContentType = contentType.toLowerCase();
-
-	// Image types
-	if (lowerContentType.includes("image/")) {
-		return "image";
-	}
-
-	// PDF
-	if (lowerContentType.includes("application/pdf")) {
-		return "pdf";
-	}
-
-	// JSON
-	if (lowerContentType.includes("application/json") || lowerContentType.includes("+json")) {
-		return "json";
-	}
-
-	// JavaScript
-	if (lowerContentType.includes("javascript") || lowerContentType.includes("application/js")) {
-		return "javascript";
-	}
-
-	// CSS
-	if (lowerContentType.includes("text/css")) {
-		return "css";
-	}
-
-	// HTML
-	if (lowerContentType.includes("text/html") || lowerContentType.includes("application/xhtml")) {
-		return "html";
-	}
-
-	// XML
-	if (
-		lowerContentType.includes("xml") ||
-		lowerContentType.includes("application/xml") ||
-		lowerContentType.includes("+xml")
-	) {
-		return "xml";
-	}
-
-	// Markdown
-	if (lowerContentType.includes("text/markdown")) {
-		return "markdown";
-	}
-
-	// Binary types
-	if (
-		lowerContentType.includes("application/octet-stream") ||
-		lowerContentType.includes("application/zip") ||
-		lowerContentType.includes("application/gzip")
-	) {
-		return "binary";
-	}
+	const media = mediaTypeOf(contentType);
+	const declared = declaredBodyType(media);
+	if (declared) return declared;
 
 	// Try to detect from body content if content-type is generic or missing
-	if (!contentType || lowerContentType.includes("text/plain")) {
+	if (!contentType || (media.type === "text" && media.subtype === "plain")) {
 		// Try JSON detection
 		const trimmed = body.trim();
 		if (
@@ -105,6 +56,33 @@ export function detectBodyType(headers: Record<string, string>, body: string): B
 	return "text";
 }
 
+const BINARY_ESSENCES: ReadonlySet<string> = new Set([
+	"application/octet-stream",
+	"application/zip",
+	"application/gzip",
+]);
+
+/**
+ * What the Content-Type alone says the body is, compared by whole token
+ * (#2458). The order is the meaning: SVG is checked before `image/` so it
+ * reads and formats as the XML it is, which is also what the engine sends it
+ * as.
+ */
+function declaredBodyType({ type, subtype, name, suffix }: MediaType): BodyType | undefined {
+	const essence = `${type}/${subtype}`;
+	if (essence === "image/svg+xml") return "xml";
+	if (type === "image") return "image";
+	if (essence === "application/pdf") return "pdf";
+	if (name === "json" || suffix === "json") return "json";
+	if (name === "javascript") return "javascript";
+	if (essence === "text/css") return "css";
+	if (essence === "text/html" || name === "xhtml") return "html";
+	if (name === "xml" || suffix === "xml") return "xml";
+	if (essence === "text/markdown") return "markdown";
+	if (BINARY_ESSENCES.has(essence)) return "binary";
+	return undefined;
+}
+
 /**
  * Map body type to Monaco editor language
  */
@@ -128,9 +106,8 @@ export function getMonacoLanguage(bodyType: BodyType): string {
  * Past this much body, the pane stops formatting and shows a raw prefix.
  *
  * Nothing about a response this size is free on the main thread, and rendering
- * one costs three synchronous passes over the whole string plus a Monaco model:
- * `JSON.parse` of the body, `JSON.stringify` of the parse result with two-space
- * indent (which is a third copy again, larger than the input), and Monaco
+ * one costs synchronous passes over the whole string plus a Monaco model: the
+ * type sniff, the indent pass (a copy larger than the input) and Monaco
  * tokenising the result line by line for syntax highlighting. There is no
  * worker to move them to - `formatBody` is called during render - so all of it
  * lands between the user pressing Send and the pane painting.
@@ -149,7 +126,13 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * Format body for display (pretty print JSON, etc.)
+ * Format body for display (pretty print JSON, XML).
+ *
+ * JSON is indented by `lib/json-format.ts`, which copies the received text
+ * token by token rather than parsing it, so member order, repeated keys and
+ * integers past 2^53 show as the server sent them (issue #2459). The input is
+ * always the received text: a caller holding a parsed object has already lost
+ * those, and there is nothing here to format it from.
  *
  * XML is pretty-printed too (`lib/xml-format.ts`). It was detected here and
  * highlighted by Monaco, but never indented, so Pretty and Raw were byte-for-byte
@@ -159,35 +142,13 @@ export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
  * the JSON branch also serves: without a declared type, "starts with a tag" is
  * also true of HTML, whose whitespace rules are not XML's.
  */
-export function formatBody(body: unknown, bodyType?: BodyType): string {
+export function formatBody(body: string | undefined, bodyType?: BodyType): string {
 	if (!body) return "";
-
-	// Handle object types (already parsed)
-	if (typeof body === "object") {
-		try {
-			return JSON.stringify(body, null, 2);
-		} catch {
-			return String(body);
-		}
-	}
-
-	// Try to format JSON
-	if (typeof body === "string" && (bodyType === "json" || bodyType === undefined)) {
-		try {
-			const parsed = JSON.parse(body);
-			return JSON.stringify(parsed, null, 2);
-		} catch {
-			// Keep original if not valid JSON
-		}
-	}
-
-	if (typeof body === "string" && bodyType === "xml") {
-		// Returns its input unchanged when the document cannot be walked, so a
-		// malformed response still renders as what arrived.
-		return formatXml(body);
-	}
-
-	return String(body);
+	if (bodyType === "json" || bodyType === undefined) return formatJson(body);
+	// Returns its input unchanged when the document cannot be walked, so a
+	// malformed response still renders as what arrived.
+	if (bodyType === "xml") return formatXml(body);
+	return body;
 }
 
 /**

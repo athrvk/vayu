@@ -37,6 +37,7 @@ import {
 	removeVariablesInput,
 	variablesInput,
 } from "./variable-blobs.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const VARIABLE_TOOLS: McpTool[] = [
 	{
@@ -58,7 +59,11 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		},
 		inputSchema: {},
 		handler: (_args, ctx, signal) =>
-			callEngine(() => ctx.client.getGlobals(signal), secretsShape(ctx, withholdRowSecrets)),
+			callEngine(
+				ctx,
+				() => ctx.client.getGlobals(signal),
+				secretsShape(ctx, withholdRowSecrets)
+			),
 	},
 	{
 		name: "resolve_variables",
@@ -112,7 +117,7 @@ export const VARIABLE_TOOLS: McpTool[] = [
 				// A bad id is the caller's mistake and must not be reported as an
 				// engine failure - the same split `pagedRead`'s callers keep.
 				if (err instanceof ToolArgError) return errorResult(err.message);
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 
 			const variables = resolveVariableReports(
@@ -136,7 +141,9 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["environment"],
 		description:
-			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. GUARDED: requires write access to be enabled in Vayu Settings. " +
+			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. " +
+			GUARDED_WRITE_SENTENCE +
+			". " +
 			precedenceNote(
 				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
 			) +
@@ -171,15 +178,16 @@ export const VARIABLE_TOOLS: McpTool[] = [
 			try {
 				stored = await ctx.client.getGlobals(signal);
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const merged = mergeVariables(
 				isRecord(stored) ? stored.variables : undefined,
 				patch,
 				removals,
-				ctx.config.revealSecretsToAgents
+				ctx
 			);
 			const result = await callEngine(
+				ctx,
 				() => ctx.client.saveGlobals({ variables: merged.variables }, signal),
 				echoShape(ctx)
 			);

@@ -88,43 +88,43 @@ describe("extractHost", () => {
 
 describe("checkAllowlist", () => {
 	test("denies everything when the allowlist is empty (safe default)", () => {
-		const res = checkAllowlist("https://api.example.com/x", DEFAULT_MCP_SAFETY_CONFIG);
+		const res = checkAllowlist("https://api.example.com/x", DEFAULT_MCP_SAFETY_CONFIG, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/allowlist is empty/i);
 	});
 	test("allows a host that is on the list (case-insensitive)", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
-		expect(checkAllowlist("https://API.example.com/x", config).ok).toBe(true);
+		expect(checkAllowlist("https://API.example.com/x", config, "app").ok).toBe(true);
 	});
 	test("denies a host that is not on the list", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
-		const res = checkAllowlist("https://evil.test/x", config);
+		const res = checkAllowlist("https://evil.test/x", config, "app");
 		expect(res.ok).toBe(false);
-		expect(res.error).toMatch(/not on Vayu's MCP allowlist/i);
+		expect(res.error).toMatch(/not on the MCP allowlist/i);
 	});
 	test("allows a scheme-less host:port URL whose host is on the list", () => {
 		// The refusal this replaces named unresolved {{variables}}, sending the
 		// user hunting a resolution bug in a URL that resolved fine.
 		const config = resolveSafetyConfig({ allowlist: ["localhost"] });
-		expect(checkAllowlist("localhost:3000/api/users", config).ok).toBe(true);
+		expect(checkAllowlist("localhost:3000/api/users", config, "app").ok).toBe(true);
 	});
 	test("matches an allowlisted IPv6 literal against its target", () => {
 		const config = resolveSafetyConfig({ allowlist: [normalizeHost("::1")] });
-		expect(checkAllowlist("http://[::1]:9876/x", config).ok).toBe(true);
+		expect(checkAllowlist("http://[::1]:9876/x", config, "app").ok).toBe(true);
 	});
 	test("denies when the host cannot be determined", () => {
 		const config = resolveSafetyConfig({ allowlist: ["api.example.com"] });
-		expect(checkAllowlist("{{baseUrl}}/x", config).ok).toBe(false);
+		expect(checkAllowlist("{{baseUrl}}/x", config, "app").ok).toBe(false);
 	});
 	test("allowAll bypasses the allowlist for any resolvable host", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
-		expect(checkAllowlist("https://anything.example.org/x", config).ok).toBe(true);
+		expect(checkAllowlist("https://anything.example.org/x", config, "app").ok).toBe(true);
 		// even with an empty allowlist
 		expect(config.allowlist).toEqual([]);
 	});
 	test("allowAll still rejects an unresolvable host (unresolved variables)", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
-		expect(checkAllowlist("{{baseUrl}}/x", config).ok).toBe(false);
+		expect(checkAllowlist("{{baseUrl}}/x", config, "app").ok).toBe(false);
 	});
 });
 
@@ -152,7 +152,7 @@ describe("checkMonitorHost", () => {
 		// 127.0.0.1 here rather than a string it would not recognise.
 		"http://2130706433:9100/metrics",
 	])("exempts the private/loopback endpoint %s from an empty allowlist", (url) => {
-		expect(checkMonitorHost(url, empty).ok).toBe(true);
+		expect(checkMonitorHost(url, empty, "app").ok).toBe(true);
 	});
 
 	test.each([
@@ -166,26 +166,26 @@ describe("checkMonitorHost", () => {
 		// like the allowlist itself, so this needs an entry rather than a lookup.
 		"http://prometheus.internal/metrics",
 	])("requires an allowlist entry for the public endpoint %s", (url) => {
-		const res = checkMonitorHost(url, empty);
+		const res = checkMonitorHost(url, empty, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/monitor endpoint is a second host/i);
 	});
 
 	test("accepts a public monitor host that is on the allowlist", () => {
 		const config = resolveSafetyConfig({ allowlist: ["metrics.example.com"] });
-		expect(checkMonitorHost("https://metrics.example.com/m", config).ok).toBe(true);
+		expect(checkMonitorHost("https://metrics.example.com/m", config, "app").ok).toBe(true);
 	});
 
 	test("refuses a monitor URL whose host cannot be determined", () => {
 		const config = resolveSafetyConfig({ allowlist: ["metrics.example.com"] });
-		const res = checkMonitorHost("{{vitalsUrl}}/metrics", config);
+		const res = checkMonitorHost("{{vitalsUrl}}/metrics", config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/monitor\.url/i);
 	});
 
 	test("allowAll covers the monitor host too", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
-		expect(checkMonitorHost("https://metrics.example.com/m", config).ok).toBe(true);
+		expect(checkMonitorHost("https://metrics.example.com/m", config, "app").ok).toBe(true);
 	});
 });
 
@@ -223,19 +223,19 @@ describe("checkLoadCaps", () => {
 
 	test("passes within caps", () => {
 		expect(
-			checkLoadCaps({ targetRps: 500, concurrency: 100, duration: "60s" }, config).ok
+			checkLoadCaps({ targetRps: 500, concurrency: 100, duration: "60s" }, config, "app").ok
 		).toBe(true);
 	});
 	test("rejects excessive RPS", () => {
-		const res = checkLoadCaps({ targetRps: 5000 }, config);
+		const res = checkLoadCaps({ targetRps: 5000 }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/targetRps 5000 exceeds/);
 	});
 	test("rejects excessive concurrency", () => {
-		expect(checkLoadCaps({ concurrency: 5000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ concurrency: 5000 }, config, "app").ok).toBe(false);
 	});
 	test("rejects excessive duration", () => {
-		const res = checkLoadCaps({ duration: "10m" }, config);
+		const res = checkLoadCaps({ duration: "10m" }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/exceeds the MCP cap of 300s/);
 	});
@@ -244,17 +244,17 @@ describe("checkLoadCaps", () => {
 	// up front rather than starting a run that dies. An absent field is still
 	// fine - it means "use the engine default".
 	test("rejects a duration the engine cannot read", () => {
-		const res = checkLoadCaps({ duration: "soon" }, config);
+		const res = checkLoadCaps({ duration: "soon" }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/is not a duration/);
 		expect(res.error).toMatch(/ms\/s\/m\/h/);
 	});
 	test("rejects an unreadable rampUpDuration", () => {
-		expect(checkLoadCaps({ rampUpDuration: "a while" }, config).ok).toBe(false);
+		expect(checkLoadCaps({ rampUpDuration: "a while" }, config, "app").ok).toBe(false);
 	});
 	test("accepts a readable rampUpDuration and an absent duration", () => {
-		expect(checkLoadCaps({ rampUpDuration: "500ms" }, config).ok).toBe(true);
-		expect(checkLoadCaps({ concurrency: 10 }, config).ok).toBe(true);
+		expect(checkLoadCaps({ rampUpDuration: "500ms" }, config, "app").ok).toBe(true);
+		expect(checkLoadCaps({ concurrency: 10 }, config, "app").ok).toBe(true);
 	});
 
 	// A ramp is seeded with `startConcurrency` before its first duration check,
@@ -263,42 +263,53 @@ describe("checkLoadCaps", () => {
 	test("rejects a startConcurrency above the concurrency cap", () => {
 		const res = checkLoadCaps(
 			{ mode: "ramp_up", concurrency: 10, startConcurrency: 5000 },
-			config
+			config,
+			"app"
 		);
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/startConcurrency 5000 exceeds the MCP cap of 200/);
 	});
 	test("names the unit the concurrency cap counts", () => {
-		const res = checkLoadCaps({ mode: "constant_concurrency", concurrency: 5000 }, config);
+		const res = checkLoadCaps(
+			{ mode: "constant_concurrency", concurrency: 5000 },
+			config,
+			"app"
+		);
 		expect(res.error).toMatch(/exceeds the MCP cap of 200 virtual users\./);
 	});
 	test("accepts a startConcurrency at the cap", () => {
 		expect(
-			checkLoadCaps({ mode: "ramp_up", concurrency: 200, startConcurrency: 200 }, config).ok
+			checkLoadCaps(
+				{ mode: "ramp_up", concurrency: 200, startConcurrency: 200 },
+				config,
+				"app"
+			).ok
 		).toBe(true);
 	});
 
 	// An iterations run stops on a request count and never reads `duration`, so
 	// `maxDurationSeconds` cannot bound it and `maxIterations` is what does.
 	test("rejects an iterations run above the iterations cap", () => {
-		const res = checkLoadCaps({ mode: "iterations", iterations: 1_000_000_000 }, config);
+		const res = checkLoadCaps({ mode: "iterations", iterations: 1_000_000_000 }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/iterations 1000000000 exceeds the MCP cap of 10000/);
 	});
 	test("accepts an iterations run at the cap", () => {
-		expect(checkLoadCaps({ mode: "iterations", iterations: 10_000 }, config).ok).toBe(true);
+		expect(checkLoadCaps({ mode: "iterations", iterations: 10_000 }, config, "app").ok).toBe(
+			true
+		);
 	});
 	test("compares an omitted count against the engine's own default of 1000", () => {
 		// An absent `iterations` is not "no iterations" - the engine runs 1000 -
 		// so a cap under that has to refuse the run rather than wave it through.
 		const tight = resolveSafetyConfig({ maxIterations: 500 });
-		const res = checkLoadCaps({ mode: "iterations" }, tight);
+		const res = checkLoadCaps({ mode: "iterations" }, tight, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/iterations 1000 exceeds the MCP cap of 500/);
-		expect(checkLoadCaps({ mode: "iterations" }, config).ok).toBe(true);
+		expect(checkLoadCaps({ mode: "iterations" }, config, "app").ok).toBe(true);
 	});
 	test("rejects a non-positive iterations count", () => {
-		const res = checkLoadCaps({ mode: "iterations", iterations: -1 }, config);
+		const res = checkLoadCaps({ mode: "iterations", iterations: -1 }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/must be a positive whole number/);
 	});
@@ -306,7 +317,7 @@ describe("checkLoadCaps", () => {
 		// `LoadStrategy::create` falls through to the iterations strategy for a
 		// mode it cannot parse when the config has an `iterations` field, so a
 		// guard keying on the mode string alone would wave this past.
-		const res = checkLoadCaps({ mode: "burst", iterations: 1_000_000_000 }, config);
+		const res = checkLoadCaps({ mode: "burst", iterations: 1_000_000_000 }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/exceeds the MCP cap of 10000/);
 	});
@@ -314,7 +325,8 @@ describe("checkLoadCaps", () => {
 		expect(
 			checkLoadCaps(
 				{ mode: "constant_rps", iterations: 1_000_000_000, duration: "30s" },
-				config
+				config,
+				"app"
 			).ok
 		).toBe(true);
 	});
@@ -322,13 +334,14 @@ describe("checkLoadCaps", () => {
 	// The engine 400s a zero-length run, so the tool names the field instead of
 	// starting a run that dies on arrival.
 	test("rejects a zero duration", () => {
-		const res = checkLoadCaps({ duration: "0s" }, config);
+		const res = checkLoadCaps({ duration: "0s" }, config, "app");
 		expect(res.ok).toBe(false);
 		expect(res.error).toMatch(/must be greater than zero/);
 	});
 	test("still accepts a zero rampUpDuration (an instant ramp the engine allows)", () => {
 		expect(
-			checkLoadCaps({ mode: "ramp_up", rampUpDuration: "0s", duration: "30s" }, config).ok
+			checkLoadCaps({ mode: "ramp_up", rampUpDuration: "0s", duration: "30s" }, config, "app")
+				.ok
 		).toBe(true);
 	});
 });
@@ -357,18 +370,30 @@ describe("capacity discovery", () => {
 	test("caps the ceiling the search climbs toward, not just a fixed target", () => {
 		// `concurrency` is the ceiling in this mode rather than a level held, so
 		// it is exactly the field that decides how large the run can get.
-		expect(checkLoadCaps({ mode: "capacity", concurrency: 5000 }, config).ok).toBe(false);
-		expect(checkLoadCaps({ mode: "capacity", startConcurrency: 5000 }, config).ok).toBe(false);
+		expect(checkLoadCaps({ mode: "capacity", concurrency: 5000 }, config, "app").ok).toBe(
+			false
+		);
+		expect(checkLoadCaps({ mode: "capacity", startConcurrency: 5000 }, config, "app").ok).toBe(
+			false
+		);
 		expect(
-			checkLoadCaps({ mode: "capacity", startConcurrency: 4, concurrency: 256 }, config).ok
+			checkLoadCaps(
+				{ mode: "capacity", startConcurrency: 4, concurrency: 256 },
+				config,
+				"app"
+			).ok
 		).toBe(true);
 	});
 
 	test("rejects a step duration the engine cannot read", () => {
 		// It goes through the same string parser `duration` does, so a value the
 		// engine would throw on has to fail here rather than at run time.
-		expect(checkLoadCaps({ mode: "capacity", stepDuration: "a bit" }, config).ok).toBe(false);
-		expect(checkLoadCaps({ mode: "capacity", stepDuration: "5s" }, config).ok).toBe(true);
+		expect(checkLoadCaps({ mode: "capacity", stepDuration: "a bit" }, config, "app").ok).toBe(
+			false
+		);
+		expect(checkLoadCaps({ mode: "capacity", stepDuration: "5s" }, config, "app").ok).toBe(
+			true
+		);
 	});
 
 	test("is a duration mode, so the duration cap still reaches it", () => {

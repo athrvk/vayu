@@ -416,13 +416,16 @@ struct ElementContext {
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::function<vayu::ScriptResult (const std::string& script)> run_teardown_script{};
 
-    /// One JSON parse of the response body, shared by every `extract.*` /
-    /// `assert.jsonpath` on the same step rather than paid per kind.
-    /// `body_parse_attempted` distinguishes "not tried yet" from "tried and
-    /// the body was not JSON, or nested too deeply" so a second kind does not
-    /// retry a parse that already failed.
+    /// One JSON parse of the response body, shared by every `extract.json` /
+    /// `assert.jsonpath` / `metric.record` on the same step rather than paid
+    /// per kind. Ordered, so a JSONPath wildcard visits members in the body's
+    /// own order (#2459); compare a match against a plain `nlohmann::json` by
+    /// converting it, because `ordered_json` object equality is
+    /// order-sensitive. `body_parse_attempted` distinguishes "not tried yet"
+    /// from "tried and the body was not JSON, or nested too deeply" so a
+    /// second kind does not retry a parse that already failed.
     // NOLINTNEXTLINE(readability-redundant-member-init)
-    std::optional<nlohmann::json> parsed_body{};
+    std::optional<nlohmann::ordered_json> parsed_body{};
     bool body_parse_attempted = false;
     /// `maxElementBodyBytes` - a response past this is not parsed, and every
     /// JSON-reading kind on the step reports `skipped` rather than paying for
@@ -819,8 +822,8 @@ int64_t own_wait_ms,
 std::mt19937_64* rng);
 
 /**
- * The response body parsed as JSON, cached on @p ctx so `extract.json` and
- * `assert.jsonpath` on the same step share one parse. Returns null when there
+ * The response body parsed as JSON in its own member order, cached on @p ctx
+ * so the JSONPath kinds on the same step share one parse. Returns null when there
  * is no response yet, the body is over `ElementContext::max_body_bytes`, it
  * does not parse as JSON, or it nests deeper than
  * `constants::elements::MAX_BODY_DEPTH` (the kinds that read the tree recurse
@@ -828,7 +831,7 @@ std::mt19937_64* rng);
  * those apart reads `ctx.body_parse_attempted` (true after this returns)
  * against whether a response is set.
  */
-[[nodiscard]] const nlohmann::json* ensure_parsed_body (ElementContext& ctx);
+[[nodiscard]] const nlohmann::ordered_json* ensure_parsed_body (ElementContext& ctx);
 
 /**
  * The text a `field` config names (`body`, `headers`, `url` or `status`), as

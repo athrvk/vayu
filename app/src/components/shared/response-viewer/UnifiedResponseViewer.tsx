@@ -46,7 +46,10 @@ export default function UnifiedResponseViewer({
 	// real headers and no body, and calling that "no response captured" would
 	// hide the only thing the run did keep.
 	const hasHeaders = !!response?.headers && Object.keys(response.headers).length > 0;
-	if (!response?.body && !hasHeaders && !request && !events) {
+	// A body with no text view (`rawBytes`, issue #2458) has an empty `body`
+	// and is still a body.
+	const hasBody = !!response?.body || !!response?.rawBytes;
+	if (!hasBody && !hasHeaders && !request && !events) {
 		return (
 			<div className={cn("flex-1 flex surface-card", className)}>
 				<EmptyState
@@ -96,10 +99,11 @@ export default function UnifiedResponseViewer({
 				</TabsList>
 
 				<TabsContent value="body" className="h-[500px] overflow-auto">
-					{response?.body ? (
+					{response && hasBody ? (
 						<ResponseBody
 							body={response.body}
 							bodyRaw={response.bodyRaw}
+							rawBytes={response.rawBytes}
 							headers={response.headers || {}}
 							compact
 							showModeToggle

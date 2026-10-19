@@ -55,4 +55,59 @@ describe("RawRequestResponse", () => {
 
 		expect(screen.getByTestId("raw-content").textContent).toContain("HTTP/1.1 200 OK");
 	});
+
+	it("prints the body as received, not the indented pane copy (#2459)", () => {
+		const received = '{"z":1,"id":9007199254740993,"z":2}';
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={response({
+					headers: { "content-type": "application/json" },
+					body: '{\n  "z": 2,\n  "id": 9007199254740992\n}',
+					bodyRaw: received,
+				})}
+			/>
+		);
+
+		const text = screen.getByTestId("raw-content").textContent ?? "";
+		expect(text).toContain(`< ${received}`);
+		expect(text).not.toContain("9007199254740992");
+	});
+
+	it("prints the pane text where no bodyRaw was recorded", () => {
+		render(<RawRequestResponse rawRequest="" response={response({ body: "just a body" })} />);
+
+		expect(screen.getByTestId("raw-content").textContent).toContain("< just a body");
+	});
+
+	it("prints one line for a body with no text view, never its base64 (#2458)", () => {
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={response({
+					headers: { "content-type": "image/png" },
+					body: "",
+					rawBytes: { data: new Uint8Array(3), isText: false },
+				})}
+			/>
+		);
+
+		expect(screen.getByTestId("raw-content").textContent).toContain(
+			"< [3 B of binary data, not shown as text. Download it from the Body tab.]"
+		);
+	});
+
+	it("prints a decoded text body as its text", () => {
+		render(
+			<RawRequestResponse
+				rawRequest=""
+				response={response({
+					body: "café",
+					rawBytes: { data: new Uint8Array([0x63, 0x61, 0x66, 0xe9]), isText: true },
+				})}
+			/>
+		);
+
+		expect(screen.getByTestId("raw-content").textContent).toContain("< café");
+	});
 });

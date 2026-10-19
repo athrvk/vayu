@@ -47,7 +47,7 @@ const COMPOSED = {
 	auth: { mode: "bearer", token: "sk_live" },
 };
 
-function mockExecute(result: { status: number; bodyRaw: string }) {
+function mockExecute(result: { status: number; bodyRaw: string; bodyEncoding?: "base64" }) {
 	vi.mocked(apiService.composeRequest).mockResolvedValue(COMPOSED);
 	vi.mocked(apiService.executeRequest).mockResolvedValue(result as SanityResult);
 }
@@ -334,6 +334,19 @@ describe("failure classification", () => {
 		const oversized = `{"data":"${"x".repeat(MAX_INTROSPECTION_CHARS)}"}`;
 		mockExecute({ status: 200, bodyRaw: oversized });
 		expect(await kindOf(introspectSchema(TARGET))).toBe("too-large");
+	});
+
+	// A body that is not UTF-8 arrives as base64 (#2458): not a JSON document,
+	// and its length is the encoding's, so it must not read as "too large".
+	it("refuses a base64 body as not JSON, before measuring it", async () => {
+		mockExecute({
+			status: 200,
+			bodyRaw: "A".repeat(MAX_INTROSPECTION_CHARS + 4),
+			bodyEncoding: "base64",
+		});
+		const failure = introspectSchema(TARGET);
+		await expect(failure).rejects.toThrow(/not with JSON/);
+		expect(await kindOf(failure)).toBe("parse");
 	});
 
 	it("accepts a large response under the cap", async () => {

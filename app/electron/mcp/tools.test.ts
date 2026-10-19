@@ -33,6 +33,7 @@ import {
 	type ToolContext,
 	type ToolResult,
 } from "./tools.js";
+import type { McpHost } from "./tools/contract.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
@@ -45,6 +46,7 @@ import {
 	type EngineClient,
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
+import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
 import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
 
@@ -398,8 +400,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 	} as unknown as EngineClient;
 }
 
-function ctxWith(client: EngineClient, safety?: Partial<McpSafetyConfig>): ToolContext {
-	return { client, config: resolveSafetyConfig(safety) };
+function ctxWith(
+	client: EngineClient,
+	safety?: Partial<McpSafetyConfig>,
+	host: McpHost = "app"
+): ToolContext {
+	return { client, config: resolveSafetyConfig(safety), host };
 }
 
 const firstText = (r: { content: Array<{ text: string }> }) => r.content[0].text;
@@ -1590,7 +1596,7 @@ describe("environments, globals and the cookie jar", () => {
 				expect(res.isError).toBe(true);
 				expect(firstText(res)).toContain("token");
 				expect(firstText(res)).toContain("Reveal secrets to agents");
-				expect(firstText(res)).toContain("Settings > MCP");
+				expect(firstText(res)).toContain("Vayu Settings → MCP");
 				expect(write(client)).not.toHaveBeenCalled();
 			});
 
@@ -2281,7 +2287,7 @@ describe("document CRUD parity", () => {
 				ctxWith(client, allow)
 			);
 			expect(res.isError).toBe(true);
-			expect(firstText(res)).toBe(INSECURE_TLS_REFUSAL);
+			expect(firstText(res)).toBe(resolveRemedyTokens(INSECURE_TLS_REFUSAL, "app"));
 			// Refused *before* composition, so nothing was even resolved - a
 			// refusal after the exchange would be a request already sent.
 			expect(client.composeRequest).not.toHaveBeenCalled();
@@ -4584,6 +4590,93 @@ describe("inline body bounds", () => {
 		);
 	});
 
+	describe("a base64 body (#2458)", () => {
+		/** Bytes that are not UTF-8 text, as the engine answers them. */
+		const bytesOf = (count: number) =>
+			Buffer.from(Array.from({ length: count }, (_, i) => i % 256));
+		const base64Answer = (bytes: Buffer) =>
+			executeAnswer({
+				bodyRaw: bytes.toString("base64"),
+				bodyEncoding: "base64",
+				bodySize: bytes.length,
+				headers: { "content-type": "image/png" },
+			});
+
+		test("is cut on a whole 4-character group and still decodes", async () => {
+			const bytes = bytesOf(MAX_INLINE_BODY_BYTES + 5_001);
+			const out = await runRequest(executed(base64Answer(bytes)));
+
+			const cut = out.bodyRaw as string;
+			expect(cut.length % 4).toBe(0);
+			// Strict: `atob` throws on a length the groups cannot make up.
+			const decoded = Buffer.from(atob(cut), "latin1");
+			expect(decoded.length).toBeLessThanOrEqual(MAX_INLINE_BODY_BYTES);
+			expect(decoded.length).toBeGreaterThan(MAX_INLINE_BODY_BYTES - 3);
+			expect(decoded.equals(bytes.subarray(0, decoded.length))).toBe(true);
+			expect(out.bodyEncoding).toBe("base64");
+			expect(out.bodyTruncated).toBe(true);
+			expect(out.bodySize).toBe(bytes.length);
+			expect(out.body).toBeNull();
+		});
+
+		test("is bounded by its decoded size, not by its text", async () => {
+			// 40,000 characters of base64 over 30,000 bytes: past the bound as
+			// text, inside it as the body it is.
+			const answer = base64Answer(bytesOf(30_000));
+			expect((answer.bodyRaw as string).length).toBeGreaterThan(MAX_INLINE_BODY_BYTES);
+			expect(await runRequest(executed(answer))).toEqual(answer);
+		});
+
+		test("states its decoded size when the engine sent none", async () => {
+			const bytes = bytesOf(MAX_INLINE_BODY_BYTES + 2);
+			const answer: Record<string, unknown> = base64Answer(bytes);
+			delete answer.bodySize;
+			const out = await runRequest(executed(answer));
+			// `=` padding carries no bytes: 32,770 bytes end in one `=`.
+			expect((answer.bodyRaw as string).endsWith("=")).toBe(true);
+			expect(out.bodySize).toBe(bytes.length);
+		});
+
+		test("a utf8 answer over the bound is cut as text, its encoding kept", async () => {
+			const out = await runRequest(
+				executed(
+					executeAnswer({ bodyRaw: huge, bodySize: huge.length, bodyEncoding: "utf8" })
+				)
+			);
+			expect(Buffer.byteLength(out.bodyRaw as string, "utf8")).toBe(MAX_INLINE_BODY_BYTES);
+			expect(out.bodyEncoding).toBe("utf8");
+		});
+
+		test("on a stored trace node is cut the same way, with its decoded size", async () => {
+			const bytes = bytesOf(MAX_INLINE_BODY_BYTES + 5_001);
+			const out = await runReport(
+				reported({
+					results: [
+						{
+							id: 1,
+							trace: {
+								response: {
+									body: bytes.toString("base64"),
+									bodyEncoding: "base64",
+								},
+							},
+						},
+					],
+				})
+			);
+
+			const response = (out.results as Row[])[0].trace!.response!;
+			const cut = response.body as string;
+			expect(cut.length % 4).toBe(0);
+			expect(
+				Buffer.from(atob(cut), "latin1").equals(bytes.subarray(0, (cut.length / 4) * 3))
+			).toBe(true);
+			expect(response.bodyEncoding).toBe("base64");
+			expect(response.bodyTruncated).toBe(true);
+			expect(response.bodyBytes).toBe(bytes.length);
+		});
+	});
+
 	function reported(report: Record<string, unknown>) {
 		return fakeClient({ getRunReport: vi.fn().mockResolvedValue(report) });
 	}
@@ -5986,7 +6079,10 @@ describe("dispatchTool", () => {
 		test("the descriptions say what is refused and where the setting lives", () => {
 			for (const name of ["run_request", "start_load_run"]) {
 				const description = TOOLS.find((t) => t.name === name)!.description;
-				expect(description).toContain("Reveal secrets to agents");
+				expect(description).toContain(REVEAL_SETTING_TOKEN);
+				expect(resolveRemedyTokens(description, "app")).toContain(
+					"Reveal secrets to agents"
+				);
 				expect(description).toMatch(/script you supply here .* is refused/);
 			}
 		});
@@ -7699,12 +7795,12 @@ describe("start_load_run resolves and states the load shape", () => {
  * re-firing a request that already ran.
  */
 describe("engine transport failures are told apart", () => {
-	async function runRequestFailingWith(err: unknown) {
+	async function runRequestFailingWith(err: unknown, host: McpHost = "app") {
 		const client = fakeClient({ executeRequest: vi.fn().mockRejectedValue(err) });
 		return dispatchTool(
 			"run_request",
 			{ url: "https://api.example.com/slow" },
-			ctxWith(client, { allowlist: ["api.example.com"] })
+			ctxWith(client, { allowlist: ["api.example.com"] }, host)
 		);
 	}
 
@@ -7729,12 +7825,23 @@ describe("engine transport failures are told apart", () => {
 		expect(firstText(res)).not.toMatch(/Make sure the Vayu app is running/);
 	});
 
-	test("a genuinely unreachable engine still says so", async () => {
+	test("a genuinely unreachable engine says so, naming the app for the app host", async () => {
 		const res = await runRequestFailingWith(
-			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876")
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"app"
 		);
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toMatch(/Make sure the Vayu app is running/);
+	});
+
+	test("a genuinely unreachable engine says so, naming the process for the CLI host", async () => {
+		const res = await runRequestFailingWith(
+			new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:9876"),
+			"cli"
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/Start vayu-engine, or point VAYU_ENGINE_URL/);
+		expect(firstText(res)).not.toMatch(/Vayu app/);
 	});
 });
 
@@ -7990,7 +8097,7 @@ describe("mock issuer tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockIssuer).not.toHaveBeenCalled();
 		expect(client.listMockIssuers).not.toHaveBeenCalled();
@@ -8367,7 +8474,7 @@ describe("mock server tools", () => {
 		] as const) {
 			const res = await dispatchTool(tool, args, off);
 			expect(res.isError, tool).toBe(true);
-			expect(firstText(res), tool).toMatch(/disabled in Vayu Settings/);
+			expect(firstText(res), tool).toMatch(/is disabled\..*Vayu Settings → MCP/);
 		}
 		expect(client.startMockServer).not.toHaveBeenCalled();
 		expect(client.stopMockServer).not.toHaveBeenCalled();
@@ -13375,7 +13482,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(firstText(res)).toContain("saved request by id");
 		expect(client.composeRequest).not.toHaveBeenCalled();
 		expect(client.executeRequest).not.toHaveBeenCalled();
@@ -13397,7 +13504,7 @@ describe("binary file bodies", () => {
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBe(true);
-		expect(firstText(res)).toBe(INLINE_FILE_REFUSAL);
+		expect(firstText(res)).toBe(resolveRemedyTokens(INLINE_FILE_REFUSAL, "app"));
 		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
@@ -13672,6 +13779,26 @@ describe("get_graphql_schema", () => {
 			} finally {
 				parse.mockRestore();
 			}
+		});
+
+		test("refuses a base64 body as not JSON, before measuring it", async () => {
+			// Over the limit as text, so a size check that ran first would answer
+			// "too large" about a length that is not the body's (#2458).
+			const res = await call({
+				status: 200,
+				bodyEncoding: "base64",
+				bodyRaw: "AAAA".repeat(MAX_INTROSPECTION_BYTES / 4 + 1),
+			});
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/not with JSON/);
+		});
+
+		test("refuses a base64 body that would parse as JSON text", async () => {
+			// "1234" is valid base64 (three bytes that are not UTF-8) and a valid
+			// JSON number, so only the encoding says it is no JSON document.
+			const res = await call({ status: 200, bodyEncoding: "base64", bodyRaw: "1234" });
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toMatch(/not with JSON/);
 		});
 
 		test("refuses JSON that is not an introspection result, without echoing it", async () => {

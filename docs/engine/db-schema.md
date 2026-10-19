@@ -1685,9 +1685,18 @@ stored at all. When a body is cut, its node gains two keys:
 | `bodyTruncated`               | bool | Present and `true` only when the stored `body` is a prefix, not the whole body |
 | `bodyBytes`                   | int  | The **original** body length in bytes (the stored `body` is the first `maxTraceBodyBytes` of it) |
 
-The cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8 sequence is
-possible; `record_design_result` dumps the trace with `error_handler_t::replace`, turning a stray
-continuation byte into U+FFFD rather than throwing. The cap is applied by
+A `response.body` that is not text (not valid UTF-8 over its whole length, or carrying a NUL) is
+stored as its base64, and only then does `response` carry **`bodyEncoding: "base64"`** (#2458):
+the same decision and spelling the live `POST /execute` answer makes for `bodyRaw`, including
+that a body the read cap cut (`bodyCapped`) is judged, and stored as text, without an incomplete
+last UTF-8 character. Absent means
+the stored `body` is the text itself, which every row written before the key holds. Such a body is
+capped by its decoded bytes, cut at a multiple of three so the stored slice still decodes, and
+its `bodyBytes` counts decoded bytes.
+
+A text body's cut is on a raw byte boundary (the body is an opaque string), so a split UTF-8
+sequence is possible; `record_design_result` dumps the trace with `error_handler_t::replace`,
+turning a stray continuation byte into U+FFFD rather than throwing. The cap is applied by
 `vayu::json::cap_trace_bodies` (`utils/json.cpp`) to the trace `build_result_trace`
 (`http/request_exchange.cpp`) produces. It applies to the design-mode writer and
 to the scenario runner, which shares that trace builder - the load-run writers

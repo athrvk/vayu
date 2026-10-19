@@ -176,7 +176,7 @@ export async function preflightScenarioSteps(
 			);
 		}
 		const url = String(composed.url ?? "");
-		const gate = checkAllowlist(url, ctx.config);
+		const gate = checkAllowlist(url, ctx.config, ctx.host);
 		if (!gate.ok) {
 			throw new ToolArgError(
 				`Refusing to run this collection: ${step} is not allowed. ${gate.error} ` +
@@ -351,7 +351,7 @@ export async function startScenarioLoadRun(
 
 	const monitor = args.monitor as { url?: unknown } | undefined;
 	if (monitor && typeof monitor === "object") {
-		const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config);
+		const monitorGate = checkMonitorHost(String(monitor.url ?? ""), ctx.config, ctx.host);
 		if (!monitorGate.ok) return errorResult(monitorGate.error!);
 	}
 
@@ -362,7 +362,7 @@ export async function startScenarioLoadRun(
 		ctx.config,
 		SCENARIO_LOAD_DEFAULTS
 	);
-	const caps = checkLoadCaps(shape, ctx.config);
+	const caps = checkLoadCaps(shape, ctx.config, ctx.host);
 	if (!caps.ok) return errorResult(caps.error!);
 
 	const environmentId = str(args, "environmentId");
@@ -376,7 +376,7 @@ export async function startScenarioLoadRun(
 		);
 	} catch (err) {
 		if (err instanceof ToolArgError) return errorResult(err.message);
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 
 	const payload: Record<string, unknown> = {
@@ -423,7 +423,7 @@ export async function startScenarioLoadRun(
 	try {
 		started = await ctx.client.startRun(withMcpOrigin(payload, ctx), signal);
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 	return watchedRun(
 		withCaveat(

@@ -22,7 +22,7 @@ import {
 	type LoadRunParams,
 	parseDurationSeconds,
 } from "../safety.js";
-import { REVEAL_SETTING, runOutputShape, withheldAuthMembers } from "../withhold.js";
+import { runOutputShape, withheldAuthMembers } from "../withhold.js";
 import type { ToolContext, ToolResult } from "./contract.js";
 import {
 	engineErrorResult,
@@ -37,6 +37,7 @@ import {
 	ToolArgError,
 } from "./kit.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
+import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 
 /**
  * The request fields an agent stated directly, raw - and *only* the ones it
@@ -199,7 +200,7 @@ export async function runStreamingRequest(
 		}
 		started = accepted as Record<string, unknown>;
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 
 	const runId = typeof started.runId === "string" ? started.runId : "";
@@ -215,7 +216,7 @@ export async function runStreamingRequest(
 	try {
 		consumed = await ctx.client.consumeStreamEvents(runId, maxEvents, budgetMs, signal);
 	} catch (err) {
-		return engineErrorResult(err);
+		return engineErrorResult(err, ctx);
 	}
 
 	const withhold = await runOutputShape(ctx, signal, [payload.auth]);
@@ -306,7 +307,7 @@ function carriesScript(entry: unknown): boolean {
  * that tool.
  */
 export function agentScriptGateSentence(carriers: string): string {
-	return `Unless the user has turned on ${REVEAL_SETTING}, a script you supply here (${carriers}) is refused before anything is sent, because a script reads every variable, secret ones included; a blank script is not refused.`;
+	return `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, a script you supply here (${carriers}) is refused before anything is sent, because a script reads every variable, secret ones included; a blank script is not refused.`;
 }
 
 /**
@@ -326,10 +327,10 @@ export function agentScriptGateSentence(carriers: string): string {
  */
 export function refuseAgentScripts(
 	args: Record<string, unknown>,
-	revealSecrets: boolean,
+	ctx: ToolContext,
 	elements: readonly unknown[] = []
 ): void {
-	if (revealSecrets) return;
+	if (ctx.config.revealSecretsToAgents) return;
 	const named: string[] = ["preRequestScript", "postRequestScript", "tests"].filter((key) => {
 		const text = str(args, key);
 		return text !== undefined && !BLANK_SCRIPT.test(text);
@@ -337,7 +338,7 @@ export function refuseAgentScripts(
 	if (elements.some(carriesScript)) named.push("elements");
 	if (named.length === 0) return;
 	throw new ToolArgError(
-		`${named.map((key) => `"${key}"`).join(", ")} carries a script, and agents cannot send one while ${REVEAL_SETTING} is off: a script reads every variable, secret ones included, and could write the value into its output or the request it sends. Nothing was sent. Leave the script out, or the user can turn the setting on in Vayu Settings > MCP.`
+		`${named.map((key) => `"${key}"`).join(", ")} carries a script, and agents cannot send one while Reveal secrets to agents is off: a script reads every variable, secret ones included, and could write the value into its output or the request it sends. Nothing was sent. Leave the script out, or ask the user to ${settingRemedy("revealSecretsToAgents", ctx.host)}.`
 	);
 }
 
@@ -507,7 +508,7 @@ export async function composeLoadRunRequest(
 	ctx: ToolContext,
 	signal?: AbortSignal
 ): Promise<{ payload: Record<string, unknown>; droppedPreRequestScripts: number }> {
-	refuseAgentScripts(args, ctx.config.revealSecretsToAgents);
+	refuseAgentScripts(args, ctx);
 	const savedId = str(args, "requestId");
 	const overrides = readRequestOverrides(args);
 	const authArg = readAuthArg(args);

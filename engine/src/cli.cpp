@@ -34,9 +34,11 @@
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -154,8 +156,14 @@ vayu::Response parse_daemon_response (const std::string& json_str) {
 
     response.status_code = json.value ("status", 0);
     response.status_text = json.value ("statusText", "");
-    response.body        = json.value ("bodyRaw", "");
-    response.body_size   = response.body.size ();
+    auto body            = vayu::json::response_body_bytes (json);
+    if (!body) {
+        throw std::runtime_error (
+        "the daemon answered a body this CLI cannot read (bodyEncoding '" +
+        json.value ("bodyEncoding", "") + "')");
+    }
+    response.body      = std::move (*body);
+    response.body_size = response.body.size ();
 
     if (json.contains ("headers")) {
         for (const auto& item : json["headers"].items ()) {

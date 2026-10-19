@@ -261,9 +261,10 @@ export function sanitizeSafetyInput(input: Partial<McpSafetyConfig>): Partial<Mc
 /**
  * The environment variable each safety field is read from by the stdio CLI.
  * Lives beside the sanitizer so a value it drops can be named back to the
- * operator without re-parsing the environment.
+ * operator without re-parsing the environment, and is what `remedy.ts` names
+ * to a CLI user whose call a guard refused.
  */
-const SAFETY_ENV_VARS = {
+export const SAFETY_ENV_VARS = {
 	allowlist: "VAYU_MCP_ALLOWLIST",
 	allowAll: "VAYU_MCP_ALLOW_ALL",
 	maxRps: "VAYU_MCP_MAX_RPS",

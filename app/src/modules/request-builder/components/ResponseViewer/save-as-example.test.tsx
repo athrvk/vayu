@@ -138,6 +138,20 @@ describe("save response as example", () => {
 		expect(saveButton()).toBeNull();
 	});
 
+	it("is disabled, behind its reason, for a body that is not UTF-8 text (#2458)", () => {
+		state.response = okResponse({
+			headers: { "Content-Type": "text/plain; charset=iso-8859-1" },
+			body: "café",
+			bodyRaw: "café",
+			bodyType: "text",
+			rawBytes: { data: new Uint8Array([0x63, 0x61, 0x66, 0xe9]), isText: true },
+		});
+		renderViewer();
+
+		expect(saveButton()).toBeDisabled();
+		expect(saveButton()!.closest('[data-slot="disabled-hint"]')).not.toBeNull();
+	});
+
 	it("writes the status, headers, body and a user origin - and never an order", async () => {
 		state.response = okResponse();
 		renderViewer();
@@ -184,6 +198,33 @@ describe("save response as example", () => {
 
 		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
 		expect(createRequestExample.mock.calls[0][1].contentType).toBe("");
+	});
+
+	it("stores the body as received, not the indented pane copy (#2459)", async () => {
+		const received = '{"z":1,"id":9007199254740993,"z":2}';
+		state.response = okResponse({
+			body: JSON.stringify(JSON.parse(received), null, 2),
+			bodyRaw: received,
+		});
+		renderViewer();
+		expect(state.response.body).not.toBe(received);
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].body).toBe(received);
+	});
+
+	it("falls back to the pane text for a response that recorded no bodyRaw", async () => {
+		state.response = okResponse({ body: "only the pane copy", bodyRaw: undefined });
+		renderViewer();
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].body).toBe("only the pane copy");
 	});
 
 	it("stores a truncated body as truncated, whatever the user renames it to", async () => {

@@ -29,6 +29,7 @@ add_executable(vayu_tests
     element_body_bound_test.cpp
     json_test.cpp
     json_depth_test.cpp
+    ordered_json_parse_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
     script_engine_test.cpp
@@ -133,6 +134,7 @@ add_executable(vayu_tests
     config_snapshot_test.cpp
     run_origin_test.cpp
     execute_auth_provenance_test.cpp
+    execute_binary_body_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
@@ -164,6 +166,7 @@ add_executable(vayu_tests
     spec_bind_route_test.cpp
     operation_match_test.cpp
     path_variables_test.cpp
+    auth_header_precedence_test.cpp
     query_encoding_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
@@ -363,6 +366,8 @@ set(vayu_scratch_database_suites
     ConfigSeedTest
     ConfigSnapshotExecuteTest
     ExecuteAuthProvenanceTest
+    ExecuteBinaryBodyTest
+    ExecuteByteRowTest
     CustomCaVerificationTest
     DatabaseConcurrencyTest
     DefaultHeaderConfigTest

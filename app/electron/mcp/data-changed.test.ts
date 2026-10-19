@@ -92,7 +92,12 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 /** A context plus the notifier spy, so a test can read what was emitted. */
 function ctxWithNotifier(client: EngineClient, safety?: Partial<McpSafetyConfig>) {
 	const onDataChanged = vi.fn<(event: McpDataChangedEvent) => void>();
-	const ctx: ToolContext = { client, config: resolveSafetyConfig(safety), onDataChanged };
+	const ctx: ToolContext = {
+		client,
+		config: resolveSafetyConfig(safety),
+		host: "app",
+		onDataChanged,
+	};
 	return { ctx, onDataChanged };
 }
 
@@ -695,7 +700,11 @@ describe("a run that started says so", () => {
 describe("dispatch emits mcp:data-changed, continued", () => {
 	test("a context without a notifier dispatches normally", async () => {
 		const client = fakeClient();
-		const ctx: ToolContext = { client, config: resolveSafetyConfig(WRITES_ENABLED) };
+		const ctx: ToolContext = {
+			client,
+			config: resolveSafetyConfig(WRITES_ENABLED),
+			host: "app",
+		};
 		const res = await dispatchTool(
 			"create_request",
 			{ collectionId: "col_1", name: "New", url: "https://api.example.com/x" },
@@ -711,6 +720,7 @@ describe("dispatch emits mcp:data-changed, continued", () => {
 		const ctx: ToolContext = {
 			client,
 			config: resolveSafetyConfig(WRITES_ENABLED),
+			host: "app",
 			onDataChanged: () => {
 				throw new Error("renderer went away");
 			},

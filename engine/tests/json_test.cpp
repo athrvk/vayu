@@ -16,6 +16,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/utils/encoding.hpp"
 
 namespace vayu::json {
 namespace {
@@ -185,6 +186,114 @@ TEST (JsonTest, SerializesTheBodyCapFlagOnEveryResponse) {
 
     response.body_truncated = true;
     EXPECT_TRUE (serialize (response)["bodyCapped"].get<bool> ());
+}
+
+// ============================================================================
+// bodyEncoding (issue #2458): a body that is not text travels as base64, and
+// the key is on every answer. Mutation check: make serialize(Response) always
+// take the utf8 branch and the base64 cases below red - and the strict dump
+// they end with throws, which is the empty 500 the issue was filed about.
+// ============================================================================
+
+namespace {
+
+Response response_with_body (std::string body) {
+    Response response;
+    response.status_code = 200;
+    response.body_size   = body.size ();
+    response.body        = std::move (body);
+    return response;
+}
+
+} // namespace
+
+TEST (BodyEncoding, AValidUtf8BodyTravelsAsItself) {
+    const auto json =
+    serialize (response_with_body ("{\"s\":\"caf\xC3\xA9\"}"));
+
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+    EXPECT_EQ (json["bodyRaw"], "{\"s\":\"caf\xC3\xA9\"}");
+    EXPECT_EQ (json["body"]["s"], "caf\xC3\xA9");
+}
+
+TEST (BodyEncoding, AnEmptyBodyIsUtf8) {
+    const auto json = serialize (response_with_body (""));
+
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+    EXPECT_EQ (json["bodyRaw"], "");
+    EXPECT_TRUE (json["body"].is_null ());
+}
+
+TEST (BodyEncoding, AnInvalidUtf8BodyTravelsAsBase64) {
+    // Valid JSON in every byte but the last two: the parse must not run on it.
+    const std::string bytes = "{\"s\":\"ok\xFF\xFE\"}";
+    const auto json         = serialize (response_with_body (bytes));
+
+    EXPECT_EQ (json["bodyEncoding"], "base64");
+    EXPECT_TRUE (json["body"].is_null ());
+    EXPECT_EQ (json["bodySize"], bytes.size ());
+    EXPECT_EQ (response_body_bytes (json), bytes);
+    EXPECT_NO_THROW ((void)json.dump ());
+}
+
+TEST (BodyEncoding, ABodyCarryingNulIsBase64EvenThoughItIsValidUtf8) {
+    const std::string bytes ("ab\0cd", 5);
+    const auto json = serialize (response_with_body (bytes));
+
+    EXPECT_EQ (json["bodyEncoding"], "base64");
+    EXPECT_EQ (json["bodyRaw"], "YWIAY2Q=");
+    EXPECT_EQ (response_body_bytes (json), bytes);
+}
+
+// Past `looks_binary`'s sniff window, on purpose: a prefix check passes this
+// body and the serializer still throws on its last byte.
+TEST (BodyEncoding, OneBadByteAfterALongTextPrefixIsStillBase64) {
+    const std::string bytes = std::string (4096, 'a') + "\xE9";
+    EXPECT_EQ (serialize (response_with_body (bytes))["bodyEncoding"], "base64");
+}
+
+// A body the read cap cut inside a character is still text, less that
+// character; the same bytes uncapped are not text at all, because a body that
+// arrived whole ends where its server ended it. Mutation check: drop the
+// `body_truncated` branch in `response_body_text` and the capped case answers
+// base64.
+TEST (BodyEncoding, ACappedBodyCutInsideACharacterIsTextWithoutTheCut) {
+    auto capped           = response_with_body ("{\"s\":\"caf\xC3\xA9\xE2\x82");
+    capped.body_truncated = true;
+
+    EXPECT_EQ (response_body_text (capped), "{\"s\":\"caf\xC3\xA9");
+    const auto json = serialize (capped);
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+    EXPECT_EQ (json["bodyRaw"], "{\"s\":\"caf\xC3\xA9");
+    EXPECT_EQ (json["bodySize"], capped.body.size ());
+    EXPECT_TRUE (json["bodyCapped"].get<bool> ());
+}
+
+TEST (BodyEncoding, AnUncappedBodyEndingInsideACharacterIsBase64) {
+    const auto uncapped = response_with_body ("ok\xE2\x82");
+
+    EXPECT_FALSE (response_body_text (uncapped).has_value ());
+    EXPECT_EQ (serialize (uncapped)["bodyEncoding"], "base64");
+}
+
+TEST (BodyEncoding, ACappedBodyWithABadByteBeforeTheCutIsBase64) {
+    auto capped           = response_with_body ("ok\xFF ok\xE2\x82");
+    capped.body_truncated = true;
+
+    EXPECT_FALSE (response_body_text (capped).has_value ());
+    EXPECT_EQ (response_body_bytes (serialize (capped)), capped.body);
+}
+
+TEST (BodyEncoding, AnAnswerWithNoEncodingReadsAsUtf8) {
+    EXPECT_EQ (response_body_bytes (Json{ { "bodyRaw", "plain" } }), "plain");
+}
+
+TEST (BodyEncoding, AnUnknownEncodingOrBadBase64IsRefused) {
+    EXPECT_FALSE (response_body_bytes (Json{ { "bodyRaw", "x" }, { "bodyEncoding", "latin1" } })
+    .has_value ());
+    EXPECT_FALSE (
+    response_body_bytes (Json{ { "bodyRaw", "!!!" }, { "bodyEncoding", "base64" } })
+    .has_value ());
 }
 
 TEST (JsonTest, SerializesError) {
@@ -496,6 +605,38 @@ TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
     EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
     EXPECT_NO_THROW (
     (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+// A base64 body (issue #2458) is capped by what it decodes to, on a three-byte
+// boundary so the stored slice still decodes, and `bodyBytes` counts decoded
+// bytes as it does for text. Mutation check: drop the `bodyEncoding` branch in
+// `cap_node_body` and the slice is cut mid-group (8 characters of text) and
+// `bodyBytes` reports the encoded length.
+TEST (CapTraceBodies, ABase64BodyIsCutOnAWholeGroupOfDecodedBytes) {
+    const std::string bytes ("\x89PNG\r\n\x1A\n\x00\x01\x02\x03\xFF", 13);
+    auto trace = make_trace ("x", vayu::utils::base64_encode (bytes));
+    trace["response"]["bodyEncoding"] = "base64";
+
+    cap_trace_bodies (trace, 8);
+
+    const auto& node = trace["response"];
+    EXPECT_TRUE (node["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (node["bodyBytes"].get<size_t> (), 13u);
+    const auto kept = vayu::utils::base64_decode (node["body"].get<std::string> ());
+    ASSERT_HAS_VALUE (kept);
+    EXPECT_EQ (*kept, bytes.substr (0, 6));
+}
+
+TEST (CapTraceBodies, ABase64BodyUnderTheCapIsLeftWhole) {
+    const std::string encoded = vayu::utils::base64_encode ("\xFF\xFE\xFD\xFC");
+    auto trace                = make_trace ("x", encoded);
+    trace["response"]["bodyEncoding"] = "base64";
+
+    // Four decoded bytes under a cap of four, though the text is eight long.
+    cap_trace_bodies (trace, 4);
+
+    EXPECT_EQ (trace["response"]["body"], encoded);
+    EXPECT_FALSE (trace["response"].contains ("bodyTruncated"));
 }
 
 // ============================================================================

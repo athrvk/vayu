@@ -13,6 +13,8 @@
  */
 
 import type { McpSafetyConfig } from "./config.js";
+import { settingRemedy } from "./remedy.js";
+import type { McpHost } from "./tools/contract.js";
 
 /** Result of a guard check. `ok: false` carries a message meant for the agent. */
 export interface GuardResult {
@@ -95,11 +97,12 @@ export function extractHost(url: string): string | null {
 
 /**
  * Enforce the target allowlist. An empty allowlist denies everything (safe
- * default). Matching is exact on hostname, case-insensitive.
+ * default). Matching is exact on hostname, case-insensitive. @p host is the
+ * session's host, which decides how the refusal tells the user to lift it.
  */
-export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResult {
-	const host = extractHost(url);
-	if (!host) {
+export function checkAllowlist(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
+	const target = extractHost(url);
+	if (!target) {
 		return {
 			ok: false,
 			error: "Could not determine the target host from the request URL (it may be empty or contain unresolved {{variables}}). Resolve the URL before sending.",
@@ -112,16 +115,16 @@ export function checkAllowlist(url: string, config: McpSafetyConfig): GuardResul
 	if (config.allowlist.length === 0) {
 		return {
 			ok: false,
-			error: `The MCP target allowlist is empty, so no outbound requests are permitted. Ask the user to add "${host}" to Vayu's MCP allowlist (Settings) before retrying.`,
+			error: `The MCP target allowlist is empty, so no outbound requests are permitted, "${target}" included. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
 		};
 	}
-	const allowed = config.allowlist.some((h) => h.trim().toLowerCase() === host);
+	const allowed = config.allowlist.some((h) => h.trim().toLowerCase() === target);
 	if (!allowed) {
 		return {
 			ok: false,
-			error: `Host "${host}" is not on Vayu's MCP allowlist. Allowed hosts: ${config.allowlist.join(
+			error: `Host "${target}" is not on the MCP allowlist. Allowed hosts: ${config.allowlist.join(
 				", "
-			)}. Ask the user to add it in Settings before retrying.`,
+			)}. Ask the user to ${settingRemedy("allowlist", host)} before retrying.`,
 		};
 	}
 	return OK;
@@ -202,16 +205,16 @@ function isPrivateIpv4(address: string): boolean {
  * for the life of the run, which is exactly what the allowlist is for, so it
  * goes through the same check the target URL does.
  */
-export function checkMonitorHost(url: string, config: McpSafetyConfig): GuardResult {
-	const host = extractHost(url);
-	if (!host) {
+export function checkMonitorHost(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
+	const monitorHost = extractHost(url);
+	if (!monitorHost) {
 		return {
 			ok: false,
 			error: "Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying.",
 		};
 	}
-	if (isPrivateHost(host)) return OK;
-	const gate = checkAllowlist(url, config);
+	if (isPrivateHost(monitorHost)) return OK;
+	const gate = checkAllowlist(url, config, host);
 	if (gate.ok) return OK;
 	return {
 		ok: false,
@@ -366,11 +369,15 @@ export function engineLoadMode(params: LoadRunParams): LoadMode {
  * grow a run is checked here - a forwarded field this function does not read is
  * a cap that cannot fire.
  */
-export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): GuardResult {
+export function checkLoadCaps(
+	params: LoadRunParams,
+	config: McpSafetyConfig,
+	host: McpHost
+): GuardResult {
 	if (typeof params.targetRps === "number" && params.targetRps > config.maxRps) {
 		return {
 			ok: false,
-			error: `targetRps ${params.targetRps} exceeds the MCP cap of ${config.maxRps}. Lower it or raise the cap in Settings.`,
+			error: `targetRps ${params.targetRps} exceeds the MCP cap of ${config.maxRps}. Lower it, or ask the user to ${settingRemedy("maxRps", host)}.`,
 		};
 	}
 	// `startConcurrency` rides the same ceiling as `concurrency`: `ramp_up` seeds
@@ -384,7 +391,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 		if (typeof value === "number" && value > config.maxConcurrency) {
 			return {
 				ok: false,
-				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency} virtual users. Lower it or raise the cap in Settings.`,
+				error: `${field} ${value} exceeds the MCP cap of ${config.maxConcurrency} virtual users. Lower it, or ask the user to ${settingRemedy("maxConcurrency", host)}.`,
 			};
 		}
 	}
@@ -414,7 +421,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 	if (durationSeconds !== null && durationSeconds > config.maxDurationSeconds) {
 		return {
 			ok: false,
-			error: `duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it or raise the cap in Settings.`,
+			error: `duration ${params.duration} (${durationSeconds}s) exceeds the MCP cap of ${config.maxDurationSeconds}s. Shorten it, or ask the user to ${settingRemedy("maxDurationSeconds", host)}.`,
 		};
 	}
 	if (engineLoadMode(params) === "iterations") {
@@ -428,7 +435,7 @@ export function checkLoadCaps(params: LoadRunParams, config: McpSafetyConfig): G
 		if (iterations > config.maxIterations) {
 			return {
 				ok: false,
-				error: `iterations ${iterations} exceeds the MCP cap of ${config.maxIterations}. An iterations run stops on request count rather than time, so the duration cap cannot bound it - lower iterations, use a duration-bounded mode, or raise the cap in Settings.`,
+				error: `iterations ${iterations} exceeds the MCP cap of ${config.maxIterations}. An iterations run stops on request count rather than time, so the duration cap cannot bound it - lower iterations, use a duration-bounded mode, or ask the user to ${settingRemedy("maxIterations", host)}.`,
 			};
 		}
 	}

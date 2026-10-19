@@ -288,8 +288,24 @@ function maskedBody(body: PreparedBody, mask: (text: string) => string): Prepare
 }
 
 /**
+ * Whether the rows already carry a header called `name`, compared
+ * case-insensitively as the engine's header map does.
+ */
+function carriesHeader(headers: Array<[string, string]>, name: string): boolean {
+	const folded = name.toLowerCase();
+	return headers.some(([key]) => key.toLowerCase() === folded);
+}
+
+/**
  * Flatten a request into what a static client has to send, with auth applied
  * and secrets already hidden.
+ *
+ * A header the request already carries wins over the one its auth would write,
+ * as in the engine's `apply_auth` (`engine/src/http/auth_resolver.cpp`), pinned
+ * to it by `engine/tests/fixtures/auth-header-precedence.json` (issue #2475):
+ * appending both made a snippet send two `Authorization` lines where Vayu sends
+ * one. A query-located API key is a URL parameter, not a header, and is never
+ * skipped.
  */
 export function prepareRequest(
 	request: SnippetRequest,
@@ -316,20 +332,27 @@ export function prepareRequest(
 		case "noauth":
 			break;
 		case "bearer":
-			headers.push(["Authorization", `Bearer ${asString(auth!.token)}`]);
+			if (!carriesHeader(headers, "Authorization")) {
+				headers.push(["Authorization", `Bearer ${asString(auth!.token)}`]);
+			}
 			break;
 		case "basic":
-			basicAuth = {
-				username: asString(auth!.username),
-				password: asString(auth!.password),
-			};
+			// Left null, not a header: `basicAuth` is rendered as its own
+			// `Authorization` by every target (`-u`, `-a`, `auth=`, `btoa`), so a
+			// typed one has to keep the structured path unused.
+			if (!carriesHeader(headers, "Authorization")) {
+				basicAuth = {
+					username: asString(auth!.username),
+					password: asString(auth!.password),
+				};
+			}
 			break;
 		case "apikey": {
 			const key = asString(auth!.key);
 			const value = asString(auth!.value);
 			if (key) {
 				if (asString(auth!.in) === "query") url = appendQueryParam(url, key, value, encode);
-				else headers.push([key, value]);
+				else if (!carriesHeader(headers, key)) headers.push([key, value]);
 			}
 			break;
 		}
@@ -370,6 +393,49 @@ export function prepareRequest(
 		notes,
 		masked: masker.wasUsed(),
 	};
+}
+
+/** A code unit above U+00FF: no Latin-1 byte exists for it. */
+const ABOVE_LATIN1 = /[\u0100-\uffff]/;
+/** U+0080..U+00FF: one Latin-1 byte here, two UTF-8 bytes in Vayu. */
+const LATIN1_HIGH = /[\u0080-\u00ff]/;
+
+/**
+ * Notes for header values a Latin-1 client cannot send the way Vayu does.
+ *
+ * Vayu writes a header value as UTF-8. `fetch` and `requests` take a header
+ * as Latin-1: a character above U+00FF makes them throw before anything is
+ * sent, and one in U+0080..U+00FF goes out as a single byte where Vayu sends
+ * two, so the server reads a different value. Nothing is transcoded - the
+ * snippet stays the request as written and says where the client differs.
+ * The basic-auth pair counts as the `Authorization` value both targets build
+ * from it (`btoa`, the `auth=` tuple), and a masked value is the placeholder
+ * the snippet actually carries.
+ */
+export function headerEncodingNotes(
+	prepared: PreparedRequest,
+	client: "fetch" | "requests"
+): string[] {
+	const values = [...prepared.headers];
+	if (prepared.basicAuth) {
+		values.push([
+			"Authorization",
+			`${prepared.basicAuth.username}:${prepared.basicAuth.password}`,
+		]);
+	}
+	const notes: string[] = [];
+	for (const [name, value] of values) {
+		if (ABOVE_LATIN1.test(value)) {
+			notes.push(
+				`The ${name} header has characters above U+00FF, which are not representable in a ${client} header, so ${client} rejects it.`
+			);
+		} else if (LATIN1_HIGH.test(value)) {
+			notes.push(
+				`The ${name} header has characters in U+0080 to U+00FF, which ${client} sends as Latin-1 where Vayu sends UTF-8, so the server may read a different value.`
+			);
+		}
+	}
+	return notes;
 }
 
 /**

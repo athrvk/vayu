@@ -26,6 +26,7 @@
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
 import type { ResponseState } from "../../types";
+import { receivedBody } from "../../utils/response-bytes";
 
 /**
  * The name a save starts with: the status line, which is what a saved response
@@ -46,6 +47,18 @@ export function defaultExampleName(response: ResponseState): string {
 	return response.statusText
 		? `${response.status} ${response.statusText}`
 		: String(response.status);
+}
+
+/**
+ * Why @p response cannot become an example, or nothing when it can.
+ *
+ * An example's body is text, and a body the engine sent as base64 (issue
+ * #2458) is not: its text, when it has one, is a decoding the engine would
+ * store and serve as UTF-8 under a Content-Type that still names the original
+ * charset. Refused rather than saved as something the server never sent.
+ */
+export function exampleRefusal(response: Pick<ResponseState, "rawBytes">): string | undefined {
+	return response.rawBytes ? "Examples hold UTF-8 text, and this body isn't" : undefined;
 }
 
 /** The response's headers as stored entries, in the order they are held. */
@@ -77,7 +90,9 @@ export function exampleFromResponse(
 		name,
 		status: response.status,
 		headers,
-		body: response.body,
+		// The text as received, not the indented pane copy: a mock server serves
+		// this verbatim, so it must keep the server's key order and number digits.
+		body: receivedBody(response),
 		contentType: headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "",
 		// Always `user`: this is the field a spec sync reads to know it must
 		// leave the row alone (#627). An app-saved example is never a spec's.

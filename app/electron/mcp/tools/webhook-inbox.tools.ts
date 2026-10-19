@@ -36,6 +36,7 @@ import {
 	inboxStartPayload,
 	MAX_INBOX_CAPTURE_LIMIT,
 } from "./webhook-inbox.js";
+import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 	{
@@ -100,7 +101,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.startInbox(inboxStartPayload(args), signal)),
+			callEngine(ctx, () => ctx.client.startInbox(inboxStartPayload(args), signal)),
 	},
 	{
 		name: "list_webhook_inboxes",
@@ -115,7 +116,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listInboxes(signal)),
+		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listInboxes(signal)),
 	},
 	{
 		name: "stop_webhook_inbox",
@@ -135,14 +136,16 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			inboxId: z.string().describe("Inbox ID to stop (from start_webhook_inbox)."),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.stopInbox(requireStr(args, "inboxId"), signal)),
+			callEngine(ctx, () => ctx.client.stopInbox(requireStr(args, "inboxId"), signal)),
 	},
 	{
 		name: "delete_webhook_inbox",
 		category: "write",
 		invalidates: ["service"],
 		description:
-			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. GUARDED: requires write access to be enabled in Vayu Settings, and confirmation - if the client supports elicitation the user is prompted with how many captures go with it, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and the captures are the part that cannot be recreated. To keep them, use stop_webhook_inbox instead.",
+			"Delete a webhook inbox: stop its listener if it is still running, drop the record, and destroy every request it captured. " +
+			GUARDED_WRITE_SENTENCE +
+			", and confirmation - if the client supports elicitation the user is prompted with how many captures go with it, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and the captures are the part that cannot be recreated. To keep them, use stop_webhook_inbox instead.",
 		annotations: {
 			title: "Delete webhook inbox",
 			readOnlyHint: false,
@@ -170,7 +173,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				if (!isRecord(found)) return errorResult(`No webhook inbox with id "${inboxId}".`);
 				inbox = found;
 			} catch (err) {
-				return engineErrorResult(err);
+				return engineErrorResult(err, ctx);
 			}
 			const subject = describeInbox(inboxId, inbox);
 			const unconfirmed = await confirmDestructive(args, ctx, {
@@ -184,7 +187,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 					"This is a preview. To delete it, call delete_webhook_inbox again with confirmed: true and the same arguments.",
 			});
 			if (unconfirmed) return unconfirmed;
-			return callEngine(() => ctx.client.deleteInbox(inboxId, signal));
+			return callEngine(ctx, () => ctx.client.deleteInbox(inboxId, signal));
 		},
 	},
 	{
@@ -232,6 +235,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			const offset = optionalOffset(args, "offset");
 			const withhold = await runOutputShape(ctx, signal);
 			return pagedRead(
+				ctx,
 				() => ctx.client.getInboxCaptures(inboxId, limit, offset, signal),
 				"captures",
 				(page) => boundInboxCaptures(withhold(page))
@@ -243,7 +247,9 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "write",
 		invalidates: ["service"],
 		description:
-			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. GUARDED: requires write access to be enabled in Vayu Settings; unlike delete_webhook_inbox it needs no confirmation, because the inbox survives and the next trigger records again. The captures themselves do not come back.",
+			"Delete every request a webhook inbox has captured, keeping the listener running on the same URL. Use it to start a fresh assertion window between triggers. " +
+			GUARDED_WRITE_SENTENCE +
+			"; unlike delete_webhook_inbox it needs no confirmation, because the inbox survives and the next trigger records again. The captures themselves do not come back.",
 		annotations: {
 			title: "Clear inbox captures",
 			readOnlyHint: false,
@@ -260,7 +266,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
 			const inboxId = requireStr(args, "inboxId");
-			return callEngine(() => ctx.client.clearInboxCaptures(inboxId, signal));
+			return callEngine(ctx, () => ctx.client.clearInboxCaptures(inboxId, signal));
 		},
 	},
 	{
@@ -314,7 +320,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 					'Name at least one of "status", "body", "headers" or "delayMs" to change.'
 				);
 			}
-			return callEngine(() => ctx.client.updateInboxResponse(inboxId, response, signal));
+			return callEngine(ctx, () => ctx.client.updateInboxResponse(inboxId, response, signal));
 		},
 	},
 ];

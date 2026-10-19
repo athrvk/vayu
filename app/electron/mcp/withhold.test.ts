@@ -650,6 +650,112 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	describe("a base64 body (#2458)", () => {
+		const secretRule = (values: string[]): RunOutputRule => ({
+			forms: secretForms(values),
+			apiKeyHeaders: [],
+		});
+		/** What @p encoded decodes to, one character per byte, as `atob` reads it. */
+		const decoded = (encoded: unknown) => atob(encoded as string);
+
+		// A NUL and Latin-1 bytes around it are why the engine sent base64.
+		const bytes = Buffer.concat([
+			Buffer.from([0xe9, 0x00]),
+			Buffer.from("token=s3cr3t-key;", "latin1"),
+			Buffer.from([0xff]),
+		]);
+		const encoded = bytes.toString("base64");
+		const masked = "\xe9\0token=<redacted>;\xff";
+
+		test("masks a secret in the bytes, live and stored, and still decodes", () => {
+			const rule = secretRule(["s3cr3t-key"]);
+			const live = withholdRunOutput(
+				{ body: null, bodyRaw: encoded, bodyEncoding: "base64", bodySize: bytes.length },
+				rule
+			) as Record<string, unknown>;
+			const stored = withholdRunOutput(
+				{ body: encoded, bodyEncoding: "base64", bodyBytes: bytes.length },
+				rule
+			) as Record<string, unknown>;
+
+			expect(decoded(live.bodyRaw)).toBe(masked);
+			expect(live).toMatchObject({
+				body: null,
+				bodyEncoding: "base64",
+				bodySize: bytes.length,
+			});
+			expect(decoded(stored.body)).toBe(masked);
+			expect(stored.bodyBytes).toBe(bytes.length);
+		});
+
+		test("matches a non-ASCII secret by its UTF-8 bytes and by its Latin-1 bytes", () => {
+			const body = Buffer.concat([
+				Buffer.from("a=café-pass;", "utf8"),
+				Buffer.from([0x00]),
+				Buffer.from("b=café-pass", "latin1"),
+			]).toString("base64");
+			const out = withholdRunOutput(
+				{ bodyRaw: body, bodyEncoding: "base64" },
+				secretRule(["café-pass"])
+			) as Record<string, unknown>;
+
+			expect(decoded(out.bodyRaw)).toBe("a=<redacted>;\0b=<redacted>");
+		});
+
+		test("does not match a secret that only coincides with the base64 text", () => {
+			// Nine zero bytes encode as twelve `A`s, so a four-character secret
+			// of base64 letters matches the encoding by coincidence alone.
+			const zeros = Buffer.alloc(9).toString("base64");
+			const live = { body: null, bodyRaw: zeros, bodyEncoding: "base64" };
+			const stored = { body: zeros, bodyEncoding: "base64" };
+
+			expect(withholdRunOutput(live, secretRule(["AAAA"]))).toEqual(live);
+			expect(withholdRunOutput(stored, secretRule(["AAAA"]))).toEqual(stored);
+		});
+
+		test("searches a multi-megabyte body whole", () => {
+			const large = Buffer.concat([
+				Buffer.alloc(4 * 1024 * 1024, 0xff),
+				Buffer.from("s3cr3t-key"),
+			]);
+			const out = withholdRunOutput(
+				{ bodyRaw: large.toString("base64"), bodyEncoding: "base64" },
+				secretRule(["s3cr3t-key"])
+			) as Record<string, unknown>;
+
+			expect(decoded(out.bodyRaw).endsWith("\xff<redacted>")).toBe(true);
+		});
+
+		test("leaves the rest of its record masked", () => {
+			const out = withholdRunOutput(
+				{
+					bodyRaw: encoded,
+					bodyEncoding: "base64",
+					headers: { "set-cookie": "sid=1" },
+					note: "s3cr3t-key",
+				},
+				secretRule(["s3cr3t-key"])
+			) as Record<string, unknown>;
+			expect(out).toMatchObject({
+				bodyEncoding: "base64",
+				headers: { "set-cookie": REDACTED_MARKER },
+				note: REDACTED_MARKER,
+			});
+			expect(decoded(out.bodyRaw)).toBe(masked);
+		});
+
+		test("is a text body's rule only when it says base64", () => {
+			const zeros = Buffer.alloc(9).toString("base64");
+			for (const bodyEncoding of ["utf8", undefined]) {
+				const out = withholdRunOutput(
+					{ bodyRaw: zeros, bodyEncoding },
+					secretRule(["AAAA"])
+				) as { bodyRaw: string };
+				expect(out.bodyRaw).toContain(REDACTED_MARKER);
+			}
+		});
+	});
+
 	test("does not read a member named like a header set as one unless it holds headers", () => {
 		const node = { disabledSystemHeaders: ["Cookie"], headers: "Cookie: x" };
 		expect(withholdRunOutput(node, rule)).toEqual(node);

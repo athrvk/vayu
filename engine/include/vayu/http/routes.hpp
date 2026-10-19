@@ -213,13 +213,19 @@ inline std::string error_message_of (const nlohmann::json& body) {
 
 /**
  * @brief Send a JSON error response
+ *
+ * Dumped with `replace`: a message can quote bytes off the wire or out of an
+ * exception, and a strict dump throwing here would turn the error answer itself
+ * into httplib's bodiless 500 (#2458).
  */
 inline void send_error (httplib::Response& res,
 int status,
 const std::string& message,
 std::string_view code = {}) {
     res.status = status;
-    res.set_content (error_body (status, message, code).dump (), "application/json");
+    res.set_content (
+    error_body (status, message, code).dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+    "application/json");
 }
 
 /**

@@ -1,0 +1,98 @@
+{
+  "$comment": "Cross-language conformance fixture for which header a request's auth writes when the request already carries one (issue #2475). Read by BOTH the engine gtest suite (engine/tests/auth_header_precedence_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/services/codegen/prepare.conformance.test.ts). The rule is the engine's `apply_auth` (engine/src/http/auth_resolver.cpp): bearer, basic and an API key in a header are skipped when `headers` already holds that name, compared case-insensitively and whatever its value (an empty typed value still wins); an API key in the query is a URL parameter and is appended regardless. The snippet generators flatten auth in app/src/services/codegen/prepare.ts and would otherwise print the typed header and the auth one, two lines where Vayu sends one. Each case: `headers` (the request's typed headers, name -> value), `auth` (the auth block), `url` the request URL, and `expected`: `headers`, the [name, value] pairs that reach the wire in any order (a skipped auth header leaves the typed spelling of the name), and `url`. The app side renders a `basic` block that no typed header displaced as its `Authorization: Basic` pair before comparing, because a snippet keeps those credentials structured for -u, -a and auth=. The credentials in these cases are made up.",
+  "cases": [
+    {
+      "name": "a typed Authorization wins over bearer",
+      "headers": { "Authorization": "Bearer typed" },
+      "auth": { "mode": "bearer", "token": "from-auth" },
+      "url": "https://x/",
+      "expected": { "headers": [["Authorization", "Bearer typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed lower-case authorization wins over bearer",
+      "headers": { "authorization": "Bearer typed" },
+      "auth": { "mode": "bearer", "token": "from-auth" },
+      "url": "https://x/",
+      "expected": { "headers": [["authorization", "Bearer typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed lower-case authorization wins over basic",
+      "headers": { "authorization": "Token typed" },
+      "auth": { "mode": "basic", "username": "ada", "password": "s3cret" },
+      "url": "https://x/",
+      "expected": { "headers": [["authorization", "Token typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed Authorization with an empty value still wins over bearer",
+      "headers": { "Authorization": "" },
+      "auth": { "mode": "bearer", "token": "from-auth" },
+      "url": "https://x/",
+      "expected": { "headers": [["Authorization", ""]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed header named like an API key in another case wins (x-key against X-Key)",
+      "headers": { "x-key": "typed" },
+      "auth": { "mode": "apikey", "key": "X-Key", "value": "from-auth", "in": "header" },
+      "url": "https://x/",
+      "expected": { "headers": [["x-key", "typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed header named like an API key in another case wins (X-KEY against x-key)",
+      "headers": { "X-KEY": "typed" },
+      "auth": { "mode": "apikey", "key": "x-key", "value": "from-auth", "in": "header" },
+      "url": "https://x/",
+      "expected": { "headers": [["X-KEY", "typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "an API key whose name no typed header carries is still written",
+      "headers": { "Accept": "application/json" },
+      "auth": { "mode": "apikey", "key": "X-Key", "value": "from-auth", "in": "header" },
+      "url": "https://x/",
+      "expected": {
+        "headers": [["Accept", "application/json"], ["X-Key", "from-auth"]],
+        "url": "https://x/"
+      }
+    },
+    {
+      "name": "a typed Authorization does not displace an API key under another name",
+      "headers": { "Authorization": "Bearer typed" },
+      "auth": { "mode": "apikey", "key": "X-Key", "value": "from-auth", "in": "header" },
+      "url": "https://x/",
+      "expected": {
+        "headers": [["Authorization", "Bearer typed"], ["X-Key", "from-auth"]],
+        "url": "https://x/"
+      }
+    },
+    {
+      "name": "an API key in the query is appended whatever a typed header of that name holds",
+      "headers": { "X-Key": "typed" },
+      "auth": { "mode": "apikey", "key": "X-Key", "value": "from-auth", "in": "query" },
+      "url": "https://x/",
+      "expected": { "headers": [["X-Key", "typed"]], "url": "https://x/?X-Key=from-auth" }
+    },
+    {
+      "name": "an API key with no name writes nothing",
+      "headers": { "Accept": "application/json" },
+      "auth": { "mode": "apikey", "key": "", "value": "from-auth", "in": "header" },
+      "url": "https://x/",
+      "expected": { "headers": [["Accept", "application/json"]], "url": "https://x/" }
+    },
+    {
+      "name": "bearer with no typed Authorization writes one",
+      "headers": { "Accept": "application/json" },
+      "auth": { "mode": "bearer", "token": "from-auth" },
+      "url": "https://x/",
+      "expected": {
+        "headers": [["Accept", "application/json"], ["Authorization", "Bearer from-auth"]],
+        "url": "https://x/"
+      }
+    },
+    {
+      "name": "basic with no typed Authorization writes one",
+      "headers": {},
+      "auth": { "mode": "basic", "username": "ada", "password": "s3cret" },
+      "url": "https://x/",
+      "expected": { "headers": [["Authorization", "Basic YWRhOnMzY3JldA=="]], "url": "https://x/" }
+    }
+  ]
+}

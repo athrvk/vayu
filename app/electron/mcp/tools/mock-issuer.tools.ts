@@ -94,7 +94,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.startMockIssuer(mockIssuerStartPayload(args), signal)),
+			callEngine(ctx, () => ctx.client.startMockIssuer(mockIssuerStartPayload(args), signal)),
 	},
 	{
 		name: "list_mock_issuers",
@@ -109,7 +109,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 			openWorldHint: false,
 		},
 		inputSchema: {},
-		handler: (_args, ctx, signal) => callEngine(() => ctx.client.listMockIssuers(signal)),
+		handler: (_args, ctx, signal) => callEngine(ctx, () => ctx.client.listMockIssuers(signal)),
 	},
 	{
 		name: "stop_mock_issuer",
@@ -128,7 +128,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 			issuerId: z.string().describe("Issuer ID to stop (from start_mock_issuer)."),
 		},
 		handler: (args, ctx, signal) =>
-			callEngine(() => ctx.client.stopMockIssuer(requireStr(args, "issuerId"), signal)),
+			callEngine(ctx, () => ctx.client.stopMockIssuer(requireStr(args, "issuerId"), signal)),
 	},
 	{
 		name: "update_mock_issuer",
@@ -171,7 +171,7 @@ export const MOCK_ISSUER_TOOLS: McpTool[] = [
 				// asked - the `update_inbox_response` precedent.
 				throw new ToolArgError('Name at least one of "failureMode" or "slowMs" to change.');
 			}
-			return callEngine(() => ctx.client.updateMockIssuer(issuerId, patch, signal));
+			return callEngine(ctx, () => ctx.client.updateMockIssuer(issuerId, patch, signal));
 		},
 	},
 ];
