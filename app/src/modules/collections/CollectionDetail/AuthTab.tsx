@@ -200,8 +200,9 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 					title={`${uneditableLabel} auth is set`}
 					className="mb-5"
 				>
-					It was imported or set elsewhere and can't be edited on this tab yet - it is
-					still what descendant requests inherit. Picking a type below replaces it.
+					It was imported or set elsewhere and can't be edited on this tab yet. Vayu does
+					not send this auth type, so requests that inherit it go out without auth.
+					Picking a type below replaces it.
 				</Callout>
 			)}
 
