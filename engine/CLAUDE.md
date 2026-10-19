@@ -390,7 +390,7 @@ Key endpoints:
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
-| GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding` and an opt-in correlation id, so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
+| GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
 | GET | `/trash` | What deleting a collection or request left recoverable (#988): roots only, each with what its cascade took; `POST /trash/:id/restore` puts one back, `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan) into the tree `/import/apply` persists (#877); reads only |
@@ -800,7 +800,12 @@ logged as a warning: it means a client skipped composition.
   which is what makes it decode. The engine never leaves libcurl a default to
   fill (#2464): `text` derives `text/plain`, and where nothing declares a
   Content-Type on a POSTFIELDS body or a bodyless POST the list carries
-  libcurl's removal line. Add a default there, never in a driver. A
+  libcurl's removal line. `Expect: 100-continue` (#2468) is the same shape
+  inverted: libcurl adds it to an HTTP/1.1 body over 1 MiB and waits a second,
+  so `build_request_header_list` appends the `Expect:` removal line unless
+  `sendExpectContinue` (`DefaultHeaderPolicy::expect_continue`, one key for both
+  scopes) is on or the request types a non-blank `Expect`. Add a default
+  there, never in a driver. A
   load or collection run's `config_snapshot` records the resolved decision
   too (#1488), for a later run's report to compare against - never re-applied
   to a send, the one deliberate exception to "none of it is stored".
