@@ -540,5 +540,55 @@ TEST (DaemonStartup, ReleasesTheInstanceLockAfterTheDatabaseCloses) {
     EXPECT_FALSE (releases_the_lock_after_the_database (by_hand));
 }
 
+/// Whether @p code's `run_daemon` refreshes the recovery backup at shutdown
+/// after the run drain and the start-of-session refresh have finished, so no
+/// writer can land after the copy (#2421). Inside `run_daemon` is before `db`
+/// closes, which `ReleasesTheInstanceLockAfterTheDatabaseCloses` orders.
+bool refreshes_the_backup_after_the_last_writer (const std::string& code) {
+    const size_t body = code.find ("int run_daemon (");
+    const size_t end  = code.find ("int main (");
+    if (body == std::string::npos || end == std::string::npos || end < body) {
+        return false;
+    }
+    const std::string run_daemon = code.substr (body, end - body);
+    const size_t drained         = run_daemon.find ("run_manager.shutdown (");
+    const size_t finished =
+    run_daemon.find ("finish_recovery_backup_refresh (");
+    const size_t refreshed =
+    run_daemon.find ("refresh_recovery_backup_on_shutdown (");
+    return drained != std::string::npos && finished != std::string::npos &&
+    refreshed != std::string::npos && drained < finished && finished < refreshed;
+}
+
+TEST (DaemonShutdown, RefreshesTheRecoveryBackupAfterTheLastWriter) {
+    // Mutation check: delete the `refresh_recovery_backup_on_shutdown` call
+    // from `run_daemon`, or move it above `finish_recovery_backup_refresh`.
+    const std::filesystem::path daemon =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src" / "daemon.cpp";
+    const std::string code = tests::strip_comments (tests::read_source (daemon));
+
+    ASSERT_GT (code.size (), 1000u) << "read " << daemon.string () << " as empty";
+    EXPECT_TRUE (refreshes_the_backup_after_the_last_writer (code))
+    << "run_daemon must call db.refresh_recovery_backup_on_shutdown after "
+       "run_manager.shutdown and finish_recovery_backup_refresh";
+
+    // The matcher, pinned both ways.
+    const std::string ordered =
+    "int run_daemon () {\n run_manager.shutdown ();\n"
+    " db.finish_recovery_backup_refresh ();\n"
+    " db.refresh_recovery_backup_on_shutdown (b);\n}\nint main () {}\n";
+    const std::string early =
+    "int run_daemon () {\n run_manager.shutdown ();\n"
+    " db.refresh_recovery_backup_on_shutdown (b);\n"
+    " db.finish_recovery_backup_refresh ();\n}\nint main () {}\n";
+    const std::string missing =
+    "int run_daemon () {\n run_manager.shutdown ();\n"
+    " db.finish_recovery_backup_refresh ();\n}\n"
+    "int main () { db.refresh_recovery_backup_on_shutdown (b); }\n";
+    EXPECT_TRUE (refreshes_the_backup_after_the_last_writer (ordered));
+    EXPECT_FALSE (refreshes_the_backup_after_the_last_writer (early));
+    EXPECT_FALSE (refreshes_the_backup_after_the_last_writer (missing));
+}
+
 } // namespace
 } // namespace vayu::platform

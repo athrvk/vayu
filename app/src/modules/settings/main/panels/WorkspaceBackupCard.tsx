@@ -14,8 +14,9 @@
  * Everything a person has built in Vayu - collections, environments, stored
  * credentials, run history - lives in one SQLite file, and until this there was
  * no copy of it the user controlled. The `.bak` the engine keeps is not one: it
- * is overwritten on every clean start and exists so a corrupt file has
- * something to restore from, not so someone can go back to last week.
+ * is overwritten once the engine listens and again at a clean shutdown, and
+ * exists so a corrupt file has something to restore from, not so someone can go
+ * back to last week.
  *
  * It sits in General beside Data management and Storage paths, because this is
  * engine-held state the user did not type - the same reason CookiesCard is

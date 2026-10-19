@@ -734,9 +734,14 @@ on quit (it is more reliable than a signal on Windows, where `SIGTERM` does not
 behave as expected).
 
 The response is sent **before** shutdown begins, so the client always receives
-the `200`. About 100ms later, on a detached thread, the engine invokes its
-shutdown callback: the daemon's main loop exits, active runs are stopped, the
-lock file is released, logs are flushed, and the process exits.
+the `200`. The handler sets the body and then calls the shutdown callback
+inline, which only wakes the daemon's main loop; the teardown cannot overtake
+the response, because stopping the server joins the worker that is writing it.
+The daemon then stops the server, stops and joins active runs, refreshes the
+recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
+what is left of the app's 5 s window; on a timeout the previous backup stands,
+see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the
+database, releases the lock file, flushes the logs and exits.
 
 **Response:** `200`
 ```json

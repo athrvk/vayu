@@ -12,10 +12,10 @@
  *
  * Everything a Vayu user has typed lives in one SQLite file: collections,
  * environments, stored credentials and run history. Until this route there was
- * no way to take a copy of it that the user controlled. The `.bak` the
- * constructor writes is not one - it is overwritten on every clean start and
- * exists so a corrupt file has something to restore *from*, not so a person can
- * go back to last week. And copying the file by hand while the engine runs is
+ * no way to take a copy of it that the user controlled. The `.bak` the engine
+ * keeps is not one - it is overwritten once the engine listens and again at a
+ * clean shutdown, and exists so a corrupt file has something to restore *from*,
+ * not so a person can go back to last week. And copying the file by hand while the engine runs is
  * not safe under WAL: the `-wal` holds committed transactions the main file
  * does not, so the copy is a database missing its most recent writes.
  *

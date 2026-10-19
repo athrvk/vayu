@@ -153,6 +153,11 @@ export const ENGINE_SHUTDOWN_REQUEST_TIMEOUT_MS = 2000;
  * silent engine releases the file dialog it is blocking.
  */
 export const ENGINE_CONFIG_REQUEST_TIMEOUT_MS = 5000;
+/**
+ * How long a stopping engine has before it is killed. The engine budgets its
+ * final recovery-backup refresh against the same 5 s (`SHUTDOWN_WINDOW_MS` in
+ * `engine/include/vayu/core/constants.hpp`), so this must not fall below it.
+ */
 export const ENGINE_GRACEFUL_EXIT_TIMEOUT_MS = 5000;
 /**
  * Poll interval while waiting for an engine this session did not spawn to exit.

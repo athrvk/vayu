@@ -59,7 +59,7 @@ window costs a slower start rather than a refusal. What happens next:
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
 | Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
-| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy | Nothing |
+| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy. A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work | Nothing |
 | Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
 | Corrupt, `<db>.bak` is corrupt too | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
 | Corrupt, `<db>.bak` cannot be examined | Nothing is touched and the daemon does not start, naming the backup: whether it would restore is unknown | (the exception, naming the backup) |
@@ -71,14 +71,25 @@ newer-schema refusal takes. A snapshot the backup refresh cannot examine is disc
 that says so (`the snapshot could not be examined: ...`), and the previous `<db>.bak` stands, as it
 does for one that did not validate.
 
+The shutdown refresh (`Database::refresh_recovery_backup_on_shutdown`) runs after the run drain,
+while the engine still holds its lock. It is skipped when `sqlite3_total_changes64` on the shared
+connection has not moved since `init()` (a write through any other connection is not counted),
+checkpoints the WAL (`TRUNCATE`, a reader another process holds tolerated), and is bounded by the
+smaller of `SHUTDOWN_BACKUP_DEADLINE_MS` (2 s) and what is left of the app's 5 s shutdown window:
+the copy is interrupted at the deadline and one that finishes after it is discarded unvalidated.
+Validation, the flush and the rename that follow an in-time copy run to completion. Every way it
+stops leaves the previous `<db>.bak` and logs a `db` warning saying so.
+
 Starting fresh is deliberate - the alternative is a daemon that fails to start
 on every launch forever - but it is total: collections, requests, environments,
 saved examples, spec documents and run history are all gone, and the app comes
 up looking like a fresh install.
 
-> **`<db>.bak` is not a user backup.** It is rewritten on every clean start, so
-> it exists to give a corrupt file something to restore *from*, not to let
-> anyone go back to last week - and the row above where it is the only copy
+> **`<db>.bak` is not a user backup.** It is rewritten once the engine listens
+> and again at a clean shutdown, so it exists to give a corrupt file something
+> to restore *from*, not to let anyone go back to last week. Work written after
+> the last refresh (a session that ended in a crash or a power cut rather than
+> a clean shutdown) is not in it - and the row above where it is the only copy
 > left is the one that ends in an empty workspace. The snapshot a user owns is
 > `POST /workspace/backup` / `vayu-cli backup`, described in
 > [architecture.md](architecture.md#workspace-backups).
@@ -86,7 +97,8 @@ up looking like a fresh install.
 > **`<db>.pre-upgrade.bak` is different: it is written once.** A one-time
 > repair pass (below) takes it immediately before its first rewrite, and
 > nothing after that touches it again - unlike `<db>.bak`, which the same start
-> refreshes, once it listens, from a file the repair has already rewritten. It
+> refreshes, once it listens, from a file the repair has already rewritten, and
+> its clean shutdown refreshes again. It
 > is the one place the pre-repair rows survive the start that repaired them.
 
 ### The quarantine (issue #984)
