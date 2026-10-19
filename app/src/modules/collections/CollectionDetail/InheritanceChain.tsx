@@ -25,7 +25,11 @@ import { Badge, Card, Eyebrow } from "@/components/ui";
 import { useCollectionAncestors } from "@/queries/collections";
 import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
 import { cn } from "@/lib/utils";
-import { resolveAuthSource, withDraftAuth } from "@/modules/request-builder/utils/auth-resolution";
+import {
+	isUnsavedAuthDraft,
+	resolveAuthSource,
+	withDraftAuth,
+} from "@/modules/request-builder/utils/auth-resolution";
 import type { Collection } from "@/types";
 
 interface InheritanceChainProps {
@@ -64,6 +68,13 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 	const ancestors = withDraftAuth(rawAncestors, collectionId, draftAuth);
 
 	if (ancestors.length === 0) return null;
+
+	// The row for this collection shows the draft; a request below sends the
+	// stored row until Save, so that row says so.
+	const storedAuth = rawAncestors.find((c) => c.id === collectionId)?.auth;
+	const draftIsUnsaved = storedAuth !== undefined && isUnsavedAuthDraft(storedAuth, draftAuth);
+	const unsavedMark = (c: Collection) =>
+		draftIsUnsaved && c.id === collectionId ? " (unsaved)" : "";
 
 	// Resolution walks leaf → root and picks the nearest collection that defines
 	// auth (nested folders take precedence, i.e. closer to leaf wins), stopping at
@@ -123,6 +134,7 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 							)}
 						>
 							{describeAuth(c)}
+							{unsavedMark(c)}
 						</span>
 
 						{isThis && (
@@ -141,8 +153,8 @@ export default function InheritanceChain({ collectionId, draftAuth }: Inheritanc
 
 			{blockedBy && (
 				<p className="mt-2.5 m-0 text-label text-muted-foreground">
-					<span className="font-mono">{blockedBy.name}</span> is set to No auth, so
-					requests below it inherit nothing.
+					<span className="font-mono">{blockedBy.name}</span> is set to No auth
+					{unsavedMark(blockedBy)}, so requests below it inherit nothing.
 				</p>
 			)}
 		</Card>
