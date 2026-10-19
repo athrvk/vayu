@@ -1729,8 +1729,8 @@ const std::vector<std::string>& secret_values) {
 
     // Stored in its own columns (#1817); a second copy here could only disagree.
     parsed.erase ("origin");
-    if (const auto body = parsed.find ("body"); body != parsed.end ()) {
-        erase_file_trust (*body);
+    if (const auto body_it = parsed.find ("body"); body_it != parsed.end ()) {
+        erase_file_trust (*body_it);
     }
     withhold_credential_headers (parsed, api_key_header_names (parsed));
     // Allowlist within the auth subtree: keep only the mode, drop every
