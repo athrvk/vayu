@@ -10,7 +10,7 @@
  */
 
 /**
- * The Headers tab hands `ResponseState.libcurlHeaders` to the panel (issue
+ * The Headers tab hands `ResponseState.wireRequestHeaders` to the panel (issue
  * #2464). The field is set by both funnels; this is the reader that keeps it
  * from being written and never shown.
  */
@@ -66,20 +66,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("the Headers tab", () => {
-	it("lists the lines libcurl added, read-only", () => {
-		state.response = response({ libcurlHeaders: { Host: "api.example.com" } });
+	it("lists the request as it went out in the one request section, read-only", () => {
+		state.response = response({
+			wireRequestHeaders: [
+				["Host", "api.example.com"],
+				["User-Agent", "vayu/1"],
+			],
+		});
 		openHeadersTab();
 
-		fireEvent.click(screen.getByRole("button", { name: /added by libcurl/i }));
+		expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+			"Request headers",
+			"Response headers",
+		]);
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
 		expect(screen.getByText("Host")).toBeTruthy();
 		expect(screen.getByText("api.example.com")).toBeTruthy();
 		expect(screen.queryAllByRole("textbox")).toHaveLength(0);
 	});
 
-	it("has no such group when the response carries none", () => {
+	it("lists the sent record when the response carries no wire lines", () => {
 		state.response = response();
 		openHeadersTab();
 
-		expect(screen.queryByText("Added by libcurl")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("User-Agent")).toBeTruthy();
+		expect(screen.queryByText("Host")).toBeNull();
 	});
 });

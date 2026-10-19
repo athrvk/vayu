@@ -51,6 +51,7 @@ import { proseTimeRuns } from "@/lib/monaco-time-tokens";
 import { EmptyState } from "../EmptyState";
 import { TimeValue } from "../TimeValue";
 import type { HeadersViewerProps } from "./types";
+import type { HeaderLine } from "./wire-headers";
 
 /**
  * A header value with each time in it carrying the time card (#1786), the text
@@ -81,7 +82,9 @@ export default function HeadersViewer({
 	className,
 }: HeadersViewerProps) {
 	const [isOpen, setIsOpen] = useState(defaultOpen);
-	const entries = Object.entries(headers);
+	const entries: readonly HeaderLine[] = Array.isArray(headers)
+		? headers
+		: Object.entries(headers);
 
 	if (entries.length === 0) {
 		return null;
@@ -136,8 +139,10 @@ export default function HeadersViewer({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{entries.map(([name, value]) => (
-							<TableRow key={name}>
+						{entries.map(([name, value], index) => (
+							// A name may repeat in a list of wire lines, so the position is
+							// part of the key.
+							<TableRow key={`${index}:${name}`}>
 								<TableCell className="font-mono text-muted-foreground">
 									{name}
 								</TableCell>
@@ -201,11 +206,11 @@ export interface ResponseHeadersPanelProps {
 	/** Headers that were sent. Collapsed by default - usually not the question. */
 	requestHeaders?: Record<string, string>;
 	/**
-	 * Request lines libcurl added on the wire that `requestHeaders` does not hold
-	 * (`ResponseState.libcurlHeaders`). Read-only and collapsed, beside the sent
-	 * headers it completes.
+	 * The request as it went out, line by line (`ResponseState.wireRequestHeaders`).
+	 * Listed in place of `requestHeaders` when present: the sent record lacks the
+	 * lines the transport wrote itself.
 	 */
-	libcurlHeaders?: Record<string, string>;
+	wireRequestHeaders?: readonly HeaderLine[];
 	/** Headers that came back. Open by default. */
 	responseHeaders?: Record<string, string>;
 }
@@ -226,10 +231,10 @@ export interface ResponseHeadersPanelProps {
  * The two treatments are a deliberate difference, not drift: a table needs
  * width the compact pane does not have.
  *
- * "Added by libcurl" is the wire's half of the request side (issue #2464): the
- * lines libcurl wrote itself, which the sent record cannot hold. It is a second
- * `HeadersViewer` so it reads as the table above it, and it is a display of
- * the frame, never an input - nothing here reaches a send.
+ * The request section is one list. It shows the request as it went out
+ * (`wireRequestHeaders`, issue #2464) when the engine recorded one, and the
+ * sent record otherwise - a failed send, or a stored row from before the frame
+ * was kept. A display of the frame, never an input: nothing here reaches a send.
  *
  * The empty-state fallback is the one piece of behaviour that is this panel's
  * own. `HeadersViewer` renders `null` with no entries, so without it a response
@@ -238,26 +243,15 @@ export interface ResponseHeadersPanelProps {
  */
 export function ResponseHeadersPanel({
 	requestHeaders,
-	libcurlHeaders,
+	wireRequestHeaders,
 	responseHeaders,
 }: ResponseHeadersPanelProps) {
 	const response = responseHeaders ?? {};
-	const hasRequestHeaders = requestHeaders && Object.keys(requestHeaders).length > 0;
+	const request = wireRequestHeaders?.length ? wireRequestHeaders : requestHeaders;
 
 	return (
 		<div className="p-4 overflow-auto h-full space-y-4">
-			{hasRequestHeaders && (
-				<HeadersViewer headers={requestHeaders} variant="request" defaultOpen={false} />
-			)}
-
-			{libcurlHeaders && (
-				<HeadersViewer
-					headers={libcurlHeaders}
-					title="Added by libcurl"
-					variant="request"
-					defaultOpen={false}
-				/>
-			)}
+			{request && <HeadersViewer headers={request} variant="request" defaultOpen={false} />}
 
 			<HeadersViewer headers={response} variant="response" defaultOpen={true} />
 

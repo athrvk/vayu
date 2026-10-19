@@ -6462,9 +6462,9 @@ transfer's last outbound header frame and followed by the request body. So it
 carries what libcurl added on its own - the `Cookie` line the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`. The app's Headers tab lists those additions in an "Added by
-libcurl" group parsed from this block, so the tab shows the whole wire while
-the script-visible record stays the engine's.
+`requestHeaders`. The app's Headers tab lists the sent request from this block,
+line by line in wire order, so the tab shows the whole wire while the
+script-visible record stays the engine's.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
 issued them. It carries what the engine derives at send time - the body-implied
@@ -6480,7 +6480,9 @@ give it a value - the engine does not emit libcurl's `Key;` form. It
 does not carry libcurl's own additions or the jar's `Cookie` line; those are
 `rawRequest`'s alone. A test script's `pm.request.headers` reads this same set
 (see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion
-about what went out and the response pane's Headers tab cannot disagree.
+about what was composed to go out reads the same set the engine recorded; the
+Headers tab lists `rawRequest`'s header block instead, which is that set plus
+the transport's own lines.
 
 **The stored trace keeps this map too**, as `trace_data.request.sentHeaders`
 beside the composed `request.headers` (issue #664) - so a restored response

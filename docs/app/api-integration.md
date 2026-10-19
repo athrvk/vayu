@@ -184,18 +184,20 @@ rides the send as `disabledDefaultHeaders`, which `POST /execute` and
 `POST /runs` both take. None of it is persisted on the request. The engine also
 leaves libcurl no default of its own to fill (issue #2464).
 
-What libcurl adds on its own (`Host`, `Accept`, `Content-Length`, the `Cookie`
-the jar matched) is not part of that set and not part of `requestHeaders`: it
-exists only on the wire. The response's Headers tab lists it, read-only and
-collapsed, as "Added by libcurl". The renderer reads it off the header block of
-the engine's recorded `rawRequest` (every wire line whose name is not in
-`requestHeaders`, compared case-insensitively) and carries it as
-`ResponseState.libcurlHeaders`, set by `responseFromExecuteResult` and
-`responseFromRunResult` alike. It is a display of what went out: nothing in it is
-sent, stored on the request or visible to `pm.request.headers`. A restored row
-with no recorded frame lists none, because the Raw tab's fallback frame is
-fabricated from the composed request, and so does a send that failed, whose frame
-the engine may have synthesized because libcurl sent nothing.
+What the transport adds on its own (`Host`, `Accept`, `Content-Length`, the
+`Cookie` the jar matched) is not part of that set and not part of
+`requestHeaders`: it exists only on the wire. The response's Headers tab lists
+the request as it was sent, taken from the engine's recorded raw request when it
+has one: one read-only, collapsed "Request headers" table holding every line of
+the `rawRequest` header block in wire order, the author's rows and the
+transport's alike, and a repeated name as separate rows. The renderer reads it
+off that block and carries it as `ResponseState.wireRequestHeaders`, set by
+`responseFromExecuteResult` and `responseFromRunResult` alike. It is a display
+of what went out: nothing in it is sent, stored on the request or visible to
+`pm.request.headers`. A restored row with no recorded frame shows `requestHeaders`
+instead, because the Raw tab's fallback frame is fabricated from the composed
+request, and so does a send that failed, whose frame the engine may have
+synthesized because nothing was sent.
 
 The *stored* counterpart is a different field (issue #1765):
 `disabledSystemHeaders`, Postman's per-request list, kept on the request as

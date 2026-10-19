@@ -65,58 +65,85 @@ describe("ResponseHeadersPanel", () => {
 	});
 });
 
-describe("ResponseHeadersPanel, the libcurl group (issue #2464)", () => {
-	it("lists what libcurl added under its own collapsed title", () => {
+describe("ResponseHeadersPanel, the request as sent (issue #2464)", () => {
+	const wire: [string, string][] = [
+		["Host", "api.example.com"],
+		["Accept", "*/*"],
+		["accept", "text/plain"],
+		["Content-Length", "5"],
+	];
+
+	it("lists the wire lines in the one request section, in order, repeats included", () => {
 		render(
 			<ResponseHeadersPanel
 				requestHeaders={{ accept: "application/json" }}
-				libcurlHeaders={{ Host: "api.example.com", "Content-Length": "5" }}
+				wireRequestHeaders={wire}
 				responseHeaders={{ server: "nginx" }}
 			/>
 		);
 
-		expect(screen.getByText("Added by libcurl")).toBeInTheDocument();
-		// Collapsed like the sent group: the response is the question.
+		// One section, titled as before: no second group for the transport's lines.
+		const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+		expect(titles).toEqual(["Request headers", "Response headers"]);
+
+		// Collapsed like the sent record was: the response is the question.
 		expect(screen.queryByText("Host")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
 
-		fireEvent.click(screen.getByRole("button", { name: /added by libcurl/i }));
-		expect(screen.getByText("Host")).toBeInTheDocument();
-		expect(screen.getByText("api.example.com")).toBeInTheDocument();
-		expect(screen.getByText("Content-Length")).toBeInTheDocument();
+		const rows = screen.getAllByRole("row").map((row) => row.firstElementChild?.textContent);
+		expect(rows.slice(0, 5)).toEqual(["Name", "Host", "Accept", "accept", "Content-Length"]);
 	});
 
-	it("is absent when libcurl added nothing, or the field is not set", () => {
-		const { rerender } = render(<ResponseHeadersPanel responseHeaders={{ server: "nginx" }} />);
-		expect(screen.queryByText("Added by libcurl")).toBeNull();
-
-		rerender(
-			<ResponseHeadersPanel libcurlHeaders={{}} responseHeaders={{ server: "nginx" }} />
-		);
-		expect(screen.queryByText("Added by libcurl")).toBeNull();
-	});
-
-	it("shows the group without a sent-headers section", () => {
-		render(
-			<ResponseHeadersPanel
-				libcurlHeaders={{ Host: "a.test" }}
-				responseHeaders={{ server: "nginx" }}
-			/>
-		);
-
-		expect(screen.queryByText("Request headers")).toBeNull();
-		expect(screen.getByText("Added by libcurl")).toBeInTheDocument();
-	});
-
-	it("keeps the group between the sent headers and the response", () => {
+	it("counts the wire lines in the section's badge", () => {
 		render(
 			<ResponseHeadersPanel
 				requestHeaders={{ accept: "x" }}
-				libcurlHeaders={{ Host: "a.test" }}
+				wireRequestHeaders={wire}
+				responseHeaders={{}}
+			/>
+		);
+
+		expect(screen.getByRole("button", { name: /request headers/i })).toHaveTextContent("4");
+	});
+
+	it("falls back to the sent record when there are no wire lines", () => {
+		const { rerender } = render(
+			<ResponseHeadersPanel requestHeaders={{ "x-mine": "1" }} responseHeaders={{ a: "b" }} />
+		);
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("x-mine")).toBeInTheDocument();
+
+		rerender(
+			<ResponseHeadersPanel
+				requestHeaders={{ "x-mine": "1" }}
+				wireRequestHeaders={[]}
+				responseHeaders={{ a: "b" }}
+			/>
+		);
+		expect(screen.getByText("x-mine")).toBeInTheDocument();
+	});
+
+	it("shows the wire lines without a sent record", () => {
+		render(
+			<ResponseHeadersPanel
+				wireRequestHeaders={[["Host", "a.test"]]}
 				responseHeaders={{ server: "nginx" }}
 			/>
 		);
 
-		const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-		expect(titles).toEqual(["Request headers", "Added by libcurl", "Response headers"]);
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("a.test")).toBeInTheDocument();
+	});
+
+	it("names nothing of the transport in the pane", () => {
+		const { container } = render(
+			<ResponseHeadersPanel
+				requestHeaders={{ accept: "x" }}
+				wireRequestHeaders={wire}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		expect(container.textContent?.toLowerCase()).not.toContain("libcurl");
 	});
 });

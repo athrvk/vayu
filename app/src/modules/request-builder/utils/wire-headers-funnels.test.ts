@@ -6,12 +6,12 @@
  */
 
 /**
- * Both response funnels name the request lines libcurl added (issue #2464).
+ * Both response funnels carry the request as it went out (issue #2464).
  *
  * The pair `validation-funnels.test.ts` guards, with one asymmetry that is the
  * point here: a restored row can hold no wire frame, and the funnel then
  * fabricates one for the Raw tab with `buildRawRequest`, a `Host` and a
- * `Content-Length` included. The group must read only a frame the engine
+ * `Content-Length` included. The list must read only a frame the engine
  * recorded, or an old row would list lines the engine never reported.
  */
 
@@ -32,7 +32,14 @@ const FRAME =
 	"Cookie: sid=abc\r\n" +
 	"\r\n" +
 	"hello";
-const ADDED = { Host: "api.example.com", Accept: "*/*", "Content-Length": "5", Cookie: "sid=abc" };
+const WIRE = [
+	["Host", "api.example.com"],
+	["User-Agent", "vayu/1"],
+	["Accept", "*/*"],
+	["Content-Type", "text/plain"],
+	["Content-Length", "5"],
+	["Cookie", "sid=abc"],
+];
 
 const executeResult = (overrides: Record<string, unknown> = {}): SanityResult =>
 	({
@@ -69,13 +76,13 @@ const runResult = (request: Record<string, unknown> = {}, withResponse = true): 
 		},
 	}) as unknown as RunResultSample;
 
-describe("the libcurl group across both funnels", () => {
+describe("the wire request headers across both funnels", () => {
 	it("is the same for the same exchange, live and restored", () => {
 		const live = responseFromExecuteResult(executeResult());
 		const restored = responseFromRunResult(runResult());
 
-		expect(live.libcurlHeaders).toEqual(ADDED);
-		expect(restored?.libcurlHeaders).toEqual(live.libcurlHeaders);
+		expect(live.wireRequestHeaders).toEqual(WIRE);
+		expect(restored?.wireRequestHeaders).toEqual(live.wireRequestHeaders);
 	});
 
 	it("is absent on a restored row with no recorded frame, though the Raw tab is fabricated", () => {
@@ -84,12 +91,12 @@ describe("the libcurl group across both funnels", () => {
 		// The fabricated frame carries lines the group would list if it read it.
 		expect(restored?.rawRequest).toContain("Host: api.example.com");
 		expect(restored?.rawRequest).toContain("Content-Length: 5");
-		expect(restored?.libcurlHeaders).toBeUndefined();
+		expect(restored?.wireRequestHeaders).toBeUndefined();
 	});
 
 	it("is absent on a restored row whose recorded frame is empty", () => {
 		expect(
-			responseFromRunResult(runResult({ rawRequest: "" }))?.libcurlHeaders
+			responseFromRunResult(runResult({ rawRequest: "" }))?.wireRequestHeaders
 		).toBeUndefined();
 	});
 
@@ -97,24 +104,36 @@ describe("the libcurl group across both funnels", () => {
 		const live = responseFromExecuteResult(executeResult({ status: 0, errorCode: "TIMEOUT" }));
 		const restored = responseFromRunResult(runResult({}, false));
 
-		expect(live.libcurlHeaders).toBeUndefined();
-		expect(restored?.libcurlHeaders).toBeUndefined();
+		expect(live.wireRequestHeaders).toBeUndefined();
+		expect(restored?.wireRequestHeaders).toBeUndefined();
 	});
 
-	it("is absent on both when libcurl added nothing", () => {
-		const frame = "GET / HTTP/1.1\r\nUser-Agent: vayu/1\r\n\r\n";
+	it("is absent on both when the recorded frame holds no header lines", () => {
+		const frame = "GET / HTTP/1.1\r\n\r\n";
 		const live = responseFromExecuteResult(executeResult({ rawRequest: frame }));
 		const restored = responseFromRunResult(runResult({ rawRequest: frame }));
 
-		expect(live.libcurlHeaders).toBeUndefined();
-		expect(restored?.libcurlHeaders).toBeUndefined();
+		expect(live.wireRequestHeaders).toBeUndefined();
+		expect(restored?.wireRequestHeaders).toBeUndefined();
 	});
 
-	it("measures a restored row against the sent record, not the composed headers", () => {
-		// `headers` is the composed request; `sentHeaders` is what went out, and it
-		// is the one the group subtracts - `Content-Type` is in neither list here.
-		const restored = responseFromRunResult(runResult({ headers: {}, sentHeaders: SENT }));
+	it("keeps a repeated name as separate lines, live and restored", () => {
+		const frame = "GET / HTTP/1.1\r\nX-Tag: one\r\nX-Tag: two\r\n\r\n";
+		const live = responseFromExecuteResult(executeResult({ rawRequest: frame }));
+		const restored = responseFromRunResult(runResult({ rawRequest: frame }));
 
-		expect(restored?.libcurlHeaders).toEqual(ADDED);
+		expect(live.wireRequestHeaders).toEqual([
+			["X-Tag", "one"],
+			["X-Tag", "two"],
+		]);
+		expect(restored?.wireRequestHeaders).toEqual(live.wireRequestHeaders);
+	});
+
+	it("leaves the sent record as it was beside the wire list", () => {
+		const live = responseFromExecuteResult(executeResult());
+		const restored = responseFromRunResult(runResult());
+
+		expect(live.requestHeaders).toEqual(SENT);
+		expect(restored?.requestHeaders).toEqual(SENT);
 	});
 });

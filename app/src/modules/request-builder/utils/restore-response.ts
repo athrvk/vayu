@@ -21,7 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
-import { libcurlHeadersField } from "@/components/shared/response-viewer/libcurl-headers";
+import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
@@ -202,8 +202,8 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 		requestHeaders,
 		// Only the engine's own frame is parsed, and only for an exchange that got
 		// a response: the fallback below is fabricated, and a failed send's frame
-		// may be too (`libcurlHeadersField`).
-		...libcurlHeadersField(!!trace.response, request.rawRequest, requestHeaders),
+		// may be too (`wireRequestHeadersField`).
+		...wireRequestHeadersField(!!trace.response, request.rawRequest),
 		rawRequest:
 			request.rawRequest ||
 			buildRawRequest(

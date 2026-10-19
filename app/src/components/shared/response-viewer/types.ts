@@ -12,6 +12,7 @@
  */
 
 import type { RunResultStreamEvents } from "@/types/domain";
+import type { HeaderLine } from "./wire-headers";
 import type { ResponseBytes } from "@/modules/request-builder/utils/response-bytes";
 
 // Extended body type to support more response formats
@@ -66,7 +67,8 @@ export interface ResponseBodyProps {
 
 // Props for headers viewer component
 export interface HeadersViewerProps {
-	headers: Record<string, string>;
+	/** A map, or the lines in order when a name may repeat (`HeaderLine`). */
+	headers: Record<string, string> | readonly HeaderLine[];
 	title?: string;
 	defaultOpen?: boolean;
 	variant?: "response" | "request";
