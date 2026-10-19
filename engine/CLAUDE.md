@@ -978,7 +978,10 @@ Execute is not silent past compose (#1008): a name compose could not answer
 (it kept its braces, #1009) is resolved once more after the pre-request script
 and before the send (`resolve_residual_tokens`,
 `engine/src/http/request_exchange.cpp`); a value compose already substituted is
-finished text. **That pass can refuse** (#1051, #1084): a header name that
+finished text. On `POST /execute` a credential holding such a name defers its
+whole auth past the script (#2473): `apply_late_auth` resolves and applies it
+after that pass, so a basic pair is not base64-encoded around a token. **That
+pass can refuse** (#1051, #1084): a header name that
 resolves onto one the request already carries, or to nothing, is refused
 before the send, in the same words and with the same code compose uses for the
 `400` (`http/header_names.hpp` holds the rule; the pass answers a

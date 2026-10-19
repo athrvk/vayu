@@ -925,6 +925,9 @@ pm.request.body = JSON.stringify({ n: 2 });
   engine applied.
 - **The script wins over engine-applied auth.** `build_request` resolves auth into the
   request before the script runs, so a script-set `Authorization` replaces the resolved one.
+  A credential still holding a `{{name}}` no variable defined at compose is applied after
+  the script instead (#2473), as Postman applies all auth; a script-set `Authorization`
+  still wins, since auth never replaces a header the request carries.
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
   (one of the seven verbs); `body` must be a string or the `RequestBody` object
   `pm.request.body` itself holds; a header value may be a string, number or boolean.

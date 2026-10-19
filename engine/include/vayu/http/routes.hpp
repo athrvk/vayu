@@ -1307,12 +1307,14 @@ DataRow read_data_row (const nlohmann::json& json, size_t max_bytes);
  * How a send-with-row's credentials are resolved (issue #642).
  *
  * `resolution` is what `build_request` must be told, and it is `Defer` exactly
- * when `credentials` is non-empty: a `{{data.column}}` inside a credential has
- * to carry the row's value *before* `apply_auth` collapses a username and a
- * password into one base64 `Authorization` value, since after that the token is
- * unreadable and goes out as base64 of its own literal text (issue #591). The
- * ordinary send - every credential static - keeps resolving auth inside the
- * build, byte for byte as it did before this existed.
+ * when `credentials` is non-empty or `after_scripts` is set: a `{{data.column}}`
+ * inside a credential has to carry the row's value *before* `apply_auth`
+ * collapses a username and a password into one base64 `Authorization` value,
+ * since after that the token is unreadable and goes out as base64 of its own
+ * literal text (issue #591), and a name the pre-request script may define has
+ * to wait for that script for the same reason (issue #2473). The ordinary send
+ * - every credential static - keeps resolving auth inside the build, byte for
+ * byte as it did before this existed.
  *
  * `ok == false` carries the 400 the route answers with. There is one: an
  * OAuth 2.0 config carrying a token deferral would otherwise bind, which no
@@ -1327,6 +1329,13 @@ struct SendRowAuth {
     vayu::http::Auth auth;
     /// The credentials split around their tokens; empty when none carries one.
     vayu::core::StepDataTemplate credentials;
+    /// A credential holds a name only the scopes answer
+    /// (`core::credentials_await_scripts`): the bind joins the row into `auth`
+    /// without applying it (`core::bind_iteration_holding_auth`), and the
+    /// exchange applies it after the pre-request script
+    /// (`apply_late_auth`). Read by `POST /execute` alone so far; a load run
+    /// still applies at its bind.
+    bool after_scripts                    = false;
     vayu::http::AuthResolution resolution = vayu::http::AuthResolution::Apply;
 };
 

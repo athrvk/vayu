@@ -549,7 +549,11 @@ applied to the outgoing request rather than being left to the UI. This lives in
   (issue #1055): a build defers because these credentials carry a token, so a
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
   carrying either kind is refused by name instead - its token is acquired once,
-  before any iteration exists, so no bind can reach it.
+  before any iteration exists, so no bind can reach it. A credential still
+  holding a name no scope answered at compose is deferred on `POST /execute`
+  too, for the pre-request script to define (#2473): the exchange resolves it
+  against the scopes the script left and applies it after the residual-token
+  pass (`apply_late_auth` in `request_exchange`), Postman's order.
   `plan_auth_refresh` decides afterwards
   whether the credential a *load* run just resolved can be kept current past its
   expiry - see the run lifecycle below.
@@ -724,13 +728,18 @@ All three passes are best-effort: a failure is logged and never blocks startup.
 1. POST /execute
    ↓
 2. Build request: parse JSON + apply timeout + resolve auth (bearer/basic/
-   apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate
+   apikey/oauth2). Auth is resolved BEFORE the script so pm.request is accurate,
+   except a credential still holding an unanswered {{name}} (#2473), which
+   waits for step 4b
    ↓
 3. Create Run record (type: Design)
    ↓
 4. Execute pre-request script (if provided). Its pm.request edits - method, url,
    headers, body - are written back into the request, so they override the auth
    resolved in step 2
+   ↓
+4b. Resolve the tokens compose left against the scopes the script wrote, then
+   apply any auth that waited (a header the request carries still wins)
    ↓
 5. Send HTTP request via libcurl, through the environment's cookie jar - stored
    cookies go out, Set-Cookie comes back in (see Cookie Jar below)

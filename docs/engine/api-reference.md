@@ -5317,6 +5317,19 @@ hits the wire:
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
 
+**When it is applied.** As the request is built, before any pre-request script
+runs - so the script's `pm.request` holds the header - unless a credential
+(a `bearer` token, a `basic` username or password, an `apikey` key or value)
+still holds a `{{name}}` that is not a data column or the iteration identity.
+Such a name is one composition found no variable for, and on `POST /execute`
+(buffered and `stream: true`) that auth is applied **after** the pre-request
+script and the residual-token pass instead, each credential resolved against the
+scopes as the script left them (#2473), so `pm.environment.set("password", …)`
+reaches a basic pair before it is base64-encoded. That is Postman's order; the
+script then does not see the header in `pm.request.headers`, and an
+`Authorization` it sets wins by the rule below. A name nothing answers is encoded
+as written. `oauth2` is never deferred this way.
+
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
 `apikey` (`in: "header"`; the key name is matched against the request's own
@@ -5577,10 +5590,11 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   `apply_auth` encodes a credential when the request is built and a token left
   for the bind would go out as base64 of its own text. That is a generator's
   case alone: a credential carrying a `{{data.*}}` or a `{{$vu}}` defers the
-  whole build and is bound before the encoding (issue #1055), where a generator
-  has nothing to wait for. A scenario plan's steps are composed with it
-  internally, so a
-  collection run needs no field at all.
+  whole build and is bound before the encoding (issue #1055), and one carrying a
+  name no scope answered defers it until after the pre-request script on
+  `POST /execute` (#2473), where a generator has nothing to wait for. A
+  scenario plan's steps are composed with it internally, so a collection run
+  needs no field at all.
 
 - **`requestId`** composes the stored request wholesale: URL, flattened enabled
   headers (later duplicates win), body, auth (absent auth defaults to
@@ -5897,7 +5911,9 @@ Execute a single HTTP request (Design Mode). Returns immediate response with tes
 
 
 The request's `auth` (see [Authentication](#authentication)) is resolved before
-the pre-request script runs, so `pm.request` reflects the real outgoing headers.
+the pre-request script runs, so `pm.request` reflects the real outgoing headers -
+unless a credential still holds a name compose could not answer, when it is
+applied after that script instead (#2473).
 If a non-interactive OAuth 2.0 token cannot be obtained, the engine still returns
 `200` but the body carries `statusCode: 0`, an `errorCode` of `AUTH_REQUIRED`
 (interactive sign-in needed) or `AUTH_FAILED`, and an `authErrorCode` hint.
@@ -5911,7 +5927,10 @@ variable scopes as the pre-request script left them. This is what makes the
 canonical imported auth pattern work: a pre-request script does
 `pm.environment.set("token", …)` and the same send's `Authorization: Bearer
 {{token}}` carries the fresh value, rather than the previous run's token or
-`""` on the first run. It resolves the same fields composition does - the URL,
+`""` on the first run. A credential that waited (above) is applied once this
+pass has answered, against the same scopes, so a basic pair carries the value a
+script set rather than base64 of its token. It resolves the same fields
+composition does - the URL,
 header names and values, body content, and the five strings a form field
 carries, plus the value of a `:name` path variable composition left waiting
 (written into its segment, encoded, as the pass ends; see
@@ -6248,8 +6267,10 @@ its `apply` ever running) - see [Elements](elements.md#the-step-trace).
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and
 because auth is resolved *before* the script runs, a script-set `Authorization`
-overrides the one the engine applied. `requestHeaders` and `rawRequest` in the
-response below, and the stored trace behind `GET /runs/:id`, all report the
+overrides the one the engine applied. A credential that waits on the script
+(#2473) is applied after it instead, and a script-set `Authorization` still
+wins: auth never replaces a header the request already carries.
+`requestHeaders` and `rawRequest` in the response below, and the stored trace behind `GET /runs/:id`, all report the
 post-script request. A value the engine cannot send (a non-string url, an
 unknown method) rejects the whole write-back, leaves the request unchanged, and
 is reported as `preScriptError`. See
@@ -7531,7 +7552,9 @@ for the reason a variable named `data.id` does not answer for the column, and
 everywhere a `data.*` token does, **credential fields included** (issue #1055):
 a credential carrying either name defers its build and is bound before
 `apply_auth` encodes it, on every run shape rather than only on one carrying
-rows, because the identity comes from the iteration rather than from a row. An
+rows, because the identity comes from the iteration rather than from a row. A
+credential that also holds a name only a variable scope answers takes the row
+first and is applied after the pre-request script on `POST /execute` (#2473). An
 OAuth 2.0 config is the exception and is refused by name - its token is acquired
 before any iteration exists.
 
