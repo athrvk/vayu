@@ -110,7 +110,7 @@ Json serialize (const Request& request) {
     json["url"]    = request.url;
 
     if (!request.headers.empty ()) {
-        json["headers"] = request.headers;
+        json["headers"] = serialize_header_lines (request.headers.lines ());
     }
 
     if (request.body.mode != BodyMode::None) {
@@ -1141,6 +1141,39 @@ std::optional<Error> drop_refused_body_mode_headers (const Json& json, Request& 
     return std::nullopt;
 }
 
+/**
+ * `headers`, in either shape (issue #2466): an array of `{"name", "value"}`
+ * lines in send order, every one kept, or the older object, one line per key
+ * in the object's key order.
+ */
+std::optional<Error> read_request_headers (const Json& json, Request& request) {
+    const auto headers = json.find ("headers");
+    if (headers == json.end () || headers->is_null ()) {
+        return std::nullopt;
+    }
+    if (headers->is_object ()) {
+        for (const auto& [name, value] : headers->items ()) {
+            request.headers.add (name, value.get<std::string> ());
+        }
+        return std::nullopt;
+    }
+    if (!headers->is_array ()) {
+        return Error{ ErrorCode::InternalError, "'headers' must be an array of {\"name\", \"value\"} lines or an object" };
+    }
+    for (const auto& line : *headers) {
+        const auto name = line.is_object () ? line.find ("name") : line.end ();
+        const auto value = line.is_object () ? line.find ("value") : line.end ();
+        if (name == line.end () || value == line.end () ||
+        !name->is_string () || !value->is_string ()) {
+            return Error{ ErrorCode::InternalError,
+                "'headers' lines must be objects with a string \"name\" and a "
+                "string \"value\"" };
+        }
+        request.headers.add (name->get<std::string> (), value->get<std::string> ());
+    }
+    return std::nullopt;
+}
+
 /** The per-request options, each optional and each with a documented default. */
 void read_request_options (const Json& json, Request& request) {
     // Options
@@ -1269,13 +1302,9 @@ Result<Request> deserialize_request (const Json& json) {
             request.path_variables = vayu::core::pending_path_variables_of (*params);
         }
 
-        // Headers (optional)
-        if (json.contains ("headers") && json["headers"].is_object ()) {
-            for (auto& [key, value] : json["headers"].items ()) {
-                request.headers[key] = value.get<std::string> ();
-            }
+        if (auto refusal = read_request_headers (json, request)) {
+            return *refusal;
         }
-
         if (auto refusal = read_request_body (json, request)) {
             return *refusal;
         }
@@ -1320,13 +1349,17 @@ Json serialize_header_lines (const std::vector<HeaderLine>& lines) {
 Json serialize (const Response& response) {
     Json json;
 
-    json["status"]         = response.status_code;
-    json["statusText"]     = response.status_text;
-    json["headers"]        = response.headers;
-    json["headerLines"]    = serialize_header_lines (response.header_lines);
-    json["requestHeaders"] = response.request_headers;
-    json["rawRequest"]     = response.raw_request;
-    json["bodySize"]       = response.body_size;
+    json["status"]      = response.status_code;
+    json["statusText"]  = response.status_text;
+    json["headers"]     = response.headers;
+    json["headerLines"] = serialize_header_lines (response.header_lines);
+    // One value per name, for the readers written against it, and every line
+    // as sent, in order (issue #2466).
+    json["requestHeaders"] = response.request_headers.folded ();
+    json["requestHeaderLines"] =
+    serialize_header_lines (response.request_headers.lines ());
+    json["rawRequest"] = response.raw_request;
+    json["bodySize"]   = response.body_size;
     // The negotiated protocol, distinct from the requested `httpVersion` on
     // the Request side (see Response::http_version). "" when nothing was
     // negotiated - not omitted, so a caller reading this field can't confuse
@@ -1730,12 +1763,43 @@ void mask_secret_values (Json& node, const std::vector<std::string>& forms) {
     }
 }
 
+/**
+ * Each header line's value in a payload's `headers`, in either shape (issue
+ * #2466): an object's member values, or each `{"name", "value"}` line's
+ * `value`. A name is never visited, the same rule `mask_secret_values` keeps
+ * for an object key.
+ */
+void for_each_header_value (Json& headers,
+const std::function<void (const std::string& name, Json& value)>& visit) {
+    if (headers.is_object ()) {
+        for (auto& [name, value] : headers.items ()) {
+            visit (name, value);
+        }
+        return;
+    }
+    if (!headers.is_array ()) {
+        return;
+    }
+    for (auto& line : headers) {
+        const auto name = line.is_object () ? line.find ("name") : line.end ();
+        const auto value = line.is_object () ? line.find ("value") : line.end ();
+        if (name != line.end () && value != line.end () && name->is_string ()) {
+            visit (name->get_ref<const std::string&> (), *value);
+        }
+    }
+}
+
 // The members of a composed payload a resolved `{{variable}}` can land in.
 void mask_snapshot_secrets (Json& parsed, const std::vector<std::string>& forms) {
-    for (const char* key : { "url", "params", "headers" }) {
+    for (const char* key : { "url", "params" }) {
         if (auto it = parsed.find (key); it != parsed.end ()) {
             mask_secret_values (*it, forms);
         }
+    }
+    if (auto it = parsed.find ("headers"); it != parsed.end ()) {
+        for_each_header_value (*it, [&forms] (const std::string&, Json& value) {
+            mask_secret_values (value, forms);
+        });
     }
     auto body_it = parsed.find ("body");
     if (body_it == parsed.end () || !body_it->is_object ()) {
@@ -1765,14 +1829,14 @@ std::vector<std::string> api_key_header_names (const Json& parsed) {
 
 void withhold_credential_headers (Json& parsed, const std::vector<std::string>& extra_names) {
     auto headers = parsed.find ("headers");
-    if (headers == parsed.end () || !headers->is_object ()) {
+    if (headers == parsed.end ()) {
         return;
     }
-    for (auto& [name, value] : headers->items ()) {
+    for_each_header_value (*headers, [&extra_names] (const std::string& name, Json& value) {
         if (vayu::utils::is_secret_header_name (name, extra_names)) {
             value = std::string (vayu::utils::kRedactedMarker);
         }
-    }
+    });
 }
 
 } // namespace

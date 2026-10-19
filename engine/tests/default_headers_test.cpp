@@ -68,7 +68,7 @@ bool has_line (const std::vector<std::string>& lines, const std::string& line) {
 /// Build the list and the sent record together, freeing the list afterwards.
 struct BuiltHeaders {
     std::vector<std::string> lines;
-    vayu::Headers sent;
+    vayu::HeaderList sent;
 };
 
 BuiltHeaders build (const vayu::Request& request, const DefaultHeaderPolicy& policy) {

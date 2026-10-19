@@ -1216,7 +1216,7 @@ namespace {
 /// The `Authorization` a step is carrying, or "" when it carries none.
 std::string authorization_of (const vayu::Request& request) {
     const auto header = request.headers.find ("Authorization");
-    return header == request.headers.end () ? std::string{} : header->second;
+    return header == request.headers.end () ? std::string{} : header->value;
 }
 
 } // namespace

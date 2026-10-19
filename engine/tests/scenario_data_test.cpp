@@ -162,8 +162,8 @@ TEST (ScenarioDataBindTest, HeaderNamesAndValuesBothBind) {
 
     ASSERT_TRUE (result.ok) << result.error;
     ASSERT_EQ (request.headers.size (), 1u);
-    EXPECT_EQ (request.headers.begin ()->first, "X-Tenant");
-    EXPECT_EQ (request.headers.begin ()->second, "Bearer t-1");
+    EXPECT_EQ (request.headers.begin ()->name, "X-Tenant");
+    EXPECT_EQ (request.headers.begin ()->value, "Bearer t-1");
 }
 
 // ---------------------------------------------------------------------------
@@ -172,12 +172,11 @@ TEST (ScenarioDataBindTest, HeaderNamesAndValuesBothBind) {
 
 TEST (ScenarioDataHeaderCollisionTest, ABoundNameCollidingWithALiteralHeaderRefusesTheRow) {
     // The failure the refusal exists for: the collision belongs to the *row*,
-    // so a first-wins insert sends good requests until the file reaches a row
-    // that binds `authorization`, and then one request without its auth. Revert
-    // the rebuild to a plain `emplace` and this reads `ok`, with the request
-    // carrying one header instead of two.
-    // The collision is case-insensitive because `vayu::Headers` is: the bound
-    // `authorization` and the literal `Authorization` are one header name.
+    // so the run sends good requests until the file reaches a row that binds
+    // `authorization`, and then one request carrying a second credential.
+    // Drop the collision record in `walk_bindable_fields` and this reads `ok`.
+    // Header names compare without case: the bound `authorization` and the
+    // literal `Authorization` are one header name.
     auto request                     = request_with_url ("https://api.test/");
     request.headers["Authorization"] = "Bearer real";
     request.headers["{{data.h}}"]    = "bound";
@@ -236,6 +235,22 @@ TEST (ScenarioDataHeaderCollisionTest, HeadersThatStayDistinctStillBind) {
     EXPECT_EQ (request.headers.size (), 2u);
     EXPECT_EQ (request.headers.at ("X-Tenant"), "acme");
     EXPECT_EQ (request.headers.at ("X-Region"), "bound");
+}
+
+TEST (ScenarioDataHeaderCollisionTest, ARepeatTheAuthorTypedStillBinds) {
+    // Two lines written alike are a repeat the author can see (issue #2466):
+    // every row binds them, and both go out in order. Mutation check: compare
+    // the bound names alone in `record_produced_name` and every row is
+    // refused.
+    auto request = request_with_url ("https://api.test/");
+    request.headers.add ("X-Dup", "{{data.v}}-1");
+    request.headers.add ("x-dup", "{{data.v}}-2");
+
+    const auto result = bind_data_row (request, json::parse (R"({"v":"a"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{ { "X-Dup", "a-1" }, { "x-dup", "a-2" } }));
 }
 
 // ---------------------------------------------------------------------------

@@ -5843,32 +5843,32 @@ with specific codes:
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
   column and the row (see [Scenario runs](#scenario-runs)).
 - `400` `{"error": {"code": "colliding_header_names", "message": "..."}}` - two
-  header names resolved to one, so one of the two headers would be gone. A
-  header map holds one value per name, so `{{tenant_header}}: acme` beside a
-  literal `X-Tenant: legacy` is not two headers once the variable answers
-  `X-Tenant` - it is one, and which one arrives is an ordering detail rather
-  than a rule. Names are compared **without case**, as `Headers` compares them,
-  so a `{{h}}` resolving to `authorization` refuses beside an `Authorization`
-  the caller typed. The message names both spellings as written and the name
-  they produced; nothing is repaired, for the reason a forged header is refused
-  rather than stripped.
+  header names written differently resolved to one, so the request would send
+  that header twice where its rows show two different names.
+  `{{tenant_header}}: acme` beside a literal `X-Tenant: legacy` is two
+  `X-Tenant` lines once the variable answers `X-Tenant`, and no row says so.
+  Names are compared **without case**, so a `{{h}}` resolving to
+  `authorization` refuses beside an `Authorization` the caller typed. The
+  message names both spellings as written and the name they produced; nothing
+  is repaired, for the reason a forged header is refused rather than stripped.
 
   Only a collision **resolution produced** is refused. Two names the caller
-  typed are two entries they can see, and the stored flattening's later-wins
-  rule (above) still decides those - the same distinction the bind-time refusal
+  *wrote* alike - `X-Dup` and `x-dup` typed on two rows, or one `{{h}}` typed
+  twice - are a repeated header they can see, and every one of those lines is
+  sent, in order (issue #2466) - the same distinction the bind-time refusal
   draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
-  refuses the same collision in the same words, since it rebuilds the same map:
+  refuses the same collision in the same words, since it resolves names the same way:
   a buffered send answers `statusCode: 0` with an `errorCode` of
   `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
   while a streaming send - which has not answered yet - is a `400` with this
   same code and fails its run row. A script's own `pm.sendRequest` refuses it
   as well, with the call named in front of the same wording, because it too
-  rebuilds a header map and a resolved name is a different key (issue #1067).
+  resolves header names (issue #1067).
 - `400` `{"error": {"code": "empty_header_name", "message": "..."}}` - a header
   name resolved to the empty string, so the line would go out under no name at
   all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
-  can see: the name is a map key, the key is empty, and what libcurl is handed
-  is the line `": acme"`. Nothing further down refuses it - the pre-send gate
+  can see: the name is empty, and what libcurl is handed is the line
+  `": acme"`. Nothing further down refuses it - the pre-send gate
   reads a header's text for the bytes that end a line early, and an absent name
   ends nothing - so composition is where it is caught. The message names the
   name as written, which is all there is to name; what it produced is nothing.
@@ -5932,9 +5932,9 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
 {
   "method": "POST",
   "url": "https://api.example.com/users",
-  "headers": {
-    "Content-Type": "application/json"
-  },
+  "headers": [                         // Optional, the lines to send, in order - see below
+    { "name": "Content-Type", "value": "application/json" }
+  ],
   "body": {
     "mode": "json",
     "content": "{\"name\":\"John\"}"
@@ -5969,6 +5969,19 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "bodyModeHeaders": ["Content-Type"]  // Optional, which `headers` the body mode wrote - see below
 }
 ```
+
+**`headers` is the request's header lines, in send order** (issue #2466): an
+array of `{"name", "value"}` objects, each sent as its own line in the order
+given and in its own spelling, so a name may repeat (`Link`, `Forwarded`, two
+`Accept` rows, `X-Dup` beside `x-dup`) and the authored order is the wire
+order. The older object form (`{"Accept": "application/json"}`) is still
+accepted and behaves as it always did: one line per key, so it cannot repeat a
+name. A line without a string `name` and a string `value`, or `headers` of any
+other type, is a `400`. `POST /runs` reads the same field the same way. What
+the engine adds (an auth header, the body-implied `Content-Type`, the
+[defaults](#default-request-headers)) is added only under a name no line
+already carries, compared without case; a typed `Authorization` sent twice is
+sent twice and auth adds none.
 
 **`timeout` is the whole-transfer deadline in milliseconds** (issue #1917), held
 to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
@@ -6321,6 +6334,9 @@ run-shaped way of stating the same field, not a second store.
     { "name": "Content-Type", "value": "application/json" }
   ],
   "requestHeaders": { "accept": "*/*" },
+  "requestHeaderLines": [
+    { "name": "accept", "value": "*/*" }
+  ],
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
   "authQueryParam": "access_token",
   "body": { "id": 1, "name": "John" },
@@ -6551,8 +6567,19 @@ about what was composed to go out reads the same set the engine recorded; the
 Headers tab lists `rawRequest`'s header block instead, which is that set plus
 the transport's own lines.
 
+**`requestHeaderLines` is the same record unfolded** (issue #2466): one
+`{name, value}` entry per line the transfer appended, in wire order, a repeated
+name repeated and each in its own spelling - the request's own lines first, in
+the order the request gave them, then what the engine derived. Always present,
+an empty array when nothing was recorded. `requestHeaders` stays one value per
+name for the readers written against it: a repeated name's values are joined
+with `", "`, a `Cookie`'s with `"; "`, under the first line's spelling - and
+that folded form is what `pm.request.headers` shows, since the scripting API is
+single-valued.
+
 **The stored trace keeps this map too**, as `trace_data.request.sentHeaders`
-beside the composed `request.headers` (issue #664) - so a restored response
+beside the composed `request.headers` (issue #664), and the unfolded lines as
+`trace_data.request.sentHeaderLines` (issue #2466) - so a restored response
 pane's sent-headers disclosure shows the set the live one showed, derived
 `User-Agent` and body-implied `Content-Type` included, rather than the composed
 map's different answer. Both maps are stored because they answer different
@@ -6732,7 +6759,7 @@ Start a load test run (Vayu Mode).
 {
   "method": "GET",
   "url": "https://api.example.com/users",
-  "headers": {},
+  "headers": [],             // Optional, {name, value} lines in send order (or the older object) - see POST /execute
   "body": {
     "mode": "none",
     "content": ""
@@ -7649,11 +7676,12 @@ part's field name, filename and content type.
 
 **Two headers that bind to one name** error the same way. `X-{{data.h}}`
 resolving to `authorization` beside a literal `Authorization`, or two templated
-names resolving alike, would leave the request carrying one of the two - so the
-row is refused instead, naming the header as it is written, the name it
-produced and the row. Note this is deliberately *not* composition's duplicate
-rule, which is last-wins: a duplicate there is two headers the author typed and
-can see, while this one exists only for the rows that produce it.
+names resolving alike, would send that header twice where the request's rows
+name two different headers - so the row is refused instead, naming the header
+as it is written, the name it produced and the row. Two headers *written* alike
+are not this: they are a repeat the author typed and can see, and every row
+sends both (issue #2466); this refusal exists only for the rows that produce
+one.
 
 **A header name a row binds to nothing** errors the same way (issue #1095), and
 is reported ahead of a collision when a row does both - two names that bind to

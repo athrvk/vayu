@@ -102,7 +102,7 @@ nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
     trace["request"] = { { "method", to_string (request.method) },
-        { "url", request.url }, { "headers", request.headers } };
+        { "url", request.url }, { "headers", request.headers.folded () } };
     if (!request.body.content.empty ()) {
         trace["request"]["body"] = request.body.content;
     }
@@ -125,6 +125,10 @@ const vayu::Response& response) {
     // would write the engine's derived headers back into the user's request as
     // if a person had typed them.
     //
+    // `sentHeaderLines` is the same record unfolded, one entry per wire line
+    // in wire order (issue #2466); `sentHeaders` keeps one value per name for
+    // the readers written against it.
+    //
     // Omitted rather than stored empty when nothing was recorded, on the same
     // reasoning as `rawRequest` below: the reader prefers this key when it is
     // there, so an empty object would suppress the composed-map fallback that
@@ -134,7 +138,9 @@ const vayu::Response& response) {
     // off the hot path - so a sampled capture keeps replaying from the composed
     // map, unchanged by this.
     if (!response.request_headers.empty ()) {
-        trace["request"]["sentHeaders"] = response.request_headers;
+        trace["request"]["sentHeaders"] = response.request_headers.folded ();
+        trace["request"]["sentHeaderLines"] =
+        vayu::json::serialize_header_lines (response.request_headers.lines ());
     }
 
     // What the wire carried, so a restored raw-request view says the same thing
@@ -488,8 +494,8 @@ bool holds_a_token (const std::string& text) {
 
 /**
  * Every string of @p request whose `{{tokens}}` composition resolves, except
- * the header *names*: a resolved name is a different key, so the map is rebuilt
- * for those rather than edited through this list.
+ * the header *names*, which `resolve_header_names` resolves under the collision
+ * rule rather than through this list.
  */
 std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     std::vector<std::string*> targets;
@@ -521,27 +527,26 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
 }
 
 /**
- * Whether the name map has to be read at all: a name still holding a token,
+ * Whether the names have to be read at all: a name still holding a token,
  * which the walk below resolves, or a name that is already nothing, which it
  * refuses.
  *
  * The second half is what widens this pass past the tokens (issue #1095). The
  * gate exists so an ordinary request pays one search per field and no more, and
- * asking whether a name is empty beside that search costs a compare on a map
+ * asking whether a name is empty beside that search costs a compare on lines
  * the search already walks - which buys the one thing a token search cannot
  * see: a header a *script* has just left nameless, and a payload posted
  * straight to `POST /execute` carrying an empty key. Neither is a name this
  * pass resolved, and both are a `": value"` line going out under no name.
  *
  * The collision rule does not widen with it, and that is not the two rules
- * drifting: a request that arrives already resolved cannot carry a collision to
- * find, because `Headers` holds one value per name and compares without case,
- * so two names that are already equal are already one. There is nothing there
- * to see, where an empty name is in plain sight.
+ * drifting: a collision is two names *written* differently that resolve alike,
+ * and a request whose names hold no token resolves nothing, so every repeated
+ * name in it is a repeat as written (issue #2466), which is sent.
  */
-bool a_header_name_needs_reading (const vayu::Headers& headers) {
-    return std::any_of (headers.begin (), headers.end (), [] (const auto& entry) {
-        return entry.first.empty () || holds_a_token (entry.first);
+bool a_header_name_needs_reading (const vayu::HeaderList& headers) {
+    return std::any_of (headers.begin (), headers.end (), [] (const vayu::HeaderLine& line) {
+        return line.name.empty () || holds_a_token (line.name);
     });
 }
 
@@ -553,55 +558,47 @@ ResidualRefusal refusal_of (std::string reason, std::string_view code) {
 }
 
 /**
- * Rebuilt rather than edited in place, because a resolved name is a different
- * key. Values are copied rather than moved, so a refusal leaves the request as
- * it found it.
+ * Every name resolved, into lines rebuilt rather than edited in place, so a
+ * refusal leaves the request as it found it.
  *
  * A name a script has just defined can resolve onto a name the request already
- * carries, and a map holds one value per name - so the rebuild is where a
- * header goes missing. Composition refuses that (`http/header_names.hpp`) and
+ * carries, which would send that header twice where the request's rows show
+ * two different names. Composition refuses that (`http/header_names.hpp`) and
  * so does this, on the same rule and in the same words; the caller is what
- * differs, having a send to stop rather than a payload to reject.
- *
- * Every collision here is one resolution made: the map this walks compares
- * names without case already, so two names that survive untouched cannot have
- * been equal to begin with.
+ * differs, having a send to stop rather than a payload to reject. Two lines
+ * written alike are a repeat the author typed, and are kept, in order.
  *
  * A name that resolves to *nothing* is refused here too (#1084), in that rule's
- * one wording: it is the same shape of quiet wrong request with the erased
- * header replaced by a `": value"` line no name owns, and this pass is the
- * layer composition cannot stand in for - the name a script has just defined is
- * one composition never saw. Since #1095 that rule reaches a name which arrives
- * *already* empty as well, holding no token for the gate to find - see
- * `a_header_name_needs_reading` for why this rule widened there and the
- * collision rule did not.
+ * one wording: it is the same shape of quiet wrong request, a `": value"` line
+ * no name owns, and this pass is the layer composition cannot stand in for -
+ * the name a script has just defined is one composition never saw. Since #1095
+ * that rule reaches a name which arrives *already* empty as well, holding no
+ * token for the gate to find - see `a_header_name_needs_reading` for why this
+ * rule widened there and the collision rule did not.
  *
  * @return the first refusal, the headers left as they were; nothing, and the
- *         map rebuilt, when every name is still its own.
+ *         lines rebuilt, when no name collides or comes out empty.
  */
-std::optional<ResidualRefusal> resolve_header_names (vayu::Headers& headers,
+std::optional<ResidualRefusal> resolve_header_names (vayu::HeaderList& headers,
 const vayu::http::VariableValues& vars) {
     if (!a_header_name_needs_reading (headers)) {
         return std::nullopt;
     }
-    vayu::Headers resolved;
+    vayu::HeaderList resolved;
     // Kept beside `resolved` so a refusal can name both spellings.
     vayu::http::HeaderNameOrigins produced;
     for (const auto& [name, value] : headers) {
         std::string resolved_name = vayu::http::resolve_template (name, vars);
-        // Both refusals are reported with the map untouched: the caller refuses
-        // the send, so a half-rebuilt request is one nothing goes on to read.
         if (resolved_name.empty ()) {
             return refusal_of (vayu::http::describe_empty_header_name (name),
             vayu::http::EMPTY_HEADER_NAME_CODE);
         }
-        if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
-            return refusal_of (
-            vayu::http::describe_header_name_collision (
-            vayu::http::HeaderNameCollision{ name, taken->second, taken->first }),
+        if (auto collision =
+            vayu::http::record_produced_name (produced, resolved_name, name)) {
+            return refusal_of (vayu::http::describe_header_name_collision (*collision),
             vayu::http::COLLIDING_HEADER_NAMES_CODE);
         }
-        resolved[std::move (resolved_name)] = value;
+        resolved.add (std::move (resolved_name), value);
     }
     headers = std::move (resolved);
     return std::nullopt;
@@ -647,7 +644,7 @@ const vayu::http::VariableValues& vars) {
         vayu::http::resolve_url_template (*text, vars, !request.disable_url_encoding) :
         vayu::http::resolve_template (*text, vars);
     }
-    // Last: it rebuilds the map the values `targets` points at live in. The
+    // Last: it rebuilds the lines the values `targets` points at live in. The
     // refusal already carries the pre-send gate's shape, because this is a
     // refusal of the same send and the drivers already render that one: an
     // `InternalError` a buffered caller turns into a status-0 response rather

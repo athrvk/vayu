@@ -66,6 +66,44 @@ TEST (JsonTest, DeserializesRequestWithHeaders) {
     EXPECT_EQ (req.headers.at ("Authorization"), "Bearer token123");
 }
 
+// The line form (issue #2466): every line kept, in the order given, each in its
+// own spelling. Mutation check: read the lines into a `Headers` map again and
+// the three collapse to two.
+TEST (JsonTest, DeserializesHeaderLinesKeepingEveryOneInOrder) {
+    auto result = deserialize_request (std::string (R"({
+        "method": "GET",
+        "url": "https://example.com/api",
+        "headers": [
+            {"name": "X-Dup", "value": "one"},
+            {"name": "x-dup", "value": "two"},
+            {"name": "X-Dup", "value": "three"}
+        ]
+    })"));
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().headers,
+    (HeaderList{ { "X-Dup", "one" }, { "x-dup", "two" }, { "X-Dup", "three" } }));
+}
+
+// The older object form is still read, one line per key - a JSON object holds a
+// name once, so it stays single-valued.
+TEST (JsonTest, AHeaderObjectStaysOneLinePerKey) {
+    auto result = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":{"B":"2","A":"1"}})"));
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().headers, (HeaderList{ { "A", "1" }, { "B", "2" } }));
+}
+
+TEST (JsonTest, RefusesAHeaderLineThatIsNotANameAndAValue) {
+    for (const char* headers : { R"([{"name":"X-A"}])",
+         R"([{"name":1,"value":"v"}])", R"(["X-A: v"])", R"("X-A: v")" }) {
+        auto result = deserialize_request (R"({"method":"GET","url":"https://x.test","headers":)" +
+        std::string (headers) + "}");
+        EXPECT_TRUE (result.is_error ()) << headers;
+    }
+}
+
 TEST (JsonTest, DeserializesRequestWithBody) {
     std::string json_str = R"({
         "method": "POST",
@@ -189,6 +227,38 @@ TEST (JsonTest, SerializesHeaderLinesInWireOrderWithTheirCase) {
     EXPECT_EQ (json["headerLines"][1]["name"], "X-Dup");
     EXPECT_EQ (json["headerLines"][2]["value"], "b=2");
     EXPECT_EQ (json["headerLines"][3]["name"], "x-dup");
+}
+
+// What was sent, both ways (issue #2466): `requestHeaderLines` every line in
+// wire order, `requestHeaders` one value per name for the readers written
+// against it - a repeat joined with ", ", a `Cookie` with "; ".
+TEST (JsonTest, SerializesTheSentHeaderLinesAndTheirFoldedRecord) {
+    Response response;
+    response.status_code     = 200;
+    response.request_headers = { { "X-Dup", "one" }, { "Cookie", "a=1" },
+        { "x-dup", "two" }, { "Cookie", "b=2" } };
+
+    auto json = serialize (response);
+
+    EXPECT_EQ (json["requestHeaderLines"], Json::parse (R"([{"name":"X-Dup","value":"one"},
+        {"name":"Cookie","value":"a=1"},{"name":"x-dup","value":"two"},
+        {"name":"Cookie","value":"b=2"}])"));
+    EXPECT_EQ (json["requestHeaders"],
+    Json::parse (R"({"Cookie":"a=1; b=2","X-Dup":"one, two"})"));
+}
+
+// A credential header is withheld from a run's snapshot in the line form
+// exactly as in the object form, and a secret value is masked in a line's
+// `value` only - a name is never a value (issue #2466).
+TEST (JsonTest, ASnapshotWithholdsCredentialHeaderLines) {
+    const std::string stored = sanitize_config_snapshot (
+    R"({"headers":[{"name":"authorization","value":"Bearer t0k3n"},
+        {"name":"X-Echo","value":"has t0k3n inside"},{"name":"t0k3n","value":"1"}]})",
+    1024, { "t0k3n" });
+
+    const Json parsed = Json::parse (stored);
+    EXPECT_EQ (parsed["headers"], Json::parse (R"([{"name":"authorization","value":"<redacted>"},
+        {"name":"X-Echo","value":"has <redacted> inside"},{"name":"t0k3n","value":"1"}])"));
 }
 
 TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {

@@ -1384,7 +1384,9 @@ with its credentials withheld. Composition has already written every
 - the value of every `headers` entry named in the shared secret set
   (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
   `X-Api-Key`, ...; `vayu::utils::is_secret_field_name`, case-insensitive) or
-  by the request's own `apikey` auth becomes `"<redacted>"`, the name kept;
+  by the request's own `apikey` auth becomes `"<redacted>"`, the name kept -
+  in either shape `headers` arrives in, an object's member or each
+  `{name, value}` line's `value` (issue #2466), and a repeated line every time;
 - every occurrence of a value of a variable marked `secret` - raw, strictly
   percent-encoded (RFC 3986), as composition writes a query value, JSON-escaped
   (a JSON body is stored as text, so `pa"ss\word` is `pa\"ss\\word` inside
@@ -1707,9 +1709,14 @@ on. None of those is written into the request row itself (issue #1229): they are
 so a stored request cannot carry a stale one. Both maps are stored because both are read, and they
 answer different questions - `sentHeaders` is what the response pane's sent-headers disclosure
 means, while `headers` is the request as *composed*, which is what a pre-request script saw and
-what `design-run-seed.ts` reseeds a request tab from. Values are **not redacted**, same contract
-as `rawRequest` beside it. The key is **absent** on a step that sent nothing and on every row
-written before #664, so a reader falls back to `headers`. The load-run writers store no sent
+what `design-run-seed.ts` reseeds a request tab from. Both are one value per name: a name the
+request carries on more than one line (issue #2466) is stored with its values joined by `", "`
+(a `Cookie`'s by `"; "`), under the first line's spelling. Beside them, **`sentHeaderLines`** is
+the sent record unfolded - one `{name, value}` entry per line in wire order, the live response's
+`requestHeaderLines` - written whenever `sentHeaders` is. Values are **not redacted**, same contract
+as `rawRequest` beside it. Both sent keys are **absent** on a step that sent nothing, `sentHeaders`
+on every row written before #664 and `sentHeaderLines` on every row written before #2466, so a
+reader falls back to `sentHeaders` and then to `headers`. The load-run writers store no sent
 record at all - the load driver passes `nullptr` for it, to keep an allocation off the hot path -
 so a sampled capture's replay reads the composed map either way.
 
