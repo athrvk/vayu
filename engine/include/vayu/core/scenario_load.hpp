@@ -305,6 +305,11 @@ class StepHistograms {
     /// under status 0, as the run's own distribution does), or the step was
     /// never sent. Counts as executed, so it is not paired with `record`.
     void record_error (size_t step);
+    /// The duration of a no-response step whose transfer ran (a timeout, a
+    /// reset; #2384). Paired with `record_error`, which already counted the
+    /// step; touches only the histogram, so the step's percentiles cover the
+    /// same attempts the run's do.
+    void record_failed_transfer (size_t step, double latency_ms);
     /// A response whose status is outside 2xx/3xx (#2134). Paired with
     /// `record`, which already counted the step as executed; touches only the
     /// error tally, because the response still arrived and its latency is real.
@@ -324,9 +329,14 @@ class StepHistograms {
     [[nodiscard]] size_t http_errors (size_t step) const;
     [[nodiscard]] size_t no_response (size_t step) const;
     [[nodiscard]] size_t unresolved_tokens (size_t step) const;
+    /// How many durations the step's histogram holds: `completed` less the
+    /// steps that never reached the wire.
+    [[nodiscard]] size_t latency_samples (size_t step) const;
     [[nodiscard]] MetricsCollector::Percentiles percentiles (size_t step) const;
 
     private:
+    void record_latency (size_t step, double latency_ms);
+
     std::vector<struct hdr_histogram*> histograms_;
     /// Per step, so the breakdown can say "this step ran N times, M of them
     /// failed" - a p99 over a step that only two VUs ever reached is a number

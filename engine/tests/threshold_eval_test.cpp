@@ -272,10 +272,11 @@ TEST (ThresholdEval, ARunThatSentNothingHasNoErrorRate) {
 // (issue #1484: a run where every request failed reported its budgets met) ---
 
 TEST (ThresholdEval, ALatencyBudgetWithNoCompletionsIsNotEvaluatedAndCountsAsFailed) {
-    // Every request sent, none completed - a timeout or a connection refusal
-    // on all of them, the exact shape a 100% error rate run has. `latency`
-    // keeps its all-default Percentiles (count 0, p99 0.0), which must not
-    // read as "p99 was 0ms".
+    // Every request failed before its transfer ran - a request the pre-send
+    // gate refused, a row that would not bind - so the run has a 100% error
+    // rate and no latency sample at all (a timeout would be one, #2384).
+    // `latency` keeps its all-default Percentiles (count 0, p99 0.0), which
+    // must not read as "p99 was 0ms".
     RunSummaryInputs inputs;
     inputs.total_requests = 5999;
     inputs.status_codes   = { { 0, 5999 } };
@@ -301,6 +302,32 @@ TEST (ThresholdEval, ARunWithSomeCompletionsStillEvaluatesEveryDeclaredLatencyBu
     EXPECT_TRUE (check.evaluated);
     EXPECT_TRUE (check.passed);
     EXPECT_DOUBLE_EQ (check.actual, 5.0);
+}
+
+// #2384: the budget judges the collector's own histogram, which holds the
+// timeouts beside the answers. One request in twenty at the 2 s timeout puts
+// p99 at the timeout, so a 200 ms ceiling fails a run it used to pass at
+// 10 ms.
+TEST (ThresholdEval, ALatencyBudgetJudgesTheTimeoutsBesideTheAnswers) {
+    vayu::core::MetricsCollector collector ("run_timeouts");
+    for (int i = 0; i < 95; ++i) {
+        collector.record_success (200, 10.0, 0.0);
+    }
+    for (int i = 0; i < 5; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "timed out", "",
+        nullptr, vayu::core::AttemptDuration{ 2000.0, 0.0 });
+    }
+
+    RunSummaryInputs inputs;
+    inputs.total_requests = collector.total_requests ();
+    inputs.status_codes   = collector.status_code_distribution ();
+    inputs.latency        = collector.calculate_percentiles ();
+
+    auto check = only_check (
+    evaluate_thresholds (config_with ({ { "latencyP99Ms", 200 } }), inputs));
+    EXPECT_TRUE (check.evaluated);
+    EXPECT_FALSE (check.passed);
+    EXPECT_NEAR (check.actual, 2000.0, 2.0);
 }
 
 TEST (ThresholdEval, AnUnevaluatedLatencyCheckDoesNotHideAFailingErrorRateBudget) {

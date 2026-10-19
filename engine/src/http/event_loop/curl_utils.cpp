@@ -1250,6 +1250,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     response.timing.wire_ms       = wire_ms;       // new
     response.timing.queue_wait_ms = queue_wait_ms; // new
     apply_phase_timings (response.timing, phase_times);
+    response.transfer_attempted = true;
 
     // Wire byte counts (body + headers), for throughput-in-bytes metrics.
     curl_off_t dl_bytes = 0, ul_bytes = 0;

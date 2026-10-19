@@ -534,6 +534,8 @@ TEST (SseConsumer, AnUnreachableHostIsAFailedRunNotAThrow) {
 
     EXPECT_EQ (response.status_code, 0);
     EXPECT_TRUE (response.has_error ());
+    // Failed, but a transfer ran: its timing is a measurement (#2384).
+    EXPECT_TRUE (response.transfer_attempted);
     EXPECT_EQ (context.end_reason (), SseEndReason::Error);
     EXPECT_TRUE (context.closed ());
 }
