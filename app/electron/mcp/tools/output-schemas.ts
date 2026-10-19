@@ -42,9 +42,10 @@ export const runComparisonSchema = z.object({
 	// the `compression` entry of `comparability`.
 	compressionNegotiationDiffers: z.boolean(),
 	// Every way the two runs were not the same experiment (issue #2162), in a
-	// fixed order; empty for a like-for-like pair. `base` and `target` are the
-	// two values already formatted for a reader ("20 s" against "3 s, stopped").
-	// Mirrors `ComparabilityWarning` in compare.ts.
+	// fixed order, `run_type` first; empty for a like-for-like pair. `base` and
+	// `target` are the two values already formatted for a reader ("20 s"
+	// against "3 s, stopped", or "not recorded"). Mirrors
+	// `ComparabilityWarning` in compare.ts.
 	comparability: z.array(
 		z.object({ code: z.string(), message: z.string(), base: z.string(), target: z.string() })
 	),

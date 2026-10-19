@@ -545,7 +545,7 @@
               "pattern": "^Vayu run \""
             },
             "differences": {
-              "description": "Every way the two runs were not the same experiment, in this order; a field only one report carries is unknown, not a difference (a data file excepted). base and target are formatted as the app shows them.",
+              "description": "Every way the two runs were not the same experiment, in this order. When both reports carry metadata.runType, a mode, concurrency or target_rps only one recorded is a difference, its missing side 'not recorded'; otherwise a field only one report carries is unknown, not a difference (a data file excepted). base and target are formatted as the app shows them.",
               "type": "array",
               "items": {
                 "type": "object",
@@ -554,8 +554,8 @@
                 "properties": {
                   "field": {
                     "enum": [
-                      "mode", "concurrency", "target_rps", "duration", "status", "http_version",
-                      "data_file", "request", "compression"
+                      "run_type", "mode", "concurrency", "target_rps", "duration", "status",
+                      "http_version", "data_file", "request", "compression"
                     ]
                   },
                   "base": {"type": "string"},

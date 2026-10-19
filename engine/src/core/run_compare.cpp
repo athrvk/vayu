@@ -139,6 +139,43 @@ std::string (*show) (const std::string&) = nullptr) {
     return Difference{ field, show (*base), show (*target) };
 }
 
+Text run_type (const json& report) {
+    return text_at (report, { "metadata", "runType" });
+}
+
+/// The run type as the app names it in History.
+std::string run_type_label (const std::string& type) {
+    if (type == "design") {
+        return "Send";
+    }
+    if (type == "load") {
+        return "Load test";
+    }
+    if (type == "scenario") {
+        return "Collection run";
+    }
+    return type;
+}
+
+constexpr std::string_view NOT_RECORDED = "not recorded";
+
+/// `differ` for a field of the run's configuration (#2438). `metadata.runType`
+/// marks a report from an engine that records each field a run was given, so
+/// once both reports carry it, a field only one recorded is one the other run
+/// was not given: a real difference, not an older engine's silence.
+std::optional<Difference> config_differ (std::string_view field,
+const json& base,
+const json& target,
+Text (*read) (const json&)) {
+    const Text b = read (base);
+    const Text t = read (target);
+    if (b.has_value () != t.has_value () && run_type (base) && run_type (target)) {
+        const std::string missing (NOT_RECORDED);
+        return Difference{ field, b.value_or (missing), t.value_or (missing) };
+    }
+    return differ (field, b, t);
+}
+
 std::string capitalized (const std::string& word) {
     std::string out = word;
     if (!out.empty ()) {
@@ -160,6 +197,10 @@ Text virtual_users (const json& report) {
     const Text ramp  = config_text (report, "rampUpDuration");
     return (start ? number_text (*start) + " to " : "") + number_text (*peak) +
     (ramp ? ", ramp " + *ramp : "");
+}
+
+Text test_mode (const json& report) {
+    return config_text (report, "mode");
 }
 
 Text target_rps (const json& report) {
@@ -282,16 +323,20 @@ std::optional<Difference> compression_difference (const json& base, const json& 
     return Difference{ "compression", show (b), show (t) };
 }
 
-/// In `compareReports`' `comparability` order.
-constexpr std::array<Rule, 9> DIFFERENCE_RULES = { {
+/// In `compareReports`' `comparability` order. A collection's load run is
+/// `load` too, so it compares with a single request's without a `run_type`.
+constexpr std::array<Rule, 10> DIFFERENCE_RULES = { {
 [] (const json& b, const json& t) {
-    return differ ("mode", config_text (b, "mode"), config_text (t, "mode"));
+    return differ ("run_type", run_type (b), run_type (t), run_type_label);
 },
 [] (const json& b, const json& t) {
-    return differ ("concurrency", virtual_users (b), virtual_users (t));
+    return config_differ ("mode", b, t, test_mode);
 },
 [] (const json& b, const json& t) {
-    return differ ("target_rps", target_rps (b), target_rps (t));
+    return config_differ ("concurrency", b, t, virtual_users);
+},
+[] (const json& b, const json& t) {
+    return config_differ ("target_rps", b, t, target_rps);
 },
 duration_difference,
 [] (const json& b, const json& t) {

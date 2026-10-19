@@ -269,7 +269,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
-| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. The result carries `comparability`: what made the two runs different experiments (see below) |
+| `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
@@ -574,16 +574,26 @@ Notes:
   against different references. Nothing to resolve through (an ad-hoc run with
   no saved request), no pin for that request, or a target that *is* the pin:
   each is a refusal naming the fix, never a silent comparison against some
-  other run. Every metric in the result carries a `direction` -
-  `lower-is-better`, `higher-is-better` or `neutral` (total requests, which
-  moves with how long a run was told to run) - so a reader can tell a
-  regression from an improvement without knowing each metric's sense.
+  other run. **Two runs of different types are refused too** (#2438): a
+  `run_type` entry in `comparability` makes the tool an error naming both
+  runs, their types and `list_runs`' `type` filter, with no deltas, because a
+  load test's throughput against a collection run's is not a regression either
+  way. The `compare_runs` prompt embeds the same refusal in place of the
+  comparison (`runTypeRefusal`, `tools/run-housekeeping.ts`). The History
+  strip and the run-report export keep showing the entry. Every metric in the
+  result carries a `direction` - `lower-is-better`, `higher-is-better` or
+  `neutral` (total requests, which moves with how long a run was told to
+  run) - so a reader can tell a regression from an improvement without
+  knowing each metric's sense.
   The result also carries **`comparability`** (#2162), which an agent reads
   *before* the deltas: a list of `{ code, message, base, target }`, empty for
   a like-for-like pair, one entry per way the runs were not the same
   experiment. `base` and `target` are the two values already formatted
   (`"20 s"` against `"3 s, stopped"`). The codes, always in this order:
-  `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
+  `run_type` (#2438; `design`, `load` and `scenario` shown as the app names
+  them, `Send`, `Load test` and `Collection run`; a collection's load run is
+  `load` too, so it compares with a single request's load run without this
+  entry), `mode`, `concurrency` (virtual users; for a `ramp_up` run its start level and
   ramp time too), `target_rps`, `duration` (the runs' measured
   `summary.testDuration`, in seconds, more than 2x apart), `status` (any two differing run
   statuses, such as `Stopped` against `Completed`), `http_version` (`auto`
@@ -591,7 +601,11 @@ Notes:
   one counts), `request` (method or URL, the URL without userinfo, query or
   fragment because the comparison is not masked the way `get_run_report` is)
   and `compression` (the same fact as `compressionNegotiationDiffers`, which
-  stays). A field a report does not carry is unknown, not a difference. The
+  stays). When both reports carry `metadata.runType`, a `mode`,
+  `concurrency` or `target_rps` only one of them recorded is a difference,
+  its missing side `not recorded`; a report with no `runType` is from an
+  engine that may not record them, and there a field a report does not carry
+  is unknown, not a difference. The
   history view's vs-baseline strip renders the same list from the same
   computation (`src/lib/run-compare.ts`), so the two cannot disagree.
 - **Run housekeeping** (issue #755) is the History surface an agent could
@@ -1864,7 +1878,7 @@ Server-provided starting points a user picks in their client (`prompts.ts`):
 | Prompt                 | Arguments                | Produces                                                    |
 | ---------------------- | ------------------------ | ----------------------------------------------------------- |
 | `summarize_run`        | `runId`                  | The run report (masked as `get_run_report` is) + a "summarize p50/p95/p99, errors, health". |
-| `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
+| `compare_runs`         | `baseRunId?, targetRunId` | The computed delta, its `comparability` list (which the prompt tells the model to read first) + "did this regress?". Two runs of different types get the tool's refusal instead, with no delta embedded. An omitted `baseRunId` resolves the target's pinned baseline through the same `resolveBaseline` the tool uses - the prompt demanded an id Vayu already knew (#760). |
 | `diagnose_errors`      | `runId`                  | The report (masked as `get_run_report` is) + an error-focused diagnosis prompt. |
 | `suggest_load_profile` | `url, goal?`             | Guidance to design a `start_load_run` (no engine data).     |
 

@@ -797,6 +797,7 @@ Row delta_row (const ordered& delta) {
 /// What each `differences[].field` code is called.
 constexpr auto DIFFERENCE_LABELS =
 std::to_array<std::pair<std::string_view, std::string_view>> ({
+{ "run_type", "Run type" },
 { "mode", "Mode" },
 { "concurrency", "Virtual users" },
 { "target_rps", "Target rate" },

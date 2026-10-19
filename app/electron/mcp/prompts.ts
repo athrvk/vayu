@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 import type { ToolContext } from "./tools.js";
-import { resolveBaseline } from "./tools.js";
+import { resolveBaseline, runTypeRefusal } from "./tools.js";
 import { compareReports } from "./compare.js";
 import { RUN_ERROR_DEFINITION_SENTENCE } from "./error-definition.js";
 import { withheldRunOutput } from "./resources.js";
@@ -110,6 +110,18 @@ export const PROMPTS: McpPromptDef[] = [
 				base as Record<string, unknown>,
 				target as Record<string, unknown>
 			);
+			const refusal = runTypeRefusal(comparison);
+			if (refusal) {
+				return {
+					messages: [
+						userText(
+							"I asked whether performance regressed between two Vayu runs, and Vayu " +
+								`refused to compare them: ${refusal} Tell me so, and offer to find a run ` +
+								"of the same type to compare against."
+						),
+					],
+				};
+			}
 			return {
 				messages: [
 					userText(

@@ -60,9 +60,12 @@ inline constexpr auto COMPARED_METRICS = std::to_array<ComparedMetric> ({
  * `{differences, deltas, statusCodes}`.
  *
  * - `differences[]`: `{field, base, target}`, every way the two runs were not
- *   the same experiment, in `compareReports`' `comparability` order, values
- *   formatted as the app shows them. A field only one report carries is
- *   unknown, not a difference (a data file excepted).
+ *   the same experiment, in `compareReports`' `comparability` order
+ *   (`run_type` first), values formatted as the app shows them. When both
+ *   reports carry `metadata.runType`, a `mode`, `concurrency` or `target_rps`
+ *   only one recorded is a difference, its missing side `not recorded`;
+ *   otherwise a field only one report carries is unknown, not a difference
+ *   (a data file excepted).
  * - `deltas[]`: `{metric, base, target, delta, pctChange, direction}` per
  *   @ref COMPARED_METRICS; a value a report lacks is `null`, and so is every
  *   figure computed from it. `pctChange` is `null` against a zero base.
