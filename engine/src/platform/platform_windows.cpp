@@ -75,17 +75,19 @@ bool is_process_running (int pid) {
 // File Locking
 // ============================================================================
 
-bool acquire_file_lock (const std::string& path, LockHandle& handle) {
+LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle) {
     // Create or open the lock file
     // Note: On Windows, file locks are automatically released when the process terminates
     // (even if it crashes or is killed), so stale locks are not a concern.
+    // Share mode 0 is also what keeps the file from being deleted while held,
+    // so the guard cannot be bypassed the way a POSIX file lock can (#2422).
     handle = CreateFileA (path.c_str (), GENERIC_READ | GENERIC_WRITE,
     0, // No sharing - exclusive access
     nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 
     if (handle == INVALID_HANDLE_VALUE) {
         handle = INVALID_LOCK_HANDLE;
-        return false;
+        return LockAcquisition::Refused;
     }
 
     // Try to lock the file (non-blocking)
@@ -95,10 +97,10 @@ bool acquire_file_lock (const std::string& path, LockHandle& handle) {
         0, 1, 0, &overlapped)) {
         CloseHandle (handle);
         handle = INVALID_LOCK_HANDLE;
-        return false;
+        return LockAcquisition::Refused;
     }
 
-    return true;
+    return LockAcquisition::Held;
 }
 
 bool write_pid_to_lock (LockHandle handle) {

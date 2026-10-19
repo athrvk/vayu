@@ -1,6 +1,6 @@
 ---
 description: >-
-  How Vayu handles vayu.lock during install and uninstall on each platform, and what happens when a stale lock is found.
+  What keeps a second Vayu engine off a data folder, how Vayu handles vayu.lock during install and uninstall on each platform, and what happens when a stale lock is found.
 ---
 
 # Lock File Handling During Install/Uninstall
@@ -9,7 +9,26 @@ This document describes how lock files (`vayu.lock`) are handled during installa
 
 ## Overview
 
-The lock file (`vayu.lock`) prevents multiple instances of the Vayu engine from running simultaneously. It contains the PID of the running engine process and is located at:
+One engine runs per data directory. The engine takes an exclusive lock at
+startup and exits 1 with "Another instance of Vayu Engine is already running"
+when another engine holds it. What it locks differs by platform:
+
+- **Linux and macOS**: a `flock` on the data directory itself, plus one on
+  `vayu.lock` inside it. The directory lock is the guard: a `flock` lives on an
+  inode, so a lock on the file alone was released for every newcomer the
+  moment something unlinked the file, and two engines then served one database
+  (issue #2422). Deleting `vayu.lock` no longer lets a second engine in. The
+  file is still locked so an engine from before this change, which locks only
+  the file, and a current one keep each other out. A filesystem that cannot
+  lock a directory (some network volumes answer `ENOTSUP` or `EINVAL`) falls
+  back to the file alone, and the engine logs a warning that the guard is
+  weaker there.
+- **Windows**: `vayu.lock` is opened with share mode 0 and byte-locked, so it
+  cannot be deleted while the engine holds it.
+
+Every platform releases the lock when the engine process ends, however it ends.
+`vayu.lock` itself is the PID record the app reads (`checkLockFile`): it holds
+the PID of the running engine process and is located at:
 
 - **Windows**: `%APPDATA%\Vayu\vayu.lock`
 - **macOS**: `~/Library/Application Support/Vayu/vayu.lock`
@@ -158,7 +177,7 @@ it answers on none, the wait above watches the first free candidate (where a
 still-starting engine, not yet listening, would be), or 9876 when none is free.
 
 **The engine releases the lock after its database has closed** (issue #2420).
-`run_daemon` (`engine/src/daemon.cpp`) holds the flock in an `InstanceLock`
+`run_daemon` (`engine/src/daemon.cpp`) holds the lock in an `InstanceLock`
 declared before the `Database`, so on the way out the database's destructor -
 its close-time WAL checkpoint included - runs first and the lock goes last, on
 an early exit and a thrown startup error as much as on a graceful shutdown. A
@@ -168,10 +187,14 @@ database when an engine starts (a `sqlite3` shell left in a transaction, a sync
 agent), the engine waits for it (10 s on each connection it opens), then exits 1 naming the database
 and leaves every file as it was, rather than treating the held file as corrupt
 ([db-schema.md](engine/db-schema.md#startup-validation-backup-and-recovery)).
+Because the lock is held before the database opens, the startup reconcile that
+marks `running` and `pending` runs as failed only ever meets runs a dead engine
+left behind; the lock is the whole ownership check, and run rows carry no owner.
 
 ## Manual Cleanup
 
-If needed, users can manually remove the lock file:
+Quit Vayu first. A lock file left behind after that is only a stale PID record
+(the lock itself went with the engine process), and removing it is safe:
 
 **Windows:**
 ```powershell
@@ -184,6 +207,11 @@ rm ~/.config/Vayu/vayu.lock
 # or on macOS:
 rm ~/Library/Application\ Support/Vayu/vayu.lock
 ```
+
+Removing it while an engine still runs frees nothing: on Windows the delete
+fails, and on Linux and macOS the engine keeps its lock on the data directory,
+so a second engine is still refused. To stop an engine that will not quit, end
+the process whose PID the file names.
 
 ## Implementation Details
 
@@ -218,13 +246,17 @@ To test lock file handling:
 2. **Kill engine process** - lock file should remain
 3. **Restart Vayu** - stale lock should be detected and removed
 4. **Reinstall** - the first launch after it reclaims any lock left behind
+5. **Delete the lock under a live engine** (Linux and macOS) - with an engine
+   running, remove `vayu.lock` and start `vayu-engine --data-dir <same dir>`:
+   the second engine exits 1 with "already running" and the first is
+   untouched. `engine/tests/file_lock_test.cpp` asserts the same in-process
 
 ## Troubleshooting
 
 **Issue**: Lock file prevents engine from starting after crash
 
-**Solution**: The app automatically cleans up stale locks on startup. If this doesn't work, manually remove the lock file (see Manual Cleanup above).
+**Solution**: A crash releases the lock with the process, so the file left behind names a dead PID and the app cleans it up on startup. An engine that still refuses to start is refused by a live engine on the same data directory, not by the file: stop the PID it names (see Manual Cleanup above).
 
 **Issue**: Multiple instances error after uninstall/reinstall
 
-**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. A live engine that never answers `/health` is replaced automatically after the health budget; if the engine still refuses to start, the replacement kill failed - stop the PID in the lock file, or remove the lock file manually.
+**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. A live engine that never answers `/health` is replaced automatically after the health budget; if the engine still refuses to start, the replacement kill failed - stop the PID in the lock file. Removing the lock file does not help while that engine lives.

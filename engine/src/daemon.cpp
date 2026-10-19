@@ -61,7 +61,9 @@ void request_stop () {
 /// reverse order close the database (its checkpoint included) before the lock
 /// is released: a successor that takes the lock never meets this engine's
 /// connection at its startup probe (issue #2420). An early return or a
-/// throw releases it the same way.
+/// throw releases it the same way. Taken before the database opens, so the
+/// startup reconcile that fails `running` runs can only meet rows no live
+/// engine owns (issue #2422).
 class InstanceLock {
     public:
     InstanceLock () = default;
@@ -74,13 +76,21 @@ class InstanceLock {
     InstanceLock& operator= (InstanceLock&&)      = delete;
 
     bool acquire (const std::string& lock_path) {
-        if (!vayu::platform::acquire_file_lock (lock_path, handle_)) {
+        const auto acquired = vayu::platform::acquire_file_lock (lock_path, handle_);
+        if (acquired == vayu::platform::LockAcquisition::Refused) {
             vayu::utils::log_error ("startup",
             "Error: Another instance of Vayu Engine is "
             "already running, or failed to create lock "
             "file: " +
             lock_path);
             return false;
+        }
+        if (acquired == vayu::platform::LockAcquisition::FileOnly) {
+            vayu::utils::log_warning ("startup",
+            "This filesystem cannot lock the data directory, so the "
+            "single-instance guard is the lock file alone: deleting it while "
+            "this engine runs would let a second engine start: " +
+            lock_path);
         }
 
         if (!vayu::platform::write_pid_to_lock (handle_)) {

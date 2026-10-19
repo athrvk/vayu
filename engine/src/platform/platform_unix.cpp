@@ -69,47 +69,91 @@ bool is_process_running (int pid) {
 // File Locking
 // ============================================================================
 
-bool acquire_file_lock (const std::string& path, LockHandle& handle) {
-    // Open or create the lock file
-    // Note: On Unix, file locks (flock) are automatically released when the process terminates
-    // (even if it crashes or is killed), so stale locks are not a concern.
+namespace {
+/// A descriptor for @p path, close-on-exec so a child the engine starts cannot
+/// inherit the lock and hold it past the engine's own exit; -1 on failure.
+int open_lock_descriptor (const std::string& path, int flags) {
     // POSIX declares `open` variadic so the mode argument can be omitted when
     // O_CREAT is not passed; with O_CREAT it is required. There is no
     // non-variadic spelling to move to - `std::fopen` cannot express the flags
-    // `flock` below needs a descriptor for.
+    // `flock` needs a descriptor for.
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-    handle = open (path.c_str (), O_RDWR | O_CREAT, 0666);
-    if (handle < 0) {
-        return false;
+    return open (path.c_str (), flags | O_CLOEXEC, 0666);
+}
+
+bool lock_exclusively (int descriptor) {
+    return flock (descriptor, LOCK_EX | LOCK_NB) == 0;
+}
+
+/// `flock`'s answer on a filesystem that cannot lock a directory. Linux makes
+/// `ENOTSUP` and `EOPNOTSUPP` one value; macOS keeps them apart.
+bool directory_lock_unsupported (int error) {
+    return error == ENOTSUP || error == EOPNOTSUPP || error == EINVAL;
+}
+
+void unlock_and_close (int& descriptor) {
+    if (descriptor < 0) {
+        return;
+    }
+    flock (descriptor, LOCK_UN);
+    close (descriptor);
+    descriptor = -1;
+}
+
+std::string directory_containing (const std::string& path) {
+    const std::filesystem::path parent = std::filesystem::path (path).parent_path ();
+    return parent.empty () ? std::string (".") : parent.string ();
+}
+} // namespace
+
+// A `flock` is released when its process ends, however it ends, so a crash
+// leaves no stale guard; a leftover `vayu.lock` is only a stale PID record.
+LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle) {
+    handle = INVALID_LOCK_HANDLE;
+    LockHandle held;
+
+    // The directory first: it is the guard, and a newcomer refused here never
+    // creates or opens the lock file.
+    held.directory =
+    open_lock_descriptor (directory_containing (path), O_RDONLY | O_DIRECTORY);
+    if (held.directory < 0) {
+        return LockAcquisition::Refused;
+    }
+    if (!lock_exclusively (held.directory)) {
+        const bool unsupported = directory_lock_unsupported (errno);
+        unlock_and_close (held.directory);
+        if (!unsupported) {
+            return LockAcquisition::Refused;
+        }
     }
 
-    // Try to acquire exclusive lock (non-blocking)
-    if (flock (handle, LOCK_EX | LOCK_NB) < 0) {
-        close (handle);
-        handle = INVALID_LOCK_HANDLE;
-        return false;
+    held.file = open_lock_descriptor (path, O_RDWR | O_CREAT);
+    if (held.file < 0 || !lock_exclusively (held.file)) {
+        release_file_lock (held);
+        return LockAcquisition::Refused;
     }
 
-    return true;
+    handle = held;
+    return held.directory < 0 ? LockAcquisition::FileOnly : LockAcquisition::Held;
 }
 
 bool write_pid_to_lock (LockHandle handle) {
-    if (handle == INVALID_LOCK_HANDLE) {
+    if (handle.file < 0) {
         return false;
     }
 
     // Truncate the file
-    if (ftruncate (handle, 0) == -1) {
+    if (ftruncate (handle.file, 0) == -1) {
         return false;
     }
 
     // Write PID
     std::string pid = std::to_string (get_process_id ()) + "\n";
-    ssize_t written = write (handle, pid.c_str (), pid.length ());
+    ssize_t written = write (handle.file, pid.c_str (), pid.length ());
 
     // Sync to ensure data is written to disk
     if (written == static_cast<ssize_t> (pid.length ())) {
-        fsync (handle);
+        fsync (handle.file);
     }
 
     return written == static_cast<ssize_t> (pid.length ());
@@ -135,11 +179,8 @@ bool read_pid_from_lock (const std::string& path, int& pid) {
 }
 
 void release_file_lock (LockHandle& handle) {
-    if (handle != INVALID_LOCK_HANDLE) {
-        flock (handle, LOCK_UN);
-        close (handle);
-        handle = INVALID_LOCK_HANDLE;
-    }
+    unlock_and_close (handle.file);
+    unlock_and_close (handle.directory);
 }
 
 // ============================================================================

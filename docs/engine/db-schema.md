@@ -185,7 +185,7 @@ Three things worth knowing about where it sits:
   (`mmap_size`) - from a second connection the rewrite committed and the file stayed its old size.
   (`POST /workspace/backup`'s `VACUUM INTO` is the one that runs on its own separate connection, since
   it writes a different file.) Nothing contends for it: `init` runs before the HTTP listener
-  starts, and the lock file has already refused a second engine.
+  starts, and the instance lock has already refused a second engine.
 - **The `VACUUM` is followed by a `wal_checkpoint(TRUNCATE)`.** Under WAL the rewritten image
   lands in the `-wal` file and the database is not resized until a checkpoint copies it back, so
   without it the pass would free every page it set out to and leave the file exactly as large as
@@ -1189,7 +1189,9 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
 it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
 killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
-failed and leaves `end_time` as recorded, so an unseeded row would report a duration spanning
+failed and leaves `end_time` as recorded (safe without an owner column because the engine holds
+the instance lock before the database opens, so no live engine owns the rows it meets - issue
+#2422), so an unseeded row would report a duration spanning
 however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
 future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
 (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
