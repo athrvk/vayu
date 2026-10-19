@@ -312,6 +312,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/modules/request-builder/utils/query-encoding.conformance.test.ts",
 		paths: ["engine/tests/fixtures/query-encoding-conformance.json"],
 	},
+	impliedContentType: {
+		reader: "app/src/modules/request-builder/utils/implied-content-type.conformance.test.ts",
+		paths: ["engine/tests/fixtures/implied-content-type-conformance.json"],
+	},
 	importPayloads: {
 		reader: "app/src/services/importers/orchestrator.payload-conformance.test.ts",
 		paths: ["engine/tests/fixtures/import-conformance.json"],

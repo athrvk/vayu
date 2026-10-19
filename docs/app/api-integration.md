@@ -126,7 +126,12 @@ untransformed. The mode strings are a contract: the engine matches
 `"form-data"` and `"x-www-form-urlencoded"` exactly and reads the content out
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
-engine writes the Content-Type each form mode implies. A `form-data` row may be
+engine writes the Content-Type each mode implies when the request declares none:
+`application/json` for `json`, `graphql` and `jsonrpc`, `application/xml` for
+`xml`, `text/plain` for `text`, the form type for each form mode and the file's
+own type for `binary`. A bodyless POST goes out with no Content-Type at all,
+where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
+`form-data` row may be
 a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
 sends the path the user picked - never the bytes - and the engine opens the file
 at send time. A **`binary`** body is one file as the whole body,
@@ -176,7 +181,9 @@ which encodings can even be asked for), so a renderer working it out from the
 config entries would be a second definition of the same rule. The Headers tab
 renders it as the read-only "Added by Vayu" group, and a row ticked off there
 rides the send as `disabledDefaultHeaders`, which `POST /execute` and
-`POST /runs` both take. None of it is persisted on the request.
+`POST /runs` both take. None of it is persisted on the request. The engine also
+leaves libcurl no default of its own to fill (issue #2464); the Headers tab does
+not list what libcurl adds on its own yet.
 
 The *stored* counterpart is a different field (issue #1765):
 `disabledSystemHeaders`, Postman's per-request list, kept on the request as
