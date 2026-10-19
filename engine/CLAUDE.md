@@ -225,7 +225,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   and calls `open_forever ()` before its pragmas, because sqlite_orm re-applies a
   remembered `journal_mode` to a new connection ahead of `on_open`. The
   timeout is `BUSY_TIMEOUT_MS`; `Database (path, startup_busy_timeout)` lowers
-  it for a test and `applied_busy_timeout_ms ()` reads it back.
+  it for a test and `applied_busy_timeout_ms ()` reads it back. `daemon.cpp`
+  releases the instance lock through an `InstanceLock` declared before the
+  `Database`, so the database closes first (`platform_test.cpp` scans for it).
 - **Any change to `make_vayu_storage`'s mapping bumps `SCHEMA_VERSION`**
   (`vayu/db/database.hpp`, #1492), an added nullable column included:
   `sync_schema ()` runs without `preserve`, so an older engine would rebuild

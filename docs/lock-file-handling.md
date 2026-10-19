@@ -157,6 +157,18 @@ orphan left on a fallback port is replaced there even after 9876 has come free. 
 it answers on none, the wait above watches the first free candidate (where a
 still-starting engine, not yet listening, would be), or 9876 when none is free.
 
+**The engine releases the lock after its database has closed** (issue #2420).
+`run_daemon` (`engine/src/daemon.cpp`) holds the flock in an `InstanceLock`
+declared before the `Database`, so on the way out the database's destructor -
+its close-time WAL checkpoint included - runs first and the lock goes last, on
+an early exit and a thrown startup error as much as on a graceful shutdown. A
+replacement that wins the lock therefore never meets its predecessor's
+connection at its own startup probe. If something else still holds the
+database when an engine starts (a `sqlite3` shell left in a transaction, a sync
+agent), the engine waits up to 10 s for it, then exits 1 naming the database
+and leaves every file as it was, rather than treating the held file as corrupt
+([db-schema.md](engine/db-schema.md#startup-validation-backup-and-recovery)).
+
 ## Manual Cleanup
 
 If needed, users can manually remove the lock file:
