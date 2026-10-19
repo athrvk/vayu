@@ -786,6 +786,27 @@ what `pr-tests.yml` and `release.yml` both run on `macos-latest`) narrow to
 `-j3` to match; `macos-dev` is unchanged; it is not what CI runs, and a
 developer's own Mac usually has more than three real cores to spend on it.
 
+**`macos-prod-x64` runs the suite as three shards, not one process per
+test.** That preset is the x64 half of the universal release binary, built on
+the arm64 runner and tested under Rosetta, where starting a process costs about
+0.22s of translation. Registered one test per process, the v0.44.0 release
+spent ~1,110s of a 1,302s suite starting ~4,100 processes - 7m16s of wall time
+on three cores, against 200s for the same tests in the arm64 half of the same
+job. The preset sets `VAYU_TEST_SHARDS=3`, and `engine/tests/CMakeLists.txt`
+then registers three CTest entries that each run the binary under gtest's
+sharding variables (`GTEST_TOTAL_SHARDS`, `GTEST_SHARD_INDEX`): three processes,
+each in its own scratch directory, each running its share of the tests in
+sequence. The trade: a failure is reported as its shard (gtest's output names
+the test), the per-test timeout becomes a 15-minute per-shard one, and a test
+that leaks state into the next one in its process can fail here and nowhere
+else. A fourth entry, `vayu_tests_shard_coverage`
+(`engine/tests/check_shard_coverage.cmake`), runs after the shards and fails
+unless every shard ran something and their totals add up to what
+`vayu_tests --gtest_list_tests` lists - three green shards are not proof on
+their own, since a shard gtest gives nothing to and a binary that ignores the
+sharding variables both pass. Every other preset keeps one process per test
+(`VAYU_TEST_SHARDS=0`, the default).
+
 **On Windows the database tests never overlap each other.** A plain `-j4` there
 took ~37 min against a ~6 min serial run - the same `-j4` that cut ubuntu from
 3-5 min to 1m15s and macOS from ~4 min to 1m06s. The per-test durations said

@@ -17,6 +17,38 @@ concurrency:
 permissions:
   contents: read
 
+# Workflow-level, not per job, because two jobs compile the engine (`build`, and
+# `test-macos-x64` below) and a second copy of a pin is the one a bump forgets.
+# The publish jobs inherit these too; they compile nothing, so nothing reads them.
+env:
+  VCPKG_COMMIT: 'a5f736224e85b32e25a8ffc52562333180396642'
+  VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
+  SCCACHE_GHA_ENABLED: 'true'
+  # v0.17.1's Windows leg reported 18 sccache "Cache errors" where v0.17.0
+  # had none. Nothing broke - an sccache error falls through to the real
+  # compiler, which is why that build still finished with zero compilation
+  # failures - but `--show-stats` only ever prints error *counts*, so the
+  # reason was not recoverable from the log afterwards. These two make it
+  # recoverable next time.
+  #
+  # Set before any step runs, not appended to $GITHUB_ENV beside the launcher
+  # vars below, because sccache reads them when its **server** starts, and the
+  # server can be up before that step runs. That also rules out `runner.temp`,
+  # which this context cannot see - hence `github.workspace`, which it can. The
+  # file is CI-only and sits outside every artifact glob (`app/release/*`,
+  # `artifacts/*`), so it cannot end up shipped.
+  SCCACHE_ERROR_LOG: '${{ github.workspace }}/sccache-error.log'
+  SCCACHE_LOG: 'warn'
+  # Never let the server exit on its own. Its default is to stop after 600s
+  # without a compile, and the end-of-job `--show-stats` (sccache-action's post
+  # step) then starts a fresh server and reports zeros. The macOS leg read
+  # "0 compile requests" in every release through v0.44.0 for exactly that
+  # reason - the post step ran ~10 min after the last compile, behind the tests
+  # and the packaging - while its error log showed the cache answering. The
+  # releasing skill's step 8 reads these stats. The runner ends the server with
+  # the job.
+  SCCACHE_IDLE_TIMEOUT: '0'
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
@@ -40,27 +72,6 @@ jobs:
           - os: macos-latest
             preset: macos-prod-arm64
     timeout-minutes: 120
-    env:
-      VCPKG_COMMIT: 'a5f736224e85b32e25a8ffc52562333180396642'
-      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
-      SCCACHE_GHA_ENABLED: 'true'
-      # v0.17.1's Windows leg reported 18 sccache "Cache errors" where v0.17.0
-      # had none. Nothing broke - an sccache error falls through to the real
-      # compiler, which is why that build still finished with zero compilation
-      # failures - but `--show-stats` only ever prints error *counts*, so the
-      # reason was not recoverable from the log afterwards. These two make it
-      # recoverable next time.
-      #
-      # Set at job level, not appended to $GITHUB_ENV beside the launcher vars
-      # below, because sccache reads them when its **server** starts, and the
-      # server can be up before that step runs. Job-level env is set before any
-      # step, which is the only placement that reliably wins the race. That also
-      # rules out `runner.temp`, which job-level env cannot see - hence
-      # `github.workspace`, which it can. The file is CI-only and sits outside
-      # every artifact glob (`app/release/*`, `artifacts/*`), so it cannot end
-      # up shipped.
-      SCCACHE_ERROR_LOG: '${{ github.workspace }}/sccache-error.log'
-      SCCACHE_LOG: 'warn'
 
     steps:
       - name: Checkout repository
@@ -182,11 +193,11 @@ jobs:
         shell: bash
         run: ctest --preset macos-prod-arm64 --output-on-failure < /dev/null
 
+      # The x64 slice this leg ships. Its tests run in `test-macos-x64` below,
+      # beside this matrix rather than after it. Built with the tests on
+      # anyway, so both jobs compile the identical configuration and the second
+      # compile is served from the sccache entries the first writes.
       - name: Build engine (x64)
-        # Both architectures run ctest now that RateLimiterTest hits an
-        # in-process mock instead of httpbin.org (issue #30). x64 still goes
-        # through Rosetta on M-series runners, but the remaining tests don't
-        # assert on tight wall-clock windows tied to a remote endpoint.
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
@@ -194,12 +205,6 @@ jobs:
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
-
-      - name: Run engine tests (x64)
-        if: runner.os == 'macOS'
-        working-directory: engine
-        shell: bash
-        run: ctest --preset macos-prod-x64 --output-on-failure < /dev/null
 
       - name: Create universal binary (macOS)
         if: runner.os == 'macOS'
@@ -490,17 +495,116 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The x64 half of the macOS universal binary, tested beside the build matrix
+  # instead of inside its macOS leg. That suite was the longest step of every
+  # release (7m16s in v0.44.0, under Rosetta) and it ran between the x64 build
+  # and the packaging, so the macOS leg was the release's critical path by
+  # about five minutes. Here it overlaps the whole matrix.
+  #
+  # It compiles the slice again rather than testing the binary `build` ships,
+  # because a job cannot hand a file to a matrix leg that is already running.
+  # Same commit, preset, flags, runner image and sccache scope, so this is the
+  # same build, and whichever compile runs second is served from the cache the
+  # other (or the master warm run) wrote. `publish` needs this job, so a red x64
+  # suite still stops the release.
+  #
+  # `macos-prod-x64` runs the suite as three gtest shards rather than one
+  # process per test: under Rosetta each process start costs ~0.22s, which was
+  # ~1,110s of that 1,302s suite (engine/tests/CMakeLists.txt, VAYU_TEST_SHARDS).
+  test-macos-x64:
+    name: Test the macOS x64 slice
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        # One leg. A matrix only so `matrix.os` resolves in the vcpkg cache key
+        # exactly as it does in `build` - cache-warm.yml's guard requires every
+        # key line in this file to be the same text.
+        os: [macos-latest]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies (macOS)
+        # The same set `build` installs: vcpkg builds libsodium from source
+        # through its autotools path and runs autoreconf first.
+        run: |
+          command -v ninja || brew install ninja
+          for pkg in autoconf autoconf-archive automake libtool; do
+            brew list --formula "$pkg" >/dev/null 2>&1 || brew install "$pkg"
+          done
+
+      - name: Cache vcpkg compiled packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ github.workspace }}/.vcpkg-archives
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
+          vcpkgJsonGlob: 'engine/vcpkg.json'
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+
+      - name: Configure sccache compiler launcher
+        shell: bash
+        run: |
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+
+      # Build and ctest split, with `< /dev/null`, for the reason given above
+      # `build`'s first engine step (#589).
+      - name: Build engine (x64)
+        uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
+        with:
+          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          configurePreset: macos-prod-x64
+          buildPreset: macos-prod-x64
+          configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
+
+      - name: Run engine tests (x64)
+        working-directory: engine
+        shell: bash
+        run: ctest --preset macos-prod-x64 --output-on-failure < /dev/null
+
+      # The same diagnostics step `build` runs, for the same reason.
+      - name: Report sccache errors
+        if: always()
+        shell: bash
+        run: |
+          log="${SCCACHE_ERROR_LOG:-}"
+          if [ -z "$log" ] || [ ! -s "$log" ]; then
+            echo "No sccache errors logged."
+            exit 0
+          fi
+          echo "::group::sccache error log"
+          cat "$log"
+          echo "::endgroup::"
+          echo "::notice::sccache logged $(wc -l < "$log" | tr -d ' ') line(s) to its error log - see the 'Report sccache errors' step."
+
   # The only job with write access. No checkout, no build: it downloads what the
   # build legs produced, attests each asset to this workflow run and tag, and
   # creates the release. `id-token` and `attestations` exist for the attestation
-  # alone. A `workflow_dispatch` run stops after `build`, so the pipeline can be
-  # exercised on a branch without publishing anything.
+  # alone. A `workflow_dispatch` run stops before this job, so the pipeline can
+  # be exercised on a branch without publishing anything.
   #
   # Verify any download with
   #   gh attestation verify <asset> --repo athrvk/vayu
   publish:
     name: Attest and publish
-    needs: build
+    needs: [build, test-macos-x64]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -618,8 +722,8 @@ jobs:
   #
   # `needs: publish` + `success()` means this only runs after the GitHub
   # Release is fully published: `build` builds all three platforms (its
-  # fail-fast:false matrix reports success only when every leg passes) and
-  # `publish` uploads the assets, incl. Vayu-x64.exe, to the release. Any failed
+  # fail-fast:false matrix reports success only when every leg passes),
+  # `test-macos-x64` passes the macOS x64 suite, and `publish` uploads the assets, incl. Vayu-x64.exe, to the release. Any failed
   # build leaves `publish` skipped and so skips this job.
   publish-winget:
     name: Publish to winget

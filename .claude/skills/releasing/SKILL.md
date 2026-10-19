@@ -204,8 +204,12 @@ re-sync of 0.26.0 added entries, and one caught a factual error.
 workflow artifacts; the one `publish` job (`contents: write`, `id-token: write`,
 `attestations: write`; no checkout, no build) downloads them, runs
 `actions/attest-build-provenance` over every installer, zip and blockmap, and
-creates the release. A `workflow_dispatch` run stops after `build`. After the
-release, spot-check one asset:
+creates the release. Beside the matrix, `test-macos-x64` (also read-only)
+rebuilds the macOS x64 slice and runs its suite, sharded three ways under
+Rosetta; it is a job of its own so the slowest test run of the release overlaps
+the matrix instead of sitting inside the macOS leg, and `publish` needs it. A
+`workflow_dispatch` run stops before `publish`. After the release, spot-check
+one asset:
 `gh attestation verify <asset> --repo athrvk/vayu`. Every `uses:` in
 `.github/` is a 40-character SHA with a `# vX.Y.Z` comment (`Script lint`
 enforces it); Dependabot moves them.
