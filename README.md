@@ -47,7 +47,7 @@ Vayu collapses that workflow into one app. Build a request once, point the load 
 
 ## Performance
 
-The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. In practice that lets a single laptop saturate a gigabit link while the dashboard keeps streaming metrics frame-by-frame - well past what Node.js-backed Electron tools manage on the same hardware.
+The HTTP core is a multi-worker libcurl event loop in C++23, isolated from the Electron UI by a local HTTP sidecar so rendering never blocks on the request load. The dashboard keeps streaming metrics frame-by-frame during a run.
 
 **Proof - head-to-head vs `wrk` and `vegeta`.** Same mock server, same machine, same session, matched concurrency (64), measured from a standalone engine:
 
@@ -73,7 +73,6 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) | JavaScript (ES6) | Groovy / BeanShell | JavaScript |
 | **UI** | Native desktop app | Native desktop app | CLI only | Java Swing (dated) | Native desktop app |
 | **UI Responsiveness** | High (sidecar arch) | Good | N/A | Laggy under load | Slows with large collections |
-| **Memory Usage** | Low (direct memory) | Low–Moderate | Low–Moderate | High (RAM-intensive) | High (Electron + Chrome) |
 | **Privacy / Offline** | 100% local, no account | 100% local | Local / cloud hybrid | 100% local | Cloud-heavy (optional local) |
 | **MCP / agent control** | Built in, local, drives the load engine | Official server, wraps the CLI | Official server (experimental) | No | Yes, via the cloud workspace |
 | **SSE streaming** | Live Events view, scriptable, load-tested | Connects, no event UI | Via extension | No | Client-side inspection |
