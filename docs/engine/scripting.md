@@ -1563,6 +1563,16 @@ whose scheme is not `http` or `https` once its variables resolve
 the scheme, and nothing is read - the same refusal a Send of that URL gets
 ([URL schemes](api-reference.md#url-schemes)).
 
+**Vayu's own ports are never a target.** A URL naming the engine's own port or
+the MCP port (9877) on this machine - `127.0.0.1`, any other `127.x.y.z`,
+`localhost`, `[::1]` - throws `pm.sendRequest refused: Vayu does not send
+requests to its own engine port ...`, before anything is dialled, because the
+engine's API would take the script's request for the app's. A redirect that
+leads there, or a host name that resolves there, is refused by the transport
+instead and reaches the callback as `err` with `.code` `INVALID_URL` and the
+same sentence. Every other local server is reachable as before. See
+[Reserved local ports](api-reference.md#reserved-local-ports).
+
 `res` carries `code`, `status` (the reason phrase, as on `pm.response`),
 `responseTime`, `headers` with `get()`/`has()`/`each()`/`all()`/`count()`/
 `toObject()`/`one()`/`indexOf()` - the same read methods documented under

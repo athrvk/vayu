@@ -196,6 +196,15 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/electron/mcp/safety.test.ts",
 		paths: ["engine/include/vayu/core/constants.hpp"],
 	},
+	/*
+	 * The engine's copy of the MCP server's port (#2355): the server lives in the
+	 * app, so `electron/constants.ts` owns the number and the header restates it
+	 * for the loopback guard.
+	 */
+	mcpPort: {
+		reader: "app/electron/engine-endpoint.test.ts",
+		paths: ["engine/include/vayu/core/constants.hpp"],
+	},
 	dataDirLayout: {
 		reader: "app/electron/app-paths.test.ts",
 		paths: ["engine/src/daemon.cpp"],

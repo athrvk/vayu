@@ -75,6 +75,11 @@ body out of a `<script>`), and **no `GET` route has a side effect**. A page
 can therefore neither read the engine nor change it, though it can make the
 engine run any `GET` handler.
 
+The engine's own outbound client sends exactly what this gate admits, a
+loopback `Host` and no `Origin`, so the engine never sends a request to its own
+port or the MCP server's - not from a script, a redirect or a name that
+resolves to loopback. See [Reserved local ports](#reserved-local-ports).
+
 ## Request bodies
 
 Every request body is judged from its headers, on the same pre-routing handler
@@ -5527,6 +5532,36 @@ sent: status `0`, error code `INVALID_URL`, and a message naming the host.
 Postman sends such a host as typed and the lookup fails; libcurl without IDN
 would refuse it as "IDN support not present", which names the wrong cause.
 
+#### Reserved local ports
+
+No request the engine sends reaches Vayu itself: the engine's own port (the
+`--port` it bound, 9876 by default) and the MCP server's port (9877) are
+refused on this machine, on every send path - Send, a load or collection run, a
+streaming request, History replay, MCP, `pm.sendRequest`, an OAuth 2.0 token
+request, `POST /import/fetch` and the server-vitals monitor. The API's
+[gate](#who-may-call-the-api) admits a loopback request with no `Origin`, which
+is exactly what the engine's own client sends, so without this a request in an
+imported collection could read and write everything the API holds (issue
+[#2355](https://github.com/athrvk/vayu/issues/2355)).
+
+"This machine" is any loopback spelling - `127.0.0.0/8` (`127.1` and other
+shorthand included), `::1`, `::ffff:127.0.0.1`, `localhost` in any case with
+or without a trailing dot - and the unspecified `0.0.0.0` and `::`, which
+connect to the local host. Every other port on loopback is sent as usual. The
+rule is applied twice:
+
+- **The URL as written**, before anything is dialled: status `0`, error code
+  `INVALID_URL`, and the message
+  `Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine - not when the URL names it, a redirect leads there or a host name resolves there`
+  (`MCP port 9877` for the other). This holds with a proxy configured too.
+- **The address libcurl connected to**, for every connection a transfer uses,
+  before a byte of the request is written. This is what refuses a redirect to
+  one of those ports and a name that resolves to loopback (`*.localhost`, a DNS
+  record pointing at `127.0.0.1`), with the same code and message. With a
+  proxy in force the connected address is the proxy's, so this half cannot see
+  the origin behind it; the URL check above still applies, and where a proxy
+  you configured forwards to is your choice.
+
 #### Path variables
 
 A `:name` segment of the URL is answered by the request's own `in: "path"`
@@ -6945,7 +6980,7 @@ than accepted and never scraped; add a `mode` beside `scenario` to scrape.
 ```jsonc
 {
   "monitor": {
-    "url": "http://localhost:9100/metrics",  // required; http(s), loopback and private allowed
+    "url": "http://localhost:9100/metrics",  // required; http(s), loopback and private allowed (not Vayu's own ports)
     "intervalMs": 1000,                      // optional, defaults to `monitorIntervalMs`; 250-60000
     "format": "prometheus",                  // optional, default "prometheus"; or "json"
     "series": [                              // required; 1 to `monitorMaxSeries` names
@@ -6988,7 +7023,9 @@ it - raise it when a heavyweight `/metrics` renders too slowly for that, and the
 cadence stays where you set it.
 
 Loopback and private addresses are deliberately allowed: this is a local tool
-scraping the user's own infrastructure. An unusable block (no `url`, a
+scraping the user's own infrastructure. The one exception is every outbound
+path's: the engine's own port and the MCP port are refused
+([Reserved local ports](#reserved-local-ports)). An unusable block (no `url`, a
 non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
 `intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
 field, before the run row is created.

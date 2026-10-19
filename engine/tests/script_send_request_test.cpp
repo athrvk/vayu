@@ -28,6 +28,7 @@
 #include <nlohmann/json.hpp>
 
 #include "echo_server.hpp"
+#include "engine_port_stand_in.hpp"
 #include "task_queue.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -210,6 +211,82 @@ TEST_F (SendRequestTest, IsBoundEvenWhenDenied) {
 
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// ============================================================================
+// Vayu's own ports (#2355)
+// ============================================================================
+
+// A script in an imported collection must not reach the engine's management
+// API, which a loopback request with no Origin passes as if it were the app.
+// Every loopback spelling is refused by throwing, before anything is dialled.
+TEST_F (SendRequestTest, TheEnginePortIsRefusedInEverySpellingAndNothingArrives) {
+    const auto& stand_in   = vayu::tests::engine_port_stand_in ();
+    const std::string port = std::to_string (stand_in.port ());
+
+    for (const char* host : { "127.0.0.1", "localhost", "[::1]", "127.9.8.7" }) {
+        const int seen_before = stand_in.requests_seen ();
+        auto result = run ("pm.sendRequest('http://" + std::string (host) + ":" + port +
+        "/health', function () { pm.test('unreachable', function () {}); });");
+
+        EXPECT_FALSE (result.success) << host;
+        EXPECT_NE (result.error_message.find ("pm.sendRequest refused"), std::string::npos)
+        << result.error_message;
+        EXPECT_NE (result.error_message.find ("own engine port " + port), std::string::npos)
+        << result.error_message;
+        EXPECT_TRUE (result.tests.empty ()) << host << ": the callback ran";
+        EXPECT_EQ (stand_in.requests_seen (), seen_before)
+        << host << ": a script reached the engine port";
+    }
+}
+
+TEST_F (SendRequestTest, TheMcpPortIsRefusedByName) {
+    auto result =
+    run ("pm.sendRequest({ url: 'http://localhost:9877/mcp', method: 'POST' }, "
+         "function () { pm.test('unreachable', function () {}); });");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("own MCP port 9877"), std::string::npos)
+    << result.error_message;
+    EXPECT_TRUE (result.tests.empty ());
+}
+
+// A redirect is invisible to the script-level check, so the transport refuses
+// it and the callback receives that refusal as the network's answer.
+TEST_F (SendRequestTest, ARedirectToTheEnginePortReachesTheCallbackAsARefusal) {
+    const auto& stand_in  = vayu::tests::engine_port_stand_in ();
+    const int seen_before = stand_in.requests_seen ();
+    vayu::tests::EchoServer origin;
+
+    auto result = run ("var seen = {}; pm.sendRequest('" +
+    origin.redirect_to ("http://127.0.0.1:" + std::to_string (stand_in.port ()) + "/health") +
+    "', function (err, res) { seen.err = err; seen.res = res; }); "
+    "pm.test('refused', function () { "
+    "  pm.expect(seen.res).to.equal(null); "
+    "  pm.expect(seen.err.code).to.equal('INVALID_URL'); "
+    "  pm.expect(seen.err.message).to.include('own engine port'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (stand_in.requests_seen (), seen_before);
+}
+
+// Only Vayu's own ports: a script calling any other local server still works
+// with the engine port registered.
+TEST_F (SendRequestTest, AnotherLoopbackServerIsStillReachable) {
+    (void)vayu::tests::engine_port_stand_in ();
+    SendRequestServer server;
+
+    auto result = run ("var code = 0; pm.sendRequest('" + server.url ("/token") +
+    "', function (err, res) { code = res.code; }); "
+    "pm.test('reached', function () { pm.expect(code).to.equal(200); });");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
 }
 
 // ============================================================================

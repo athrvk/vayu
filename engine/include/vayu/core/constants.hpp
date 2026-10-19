@@ -30,6 +30,10 @@ namespace defaults {
 constexpr const char* DAEMON_URL = "http://127.0.0.1:9876";
 /// Default port for the daemon server
 constexpr int PORT = 9876;
+/// The MCP server's port, which the engine never sends a request to
+/// (`http/loopback_guard.hpp`, #2355). The server lives in the app, so
+/// `MCP_PORT` in `app/electron/constants.ts` owns the number; this is a copy.
+constexpr int MCP_PORT = 9877;
 /// Default verbosity level
 constexpr bool VERBOSE = false;
 // DEFAULT_USER_AGENT is declared in "vayu/core/user_agent.hpp", included above.

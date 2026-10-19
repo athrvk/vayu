@@ -54,6 +54,11 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors);
  * recycles them across transfers), so a branch that left the option alone
  * would inherit whatever the previous policy put there.
  *
+ * `CURLOPT_PREREQFUNCTION` is on every handle too: the connected-address
+ * half of the loopback guard (`http/loopback_guard.hpp`), which refuses a
+ * redirect or a resolved name that lands on Vayu's own port. `curl_to_error`
+ * reports that abort as the same refusal `validate_transferable` gives.
+ *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
  * for the two URLs it never sees - a redirect's `Location`, and the scheme
@@ -122,7 +127,7 @@ int extract_port (const std::string& url);
 /**
  * @brief Reject a request that cannot be put on the wire as written.
  *
- * Both clients call this before configuring a handle. Five such requests:
+ * Every driver calls this before configuring a handle. Six such requests:
  * a URL whose scheme is not `http` or `https` (`vayu::http::unsendable_scheme`;
  * libcurl is built with other protocols and would read a `file://` URL), a
  * HEAD with a body (`CURLOPT_NOBODY` resets curl's method back to HEAD and
@@ -131,8 +136,9 @@ int extract_port (const std::string& url);
  * run, before this, and a body that skipped it is refused rather than read),
  * header text carrying a byte no header line can hold - see
  * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
- * name (`vayu::http::unsendable_host`). In each case the caller is told rather
- * than having half its request silently discarded.
+ * name (`vayu::http::unsendable_host`), and a URL naming Vayu's own engine or
+ * MCP port (`vayu::http::reserved_target_port`, #2355). In each case the
+ * caller is told rather than having half its request silently discarded.
  *
  * Being the one gate every driver passes through *before* configuring anything
  * is what makes it the home for a rule that has to hold for every origin -
