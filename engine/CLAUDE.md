@@ -135,6 +135,16 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   alive for the whole transfer, cleared between transfers on a reused handle).
   Guard: `tests/bounds_primitives_test.cpp`. A subscript is not a token, so for
   the rest of the family the lint gate is the whole guard.
+- **Untrusted JSON text becomes an `ordered_json` through
+  `vayu::utils::parse_ordered_json`** (`utils/ordered_json.hpp`, #2497), never
+  `nlohmann::ordered_json::parse`: that parse places each member with a scan of
+  the members before it, so one object of 100,000 keys is minutes of one core
+  in a Debug build. Pass `ORDERED_JSON_UNBOUNDED` where the caller bounds depth
+  itself (`read_document` does, on the finished tree) and a depth where it
+  does not. Text the engine serialised itself (a stored row) may keep
+  `ordered_json::parse`. Guard: `wide_json.hpp` is the input; each entry point
+  (`jsonrpc_wire_body`, `parse_import`, `read_document`, the element
+  pipeline) has a test that fails its time budget on the quadratic parse.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as

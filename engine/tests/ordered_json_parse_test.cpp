@@ -7,7 +7,7 @@
 
 /**
  * @file ordered_json_parse_test.cpp
- * @brief `parse_ordered_json` (core/elements/json_path.hpp): the response-body
+ * @brief `parse_ordered_json` (utils/ordered_json.hpp): the response-body
  *        parse behind every JSONPath kind. It must answer exactly what
  *        `nlohmann::ordered_json::parse` answers, in linear time, and bound
  *        depth exactly as `json_within_depth` does.
@@ -27,13 +27,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include "../src/core/elements/json_path.hpp"
 #include "optional_assert.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 namespace {
 
-using vayu::core::detail::parse_ordered_json;
+using vayu::utils::parse_ordered_json;
 
 /// Deep enough that no parity case reaches it.
 constexpr size_t NO_DEPTH_LIMIT = 1000;

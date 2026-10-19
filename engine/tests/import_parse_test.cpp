@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -55,6 +56,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "wide_json.hpp"
 
 namespace vayu::http::routes {
 std::pair<int, nlohmann::json>
@@ -1585,6 +1587,48 @@ TEST (PostmanImport, AFolderNestedFarPastTheDepthBoundIsRefusedNotWalked) {
     {}, {});
     EXPECT_FALSE (parsed.ok ());
     EXPECT_NE (parsed.error.find ("nests deeper"), std::string::npos) << parsed.error;
+}
+
+/// A raw body is sniffed for JSON by parsing it, and the body is whatever the
+/// collection's author pasted (#2497). Mutation check: parse with
+/// `nlohmann::ordered_json::parse` in `postman_raw_body` and this runs for tens
+/// of seconds and fails the budget.
+TEST (PostmanImport, ARawBodyOfAHundredThousandMembersIsSniffedInLinearTime) {
+    const std::string raw = vayu::tests::wide_object_json ();
+    const json document   = {
+        { "info", { { "schema", POSTMAN_SCHEMA } } },
+        { "item",
+          json::array ({ { { "name", "R" },
+          { "request",
+          { { "method", "POST" }, { "url", "https://x.com" },
+          { "body", { { "mode", "raw" }, { "raw", raw } } } } } } }) },
+    };
+    const std::string text = document.dump ();
+
+    const auto started       = std::chrono::steady_clock::now ();
+    const ImportParse parsed = parse_import (text, {}, {});
+    const auto elapsed       = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    const json& body = parsed.result.at ("collections")[0].at ("requests")[0].at ("body");
+    EXPECT_EQ (body.at ("mode"), "json");
+    EXPECT_EQ (body.at ("content"), raw);
+}
+
+/// The other half of the sniff: raw text that is not JSON stays text.
+TEST (PostmanImport, ARawBodyThatIsNotJsonImportsAsText) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{\"a\":"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("body").at (
+    "mode"),
+    "text");
 }
 
 /// A body's own `disabled: true` ("prevent request body from being sent")

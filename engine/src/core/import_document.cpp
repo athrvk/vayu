@@ -38,6 +38,7 @@
 #include "vayu/types.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/json.hpp"
+#include "vayu/utils/ordered_json.hpp"
 #include "vayu/utils/parse.hpp"
 
 #include <algorithm>
@@ -85,9 +86,9 @@ postman_raw_body (const std::string& content, const std::string* language) {
     }
     // No language Vayu has a mode for: sniff JSON, and keep what was declared
     // so the export can say it again rather than the mode's own name.
-    const nlohmann::ordered_json parsed =
-    nlohmann::ordered_json::parse (content, nullptr, false);
-    return nlohmann::ordered_json{ { "mode", parsed.is_discarded () ? "text" : "json" },
+    const bool is_json =
+    utils::parse_ordered_json (content, utils::ORDERED_JSON_UNBOUNDED).has_value ();
+    return nlohmann::ordered_json{ { "mode", is_json ? "json" : "text" },
         { "content", content },
         { "rawLanguage", language == nullptr ? std::string () : *language } };
 }
