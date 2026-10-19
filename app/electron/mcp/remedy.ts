@@ -143,8 +143,8 @@ function remedyFor(name: string, host: McpHost): string {
 }
 
 /**
- * Tool descriptions are static strings built at module load, but what a gate
- * tells the user to do depends on the host serving the session. A description
+ * What a gate tells the user to do depends on the host serving the session,
+ * and a description is built before the host is known. A description
  * names its remedy with one of the tokens below and the server fills it in per
  * session (`server.ts`, `toolCatalog`), so neither host's wording is written
  * into a description and a new host cannot inherit the other's.
