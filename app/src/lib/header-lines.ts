@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { HeaderLine } from "@/types/domain";
+import type { HeaderLine, RedirectHop } from "@/types/domain";
 
 /**
  * The lines the engine sent, or `undefined` when it sent none (issue #2460).
@@ -24,6 +24,17 @@ import type { HeaderLine } from "@/types/domain";
  */
 export function receivedHeaderLines(lines: HeaderLine[] | undefined): HeaderLine[] | undefined {
 	return lines && lines.length > 0 ? lines : undefined;
+}
+
+/**
+ * The redirect hops the engine reported, or `undefined` when there were none
+ * (issue #2461). Same rule as {@link receivedHeaderLines}: a live answer
+ * always carries `redirects: []` while a stored trace writes the key only when
+ * a hop was followed, so an empty list is an absent one or the same exchange
+ * would build a different `ResponseState` live and restored.
+ */
+export function receivedRedirects(hops: RedirectHop[] | undefined): RedirectHop[] | undefined {
+	return hops && hops.length > 0 ? hops : undefined;
 }
 
 /**

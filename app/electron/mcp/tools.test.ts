@@ -12497,6 +12497,32 @@ describe("secret withholding", () => {
 		});
 	});
 
+	test("run_request passes a followed redirect through and masks the hop's Set-Cookie (#2461)", async () => {
+		const hop = {
+			status: 302,
+			statusText: "Found",
+			headerLines: [
+				{ name: "Set-Cookie", value: "session=hop-cookie-value; Path=/" },
+				{ name: "Location", value: "/home" },
+			],
+		};
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({ ...EXECUTE_ANSWER, redirects: [hop] }),
+		});
+		const { text, body } = await sendRequest(client);
+		expect(text).not.toContain("hop-cookie-value");
+		expect(body.redirects).toEqual([
+			{
+				status: 302,
+				statusText: "Found",
+				headerLines: [
+					{ name: "Set-Cookie", value: "<redacted>" },
+					{ name: "Location", value: "/home" },
+				],
+			},
+		]);
+	});
+
 	test("run_request returns the exchange as the engine answered it with reveal on", async () => {
 		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
 		const { body } = await sendRequest(client, REVEAL);

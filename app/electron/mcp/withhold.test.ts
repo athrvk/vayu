@@ -652,6 +652,73 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	test("masks a redirect hop's Set-Cookie as it does the final headers, keeping status, Location and order (#2461)", () => {
+		const hops = [
+			{
+				status: 302,
+				statusText: "Found",
+				headerLines: [
+					{ name: "Set-Cookie", value: "session=abc; Path=/" },
+					{ name: "Location", value: "/home" },
+					{ name: "X-Session-Key", value: "k-1" },
+				],
+			},
+			{ status: 301, statusText: "Moved Permanently", headerLines: [] },
+		];
+		const answer = {
+			status: 200,
+			headerLines: [{ name: "Set-Cookie", value: "final=1" }],
+			redirects: hops,
+			// What auth wrote at send time names a header the final map masks; the
+			// hops of the same record are masked by that name too.
+			authHeaders: ["X-Session-Key"],
+		};
+		expect(withholdRunOutput(answer, rule)).toEqual({
+			status: 200,
+			headerLines: [{ name: "Set-Cookie", value: "<redacted>" }],
+			redirects: [
+				{
+					status: 302,
+					statusText: "Found",
+					headerLines: [
+						{ name: "Set-Cookie", value: "<redacted>" },
+						{ name: "Location", value: "/home" },
+						{ name: "X-Session-Key", value: "<redacted>" },
+					],
+				},
+				hops[1],
+			],
+			authHeaders: ["X-Session-Key"],
+		});
+	});
+
+	test("masks a stored trace's response.redirects the same way (#2461)", () => {
+		const trace = {
+			response: {
+				headerLines: [],
+				redirects: [
+					{
+						status: 302,
+						statusText: "Found",
+						headerLines: [{ name: "set-cookie", value: "session=abc" }],
+					},
+				],
+			},
+		};
+		expect(withholdRunOutput(trace, rule)).toEqual({
+			response: {
+				headerLines: [],
+				redirects: [
+					{
+						status: 302,
+						statusText: "Found",
+						headerLines: [{ name: "set-cookie", value: "<redacted>" }],
+					},
+				],
+			},
+		});
+	});
+
 	test("masks credential header rows and a sent-header map, by the shared list and the API-key name", () => {
 		const node = {
 			headers: [

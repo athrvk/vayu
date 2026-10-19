@@ -1463,6 +1463,7 @@ replay puts the run's recorded list back on its seeded rows.
   clientCertificate: "",
   bodyCapped: false,
   headerLines: [{ name: "Content-Type", value: "application/json" }],
+  redirects: [],
   timing: { totalMs: 150, engineMs: 3.4, dnsMs: 10, connectMs: 20, ... },
   testResults: [
     { name: "Token was issued", passed: true, source: "pre" },
@@ -1558,6 +1559,26 @@ split by the legacy `parseSetCookie` rather than read one cookie per line. The
 Headers and Raw tabs and the History step pane show the lines when there are
 some and `headers` when there are not (`resolveHeaderLines`); Save as example
 stores the folded map.
+
+`redirects` is the redirect responses the send followed (issue #2461): one
+`{ status, statusText, headerLines }` per 3xx, in arrival order. `headers` and
+`headerLines` hold the final response only, so a `Set-Cookie` on the `302` that
+answers a login is readable nowhere else. The live body always carries the key
+(`[]` when nothing was followed, and always for `followRedirects: false`); the
+stored trace writes `trace.response.redirects` only when a hop was followed, and
+a load sample or a row stored before the key has none. Both funnels pass it
+through `receivedRedirects` (`lib/header-lines.ts`), the same empty-is-absent
+rule, so the live and restored `ResponseState.redirects` agree
+(`redirects-funnels.test.ts`). The Cookies tab reads it: with no cookie on any
+hop it is the one table it always was; once a hop set one it shows two groups,
+**Set by this response** (the final response's lines, as above) and **Set during
+redirects**, one sub-heading per hop that set a cookie ("302 Found, to /home":
+the hop's status, and its `Location` when it sent one) over that hop's table,
+each `Set-Cookie` line parsed on its own. The empty state ("No cookies in
+response") shows only when neither group has a cookie; the tab carries no count.
+The rows say what the server sent and never that the jar stored it, because curl
+drops a hop's cookie when the redirect changes origin. `GET /cookies` and the
+Settings cookie card are what the jar holds.
 
 The renderer keeps it strictly apart from `bodyTruncated`, which is
 `maxTraceBodyBytes` shortening a *stored* body after the whole of it was read:
