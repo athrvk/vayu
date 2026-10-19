@@ -5283,8 +5283,13 @@ hits the wire:
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
 
-A user-supplied `Authorization` header always wins over `bearer`/`basic`/`oauth2`.
-Header names are matched case-insensitively.
+A user-supplied header always wins over the one auth would write: `Authorization`
+over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
+`apikey` (`in: "header"`; the key name is matched against the request's own
+headers). Header names are matched case-insensitively, so `authorization` or
+`x-key` against `X-Key` counts. A query-located API key is a URL parameter and is
+appended regardless. The app's code snippets apply the same rule
+(`engine/tests/fixtures/auth-header-precedence.json`).
 
 ### OAuth 2.0 token cache
 

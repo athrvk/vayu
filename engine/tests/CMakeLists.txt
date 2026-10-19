@@ -164,6 +164,7 @@ add_executable(vayu_tests
     spec_bind_route_test.cpp
     operation_match_test.cpp
     path_variables_test.cpp
+    auth_header_precedence_test.cpp
     query_encoding_test.cpp
     url_encoding_test.cpp
     idn_host_test.cpp
