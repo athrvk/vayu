@@ -578,9 +578,10 @@ Notes:
   way. The `compare_runs` prompt embeds the same refusal in place of the
   comparison (`runTypeRefusal`, `tools/run-housekeeping.ts`). The History
   strip and the run-report export keep showing the entry. Every metric in the
-  result carries a `direction` - `lower-is-better`, `higher-is-better` or `neutral` (total requests, which
-  moves with how long a run was told to run) - so a reader can tell a
-  regression from an improvement without knowing each metric's sense.
+  result carries a `direction` - `lower-is-better`, `higher-is-better` or
+  `neutral` (total requests, which moves with how long a run was told to
+  run) - so a reader can tell a regression from an improvement without
+  knowing each metric's sense.
   The result also carries **`comparability`** (#2162), which an agent reads
   *before* the deltas: a list of `{ code, message, base, target }`, empty for
   a like-for-like pair, one entry per way the runs were not the same

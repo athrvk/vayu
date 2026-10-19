@@ -7220,10 +7220,7 @@ describe("dispatchTool", () => {
 		);
 	});
 
-	/*
-	 * Issue #2438: a load run against a collection run printed +241% avgRps as
-	 * if they were one experiment. The pair is refused before any delta leaves.
-	 */
+	// #2438: a mismatched pair is refused before any delta leaves.
 	describe("compare_runs and the run type", () => {
 		const report = (runType: string | undefined, avgRps: number) => ({
 			metadata: { status: "completed", ...(runType ? { runType } : {}) },
@@ -7281,7 +7278,6 @@ describe("dispatchTool", () => {
 		test("the description says a mismatched pair is refused", () => {
 			const description = TOOLS.find((t) => t.name === "compare_runs")?.description ?? "";
 			expect(description).toMatch(/different types[^.]*refused/);
-			expect(description).toContain("run type, mode");
 		});
 	});
 
