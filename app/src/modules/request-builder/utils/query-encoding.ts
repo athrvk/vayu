@@ -100,26 +100,6 @@ function afterUrlToken(where: UrlComponent): UrlComponent {
 	return where === "headSeparator" ? "head" : where;
 }
 
-/**
- * The component in force after `text`, read from `from`: in the head a `/`
- * opens the path unless it follows a `:` or a `/`, the first `?` before the
- * fragment opens the query, `#` opens the fragment. A whole `{{...}}` token
- * reads as head text.
- */
-export function advanceUrlComponent(text: string, from: UrlComponent): UrlComponent {
-	let where = from;
-	for (let at = 0; at < text.length && where !== "fragment";) {
-		const end = tokenEnd(text, at);
-		if (end !== -1) {
-			where = afterUrlToken(where);
-			at = end;
-			continue;
-		}
-		where = afterUrlChar(text[at++], where);
-	}
-	return where;
-}
-
 type ByteSet = (byte: number, where: UrlComponent) => boolean;
 
 /** Written for a substituted value: the Postman set of the component it lands in. */

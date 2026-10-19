@@ -693,8 +693,10 @@ ones mirror `vayu::Request` fields and ride every composed payload:
   and `postman-token` are stored and exported but change nothing on the wire.
 - `disable_url_encoding` writes a path variable's value (at composition and
   when a bind or the residual pass settles it) and an api-key or OAuth 2.0
-  query parameter as typed. libcurl's own URL handling is unchanged: a raw
-  space is still refused and dot-segments are still normalised.
+  query parameter as typed, and it turns off the percent-encoding of the
+  URL's literal text (`wire_url`): with encoding on a raw space is sent as
+  `%20`, with the toggle on it is refused, by a message that names the space
+  and the toggle. libcurl's dot-segment normalisation is unchanged.
 
 `postman_protocol_behavior` is nothing the engine sends: `POST /export/postman`
 starts from it and overwrites only the keys a typed column now disagrees with,

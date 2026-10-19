@@ -1667,9 +1667,9 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   their rules, and the literal text keeps its spaces and non-ASCII bytes
   ([Query encoding](#query-encoding)), so `a"b` goes out as `a"b`, not
   `a%22b`, as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
-  the toggle on libcurl refuses a raw space, and the send fails with a
-  message that names it ([URL schemes](#url-schemes)); with it off the space
-  is sent as `%20`.
+  encoding on, a raw space is percent-encoded to `%20`; with the toggle on
+  it is refused, and the send fails with a message that names the space and
+  the toggle ([URL schemes](#url-schemes)).
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the

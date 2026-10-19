@@ -6,11 +6,17 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { advanceUrlComponent, type UrlComponent } from "./query-encoding";
+import {
+	encodeAtUrlComponent,
+	encodeLiteralAtUrlComponent,
+	resolveUrlTemplate,
+	type UrlComponent,
+} from "./query-encoding";
 
-// The component walk the engine's `advance_url_component` pins; the
-// substitution outcomes it drives are in the conformance fixture.
-describe("advanceUrlComponent", () => {
+// The component walk the engine's `advance_url_component` mirrors, read through
+// the `where` the encoders return; the substitution outcomes it drives are in
+// the conformance fixture.
+describe("the URL component walk", () => {
 	it.each<[string, string, UrlComponent]>([
 		["a bare host", "example.com", "head"],
 		["the // after the scheme", "http://", "headSeparator"],
@@ -23,19 +29,37 @@ describe("advanceUrlComponent", () => {
 		["a # in the query", "http://h/p?q=a#f", "fragment"],
 		["a / in the fragment", "http://h/p#f/g?h", "fragment"],
 	])("%s", (_name, text, expected) => {
-		expect(advanceUrlComponent(text, "head")).toBe(expected);
+		expect(encodeLiteralAtUrlComponent(text, "head").where).toBe(expected);
 	});
 
 	it("reads a kept token as head text, so the / after it opens the path", () => {
-		expect(advanceUrlComponent("{{base}}/", "head")).toBe("path");
-		expect(advanceUrlComponent("http://{{host}}/", "head")).toBe("path");
+		expect(encodeLiteralAtUrlComponent("{{base}}/", "head").where).toBe("path");
+		expect(encodeLiteralAtUrlComponent("http://{{host}}/", "head").where).toBe("path");
 		// A separator inside the token moves nothing.
-		expect(advanceUrlComponent("{{a/b?c#d}}", "head")).toBe("head");
+		expect(encodeLiteralAtUrlComponent("{{a/b?c#d}}", "head").where).toBe("head");
 	});
 
 	it("continues from where the text before it stopped", () => {
-		expect(advanceUrlComponent("a/b", "path")).toBe("path");
-		expect(advanceUrlComponent("?x", "path")).toBe("query");
-		expect(advanceUrlComponent("//h/p", "headSeparator")).toBe("path");
+		expect(encodeLiteralAtUrlComponent("a/b", "path").where).toBe("path");
+		expect(encodeLiteralAtUrlComponent("?x", "path").where).toBe("query");
+		expect(encodeLiteralAtUrlComponent("//h/p", "headSeparator").where).toBe("path");
+	});
+
+	it("walks a substituted value the same way", () => {
+		expect(encodeAtUrlComponent("h/p", "head").where).toBe("path");
+		expect(encodeAtUrlComponent("a?b", "path").where).toBe("query");
+		expect(encodeAtUrlComponent("a#b", "query").where).toBe("fragment");
+	});
+
+	it("encodes each substituted value by the component the text before it reached", () => {
+		const values: Record<string, string> = {
+			"{{h}}": "x y",
+			"{{v}}": "a b{c}",
+			"{{w}}": "a'b",
+		};
+		const resolve = (token: string) => values[token] ?? token;
+		expect(resolveUrlTemplate("http://{{h}}/p/{{v}}?q={{w}}", resolve, { encode: true })).toBe(
+			"http://x y/p/a%20b%7Bc%7D?q=a%27b"
+		);
 	});
 });
