@@ -178,13 +178,24 @@ function isPidCertainlyDead(pid: number): boolean {
 }
 
 /**
+ * What holds a lock file's PID, as far as the OS will say.
+ *
+ * `not-engine` is proof: nothing holds the PID, or the name read back is not
+ * vayu-engine. `unknown` is a live PID whose name could not be read (`ps`
+ * missing from a minimal container, `tasklist` failing), and it is neither
+ * answer (#2422): read as `not-engine` it deleted a live engine's lock, and
+ * read as `engine` it would aim the force-kill at whatever inherited a
+ * recycled PID.
+ */
+export type EngineProcessState = "engine" | "not-engine" | "unknown";
+
+/**
  * Does the OS agree that this live PID is a vayu-engine?
  *
  * The subprocess half, and the only half that costs anything - reached only
- * once something is known to be alive under the PID. Failure to read the name
- * is not evidence of an engine, so it answers no.
+ * once something is known to be alive under the PID.
  */
-function isEngineProcessName(pid: number): boolean {
+function classifyLiveProcess(pid: number): EngineProcessState {
 	try {
 		if (process.platform === "win32") {
 			// Format: "vayu-engine.exe","12345","Console","1","12,345 K" - and
@@ -194,17 +205,18 @@ function isEngineProcessName(pid: number): boolean {
 				encoding: "utf-8",
 				windowsHide: true,
 			});
-			return output.toLowerCase().includes("vayu-engine.exe");
+			return output.toLowerCase().includes("vayu-engine.exe") ? "engine" : "not-engine";
 		}
 
-		return execSync(`ps -p ${pid} -o comm=`, { encoding: "utf-8" }).includes("vayu-engine");
+		const name = execSync(`ps -p ${pid} -o comm=`, { encoding: "utf-8" });
+		return name.includes("vayu-engine") ? "engine" : "not-engine";
 	} catch {
-		return false;
+		return "unknown";
 	}
 }
 
 /**
- * Check if a process is still running by PID and verify it's vayu-engine
+ * Is this PID a running vayu-engine?
  *
  * Cheap first, subprocess second: a PID nothing holds is answered by the signal-0
  * probe alone, and only a live PID is worth paying a `tasklist` / `ps` for. The
@@ -212,22 +224,23 @@ function isEngineProcessName(pid: number): boolean {
  * different process might have reused the same PID that was previously held by
  * vayu-engine.
  */
-function isVayuEngineRunning(pid: number): boolean {
-	if (!isPlausiblePid(pid)) return false;
-	if (isPidCertainlyDead(pid)) return false;
-	return isEngineProcessName(pid);
+function engineProcessState(pid: number): EngineProcessState {
+	if (!isPlausiblePid(pid)) return "not-engine";
+	if (isPidCertainlyDead(pid)) return "not-engine";
+	return classifyLiveProcess(pid);
 }
 
 /**
  * Force-kill a vayu-engine process by PID.
  *
- * Name-verified first, for the same reason `isVayuEngineRunning` verifies: the
+ * Name-verified first, for the same reason `engineProcessState` verifies: the
  * PID comes from a lock file written by a process that may be long gone, and
  * killing whatever inherited that PID would be far worse than leaving an engine
- * running. Returns whether a kill was actually issued.
+ * running. So only a confirmed engine is killed, never an `unknown` one.
+ * Returns whether a kill was actually issued.
  */
 function killVayuEngineProcess(pid: number): boolean {
-	if (!isVayuEngineRunning(pid)) {
+	if (engineProcessState(pid) !== "engine") {
 		return false;
 	}
 
@@ -265,25 +278,16 @@ function readPidFromLock(lockPath: string): number | null {
 }
 
 /**
- * Check lock file and verify if the vayu-engine process is still running
- * Returns true if lock file exists and vayu-engine process is running, false otherwise
- *
- * This verifies both that the PID exists AND that it belongs to vayu-engine,
- * preventing false positives from PID reuse.
+ * Read the lock file's PID and classify what holds it; null when there is no
+ * readable PID. `classify` checks the name as well as the PID, so a recycled
+ * PID is not mistaken for the engine.
  */
 function checkLockFile(
 	lockPath: string,
-	isAlive: (pid: number) => boolean
-): {
-	pid: number | null;
-	running: boolean;
-} {
+	classify: (pid: number) => EngineProcessState
+): { pid: number; state: EngineProcessState } | null {
 	const pid = readPidFromLock(lockPath);
-	if (pid === null) {
-		return { pid: null, running: false };
-	}
-
-	return { pid, running: isAlive(pid) };
+	return pid === null ? null : { pid, state: classify(pid) };
 }
 
 /**
@@ -303,7 +307,7 @@ export interface SidecarSystem {
 	 */
 	spawnEngine(binaryPath: string, args: string[], env: NodeJS.ProcessEnv): ChildProcess;
 	/** Is this PID alive *and* still vayu-engine? (PID reuse is real.) */
-	isEngineProcessAlive(pid: number): boolean;
+	engineProcessState(pid: number): EngineProcessState;
 	/** Force-kill a name-verified engine PID. Returns whether a kill was issued. */
 	killEngineProcess(pid: number): boolean;
 	/** Does a Vayu engine answer `/health` on this port: `status: ok` plus its `version` and `workers`? */
@@ -322,7 +326,7 @@ export const defaultSidecarSystem: SidecarSystem = {
 			detached: false,
 			env,
 		}),
-	isEngineProcessAlive: isVayuEngineRunning,
+	engineProcessState,
 	killEngineProcess: killVayuEngineProcess,
 	probeHealth: isEngineRunning,
 	requestShutdown: requestEngineShutdown,
@@ -566,6 +570,10 @@ export class EngineSidecar {
 	 * held would blame another program for our own engine. So it is given the
 	 * budget a freshly spawned engine gets: one that answers is asked to shut
 	 * down like any other engine found running, and one that does not is killed.
+	 *
+	 * A PID whose name could not be read arrives here too, and the kill refuses
+	 * it; the cost is the budget plus the stop's grace period, after which the
+	 * spawn goes ahead and the engine's own data-directory lock decides.
 	 */
 	private async replaceLockedEngine(pid: number): Promise<void> {
 		appLogger().warn(
@@ -595,21 +603,29 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * The lock file's PID when it names a live Vayu engine; a lock naming a dead
-	 * one is removed and answers null.
+	 * The lock file's PID unless it certainly names no Vayu engine, in which case
+	 * the lock is removed and this answers null. A live PID whose name could not
+	 * be read counts as live: its lock is never removed (#2422).
 	 */
 	private liveLockPid(lockPath: string): number | null {
-		const lockStatus = checkLockFile(lockPath, this.system.isEngineProcessAlive);
-		if (lockStatus.pid === null) return null;
+		const lock = checkLockFile(lockPath, this.system.engineProcessState);
+		if (lock === null) return null;
+		const { pid, state } = lock;
 
-		if (lockStatus.running) {
-			appLogger().info("sidecar", "Lock file found, process is running", {
-				pid: lockStatus.pid,
-			});
-			return lockStatus.pid;
+		if (state === "engine") {
+			appLogger().info("sidecar", "Lock file found, process is running", { pid });
+			return pid;
+		}
+		if (state === "unknown") {
+			appLogger().warn(
+				"sidecar",
+				"Lock file names a live process whose name could not be read - keeping the lock",
+				{ pid }
+			);
+			return pid;
 		}
 
-		appLogger().warn("sidecar", "Stale lock file found, cleaning up", { pid: lockStatus.pid });
+		appLogger().warn("sidecar", "Stale lock file found, cleaning up", { pid });
 		// Clean up stale lock file to prevent issues during install/reinstall
 		try {
 			fs.unlinkSync(lockPath);
@@ -1010,7 +1026,8 @@ export class EngineSidecar {
 	 *
 	 * By PID when we have one - a healthy `/health` answer would keep reporting
 	 * "alive" for a *replacement* engine on the same port, and a dead one for an
-	 * engine still writing its final flush. Health is only the fallback.
+	 * engine still writing its final flush. Health is only the fallback. A PID
+	 * whose name cannot be read is not gone until the signal-0 probe says so.
 	 */
 	private async waitForAdoptedExit(pid: number | null): Promise<boolean> {
 		const deadline = ENGINE_GRACEFUL_EXIT_TIMEOUT_MS;
@@ -1018,7 +1035,7 @@ export class EngineSidecar {
 			await this.system.sleep(ENGINE_EXIT_POLL_INTERVAL_MS);
 			const alive =
 				pid !== null
-					? this.system.isEngineProcessAlive(pid)
+					? this.system.engineProcessState(pid) !== "not-engine"
 					: await this.system.probeHealth(this.port);
 			if (!alive) return true;
 		}

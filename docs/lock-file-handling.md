@@ -134,15 +134,30 @@ The Electron sidecar (`app/electron/sidecar.ts`) automatically handles stale loc
 3. **Verifies process** is still running - cheap first, subprocess second: a
    signal-0 probe answers a PID nothing holds, and only a live PID is worth a
    `tasklist` / `ps` call to verify the name
-4. **Removes stale lock** if process is dead
-5. **Waits for, then replaces,** a live engine that never answers `/health`
+4. **Removes stale lock** only when that is proven: the PID is dead, or the
+   name read back is not `vayu-engine`
+5. **Keeps the lock** of a live PID whose name could not be read (below)
+6. **Waits for, then replaces,** a live engine that never answers `/health`
    (below)
-6. **Logs warnings** for debugging
+7. **Logs warnings** for debugging
 
 This ensures that:
 - Stale locks from crashes are cleaned up
 - Reinstalls work correctly
 - No manual intervention needed
+
+**A PID it cannot classify keeps its lock, and is never killed** (issue
+#2422). The name check is a subprocess (`ps -p <pid> -o comm=`, or `tasklist`
+on Windows), and it can fail to run: `ps` missing from a minimal container, a
+`tasklist` that errors. `engineProcessState` answers `unknown` then, distinct
+from `not-engine`, because a live PID whose name cannot be read may be the
+engine. The sidecar treats it as live for the lock (it is not removed) and as
+unverified for the kill (the name-verified kill refuses it, so a recycled PID
+is never signalled). Startup stays bounded: the PID goes through the wait
+below on the same health budget, the stop's grace period, then the spawn, and
+the engine's own lock decides whether this session's engine can start. A PID
+recycled by another program on such a system costs that wait once; the new
+engine then writes its own PID over the file.
 
 **A live engine is replaced, never adopted** (issue #2356). The lock file can
 point at a PID that is alive and answering `/health`: an orphan from a crashed
@@ -231,8 +246,9 @@ the process whose PID the file names.
   their lock-file cleanup *instead of* that setup.
 
 ### Electron Sidecar
-- Function: `checkLockFile()` - checks lock file and verifies PID
-- Function: `isVayuEngineRunning()` - cross-platform process check with process name verification. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse
+- Function: `checkLockFile()` - reads the lock file's PID and classifies it
+- Function: `engineProcessState()` - cross-platform process check with process name verification, answering `engine`, `not-engine` or `unknown`. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse; a name check that cannot run answers `unknown`, which keeps the lock and is never killed
+- Method: `liveLockPid()` - removes the lock only for a `not-engine` PID
 - Method: `replaceAnsweringEngine()` - stops a healthy engine `start()` finds already on the port, so it can spawn its own
 - Method: `replaceLockedEngine()` - settles a live lock PID: waits on `pollHealthWithinBudget()`, then asks it to shut down if it answered or kills it if it stayed silent
 - Automatic cleanup in `start()` method
@@ -259,4 +275,4 @@ To test lock file handling:
 
 **Issue**: Multiple instances error after uninstall/reinstall
 
-**Solution**: Startup reclaims a lock whose PID is not a live `vayu-engine`, so launching the reinstalled app is the fix. A live engine that never answers `/health` is replaced automatically after the health budget; if the engine still refuses to start, the replacement kill failed - stop the PID in the lock file. Removing the lock file does not help while that engine lives.
+**Solution**: Startup reclaims a lock whose PID is dead or provably not `vayu-engine`, so launching the reinstalled app is the fix. A live engine that never answers `/health` is replaced automatically after the health budget; if the engine still refuses to start, the replacement kill failed - stop the PID in the lock file. Removing the lock file does not help while that engine lives.
