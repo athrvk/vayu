@@ -398,6 +398,15 @@ const nlohmann::json& json) {
         }
         parsed.response = std::move (*response);
     }
+
+    auto origins = routes::parse_allowed_origins (json,
+    constants::inbox::MAX_ALLOWED_ORIGINS, constants::inbox::MAX_ALLOWED_ORIGIN_LENGTH);
+    if (!origins) {
+        return std::unexpected (InboxParseError{ .http_status = 400,
+        .code                                                 = "bad_request",
+        .message = std::move (origins.error ()) });
+    }
+    parsed.allowed_origins = std::move (*origins);
     return parsed;
 }
 
@@ -435,14 +444,15 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     }
 
     nlohmann::json out;
-    out["inboxId"]      = info.inbox_id;
-    out["url"]          = info.url;
-    out["bind"]         = info.bind;
-    out["port"]         = info.port;
-    out["running"]      = info.running;
-    out["loopback"]     = info.loopback;
-    out["captureCount"] = info.capture_count;
-    out["response"]     = std::move (response);
+    out["inboxId"]        = info.inbox_id;
+    out["url"]            = info.url;
+    out["bind"]           = info.bind;
+    out["port"]           = info.port;
+    out["running"]        = info.running;
+    out["loopback"]       = info.loopback;
+    out["captureCount"]   = info.capture_count;
+    out["allowedOrigins"] = info.allowed_origins;
+    out["response"]       = std::move (response);
     return out;
 }
 
@@ -497,6 +507,9 @@ struct InboxManager::Inbox {
     /// Resolved once at start and const thereafter, so every capture in one
     /// inbox was truncated and retained by the same rules.
     InboxLimits limits;
+    /// Set before the listener starts and const thereafter, like `limits`, so
+    /// the capture handler reads it with no lock.
+    routes::CorsPolicy cors;
     /// One live SSE stream per inbox; see InboxManager::try_claim_live. Guarded
     /// by InboxManager::mutex_ - every accessor locks it - which is the
     /// externally-locked-by-its-owner contract LiveClaimSlot is written to.
@@ -522,6 +535,7 @@ struct InboxManager::Inbox {
         info.running  = listener.is_listening ();
         info.loopback = is_loopback_bind (bind);
         info.response = response;
+        info.allowed_origins = cors.allowed_origins;
         return info;
     }
 };
@@ -552,6 +566,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     inbox->id       = vayu::utils::generate_id ("inbox_");
     inbox->bind     = request.bind;
     inbox->response = request.response;
+    inbox->cors     = routes::CorsPolicy{ request.allowed_origins };
     // Reject an oversized upload at the transport rather than buffering it:
     // the handler below only ever stores a prefix anyway.
     inbox->listener.server ().set_payload_max_length (constants::inbox::MAX_PAYLOAD_BYTES);
@@ -559,7 +574,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     Inbox* raw                       = inbox.get ();
     httplib::Server::Handler capture = [raw, &db] (const httplib::Request& req,
                                        httplib::Response& res) {
-        routes::apply_cors_headers (req, res);
+        routes::apply_cors_headers (req, res, raw->cors);
 
         // A real preflight must get a 2xx or the browser aborts before the
         // actual request ever arrives - so it answers 204 here and returns

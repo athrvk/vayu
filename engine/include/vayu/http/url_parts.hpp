@@ -8,6 +8,7 @@
  */
 
 #include <cstddef>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -193,6 +194,25 @@ inline constexpr const char* SENDABLE_PROTOCOLS = "http,https";
  * every `{{variable}}` in the URL has been resolved.
  */
 [[nodiscard]] std::optional<std::string> unsendable_scheme (std::string_view url);
+
+/**
+ * @brief @p origin as a browser serialises one - scheme and host lowercased,
+ *        a non-ASCII host as punycode, the scheme's default port dropped - or
+ *        why it is not an `http` / `https` origin, as a lowercase clause.
+ *
+ * An origin is exactly `scheme://host[:port]`: no userinfo, no path (a
+ * trailing `/` included), query or fragment, no `*`, no whitespace, and not
+ * the literal `null` an opaque origin sends. The shape is checked on the text
+ * before ada parses it, because the URL standard's leniencies (stripped tabs,
+ * `https:host` read as `https://host`, the path `/` every special URL gets)
+ * would otherwise canonicalise a value that is not an origin into one.
+ *
+ * A configured allowlist entry and an inbound `Origin` header both go through
+ * this, so the two are equal strings exactly when they name the same origin
+ * (#2367).
+ */
+[[nodiscard]] std::expected<std::string, std::string> canonical_origin (
+std::string_view origin);
 
 /**
  * @brief Split a raw query string (no leading `?`) on `&`, in wire order.

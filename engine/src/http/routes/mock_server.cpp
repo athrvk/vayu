@@ -224,6 +224,14 @@ std::expected<MockStartRequest, MockParseError> parse_mock_start (const nlohmann
     !outcome) {
         return std::unexpected (outcome.error ());
     }
+    auto origins = routes::parse_allowed_origins (json, constants::mock_server::MAX_ALLOWED_ORIGINS,
+    constants::mock_server::MAX_ALLOWED_ORIGIN_LENGTH);
+    if (!origins) {
+        return std::unexpected (MockParseError{ .http_status = 400,
+        .code                                                = "bad_request",
+        .message = std::move (origins.error ()) });
+    }
+    parsed.allowed_origins = std::move (*origins);
     return parsed;
 }
 
@@ -464,6 +472,7 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info) {
     out["routeCount"]           = info.route_count;
     out["routesWithoutExample"] = info.routes_without_example;
     out["createdAt"]            = info.created_at;
+    out["allowedOrigins"]       = info.allowed_origins;
     return out;
 }
 
@@ -571,6 +580,8 @@ struct MockServerManager::MockServer {
     int latency_ms     = 0;
     int error_rate_pct = 0;
     int64_t created_at = 0;
+    /// Set before the listener starts and never written again, like `routes`.
+    routes::CorsPolicy cors;
     /// Built once at start and never written again, so the handler reads it
     /// with no lock at all. A running mock does not hot-reload the collection -
     /// restart it, which is documented and is what keeps this true.
@@ -607,6 +618,7 @@ struct MockServerManager::MockServer {
         out.route_count     = static_cast<int> (routes.size ());
         out.routes_without_example = routes_without_example;
         out.created_at             = created_at;
+        out.allowed_origins        = cors.allowed_origins;
         return out;
     }
 };
@@ -637,6 +649,7 @@ struct MockConfig {
     std::vector<std::atomic<std::uint64_t>>& hits;
     std::atomic<std::uint64_t>& example_roll;
     MockActivityLog& activity;
+    const routes::CorsPolicy& cors;
 };
 
 /**
@@ -653,7 +666,7 @@ struct MockConfig {
 void serve_mock_request (const MockConfig& mock,
 const httplib::Request& req,
 httplib::Response& res) {
-    routes::apply_cors_headers (req, res);
+    routes::apply_cors_headers (req, res, mock.cors);
 
     // A real preflight (Access-Control-Request-Method present) is browser
     // plumbing, not application traffic, and always gets the synthesized
@@ -775,6 +788,7 @@ const MockStartRequest& request) {
     server->latency_ms      = request.latency_ms;
     server->error_rate_pct  = request.error_rate_pct;
     server->created_at      = routes::now_ms ();
+    server->cors            = routes::CorsPolicy{ request.allowed_origins };
     server->routes          = build_mock_routes (db, request.collection_id);
     server->hits = std::vector<std::atomic<std::uint64_t>> (server->routes.size ());
 
@@ -825,8 +839,8 @@ const MockStartRequest& request) {
     // body is drained by httplib after the response, so keep-alive is
     // unaffected.
     svr.set_pre_routing_handler (
-    [config = MockConfig{ server->latency_ms, server->error_rate_pct,
-     raw->routes, raw->served, raw->hits, raw->example_roll, raw->activity }] (
+    [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
+     raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors }] (
     const httplib::Request& req, httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;

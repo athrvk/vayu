@@ -8,6 +8,7 @@
 #include "vayu/http/url_parts.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #include <ada.h>
 #include <curl/curl.h>
@@ -392,6 +393,65 @@ std::optional<std::string> unsendable_scheme (std::string_view url) {
     }
     return "scheme '" + std::string (scheme) +
     "' is not supported - only http and https URLs can be sent";
+}
+
+namespace {
+
+bool is_space_or_control (char c) {
+    const auto byte = static_cast<unsigned char> (c);
+    return byte <= 0x20 || byte == 0x7f;
+}
+
+/// Why @p origin is not spelled `http(s)://authority` with nothing after the
+/// authority; `nullopt` when it is. Says nothing about whether the authority
+/// is a valid host and port, which is ada's to answer.
+std::optional<std::string> origin_shape_error (std::string_view origin) {
+    if (origin.empty ()) {
+        return "is empty";
+    }
+    if (origin == "null") {
+        return "is the opaque origin 'null', which names no one site";
+    }
+    if (std::any_of (origin.begin (), origin.end (), is_space_or_control)) {
+        return "contains whitespace or a control character";
+    }
+    if (origin.find ('*') != std::string_view::npos) {
+        return "is a wildcard; list each origin by name";
+    }
+    const std::string_view scheme = url_scheme (origin);
+    std::string_view authority    = origin.substr (scheme.size ());
+    if ((!vayu::utils::ascii_lower_equal (scheme, "http") &&
+        !vayu::utils::ascii_lower_equal (scheme, "https")) ||
+    !authority.starts_with ("://")) {
+        return "must start http:// or https://";
+    }
+    authority.remove_prefix (3);
+    if (authority.empty ()) {
+        return "has no host";
+    }
+    if (authority.find ('@') != std::string_view::npos) {
+        return "carries a user name or password; an origin is a scheme, a host "
+               "and a port";
+    }
+    if (authority.find_first_of ("/?#\\") != std::string_view::npos) {
+        return "has a path, query or fragment; an origin ends at the host or "
+               "port";
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+std::expected<std::string, std::string> canonical_origin (std::string_view origin) {
+    if (auto error = origin_shape_error (origin)) {
+        return std::unexpected (std::move (*error));
+    }
+    const auto url = ada::parse<ada::url_aggregator> (origin);
+    if (!url) {
+        return std::unexpected (
+        std::string ("does not name a valid host and port"));
+    }
+    return url->get_origin ();
 }
 
 } // namespace vayu::http

@@ -176,8 +176,8 @@ four more are opened on demand, and the rule that separates them is where each m
 | Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
 | OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
 | [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
-| [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response |
-| [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped |
+| [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
+| [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
 
 Every management API response also carries `Cache-Control: no-store` (#1507, `server.cpp`): every
 route answers a live read of state that changes under the client, so nothing here is valid to replay
@@ -189,6 +189,14 @@ CORS header, refuses a `Host` that is not a loopback spelling of its own port (D
 refuses any request carrying `Origin`; an `OPTIONS` that passes the Host check is answered `204`
 with nothing else. The Electron shell strips the renderer's `Origin` and supplies the renderer's
 CORS headers itself. See [Who may call the API](api-reference.md#who-may-call-the-api).
+
+**A mock server and an inbox do answer browsers**, under a `CorsPolicy` fixed when the listener
+starts (`routes.hpp`, issue #2367). With no `allowedOrigins`, the default, every response is
+`Access-Control-Allow-Origin: *` and never carries credentials, so every page in the browser can
+read it and none can read one sent with the user's cookies. With a list, a listed `Origin` is
+echoed with `Access-Control-Allow-Credentials: true` and every other origin gets no CORS header at
+all. The policy decides what a page can *read*, not what it can send: any page can still make a
+mock or an inbox answer a request.
 
 **The inbox is the only one that may bind beyond loopback**, and the two reasons the others may not
 are different reasons:

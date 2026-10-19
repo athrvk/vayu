@@ -4728,18 +4728,35 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
-**CORS is on by default, with no setting to turn it off** - the same reflected
-`Access-Control-Allow-Origin` / `-Allow-Credentials` / `Vary` pair a mock
-server sends (see [Mock Server](#mock-server)), so a browser-hosted sender can
-read the canned response. A real preflight (a request carrying
-`Access-Control-Request-Method`) is answered `204` and never reaches the
-capture, the canned delay or the canned status - a preflight must get a 2xx
-or the browser aborts before the real request arrives, so a canned response
-configured with a non-2xx status (to exercise a sender's retry path) would
-otherwise break every browser-hosted sender silently. A header the canned
+**CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
+mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
+sender can read the canned response:
+
+- **None listed (the default)**: every answer carries
+  `Access-Control-Allow-Origin: *` and `Access-Control-Expose-Headers: *`,
+  whatever the request's `Origin`, and never `Access-Control-Allow-Credentials`
+  or `Vary`. Every page in the browser can read the canned response; none can
+  read one sent with the user's cookies.
+- **A list**: a request whose `Origin` is a listed origin gets that `Origin`
+  echoed, `Access-Control-Allow-Credentials: true` and the rest of the answer
+  below. Any other request - an unlisted origin, the literal `null` a sandboxed
+  frame or `file://` page sends, no `Origin` at all - is still captured and
+  answered, with no `Access-Control-*` header, so the browser keeps the answer
+  from the page. `Vary: Origin` is on every answer under a list. Origins are
+  compared canonically: scheme and host case-folded, a default port dropped, so
+  `https://App.Example:443` matches a listed `https://app.example`.
+
+A real preflight (a request carrying `Access-Control-Request-Method`) is
+answered `204` and never reaches the capture, the canned delay or the canned
+status - a preflight must get a 2xx or the browser aborts before the real
+request arrives, so a canned response configured with a non-2xx status (to
+exercise a sender's retry path) would otherwise break every browser-hosted
+sender silently. It carries the grant above (and `Access-Control-Allow-Methods`
+/ `-Allow-Headers` echoing what was asked, `Access-Control-Max-Age: 600`), or
+under a list for an unlisted origin no CORS header at all. A header the canned
 response sets that names `Access-Control-*` or `Vary` is dropped rather than
-echoed, since the engine already answered those; a credentialed request
-(`Origin` present and not the literal `null`) rewrites a wildcard
+echoed, since the engine already answered those and a replayed grant would undo
+a refusal; a credentialed answer (a listed origin) rewrites the wildcard
 `Access-Control-Expose-Headers` into the canned response's own header names,
 per the Fetch spec's rule that `*` there is a literal name, not a wildcard,
 under credentials.
@@ -4755,6 +4772,7 @@ inbox on a free port that answers `200` with no body.
   "port": 0,
   "bind": "127.0.0.1",
   "confirmNonLoopback": false,
+  "allowedOrigins": [],
   "response": {
     "status": 200,
     "body": "",
@@ -4771,12 +4789,15 @@ inbox on a free port that answers `200` with no body.
 | `response.status` | 100-599 |
 | `response.headers` | String values only; a `Content-Type` here is used verbatim |
 | `response.delayMs` | 0-30000, applied before every reply |
+| `allowedOrigins` | Default `[]` (CORS `*`, no credentials). Up to 32 origins granted credentialed CORS, each `http://` or `https://` plus a host and an optional port, at most 512 bytes: no path (a trailing `/` included), query, fragment, user name or password, no `*` and not `null`. Stored and echoed canonical (scheme and host lowercased, a default port dropped); fixed for the inbox's life, `PUT` does not change it |
 
 An out-of-range value is a `400` naming the field rather than a fallback to the
 default: a listener quietly answering something other than what it was asked to
 is invisible on both sides of the wire. A bind that fails is a `409` with code
 `inbox_bind_failed`; a non-loopback bind without confirmation is a `400` with
-code `inbox_non_loopback_bind`.
+code `inbox_non_loopback_bind`. An `allowedOrigins` that is not an array, holds
+too many entries, or holds one that is not an origin is a `400` `bad_request`
+naming the entry (`allowedOrigins[1]`) and what is wrong with it.
 
 A `port` another engine listener is already running on - an inbox or a mock
 issuer - is refused with that same `409`, naming the holder ("`inbox inbox_2f1c`
@@ -4798,6 +4819,7 @@ this way, since the kernel does not hand out a port it is already using.
   "running": true,
   "loopback": true,
   "captureCount": 0,
+  "allowedOrigins": [],
   "response": { "status": 200, "body": "", "headers": {}, "delayMs": 0 }
 }
 ```
@@ -4989,25 +5011,39 @@ outcomes are distinct rather than one blanket 404:
 | The path matches, the method does not | 404 | `mock_method_mismatch` | The matching path template and the methods it *is* served for |
 | A route matched but its request has no saved example | 501 | `mock_no_example` | The request's name, and that an example must be saved or imported |
 
-**CORS is on by default, with no setting to turn it off.** A mock server
+**CORS follows the mock's `allowedOrigins`** (issue #2367). A mock server
 answers whatever calls it - most often a browser page on another origin, not
-only curl - so every response carries `Access-Control-Allow-Origin`, echoing
-the request's `Origin` header (with `Access-Control-Allow-Credentials: true`
-and `Vary: Origin`) when present and not the literal `null` a sandboxed frame
-or `file://` page sends, or `*` otherwise, plus `Access-Control-Expose-Headers:
-*` so a page's `fetch` can read a header the example set - rewritten to the
-example's own header names on a credentialed response, since the Fetch spec
-reads `*` there as a literal name, not a wildcard, once credentials are in
-play. A header the example itself carries under `Access-Control-*` or `Vary`
-is dropped rather than echoed, since the engine already answered those. This
-applies to a miss too - a 404 with no CORS headers reads in a browser as an
-opaque "CORS error" instead of the `mock_no_route` / `mock_method_mismatch` /
-`mock_no_example` body above.
+only curl - and what it answers with is often a recorded response, so which
+pages may read it is the caller's to state:
+
+- **None listed (the default)**: every response carries
+  `Access-Control-Allow-Origin: *`, whatever the request's `Origin`, plus
+  `Access-Control-Expose-Headers: *` so a page's `fetch` can read a header the
+  example set, and never `Access-Control-Allow-Credentials` or `Vary`. Every
+  page in the browser can read the mock; none can read a response sent with
+  the user's cookies.
+- **A list**: a request whose `Origin` is a listed origin gets that `Origin`
+  echoed with `Access-Control-Allow-Credentials: true`, and
+  `Access-Control-Expose-Headers` names the example's own headers, since the
+  Fetch spec reads `*` there as a literal name, not a wildcard, once
+  credentials are in play. Any other request - an unlisted origin, the literal
+  `null` a sandboxed frame or `file://` page sends, no `Origin` at all - is
+  still served, with no `Access-Control-*` header, so the browser keeps the
+  response from the page. `Vary: Origin` is on every response under a list.
+  Origins are compared canonically: scheme and host case-folded, a default port
+  dropped, so `https://App.Example:443` matches a listed `https://app.example`.
+
+A header the example itself carries under `Access-Control-*` or `Vary` is
+dropped rather than echoed, since the engine already answered those and a
+replayed grant would undo a refusal. The grant applies to a miss too - a 404
+with no CORS headers reads in a browser as an opaque "CORS error" instead of
+the `mock_no_route` / `mock_method_mismatch` / `mock_no_example` body above.
 
 A **real preflight** - a request carrying `Access-Control-Request-Method` -
-is always answered synthetically (`204`, `Access-Control-Allow-Methods` /
-`-Allow-Headers` echoing what the browser asked for,
-`Access-Control-Max-Age: 600`), whether or not a route is stored for that
+is always answered synthetically (`204`, with the grant above plus
+`Access-Control-Allow-Methods` / `-Allow-Headers` echoing what the browser
+asked for and `Access-Control-Max-Age: 600`, or under a list for an unlisted
+origin no CORS header at all), whether or not a route is stored for that
 path under `OPTIONS`: breaking the preflight to surface a stored route's
 `404`/`501` would break the browser request behind it for nothing. It does
 not count toward a route's `hits` or appear in `GET /mock/:mockId/activity`.
@@ -5027,14 +5063,22 @@ on that join.
   "collectionId": "col_abc123",
   "port": 0,
   "latencyMs": 0,
-  "errorRatePct": 0
+  "errorRatePct": 0,
+  "allowedOrigins": []
 }
 ```
 
 `collectionId` is required. `port` 0 (the default) binds a free one.
 `latencyMs` (0 - 30000) delays every answer; `errorRatePct` (0 - 100) replaces
 that share of answers with a synthesized `500` carrying `mock_injected_error`.
-Every out-of-range value is a `400` rather than a clamp.
+`allowedOrigins` (default `[]`) lists up to 32 origins granted credentialed
+CORS (see above), each `http://` or `https://` plus a host and an optional
+port, at most 512 bytes: no path (a trailing `/` included), query, fragment,
+user name or password, no `*` and not `null`. It is stored and echoed
+canonical (scheme and host lowercased, a default port dropped). Every
+out-of-range value is a `400` rather than a clamp, and an `allowedOrigins`
+entry that is not an origin is a `400` `bad_request` naming the entry
+(`allowedOrigins[1]`) and what is wrong with it.
 
 **Response:**
 ```json
@@ -5048,7 +5092,8 @@ Every out-of-range value is a `400` rather than a clamp.
   "errorRatePct": 0,
   "routeCount": 12,
   "routesWithoutExample": 3,
-  "createdAt": 1735689600000
+  "createdAt": 1735689600000,
+  "allowedOrigins": []
 }
 ```
 

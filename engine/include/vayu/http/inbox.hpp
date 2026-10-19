@@ -57,6 +57,9 @@ struct InboxInfo {
     /// than a wrong number.
     int64_t capture_count = 0;
     InboxCannedResponse response;
+    /// The origins granted credentialed CORS, canonical; empty is the
+    /// anonymous `*` default (`routes::CorsPolicy`).
+    std::vector<std::string> allowed_origins;
 };
 
 /** A validated `POST /inbox/start` payload. */
@@ -64,6 +67,8 @@ struct InboxStartRequest {
     int port         = 0; // 0 = pick an ephemeral port
     std::string bind = "127.0.0.1";
     InboxCannedResponse response;
+    /// `allowedOrigins`, canonical (`canonical_origin`); empty is the default.
+    std::vector<std::string> allowed_origins;
 };
 
 /**
