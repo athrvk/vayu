@@ -187,7 +187,7 @@ function isPidCertainlyDead(pid: number): boolean {
  * read as `engine` it would aim the force-kill at whatever inherited a
  * recycled PID.
  */
-export type EngineProcessState = "engine" | "not-engine" | "unknown";
+type EngineProcessState = "engine" | "not-engine" | "unknown";
 
 /**
  * Does the OS agree that this live PID is a vayu-engine?

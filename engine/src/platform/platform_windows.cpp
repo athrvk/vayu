@@ -80,7 +80,7 @@ LockAcquisition acquire_file_lock (const std::string& path, LockHandle& handle) 
     // Note: On Windows, file locks are automatically released when the process terminates
     // (even if it crashes or is killed), so stale locks are not a concern.
     // Share mode 0 is also what keeps the file from being deleted while held,
-    // so the guard cannot be bypassed the way a POSIX file lock can (#2422).
+    // so the guard cannot be bypassed the way a POSIX file lock can (issue #2422).
     handle = CreateFileA (path.c_str (), GENERIC_READ | GENERIC_WRITE,
     0, // No sharing - exclusive access
     nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
