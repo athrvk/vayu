@@ -847,6 +847,11 @@ unsaved one. `AuthTab` writes its current draft here on every render and clears
 its entry on unmount; `withDraftAuth` (`modules/request-builder/utils/auth-resolution.ts`)
 substitutes it into an ancestor chain before either reader calls
 `resolveAuthSource`, so a dirty pick and its own inheritance chain agree.
+The entry is also published while the tab is clean, equal to the stored value,
+so a reader tells "unsaved" from "open" with `isUnsavedAuthDraft` (same module),
+which compares the way the tab's `isDirty` does; both readers append "(unsaved)"
+to what they describe only while that holds, because the engine composes from the
+stored row and a request below sends that until Save.
 
 #### `response-store.ts` - Response Cache
 

@@ -12,9 +12,9 @@
  * at this level" (`none`, stepped over) and "configured to send nothing"
  * (`noauth`, terminal). Collapsing the two meant a request under a folder the
  * user had explicitly set to No Auth still sent the root collection's bearer
- * token - issue #195, finding 2. The MCP copy of this walk (`electron/mcp/
- * resolve.ts`) is pinned by the equivalent case in `resolve.test.ts`; the two
- * must stay in step.
+ * token - issue #195, finding 2. The engine walks the same chain in
+ * `resolve_inherited_auth` (`engine/src/http/request_composer.cpp`) and has its
+ * own tests; the two must stay in step.
  */
 
 import { describe, it, expect } from "vitest";

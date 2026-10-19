@@ -471,15 +471,64 @@ export function collectionScriptInput(which: "pre" | "post") {
 		);
 }
 
+/** The modes the engine applies, plus the two a collection chain reads (`none`, `noauth`) and `inherit`. */
+const AUTH_MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"] as const;
+
+/**
+ * Modes an import can store that the engine has no resolution for
+ * (`UneditableAuthMode` in the app's `constants/auth-modes.ts`). Named so the
+ * refusal can say Vayu does not send them rather than call them misspelt.
+ */
+const UNEXECUTED_AUTH_MODES: readonly string[] = [
+	"digest",
+	"aws",
+	"ntlm",
+	"hawk",
+	"oauth1",
+	"edgegrid",
+	"jwt",
+];
+
+/**
+ * Why a `mode` was refused. The engine maps an unknown one to "no auth" and
+ * sends anyway, so the refusal has to happen here, before a request goes out
+ * the agent believes is authenticated.
+ */
+function authModeError(input: unknown): string {
+	const keep = 'Leave "auth" out to keep what is stored.';
+	if (typeof input === "string" && UNEXECUTED_AUTH_MODES.includes(input)) {
+		return `Vayu does not execute auth mode "${input}": a request carrying it is sent with no authentication. Use one of ${AUTH_MODES.join(", ")}. ${keep}`;
+	}
+	return `Unknown auth mode ${JSON.stringify(input)}. Modes are lowercase and exact: ${AUTH_MODES.join(", ")}. ${keep}`;
+}
+
 /**
  * Optional auth block. Callers can copy a saved request's `auth` object verbatim
  * (read via list_requests). The engine applies it - bearer/basic/apikey and
  * oauth2 (using its token cache) - after `{{variables}}` inside it are resolved;
  * `inherit` resolves against the collection chain (supply collectionId).
+ *
+ * `mode` is closed and `.passthrough()` stays: the members each mode reads
+ * (token, username, config…) belong to the engine, which is the only place that
+ * knows them. `in` is optional because the engine defaults an api key to a
+ * header; a Postman-style `addTo` is refused because the engine would read
+ * nothing from it and send the key in a header.
  */
 export const authInput = z
-	.object({ mode: z.string().describe("bearer | basic | apikey | oauth2 | inherit | none.") })
+	.object({
+		mode: z
+			.enum(AUTH_MODES, { error: (issue) => authModeError(issue.input) })
+			.describe(AUTH_MODES.join(" | ") + "."),
+		in: z
+			.enum(["header", "query"])
+			.optional()
+			.describe("apikey only: where the key goes (default header)."),
+	})
 	.passthrough()
+	.refine((auth) => auth.mode !== "apikey" || !("addTo" in auth), {
+		path: ["addTo"],
+		error: 'An apikey block places the key with "in" ("header" | "query"), not "addTo".',
+	})
 	.optional()
 	.describe(
 		"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."

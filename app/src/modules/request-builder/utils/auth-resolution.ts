@@ -59,6 +59,22 @@ export function withDraftAuth(
 	return ancestors.map((c) => (c.id === collectionId ? { ...c, auth: draftAuth } : c));
 }
 
+/**
+ * Does the Auth tab's draft say something the stored collection does not?
+ *
+ * The tab publishes its draft even while clean (equal to the stored value), so
+ * "a draft exists" is not "there is something unsaved". Compared the way the
+ * tab's own `isDirty` is, by serialised value. What `POST /compose` walks is
+ * the stored row, so a differing draft is what a context-bar sentence or chain
+ * row describes and a request below does not yet send.
+ */
+export function isUnsavedAuthDraft(
+	stored: Collection["auth"],
+	draftAuth: Collection["auth"] | undefined
+): boolean {
+	return draftAuth !== undefined && JSON.stringify(draftAuth) !== JSON.stringify(stored);
+}
+
 export function resolveAuthSource(ancestors: Collection[]): AuthSource {
 	for (let i = ancestors.length - 1; i >= 0; i--) {
 		const collection = ancestors[i];

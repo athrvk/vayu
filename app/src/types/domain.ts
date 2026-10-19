@@ -222,8 +222,9 @@ export interface OAuth2Config {
  * inheritance; a folder left on Inherit does not), and collapsing the two is how
  * an imported No Auth folder used to leak its parent's bearer token (issue
  * #195). `resolveAuthSource` in `modules/request-builder/utils/auth-resolution.ts`
- * is the one place that reads the difference, mirrored for MCP in
- * `electron/mcp/resolve.ts`.
+ * is the app's half of that read; the engine's is `resolve_inherited_auth` in
+ * `engine/src/http/request_composer.cpp`, which `POST /compose` (and so MCP)
+ * walks.
  *
  * On a *request* the two coincide - a request's own auth is never walked, so
  * `none` already means send nothing - which is why only the collection editor

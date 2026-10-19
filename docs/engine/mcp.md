@@ -687,7 +687,14 @@ Notes:
   both scripts, so an agent that can send an authenticated request can now save
   one. The `auth` input is the *same schema* `run_request` takes rather than a
   copy of it - one definition, four descriptions - which is what lets an agent
-  read a request's `auth` over `list_requests` and write it back verbatim. Both
+  read a request's `auth` over `list_requests` and write it back verbatim. Its
+  `mode` is a closed set (`bearer`, `basic`, `apikey`, `oauth2`, `inherit`,
+  `none`, `noauth`): the engine sends a request with an unknown mode and no auth
+  at all, so a misspelling (`Bearer`, `api-key`) or a mode Vayu does not execute
+  (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`) is refused at the
+  schema, with a message saying which, and omitting `auth` keeps what is stored.
+  An `apikey` block places the key with `in` (`header`, the default, or `query`);
+  a Postman-style `addTo` is refused rather than read as a header (#2477). Both
   the auth block and each setting follow the merge-patch rule the strings already
   did: named is written, absent is left alone, so an update that mentions only
   `maxRedirects` cannot hand a stored `followRedirects: false` back to the
