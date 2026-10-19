@@ -28,6 +28,8 @@ const SURFACES = [
 	"modules/request-builder/components/RequestTabs/panels/AuthPanel.tsx",
 	"components/layout/context-bar/AuthContextSection.tsx",
 	"modules/request-builder/components/RequestTabs/panels/AuthInheritBanner.tsx",
+	"modules/collections/CollectionDetail/AuthTab.tsx",
+	"components/shared/AuthFields/AuthFields.tsx",
 	"services/codegen/prepare.ts",
 ];
 
@@ -35,6 +37,8 @@ const FALSE_CLAIMS = [
 	"still sent with this request",
 	"computed at send time",
 	"happens on the wire",
+	"still what descendant requests inherit",
+	"still what runs",
 ];
 
 describe("copy about auth modes the engine does not execute", () => {
