@@ -144,7 +144,7 @@ std::string row_value (const nlohmann::json& row) {
 }
 
 /// A stored row's `enabled`, defaulting to `true` for a row that carries
-/// none - the same rule `request_composer.cpp`'s `flatten_stored_headers`
+/// none - the same rule `request_composer.cpp`'s `stored_header_rows`
 /// applies at send time. `find` + `is_boolean` rather than
 /// `value ("enabled", true)`: the templated multi-arg accessor is what a
 /// release build's `-Wnull-dereference` false-positives on (issue #1491).

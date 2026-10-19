@@ -5531,7 +5531,7 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   "request": {                      // Optional: an inline unresolved request
     "method": "POST",
     "url": "https://{{host}}/users",
-    "headers": { "X-Token": "{{token}}" },
+    "headers": [{ "name": "X-Token", "value": "{{token}}" }],
     "body": { "mode": "json", "content": "{\"name\":\"{{name}}\"}" },
     "auth": { "mode": "inherit" },
     "elements": []
@@ -5582,8 +5582,9 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   internally, so a
   collection run needs no field at all.
 
-- **`requestId`** composes the stored request wholesale: URL, flattened enabled
-  headers (later duplicates win), body, auth (absent auth defaults to
+- **`requestId`** composes the stored request wholesale: URL, headers (every
+  enabled row with a key, in row order, as `{name, value}` lines - a repeated
+  name repeated, each in the spelling typed, issue #2466), body, auth (absent auth defaults to
   `inherit`), the resolved `elements` list (collection chain root→leaf, then
   the request's own, each stamped with its origin, disabled and blank
   `script.*` entries dropped the same way - see [Elements](elements.md)),
@@ -5813,6 +5814,9 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 **Response:** `200` with the composed payload - the `POST /execute` body shape,
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
 unchanged. An auth that resolves to "send nothing" is an absent `auth` field.
+`headers` always comes back as the line array (issue #2466), whichever shape an
+inline request used, so a repeated header survives compose to execute; it is
+absent when there are no lines.
 
 **Errors** use the engine's single nested shape (see the top of this page),
 with specific codes:
@@ -6024,9 +6028,9 @@ run's per-virtual-user session (the step neither sends nor updates it); a
 single-request load run never tracks cookies at all.
 
 **`bodyModeHeaders` names the headers the body mode wrote** (issue #1765): the
-`headers` keys whose row carried `"source": "body-mode"`. The flat `headers`
-object has no room for the marker, so `POST /compose` emits this list from a
-stored request's rows (only when it names something) and the app sends it
+header names whose last row carried `"source": "body-mode"`, compared without
+case. A `headers` line has no room for the marker, so `POST /compose` emits this
+list from a stored request's rows (only when it names something) and the app sends it
 beside an inline request's headers; inline `headers` replace the stored ones,
 so the stored list is dropped with them. A name in it that
 `disabledSystemHeaders` or `disabledDefaultHeaders` refuses is left off the

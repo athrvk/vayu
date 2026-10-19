@@ -57,6 +57,18 @@ const nlohmann::json& json);
 
 namespace {
 
+/// The value of the first composed header line spelled exactly @p name, or
+/// null when no line is. `POST /compose` answers headers as `{name, value}`
+/// lines (issue #2466).
+json header_of (const json& payload, std::string_view name) {
+    for (const json& line : payload.value ("headers", json::array ())) {
+        if (line.value ("name", "") == name) {
+            return line.value ("value", json ());
+        }
+    }
+    return json ();
+}
+
 json load_fixture () {
     const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
     "tests" / "fixtures" / "variable-resolution-conformance.json";
@@ -579,7 +591,8 @@ TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     EXPECT_EQ (payload["method"], "POST");
 
     // Headers: enabled-only, empty keys dropped, values resolved.
-    EXPECT_EQ (payload["headers"], (json{ { "X-Token", "leaf-token" } }));
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"X-Token","value":"leaf-token"}])"));
 
     // Body content resolved.
     EXPECT_EQ (payload["body"]["mode"], "json");
@@ -701,7 +714,8 @@ TEST_F (RequestComposerTest, ComposesAnInlineRequestAgainstAScope) {
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["method"], "GET");
     EXPECT_EQ (payload["url"], "https://col.test/x");
-    EXPECT_EQ (payload["headers"], (json{ { "X-col.test", "s3cr3t" } }));
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"X-col.test","value":"s3cr3t"}])"));
     EXPECT_EQ (payload["body"]["content"], "v=s3cr3t");
     // Inline inherit resolves through the supplied collection scope, and the
     // winning block's own {{vars}} resolve (strictly before any OAuth cache
@@ -729,7 +743,7 @@ TEST_F (RequestComposerTest, DeferDynamicVariablesKeepsTheTokensForTheRunToBind)
     { "deferDynamicVariables", true } });
     ASSERT_EQ (status, 200) << deferred.dump ();
     EXPECT_EQ (deferred["url"], "https://example.test/{{$randomUUID}}");
-    EXPECT_EQ (deferred["headers"]["X-Key"], "{{$guid}}");
+    EXPECT_EQ (header_of (deferred, "X-Key"), "{{$guid}}");
     EXPECT_EQ (deferred["body"]["content"], R"({"id":"{{$guid}}"})");
     // A credential is *encoded* when the request is built, so there is no later
     // moment for a bind to reach it: composition generates it here, once, and
@@ -742,7 +756,8 @@ TEST_F (RequestComposerTest, DeferDynamicVariablesKeepsTheTokensForTheRunToBind)
     *db_, json{ { "request", request }, { "collectionId", "col" } });
     ASSERT_EQ (plain_status, 200) << composed.dump ();
     EXPECT_NE (composed["url"], "https://example.test/{{$randomUUID}}");
-    EXPECT_NE (composed["headers"]["X-Key"], "{{$guid}}");
+    ASSERT_TRUE (header_of (composed, "X-Key").is_string ()) << composed.dump ();
+    EXPECT_NE (header_of (composed, "X-Key"), "{{$guid}}");
     EXPECT_NE (composed["body"]["content"], R"({"id":"{{$guid}}"})");
 }
 
@@ -936,8 +951,8 @@ TEST_F (RequestComposerTest, AnUnknownNameReachesTheWireAsItsTokenNotAsAHole) {
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["url"], "https://{{host}}/x?k=k");
-    EXPECT_EQ (payload["headers"]["X-Note"], "{{missing}}");
-    EXPECT_EQ (payload["headers"]["X-Known"], "k");
+    EXPECT_EQ (header_of (payload, "X-Note"), "{{missing}}");
+    EXPECT_EQ (header_of (payload, "X-Known"), "k");
     EXPECT_EQ (payload["body"]["fields"][0]["value"], "{{gone}}");
 
     // Defined-and-empty is still empty: the rule is about a name nothing
@@ -971,7 +986,7 @@ TEST_F (RequestComposerTest, AValueCarryingTokensResolvesThroughThemAndStopsOnAC
     EXPECT_EQ (payload["url"], "https://api.example.test/orders");
     // A name already being expanded is left written as it stands, so the
     // composition terminates and the request says where it gave up.
-    EXPECT_EQ (payload["headers"]["X-Cycle"], "AB{{a}}");
+    EXPECT_EQ (header_of (payload, "X-Cycle"), "AB{{a}}");
 }
 
 // The header refusal reads *substituted values*, and since #1009 a value can
@@ -1089,7 +1104,7 @@ TEST_F (RequestComposerTest, ABoundColumnOutranksASameNamedVariableByBeingDeferr
     auto [status, payload] = vayu::http::compose_request_core (*db_, bound);
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["url"], "https://api.test/u/{{username}}");
-    EXPECT_EQ (payload["headers"]["X-User"], "{{username}}");
+    EXPECT_EQ (header_of (payload, "X-User"), "{{username}}");
     EXPECT_EQ (payload["body"]["content"], R"({"who":"{{username}}"})");
     EXPECT_EQ (payload["auth"]["username"], "{{username}}");
 
@@ -1100,7 +1115,7 @@ TEST_F (RequestComposerTest, ABoundColumnOutranksASameNamedVariableByBeingDeferr
     auto [plain_status, plain_payload] = vayu::http::compose_request_core (*db_, unbound);
     ASSERT_EQ (plain_status, 200) << plain_payload.dump ();
     EXPECT_EQ (plain_payload["url"], "https://api.test/u/from-the-environment");
-    EXPECT_EQ (plain_payload["headers"]["X-User"], "from-the-environment");
+    EXPECT_EQ (header_of (plain_payload, "X-User"), "from-the-environment");
     EXPECT_EQ (plain_payload["auth"]["username"], "from-the-environment");
 }
 
@@ -1240,7 +1255,7 @@ TEST_F (RequestComposerTest, ALiteralLineBreakInTheHeaderIsNotBlamedOnAVariable)
                { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["headers"]["X-Note"], "typed\r\nX-Admin: true fine");
+    EXPECT_EQ (header_of (payload, "X-Note"), "typed\r\nX-Admin: true fine");
 }
 
 // The twin of `TheBindRuleIsTheOneSharedHeaderTextRule` in the scenario-data
@@ -1270,16 +1285,16 @@ TEST_F (RequestComposerTest, TheComposerRuleIsTheOneSharedHeaderTextRule) {
 // --- Two header names that resolve to one (#1051) ----------------------------
 //
 // The sibling of the block above, and the other half of what a substituted
-// header name can do: there a value *forges* a header, here a name *erases*
-// one. The map the payload becomes holds one value per name, so the second of
-// two names that resolve alike takes the first's place and the request goes out
-// a header short - which nothing downstream can notice, the pre-send gate
+// header name can do: there a value *forges* a header, here a name *repeats*
+// one the author did not repeat. Two names written differently that resolve
+// alike would go out as one header sent twice, which no row in the editor
+// shows and nothing downstream can tell from a typed repeat, the pre-send gate
 // included. See `http/header_names.hpp`.
 //
-// Mutation-check for the four below: drop the `collision` check in
-// `resolve_header_block` and the first three fail on the status, while the
-// fourth must keep passing - it is the case the refusal deliberately leaves
-// alone.
+// Mutation-check for the tests below: drop the `collision` check in
+// `resolve_header_block` and the refusals fail on the status, while the typed
+// repeats must keep passing - they are the case the refusal deliberately
+// leaves alone (issue #2466).
 
 TEST_F (RequestComposerTest, TwoTemplatedHeaderNamesResolvingAlikeAreRefused) {
     seed_environment ("env_1",
@@ -1317,11 +1332,9 @@ TEST_F (RequestComposerTest, ATemplatedNameCollidingWithALiteralHeaderIsRefused)
     EXPECT_NE (message.find ("X-Tenant"), std::string::npos) << message;
 }
 
-// `Headers` compares names without case, so a name that differs from another
-// only in case is not a second header - it is the same one, arriving instead of
-// it. This is the case composition alone can catch: the payload it would answer
-// 200 with carries both names as distinct JSON keys, and the header is lost
-// later, where `deserialize_request` parses them into the map.
+// Header names compare without case, so a name that differs from another only
+// in case is the same header: `{{h}}` resolving to `authorization` beside a
+// typed `Authorization` would send a second credential under one name.
 TEST_F (RequestComposerTest, TheHeaderNameCollisionIsJudgedWithoutCase) {
     seed_environment ("env_1", R"({"h":{"value":"authorization","enabled":true}})");
     const json body = {
@@ -1359,24 +1372,126 @@ TEST_F (RequestComposerTest, TheCollisionIsRefusedWhicheverNameResolvedFirst) {
     EXPECT_NE (message.find ("X~Tenant"), std::string::npos) << message;
 }
 
-// Two names the author typed are two lines they can see side by side, and the
-// later one has always won - a rule that is visible in the editor and is not
-// this refusal's to change. Only a collision resolution *made* is invisible,
-// which is the whole distinction (the same one the bind-time rule draws in
-// `docs/engine/api-reference.md`).
+// Two names the author typed alike are two lines they can see side by side, and
+// both are sent, each in its own spelling (issue #2466). Only a collision
+// resolution *made* is invisible, which is the whole distinction (the same one
+// the bind-time rule draws in `docs/engine/api-reference.md`).
 TEST_F (RequestComposerTest, TwoNamesTheAuthorTypedAreNotThisRefusal) {
     seed_environment ("env_1", R"({"ok":{"value":"fine","enabled":true}})");
-    const json body = {
-        { "request",
-        { { "method", "GET" }, { "url", "https://x.test/" },
-        { "headers", { { "Authorization", "Bearer {{ok}}" }, { "authorization", "Bearer other" } } } } },
-        { "environmentId", "env_1" }
-    };
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", json::parse (R"([{"name":"Authorization","value":"Bearer {{ok}}"},
+            {"name":"authorization","value":"Bearer other"}])") } } },
+               { "environmentId", "env_1" } };
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["headers"]["Authorization"], "Bearer fine");
-    EXPECT_EQ (payload["headers"]["authorization"], "Bearer other");
+    EXPECT_EQ (payload["headers"], json::parse (R"([{"name":"Authorization","value":"Bearer fine"},
+        {"name":"authorization","value":"Bearer other"}])"));
+}
+
+// One template typed on two rows is a repeat the author can see too: written
+// alike, so both lines go out whatever the template answers.
+TEST_F (RequestComposerTest, OneTemplateTypedTwiceIsNotThisRefusal) {
+    seed_environment ("env_1", R"({"h":{"value":"X-Trace","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", json::parse (R"([{"name":"{{h}}","value":"a"},
+            {"name":"{{h}}","value":"b"}])") } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"], json::parse (R"([{"name":"X-Trace","value":"a"},
+        {"name":"X-Trace","value":"b"}])"));
+}
+
+// The same refusal in the line form a client sends since issue #2466: the
+// order is the author's here, so the literal comes first and the template
+// collides into it.
+TEST_F (RequestComposerTest, AResolutionCollisionIsRefusedInTheLineForm) {
+    seed_environment ("env_1", R"({"h":{"value":"x-dup","enabled":true}})");
+    const json body        = { { "request",
+                               { { "method", "GET" }, { "url", "https://x.test/" },
+                               { "headers", json::parse (R"([{"name":"X-Dup","value":"one"},
+            {"name":"{{h}}","value":"two"}])") } } },
+               { "environmentId", "env_1" } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "colliding_header_names");
+}
+
+// --- Every enabled header row is sent, in order (issue #2466) ----------------
+//
+// A stored request's rows compose to one `{name, value}` line each, a repeated
+// name repeated and each in the spelling typed, so a duplicate survives
+// compose -> execute. Mutation check: key the lines by name again in
+// `stored_header_rows` (an object, last row wins) and the three rows compose
+// to two.
+
+TEST_F (RequestComposerTest, RepeatedStoredHeaderRowsComposeToOrderedLines) {
+    seed_collection ("col", "");
+    auto r    = make_request ("req_1", "col");
+    r.headers = R"([{"key":"X-Dup","value":"one","enabled":true},
+        {"key":"x-dup","value":"two","enabled":true},
+        {"key":"X-Dup","value":"three","enabled":true}])";
+    db_->save_request (r);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"], json::parse (R"([{"name":"X-Dup","value":"one"},
+        {"name":"x-dup","value":"two"},{"name":"X-Dup","value":"three"}])"));
+
+    // And the request the payload becomes carries the three, in order.
+    auto request = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (request.is_ok ()) << request.error ().message;
+    EXPECT_EQ (request.value ().headers,
+    (vayu::HeaderList{ { "X-Dup", "one" }, { "x-dup", "two" }, { "X-Dup", "three" } }));
+}
+
+// The older object form is still taken inline, one line per key, and comes
+// back in the line form like every composed payload.
+TEST_F (RequestComposerTest, AnInlineHeaderObjectComposesToLines) {
+    const json body        = { { "request",
+           { { "method", "GET" }, { "url", "https://x.test/" },
+           { "headers", { { "Accept", "application/json" } } } } } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"Accept","value":"application/json"}])"));
+}
+
+/**
+ * `tests/fixtures/header-rows-conformance.json` is the contract between this
+ * suite and the app's flattening of the Headers table (`toHeaderRows`): both
+ * turn the same rows into the same ordered lines. Mutation check: key the
+ * lines by name in `stored_header_rows` (an object, last row wins) and the
+ * repeated-name cases fail.
+ */
+TEST_F (RequestComposerTest, StoredHeaderRowsMatchTheConformanceFixture) {
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "header-rows-conformance.json";
+    std::ifstream in (path);
+    ASSERT_TRUE (in.good ()) << "fixture missing: " << path;
+    const json cases = json::parse (in);
+    ASSERT_TRUE (cases.is_array ());
+    ASSERT_FALSE (cases.empty ()) << "header-rows fixture scanned nothing";
+
+    seed_collection ("col", "");
+    for (const json& c : cases) {
+        auto r    = make_request ("req_rows", "col");
+        r.url     = "https://x.test/";
+        r.headers = c.at ("rows").dump ();
+        db_->save_request (r);
+        auto [status, payload] =
+        vayu::http::compose_request_core (*db_, json{ { "requestId", "req_rows" } });
+        ASSERT_EQ (status, 200) << c.at ("name") << ": " << payload.dump ();
+        EXPECT_EQ (payload.value ("headers", json::array ()), c.at ("expected"))
+        << c.at ("name");
+    }
 }
 
 // --- A header name that resolves to nothing (#1084) --------------------------
@@ -1438,7 +1553,7 @@ TEST_F (RequestComposerTest, ANameThatResolvesToANameIsNotThisRefusal) {
     auto [status, payload] = vayu::http::compose_request_core (*db_, body);
 
     ASSERT_EQ (status, 200) << payload.dump ();
-    EXPECT_EQ (payload["headers"]["X-Tenant"], "acme");
+    EXPECT_EQ (header_of (payload, "X-Tenant"), "acme");
 }
 
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
@@ -1718,8 +1833,8 @@ TEST_F (RequestComposerTest, EmitsTheStoredProtocolSettingsAndLetsAnInlineValueW
  * Body panel writes carries `source: "body-mode"`, and a stored
  * `content-type` opt-out drops it once the composed payload is parsed, while
  * a Content-Type the user typed (no marker) is always kept. The stored rows
- * are the app's own shape. Mutation check: drop the `marked[...]` line in
- * `flatten_stored_headers` (no `bodyModeHeaders`) and the marked row reaches
+ * are the app's own shape. Mutation check: drop the `marked.insert_or_assign` line in
+ * `stored_header_rows` (no `bodyModeHeaders`) and the marked row reaches
  * the request; drop the `drop_refused_body_mode_headers` call in
  * `deserialize_request` and the same.
  */
