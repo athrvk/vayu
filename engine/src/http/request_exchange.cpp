@@ -692,6 +692,22 @@ const ScriptVariableScopes& scopes) {
     return apply_late_auth (request, std::move (auth), values_from_scopes (scopes));
 }
 
+std::vector<std::string> resolve_load_residuals (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+std::optional<vayu::http::Auth> late_auth) {
+    auto refusal = resolve_residual_tokens (request, vars);
+    if (late_auth) {
+        auto late_refusal = apply_late_auth (request, std::move (*late_auth), vars);
+        if (!refusal) {
+            refusal = std::move (late_refusal);
+        }
+    }
+    if (refusal) {
+        return { std::move (refusal->error.message) };
+    }
+    return unresolved_token_names (request);
+}
+
 void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
     vayu::Environment* target = &collection_;
     if (scope == "env") {

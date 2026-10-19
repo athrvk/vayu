@@ -550,10 +550,18 @@ applied to the outgoing request rather than being left to the UI. This lives in
   run with no data set at all still binds `user-{{$vu}}`. An OAuth 2.0 config
   carrying either kind is refused by name instead - its token is acquired once,
   before any iteration exists, so no bind can reach it. A credential still
-  holding a name no scope answered at compose is deferred on `POST /execute`
-  too, for the pre-request script to define (#2473): the exchange resolves it
-  against the scopes the script left and applies it after the residual-token
-  pass (`apply_late_auth` in `request_exchange`), Postman's order.
+  holding a name no scope answered at compose is deferred too, for a script to
+  define (#2473): the row and identity are joined into it without applying it
+  (`bind_iteration_holding_auth`), and it is resolved against the scopes the
+  script left and applied after the residual-token pass (`apply_late_auth` in
+  `request_exchange`), Postman's order. `POST /execute` decides it per send
+  (`plan_send_row_auth`), a collection run per step when its plan resolves
+  (`ScenarioStep::auth_after_scripts`, applied by `execute_exchange` on the
+  sequential run and by `resolve_load_residuals` on the load run), and a
+  single-request load run once, only when it declares `requestElements`
+  (`LoadAuthPlan::after_scripts`), the one shape with a residual pass per
+  submission. A step or run whose credentials hold no such name pays nothing
+  per iteration.
   `plan_auth_refresh` decides afterwards
   whether the credential a *load* run just resolved can be kept current past its
   expiry - see the run lifecycle below.

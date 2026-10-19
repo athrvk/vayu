@@ -654,6 +654,26 @@ const ScriptVariableScopes& scopes);
 [[nodiscard]] std::vector<std::string> unresolved_token_names (vayu::Request& request);
 
 /**
+ * The residual pass as the load paths run it before a submission: resolve
+ * against @p vars, then apply @p late_auth (@ref apply_late_auth, issue #2473)
+ * against the same map, then report.
+ *
+ * Never refused, only counted (issue #1503): the request is sent whatever this
+ * answers, so the late auth is applied even after a refusal, and a credential
+ * name nothing answers is encoded as written - what the build did with it
+ * before #2473.
+ *
+ * @return what the run counts as unresolved, empty when nothing: the
+ *         refusal's sentence when the pass refused, otherwise every `{{name}}`
+ *         still on the request. A late bearer token or api key still holding
+ *         one is among them; a name inside a basic pair's base64 is not, as it
+ *         never was.
+ */
+[[nodiscard]] std::vector<std::string> resolve_load_residuals (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+std::optional<vayu::http::Auth> late_auth);
+
+/**
  * Run one exchange: pre-request script, send, test script.
  *
  * @param engine     Reused across calls; contexts are pooled, so a scenario run

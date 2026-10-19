@@ -1333,8 +1333,10 @@ struct SendRowAuth {
     /// (`core::credentials_await_scripts`): the bind joins the row into `auth`
     /// without applying it (`core::bind_iteration_holding_auth`), and the
     /// exchange applies it after the pre-request script
-    /// (`apply_late_auth`). Read by `POST /execute` alone so far; a load run
-    /// still applies at its bind.
+    /// (`apply_late_auth`). A single-request load run carries it into
+    /// `core::LoadAuthPlan::after_scripts` when it declares `requestElements`;
+    /// a collection run decides it per step when its plan resolves
+    /// (`core::ScenarioStep::auth_after_scripts`).
     bool after_scripts                    = false;
     vayu::http::AuthResolution resolution = vayu::http::AuthResolution::Apply;
 };

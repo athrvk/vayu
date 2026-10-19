@@ -978,9 +978,13 @@ Execute is not silent past compose (#1008): a name compose could not answer
 (it kept its braces, #1009) is resolved once more after the pre-request script
 and before the send (`resolve_residual_tokens`,
 `engine/src/http/request_exchange.cpp`); a value compose already substituted is
-finished text. On `POST /execute` a credential holding such a name defers its
-whole auth past the script (#2473): `apply_late_auth` resolves and applies it
-after that pass, so a basic pair is not base64-encoded around a token. **That
+finished text. A credential holding such a name defers its whole auth past the
+script (#2473): `apply_late_auth` resolves and applies it after that pass, so a
+basic pair is not base64-encoded around a token. Decided once, never per send
+or submission: `plan_send_row_auth` for `POST /execute`,
+`ScenarioStep::auth_after_scripts` at plan time for a collection run (both its
+executors), `LoadAuthPlan::after_scripts` for a single-request load run that
+declares `requestElements`. **That
 pass can refuse** (#1051, #1084): a header name that
 resolves onto one the request already carries, or to nothing, is refused
 before the send, in the same words and with the same code compose uses for the
@@ -996,7 +1000,8 @@ value one VU's step 1 sets reaches that same VU's step 2 `{{token}}` without
 two VUs' writes ever landing in one shared map. Never refused under load,
 only counted, on the same #1503 rule the load path has always followed: an
 unresolved name or a header-name collision the pass produces goes on the wire
-regardless. Since #1594, the single-request load path
+regardless, a late credential included (`resolve_load_residuals`, the one
+copy both load paths call). Since #1594, the single-request load path
 (`load_strategy.cpp`) runs the same pass too, against a per-submission
 `ScopeOverlay` rather than a per-VU one - see the element-pipeline bullet
 above - but only when the run declares `requestElements`; a bare URL run

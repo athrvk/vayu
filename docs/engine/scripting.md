@@ -944,7 +944,9 @@ Rules worth knowing before you rely on them:
   the request was composed (#2473): that auth is applied *after* the script, so
   a value the script sets reaches it, and the header is not in
   `pm.request.headers` yet. A header the script sets still wins, because auth
-  never replaces one the request already carries.
+  never replaces one the request already carries. The order is the same on a
+  Send, on every step of a collection run, and under load after an `inline`
+  `script.pre` (a single-request load run's through `requestElements`).
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`

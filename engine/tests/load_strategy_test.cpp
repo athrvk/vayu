@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 
+#include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
 #include "mock_server.hpp"
 #include "temp_database.hpp"
@@ -1803,6 +1804,7 @@ TEST (LegacyScriptFieldRefusalTest, AcceptsAPayloadCarryingNoneOfThem) {
 namespace {
 
 /// A single-request load run driven the way `POST /runs` drives one, through
+/// the route's own read of the payload's rows and auth plan and
 /// `RunManager::start_run` against a real database - the row, the wait for a
 /// terminal status, and the parsed summary every case below reads its answer
 /// out of. A non-void helper cannot use `ASSERT_*`, so a run that never
@@ -1810,6 +1812,16 @@ namespace {
 nlohmann::json run_single_request_summary (vayu::db::Database& db,
 const std::string& run_id,
 const nlohmann::json& config) {
+    vayu::core::ScenarioLimits limits;
+    limits.max_data_rows  = vayu::core::constants::scenario::MAX_DATA_ROWS;
+    limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+    auto read =
+    vayu::http::routes::read_load_data_set (config, limits, /*is_scenario=*/false);
+    if (!read.ok) {
+        ADD_FAILURE () << "the route refused the payload: " << read.error;
+        return nlohmann::json::object ();
+    }
+
     vayu::db::Run row;
     row.id              = run_id;
     row.type            = vayu::RunType::Load;
@@ -1822,7 +1834,8 @@ const nlohmann::json& config) {
     db.create_run (row);
 
     vayu::core::RunManager run_manager;
-    if (!run_manager.start_run (run_id, config, db)) {
+    if (!run_manager.start_run (run_id, config, db, nullptr,
+        std::move (read.set), std::move (read.auth))) {
         ADD_FAILURE () << "start_run refused the payload";
         return nlohmann::json::object ();
     }
@@ -1927,6 +1940,46 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreElementsHeaderEditReachesTheWire) {
     { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" }, { "inline", true } } } } })));
 
     EXPECT_EQ (echo.header ("X-Signed"), "yes") << summary.dump ();
+}
+
+// Issue #2473 on the single-request path: a basic password an inline
+// `script.pre` sets reaches the wire, applied after the submission's residual
+// pass rather than encoded around the token when the run's request was built.
+// Mutation check: leave `LoadAuthPlan::after_scripts` false in
+// `read_load_data_set` and the wire carries `user:{{password}}`.
+TEST_F (LoadStrategyTest, AnInlineScriptPreSetsAPasswordThatReachesTheWireThroughLateAuth) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config    = request_elements_payload (echo.url (), 2, 1,
+       nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+       { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
+    config["auth"] = { { "mode", "basic" }, { "username", "user" },
+        { "password", "{{password}}" } };
+
+    const auto summary = run_single_request_summary (db, "run-late-auth", config);
+
+    EXPECT_EQ (vayu::tests::basic_pair_of (echo.header ("Authorization")), "user:s3cret")
+    << summary.dump ();
+}
+
+// Mixed credentials on the same path: the submission's row answers one half at
+// the bind and the script the other after it.
+TEST_F (LoadStrategyTest, ARowAndAScriptEachAnswerHalfOfABasicPairThroughLateAuth) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config    = request_elements_payload (echo.url (), 1, 1,
+       nlohmann::json::array ({ nlohmann::json{ { "id", "el_pre" }, { "kind", "script.pre" },
+       { "config", { { "script", "pm.environment.set('password', 's3cret');" }, { "inline", true } } } } }));
+    config["auth"] = { { "mode", "basic" }, { "username", "{{data.user}}" },
+        { "password", "{{password}}" } };
+    config["data"] = nlohmann::json::array ({ { { "user", "ada" } } });
+
+    const auto summary = run_single_request_summary (db, "run-late-auth-mixed", config);
+
+    EXPECT_EQ (vayu::tests::basic_pair_of (echo.header ("Authorization")), "ada:s3cret")
+    << summary.dump ();
 }
 
 // The same element left unmarked runs nowhere: `script.pre` has no deferred

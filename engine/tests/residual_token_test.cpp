@@ -35,8 +35,8 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 
+#include "basic_auth_pair.hpp"
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
@@ -47,7 +47,6 @@
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
-#include "vayu/utils/encoding.hpp"
 
 using vayu::http::routes::resolve_residual_tokens;
 using vayu::http::routes::ScriptVariableScopes;
@@ -721,22 +720,8 @@ TEST_F (ResidualTokenExchangeTest, TheReportedRequestIsTheOneThatWentOut) {
 
 // --- auth that waits on the pre-request script (#2473) -----------------------
 
-namespace {
-
 using vayu::http::routes::apply_late_auth;
-
-/// The `user:password` pair a basic `Authorization` value carries, decoded, so
-/// a failure prints the credential that went out rather than its base64.
-std::string basic_pair_of (const std::string& header) {
-    constexpr std::string_view prefix = "Basic ";
-    if (header.rfind (prefix, 0) != 0) {
-        return "<not basic: " + header + ">";
-    }
-    return vayu::utils::base64_decode (std::string_view (header).substr (prefix.size ()))
-    .value_or ("<not base64: " + header + ">");
-}
-
-} // namespace
+using vayu::tests::basic_pair_of;
 
 /// The defect: a password the script defines reached the wire as base64 of
 /// `user:{{password}}`, because the pair was encoded before the script ran and

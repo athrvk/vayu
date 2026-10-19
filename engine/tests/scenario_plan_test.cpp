@@ -33,7 +33,9 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -44,6 +46,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -1219,6 +1222,21 @@ std::string authorization_of (const vayu::Request& request) {
     return header == request.headers.end () ? std::string{} : header->second;
 }
 
+/// `bind_step_iteration` for row @p row_index, for a step whose auth the plan
+/// did not hold for the scripts: what these cases assert is what the bind
+/// applies.
+vayu::core::DataBindResult bind_step (vayu::Request& request,
+const vayu::core::ScenarioStep& step,
+const std::vector<json>& rows,
+size_t row_index) {
+    std::optional<vayu::http::Auth> late_auth;
+    auto bound = vayu::core::bind_step_iteration (
+    request, step, rows, row_index, vayu::core::IterationIdentity{}, late_auth);
+    EXPECT_FALSE (late_auth.has_value ())
+    << "the bind held auth for the scripts";
+    return bound;
+}
+
 } // namespace
 
 TEST_F (ScenarioPlanTest, BasicAuthCredentialsBindPerIterationRatherThanEncodingTheToken) {
@@ -1249,8 +1267,7 @@ TEST_F (ScenarioPlanTest, BasicAuthCredentialsBindPerIterationRatherThanEncoding
     << "auth was applied at plan time, which is what hid the token";
 
     vayu::Request request = step.request;
-    const auto bound      = vayu::core::bind_step_iteration (request, step,
-         resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
+    const auto bound = bind_step (request, step, resolved.data_rows, /*row_index=*/0);
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
@@ -1275,8 +1292,7 @@ TEST_F (ScenarioPlanTest, EachRowGetsItsOwnCredentialsFromTheSamePlan) {
     std::vector<std::string> sent;
     for (size_t row = 0; row < resolved.data_rows.size (); ++row) {
         vayu::Request request = step.request;
-        const auto bound      = vayu::core::bind_step_iteration (
-        request, step, resolved.data_rows, row, vayu::core::IterationIdentity{});
+        const auto bound = bind_step (request, step, resolved.data_rows, row);
         ASSERT_TRUE (bound.ok) << bound.error;
         sent.push_back (authorization_of (request));
     }
@@ -1303,9 +1319,8 @@ TEST_F (ScenarioPlanTest, BearerAndApiKeyCredentialsBindByContract) {
         const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
         EXPECT_TRUE (resolved.ok) << resolved.error;
         vayu::Request request = resolved.plan.steps[0].request;
-        const auto result =
-        vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
-        resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
+        const auto result     = bind_step (
+        request, resolved.plan.steps[0], resolved.data_rows, /*row_index=*/0);
         EXPECT_TRUE (result.ok) << result.error;
         return request;
     };
@@ -1343,8 +1358,8 @@ TEST_F (ScenarioPlanTest, AMissingColumnInACredentialEndsTheStepByName) {
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound = vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
-    resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
+    const auto bound =
+    bind_step (request, resolved.plan.steps[0], resolved.data_rows, /*row_index=*/0);
     EXPECT_FALSE (bound.ok);
     EXPECT_NE (bound.error.find ("{{data.missing}}"), std::string::npos)
     << bound.error;
@@ -1414,13 +1429,13 @@ TEST_F (ScenarioPlanTest, CredentialsWithoutADataTokenAreStillResolvedIntoThePla
     const auto& step = resolved.plan.steps[0];
 
     EXPECT_TRUE (step.auth_template.empty ());
+    EXPECT_FALSE (step.auth_after_scripts);
     EXPECT_EQ (authorization_of (step.request),
     "Basic " + vayu::utils::base64_encode ("alice:s3cret"));
 
     // And `bind_step_iteration` is the no-op the executors call unconditionally.
     vayu::Request request = step.request;
-    const auto bound      = vayu::core::bind_step_iteration (request, step,
-         resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
+    const auto bound = bind_step (request, step, resolved.data_rows, /*row_index=*/0);
     EXPECT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), authorization_of (step.request));
 }
@@ -1442,10 +1457,99 @@ TEST_F (ScenarioPlanTest, AUserSuppliedAuthorizationHeaderStillWinsOverBoundCred
     ASSERT_TRUE (resolved.ok) << resolved.error;
 
     vayu::Request request = resolved.plan.steps[0].request;
-    const auto bound = vayu::core::bind_step_iteration (request, resolved.plan.steps[0],
-    resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{});
+    const auto bound =
+    bind_step (request, resolved.plan.steps[0], resolved.data_rows, /*row_index=*/0);
     ASSERT_TRUE (bound.ok) << bound.error;
     EXPECT_EQ (authorization_of (request), "Bearer mine");
+}
+
+// --- Credentials that wait on a script (issue #2473) -------------------------
+
+namespace {
+
+/// The basic pair @p auth holds, as `user:password`, or a note saying what it
+/// is instead.
+std::string basic_pair_held (const std::optional<vayu::http::Auth>& auth) {
+    if (!auth) {
+        return "<no auth held>";
+    }
+    const auto* basic = std::get_if<vayu::http::BasicAuth> (&*auth);
+    return basic == nullptr ? "<not basic>" : basic->username + ":" + basic->password;
+}
+
+} // namespace
+
+TEST_F (ScenarioPlanTest, ACredentialOnlyAScriptCanAnswerIsHeldForTheScripts) {
+    // `{{password}}` survives composition because no scope defines it yet; a
+    // step's pre-request script may. Encoded here it would be base64 of the
+    // token text, which no later pass can read. Mutation check: drop
+    // `auth_after_scripts` from the resolution in `resolve_step` and the step
+    // carries `Basic base64(user:{{password}})` with nothing held.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"user","password":"{{password}}"})");
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps[0];
+
+    EXPECT_TRUE (step.auth_after_scripts);
+    EXPECT_EQ (authorization_of (step.request), "")
+    << "auth was encoded at plan time, around the token";
+
+    vayu::Request request = step.request;
+    std::optional<vayu::http::Auth> late_auth;
+    const auto bound = vayu::core::bind_step_iteration (request, step,
+    resolved.data_rows, std::nullopt, vayu::core::IterationIdentity{}, late_auth);
+    ASSERT_TRUE (bound.ok) << bound.error;
+    EXPECT_EQ (basic_pair_held (late_auth), "user:{{password}}");
+    EXPECT_EQ (authorization_of (request), "")
+    << "the bind applied what it was meant to hold";
+}
+
+TEST_F (ScenarioPlanTest, ARowTokenBesideAScriptTokenBindsTheRowAndHoldsTheRest) {
+    // Mixed credentials: the row answers its half at the bind, before anything
+    // is encoded, and the script's half still waits.
+    seed_collection ("col", "");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"{{data.user}}","password":"{{password}}"})");
+
+    json scenario    = block ("col");
+    scenario["data"] = json::array ({ json{ { "user", "alice" } } });
+
+    const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps[0];
+    EXPECT_TRUE (step.auth_after_scripts);
+    EXPECT_FALSE (step.auth_template.empty ());
+
+    vayu::Request request = step.request;
+    std::optional<vayu::http::Auth> late_auth;
+    const auto bound = vayu::core::bind_step_iteration (request, step,
+    resolved.data_rows, /*row_index=*/0, vayu::core::IterationIdentity{}, late_auth);
+    ASSERT_TRUE (bound.ok) << bound.error;
+    EXPECT_EQ (basic_pair_held (late_auth), "alice:{{password}}");
+    EXPECT_EQ (basic_pair_held (step.auth), "{{data.user}}:{{password}}")
+    << "the bind wrote into the plan every iteration shares";
+}
+
+TEST_F (ScenarioPlanTest, ACredentialAScopeAnsweredAtComposeIsStillResolvedIntoThePlan) {
+    // No behaviour change for the ordinary step: composition substituted the
+    // name, so nothing waits, and the plan pays the auth once as it always did.
+    seed_collection ("col", "");
+    seed_environment ("env", R"({"password":{"value":"s3cret"}})");
+    seed_request ("login", "col", /*order=*/0, "https://example.test/login",
+    R"({"mode":"basic","username":"user","password":"{{password}}"})");
+
+    auto opts           = options ();
+    opts.environment_id = "env";
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    const auto& step = resolved.plan.steps[0];
+
+    EXPECT_FALSE (step.auth_after_scripts);
+    EXPECT_EQ (authorization_of (step.request),
+    "Basic " + vayu::utils::base64_encode ("user:s3cret"));
 }
 
 TEST_F (ScenarioPlanTest, AnUnknownSourceDoesNotFallThroughToTheCollectionPath) {

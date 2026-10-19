@@ -657,7 +657,11 @@ bool is_scenario) {
     }
     out.auth.auth        = std::move (row_auth.auth);
     out.auth.credentials = std::move (row_auth.credentials);
-    out.set              = std::move (set);
+    // Held for the scripts only where something runs after the build to
+    // answer it (issue #2473); see `LoadAuthPlan::after_scripts`.
+    out.auth.after_scripts =
+    row_auth.after_scripts && vayu::core::declares_request_elements (json);
+    out.set = std::move (set);
     return out;
 }
 

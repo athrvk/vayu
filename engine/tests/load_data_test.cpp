@@ -444,6 +444,30 @@ TEST (ReadLoadDataSet, CredentialsCarryingATokenDeferTheBuild) {
        "after `apply_auth` the token is base64 of its own literal text";
 }
 
+// Issue #2473: a credential only a script can answer is held back only where
+// `requestElements` gives each submission a residual pass to answer it.
+// Without one nothing ever would, so the build encodes it as it always did and
+// the run keeps sending one shared request. Mutation check: drop the
+// `declares_request_elements` test in `read_load_data_set` and the second
+// expectation reds.
+TEST (ReadLoadDataSet, AScriptCredentialDefersOnlyWhereRequestElementsCanAnswerIt) {
+    json payload = { { "url", "https://example.test/" },
+        { "auth", { { "mode", "basic" }, { "username", "user" }, { "password", "{{password}}" } } } };
+
+    payload["requestElements"] = json::array (
+    { json{ { "kind", "script.pre" }, { "config", { { "script", "" } } } } });
+    auto read = read_load_data_set (payload, stock_limits (), false);
+    ASSERT_TRUE (read.ok) << read.error;
+    EXPECT_TRUE (read.auth.after_scripts);
+    EXPECT_EQ (read.auth.auth_resolution (), vayu::http::AuthResolution::Defer);
+
+    payload.erase ("requestElements");
+    read = read_load_data_set (payload, stock_limits (), false);
+    ASSERT_TRUE (read.ok) << read.error;
+    EXPECT_FALSE (read.auth.after_scripts);
+    EXPECT_EQ (read.auth.auth_resolution (), vayu::http::AuthResolution::Apply);
+}
+
 // The one mode deferral cannot serve: the token is acquired against the token
 // endpoint before the run starts, so no submission exists for a row to reach.
 TEST (ReadLoadDataSet, ADataTokenInAnOAuth2ConfigIsRefused) {

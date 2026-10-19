@@ -189,8 +189,10 @@ escaped for the document it lands in - and a basic-auth username, a bearer
 token or an api key. A credential is encoded when the request is built, so one
 carrying either name defers that build and is bound before `apply_auth`
 encodes it, which is the same order a `{{data.*}}` credential has always taken.
-A Send defers the build for a credential holding a name only a variable scope
-answers too, and applies it after the pre-request script (issue #2473).
+A credential holding a name only a variable scope answers defers the build
+too, and is applied after the pre-request script (issue #2473) - on a Send, on
+each step of a collection run (design or load), and on a single-request load
+run that declares `requestElements` - with any row bound into it first.
 A run does not need a data set for it: the identity comes from the iteration
 rather than from a row, so `user-{{$vu}}` binds on a plain load run exactly as
 it does on a data-driven one. OAuth 2.0 is the exception, and it is refused by
@@ -834,7 +836,7 @@ asks. And a generator inside an **auth credential** is still generated once, at
 composition: `apply_auth` encodes a credential when the request is built - basic
 auth collapses into one base64 value - so a token left for the bind would go out
 as base64 of its own text. (A credential still holding a name no scope answered
-is the other deferral: a Send applies it after the pre-request script, #2473.)
+is the other deferral: it is applied after the pre-request script, #2473.)
 A `{{$vu}}` in a credential is no longer the same case: a credential carrying
 one defers the build and binds before `apply_auth` runs (issue #1055), where a generator has nothing to wait for - its value is
 knowable at composition, so deferring it would buy a different id per iteration
@@ -944,7 +946,11 @@ base64-encoded. Until then the script's `pm.request.headers` does not hold that
 header, and a header the script sets still wins over it. A credential
 composition fully resolved is applied when the request is built, as before, so
 the script sees it. OAuth 2.0 is never deferred: its token is acquired before
-the send.
+the send. A collection run's steps take the same order, on the design run and
+under load (where the script is an `inline` `script.pre`), and so does a
+single-request load run that declares `requestElements`; under load a name
+nothing answers is sent as written rather than refused, as every residual token
+there is.
 A script that must change a value composition already resolved still edits
 `pm.request` directly (the write-back is applied to the outgoing request).
 

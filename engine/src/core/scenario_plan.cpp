@@ -421,9 +421,10 @@ nlohmann::json& raw_elements_out) {
 
     // Auth is resolved into headers/url here, which is what makes the plan
     // credential-grade and the snapshot manifest necessary - unless the
-    // credentials themselves come from the data file. `apply_auth`
-    // collapses basic auth into one base64 `Authorization` value, so a
-    // `{{data.user}}` resolved into the plan is unreadable by the time
+    // credentials themselves come from the data file or wait on a script
+    // (below). `apply_auth` collapses basic auth into one base64
+    // `Authorization` value, so a `{{data.user}}` resolved into the plan is
+    // unreadable by the time
     // anything scans the built request: it used to go out as base64 of the
     // literal token text, silently, and the refusal below could not see it
     // either (issue #591). Such a step keeps its credentials typed and
@@ -447,10 +448,17 @@ nlohmann::json& raw_elements_out) {
         "there, or move the token into the request itself.");
     }
 
+    // A name composition found no scope for is one a pre-request script, an
+    // inline element or a setup script may define before the send, and none
+    // of them can reach it once `apply_auth` has encoded it (issue #2473).
+    // Never true for OAuth 2.0, which is acquired right here.
+    const bool auth_after_scripts =
+    vayu::core::credentials_await_scripts (parsed_auth, bound_columns);
+
     // Deferred through the builder's own option rather than by hiding the
     // `auth` key from it: one mechanism, named at the call site, shared
     // with the single send that defers for the same reason (issue #642).
-    const auto auth_resolution = auth_template.empty () ?
+    const auto auth_resolution = auth_template.empty () && !auth_after_scripts ?
     vayu::http::AuthResolution::Apply :
     vayu::http::AuthResolution::Defer;
     auto built =
@@ -515,9 +523,10 @@ nlohmann::json& raw_elements_out) {
     // and is why `first_data_token` is the scan there rather than the whole
     // template - the identity binds off the iteration, so that step is
     // perfectly runnable with no rows at all and must not be refused.
-    if (!auth_template.empty ()) {
-        step.auth          = parsed_auth;
-        step.auth_template = std::move (auth_template);
+    if (auth_resolution == vayu::http::AuthResolution::Defer) {
+        step.auth               = parsed_auth;
+        step.auth_template      = std::move (auth_template);
+        step.auth_after_scripts = auth_after_scripts;
     }
     plan.steps.push_back (std::move (step));
     return std::nullopt;
@@ -805,8 +814,11 @@ plan_step_files (vayu::db::Database& db, ScenarioResolution& resolution) {
     for (auto& step : resolution.plan.steps) {
         auto refusal = plan_request_files (*files, step.request,
         resolution.data_rows, [&] (vayu::Request& bound, size_t row) {
-            return bind_step_iteration (
-            bound, step, resolution.data_rows, row, IterationIdentity{});
+            // Checking a file sends nothing, so auth held for the scripts is
+            // never applied here.
+            std::optional<vayu::http::Auth> unapplied;
+            return bind_step_iteration (bound, step, resolution.data_rows, row,
+            IterationIdentity{}, unapplied);
         });
         if (refusal) {
             return "Step " + std::to_string (step.index + 1) + " ('" +
@@ -896,7 +908,8 @@ DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
 const std::vector<nlohmann::json>& rows,
 std::optional<size_t> row_index,
-IterationIdentity identity) {
+IterationIdentity identity,
+std::optional<vayu::http::Auth>& late_auth) {
     // `.at()` rather than a subscript: the index was claimed off a cursor taken
     // modulo this vector's own size, so a mismatch is a broken invariant and a
     // throw names it instead of reading past the end.
@@ -905,10 +918,15 @@ IterationIdentity identity) {
     // The fields-then-credentials order lives in one place, shared with the
     // single-request load path that binds its own templates the same way
     // (issue #993); this is the step-shaped caller of it. The step's auth is
-    // copied by the callee, which is what a plan shared by every virtual user
-    // of the run requires.
-    return bind_iteration (
-    request, step.data_template, step.auth, step.auth_template, binding);
+    // copied, by the callee or into @p late_auth, which is what a plan shared
+    // by every virtual user of the run requires.
+    if (!step.auth_after_scripts) {
+        return bind_iteration (
+        request, step.data_template, step.auth, step.auth_template, binding);
+    }
+    auto& auth = late_auth.emplace (step.auth);
+    return bind_iteration_holding_auth (
+    request, step.data_template, auth, step.auth_template, binding);
 }
 
 nlohmann::json build_scenario_manifest (const ScenarioRequest& request,

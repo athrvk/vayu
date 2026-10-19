@@ -5321,14 +5321,27 @@ hits the wire:
 runs - so the script's `pm.request` holds the header - unless a credential
 (a `bearer` token, a `basic` username or password, an `apikey` key or value)
 still holds a `{{name}}` that is not a data column or the iteration identity.
-Such a name is one composition found no variable for, and on `POST /execute`
-(buffered and `stream: true`) that auth is applied **after** the pre-request
-script and the residual-token pass instead, each credential resolved against the
-scopes as the script left them (#2473), so `pm.environment.set("password", …)`
-reaches a basic pair before it is base64-encoded. That is Postman's order; the
-script then does not see the header in `pm.request.headers`, and an
-`Authorization` it sets wins by the rule below. A name nothing answers is encoded
-as written. `oauth2` is never deferred this way.
+Such a name is one composition found no variable for, and that auth is applied
+**after** the pre-request script and the residual-token pass instead, each
+credential resolved against the scopes as the script left them (#2473), so
+`pm.environment.set("password", …)` reaches a basic pair before it is
+base64-encoded. That is Postman's order; the script then does not see the header
+in `pm.request.headers`, and an `Authorization` it sets wins by the rule below.
+A data column or the identity in the same credential is bound first. A name
+nothing answers is encoded as written. `oauth2` is never deferred this way. The
+same order holds wherever a script can run between the build and the send:
+
+| Send | Applied after |
+|------|---------------|
+| `POST /execute` (buffered and `stream: true`) | the pre-request script |
+| A collection run's step | that step's pre-request script, each iteration |
+| A collection **load** run's step | that submission's `step.before` elements (an `inline` `script.pre`) and the residual pass over its virtual user's scope |
+| A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
+
+A single-request load run without `requestElements` has no such pass, so the
+build encodes the name as written. Under load a name nothing answers is never a
+refusal: it is sent as written and counted like any other unresolved token
+(#1503), except inside a basic pair's base64, where it never was countable.
 
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
@@ -5591,8 +5604,8 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   for the bind would go out as base64 of its own text. That is a generator's
   case alone: a credential carrying a `{{data.*}}` or a `{{$vu}}` defers the
   whole build and is bound before the encoding (issue #1055), and one carrying a
-  name no scope answered defers it until after the pre-request script on
-  `POST /execute` (#2473), where a generator has nothing to wait for. A
+  name no scope answered defers it until after the pre-request script (#2473,
+  see [Authentication](#authentication)), where a generator has nothing to wait for. A
   scenario plan's steps are composed with it internally, so a collection run
   needs no field at all.
 
@@ -7554,7 +7567,8 @@ a credential carrying either name defers its build and is bound before
 `apply_auth` encodes it, on every run shape rather than only on one carrying
 rows, because the identity comes from the iteration rather than from a row. A
 credential that also holds a name only a variable scope answers takes the row
-first and is applied after the pre-request script on `POST /execute` (#2473). An
+first and is applied after the pre-request script (#2473), on every send that
+runs one (see [Authentication](#authentication)). An
 OAuth 2.0 config is the exception and is refused by name - its token is acquired
 before any iteration exists.
 
