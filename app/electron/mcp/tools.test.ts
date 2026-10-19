@@ -12534,6 +12534,23 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(answer);
 	});
 
+	test("run_request passes the engine's authNotice through, masked or revealed (#2474)", async () => {
+		// The agent that sees a 401 from a request whose auth mode is not
+		// executed is the reader who most needs to be told it was never sent.
+		const NOTICE =
+			"auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication";
+		const answer = { ...EXECUTE_ANSWER, status: 401, authNotice: NOTICE };
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(answer) });
+		const withheld = await sendRequest(client);
+		expect(withheld.body.authNotice).toBe(NOTICE);
+		const revealed = await sendRequest(client, REVEAL);
+		expect(revealed.body.authNotice).toBe(NOTICE);
+		// A response without the key stays without it, so the pass-through adds no
+		// empty field for an executed mode.
+		const plain = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		expect("authNotice" in (await sendRequest(plain)).body).toBe(false);
+	});
+
 	test("run_request masks the header an inline API-key auth names", async () => {
 		const client = runClient({
 			executeRequest: vi.fn().mockResolvedValue({

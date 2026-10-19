@@ -336,6 +336,17 @@ export interface ResponseState {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
+	 * The request's auth mode is one the engine does not execute, so it went
+	 * out without authentication (issue #2474); the engine's own sentence,
+	 * absent when there is nothing to say. Set by **both** funnels -
+	 * `responseFromExecuteResult` from the `/execute` body,
+	 * `responseFromRunResult` from `trace.request.authNotice` - and drawn by
+	 * `ResponseViewer` as a band above the tabs, so a 401 from the target
+	 * carries the explanation with it. See `HttpResponse.authNotice` in
+	 * `app/src/types/domain.ts`.
+	 */
+	authNotice?: string;
+	/**
 	 * The client-certificate registry entry this exchange presented, as `host`
 	 * or `host:port` (issue #707); absent when none matched.
 	 *
