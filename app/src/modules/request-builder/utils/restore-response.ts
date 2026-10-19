@@ -22,6 +22,7 @@ import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
+import { paneBody } from "./execute-mapping";
 import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
@@ -281,17 +282,16 @@ export function responseFromRunResult(
 	/*
 	 * The stored trace keeps the body as an opaque string - the engine caps it
 	 * on a raw byte boundary, so what comes back is what the server sent. That
-	 * string is the raw body, and it is carried through as `bodyRaw` rather than
-	 * left undefined.
-	 *
-	 * It used to be omitted, and the Raw view was correct only by accident:
-	 * `ResponseBody` falls back to `body`, which happened to be the same string.
-	 * The moment a trace arrives holding a parsed object instead - the branch
-	 * below exists because that can happen - `body` becomes pretty-printed and
-	 * Raw would have silently shown formatting the server never sent.
+	 * string is the raw body, and it is carried through as `bodyRaw`; `body` is
+	 * the same text formatted for Pretty by the live funnel's `paneBody`, so the
+	 * pane for a send reads the same whether it arrived live or from History.
 	 *
 	 * A base64 one (issue #2458) goes through the live funnel's decoder, so
 	 * both hold the same text and the same bytes.
+	 *
+	 * The stringify is for a trace that holds a parsed object instead of a
+	 * string, which an older row can. Its original text is gone, so compact is
+	 * the closest honest reconstruction, and `paneBody` indents it for the pane.
 	 */
 	const raw = trace.response.body;
 	const headers = trace.response.headers || {};
@@ -303,8 +303,8 @@ export function responseFromRunResult(
 					headers,
 				})
 			: undefined;
-	const body = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw, null, 2);
 	const bodyRaw = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw);
+	const body = paneBody(bodyRaw);
 	const rawBytes = decoded?.bytes;
 
 	return {
@@ -321,7 +321,7 @@ export function responseFromRunResult(
 		// `size` is what the pane's byte count shows. When the body was truncated
 		// for storage the stored slice is not the real size, so prefer the
 		// original `bodyBytes` the engine recorded and fall back to the slice.
-		size: trace.response.bodyBytes ?? heldBodySize({ body, rawBytes }),
+		size: trace.response.bodyBytes ?? heldBodySize({ body, bodyRaw, rawBytes }),
 		bodyTruncated: trace.response.bodyTruncated,
 		bodyBytes: trace.response.bodyBytes,
 		// A second, separate fact about the same body (issue #1157): the live

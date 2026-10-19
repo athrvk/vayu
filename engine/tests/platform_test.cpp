@@ -400,5 +400,46 @@ TEST (DaemonStartup, PreparesTheDataDirectoryThroughOnePlatformCall) {
     tests::strip_comments ("// prepare_data_directory (x);\n"), "prepare_data_directory"));
 }
 
+/// Whether, inside @p code's `run_daemon`, the instance lock is declared
+/// before the database and nothing there releases it by hand - so locals
+/// destroyed in reverse order close the database first (issue #2420).
+bool releases_the_lock_after_the_database (const std::string& code) {
+    const size_t body = code.find ("int run_daemon (");
+    if (body == std::string::npos) {
+        return false;
+    }
+    const std::string run_daemon = code.substr (body);
+    const size_t lock     = run_daemon.find ("InstanceLock instance_lock");
+    const size_t database = run_daemon.find ("vayu::db::Database db");
+    return lock != std::string::npos && database != std::string::npos &&
+    lock < database && !tests::names_call (run_daemon, "release_file_lock");
+}
+
+TEST (DaemonStartup, ReleasesTheInstanceLockAfterTheDatabaseCloses) {
+    const std::filesystem::path daemon =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src" / "daemon.cpp";
+    const std::string code = tests::strip_comments (tests::read_source (daemon));
+
+    ASSERT_GT (code.size (), 1000u) << "read " << daemon.string () << " as empty";
+    EXPECT_TRUE (releases_the_lock_after_the_database (code))
+    << "run_daemon must declare its InstanceLock before `Database db` and "
+       "leave the release to the lock's destructor, so a successor never "
+       "meets this engine's connection at its startup probe";
+
+    // The matcher, pinned both ways.
+    const std::string ordered =
+    "int run_daemon () {\n InstanceLock instance_lock;\n"
+    " vayu::db::Database db (p);\n}\n";
+    const std::string reversed =
+    "int run_daemon () {\n vayu::db::Database db (p);\n"
+    " InstanceLock instance_lock;\n}\n";
+    const std::string by_hand =
+    "int run_daemon () {\n InstanceLock instance_lock;\n"
+    " vayu::db::Database db (p);\n release_file_lock (h);\n}\n";
+    EXPECT_TRUE (releases_the_lock_after_the_database (ordered));
+    EXPECT_FALSE (releases_the_lock_after_the_database (reversed));
+    EXPECT_FALSE (releases_the_lock_after_the_database (by_hand));
+}
+
 } // namespace
 } // namespace vayu::platform

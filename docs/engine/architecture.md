@@ -1344,6 +1344,21 @@ Restore by hand, with the engine stopped.
    its writes on top of the snapshot.
 4. Start Vayu again.
 
+**Putting a quarantined file back.** A start that judged `vayu.db` corrupt
+moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
+fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` is a
+session old at best, so when the quarantined file was healthy after all, it is
+the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
+`db/vayu.db`, and its `-wal` and `-shm`, when the set has them, over
+`db/vayu.db-wal` and `db/vayu.db-shm` (deleting those two if the set has none).
+Unlike a snapshot, the set's sidecars are part of it: its `-wal` holds the
+writes the main file had not taken yet. Anything written since the recovery is
+replaced along with the database it was written to, and only the newest two
+sets are kept, so a later recovery can prune this one. Since #2420 a database
+that was merely locked or on a full disk is refused rather than quarantined, so
+this is for a file the engine genuinely could not read, or one an older engine
+quarantined.
+
 ### Logging
 
 `vayu-engine` and `vayu-cli` each write one file under `<data-dir>/logs/`

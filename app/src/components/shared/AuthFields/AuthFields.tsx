@@ -162,6 +162,18 @@ export default function AuthFields({
 					{value.in === "header" ? "header" : "query parameter"}.
 				</p>
 
+				{/* A header key rides a redirect to the next host: libcurl drops only
+				    Authorization and Cookie there (issue #2476). A query key is part
+				    of the URL sent, and a redirect continues at whatever `Location`
+				    names, so the note is the header's alone. */}
+				{value.in === "header" && (
+					<p className="text-sm text-muted-foreground">
+						If the server redirects, this key is sent to whichever host the redirect
+						leads to. Turn off Follow redirects in the request's Settings to prevent
+						that.
+					</p>
+				)}
+
 				<Field label="Add to">
 					<Select
 						value={value.in}

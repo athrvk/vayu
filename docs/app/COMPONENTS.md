@@ -1864,11 +1864,24 @@ Silent when the surface lists no steps - nothing on screen, nothing to disclose.
 
 ## Recovery Banner (`components/shared/RecoveryBanner.tsx`)
 
-The one place the user is told the engine restored or deleted their database
-(issue #922). A database that fails validation at startup and cannot be restored
-from its `.bak` backup is **deleted**, so the daemon starts instead of
-crash-looping - and until this banner the whole record of that was two lines in
-the engine log, with the app coming up looking like a fresh install.
+The one place the user is told the engine restored or replaced their database
+(issue #922). A database the engine judges corrupt is **moved aside** (issue
+#984) and either the `.bak` backup is restored over it or a new empty database
+is created, so the daemon starts instead of crash-looping - and until this
+banner the whole record of that was two lines in the engine log, with the app
+coming up looking like a fresh install. Only `deleted_corrupt` (an engine older
+than #984, or one whose rename failed) means the file is gone.
+
+`HEADLINE` and `DETAIL` are `Record`s over the outcome union, so an outcome the
+engine adds without copy here is a type error. Whenever the record carries a
+`quarantinedPath`, the banner also names that file, says what undoes the
+recovery - quit Vayu and copy it back over the database file, with its `-wal` and
+`-shm` when it has them (issue #2420; the engine's account is
+[architecture.md](../engine/architecture.md#restoring)) - and gives
+`sqlite3 <path> .recover` for a file that really is damaged. The engine judges a
+file corrupt only on `SQLITE_CORRUPT` or `SQLITE_NOTADB`; a locked, full or
+read-only database is refused at startup instead of quarantined, so no banner
+describes one.
 
 It reads `engine-store.recovery`, which `queries/health.ts` writes from the
 optional `recovery` node on `GET /health`. Absent means a clean start, which is
@@ -2257,7 +2270,7 @@ here (issue #1635).
 Response-rendering primitives reused outside the request builder (e.g. history detail):
 
 - `UnifiedResponseViewer.tsx` - top-level response view for stored runs. Its **Events** tab appears only when the caller passes an `events` node - a load run's captured stream (issue #657) - because almost every sampled row is not a stream, and a permanent tab reading "not an event stream" would be noise on all of them
-- `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML; SVG is XML). A body with no text view - `rawBytes` with `isText: false`, the decoded base64 the engine sends for a body that is not UTF-8 (issue #2458) - skips the editor under the same toolbar: an image is drawn from its bytes through a Blob object URL revoked on unmount, and a PDF or other bytes are named with their size. Whether there is any text comes from the funnel's `rawBytes.isText`, not from a sniff of its own. A decoding that replaced bytes or met an unknown charset gets a warning `Callout` over the text. Past `LARGE_BODY_BYTES` (2 MB, `utils.ts`) it drops to a **large-body mode**: no `formatBody`, no syntax highlighting, no Pretty/Raw/Preview toggle, and only the first 2 MB of the raw body in the editor, under an info `Callout` saying so. Everything this component does to a body it does synchronously during render - `JSON.parse`, a re-indenting `JSON.stringify` larger than its input, then Monaco tokenising the result - so a multi-megabyte response froze the window between Send and the pane painting. The Download half of the notice is worded against the `actions` slot, which the history viewer does not pass. Separate from the engine's `bodyCapped` notice (see the request builder's `ResponseViewer/`): this one is the *pane* declining to format what it was given, that one is the engine never having read more - both can be on screen at once
+- `ResponseBody.tsx` - body rendering (JSON/text/HTML/XML; SVG is XML). A body with no text view - `rawBytes` with `isText: false`, the decoded base64 the engine sends for a body that is not UTF-8 (issue #2458) - skips the editor under the same toolbar: an image is drawn from its bytes through a Blob object URL revoked on unmount, and a PDF or other bytes are named with their size. Whether there is any text comes from the funnel's `rawBytes.isText`, not from a sniff of its own. A decoding that replaced bytes or met an unknown charset gets a warning `Callout` over the text. Past `LARGE_BODY_BYTES` (2 MB, `utils.ts`) it drops to a **large-body mode**: no `formatBody`, no syntax highlighting, no Pretty/Raw/Preview toggle, and only the first 2 MB of the raw body in the editor, under an info `Callout` saying so. Everything this component does to a body it does synchronously during render - `formatBody`'s indent pass (a copy larger than its input), then Monaco tokenising the result - so a multi-megabyte response froze the window between Send and the pane painting. `formatBody` indents JSON with `lib/json-format.ts`, which copies the received text token by token without parsing a value, so member order, duplicate keys and integers past 2^53 show as the server sent them (issue #2459); the funnels hand it the received text, and Copy, Download, Save as example and the Raw tab take that same text unchanged rather than the indented copy. The Download half of the notice is worded against the `actions` slot, which the history viewer does not pass. Separate from the engine's `bodyCapped` notice (see the request builder's `ResponseViewer/`): this one is the *pane* declining to format what it was given, that one is the engine never having read more - both can be on screen at once
 - `preview-document.ts` - the document the HTML **Preview** frame renders. The frame is `sandbox=""`, never `allow-same-origin`: the markup is the server's, and with `allow-scripts` beside it the frame would run that script as the renderer, `window.parent.electronAPI` included. So the preview runs no script at all, submits no form, opens no popup and cannot navigate the window. `buildPreviewDocument` puts a Content-Security-Policy in front of the server's markup that loads nothing from the network (images, fonts and media from `data:` only, stylesheets inline only), since a srcdoc document resolves relative URLs against the renderer's base URL and would otherwise send GETs wherever the body pointed, the engine's loopback port included; a page that leans on a CDN previews unstyled. Links are inert through `<base target="_top">`, which the sandbox refuses. The injected policy is the preview's only one (#1780): it lives in the document, where `sandbox=""` enforces it without `allow-same-origin`, and the frame carries no `csp` attribute. `preview-sandbox.test.tsx` holds the attribute and scans every `<iframe>` under `src/` for a sandbox without `allow-same-origin`
 - `ResponseEvents.tsx` - the Events timeline (issue #574). It lived under `request-builder/components/ResponseViewer/` until a second surface needed it: a load run's sampled stream, whose events the engine parses back out of the stored body and serves on `GET /runs/:id/samples`. Three sources now feed one list - the live relay, a restored design trace, and a captured load sample - and the truncation disclosures (`eventsTruncated`, per-event `dataTruncated`) are stated once for all three. The rows are memoized and rendered through `useGrowingWindow`, since a stream runs to 100,000 events by default (issue #1158); a source whose list grows in place passes `listKey` so the window resets on a new stream rather than on every batch, and the two that arrive whole want the default
 - `CapturedResponseNotice.tsx` - what a captured load-run response is *not*: truncated at `maxSampleBodyBytes`, dropped once the run's `maxSampleBytes` budget was spent, or binary and therefore stored by size and type. All three are invisible in the bytes - a truncated body looks malformed, a dropped one looks empty - so the difference is stated rather than left to be inferred
@@ -2347,7 +2360,12 @@ there is no editor-local vocabulary and nothing to translate at the boundary.
   a variable-aware token editor while the collection editor takes the default
   plain input, which accents `{{var}}`. `noAuthDescription` is host-supplied: a
   request sends nothing, a collection hands nothing down, and those are different
-  statements under one empty state.
+  statements under one empty state. An API key sent in a **header** carries a
+  one-sentence note that a redirect takes the key to whichever host it leads to
+  and that turning off Follow redirects on the request prevents it (issue
+  #2476): libcurl drops only `Authorization` and `Cookie` across hosts. A query
+  key and the `Authorization` modes do not get it, and
+  `AuthFields.test.tsx` holds all three branches.
 - `types.ts` - `AuthFieldsProps`, `AuthTextInput`, `EditableAuth`.
 
 What stays with each host: the mode picker (only the request offers `inherit`),

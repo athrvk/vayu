@@ -5304,6 +5304,17 @@ headers). Header names are matched case-insensitively, so `authorization` or
 appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
+**Redirects.** With `followRedirects` on, a redirect to another host (a different
+host name or port) drops the `Authorization` header, so `bearer`, `basic` and an
+`oauth2` token placed in the header stop at the first host, as libcurl does.
+Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
+the request carries - is sent to the host the redirect leads to. A query-located
+key is part of the URL as sent; the next hop is whatever the response's
+`Location` names, so the key reaches it only if that URL repeats it. Set
+`followRedirects: false` on a request whose key must not leave the host it was
+sent to; the app says this beside the API Key fields.
+(`engine/tests/redirect_credentials_test.cpp`)
+
 ### OAuth 2.0 token cache
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
@@ -6346,6 +6357,11 @@ declared charset: a body that is valid UTF-8 is `"utf8"` whatever its
 `Content-Type` says, and one whose `charset=utf-8` is wrong is `"base64"`, left
 for the client to decode by the declared charset. A header value that is not
 UTF-8 has no such field and is answered with U+FFFD in place of each bad byte.
+
+`bodyRaw` of a `"utf8"` answer is the byte-exact text received; `body` is the
+parsed convenience copy, whose member order is unspecified and in which a
+duplicate key collapses to the last value. A client that shows or re-saves the
+body should use `bodyRaw`, as the app does (issue #2459).
 
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.

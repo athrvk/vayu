@@ -43,12 +43,53 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace vayu::db {
+
+/**
+ * @brief What the startup probe found at a database path (issue #2420).
+ *
+ * Three answers, not two, because only one of the failures is the file's
+ * fault. `Corrupt` sends the file to the recovery branch, which quarantines
+ * it; `Unavailable` means the probe could not finish for a reason outside
+ * the file (another connection holding a lock, a full disk, a read-only
+ * directory, an I/O error, a migration step that failed) and nothing may be
+ * renamed, restored or deleted on its strength.
+ */
+struct ProbeResult {
+    enum class Verdict : std::uint8_t { Valid, Corrupt, Unavailable };
+    Verdict verdict = Verdict::Valid;
+    /// The SQLite primary result code behind a failure, or 0 when the
+    /// failure was not SQLite's (a filesystem error, a migration refusal).
+    int sqlite_code = 0;
+    /// What failed, in the words of whatever threw; empty when valid.
+    std::string reason;
+};
+
+/**
+ * @brief Sort an exception the probe caught into `Corrupt` or `Unavailable`.
+ *
+ * Corrupt is exactly `SQLITE_CORRUPT` (11) and `SQLITE_NOTADB` (26), read off
+ * a `std::system_error` in sqlite_orm's SQLite category. Everything else is
+ * unavailable, including a `std::system_error` in another category: a
+ * `std::filesystem_error` carries an errno, whose 11 and 26 mean something
+ * else entirely.
+ */
+ProbeResult classify_probe_failure (const std::exception& error);
+
+/**
+ * @brief The startup refusal for a database the probe could not examine:
+ *        the path, the SQLite code and message, and what to do about it.
+ *
+ * `Database::Database` throws this rather than recovering, so the daemon
+ * exits non-zero with it on stderr, the way a newer-schema refusal does.
+ */
+std::string unavailable_database_message (const std::string& path, const ProbeResult& found);
 
 /**
  * @brief What the startup validation did about a database it could not open.

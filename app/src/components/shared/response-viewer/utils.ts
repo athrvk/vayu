@@ -9,6 +9,7 @@
  * Utility functions for response body type detection and formatting
  */
 
+import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
 import { mediaTypeOf, type MediaType } from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
@@ -105,9 +106,8 @@ export function getMonacoLanguage(bodyType: BodyType): string {
  * Past this much body, the pane stops formatting and shows a raw prefix.
  *
  * Nothing about a response this size is free on the main thread, and rendering
- * one costs three synchronous passes over the whole string plus a Monaco model:
- * `JSON.parse` of the body, `JSON.stringify` of the parse result with two-space
- * indent (which is a third copy again, larger than the input), and Monaco
+ * one costs synchronous passes over the whole string plus a Monaco model: the
+ * type sniff, the indent pass (a copy larger than the input) and Monaco
  * tokenising the result line by line for syntax highlighting. There is no
  * worker to move them to - `formatBody` is called during render - so all of it
  * lands between the user pressing Send and the pane painting.
@@ -126,7 +126,13 @@ export function getMonacoLanguage(bodyType: BodyType): string {
 export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * Format body for display (pretty print JSON, etc.)
+ * Format body for display (pretty print JSON, XML).
+ *
+ * JSON is indented by `lib/json-format.ts`, which copies the received text
+ * token by token rather than parsing it, so member order, repeated keys and
+ * integers past 2^53 show as the server sent them (issue #2459). The input is
+ * always the received text: a caller holding a parsed object has already lost
+ * those, and there is nothing here to format it from.
  *
  * XML is pretty-printed too (`lib/xml-format.ts`). It was detected here and
  * highlighted by Monaco, but never indented, so Pretty and Raw were byte-for-byte
@@ -136,35 +142,13 @@ export const LARGE_BODY_BYTES = 2 * 1024 * 1024;
  * the JSON branch also serves: without a declared type, "starts with a tag" is
  * also true of HTML, whose whitespace rules are not XML's.
  */
-export function formatBody(body: unknown, bodyType?: BodyType): string {
+export function formatBody(body: string | undefined, bodyType?: BodyType): string {
 	if (!body) return "";
-
-	// Handle object types (already parsed)
-	if (typeof body === "object") {
-		try {
-			return JSON.stringify(body, null, 2);
-		} catch {
-			return String(body);
-		}
-	}
-
-	// Try to format JSON
-	if (typeof body === "string" && (bodyType === "json" || bodyType === undefined)) {
-		try {
-			const parsed = JSON.parse(body);
-			return JSON.stringify(parsed, null, 2);
-		} catch {
-			// Keep original if not valid JSON
-		}
-	}
-
-	if (typeof body === "string" && bodyType === "xml") {
-		// Returns its input unchanged when the document cannot be walked, so a
-		// malformed response still renders as what arrived.
-		return formatXml(body);
-	}
-
-	return String(body);
+	if (bodyType === "json" || bodyType === undefined) return formatJson(body);
+	// Returns its input unchanged when the document cannot be walked, so a
+	// malformed response still renders as what arrived.
+	if (bodyType === "xml") return formatXml(body);
+	return body;
 }
 
 /**

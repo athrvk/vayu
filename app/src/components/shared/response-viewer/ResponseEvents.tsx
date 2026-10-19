@@ -46,6 +46,7 @@ import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui"
 import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
+import { formatJson } from "@/lib/json-format";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 
@@ -125,11 +126,7 @@ const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }
  * (`events-tab.test.tsx` expands one and reads the formatting).
  */
 function formatEventData(data: string): string {
-	try {
-		return JSON.stringify(JSON.parse(data), null, 2);
-	} catch {
-		return data;
-	}
+	return formatJson(data);
 }
 
 /**

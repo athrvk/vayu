@@ -200,6 +200,33 @@ describe("save response as example", () => {
 		expect(createRequestExample.mock.calls[0][1].contentType).toBe("");
 	});
 
+	it("stores the body as received, not the indented pane copy (#2459)", async () => {
+		const received = '{"z":1,"id":9007199254740993,"z":2}';
+		state.response = okResponse({
+			body: JSON.stringify(JSON.parse(received), null, 2),
+			bodyRaw: received,
+		});
+		renderViewer();
+		expect(state.response.body).not.toBe(received);
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].body).toBe(received);
+	});
+
+	it("falls back to the pane text for a response that recorded no bodyRaw", async () => {
+		state.response = okResponse({ body: "only the pane copy", bodyRaw: undefined });
+		renderViewer();
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].body).toBe("only the pane copy");
+	});
+
 	it("stores a truncated body as truncated, whatever the user renames it to", async () => {
 		state.response = okResponse({ bodyTruncated: true, bodyBytes: 4096 });
 		renderViewer();

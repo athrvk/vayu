@@ -491,7 +491,9 @@ Notes:
   headers are always kept whole, since the `Cookie` line libcurl attached
   appears nowhere else. A cut `bodyRaw` comes back with its parsed `body` as
   `null`, because the two carry the same payload and an intact `body` would
-  return in full exactly what was just dropped. A trace the engine had already
+  return in full exactly what was just dropped. Quote `bodyRaw`, not `body`:
+  `bodyRaw` is the received text, while `body` is its parse, with keys sorted
+  and a repeated key reduced to its last value. A trace the engine had already
   truncated keeps the original size the engine recorded. Under the bound,
   nothing is added and nothing is changed. **A body that is not UTF-8 text is
   base64** (issue #2458): the live answer's `bodyEncoding` is always present,

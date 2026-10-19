@@ -35,6 +35,7 @@ import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value"
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
+import { formatJson } from "@/lib/json-format";
 import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -251,27 +252,24 @@ export function disabledDefaults(request: Pick<RequestState, "disabledDefaultHea
 }
 
 /**
- * The string the pane's Pretty view reads, given the raw body beside it.
+ * The string the pane's `body` holds, given the text the server sent: that text
+ * indented when it is JSON (`lib/json-format.ts`), else as received.
  *
- * The first branch is the only one that builds a *second* full copy of the
- * payload, and above `LARGE_BODY_BYTES` it builds one nothing renders:
- * `ResponseBody` stops calling `formatBody` at that size and shows a raw prefix
- * instead. So over the threshold this hands back the raw string it already has
- * - which is what the pane would display anyway - and a multi-megabyte response
- * costs one indent pass on the send path rather than two.
+ * It is built from @p bodyRaw and never from the engine's parsed `body`, which
+ * is key-sorted, collapses a repeated key to its last value and rounds any
+ * integer past 2^53 (issue #2459). A JSON `null` or scalar needs no case of its
+ * own: its text is its own formatting.
  *
- * Two subtleties from the original expression, both load-bearing:
- * `typeof null === "object"`, so null is excluded explicitly or a JSON `null`
- * body stringifies as `"null"` in one branch and vanishes in the other; and a
- * body that is `null`/`undefined` falls through to `bodyRaw`, not to `"null"`.
+ * Above `LARGE_BODY_BYTES` the pane never calls `formatBody` (`ResponseBody`
+ * shows a raw prefix instead), so there the raw text is handed back unindented
+ * and a multi-megabyte response costs no pass at all on the send path.
+ *
+ * Shared with `responseFromRunResult`, which must build the same pane for the
+ * same send.
  */
-function paneBody(body: unknown, bodyRaw: string): string {
-	if (typeof body === "object" && body !== null) {
-		if (bodyRaw.length > LARGE_BODY_BYTES) return bodyRaw;
-		return JSON.stringify(body, null, 2);
-	}
-	if (body !== null && body !== undefined) return String(body);
-	return bodyRaw || "";
+export function paneBody(bodyRaw: string): string {
+	if (bodyRaw.length > LARGE_BODY_BYTES) return bodyRaw;
+	return formatJson(bodyRaw);
 }
 
 /**
@@ -282,26 +280,19 @@ function paneBody(body: unknown, bodyRaw: string): string {
  * - **status 0 is meaningful**, so it must not be defaulted to 200. It is what
  *   a client-side failure (no server response) reports, and it is what makes
  *   the pane render `ClientErrorView` instead of an empty 200.
- * - **`typeof null === "object"`**, so the body checks test for null
- *   explicitly. Without that a JSON `null` body stringifies as `"null"` in one
- *   branch and vanishes in the other. Those checks live in `paneBody` above,
- *   which also holds the large-body gate.
- *
- * `bodyRaw` is always carried through for the Raw view; `body` prefers the
- * parsed form and falls back to it.
+ * - **`bodyRaw` is the received text**, carried through unchanged for the Raw
+ *   view, Copy, Download and Save as example; `body` is that text formatted for
+ *   the Pretty view (`paneBody`).
  */
 export function responseFromExecuteResult(result: SanityResult): ResponseState {
 	/*
-	 * The fallback must not indent. `bodyRaw` is the field whose entire job is
-	 * to be what the server actually sent - the Raw view reads it and nothing
-	 * else - so a fallback that pretty-prints turns Raw into a second Pretty
-	 * whenever it fires.
-	 *
 	 * The engine always sends `bodyRaw` (`json["bodyRaw"] = response.body` in
-	 * `utils/json.cpp`), so this is a guard against a producer that does not,
-	 * and the original bytes are already gone by the time we are stringifying a
-	 * parsed object. Compact is the closest honest reconstruction; indenting
-	 * would be inventing formatting the server never sent.
+	 * `utils/json.cpp`), and it is the field whose entire job is to be what the
+	 * server actually sent, so it is never rebuilt from the parsed `body` while
+	 * it is there. The stringify below is only a guard against a producer that
+	 * sends no `bodyRaw`: the original bytes are already gone by then, and compact
+	 * is the closest honest reconstruction - indenting would invent formatting
+	 * the server never sent.
 	 *
 	 * A base64 `bodyRaw` (issue #2458) is decoded first, so from here on
 	 * `bodyRaw` is text or nothing: the bytes ride `rawBytes`.
@@ -317,7 +308,7 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 			? JSON.stringify(result.body)
 			: String(result.body || ""));
 
-	const body = paneBody(result.body, bodyRaw);
+	const body = paneBody(bodyRaw);
 
 	const status = result.status !== undefined && result.status !== null ? result.status : 200;
 

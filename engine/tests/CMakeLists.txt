@@ -29,6 +29,7 @@ add_executable(vayu_tests
     element_body_bound_test.cpp
     json_test.cpp
     json_depth_test.cpp
+    ordered_json_parse_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
     script_engine_test.cpp
@@ -166,6 +167,7 @@ add_executable(vayu_tests
     operation_match_test.cpp
     path_variables_test.cpp
     auth_header_precedence_test.cpp
+    redirect_credentials_test.cpp
     query_encoding_test.cpp
     implied_content_type_test.cpp
     url_encoding_test.cpp
