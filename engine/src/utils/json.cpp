@@ -16,6 +16,7 @@
 #include <ostream>
 #include <sstream>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -1735,6 +1736,29 @@ const std::vector<std::string>& secret_values) {
     mask_snapshot_secrets (parsed, masked_secret_forms (secret_values));
     cap_snapshot_body (parsed, max_body_bytes);
     return parsed.dump ();
+}
+
+bool exceeds_depth (const Json& value, std::size_t max_depth) {
+    // Each entry is a container and the level it sits at (the root is level
+    // 1); scalars never go on the stack, so a wide array of them costs one
+    // pass and no growth.
+    std::vector<std::pair<const Json*, std::size_t>> pending;
+    if (value.is_structured ()) {
+        pending.emplace_back (&value, 1);
+    }
+    while (!pending.empty ()) {
+        const auto [node, level] = pending.back ();
+        pending.pop_back ();
+        if (level > max_depth) {
+            return true;
+        }
+        for (const auto& child : *node) {
+            if (child.is_structured ()) {
+                pending.emplace_back (&child, level + 1);
+            }
+        }
+    }
+    return false;
 }
 
 } // namespace vayu::json
