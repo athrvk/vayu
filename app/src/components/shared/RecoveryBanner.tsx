@@ -53,9 +53,9 @@ const DETAIL: Record<EngineRecovery["outcome"], string> = {
  * `UpdateBanner` and shares its shape for that reason.
  *
  * Since issue #984 the engine keeps the unreadable file rather than deleting
- * it, and this is the only place its path and the `sqlite3 ... .recover` that
- * reads it are shown - so the salvage route exists exactly as far as this
- * component renders it.
+ * it, and this is the only place its path, the way to put it back (issue
+ * #2420) and the `sqlite3 ... .recover` that reads it are shown - so the
+ * salvage route exists exactly as far as this component renders it.
  *
  * Shown once *ever* per event, not once per session - `recovery-notice-store`
  * remembers the timestamp that was dismissed, because the engine keeps
@@ -100,13 +100,24 @@ function RecoveryBanner() {
 					{recovery.databasePath}
 				</span>
 				{recovery.quarantinedPath && (
-					/* The unreadable file is kept rather than deleted (issue
-					   #984), and this is the only place the user is told so -
-					   with the command, because a path alone does not tell
-					   someone that most of their rows are probably still in it. */
+					/* The previous file is kept rather than deleted (issue #984),
+					   and this is the only place the user is told where and how
+					   to put it back (issue #2420): the engine judged it, and a
+					   judgement can be wrong. The sidecars travel with it - its
+					   -wal holds writes the main file had not taken yet, and a
+					   stale one left beside the copied file would be replayed
+					   onto it. The command is for a file that really is
+					   damaged, because a path alone does not tell someone that
+					   most of their rows are probably still in it. */
 					<>
 						{" "}
-						The unreadable database was kept, and{" "}
+						The previous file was kept at{" "}
+						<span className="break-all font-mono text-xs text-muted-foreground">
+							{recovery.quarantinedPath}
+						</span>
+						. If it was healthy after all, quit Vayu and copy it back over the database
+						file above to undo this, along with its -wal and -shm files if it has them.
+						If it is damaged,{" "}
 						<span className="break-all font-mono text-xs text-muted-foreground">
 							sqlite3 {recovery.quarantinedPath} .recover
 						</span>{" "}

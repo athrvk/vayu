@@ -158,7 +158,8 @@ it rather than deriving it from `outcome`. Two rules the readers depend on:
 endpoint reports it as a `recovery` node, absent on a clean start - see
 [api-reference.md](api-reference.md#get-health) - and the app renders it as a
 dismissible banner naming the database path and, when there is one, the
-quarantined file and the `.recover` command that reads it.
+quarantined file, how to copy it back to undo the recovery and the `.recover`
+command that reads it.
 
 ### Reclaiming freed pages
 

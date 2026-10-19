@@ -1864,11 +1864,24 @@ Silent when the surface lists no steps - nothing on screen, nothing to disclose.
 
 ## Recovery Banner (`components/shared/RecoveryBanner.tsx`)
 
-The one place the user is told the engine restored or deleted their database
-(issue #922). A database that fails validation at startup and cannot be restored
-from its `.bak` backup is **deleted**, so the daemon starts instead of
-crash-looping - and until this banner the whole record of that was two lines in
-the engine log, with the app coming up looking like a fresh install.
+The one place the user is told the engine restored or replaced their database
+(issue #922). A database the engine judges corrupt is **moved aside** (issue
+#984) and either the `.bak` backup is restored over it or a new empty database
+is created, so the daemon starts instead of crash-looping - and until this
+banner the whole record of that was two lines in the engine log, with the app
+coming up looking like a fresh install. Only `deleted_corrupt` (an engine older
+than #984, or one whose rename failed) means the file is gone.
+
+`HEADLINE` and `DETAIL` are `Record`s over the outcome union, so an outcome the
+engine adds without copy here is a type error. Whenever the record carries a
+`quarantinedPath`, the banner also names that file, says what undoes the
+recovery - quit Vayu and copy it back over the database file, with its `-wal` and
+`-shm` when it has them (issue #2420; the engine's account is
+[architecture.md](../engine/architecture.md#restoring)) - and gives
+`sqlite3 <path> .recover` for a file that really is damaged. The engine judges a
+file corrupt only on `SQLITE_CORRUPT` or `SQLITE_NOTADB`; a locked, full or
+read-only database is refused at startup instead of quarantined, so no banner
+describes one.
 
 It reads `engine-store.recovery`, which `queries/health.ts` writes from the
 optional `recovery` node on `GET /health`. Absent means a clean start, which is
