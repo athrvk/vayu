@@ -1423,6 +1423,13 @@ export interface RunResultTrace {
 	};
 	response?: {
 		headers?: Record<string, string>;
+		/**
+		 * The header lines as received, written only when the response had any
+		 * (issue #2460) - `HttpResponse.headerLines` is the live spelling. Absent
+		 * on rows stored before the key and on load-run samples, which keep the
+		 * folded map alone.
+		 */
+		headerLines?: HeaderLine[];
 		body?: unknown;
 		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
 		bodyTruncated?: boolean;
@@ -2035,10 +2042,32 @@ export interface ResponseTiming {
 	downloadMs: number;
 }
 
+/**
+ * One response header line as the server sent it (issue #2460): the name in
+ * its received case, the value trimmed by the engine and nothing else. A
+ * repeated header is repeated lines, which the folded `headers` map beside it
+ * cannot hold.
+ */
+export interface HeaderLine {
+	name: string;
+	value: string;
+}
+
 export interface HttpResponse {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	/**
+	 * The response's header lines in wire order - `serialize(Response)`
+	 * (`engine/src/utils/json.cpp`) always sends the key, `[]` when there were
+	 * none. `headers` above is the same headers folded (lowercased, repeats
+	 * joined with ", "); this is what the folding loses: a repeated name, and
+	 * the case the server used.
+	 *
+	 * `responseFromExecuteResult` passes it through `receivedHeaderLines`
+	 * (`lib/header-lines.ts`), which reads an empty list as an absent one.
+	 */
+	headerLines?: HeaderLine[];
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	body: unknown;

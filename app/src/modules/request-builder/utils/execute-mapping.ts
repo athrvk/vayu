@@ -35,6 +35,7 @@ import { toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value"
 import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
+import { receivedHeaderLines } from "@/lib/header-lines";
 import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -313,6 +314,11 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		status: result.status !== undefined && result.status !== null ? result.status : 200,
 		statusText: result.statusText || "",
 		headers: result.headers || {},
+		// The engine sends `[]` for a response with no headers, the stored trace
+		// omits the key: `receivedHeaderLines` makes both absent, so the funnels
+		// agree and the Cookies tab can tell a legacy answer from a received
+		// one (issue #2460).
+		headerLines: receivedHeaderLines(result.headerLines),
 		requestHeaders: result.requestHeaders,
 		rawRequest: result.rawRequest,
 		httpVersion: result.httpVersion,

@@ -27,6 +27,7 @@ import type {
 	ConsoleLogEntry,
 	FileRef,
 	ExampleSentRequest,
+	HeaderLine,
 	DataContractScope,
 	ElementDef,
 	ElementOutcome,
@@ -244,6 +245,22 @@ export interface ResponseState {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	/**
+	 * The response's header lines as received - name in the server's case, one
+	 * entry per line, repeats kept (issue #2460). The Headers, Cookies and Raw
+	 * tabs read this; `headers` stays the folded map for everything that looks a
+	 * header up by name.
+	 *
+	 * Both funnels set it through `receivedHeaderLines`
+	 * (`responseFromExecuteResult` from `/execute`'s `headerLines`,
+	 * `responseFromRunResult` from `trace.response.headerLines`), and an empty
+	 * list becomes absent in both, so a live and a restored response build the
+	 * same state. Absent means no lines were received - an engine or a stored
+	 * row from before the key, a stream's `open` frame, a response with no
+	 * headers - never "derive them": the tabs show `headers` then, and the
+	 * Cookies tab splits its folded `set-cookie`.
+	 */
+	headerLines?: HeaderLine[];
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	body: string;
