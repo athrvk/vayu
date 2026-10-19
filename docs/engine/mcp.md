@@ -1328,8 +1328,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   stopped at** beside them - `completed`, `capReached` or `budgetExhausted`, plus
   `totalEvents` where the completion frame reported it. The three are separate
   because the follow-up differs: a completed stream is finished, a capped read
-  wants a larger cap, and an exhausted budget means the run is still going and
-  `stop_run` ends it. The flag is sent on **every** call, never elided and never
+  wants a larger cap, and an exhausted budget means the run is still going, `get_run` says
+  whether it has finished, and `stop_run` ends it. The flag is sent on **every** call, never elided and never
   inherited from a stored row - the two answers have different shapes, so the
   tool decides which one it is about to parse rather than a default deciding for
   it. The allowlist gate is unchanged: it runs on the composed URL before

@@ -8436,10 +8436,10 @@ describe("run status reads (#2436)", () => {
 		test("each terminal status points at the report, and a stopped run says it has no verdict", async () => {
 			const done = await getRun(runRow({ status: "completed", endTime: START + 1 }));
 			expect(done.nextStep).toBe("read get_run_report(runId)");
-			for (const status of ["failed", "stopped"]) {
-				const out = await getRun(runRow({ status, endTime: START + 1 }));
-				expect(out.nextStep).toMatch(/partial numbers.*no verdict/);
-			}
+			const failed = await getRun(runRow({ status: "failed", endTime: START + 1 }));
+			expect(failed.nextStep).toMatch(/numbers recorded before the failure/);
+			const stopped = await getRun(runRow({ status: "stopped", endTime: START + 1 }));
+			expect(stopped.nextStep).toMatch(/partial numbers.*no verdict/);
 		});
 
 		test("a running row whose endTime is non-zero is still not terminal", async () => {
