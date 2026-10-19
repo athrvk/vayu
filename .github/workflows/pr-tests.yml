@@ -287,6 +287,7 @@ jobs:
               - 'engine/tests/fixtures/set-cookie-conformance.json'
               - 'engine/tests/fixtures/path-variable-conformance.json'
               - 'engine/tests/fixtures/query-encoding-conformance.json'
+              - 'engine/tests/fixtures/auth-header-precedence.json'
               - 'engine/tests/fixtures/import-conformance.json'
               - 'engine/tests/fixtures/element-kinds.json'
               - 'engine/tests/fixtures/log-redaction-conformance.json'

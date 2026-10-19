@@ -16,7 +16,7 @@
  * how a generator ends up emitting a raw newline inside a `"`.
  */
 
-import { prepareRequest } from "./prepare";
+import { headerEncodingNotes, prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A Python string literal - see the file comment for why JSON's rule fits. */
@@ -33,7 +33,7 @@ export function generatePython(
 	options: CodegenOptions = {}
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
-	const notes = [...prepared.notes];
+	const notes = [...prepared.notes, ...headerEncodingNotes(prepared, "requests")];
 	// Said rather than emitted: this target's stock idiom buffers the whole
 	// body, so a snippet that looked like the request would simply hang on an
 	// endless stream. A stated limit is better than a command that stalls.
