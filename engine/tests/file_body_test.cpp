@@ -1030,13 +1030,13 @@ TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendP
         << sent.response.error_message;
         EXPECT_FALSE (delivered ("secret")) << "the file reached the server";
 
-        const auto planned = load_plan (body);
-        ASSERT_HAS_VALUE (planned) << body.dump ();
-        EXPECT_NE (planned->find (UNTRUSTED), std::string::npos) << *planned;
-
         const auto run = collection_run (body);
         EXPECT_FALSE (run.ok) << body.dump ();
         EXPECT_NE (run.error.find (UNTRUSTED), std::string::npos) << run.error;
+
+        const auto planned = load_plan (body);
+        ASSERT_HAS_VALUE (planned) << body.dump ();
+        EXPECT_NE (planned->find (UNTRUSTED), std::string::npos) << *planned;
     }
 }
 
