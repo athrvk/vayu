@@ -176,6 +176,30 @@ TEST (ExecutionTrace, AResponseWithNoHeaderLinesStoresNoHeaderLinesKey) {
     EXPECT_FALSE (trace["response"].contains ("headerLines"));
 }
 
+// The followed redirect hops are stored with the final response (issue #2461),
+// so History shows the cookie a redirect set the way the live pane did.
+TEST (ExecutionTrace, ResponseCarriesTheRedirectHops) {
+    auto response = make_response ();
+    response.redirect_hops = { { 302, "Found", { { "Set-Cookie", "hop=1" } } } };
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace["response"].contains ("redirects"));
+    const auto& hops = trace["response"]["redirects"];
+    ASSERT_EQ (hops.size (), 1U);
+    EXPECT_EQ (hops[0]["status"], 302);
+    EXPECT_EQ (hops[0]["statusText"], "Found");
+    EXPECT_EQ (hops[0]["headerLines"][0]["value"], "hop=1");
+}
+
+// Written only when non-empty, on the `headerLines` rule above: absent is what
+// a send that followed nothing, and every row stored before the field, say.
+TEST (ExecutionTrace, AResponseThatFollowedNoRedirectStoresNoRedirectsKey) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace["response"].contains ("redirects"));
+}
+
 // The read cap travels with the exchange (issue #1157), so History says about
 // a response what the live pane said: this body is a prefix, and re-sending
 // under the same setting reads the same prefix. Stored under

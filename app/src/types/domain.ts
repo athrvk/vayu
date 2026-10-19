@@ -1437,6 +1437,12 @@ export interface RunResultTrace {
 		 * folded map alone.
 		 */
 		headerLines?: HeaderLine[];
+		/**
+		 * The redirect hops followed, written only when there were some (issue
+		 * #2461) - `HttpResponse.redirects` is the live spelling. Absent on rows
+		 * stored before the key, on load-run samples and when nothing was followed.
+		 */
+		redirects?: RedirectHop[];
 		body?: unknown;
 		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
 		bodyTruncated?: boolean;
@@ -2060,10 +2066,31 @@ export interface HeaderLine {
 	value: string;
 }
 
+/**
+ * One redirect response the engine followed on the way to the final answer
+ * (issue #2461): its status and every header line it carried. `headers` and
+ * `headerLines` of the answer hold the last hop only, so a `Set-Cookie` or
+ * `Location` here is readable nowhere else. It reports what the server sent,
+ * not what the cookie jar kept.
+ */
+export interface RedirectHop {
+	status: number;
+	statusText: string;
+	headerLines: HeaderLine[];
+}
+
 export interface HttpResponse {
 	status: number;
 	statusText: string;
 	headers: Record<string, string>;
+	/**
+	 * The redirect hops followed before this response, in the order they
+	 * arrived - `serialize(Response)` always sends the key, `[]` when nothing
+	 * was followed (and always for `followRedirects: false`). Absent on an
+	 * engine from before #2461. `responseFromExecuteResult` passes it through
+	 * `receivedRedirects`, which reads an empty list as an absent one.
+	 */
+	redirects?: RedirectHop[];
 	/**
 	 * The response's header lines in wire order - `serialize(Response)`
 	 * (`engine/src/utils/json.cpp`) always sends the key, `[]` when there were

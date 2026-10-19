@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -165,6 +166,18 @@ class MockHttpBin {
         // /loop - redirects to itself: a chain no maxRedirects can outlast.
         svr_.Get ("/loop", [] (const httplib::Request&, httplib::Response& res) {
             res.set_redirect ("/loop", 302);
+        });
+
+        // /login-redirect - the classic login: a 302 that sets a cookie and
+        // names where to go next (issue #2461).
+        svr_.Get ("/login-redirect", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "hop=1; Path=/");
+            res.set_redirect ("/landing", 302);
+        });
+
+        // /chain - two hops, 301 then 302, before the 200 at /get.
+        svr_.Get ("/chain", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_redirect ("/redirect/1", 301);
         });
 
         // A body that claims an encoding it is not in (gzip), and one in an
@@ -607,6 +620,115 @@ TEST_F (HttpClientTest, DoesNotFollowRedirectsWhenDisabled) {
 
     ASSERT_TRUE (result.is_ok ()) << "Error: " << result.error ().message;
     EXPECT_EQ (result.value ().status_code, 302);
+}
+
+// A followed redirect's headers are replaced by the next hop's, so the hop is
+// recorded as it finishes (issue #2461). Mutation-check: restore a bare
+// `headers.clear ()` in header_callback and no hop is recorded.
+TEST_F (HttpClientTest, ARedirectHopKeepsItsStatusAndHeaderLines) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/login-redirect");
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 200);
+    ASSERT_EQ (response.redirect_hops.size (), 1U);
+    const auto& hop = response.redirect_hops.front ();
+    EXPECT_EQ (hop.status_code, 302);
+    EXPECT_EQ (hop.status_text, "Found");
+    const auto has_line = [&hop] (const std::string& name, const std::string& value) {
+        return std::ranges::any_of (hop.header_lines, [&] (const HeaderLine& line) {
+            return line.name == name && line.value == value;
+        });
+    };
+    EXPECT_TRUE (has_line ("Set-Cookie", "hop=1; Path=/"));
+    EXPECT_TRUE (has_line ("Location", "/landing"));
+
+    // The final response stays the final hop alone.
+    EXPECT_FALSE (response.headers.contains ("set-cookie"));
+    EXPECT_FALSE (response.headers.contains ("location"));
+    EXPECT_TRUE (response.headers.contains ("content-type"));
+}
+
+TEST_F (HttpClientTest, RedirectHopsAreRecordedInTheOrderTheyArrived) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/chain");
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    ASSERT_EQ (result.value ().redirect_hops.size (), 2U);
+    EXPECT_EQ (result.value ().redirect_hops[0].status_code, 301);
+    EXPECT_EQ (result.value ().redirect_hops[1].status_code, 302);
+}
+
+TEST_F (HttpClientTest, ARequestThatWasNotRedirectedHasNoHops) {
+    auto result = client_->get (mock_->url ("/get"));
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_TRUE (result.value ().redirect_hops.empty ());
+}
+
+// With redirects off the 302 is the final response and nothing is a hop.
+TEST_F (HttpClientTest, NoHopsAreRecordedWhenRedirectsAreNotFollowed) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/login-redirect");
+    request.follow_redirects = false;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 302);
+    EXPECT_TRUE (result.value ().redirect_hops.empty ());
+    EXPECT_TRUE (result.value ().headers.contains ("set-cookie"));
+}
+
+// A 1xx interim response precedes the real status line, and is not a hop.
+// The POST asks for `100 Continue`, which the mock sends before each answer,
+// so the 307 is preceded by one and the final 200 by another. Mutation-check:
+// let record_finished_hop take any status and the two interim blocks count.
+TEST_F (HttpClientTest, AnInterimContinueIsNotARedirectHop) {
+    Request request;
+    request.method            = HttpMethod::POST;
+    request.url               = mock_->url ("/redirect-from/307");
+    request.body.mode         = BodyMode::Text;
+    request.body.content      = "payload";
+    request.headers["Expect"] = "100-continue";
+    request.follow_redirects  = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 200);
+    ASSERT_EQ (result.value ().redirect_hops.size (), 1U);
+    EXPECT_EQ (result.value ().redirect_hops.front ().status_code, 307);
+}
+
+// libcurl stops at max_redirects, and so does the record: a loop reports the
+// hops it made and no more.
+TEST_F (HttpClientTest, ARedirectLoopRecordsAtMostMaxRedirectsHops) {
+    for (const int limit : { 0, 1, 3 }) {
+        Request request;
+        request.method           = HttpMethod::GET;
+        request.url              = mock_->url ("/loop");
+        request.follow_redirects = true;
+        request.max_redirects    = limit;
+        request.timeout_ms       = 5000;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        EXPECT_EQ (result.value ().error_code, ErrorCode::TooManyRedirects) << limit;
+        EXPECT_EQ (result.value ().redirect_hops.size (), static_cast<size_t> (limit))
+        << limit;
+    }
 }
 
 TEST_F (HttpClientTest, SendsCustomHeaders) {

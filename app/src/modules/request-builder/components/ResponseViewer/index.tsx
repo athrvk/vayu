@@ -766,7 +766,11 @@ export default function ResponseViewer() {
 					/>
 				</TabsContent>
 				<TabsContent value="cookies" className="mt-0 flex-1 overflow-hidden">
-					<ResponseCookies headers={shown.headers} headerLines={shown.headerLines} />
+					<ResponseCookies
+						headers={shown.headers}
+						headerLines={shown.headerLines}
+						redirects={shown.redirects}
+					/>
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 					{shown.timing ? (

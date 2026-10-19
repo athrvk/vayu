@@ -11,6 +11,13 @@
  * Displays cookies extracted from Set-Cookie headers: one per received line,
  * or, for a response with no lines, from the folded header.
  *
+ * A redirect chain is two groups (issue #2461). The final response's headers
+ * are all `headers` holds, so a cookie a followed 3xx set - the `302` that
+ * answers a login - is read from `redirects` instead and listed under
+ * "Set during redirects", one sub-heading per hop. Those rows say what the
+ * server sent, never that the jar stored it: a cross-origin hop's cookie is
+ * dropped by curl, so "stored" would be a claim this tab cannot back.
+ *
  * Parsing lives in `parse-set-cookie.ts`; the three defects it fixes are
  * documented there. The visible consequence was that `attrs` had always been
  * parsed and never rendered, so Path, HttpOnly, Secure and SameSite - the
@@ -19,14 +26,24 @@
  */
 
 import { EmptyState, HeaderValue } from "@/components/shared";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui";
-import type { HeaderLine } from "@/types/domain";
+import {
+	Eyebrow,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui";
+import type { HeaderLine, RedirectHop } from "@/types/domain";
 import { parseSetCookie, parseSetCookieLine, type ParsedCookie } from "./parse-set-cookie";
 
 export interface ResponseCookiesProps {
 	headers: Record<string, string>;
 	/** The lines as received (issue #2460); absent for a response that has none. */
 	headerLines?: HeaderLine[];
+	/** The redirect hops followed before this response (issue #2461); absent when none were. */
+	redirects?: RedirectHop[];
 }
 
 /**
@@ -47,12 +64,78 @@ function cookiesFromFolded(headers: Record<string, string>): ParsedCookie[] {
 	return setCookie ? parseSetCookie(setCookie) : [];
 }
 
-export default function ResponseCookies({ headers, headerLines }: ResponseCookiesProps) {
-	const cookies = headerLines ? cookiesFromLines(headerLines) : cookiesFromFolded(headers);
+interface HopCookies {
+	/** "302 Found, to /home": what answered, and where it sent the client. */
+	label: string;
+	cookies: ParsedCookie[];
+}
 
-	if (cookies.length === 0) {
+function hopLabel(hop: RedirectHop): string {
+	const location = hop.headerLines.find((line) => line.name.toLowerCase() === "location");
+	const answer = `${hop.status} ${hop.statusText}`.trim();
+	return location?.value ? `${answer}, to ${location.value}` : answer;
+}
+
+/** The hops that set a cookie, in the order they arrived; a hop that set none has nothing to list. */
+function hopsWithCookies(redirects: RedirectHop[] | undefined): HopCookies[] {
+	return (redirects ?? [])
+		.map((hop) => ({ label: hopLabel(hop), cookies: cookiesFromLines(hop.headerLines) }))
+		.filter((hop) => hop.cookies.length > 0);
+}
+
+function CookieTable({ cookies }: { cookies: ParsedCookie[] }) {
+	return (
+		<Table>
+			<TableHeader>
+				<TableRow>
+					<TableHead>Name</TableHead>
+					<TableHead>Value</TableHead>
+					<TableHead>Attributes</TableHead>
+				</TableRow>
+			</TableHeader>
+			<TableBody>
+				{cookies.map((cookie, i) => (
+					<TableRow key={i}>
+						<TableCell className="font-mono text-muted-foreground">
+							{cookie.name}
+						</TableCell>
+						<TableCell className="font-mono break-all text-foreground">
+							{cookie.value}
+						</TableCell>
+						<TableCell>
+							{cookie.attrs.length > 0 ? (
+								<div className="flex flex-wrap gap-1">
+									{cookie.attrs.map((attr, j) => (
+										<span
+											key={j}
+											className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-label text-muted-foreground"
+										>
+											<HeaderValue value={attr} />
+										</span>
+									))}
+								</div>
+							) : (
+								<span className="text-muted-foreground italic">none</span>
+							)}
+						</TableCell>
+					</TableRow>
+				))}
+			</TableBody>
+		</Table>
+	);
+}
+
+export default function ResponseCookies({ headers, headerLines, redirects }: ResponseCookiesProps) {
+	const cookies = headerLines ? cookiesFromLines(headerLines) : cookiesFromFolded(headers);
+	const hops = hopsWithCookies(redirects);
+
+	if (cookies.length === 0 && hops.length === 0) {
 		return <EmptyState variant="inline" title="No cookies in response" />;
 	}
+
+	// A response with no redirect cookies is the one table it always was; the
+	// group labels appear only when there is a second group to tell it from.
+	const grouped = hops.length > 0;
 
 	return (
 		/*
@@ -67,44 +150,26 @@ export default function ResponseCookies({ headers, headerLines }: ResponseCookie
 		 * distinguished by its label styling instead, and rows still light up on
 		 * hover.
 		 */
-		<div className="p-4 overflow-auto h-full">
-			<Table>
-				<TableHeader>
-					<TableRow>
-						<TableHead>Name</TableHead>
-						<TableHead>Value</TableHead>
-						<TableHead>Attributes</TableHead>
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{cookies.map((cookie, i) => (
-						<TableRow key={i}>
-							<TableCell className="font-mono text-muted-foreground">
-								{cookie.name}
-							</TableCell>
-							<TableCell className="font-mono break-all text-foreground">
-								{cookie.value}
-							</TableCell>
-							<TableCell>
-								{cookie.attrs.length > 0 ? (
-									<div className="flex flex-wrap gap-1">
-										{cookie.attrs.map((attr, j) => (
-											<span
-												key={j}
-												className="rounded-sm surface-sunken border border-rule px-1.5 py-0.5 font-mono text-label text-muted-foreground"
-											>
-												<HeaderValue value={attr} />
-											</span>
-										))}
-									</div>
-								) : (
-									<span className="text-muted-foreground italic">none</span>
-								)}
-							</TableCell>
-						</TableRow>
+		<div className="p-4 overflow-auto h-full space-y-6">
+			{cookies.length > 0 && (
+				<section className="space-y-2">
+					{grouped && <Eyebrow>Set by this response</Eyebrow>}
+					<CookieTable cookies={cookies} />
+				</section>
+			)}
+			{grouped && (
+				<section className="space-y-4">
+					<Eyebrow>Set during redirects</Eyebrow>
+					{hops.map((hop, i) => (
+						<div key={i} className="space-y-2">
+							<p className="font-mono text-sm break-all text-foreground">
+								{hop.label}
+							</p>
+							<CookieTable cookies={hop.cookies} />
+						</div>
 					))}
-				</TableBody>
-			</Table>
+				</section>
+			)}
 		</div>
 	);
 }

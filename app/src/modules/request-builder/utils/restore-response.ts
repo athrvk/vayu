@@ -21,7 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
-import { receivedHeaderLines } from "@/lib/header-lines";
+import { receivedHeaderLines, receivedRedirects } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { paneBody } from "./execute-mapping";
 import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
@@ -317,6 +317,7 @@ export function responseFromRunResult(
 		headers,
 		// Same rule as the live funnel: an empty list is an absent one.
 		headerLines: receivedHeaderLines(trace.response.headerLines),
+		redirects: receivedRedirects(trace.response.redirects),
 		...sentSide(trace),
 		httpVersion: trace.response.httpVersion,
 		httpVersionDowngraded: trace.response.httpVersionDowngraded,

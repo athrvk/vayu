@@ -4454,7 +4454,9 @@ never written to disk. Load runs neither read nor write it.
 
 Cookies set *during* a redirect chain follow curl's cross-origin rule rather
 than the jar's - see [POST /execute](#post-execute) for what a redirect that
-changes origin does to them.
+changes origin does to them. The `Set-Cookie` lines of those intermediate hops
+are reported on the answer's `redirects` member, whether or not curl applied
+them.
 
 ### GET /cookies
 
@@ -6272,10 +6274,11 @@ is reported as `preScriptError`. See
 [scripting.md](scripting.md#mutating-the-request-pre-request-scripts).
 
 **Redirect policy.** `followRedirects` defaults to **true**, so omitting it
-follows every 3xx and only the final response is returned - send
-`followRedirects: false` to see the 3xx status and its `Location` header. A
-chain longer than `maxRedirects` (default 10) fails the send with
-`TOO_MANY_REDIRECTS` rather than returning the last 3xx. Both
+follows every 3xx and the final response is returned as the answer, with the
+earlier hops' status and header lines on its `redirects` member (field notes
+below the response example) - send `followRedirects: false` to make the 3xx
+itself the answer. A chain longer than `maxRedirects` (default 10) fails the
+send with `TOO_MANY_REDIRECTS` rather than returning the last 3xx. Both
 clients send these explicitly for exactly that reason (see
 [api-integration](../app/api-integration.md)). `POST /runs` accepts the same
 three fields with the same defaults, so a load test can be run under the policy
@@ -6304,7 +6307,9 @@ alike. A flow that depended on a cookie surviving a cross-origin hop (a login
 that bounces through an identity provider is the usual shape) now sends the
 follow-up request without it. Nothing about the [cookie jar](#cookies) itself
 changed: it is domain-scoped as before, so a cookie is still stored under the
-origin that set it and still sent on a later request back to that origin.
+origin that set it and still sent on a later request back to that origin. A
+hop's `Set-Cookie` is reported in `redirects` whether or not curl applied it,
+so the member says what the server sent, not what the jar stored.
 
 **Protocol.** `httpVersion` selects which HTTP version curl attempts:
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
@@ -6335,6 +6340,16 @@ run-shaped way of stating the same field, not a second store.
   },
   "headerLines": [
     { "name": "Content-Type", "value": "application/json" }
+  ],
+  "redirects": [
+    {
+      "status": 302,
+      "statusText": "Found",
+      "headerLines": [
+        { "name": "Set-Cookie", "value": "session=abc; Path=/" },
+        { "name": "Location", "value": "/users" }
+      ]
+    }
   ],
   "requestHeaders": { "accept": "*/*" },
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
@@ -6531,6 +6546,20 @@ The same `headers` fold holds for the response headers stored on a design run's
 parse. The stored `trace_data.response` also carries `headerLines`, written only
 when non-empty; a load-run sample keeps the folded map alone, because the load
 path is the hot path and records no lines.
+
+**`redirects` lists the redirect responses the
+send followed** (issue #2461), in the order they arrived, each as
+`{status, statusText, headerLines}` with `headerLines` shaped as above. `headers`
+and `headerLines` hold the final hop only, so a `Set-Cookie` or `Location` on an
+earlier hop - the `302` that answers a login and sets the session cookie - is
+readable nowhere else. Only 3xx responses are hops: a `1xx` interim response
+such as `100 Continue` is not. It is always present on a design answer, an empty
+array when nothing was followed (`followRedirects: false` always gives an empty
+one, the 3xx being the answer), and holds at most `maxRedirects` entries, so a
+loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
+`trace_data.response` carries it too, written only when non-empty; a load-run
+sample records none. It reports what the server sent: see the cross-origin
+paragraph above for why a hop's cookie is not necessarily one the jar kept.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

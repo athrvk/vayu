@@ -202,6 +202,40 @@ TEST (JsonTest, SerializesNoHeaderLinesAsAnEmptyArray) {
     EXPECT_TRUE (json["headerLines"].empty ());
 }
 
+// The followed redirect hops (issue #2461). Always present, an empty array
+// when nothing was followed, on the `headerLines` rule above.
+TEST (JsonTest, SerializesRedirectHopsWithTheirStatusAndHeaderLines) {
+    Response response;
+    response.status_code   = 200;
+    response.redirect_hops = {
+        { 302, "Found", { { "Set-Cookie", "hop=1; Path=/" }, { "Location", "/home" } } },
+        { 301, "", {} }
+    };
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json["redirects"].is_array ());
+    ASSERT_EQ (json["redirects"].size (), 2U);
+    EXPECT_EQ (json["redirects"][0],
+    (Json{ { "status", 302 }, { "statusText", "Found" },
+    { "headerLines",
+    Json::array ({ { { "name", "Set-Cookie" }, { "value", "hop=1; Path=/" } },
+    { { "name", "Location" }, { "value", "/home" } } }) } }));
+    EXPECT_EQ (json["redirects"][1]["status"], 301);
+    EXPECT_TRUE (json["redirects"][1]["headerLines"].empty ());
+}
+
+TEST (JsonTest, SerializesNoRedirectHopsAsAnEmptyArray) {
+    Response response;
+    response.status_code = 200;
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("redirects"));
+    EXPECT_TRUE (json["redirects"].is_array ());
+    EXPECT_TRUE (json["redirects"].empty ());
+}
+
 // The live body's read cap (issue #1157). Always present, so a pane can tell
 // "not capped" from "this engine cannot say" - the same rule `httpVersion`
 // above is held to, and the one that decides whether a prefix is shown as the
