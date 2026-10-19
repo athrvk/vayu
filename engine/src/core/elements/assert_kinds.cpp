@@ -41,13 +41,6 @@ const std::string& failure_message) {
     }
 }
 
-std::string json_value_to_string (const nlohmann::json& value) {
-    if (value.is_string ()) {
-        return value.get<std::string> ();
-    }
-    return value.dump ();
-}
-
 // ---------------------------------------------------------------------------
 // assert.status - `in` (a set of codes) or `range` ({min, max}).
 // ---------------------------------------------------------------------------
@@ -137,7 +130,7 @@ class AssertJsonPathElement final : public Element {
             ctx.outcome_message = "invalid JSONPath";
             return;
         }
-        const nlohmann::json* body = ensure_parsed_body (ctx);
+        const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
             ctx.outcome_status  = "skipped";
             ctx.outcome_message = constants::elements::BODY_UNREADABLE_MESSAGE;
@@ -153,12 +146,16 @@ class AssertJsonPathElement final : public Element {
             passed = !matches.empty ();
             failure = "expected '" + path_text + "' to " + (negate ? "not " : "") + "exist";
         } else if (config_.contains ("expected")) {
-            const bool found = !matches.empty () && *matches.front () == config_["expected"];
+            // Converted first: `ordered_json` object equality is
+            // order-sensitive, and `expected` is not compared by key order.
+            const bool found = !matches.empty () &&
+            nlohmann::json (*matches.front ()) == config_["expected"];
             passed  = found;
             failure = "expected '" + path_text + "' to equal " +
             config_["expected"].dump () +
-            (matches.empty () ? " (no match)" :
-                                ", got " + json_value_to_string (*matches.front ()));
+            (matches.empty () ?
+            " (no match)" :
+            ", got " + detail::json_value_to_string (*matches.front ()));
         } else if (const auto& regex = regex_) {
             if (!*regex) {
                 ctx.outcome_status  = "error";
@@ -166,7 +163,7 @@ class AssertJsonPathElement final : public Element {
                 return;
             }
             passed = !matches.empty () &&
-            (*regex)->search (json_value_to_string (*matches.front ()));
+            (*regex)->search (detail::json_value_to_string (*matches.front ()));
             failure = "expected '" + path_text + "' to match /" +
             config_.value ("regex", "") + "/";
         } else {

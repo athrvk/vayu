@@ -17,6 +17,7 @@ import {
 	decodeResponseBody,
 	extensionForContentType,
 	heldBodySize,
+	receivedBody,
 	responseBodyType,
 } from "./response-bytes";
 
@@ -227,6 +228,22 @@ describe("heldBodySize", () => {
 		const data = new Uint8Array(9);
 		expect(heldBodySize({ body: "", rawBytes: { data, isText: false } })).toBe(9);
 		expect(heldBodySize({ body: "abc" })).toBe(3);
+	});
+
+	it("counts the received text, not the longer indented copy", () => {
+		expect(heldBodySize({ body: '{\n  "a": 1\n}', bodyRaw: '{"a":1}' })).toBe(7);
+	});
+});
+
+describe("receivedBody", () => {
+	it("is the received text, not the indented pane copy", () => {
+		const pane = '{\n  "a": 1\n}';
+		expect(receivedBody({ body: pane, bodyRaw: '{"a":1}' })).toBe('{"a":1}');
+	});
+
+	it("falls back to body where no bodyRaw was recorded or it is empty", () => {
+		expect(receivedBody({ body: "message" })).toBe("message");
+		expect(receivedBody({ body: "message", bodyRaw: "" })).toBe("message");
 	});
 });
 
