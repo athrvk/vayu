@@ -6467,8 +6467,9 @@ cookie from its own line. It is always present on a design answer, an empty
 array when no headers arrived, so a client can tell "none" from "an engine too
 old to say" - the same rule as `httpVersion`. A streaming send (`stream: true`)
 reports it on the completed trace, while its `open` frame carries the folded
-`headers` map only. The map is unchanged and stays what scripts, assertions and
-the MCP tools read. Splitting a folded `Set-Cookie` out of `headers` is now
+`headers` map only. The map is unchanged and stays what assertions and the
+MCP `headers` member read; `pm.response.cookies` and MCP's `headerLines`
+read the lines. Splitting a folded `Set-Cookie` out of `headers` is now
 needed only for a row stored before this field and an answer from an older
 engine, and it must split on a comma followed by `name=`, since an `Expires=`
 value contains a comma of its own (a cookie value that holds one is
