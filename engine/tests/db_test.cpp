@@ -474,7 +474,8 @@ TEST_F (DatabaseTest, AStoredFullSynchronousSurvivesAReopen) {
 }
 
 // An install from before #2419 holds value "0" beside default "0". The first
-// start of this build moves it to Normal and applies it on that same start.
+// start of this build moves it to Normal and applies it on that same start;
+// the next one changes nothing.
 TEST_F (DatabaseTest, AWorkspaceOnTheOldOffDefaultMovesToNormalOnce) {
     {
         Database db (TEST_DB_PATH);
@@ -486,13 +487,29 @@ TEST_F (DatabaseTest, AWorkspaceOnTheOldOffDefaultMovesToNormalOnce) {
         db.save_config_entry (*entry);
     }
 
-    Database reopened (TEST_DB_PATH);
-    reopened.init ();
-    auto entry = reopened.get_config_entry ("dbSynchronous");
-    ASSERT_HAS_VALUE (entry);
-    EXPECT_EQ (entry->value, "1");
-    EXPECT_EQ (entry->default_value, "1");
-    EXPECT_EQ (reopened.applied_synchronous (), 1);
+    int64_t migrated_at = 0;
+    {
+        Database reopened (TEST_DB_PATH);
+        reopened.init ();
+        auto entry = reopened.get_config_entry ("dbSynchronous");
+        ASSERT_HAS_VALUE (entry);
+        EXPECT_EQ (entry->value, "1");
+        EXPECT_EQ (entry->default_value, "1");
+        EXPECT_EQ (reopened.applied_synchronous (), 1);
+        migrated_at = entry->updated_at;
+    }
+
+    // The move is once: a later start finds value == default and writes
+    // nothing, so the row's timestamp is the migration's and not the latest
+    // start's.
+    Database second (TEST_DB_PATH);
+    second.init ();
+    auto again = second.get_config_entry ("dbSynchronous");
+    ASSERT_HAS_VALUE (again);
+    EXPECT_EQ (again->value, "1");
+    EXPECT_EQ (again->default_value, "1");
+    EXPECT_EQ (again->updated_at, migrated_at);
+    EXPECT_EQ (second.applied_synchronous (), 1);
 }
 
 // The seed is one transaction now (issue #838) rather than sixty-odd implicit
