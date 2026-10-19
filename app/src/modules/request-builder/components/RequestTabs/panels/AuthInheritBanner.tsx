@@ -26,7 +26,7 @@ import { Callout } from "@/components/shared/Callout";
 import { useCollectionAncestors } from "@/queries/collections";
 import type { Collection } from "@/types";
 import { VARIABLE_SPLIT_PATTERN, isVariableToken } from "@/constants/variables";
-import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import { AUTH_MODE_LABELS, isEngineExecutableAuthMode } from "@/constants/auth-modes";
 import { resolveAuthSource } from "../../../utils/auth-resolution";
 import ChainCard from "./ChainCard";
 
@@ -103,6 +103,7 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 	}
 
 	const { label: authLabel, secret } = describeAuth(source);
+	const sent = isEngineExecutableAuthMode(source.auth.mode);
 
 	return (
 		<ChainCard
@@ -112,6 +113,8 @@ export default function AuthInheritBanner({ collectionId }: AuthInheritBannerPro
 					<p className="m-0 text-xs leading-relaxed text-foreground">
 						Inheriting <span className="font-semibold text-primary">{authLabel}</span>{" "}
 						from <span className="font-mono font-medium">{source.name}</span>.
+						{!sent &&
+							" Vayu does not send this auth type, so this request goes out without auth."}
 					</p>
 					{secret && (
 						<p className="mt-1 m-0 text-label text-muted-foreground font-mono truncate">

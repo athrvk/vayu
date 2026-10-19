@@ -1420,6 +1420,13 @@ export interface RunResultTrace {
 		 * `sentBodyFileOf` (`lib/sent-body-file.ts`) is the one reader.
 		 */
 		bodyFile?: unknown;
+		/**
+		 * The auth mode was not executed and the request went out without
+		 * authentication - see {@link HttpResponse.authNotice} (issue #2474).
+		 * Written on the request node because it describes what was sent, so it
+		 * is present on a failed exchange (no `response` node) too.
+		 */
+		authNotice?: string;
 	};
 	response?: {
 		headers?: Record<string, string>;
@@ -2105,6 +2112,17 @@ export interface HttpResponse {
 	 * changed, and the answer belongs to the exchange, not to the editor.
 	 */
 	httpVersionDowngraded?: boolean;
+	/**
+	 * The request's auth mode is one the engine stores but does not execute
+	 * (`digest`, `ntlm`, ...), so it was sent without authentication
+	 * (issue #2474). A sentence naming the mode, written by
+	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
+	 * key and to `trace.request.authNotice` from one place. **Absent** when
+	 * there is nothing to say - an executed mode, no auth, or an engine older
+	 * than the key - and on a streaming send, which is answered before it
+	 * exists: only its stored trace carries it.
+	 */
+	authNotice?: string;
 	/**
 	 * Which client-certificate registry entry this exchange presented, as
 	 * `host` or `host:port`; `""` when none matched (issue #707). Always

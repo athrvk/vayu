@@ -96,6 +96,9 @@ void record_auth_provenance (nlohmann::json& node, const vayu::Request& request)
     if (!request.secret_header_names.empty ()) {
         node["authHeaders"] = request.secret_header_names;
     }
+    if (!request.auth_notice.empty ()) {
+        node["authNotice"] = request.auth_notice;
+    }
 }
 
 nlohmann::json build_result_trace (const vayu::Request& request,
