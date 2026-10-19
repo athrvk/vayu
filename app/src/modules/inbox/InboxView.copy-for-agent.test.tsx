@@ -55,6 +55,7 @@ const INBOX: Inbox = {
 	running: true,
 	loopback: true,
 	captureCount: 0,
+	allowedOrigins: [],
 	response: { status: 200, body: SENTINEL, headers: { "X-Key": SENTINEL }, delayMs: 0 },
 };
 

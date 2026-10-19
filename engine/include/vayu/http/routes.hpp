@@ -39,6 +39,7 @@
 // see it. Included here so route TUs keep naming it through routes.hpp.
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/run_summary_cache.hpp"
+#include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
@@ -228,40 +229,136 @@ inline void send_json (httplib::Response& res, const nlohmann::json& data) {
 }
 
 /**
+ * @brief Which browser origins a mock server or a webhook inbox grants CORS
+ *        access to (#2367). Built once when the listener starts and never
+ *        written again, so a handler reads it with no lock.
+ *
+ * An empty list - the default - is the anonymous answer: every page may read
+ * a response, and none may read one its cookies were sent with. A non-empty
+ * list grants credentialed access to the origins it names and nothing to any
+ * other page.
+ */
+struct CorsPolicy {
+    /// `canonical_origin` spellings, in the order they were configured.
+    std::vector<std::string> allowed_origins;
+
+    /// Whether @p origin, an inbound `Origin` value, names a listed origin.
+    /// Compared canonical to canonical, so `HTTPS://App.Example:443` matches
+    /// `https://app.example`; a value that is not an origin (`null`, empty,
+    /// a path) matches nothing.
+    [[nodiscard]] bool allows (std::string_view origin) const {
+        const auto canonical = canonical_origin (origin);
+        return canonical &&
+        std::ranges::find (allowed_origins, *canonical) != allowed_origins.end ();
+    }
+};
+
+/**
+ * @brief The origin half of `apply_cors_headers`: false when @p policy grants
+ *        this request nothing, in which case nothing was written but `Vary`.
+ */
+inline bool apply_cors_origin (const httplib::Request& req,
+httplib::Response& res,
+const CorsPolicy& policy) {
+    if (policy.allowed_origins.empty ()) {
+        res.set_header ("Access-Control-Allow-Origin", "*");
+        return true;
+    }
+    // Under a list, whether the CORS headers are present at all depends on
+    // the Origin, granted or not, so a shared cache must key on it.
+    res.set_header ("Vary", "Origin");
+    const auto origin = req.get_header_value ("Origin");
+    if (!policy.allows (origin)) {
+        return false;
+    }
+    res.set_header ("Access-Control-Allow-Origin", origin);
+    res.set_header ("Access-Control-Allow-Credentials", "true");
+    return true;
+}
+
+/**
  * @brief CORS headers for a listener a browser page may call directly - a
  *        mock server or a webhook inbox, never the management API, which
  *        serves no browser and sends no CORS header (`server.cpp`).
  *
- * Reflects the request's own asks (origin, requested method/headers) rather
- * than a fixed list, since a mock or inbox stands in for an arbitrary real
- * endpoint. `Access-Control-Allow-Origin: *` cannot pair with
- * `Allow-Credentials: true`, so a present `Origin` - the literal `null` a
- * sandboxed frame or `file://` page sends excluded, since that is not a
- * credential-safe origin - switches to echoing it. A preflight is detected
- * by `Access-Control-Request-Method`, not `method == "OPTIONS"`: a bare
- * OPTIONS carrying neither is not one and gets no synthesized answer here.
+ * The origin follows @p policy. Under the default empty list every response
+ * is `Access-Control-Allow-Origin: *` and the request's `Origin` is never
+ * read, so no credentials are ever granted: `*` cannot pair with
+ * `Allow-Credentials`. Under a list, a listed `Origin` is echoed with
+ * `Allow-Credentials: true`, and anything else - an unlisted origin, the
+ * literal `null`, no `Origin` at all - gets no `Access-Control-*` header,
+ * a preflight included, so the browser keeps the response from the page.
+ *
+ * Methods and headers reflect the request's own asks rather than a fixed
+ * list, since a mock or inbox stands in for an arbitrary real endpoint. A
+ * preflight is detected by `Access-Control-Request-Method`, not `method ==
+ * "OPTIONS"`: a bare OPTIONS carrying neither is not one and gets no
+ * synthesized answer here.
  */
-inline void apply_cors_headers (const httplib::Request& req, httplib::Response& res) {
-    const auto origin       = req.get_header_value ("Origin");
-    const bool credentialed = !origin.empty () && origin != "null";
-    if (credentialed) {
-        res.set_header ("Access-Control-Allow-Origin", origin);
-        res.set_header ("Access-Control-Allow-Credentials", "true");
-        res.set_header ("Vary", "Origin");
-    } else {
-        res.set_header ("Access-Control-Allow-Origin", "*");
+inline void apply_cors_headers (const httplib::Request& req,
+httplib::Response& res,
+const CorsPolicy& policy) {
+    if (!apply_cors_origin (req, res, policy)) {
+        return;
     }
     res.set_header ("Access-Control-Expose-Headers", "*");
-
-    if (req.has_header ("Access-Control-Request-Method")) {
-        res.set_header ("Access-Control-Allow-Methods",
-        req.get_header_value ("Access-Control-Request-Method"));
-        if (req.has_header ("Access-Control-Request-Headers")) {
-            res.set_header ("Access-Control-Allow-Headers",
-            req.get_header_value ("Access-Control-Request-Headers"));
-        }
-        res.set_header ("Access-Control-Max-Age", "600");
+    if (!req.has_header ("Access-Control-Request-Method")) {
+        return;
     }
+    res.set_header ("Access-Control-Allow-Methods",
+    req.get_header_value ("Access-Control-Request-Method"));
+    if (req.has_header ("Access-Control-Request-Headers")) {
+        res.set_header ("Access-Control-Allow-Headers",
+        req.get_header_value ("Access-Control-Request-Headers"));
+    }
+    res.set_header ("Access-Control-Max-Age", "600");
+}
+
+/**
+ * @brief A start payload's optional `allowedOrigins` (#2367) as the list a
+ *        `CorsPolicy` holds, or the message to refuse the payload with.
+ *
+ * Absent and `null` are the default empty list. Anything else must be an
+ * array of at most @p max_count strings, each at most @p max_length bytes and
+ * an origin by `canonical_origin`, which is the spelling stored. The first
+ * entry that is not is named in the refusal rather than skipped: a dropped
+ * entry is a page the caller meant to admit, refused without a word.
+ */
+inline std::expected<std::vector<std::string>, std::string>
+parse_allowed_origins (const nlohmann::json& body, std::size_t max_count, std::size_t max_length) {
+    const auto field = body.find ("allowedOrigins");
+    if (field == body.end () || field->is_null ()) {
+        return std::vector<std::string>{};
+    }
+    if (!field->is_array ()) {
+        return std::unexpected (std::string (
+        "Invalid 'allowedOrigins': must be an array of origin strings"));
+    }
+    if (field->size () > max_count) {
+        return std::unexpected (std::format (
+        "Invalid 'allowedOrigins': at most {} origins may be listed", max_count));
+    }
+    std::vector<std::string> origins;
+    origins.reserve (field->size ());
+    for (const auto& entry : *field) {
+        const std::string name = std::format ("allowedOrigins[{}]", origins.size ());
+        if (!entry.is_string ()) {
+            return std::unexpected (
+            std::format ("Invalid '{}': must be a string", name));
+        }
+        const auto& text = entry.get_ref<const std::string&> ();
+        if (text.size () > max_length) {
+            return std::unexpected (
+            std::format ("Invalid '{}': longer than {} bytes", name, max_length));
+        }
+        auto canonical = canonical_origin (text);
+        if (!canonical) {
+            return std::unexpected (
+            std::format ("Invalid '{}': '{}' {}", name, text, canonical.error ()));
+        }
+        origins.push_back (std::move (*canonical));
+    }
+    return origins;
 }
 
 /**
@@ -287,8 +384,11 @@ inline bool is_cors_response_header (std::string_view name) {
  *        credentialed response.
  *
  * Per the Fetch spec, `*` there is the literal header name `*`, not a
- * wildcard, whenever the request's credentials mode is `include` - exactly
- * the case `apply_cors_headers` marks with `Access-Control-Allow-Credentials`.
+ * wildcard, whenever the request's credentials mode is `include`. Only a
+ * listed origin under a non-empty `CorsPolicy` can be answered with
+ * credentials, and `apply_cors_headers` marks exactly that case with
+ * `Access-Control-Allow-Credentials`, which is what this keys on; the default
+ * policy's `*` and an unlisted origin's empty answer pass through untouched.
  * Call this as the last statement on every path that writes response
  * headers, so a credentialed page can still read a header an example or
  * canned response set.

@@ -52,6 +52,7 @@ const INBOX = {
 	running: true,
 	loopback: true,
 	captureCount: 0,
+	allowedOrigins: [],
 	response: { status: 200, body: SENTINEL, headers: {}, delayMs: 0 },
 } as Inbox;
 
@@ -81,6 +82,7 @@ const MOCK = {
 	routeCount: 3,
 	routesWithoutExample: 0,
 	createdAt: 1700000000000,
+	allowedOrigins: [],
 } as MockServer;
 
 const writeText = vi.fn();

@@ -43,7 +43,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["service"],
 		description:
-			"Start a local webhook inbox and return its id and URL. It records every request sent to it - method, path, query, headers, body, caller address - so an agent can point a webhook at the URL, trigger it, and then assert on what actually arrived with get_inbox_captures. It needs no allowlist entry: the inbox listens on this machine's loopback interface only, which MCP does not let you change, so it is unreachable from off the machine. Give it a canned `response` to make the sender see a specific status, body, headers or delay - the reply every captured request gets, changeable later with update_inbox_response. Stop it with stop_webhook_inbox when you are done (the captures survive a stop), or delete_webhook_inbox to remove it and them.",
+			"Start a local webhook inbox and return its id and URL. It records every request sent to it - method, path, query, headers, body, caller address - so an agent can point a webhook at the URL, trigger it, and then assert on what actually arrived with get_inbox_captures. It needs no allowlist entry: the inbox listens on this machine's loopback interface only, which MCP does not let you change, so it is unreachable from off the machine. Which browser pages may read its answers is separate: by default any page can, without credentials, and allowedOrigins narrows that to the listed origins, with credentials. Give it a canned `response` to make the sender see a specific status, body, headers or delay - the reply every captured request gets, changeable later with update_inbox_response. Stop it with stop_webhook_inbox when you are done (the captures survive a stop), or delete_webhook_inbox to remove it and them.",
 		annotations: {
 			title: "Start webhook inbox",
 			readOnlyHint: false,
@@ -62,6 +62,12 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 				.optional()
 				.describe(
 					"Port to listen on, on this machine's loopback interface. Default 0 - the engine picks a free one. The interface itself is not configurable over MCP."
+				),
+			allowedOrigins: z
+				.array(z.string())
+				.optional()
+				.describe(
+					'Browser origins allowed to read the inbox\'s answers, e.g. ["https://app.example.com"]: only those pages get CORS headers, with credentials. Omit or leave empty (the default) for any origin, without credentials. Each is http:// or https:// plus a host and optional port - no path, trailing slash, wildcard or "null" - at most 32 of them. A bad entry is refused by name. Fixed for the inbox\'s life.'
 				),
 			response: z
 				.object({
@@ -101,7 +107,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"List the webhook inboxes this engine has started, running and stopped alike, each with its id, URL, port, whether it is still listening, how many requests it has captured, and its canned response. A stopped inbox stays listed with its captures readable until it is deleted, so this is also how to find an inbox started earlier in the session.",
+			"List the webhook inboxes this engine has started, running and stopped alike, each with its id, URL, port, whether it is still listening, how many requests it has captured, its allowedOrigins, and its canned response. A stopped inbox stays listed with its captures readable until it is deleted, so this is also how to find an inbox started earlier in the session.",
 		annotations: {
 			title: "List webhook inboxes",
 			readOnlyHint: true,

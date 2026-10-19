@@ -15,10 +15,10 @@ import { isRecord, requireStr } from "./kit.js";
 /**
  * The fields `POST /mock/start` accepts (`parse_mock_start`,
  * engine/src/http/routes/mock_server.cpp). `collectionId` is required and is
- * validated by {@link requireStr} before the body is built; the other three are
+ * validated by {@link requireStr} before the body is built; the other four are
  * optional knobs.
  */
-const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct"] as const;
+const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct", "allowedOrigins"] as const;
 
 /**
  * The start body. `collectionId` always travels; a knob the caller did not name
@@ -33,6 +33,12 @@ const MOCK_SERVER_START_KEYS = ["port", "latencyMs", "errorRatePct"] as const;
  * either side moves. `port` and `errorRatePct` are bounded in the schema
  * because their bounds are the *shape* - a port is 0-65535 everywhere and a
  * percentage is 0-100 by definition, not by an engine constant.
+ *
+ * `allowedOrigins` (#2367) is the first kind: its count and length ceilings are
+ * engine constants, and what makes an entry an origin is the engine's
+ * `canonical_origin`, so the schema says "array of strings" and the engine's
+ * `400` names the entry (`allowedOrigins[1]`) and what is wrong with it. It
+ * travels as given, `[]` included - the engine reads that as the default.
  */
 export function mockServerStartPayload(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = { collectionId: requireStr(args, "collectionId") };

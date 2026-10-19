@@ -6,7 +6,9 @@
  */
 
 /**
- * The two knobs `POST /mock/start` takes beyond the collection (issue #570).
+ * The knobs `POST /mock/start` takes beyond the collection (issue #570), less
+ * the origin policy, whose rules are shared with the inbox and live in
+ * `lib/allowed-origins.ts` (#2367).
  *
  * Its own file, like `mock-server-selection.ts` beside it, so the dialog
  * exports nothing but a component and fast refresh keeps working - and so the
@@ -28,6 +30,8 @@ export const MAX_MOCK_ERROR_RATE_PCT = 100;
 export interface MockServerOptions {
 	latencyMs: number;
 	errorRatePct: number;
+	/** Present only when the user listed some; see `lib/allowed-origins.ts`. */
+	allowedOrigins?: string[];
 }
 
 /** Both knobs off - a mock that answers its examples as fast as it can. */

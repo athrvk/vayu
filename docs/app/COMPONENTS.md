@@ -488,6 +488,8 @@ hand. A dialog on the way in would charge the common case for the uncommon one;
 defaults-only case worth one click. The bounds (`0-30000ms`, `0-100%`) live in
 `mock-server-options.ts` mirroring `constants::mock_server::`, and the form refuses an out-of-range
 or emptied value **with the range in words** - the engine's `400` names the field and not the bound.
+The same dialog carries the **Allowed origins** box (issue #2367, `AllowedOriginsField`), sent only
+when something is listed.
 The mutation stays in `MockServerControl` and the dialog reports its failure as a `Callout` instead
 of a toast behind an open form; opening the dialog resets it, so a failed one-click start does not
 greet the next open. Neither knob is mutable on a running mock: they are read per response and so
@@ -792,6 +794,13 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   to the same discipline through the shared `useCopy` (see [Services](#services-modulesservices)) -
   it is not a mutation, but it is the other thing here that can fail, and it claimed success
   regardless until #565.
+- `InboxStartOptions.tsx` - the secondary start path (issue #2367): an **Inbox options** icon button
+  beside every Start (the tab's empty state and its stopped-inbox **Start new**, and the Services
+  drawer's **New inbox**) opening a dialog with the **Allowed origins** box. The one-click start
+  stays one click and sends `{}`; the dialog is the only way a list reaches the engine. It owns its
+  own start mutation, since the three places that offer it react to a start differently (`onStarted`),
+  and shows an engine refusal as a `Callout` in the form. The header of `InboxView` states the
+  policy the engine echoes (`Origins: any` or the list) for the default too.
 - `CannedResponseControls.tsx` - all four fields the engine serves: reply status and delay inline,
   body and headers behind a disclosure that opens on its own when either is set. It showed status and
   delay only, so a reply body or header set configured by an MCP tool or a bare curl was invisible
@@ -968,7 +977,12 @@ both reveal it.
   - in `slow` only - the delay that mode answers after, committed on blur rather than per keystroke.
   The inbox group's affordance is **New inbox** (Plus), matching **New issuer**: it always mints a
   new listener, and as a Play labelled "Start inbox" beside a stopped row it read as "restart that
-  one", which nothing here does (issue #553).
+  one", which nothing here does (issue #553). Beside it is **Inbox options**, the secondary start path
+  that sets the inbox's allowed origins (#2367, `modules/inbox/InboxStartOptions.tsx`). **An inbox or
+  mock row marks a restricted CORS policy** (`2 origins`, the list in its `title`) and says nothing for
+  the default: the row is 32px and its payload is a URL, so "Any origin" on every row would only
+  spend the URL's width repeating what an absent mark already says. The tabs state the policy either
+  way.
 
   **An inbox row also says when its `Notify` toggle is not in effect** - a *Not notifying* chip
   (issue #1412), from `useInboxWatchSummary` over the watch service's `getSummary`. Two causes, one
@@ -1076,7 +1090,9 @@ log, it needs a surface that can grow while it is watched.
   start-time snapshot, but each route's `hits` moves live as traffic arrives, so it joined the fast
   interval alongside Activity rather than the mock list's slower one.
   Each section shows a `ListSkeleton` on its first fetch, and the Routes count a dash, rather than
-  "Routes (0)" or "Nothing served yet" for a query still in flight (#1928).
+  "Routes (0)" or "Nothing served yet" for a query still in flight (#1928). The header also states
+  the mock's CORS policy on a line of its own, `Origins: any` or the origins it was started with
+  (`describeOriginPolicy`, #2367); the Services drawer row marks only a restricted mock, as a count.
 - **One tab, not one per mock**, and **the tab's own `entityId` is the address**, exactly as the
   inbox tab: a mock is engine-process state with no id worth restoring across a restart, and the
   address is read from the tab rather than mirrored into local state - the drawer row and this
@@ -1921,6 +1937,16 @@ nothing for an empty message, so a call site is `<FieldError>{error}</FieldError
 fails on red prose outside the three primitives; a site where the token is on data rather than on a
 message (a failure count, the Dock's "Not saved") is named in that guard's exemption list with what
 the red text is instead.
+
+## Allowed Origins Field (`components/shared/AllowedOriginsField.tsx`)
+
+The "Allowed origins" box on the mock server's and the inbox's start forms (issue #2367): a
+`Textarea`, one `http(s)://host[:port]` per line, with the helper text "Leave empty to allow any
+origin" and a `FieldError` beneath. Shared because both forms ask the same question in the same
+words. The parent owns the text and runs `parseAllowedOrigins` (`lib/allowed-origins.ts`), because
+it also needs the result to decide whether Start is enabled and what to send; the field only
+displays. The parser mirrors the engine's rules (shape, 32 entries, 512 bytes) and sends the
+canonical spelling, repeats listed once; the engine stays the authority.
 
 ## Number Field (`components/shared/NumberField.tsx`)
 

@@ -827,6 +827,11 @@ constexpr int MAX_RESPONSE_DELAY_MS = 30000;
 /// setting: the app always sends an explicit `limit`, so an engine-side default
 /// would have no reader on the path the app takes.
 constexpr int64_t DEFAULT_PAGE_LIMIT = 50;
+/// Bounds on `POST /inbox/start`'s `allowedOrigins` (#2367): every inbound
+/// request with an `Origin` is compared against the whole list, and an origin
+/// (`scheme://host:port`, a 253-byte DNS name at most) never needs more bytes.
+constexpr size_t MAX_ALLOWED_ORIGINS       = 32;
+constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 } // namespace inbox
 
 /**
@@ -1147,6 +1152,11 @@ constexpr int MAX_LATENCY_MS = 30000;
 /// own memory, not the database - bounded so a mock hammered by a load run
 /// does not grow without limit for the whole time it stays up.
 constexpr size_t MAX_ACTIVITY_ENTRIES = 200;
+
+/// Bounds on `POST /mock/start`'s `allowedOrigins` (#2367), for the reason
+/// the inbox's are bounded: every request with an `Origin` scans the list.
+constexpr size_t MAX_ALLOWED_ORIGINS       = 32;
+constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 } // namespace mock_server
 
 /**

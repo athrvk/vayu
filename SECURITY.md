@@ -27,6 +27,13 @@ anything. A request the engine itself sends - a Send, a run, a script's
 `pm.sendRequest`, a redirect it follows - never reaches the engine's own port
 or the MCP port, whatever spelling, redirect or DNS name leads there.
 
+A mock server or webhook inbox you start is different: it exists to be called
+from pages, so every page in the browser can reach it and, by default, read
+what it answers (CORS `*`, never with your cookies). Starting one with
+`allowedOrigins` restricts reading to the origins you list, and since a mock
+replays saved examples verbatim, do not save examples from production responses
+into a collection you mock.
+
 ## Renderer posture
 
 The UI window runs with `nodeIntegration` off, `contextIsolation` and the

@@ -47,6 +47,7 @@ import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
+import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
 
 export default function MockServerView() {
@@ -175,6 +176,12 @@ export default function MockServerView() {
 				<p className="pl-6 text-xs text-muted-foreground">
 					{mock.latencyMs > 0 ? `${mock.latencyMs}ms latency` : "No added latency"}
 					{mock.errorRatePct > 0 && `, ${mock.errorRatePct}% of answers fail`}
+				</p>
+				{/* A line of its own: the list can be 32 long, and the knobs above are
+				    short enough to read at a glance. Said for the default too, so
+				    "any" is stated rather than inferred (#2367). */}
+				<p className="break-words pl-6 text-xs text-muted-foreground">
+					{describeOriginPolicy(mock.allowedOrigins)}
 				</p>
 			</header>
 

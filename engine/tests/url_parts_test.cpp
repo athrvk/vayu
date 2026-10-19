@@ -19,6 +19,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "optional_assert.hpp"
@@ -305,6 +306,50 @@ TEST (PercentEncodeTest, EscapesEverythingOutsideTheUnreservedSet) {
     EXPECT_EQ (percent_encode ("{ me { id } }"), "%7B%20me%20%7B%20id%20%7D%20%7D");
     EXPECT_EQ (percent_encode ("a-b_c.d~e"), "a-b_c.d~e");
     EXPECT_EQ (percent_encode (""), "");
+}
+
+// The spelling a mock's or inbox's allowlist stores and an inbound Origin is
+// compared in (#2367): equal strings exactly when they name one origin.
+TEST (CanonicalOriginTest, SpellsAnOriginTheWayABrowserSerialisesIt) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { "https://app.example.test", "https://app.example.test" },
+        { "HTTPS://App.Example.TEST", "https://app.example.test" },
+        { "https://app.example.test:443", "https://app.example.test" },
+        { "http://app.example.test:80", "http://app.example.test" },
+        { "http://app.example.test:", "http://app.example.test" },
+        { "http://localhost:5173", "http://localhost:5173" },
+        { "https://app.example.test:80", "https://app.example.test:80" },
+        { "http://127.0.0.1:3000", "http://127.0.0.1:3000" },
+        { "http://[::1]:8080", "http://[::1]:8080" },
+        { "https://b\xC3\xBC"
+          "cher.example",
+        "https://xn--bcher-kva.example" },
+    };
+    for (const auto& [input, expected] : cases) {
+        const auto canonical = canonical_origin (input);
+        ASSERT_HAS_VALUE (canonical) << input << ": " << canonical.error ();
+        EXPECT_EQ (*canonical, expected) << input;
+    }
+}
+
+TEST (CanonicalOriginTest, RefusesAnythingThatIsNotOneHttpOrigin) {
+    // Each of these either names no single origin or names more than one; the
+    // ones ada alone would accept (a trailing slash, `https:host`, a `*`
+    // label, an embedded tab) are why the shape is read off the text first.
+    for (const char* refused :
+    { "", "null", "*", "https://*.example.test", "app.example.test", "//app.example.test",
+    "https:app.example.test", "https:/app.example.test", "ftp://app.example.test",
+    "ws://app.example.test", "file://", "https://", "https://app.example.test/",
+    "https://app.example.test/path", "https://app.example.test?q=1", "https://app.example.test#top",
+    "https://user:pass@app.example.test", "https://app.example.test\\x",
+    " https://app.example.test", "https://app.example.test ", "https://app.\texample.test",
+    "https://app.example.test:99999", "https://[::1", "https://exa mple.test" }) {
+        const auto canonical = canonical_origin (refused);
+        EXPECT_FALSE (canonical.has_value ()) << "'" << refused << "' was accepted";
+        if (!canonical) {
+            EXPECT_FALSE (canonical.error ().empty ()) << refused;
+        }
+    }
 }
 
 } // namespace

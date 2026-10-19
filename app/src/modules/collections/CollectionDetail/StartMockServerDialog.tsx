@@ -4,9 +4,9 @@
  * This source code is licensed under the Apache 2.0 license found in the
  * LICENSE file in the "app" directory of this source tree.
  *
- * The start form for a mock server's two injection knobs (issue #570), on the
- * shape of `services/NewIssuerDialog` - the precedent for "a service with
- * options, started from a form".
+ * The start form for a mock server's two injection knobs (issue #570) and its
+ * allowed origins (#2367), on the shape of `services/NewIssuerDialog` - the
+ * precedent for "a service with options, started from a form".
  *
  * It is the *secondary* affordance, not the way in: the common case is "serve
  * this collection with nothing set", and the header's button still does that in
@@ -16,8 +16,8 @@
  * without breaking a real service - and neither is what you want on the way to
  * poking a route by hand.
  *
- * Both are start-time only. The engine has no `PUT /mock/:id`, and this did not
- * add one: they are read per response, so they *could* be live, but a run
+ * All three are start-time only. The engine has no `PUT /mock/:id`, and this did
+ * not add one: they are read per response, so they *could* be live, but a run
  * against a mock has to be able to say which configuration produced its
  * numbers, which is the same reason the route table is a start-time snapshot.
  * Stop and start to change one - and the stop tooltip says so.
@@ -42,7 +42,8 @@ import {
 	Label,
 	DialogCancelButton,
 } from "@/components/ui";
-import { Callout, FieldError } from "@/components/shared";
+import { AllowedOriginsField, Callout, FieldError } from "@/components/shared";
+import { parseAllowedOrigins } from "@/lib/allowed-origins";
 import {
 	DEFAULT_MOCK_OPTIONS,
 	MAX_MOCK_ERROR_RATE_PCT,
@@ -74,14 +75,22 @@ export function StartMockServerDialog({
 }: StartMockServerDialogProps) {
 	const [latency, setLatency] = useState(String(DEFAULT_MOCK_OPTIONS.latencyMs));
 	const [errorRate, setErrorRate] = useState(String(DEFAULT_MOCK_OPTIONS.errorRatePct));
+	const [originsText, setOriginsText] = useState("");
 
 	const latencyError = outOfRange(latency, MAX_MOCK_LATENCY_MS, "milliseconds");
 	const errorRateError = outOfRange(errorRate, MAX_MOCK_ERROR_RATE_PCT, "percent");
-	const canStart = !latencyError && !errorRateError && !pending;
+	const origins = parseAllowedOrigins(originsText);
+	const canStart = !latencyError && !errorRateError && !origins.error && !pending;
 
 	const start = () => {
 		if (!canStart) return;
-		onStart({ latencyMs: Number(latency), errorRatePct: Number(errorRate) });
+		onStart({
+			latencyMs: Number(latency),
+			errorRatePct: Number(errorRate),
+			// Absent, not `[]`: no list is the engine's own default, and the
+			// exact payload of a start that sets nothing stays what it was.
+			...(origins.origins.length > 0 && { allowedOrigins: origins.origins }),
+		});
 	};
 
 	return (
@@ -90,8 +99,8 @@ export function StartMockServerDialog({
 				<DialogHeader>
 					<DialogTitle>Mock server options</DialogTitle>
 					<DialogDescription>
-						What the mock does on its way to answering. Both are fixed for the life of
-						the mock - stop and start it to change either.
+						What the mock does on its way to answering, and which pages may read it. All
+						three are fixed for the life of the mock - stop and start it to change any.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -156,6 +165,13 @@ export function StartMockServerDialog({
 						</div>
 						<FieldError id="mock-error-rate-error">{errorRateError}</FieldError>
 					</div>
+
+					<AllowedOriginsField
+						id="mock-allowed-origins"
+						value={originsText}
+						onChange={setOriginsText}
+						error={origins.error}
+					/>
 
 					{/* The engine's own refusal - a collection with nothing to serve,
 					    or the server budget - shown where the form is rather than as a
