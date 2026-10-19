@@ -16,6 +16,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/platform/platform.hpp"
 
 using namespace vayu::core;
@@ -618,6 +619,39 @@ nlohmann::json live_frame_json (std::string_view frame) {
     frame.substr (json_at, frame.find ('\n', json_at) - json_at));
 }
 
+/// A load run row for @p config, dated now: an epoch-dated run is pruned, row
+/// and all, the moment it finishes.
+void create_load_run (vayu::db::Database& db,
+const std::string& run_id,
+const nlohmann::json& config) {
+    vayu::db::Run run;
+    run.id              = run_id;
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Pending;
+    run.config_snapshot = config.dump ();
+    run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    db.create_run (run);
+}
+
+/// @p run_id's row once it reaches a terminal status, or its last read after
+/// 20 s.
+std::optional<vayu::db::Run>
+wait_for_terminal_run (vayu::db::Database& db, const std::string& run_id) {
+    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (20);
+    std::optional<vayu::db::Run> stored;
+    while (std::chrono::steady_clock::now () < deadline) {
+        stored = db.get_run (run_id);
+        if (stored && stored->status != vayu::RunStatus::Pending &&
+        stored->status != vayu::RunStatus::Running) {
+            break;
+        }
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+    return stored;
+}
+
 } // namespace
 
 // #2395: the live clock starts where the report's does, after `script.setup`.
@@ -646,30 +680,11 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
             { "enabled", true }, { "config", { { "script", setup_script } } } } }) } };
 
         const std::string run_id = "run_load_clock";
-        vayu::db::Run run;
-        run.id              = run_id;
-        run.type            = vayu::RunType::Load;
-        run.status          = vayu::RunStatus::Pending;
-        run.config_snapshot = config.dump ();
-        // An epoch-dated run is pruned, row and all, the moment it finishes.
-        run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::system_clock::now ().time_since_epoch ())
-                         .count ();
-        db.create_run (run);
+        create_load_run (db, run_id, config);
 
         RunManager manager;
         ASSERT_TRUE (manager.start_run (run_id, config, db));
-        const auto deadline =
-        std::chrono::steady_clock::now () + std::chrono::seconds (20);
-        std::optional<vayu::db::Run> stored;
-        while (std::chrono::steady_clock::now () < deadline) {
-            stored = db.get_run (run_id);
-            if (stored && stored->status != vayu::RunStatus::Pending &&
-            stored->status != vayu::RunStatus::Running) {
-                break;
-            }
-            std::this_thread::sleep_for (std::chrono::milliseconds (20));
-        }
+        const auto stored = wait_for_terminal_run (db, run_id);
         ASSERT_HAS_VALUE (stored);
         ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
         const auto summary = nlohmann::json::parse (stored->summary);
@@ -710,6 +725,63 @@ TEST (LoadClock, LiveElapsedStartsWithLoadNotWithSetup) {
         EXPECT_NEAR (frames.back ()["elapsedSeconds"].get<double> (), test_duration, 0.5)
         << "the last live frame and the report disagree about how long load "
            "ran";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2392: the report's send rate and rate fidelity divide by the sending
+// window, not by a duration that includes the end-of-run drain. Every /slow
+// request answers 500 ms after it is sent, so the drain after a 2 s run is
+// about that long. Mutation checks: divide `send_rate` by `total_duration_s`
+// again in `collect_summary_inputs` and the send-rate assertion fails; drop
+// the `apply_sending_window_rates` call in `reconcile_report_rates` and the
+// achievement reads about 80.
+TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
+    const std::string db_path = "test_load_clock_drain.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        constexpr double DURATION_S = 2.0;
+        const nlohmann::json config{ { "method", "GET" }, { "url", server.slow_url () },
+            { "mode", "constant_rps" }, { "duration", "2s" },
+            { "targetRps", 50.0 }, { "timeout", 5000 }, { "workers", 1 } };
+        const std::string run_id = "run_load_drain";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto summary   = nlohmann::json::parse (stored->summary);
+        const double sending = summary.at ("sending_duration").get<double> ();
+        const double test_duration = summary.at ("test_duration").get<double> ();
+        const auto sent     = summary.at ("requests_sent").get<size_t> ();
+        const auto expected = summary.at ("requests_expected").get<size_t> ();
+        EXPECT_EQ (expected, 100u);
+        ASSERT_GT (sent, 0u);
+        EXPECT_GE (sending, DURATION_S);
+        EXPECT_LT (sending, DURATION_S + 0.15)
+        << "the window ran past the deadline";
+        EXPECT_GT (test_duration - sending, 0.4) << "no drain was measured";
+        EXPECT_DOUBLE_EQ (summary.at ("send_rate").get<double> (),
+        static_cast<double> (sent) / sending);
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const double achievement =
+        report.at ("rateControl").at ("achievement").get<double> ();
+        EXPECT_NEAR (achievement,
+        static_cast<double> (sent) * 100.0 / static_cast<double> (expected), 0.1);
+        EXPECT_GT (achievement, 95.0) << "the drain is back in the denominator";
 
         manager.shutdown ();
     }

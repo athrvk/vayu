@@ -12,13 +12,7 @@
  */
 
 import { z } from "zod";
-import {
-	secretsShape,
-	WITHHELD_AUTH_SENTENCE,
-	WITHHELD_SPEC_DIFF_SENTENCE,
-	WITHHELD_VARIABLE_SENTENCE,
-	withholdSpecDiffChanges,
-} from "../withhold.js";
+import { secretsShape, withholdSpecDiffChanges, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -168,9 +162,9 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "diff_spec",
 		category: "read",
 		invalidates: [],
-		description:
-			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift. " +
-			WITHHELD_SPEC_DIFF_SENTENCE,
+		description: (config) =>
+			"Check whether an OpenAPI contract has drifted from the collection bound to it, and where. Pass the collection and the re-fetched document text; the engine compares it against the document the collection is currently bound to AND against every request in its subtree, and answers which operations the document adds, which requests it no longer declares, and which requests changed field by field with the current and next value of each. Reads only: nothing is stored, no binding moves, no request is stamped, so it is safe to ask about a document you have not decided to apply. `identical` is decided on the stored bytes and is the 'already up to date' answer. A field flagged `userTouched` is one somebody edited by hand rather than one the last import wrote - applying the document there would overwrite a person's work. `unmapped` counts requests carrying no operation identity at all, which no comparison covers. This tool is the read half: `sync_spec` applies the safe half of a drift." +
+			withheldPointer(config),
 		annotations: {
 			title: "Diff OpenAPI spec against collection",
 			readOnlyHint: true,
@@ -606,14 +600,11 @@ export const SPEC_TOOLS: McpTool[] = [
 		name: "unbind_spec",
 		category: "write",
 		invalidates: ["collection"],
-		description:
+		description: (config) =>
 			"Detach a collection from the OpenAPI document it is bound to. " +
 			GUARDED_WRITE_SENTENCE +
 			". The document itself is kept - other collections may bind it - and the requests keep the operation identities they were stamped with, exactly as the app's Unbind button leaves them, so re-binding the same document later costs nothing. After this the collection's runs report no contract coverage and its responses are no longer schema-checked. Re-binding is `bind_spec`, which restores this state exactly if you hand it the same document." +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" " +
-			WITHHELD_AUTH_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Unbind OpenAPI spec",
 			readOnlyHint: false,

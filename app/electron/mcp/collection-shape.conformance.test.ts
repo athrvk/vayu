@@ -17,7 +17,7 @@ import { describe, expect, test, vi } from "vitest";
 import { hasDataContract, type CollectionDataSchema } from "@/types/domain";
 import { DATA_CONTRACT_SENTENCE, readDataContract } from "./collection-shape.js";
 import { STATIC_RESOURCES } from "./resources.js";
-import { TOOLS, dispatchTool, type ToolContext } from "./tools.js";
+import { TOOLS, dispatchTool, resolveDescription, type ToolContext } from "./tools.js";
 import { resolveSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
 
@@ -90,7 +90,7 @@ describe("a collection's data contract on the MCP surface", () => {
 		const resource = STATIC_RESOURCES.find((r) => r.uri === "vayu://collections")!;
 		const tool = TOOLS.find((t) => t.name === "list_collections")!;
 		expect(resource.description).toContain(DATA_CONTRACT_SENTENCE);
-		expect(tool.description).toContain(DATA_CONTRACT_SENTENCE);
+		expect(resolveDescription(tool, resolveSafetyConfig())).toContain(DATA_CONTRACT_SENTENCE);
 	});
 });
 

@@ -17,7 +17,7 @@ import type http from "node:http";
 import { EngineClient } from "./engine-client.js";
 import { McpHttpServer } from "./http.js";
 import { resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
-import { listedToolNames, type McpDataChangedEvent, type ToolContext } from "./tools.js";
+import { toolListSignature, type McpDataChangedEvent, type ToolContext } from "./tools.js";
 import type { Logger } from "../log.js";
 import type { AppFocus } from "../app-focus.js";
 import type { DataFileLocation } from "../data-file-locations.js";
@@ -97,9 +97,9 @@ export class VayuMcpService {
 	 * answers is also announced, to the clients that can hear it.
 	 */
 	updateSafety(override: Partial<McpSafetyConfig>): void {
-		const listed = listedToolNames(this.config).join(",");
+		const listed = toolListSignature(this.config);
 		this.config = resolveSafetyConfig({ ...this.config, ...override });
-		if (listedToolNames(this.config).join(",") !== listed) this.httpServer.notifyToolsChanged();
+		if (toolListSignature(this.config) !== listed) this.httpServer.notifyToolsChanged();
 	}
 
 	getSafety(): McpSafetyConfig {

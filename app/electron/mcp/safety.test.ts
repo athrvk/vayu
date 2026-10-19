@@ -452,6 +452,16 @@ describe("the load default tables mirror the engine", () => {
 			return Number(match![1]);
 		};
 		const concurrency = constant("DEFAULT_CONCURRENCY");
+		// `MAX_CONCURRENCY` is declared in `run_config` and in `capacity`; the
+		// capacity one is the search ceiling the table holds.
+		const capacityBlock = header.match(
+			/namespace capacity \{([\s\S]*?)\} \/\/ namespace capacity/
+		);
+		expect(capacityBlock, "namespace capacity not found in constants.hpp").not.toBeNull();
+		const capacityCeiling = Number(
+			capacityBlock![1].match(/constexpr\s+int64_t\s+MAX_CONCURRENCY\s*=\s*(\d+);/)?.[1]
+		);
+		expect(capacityCeiling).toBeGreaterThan(0);
 		const durationSeconds = constant("DEFAULT_DURATION_MS") / 1000;
 		const expected: Record<LoadMode, EngineLoadDefaults> = {
 			constant_concurrency: { concurrency, durationSeconds, ratePaced: true },
@@ -466,7 +476,10 @@ describe("the load default tables mirror the engine", () => {
 				concurrency: constant("DEFAULT_ITERATIONS_CONCURRENCY"),
 				iterations: constant("DEFAULT_ITERATIONS"),
 			},
-			capacity: { durationSeconds: constant("DEADLINE_MS") / 1000 },
+			capacity: {
+				concurrency: capacityCeiling,
+				durationSeconds: constant("DEADLINE_MS") / 1000,
+			},
 		};
 		expect(ENGINE_LOAD_DEFAULTS).toEqual(expected);
 	});

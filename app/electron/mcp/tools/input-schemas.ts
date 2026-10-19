@@ -69,11 +69,16 @@ export const environmentIdInput = z
  * mentioned - and an agent testing "what does this endpoint do with no
  * `User-Agent`" had no way to find out that it cannot simply omit one.
  *
- * One sentence in one place, carried by the three tools that send traffic: three
- * paraphrases of the same rule are three things to keep in step with the engine.
+ * One sentence in one place, carried whole by `run_request`, the tool that owns
+ * the behaviour; the other tools that send traffic carry
+ * {@link ENGINE_DEFAULT_HEADERS_POINTER} (#2441).
  */
 export const ENGINE_DEFAULT_HEADERS_SENTENCE =
 	"Headers the engine adds itself: every request sent through Vayu that does not already name them gets a `User-Agent` (`Vayu/<version>`), an `Accept-Encoding` negotiating the compression this build can decode, and - only when the user has switched it on - a fresh per-request correlation id (`X-Vayu-Request-Id` by default). They are added at send time and never stored on a request, and a header you write under one of those names always wins, so setting `User-Agent` yourself is how you control what the target sees. Refusing one outright - sending no `User-Agent` at all - is the engine's `disabledDefaultHeaders` field, which names the headers a send declines; the app's Headers tab offers it as a tick per header, and run_request and start_load_run take it as an argument. run_collection_smoke does not: it replays each saved request exactly as stored, so a refusal there would be a per-send decision applied to requests the agent did not write.";
+
+/** What `start_load_run` and `run_collection_smoke` say about the engine's default headers. */
+export const ENGINE_DEFAULT_HEADERS_POINTER =
+	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id to a request that does not name them; a header you write under that name wins; run_request states the rule.";
 
 /**
  * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.

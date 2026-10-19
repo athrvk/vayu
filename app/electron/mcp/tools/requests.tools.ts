@@ -12,13 +12,7 @@
 
 import { z } from "zod";
 import { EngineRequestError } from "../engine-client.js";
-import {
-	secretsShape,
-	WITHHELD_AUTH_SENTENCE,
-	WITHHELD_HEADER_SENTENCE,
-	WITHHELD_URL_SENTENCE,
-	withholdRequestUrl,
-} from "../withhold.js";
+import { secretsShape, withholdRequestUrl, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -49,16 +43,11 @@ export const REQUEST_TOOLS: McpTool[] = [
 		name: "create_request",
 		category: "write",
 		invalidates: ["request"],
-		description:
+		description: (config) =>
 			"Create a saved request inside a collection (stores it; does not send it), with its auth, redirect policy, protocol, stream flag, certificate-verification setting and its elements (extractors, assertions, timers, scripts) - everything the app's builder stores except form-data file parts. " +
 			GUARDED_WRITE_SENTENCE +
 			'. The URL may contain {{variables}} since it is only saved, not executed, and a stored element runs only when the request is later sent. Auth is stored as written and resolved at send time, so {{variables}} inside it are fine; leaving `auth` out stores the default "inherit", which resolves against the collection chain.' +
-			" " +
-			WITHHELD_AUTH_SENTENCE +
-			" " +
-			WITHHELD_HEADER_SENTENCE +
-			" " +
-			WITHHELD_URL_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Create saved request",
 			readOnlyHint: false,
@@ -152,16 +141,11 @@ export const REQUEST_TOOLS: McpTool[] = [
 		name: "update_request",
 		category: "write",
 		invalidates: ["request"],
-		description:
+		description: (config) =>
 			"Correct a saved request: its name, URL, method, headers, body, auth, redirect policy, protocol, stream flag, certificate-verification setting, description or elements (extractors, assertions, timers, scripts). " +
 			GUARDED_WRITE_SENTENCE +
 			". Only the fields you pass change - anything you leave out keeps its stored value. Passing `headers` replaces the whole header list, so send every header the request should end up with; passing `auth` replaces the whole auth block, so send the mode and its credentials together ({ mode: 'none' } clears it, { mode: 'inherit' } hands it back to the collection chain); passing `elements` replaces the whole elements list; passing a script replaces just that script's element, and an empty string clears it. `mockResponseMode`/`mockExampleId` set which saved example a mock server answers this request with (`mockExampleId: null` clears it) - get_mock_routes shows the effect once a mock is running." +
-			" " +
-			WITHHELD_AUTH_SENTENCE +
-			" " +
-			WITHHELD_HEADER_SENTENCE +
-			" " +
-			WITHHELD_URL_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Update saved request",
 			readOnlyHint: false,

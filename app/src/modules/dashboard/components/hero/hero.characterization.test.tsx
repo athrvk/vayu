@@ -66,7 +66,8 @@ const snap = (ui: React.ReactElement) => {
 };
 
 describe("hero cards (characterization)", () => {
-	it("RateFidelityCard", () => snap(<RateFidelityCard targetRps={100} actualRps={96} />));
+	it("RateFidelityCard", () =>
+		snap(<RateFidelityCard targetRps={100} actualRps={96} achievement={96} />));
 	it("ThroughputTwinCard (no queue chip)", () =>
 		snap(<ThroughputTwinCard sendRate={96} throughput={96} avgQueueWaitMs={0} />));
 	it("ThroughputTwinCard (queue chip)", () =>
@@ -145,6 +146,7 @@ function derived(mode: DashboardDerived["mode"]): DashboardDerived {
 		isCompleted: false,
 		targetRps: 100,
 		actualRps: 100,
+		rateAchievementPct: 100,
 		sendRate: 100,
 		throughput: 3940,
 		currentRps: 100,

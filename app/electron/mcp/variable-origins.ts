@@ -338,12 +338,16 @@ export const VARIABLE_RESOLUTION_URI = "vayu://variables/resolution";
  * The one sentence. It appears verbatim in every tool that writes or lists
  * variables; a new such tool that omits it fails the scan.
  *
+ * Kept under 150 characters: it is the one sentence repeated across many
+ * descriptions on purpose, and longer repeats are what #2441 took out of
+ * `tools/list`.
+ *
  * Spelled with `<` rather than `>` because that is the direction
  * `docs/app/variable-resolution.md` states the ladder in, and the two spellings
  * in one surface were half of what made the order hard to learn.
  */
 export const VARIABLE_PRECEDENCE_SENTENCE =
-	"Resolution order (lowest to highest): globals < collection chain (root to leaf) < active environment, with a bound data row's bare column names above all three.";
+	"Resolution order (lowest to highest): globals < collection chain (root to leaf) < active environment < a bound data row's bare column names.";
 
 /**
  * Which environment a tool resolves against when the call names none (#2480).

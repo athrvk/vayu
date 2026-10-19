@@ -27,7 +27,14 @@ import {
 	type InputRequiredResult,
 	type ServerContext,
 } from "@modelcontextprotocol/server";
-import { TOOLS, dispatchTool, isListed, withheldWriteRefusal, type ToolContext } from "./tools.js";
+import {
+	TOOLS,
+	dispatchTool,
+	isListed,
+	resolveDescription,
+	withheldWriteRefusal,
+	type ToolContext,
+} from "./tools.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
 import type { McpHost } from "./tools/contract.js";
 import { resolveRemedyTokens, settingRemedy } from "./remedy.js";
@@ -123,17 +130,50 @@ const INSTRUCTIONS_TAIL =
  * gate: a withheld value is a marker in place of data, and an agent that does
  * not know why it is there reads it as missing data rather than as a setting a
  * person can change (#1805).
+ *
+ * This is the one full statement of the withholding rules: a tool's
+ * description carries only `withheldPointer`'s line (#2441), and a tools-only
+ * client never reads the resources that restate parts of it.
  */
 function revealGateSentence(host: McpHost): string {
 	return (
-		"Secret values are withheld in this session: a secret variable or a cookie reads as " +
-		"`valueWithheld: true`, an auth credential as `<member>Withheld: true`, and a proxy " +
-		"URL's credentials as `credentialsWithheld: true`. A saved request's `url` loses " +
-		"its password and its credential query values, and a Params row naming one reads " +
-		"`valueWithheld: true`. A request that references a " +
-		"secret still sends with it, because the engine resolves it, and what the run " +
-		"recorded reads `<redacted>` wherever that value or a credential header's value " +
-		"appears. A script you supply when sending a request or starting a load run " +
+		"Secret values are withheld in this session. Stored data: a secret variable or a " +
+		"cookie reads `valueWithheld: true`; an auth credential (a token, password, client " +
+		"secret or key) `<member>Withheld: true`, and a credential row in a Postman import's " +
+		"`postman` source `valueWithheld: true`; so does a header row named `Authorization`, " +
+		"`Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, " +
+		"`X-CSRF-Token` or the header the request's API-key auth names. A `url` (a saved " +
+		"request's; a smoke test row's, composed or else stored; a GraphQL schema read's " +
+		"`endpoint`, though never the schema) drops the password of `user:password@` and " +
+		"empties a credential query or fragment value (`api_key`, `token`, `signature`, or " +
+		"the one the API-key auth places in the query) in place " +
+		"(`?api_key=&page=2`), and a `params` row naming one reads `valueWithheld: true`. An " +
+		"empty value or a pure {{variable}} reference is shown as written. A proxy URL's " +
+		"user:password is stripped, with `credentialsWithheld: true` on the config entry or " +
+		"the connection diagnosis's `proxy`. An OpenAPI diff's `headers`, `url` or `params` " +
+		"change whose current value could carry a credential (such a header with a value, a " +
+		"`user:password@` or a url cut short before its host ends, a credential-named query " +
+		"or params value) reads `currentWithheld: true` in place of `current`. An auth block " +
+		"carrying a Withheld marker is refused as `auth` by every tool that takes one, " +
+		"because it holds no credential. " +
+		"A request that references a secret still sends with it, because the engine resolves " +
+		"it. What a run recorded (run rows, reports, samples, exports, send results, inbox " +
+		"captures, mock activity) reads `<redacted>` in place of every secret variable's " +
+		"value and every literal credential a stored collection's or request's auth holds, 4 " +
+		"bytes or longer, raw, percent-encoded, JSON- or XML-escaped; in place of a credential " +
+		"header's value in header maps, `headerLines` and `rawRequest` header lines, request " +
+		"and response alike; in place of what auth wrote at send time (an OAuth 2.0 token " +
+		"or an API key, whatever its source) in the request's `url`, header maps and " +
+		"`rawRequest`; and in place of a credential-named query value (matched on the whole " +
+		"name, however it got there; an empty value or a pure {{variable}} reference is shown as written) in that `url` and request line. A base64 body " +
+		'(`bodyEncoding: "base64"`) is searched as the bytes it decodes to, matched as ' +
+		"UTF-8 and as Latin-1, and stays base64 that decodes, with " +
+		"`<redacted>` in place of those bytes. Everything else is kept - shape, order and " +
+		"the engine's size fields, which still count the bytes it read - and the request was sent with the real values. If a " +
+		"lookup the masking needs fails, the call answers an error naming it and none of the " +
+		"result. A load run's confirmation preview shows the run as it will be recorded: " +
+		"secrets `<redacted>`, the `auth` block's credentials `<member>Withheld: true`. " +
+		"A script you supply when sending a request or starting a load run " +
 		"(preRequestScript, postRequestScript, tests, or a script.* element) is refused, " +
 		"because a script reads every variable. A task that needs the " +
 		`value itself is blocked until the user chooses to ${settingRemedy("revealSecretsToAgents", host)}. `
@@ -213,7 +253,7 @@ export function createMcpServer(
 			tool.name,
 			{
 				title: tool.annotations.title,
-				description: tool.description,
+				description: resolveDescription(tool, baseCtx.config),
 				inputSchema: z.object(tool.inputSchema),
 				...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 				annotations: tool.annotations,
@@ -351,11 +391,10 @@ function captureToolHandlers(mcp: McpServer): () => ToolHandlers {
 /**
  * Fill every remedy token in the `tools/list` answer with the host's wording.
  *
- * Descriptions are static strings, and the SDK converts each tool's Zod schema
- * to JSON Schema only when it answers the list, so a token in a parameter's
- * description is out of reach of anything done at registration. Resolving the
- * answer covers a tool's description, its parameters' and its output schema
- * in one place.
+ * The SDK converts each tool's Zod schema to JSON Schema only when it answers
+ * the list, so a token in a parameter's description is out of reach of
+ * anything done at registration. Resolving the answer covers a tool's
+ * description, its parameters' and its output schema in one place.
  */
 function resolveRemedyInToolList(
 	mcp: McpServer,

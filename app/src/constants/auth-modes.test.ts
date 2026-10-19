@@ -23,6 +23,7 @@ import {
 	COLLECTION_AUTH_MODES,
 	EDITABLE_AUTH_MODES,
 	isCollectionAuthMode,
+	isEngineExecutableAuthMode,
 	isUneditableAuthMode,
 	uneditableAuthLabel,
 } from "./auth-modes";
@@ -76,6 +77,15 @@ describe("auth mode registry", () => {
 			expect(isUneditableAuthMode(mode)).toBe(true);
 			expect(EDITABLE_AUTH_MODES as readonly string[]).not.toContain(mode);
 		}
+	});
+
+	it("treats exactly the unresolvable modes as not sent by the engine", () => {
+		for (const mode of ALL_MODES) {
+			expect(isEngineExecutableAuthMode(mode), mode).toBe(!isUneditableAuthMode(mode));
+		}
+		expect(isEngineExecutableAuthMode("digest")).toBe(false);
+		expect(isEngineExecutableAuthMode("bearer")).toBe(true);
+		expect(isEngineExecutableAuthMode("inherit")).toBe(true);
 	});
 
 	it("keeps noauth out of the shared list and in the collection one", () => {

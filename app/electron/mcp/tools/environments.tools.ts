@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { ENVIRONMENT_DEFAULT_SENTENCE, precedenceNote } from "../variable-origins.js";
-import { WITHHELD_VARIABLE_SENTENCE } from "../withhold.js";
+import { withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -44,15 +44,14 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		name: "create_environment",
 		category: "write",
 		invalidates: ["environment"],
-		description:
+		description: (config) =>
 			"Create an environment - a named set of {{variables}} a request resolves against. Populate it in the same call, with plain values or with the secret/type/enabled flags. The environment is created inactive: activate_environment is what makes it the one requests resolve against. Vayu assigns the id and returns it. " +
 			GUARDED_WRITE_SENTENCE +
 			". " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: once this one is active they shadow every collection and global of the same name."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Create environment",
 			readOnlyHint: false,
@@ -93,15 +92,14 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		name: "update_environment",
 		category: "write",
 		invalidates: ["environment"],
-		description:
+		description: (config) =>
 			"Set, re-flag or remove an environment's variables, and rename it. Merges: variables you do not name are left alone, and a named one keeps every flag you do not state - so rotating a secret leaves it masked and writing to a disabled variable leaves it disabled. Pass a variable as a string to set its value, or as an object to set any of value/secret/type/enabled. removeVariables deletes names outright, which blanking a value cannot do. " +
 			GUARDED_WRITE_SENTENCE +
 			". " +
 			precedenceNote(
 				"An environment's variables are the top scope tier: while this environment is active they shadow every collection and global of the same name. Writing here to an inactive environment changes nothing a request resolves until activate_environment makes it current."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Update environment",
 			readOnlyHint: false,
@@ -161,7 +159,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		name: "activate_environment",
 		category: "write",
 		invalidates: ["environment"],
-		description:
+		description: (config) =>
 			"Make an environment the active one, the one the app's own switcher shows. " +
 			ENVIRONMENT_DEFAULT_SENTENCE +
 			' Exactly one environment is active at a time: activating one deactivates the previous in the same write. Pass "none" to leave no environment active, the switcher\'s "No Environment" option. A call that names an explicit environmentId (run_request, start_load_run, run_collection) is unaffected by this - it is the default, not an override. ' +
@@ -170,8 +168,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 			precedenceNote(
 				"This is the one call that changes which tier answers without changing any value: the newly active environment shadows every collection and global of the same name, so a name can start resolving differently with nothing else edited."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Activate environment",
 			readOnlyHint: false,

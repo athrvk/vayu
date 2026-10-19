@@ -18,7 +18,7 @@ import {
 	precedenceNote,
 	resolveVariableReports,
 } from "../variable-origins.js";
-import { secretsShape, WITHHELD_VARIABLE_SENTENCE, withholdRowSecrets } from "../withhold.js";
+import { secretsShape, withheldPointer, withholdRowSecrets } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -49,13 +49,12 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		name: "get_globals",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			"Read the global variables - used by every request whatever environment is active. An engine that has never had any answers an empty set rather than an error. " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" " +
 			precedenceNote(
 				"Globals are the bottom tier, so a value read back here is not necessarily the one a request resolves: use resolve_variables to see which definition actually wins."
-			),
+			) +
+			withheldPointer(config),
 		annotations: {
 			title: "Get global variables",
 			readOnlyHint: true,
@@ -74,14 +73,13 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		name: "resolve_variables",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			'Answer which definition of a variable name actually wins in a given context, and list the ones it beat - the question get_globals and list_environments cannot, because each shows one tier in isolation. For every name it reports the winning value with the scope and source that supplied it, then every shadowed definition highest-precedence-first, each saying whether it was outranked by a higher tier or simply switched off (`enabled: false`). A switched-off row is the more common answer to "why is this not the value I set?", and a name whose every definition is disabled resolves to nothing at all rather than to an empty string. ' +
 			precedenceNote(
 				`${ENVIRONMENT_DEFAULT_SENTENCE} Pass a collectionId to include its chain.`
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" Reports what is stored: it resolves nothing on the wire and starts no run.",
+			" Reports what is stored: it resolves nothing on the wire and starts no run." +
+			withheldPointer(config),
 		annotations: {
 			title: "Resolve variables",
 			readOnlyHint: true,
@@ -145,15 +143,14 @@ export const VARIABLE_TOOLS: McpTool[] = [
 		name: "update_globals",
 		category: "write",
 		invalidates: ["environment"],
-		description:
+		description: (config) =>
 			"Set, re-flag or remove global variables - the ones every request can resolve, whatever environment is active. Merges exactly as update_environment does: globals you do not name are left alone, and a named one keeps every flag you do not state. " +
 			GUARDED_WRITE_SENTENCE +
 			". " +
 			precedenceNote(
 				"Globals are the bottom tier: any collection or active-environment definition of the same name shadows what you write here, so a request whose value does not change after this call is usually shadowed rather than unwritten - resolve_variables names the definition that won."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Update global variables",
 			readOnlyHint: false,

@@ -13,11 +13,7 @@
 
 import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
-import {
-	secretsShape,
-	WITHHELD_GRAPHQL_ENDPOINT_SENTENCE,
-	withholdRequestUrl,
-} from "../withhold.js";
+import { secretsShape, withheldPointer, withholdRequestUrl } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import { engineErrorResult, errorResult, jsonResult, stringArray, ToolArgError } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
@@ -36,10 +32,10 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 		name: "get_graphql_schema",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			"Read a GraphQL endpoint's schema as SDL, so a query is written against the types the endpoint actually declares. Pass a saved request's `requestId` to compose it exactly as a send of that request would (variables resolved, `inherit` auth walked through its collection), or an endpoint `url` with optional `headers`, `auth`, `collectionId` and `environmentId` for one with no saved request. The standard introspection query is then sent as a POST with that request's own auth and headers; the send is transient, so no run is filed in History, and the schema is fetched live on every call. GUARDED: the composed endpoint's host must be on Vayu's MCP allowlist. " +
-			`\`sdl\` is capped at ${MAX_SCHEMA_SDL_BYTES} bytes, with \`sdlTruncated\` and \`sdlBytes\` (the true size) beside it. \`types\` lists every named type the schema declares, whether or not it fits under the cap; pass \`types\` to print only the ones you name, in the order given, which is how a schema past the cap is read in parts - a name the schema does not declare is listed under \`unknownTypes\` rather than failing the call. ` +
-			WITHHELD_GRAPHQL_ENDPOINT_SENTENCE,
+			`\`sdl\` is capped at ${MAX_SCHEMA_SDL_BYTES} bytes, with \`sdlTruncated\` and \`sdlBytes\` (the true size) beside it. \`types\` lists every named type the schema declares, whether or not it fits under the cap; pass \`types\` to print only the ones you name, in the order given, which is how a schema past the cap is read in parts - a name the schema does not declare is listed under \`unknownTypes\` rather than failing the call.` +
+			withheldPointer(config, "url"),
 		annotations: {
 			title: "Get a GraphQL request's schema",
 			readOnlyHint: true,

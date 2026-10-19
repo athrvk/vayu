@@ -139,8 +139,8 @@ export default function AuthPanel() {
 			{/* Stored-but-not-editable mode (imported digest/aws/ntlm) */}
 			{uneditableLabel && (
 				<Callout severity="warning" title={`${uneditableLabel} auth is set`}>
-					It was imported and can't be edited here yet - it is still sent with this
-					request. Picking a type above replaces it.
+					It was imported and can't be edited here yet. Vayu does not send this auth type,
+					so the request goes out without auth. Picking a type above replaces it.
 				</Callout>
 			)}
 

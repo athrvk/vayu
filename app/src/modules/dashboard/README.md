@@ -40,9 +40,10 @@ consumes it.
 - **Tooltip copy lives in one file.** `components/tooltips.tsx` is the single
   source of every InfoChip string. Components import by key
   (`<InfoChip tip={TOOLTIPS.rateFidelity} />`) and never write tooltip copy
-  inline. Nothing outside the file locks the wording - no test pins a string and
-  no document restates it - so `tooltips.tsx` is where wording is decided, and
-  editing an entry there updates every card that shows it.
+  inline. No document restates the wording, and the one test that reads it
+  (`tooltips.rate-fidelity.test.tsx`) holds only which window the rate tooltips
+  name (#2392), so `tooltips.tsx` is where wording is decided, and editing an
+  entry there updates every card that shows it.
 - **No chart geometry constants in component files.** `utils/chartGeometry.ts`
   owns `TIME_SERIES_DIMS` and `HDR_DIMS`. The full-width time-series charts must
   stay dimensionally identical or the dashboard rows stop lining up, and the HDR

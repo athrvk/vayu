@@ -7,7 +7,9 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 #include <variant>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -138,6 +140,40 @@ TEST (AuthResolver, UserSuppliedAuthorizationHeaderWins) {
     // no second (differently-cased) Authorization header is added.
     EXPECT_EQ (req.headers.size (), 1u);
     EXPECT_EQ (req.headers.at ("Authorization"), "Bearer user-typed");
+}
+
+// #2474: a mode Vayu stores but does not execute is sent without auth, never
+// refused, and says so. Mutation check: drop the `auth_notice` assignment in
+// `apply_auth`'s UnsupportedAuth branch and this reds.
+TEST (AuthResolver, UnsupportedModeSendsWithoutAuthAndSaysSo) {
+    for (const char* mode : { "digest", "aws", "ntlm", "hawk", "oauth1", "edgegrid", "jwt" }) {
+        auto req    = make_request ();
+        auto result = vayu::http::apply_auth (req,
+        json{ { "mode", mode }, { "username", "u" }, { "password", "p" } }, nullptr);
+        EXPECT_TRUE (result.ok) << mode;
+        EXPECT_TRUE (req.headers.empty ()) << mode;
+        EXPECT_EQ (req.url, "https://api.example.com/v1") << mode;
+        EXPECT_TRUE (req.auth_query_param.empty ()) << mode;
+        EXPECT_NE (req.auth_notice.find (std::string ("'") + mode + "'"), std::string::npos)
+        << mode << ": " << req.auth_notice;
+        EXPECT_NE (req.auth_notice.find ("without authentication"), std::string::npos)
+        << mode << ": " << req.auth_notice;
+    }
+}
+
+TEST (AuthResolver, ExecutedModesLeaveNoNotice) {
+    const std::vector<json> executed{
+        json (nullptr),
+        json{ { "mode", "none" } },
+        json{ { "mode", "bearer" }, { "token", "t" } },
+        json{ { "mode", "basic" }, { "username", "u" }, { "password", "p" } },
+        json{ { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "v" } },
+    };
+    for (const auto& auth : executed) {
+        auto req = make_request ();
+        EXPECT_TRUE (vayu::http::apply_auth (req, auth, nullptr).ok) << auth.dump ();
+        EXPECT_TRUE (req.auth_notice.empty ()) << auth.dump ();
+    }
 }
 
 TEST (AuthResolver, Oauth2WithoutDatabaseFailsCleanly) {

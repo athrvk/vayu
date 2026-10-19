@@ -13,11 +13,7 @@
 import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
 import { ENVIRONMENT_DEFAULT_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
-import {
-	runOutputShape,
-	WITHHELD_RUN_OUTPUT_SENTENCE,
-	WITHHELD_SMOKE_ROW_URL_SENTENCE,
-} from "../withhold.js";
+import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	engineErrorResult,
@@ -33,7 +29,7 @@ import {
 import { composeViaEngine, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
 import {
 	elementsTimersInput,
-	ENGINE_DEFAULT_HEADERS_SENTENCE,
+	ENGINE_DEFAULT_HEADERS_POINTER,
 	failOnSchemaErrorInput,
 	scenarioDataInput,
 	dataFileNameInput,
@@ -57,15 +53,13 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		name: "run_collection_smoke",
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
-		description:
+		description: (config) =>
 			"Execute a collection's own saved requests once each and return a pass/fail matrix (a request passes on a 2xx/3xx status with all its tests passing and, when the collection is bound to an OpenAPI document, a response matching the schema that document declares - a response the document declares no schema for is reported as unchecked and never fails the request; pass failOnSchemaError: false to keep that verdict on every row without letting it decide pass/fail). A row whose request ran assertions carries `tests` - `total`, `failed`, and the failing `name: message` lines (at most 10; `failed` is the true count) - so a request that failed on its tests says which, not just ok:false. Scope is the collection's DIRECT requests: nested sub-collections are not run, and the result discloses how many were left out - call this tool on each of them to cover them. Requests run one at a time, so a large collection takes as long as its requests do added together. Each request is composed exactly as the app would send it: {{variables}} resolved in the order " +
 			VARIABLE_RESOLUTION_URI +
 			" states, the request's stored auth applied (inheriting from the collection chain, incl. OAuth2), and its collection-chain + own pre/post scripts run. Each request's resolved host must be on the allowlist; requests whose host still cannot be verified (e.g. a variable did not resolve and allow-all is off) are skipped. Sends real traffic and, as the app's Send does, saves back any variables its scripts or extractors set (environment, globals, collection variables); it changes no other Vayu data. " +
-			ENGINE_DEFAULT_HEADERS_SENTENCE +
-			" " +
-			WITHHELD_RUN_OUTPUT_SENTENCE +
-			" " +
-			WITHHELD_SMOKE_ROW_URL_SENTENCE,
+			ENGINE_DEFAULT_HEADERS_POINTER +
+			" There is no `disabledDefaultHeaders` here: each saved request is replayed exactly as stored." +
+			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Run collection smoke test",
 			readOnlyHint: false,

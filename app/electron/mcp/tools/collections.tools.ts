@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { precedenceNote } from "../variable-origins.js";
-import { WITHHELD_AUTH_SENTENCE, WITHHELD_VARIABLE_SENTENCE } from "../withhold.js";
+import { withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -46,17 +46,14 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		name: "create_collection",
 		category: "write",
 		invalidates: ["collection"],
-		description:
+		description: (config) =>
 			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. " +
 			GUARDED_WRITE_SENTENCE +
 			". Pass `parentId` to nest it inside an existing collection; omit it for a top-level one. Returns the created collection - its `id` is what create_request takes as `collectionId`. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" " +
-			WITHHELD_AUTH_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Create collection",
 			readOnlyHint: false,
@@ -125,17 +122,14 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		name: "update_collection",
 		category: "write",
 		invalidates: ["collection"],
-		description:
+		description: (config) =>
 			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. " +
 			GUARDED_WRITE_SENTENCE +
 			". Only the fields you pass change, and the requests inside it are never touched. Variables merge: one you do not name is left alone, and a named one keeps every flag you do not state; removeVariables deletes names outright. Auth and elements each replace the stored block/list whole. This is not a move - to re-parent a collection, use move_item. " +
 			precedenceNote(
 				"Collection variables sit between globals and the active environment: they shadow globals, a nested collection shadows its ancestors, and the active environment shadows them all."
 			) +
-			" " +
-			WITHHELD_VARIABLE_SENTENCE +
-			" " +
-			WITHHELD_AUTH_SENTENCE,
+			withheldPointer(config),
 		annotations: {
 			title: "Update collection",
 			readOnlyHint: false,

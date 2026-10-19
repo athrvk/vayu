@@ -747,7 +747,10 @@ class Database {
      * shutdown is not one of those paths - `RunManager::shutdown` stops and
      * joins every worker, which writes the terminal status. Called from
      * `init()` - before the sweeper and the HTTP server start - so no live run
-     * can be caught by it.
+     * of this process can be caught by it, and `daemon.cpp` holds the
+     * instance lock before the database opens, so no other engine has a live
+     * run here either. That lock is the whole
+     * ownership check; rows carry no owner (issue #2422).
      *
      * @return Number of rows reconciled.
      */

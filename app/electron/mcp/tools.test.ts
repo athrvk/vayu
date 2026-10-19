@@ -27,9 +27,12 @@ import {
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SPEC_DIFF_ENTRIES,
 	MAX_SUCCESS_SAMPLE_PERIOD,
+	ENGINE_DEFAULT_HEADERS_SENTENCE,
 	REQUEST_SETTINGS_KEYS,
+	resolveDescription,
 	toolCatalog,
 	TOOLS,
+	type McpTool,
 	type ToolContext,
 	type ToolResult,
 } from "./tools.js";
@@ -51,8 +54,18 @@ import {
 } from "./engine-client.js";
 import { defaultMcpExportFormat } from "./run-export-formats.js";
 import { REVEAL_SETTING_TOKEN, resolveRemedyTokens } from "./remedy.js";
-import { WITHHELD_MOCK_ACTIVITY_SENTENCE, WITHHELD_RUN_OUTPUT_SENTENCE } from "./withhold.js";
+import { REDACTED_MARKER, withheldPointer } from "./withhold.js";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
+
+/**
+ * @p tool's description as a session under @p safety lists it - the defaults,
+ * writes and reveal off, unless a case names otherwise. Throws for a missing
+ * tool, so a renamed one fails here rather than passing a negative match.
+ */
+function descriptionOf(tool: McpTool | undefined, safety: Partial<McpSafetyConfig> = {}): string {
+	if (!tool) throw new Error("tool is not registered");
+	return resolveDescription(tool, resolveSafetyConfig(safety));
+}
 
 /**
  * Default `composeRequest` fake: the engine's identity composition for an
@@ -3535,8 +3548,8 @@ describe("run_collection_smoke", () => {
 
 	test("the tool description states the scope it actually runs", () => {
 		const tool = TOOLS.find((t) => t.name === "run_collection_smoke");
-		expect(tool?.description).toMatch(/DIRECT requests/);
-		expect(tool?.description).toMatch(/one at a time/);
+		expect(descriptionOf(tool)).toMatch(/DIRECT requests/);
+		expect(descriptionOf(tool)).toMatch(/one at a time/);
 	});
 });
 
@@ -4852,7 +4865,7 @@ describe("inline body bounds", () => {
 
 	test("both tool descriptions state the bound", () => {
 		for (const name of ["run_request", "get_run_report"]) {
-			const description = TOOLS.find((t) => t.name === name)!.description;
+			const description = descriptionOf(TOOLS.find((t) => t.name === name));
 			expect(description).toContain(String(MAX_INLINE_BODY_BYTES));
 			expect(description).toMatch(/bodyTruncated/);
 		}
@@ -4862,7 +4875,7 @@ describe("inline body bounds", () => {
 		// The flags are one word apart and mean opposite things about what a
 		// re-send would achieve, so the description has to name both and say
 		// which remedy belongs to which.
-		const description = TOOLS.find((t) => t.name === "run_request")!.description;
+		const description = descriptionOf(TOOLS.find((t) => t.name === "run_request"));
 		expect(description).toMatch(/bodyCapped/);
 		expect(description).toMatch(/maxDesignResponseBodyBytes/);
 	});
@@ -5008,7 +5021,7 @@ describe("inline body bounds", () => {
 		});
 
 		test("the tool description states the total bound and its disclosure", () => {
-			const description = TOOLS.find((t) => t.name === "get_run_report")!.description;
+			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
 			expect(description).toContain(String(MAX_REPORT_TRACE_BYTES));
 			expect(description).toMatch(/traceOmitted/);
 			expect(description).toMatch(/tracesOmitted/);
@@ -5584,9 +5597,9 @@ describe("dispatchTool", () => {
 		// The description is where an agent learns a collection can be the target
 		// at all, so it has to name the argument and what `concurrency` becomes.
 		const loadRun = TOOLS.find((t) => t.name === "start_load_run");
-		expect(loadRun?.description).toMatch(/scenario/i);
-		expect(loadRun?.description).toMatch(/virtual users/);
-		expect(loadRun?.description).not.toMatch(/cannot be started from here/);
+		expect(descriptionOf(loadRun)).toMatch(/scenario/i);
+		expect(descriptionOf(loadRun)).toMatch(/virtual users/);
+		expect(descriptionOf(loadRun)).not.toMatch(/cannot be started from here/);
 		expect(Object.keys(loadRun!.inputSchema)).toContain("scenario");
 	});
 
@@ -6093,7 +6106,7 @@ describe("dispatchTool", () => {
 
 		test("the descriptions say what is refused and where the setting lives", () => {
 			for (const name of ["run_request", "start_load_run"]) {
-				const description = TOOLS.find((t) => t.name === name)!.description;
+				const description = descriptionOf(TOOLS.find((t) => t.name === name));
 				expect(description).toContain(REVEAL_SETTING_TOKEN);
 				expect(resolveRemedyTokens(description, "app")).toContain(
 					"Reveal secrets to agents"
@@ -6338,12 +6351,12 @@ describe("dispatchTool", () => {
 			const tool = TOOLS.find((t) => t.name === "run_request")!;
 			const idDescription = (tool.inputSchema as Record<string, z.ZodType>).requestId
 				.description;
-			for (const text of [tool.description, idDescription]) {
+			for (const text of [descriptionOf(tool), idDescription]) {
 				expect(text).toMatch(/Omit `url` and pass `requestId`|Without `url`/);
 				expect(text).toMatch(/nothing stored is applied/);
 				expect(text).toMatch(/only links the run in History/);
 			}
-			expect(tool.description).not.toMatch(/use run_collection_smoke/);
+			expect(descriptionOf(tool)).not.toMatch(/use run_collection_smoke/);
 		});
 	});
 
@@ -6436,7 +6449,7 @@ describe("dispatchTool", () => {
 		});
 
 		test("the description says what write access off means for a send", () => {
-			const description = TOOLS.find((t) => t.name === "run_request")!.description;
+			const description = descriptionOf(TOOLS.find((t) => t.name === "run_request"));
 			expect(description).toMatch(
 				/write access off, nothing a script or extractor sets is stored/
 			);
@@ -7233,7 +7246,7 @@ describe("dispatchTool", () => {
 				{ code: "status", base: "Completed", target: "Stopped" },
 			],
 		});
-		expect(TOOLS.find((t) => t.name === "compare_runs")?.description).toMatch(
+		expect(descriptionOf(TOOLS.find((t) => t.name === "compare_runs"))).toMatch(
 			/Read comparability before the deltas/
 		);
 	});
@@ -7294,7 +7307,7 @@ describe("dispatchTool", () => {
 		});
 
 		test("the description says a mismatched pair is refused", () => {
-			const description = TOOLS.find((t) => t.name === "compare_runs")?.description ?? "";
+			const description = descriptionOf(TOOLS.find((t) => t.name === "compare_runs"));
 			expect(description).toMatch(/different types[^.]*refused/);
 		});
 	});
@@ -7503,7 +7516,7 @@ describe("dispatchTool", () => {
 		});
 
 		test("points at the tools that hold what the document leaves out", () => {
-			const description = TOOLS.find((t) => t.name === "export_run_report")?.description;
+			const description = descriptionOf(TOOLS.find((t) => t.name === "export_run_report"));
 			expect(description).toContain("get_run_samples");
 			expect(description).toContain("get_run_report");
 		});
@@ -7607,18 +7620,29 @@ describe("default-header opt-outs reach the engine", () => {
 		expect(payload.disabledDefaultHeaders).toEqual(["Accept-Encoding"]);
 	});
 
-	test("the shared sentence names the two tools that take the argument", () => {
-		const description = (name: string) => TOOLS.find((t) => t.name === name)!.description;
-		// One sentence carried by the three tools that send traffic, so it has to
-		// tell them apart: a paraphrase per tool is what it exists to prevent.
-		for (const name of ["run_request", "start_load_run"]) {
-			expect(description(name), name).toContain("disabledDefaultHeaders");
-			expect(description(name), name).toMatch(
-				/run_request and start_load_run take it as an argument/
-			);
-		}
-		expect(description("run_collection_smoke")).toMatch(
+	test("run_request carries the whole rule and the other senders point at it", () => {
+		const tool = (name: string) => TOOLS.find((t) => t.name === name);
+		const description = (name: string) => descriptionOf(tool(name));
+		// The one full statement, on the tool that owns the behaviour (#2441). It
+		// tells the three senders apart, so the pointers need not.
+		expect(description("run_request")).toContain(ENGINE_DEFAULT_HEADERS_SENTENCE);
+		expect(ENGINE_DEFAULT_HEADERS_SENTENCE).toMatch(
+			/run_request and start_load_run take it as an argument/
+		);
+		expect(ENGINE_DEFAULT_HEADERS_SENTENCE).toMatch(
 			/run_collection_smoke does not: it replays each saved request exactly as stored/
+		);
+		for (const name of ["start_load_run", "run_collection_smoke"]) {
+			expect(description(name), name).not.toContain(ENGINE_DEFAULT_HEADERS_SENTENCE);
+			expect(description(name), name).toMatch(/User-Agent.*run_request states the rule/);
+		}
+		// What the pointer leaves out, each tool's schema still says.
+		expect(tool("start_load_run")?.inputSchema).toHaveProperty("disabledDefaultHeaders");
+		expect(tool("run_collection_smoke")?.inputSchema).not.toHaveProperty(
+			"disabledDefaultHeaders"
+		);
+		expect(description("run_collection_smoke")).toMatch(
+			/no `disabledDefaultHeaders` here: each saved request is replayed exactly as stored/
 		);
 	});
 });
@@ -7720,7 +7744,7 @@ describe("start_load_run resolves and states the load shape", () => {
 			{ concurrency: 100, startConcurrency: 1, duration: "60s", rampUpDuration: "10s" },
 		],
 		["iterations", {}, { iterations: 1000, concurrency: 10 }],
-		["capacity", {}, { duration: "300s" }],
+		["capacity", {}, { concurrency: 100, duration: "300s" }],
 	])("a %s run sends its row of defaults", async (mode, extra, row) => {
 		const sent = await sentShape({ url: "https://api.example.com", mode, ...extra });
 		expect(sent).toEqual({ mode, ...row });
@@ -7803,6 +7827,18 @@ describe("start_load_run resolves and states the load shape", () => {
 		const res = await dispatchTool(
 			"start_load_run",
 			{ url: "https://api.example.com", confirmed: true },
+			ctxWith(client, { ...allowed, maxConcurrency: 50 })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toMatch(/concurrency 100 exceeds the MCP cap of 50 virtual users/);
+		expect(client.startRun).not.toHaveBeenCalled();
+	});
+
+	test("an omitted capacity concurrency is judged on the engine's search ceiling", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ url: "https://api.example.com", mode: "capacity", confirmed: true },
 			ctxWith(client, { ...allowed, maxConcurrency: 50 })
 		);
 		expect(res.isError).toBe(true);
@@ -9208,7 +9244,9 @@ describe("run status reads (#2436)", () => {
 			const tool = TOOLS.find((t) => t.name === "get_run");
 			expect(tool?.category).toBe("read");
 			expect(tool?.annotations.readOnlyHint).toBe(true);
-			expect(tool?.description).toContain(WITHHELD_RUN_OUTPUT_SENTENCE);
+			expect(descriptionOf(tool)).toContain(
+				withheldPointer({ revealSecretsToAgents: false }, "recorded")
+			);
 		});
 	});
 
@@ -9264,7 +9302,7 @@ describe("run status reads (#2436)", () => {
 		});
 
 		test("the description leads with the partial rule and names metadata.status", () => {
-			const description = TOOLS.find((t) => t.name === "get_run_report")!.description;
+			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
 			expect(description).toMatch(
 				/^Get the report for a run; a run still in progress returns a partial report marked `partial: true`/
 			);
@@ -9574,7 +9612,7 @@ describe("webhook inbox tools", () => {
 			expect(client.stopInbox).toHaveBeenCalledWith("inbox_1", undefined);
 			expect(client.deleteInbox).not.toHaveBeenCalled();
 			// The distinction an agent has to be able to read off the tool list.
-			expect(byName().get("stop_webhook_inbox")?.description).toMatch(/NOT a delete/);
+			expect(descriptionOf(byName().get("stop_webhook_inbox"))).toMatch(/NOT a delete/);
 		});
 	});
 
@@ -9731,7 +9769,7 @@ describe("webhook inbox tools", () => {
 			expect(
 				TOOLS.map((t) => t.name).filter((n) => /inbox.*live|live.*inbox/.test(n))
 			).toEqual([]);
-			expect(byName().get("get_inbox_captures")?.description).toMatch(/no live stream/i);
+			expect(descriptionOf(byName().get("get_inbox_captures"))).toMatch(/no live stream/i);
 		});
 	});
 });
@@ -11131,16 +11169,16 @@ describe("variable precedence is stated wherever a variable is written or listed
 		(_name, tool) => {
 			// Mutation check: drop the precedenceNote() call from any one of these
 			// descriptions and that row fails.
-			expect(tool.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
-			expect(tool.description).toContain(VARIABLE_RESOLUTION_URI);
+			expect(descriptionOf(tool)).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+			expect(descriptionOf(tool)).toContain(VARIABLE_RESOLUTION_URI);
 		}
 	);
 
 	test.each(VARIABLE_READERS)("%s (reads or switches a tier) states it too", (name) => {
 		const tool = TOOLS.find((t) => t.name === name);
 		expect(tool, `${name} is missing from TOOLS`).toBeDefined();
-		expect(tool!.description).toContain(VARIABLE_PRECEDENCE_SENTENCE);
-		expect(tool!.description).toContain(VARIABLE_RESOLUTION_URI);
+		expect(descriptionOf(tool)).toContain(VARIABLE_PRECEDENCE_SENTENCE);
+		expect(descriptionOf(tool)).toContain(VARIABLE_RESOLUTION_URI);
 	});
 
 	test("no tool spells the order its own way any more", () => {
@@ -11148,8 +11186,8 @@ describe("variable precedence is stated wherever a variable is written or listed
 		// nowhere else. A second spelling is how it drifts back apart.
 		const rogue = TOOLS.filter(
 			(t) =>
-				/environment\s*>\s*collection\s*chain\s*>\s*globals/.test(t.description) &&
-				!t.description.includes(VARIABLE_RESOLUTION_URI)
+				/environment\s*>\s*collection\s*chain\s*>\s*globals/.test(descriptionOf(t)) &&
+				!descriptionOf(t).includes(VARIABLE_RESOLUTION_URI)
 		);
 		expect(rogue.map((t) => t.name)).toEqual([]);
 	});
@@ -11158,9 +11196,9 @@ describe("variable precedence is stated wherever a variable is written or listed
 		const byName = new Map(TOOLS.map((t) => [t.name, t]));
 		// A shared sentence alone would pass the scan above while telling an
 		// agent nothing about the tier it is writing to.
-		expect(byName.get("update_globals")?.description).toMatch(/bottom tier/);
-		expect(byName.get("update_environment")?.description).toMatch(/top scope tier/);
-		expect(byName.get("create_collection")?.description).toMatch(
+		expect(descriptionOf(byName.get("update_globals"))).toMatch(/bottom tier/);
+		expect(descriptionOf(byName.get("update_environment"))).toMatch(/top scope tier/);
+		expect(descriptionOf(byName.get("create_collection"))).toMatch(
 			/between globals and the active environment/
 		);
 	});
@@ -11521,7 +11559,7 @@ describe("resolve_variables", () => {
 			const read = names.filter((name) => {
 				const tool = TOOLS.find((t) => t.name === name);
 				const param = tool?.inputSchema.environmentId?.description ?? "";
-				return `${tool?.description ?? ""} ${param}`.includes(ENVIRONMENT_DEFAULT_SENTENCE);
+				return `${descriptionOf(tool)} ${param}`.includes(ENVIRONMENT_DEFAULT_SENTENCE);
 			});
 			expect(ENVIRONMENT_DEFAULT_SENTENCE).not.toBe("");
 			expect(read).toEqual([
@@ -12706,6 +12744,23 @@ describe("secret withholding", () => {
 		expect(revealed.body).toEqual(answer);
 	});
 
+	test("run_request passes the engine's authNotice through, masked or revealed (#2474)", async () => {
+		// The agent that sees a 401 from a request whose auth mode is not
+		// executed is the reader who most needs to be told it was never sent.
+		const NOTICE =
+			"auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication";
+		const answer = { ...EXECUTE_ANSWER, status: 401, authNotice: NOTICE };
+		const client = runClient({ executeRequest: vi.fn().mockResolvedValue(answer) });
+		const withheld = await sendRequest(client);
+		expect(withheld.body.authNotice).toBe(NOTICE);
+		const revealed = await sendRequest(client, REVEAL);
+		expect(revealed.body.authNotice).toBe(NOTICE);
+		// A response without the key stays without it, so the pass-through adds no
+		// empty field for an executed mode.
+		const plain = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
+		expect("authNotice" in (await sendRequest(plain)).body).toBe(false);
+	});
+
 	test("run_request masks the header an inline API-key auth names", async () => {
 		const client = runClient({
 			executeRequest: vi.fn().mockResolvedValue({
@@ -13621,16 +13676,21 @@ describe("secret withholding", () => {
 		"list_runs",
 		"set_run_baseline",
 		"get_inbox_captures",
-	])("%s says what it withholds from run output", (name) => {
-		expect(TOOLS.find((tool) => tool.name === name)?.description).toContain(
-			WITHHELD_RUN_OUTPUT_SENTENCE
-		);
+	])("%s points at what it withholds from run output, only while reveal is off", (name) => {
+		// The rules themselves are the server instructions' (server-host.test.ts).
+		const tool = TOOLS.find((t) => t.name === name);
+		const pointer = withheldPointer({ revealSecretsToAgents: false }, "recorded");
+		expect(pointer).toContain(REDACTED_MARKER);
+		expect(descriptionOf(tool)).toContain(pointer);
+		expect(descriptionOf(tool, { revealSecretsToAgents: true })).not.toContain(REDACTED_MARKER);
 	});
 
-	test("get_mock_activity says what it withholds", () => {
-		expect(TOOLS.find((tool) => tool.name === "get_mock_activity")?.description).toContain(
-			WITHHELD_MOCK_ACTIVITY_SENTENCE
+	test("get_mock_activity points at what it withholds, only while reveal is off", () => {
+		const tool = TOOLS.find((t) => t.name === "get_mock_activity");
+		expect(descriptionOf(tool)).toContain(
+			withheldPointer({ revealSecretsToAgents: false }, "recorded")
 		);
+		expect(descriptionOf(tool, { revealSecretsToAgents: true })).not.toContain(REDACTED_MARKER);
 	});
 });
 
@@ -13830,8 +13890,8 @@ describe("get_graphql_schema", () => {
 			idempotentHint: true,
 			openWorldHint: true,
 		});
-		expect(tool?.description).toContain(String(MAX_SCHEMA_SDL_BYTES));
-		expect(tool?.description).toContain("GUARDED");
+		expect(descriptionOf(tool)).toContain(String(MAX_SCHEMA_SDL_BYTES));
+		expect(descriptionOf(tool)).toContain("GUARDED");
 	});
 
 	test("composes a saved request as stored and introspects it transiently", async () => {
