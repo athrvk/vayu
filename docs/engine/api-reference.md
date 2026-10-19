@@ -5317,7 +5317,10 @@ Acquire (or return a cached) token for an `OAuth2Config`. Supports the
 ```
 
 `force: true` bypasses the cache (refreshes via the refresh token when present,
-else re-acquires). `interactive` is only used for the `authorization_code` grant.
+else re-acquires). `interactive` is only used for the `authorization_code` grant,
+and it always exchanges the code and overwrites the cached row, whatever `force`
+says and whether the cached token is fresh, expired or refreshable (the old
+refresh token is not carried over).
 
 **Response (`200`):**
 ```json
@@ -5367,7 +5370,9 @@ hands it back.
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
 
 Attempts time out after 5 minutes; on success the token is written to the cache
-and `cacheKey` is returned.
+and `cacheKey` is returned. A completion (the loopback callback and `POST
+/oauth2/authorize/complete` alike) always exchanges its code and replaces any
+token already cached under that key.
 
 ### Local mock issuer
 
