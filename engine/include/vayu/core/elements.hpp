@@ -419,18 +419,19 @@ struct ElementContext {
     /// One JSON parse of the response body, shared by every `extract.*` /
     /// `assert.jsonpath` on the same step rather than paid per kind.
     /// `body_parse_attempted` distinguishes "not tried yet" from "tried and
-    /// the body was not JSON" so a second kind does not retry a parse that
-    /// already failed.
+    /// the body was not JSON, or nested too deeply" so a second kind does not
+    /// retry a parse that already failed.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<nlohmann::json> parsed_body{};
     bool body_parse_attempted = false;
     /// `maxElementBodyBytes` - a response past this is not parsed, and every
     /// JSON-reading kind on the step reports `skipped` rather than paying for
-    /// (or failing on) a parse of an oversized body. The default is the
-    /// config entry's own default; a caller that resolves the live setting
-    /// (`EngineDefaults::max_element_body_bytes`, `ExchangeInputs::max_element_body_bytes`)
-    /// overwrites it, the way every other config-backed `ElementContext`
-    /// field here does.
+    /// (or failing on) a parse of an oversized body. A body that parses but
+    /// nests past `constants::elements::MAX_BODY_DEPTH` is dropped the same
+    /// way. The default is the config entry's own default; a caller that
+    /// resolves the live setting (`EngineDefaults::max_element_body_bytes`,
+    /// `ExchangeInputs::max_element_body_bytes`) overwrites it, the way every
+    /// other config-backed `ElementContext` field here does.
     size_t max_body_bytes = vayu::core::constants::elements::MAX_BODY_BYTES;
 
     /// Filled by `Element::apply`, reset by `ElementPipeline::run` before each
@@ -820,10 +821,12 @@ std::mt19937_64* rng);
 /**
  * The response body parsed as JSON, cached on @p ctx so `extract.json` and
  * `assert.jsonpath` on the same step share one parse. Returns null when there
- * is no response yet, the body is over `ElementContext::max_body_bytes`, or it
- * does not parse as JSON - a caller that needs to tell those apart reads
- * `ctx.body_parse_attempted` (true after this returns) against whether a
- * response is set.
+ * is no response yet, the body is over `ElementContext::max_body_bytes`, it
+ * does not parse as JSON, or it nests deeper than
+ * `constants::elements::MAX_BODY_DEPTH` (the kinds that read the tree recurse
+ * over it, and its depth is the sender's choice) - a caller that needs to tell
+ * those apart reads `ctx.body_parse_attempted` (true after this returns)
+ * against whether a response is set.
  */
 [[nodiscard]] const nlohmann::json* ensure_parsed_body (ElementContext& ctx);
 

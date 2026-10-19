@@ -328,6 +328,12 @@ engine process, while a delete takes both (issue #553). Its mutation *removes*
 the captures cache entry rather than invalidating it - an invalidation would
 refetch an id the engine now `404`s. `Inbox.captureCount` is what a delete would
 destroy, and is what the confirmation is worded from.
+`StartInboxRequest.allowedOrigins` (issue #2367) is the optional CORS policy:
+absent is the any-origin default, and the one-click start still sends `{}`. Only
+the options dialog beside Start (`modules/inbox/InboxStartOptions`) sends a list,
+parsed and checked by the same `lib/allowed-origins.ts` the mock's form uses; the
+engine echoes the canonical list as `Inbox.allowedOrigins`, which the inbox tab's
+header and the Services drawer row read. It is fixed for the inbox's life.
 `clearCookies` distinguishes three cases the way the engine does, and they are
 not interchangeable: **omitted** clears every jar, `{ environmentId: null }`
 clears only the jar used when no environment is selected, and an id clears that
@@ -381,6 +387,14 @@ the field but not the range. There is no update verb: `latencyMs` and
 `errorRatePct` are read per response and so *could* change under a running
 mock, but a run pointed at one has to be able to say which configuration
 produced its numbers, so they are frozen at start like the route table.
+
+The same dialog takes `allowedOrigins` (issue #2367), one origin per line. The
+key is sent **only when non-empty**: an empty box leaves the payload what it was,
+so the engine's any-origin default is its own and not restated here. The lines are
+parsed and checked by `lib/allowed-origins.ts` (the engine's rules, in words,
+sent in the engine's canonical spelling), and the echoed `MockServer.allowedOrigins`
+is shown on the mock-server tab as `Origins: any` or the list. Frozen at start
+like the knobs.
 
 `listMockServerRoutes` **is** polled, at `MOCK_ACTIVITY_POLL_INTERVAL_MS`, even
 though it carries `staleTime: Infinity`: the route table's *shape* is a

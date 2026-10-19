@@ -43,6 +43,7 @@ const inbox: Inbox = {
 	running: true,
 	loopback: true,
 	captureCount: 0,
+	allowedOrigins: [],
 	response: { status: 200, body: "", delayMs: 0, headers: {} },
 };
 

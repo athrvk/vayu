@@ -201,7 +201,11 @@ identically, same as `timer.pacing`.
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
 step, through `ElementContext`'s lazily filled slot - a body over the
 [`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
-is not parsed, and every such kind on that step reports `skipped` with the reason. The text-reading
+is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
+recurse over it, and a hostile server chooses its shape); every such kind on that step reports
+`skipped` with the reason, `response body is not JSON, nests too deeply, or exceeds
+maxElementBodyBytes`. `metric.record`'s `jsonpath` source reads the same shared parse, so it reports
+`missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
 

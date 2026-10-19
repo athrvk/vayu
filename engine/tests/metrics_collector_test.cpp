@@ -78,9 +78,86 @@ TEST_F (MetricsCollectorTest, CalculatesMixedStatsCorrectly) {
     EXPECT_EQ (collector->total_errors (), 2);
     EXPECT_EQ (collector->success_count (), 8);
     EXPECT_DOUBLE_EQ (collector->total_latency_sum (), 800.0);
-    EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0); // 800 / 8 successes
+    // Neither timeout carried a duration, so neither is a latency sample.
+    EXPECT_EQ (collector->latency_samples (), 8u);
+    EXPECT_EQ (collector->latency_count (), 8);
+    EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0); // 800 / 8 samples
     EXPECT_DOUBLE_EQ (collector->get_current_stats (0, 1.0, 0)["errorRate"].get<double> (),
     20.0); // 2/10 * 100
+}
+
+// #2384: a failure whose transfer ran is in the latency population at its own
+// duration, so the percentiles, the max and the mean describe the same 100
+// requests. Before, the 5 timeouts were in the request count and no latency
+// figure: p99 and max read 10 ms for a run where one request in twenty waited
+// 2 s. Mutation-check: drop the `record_latency_sample` call from
+// record_error and every assertion on the population below fails.
+TEST_F (MetricsCollectorTest, FailedTransfersWithADurationJoinTheLatencyPopulation) {
+    for (int i = 0; i < 95; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    for (int i = 0; i < 5; ++i) {
+        collector->record_error (vayu::ErrorCode::Timeout, "timed out", "",
+        nullptr, AttemptDuration{ 2000.0, 0.0 });
+    }
+
+    EXPECT_EQ (collector->total_requests (), 100u);
+    EXPECT_EQ (collector->total_errors (), 5u);
+    EXPECT_EQ (collector->success_count (), 95u);
+    EXPECT_EQ (collector->latency_count (), 100);
+    EXPECT_EQ (collector->latency_samples (), 100u);
+    EXPECT_DOUBLE_EQ (collector->average_latency (), (95.0 * 10.0 + 5.0 * 2000.0) / 100.0);
+
+    const auto percentiles = collector->calculate_percentiles ();
+    EXPECT_EQ (percentiles.count, 100u);
+    // HdrHistogram at 3 significant figures holds a value to 0.1%.
+    EXPECT_NEAR (percentiles.p99, 2000.0, 2.0);
+    EXPECT_NEAR (percentiles.max, 2000.0, 2.0);
+    EXPECT_NEAR (percentiles.p95, 10.0, 0.01);
+}
+
+// The queue wait's mean divides by the same population as the latency's.
+TEST_F (MetricsCollectorTest, AFailedTransfersQueueWaitJoinsTheMeanBesideItsLatency) {
+    collector->record_success (200, 50.0, 10.0);
+    collector->record_error (vayu::ErrorCode::Timeout, "timed out", "", nullptr,
+    AttemptDuration{ 2000.0, 30.0 });
+    collector->record_error (vayu::ErrorCode::InvalidUrl, "never sent");
+
+    EXPECT_DOUBLE_EQ (collector->average_queue_wait (), 20.0);
+    EXPECT_DOUBLE_EQ (collector->average_latency (), 1025.0);
+}
+
+// The sample count is published after the sums it divides, so a reader racing
+// a writer can see a sum one sample ahead of the count - never a count ahead
+// of its sum, which reads the mean low (toward zero for a run that has only
+// just started). Every sample here is 100 ms, so any mean below 100 is a count
+// read ahead of its sum. Mutation-check: bump `latency_samples_` before the
+// sums in record_latency_sample and the reader observes a mean below 100.
+TEST_F (MetricsCollectorTest, TheMeanNeverReadsACountAheadOfItsSum) {
+    constexpr int kIterations = 200000;
+    std::atomic<bool> writer_done{ false };
+    std::thread writer ([this, &writer_done] () {
+        for (int i = 0; i < kIterations; ++i) {
+            collector->record_success (200, 100.0, 0.0);
+        }
+        writer_done.store (true);
+    });
+
+    // Non-fatal and joined before reporting, for the reason
+    // SuccessCountNeverExceedsTotalRequests gives.
+    double observed = 0.0;
+    bool low        = false;
+    while (!writer_done.load ()) {
+        observed = collector->average_latency ();
+        if (observed != 0.0 && observed < 100.0) {
+            low = true;
+            break;
+        }
+    }
+    writer.join ();
+
+    EXPECT_FALSE (low) << "average_latency() read " << observed << " for 100 ms samples";
+    EXPECT_DOUBLE_EQ (collector->average_latency (), 100.0);
 }
 
 // ============================================================================
@@ -437,9 +514,7 @@ TEST_F (MetricsCollectorTest, HistogramLosesNoSamplesUnderConcurrentWriters) {
 // total_requests_ and total_errors_ are independent relaxed atomics that
 // record_error bumps one after the other, so a reader can observe the error
 // increment before its paired request increment. Unguarded, the subtraction
-// wraps to a huge size_t which passes every `> 0` denominator check and drives
-// average_latency()/average_queue_wait() toward zero - the 1 Hz metrics tick
-// then stores that near-zero point permanently in an otherwise normal series.
+// wraps to a huge size_t.
 //
 // Note on what this test can and cannot prove: the inverted window is only
 // *observable* on a weak memory model (ARM64, which Vayu ships on macOS). On

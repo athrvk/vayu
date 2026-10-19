@@ -61,6 +61,7 @@ function mock(overrides: Partial<MockServer> = {}): MockServer {
 		routeCount: 3,
 		routesWithoutExample: 0,
 		createdAt: 1700000000000,
+		allowedOrigins: [],
 		...overrides,
 	};
 }
@@ -266,6 +267,54 @@ describe("the mock server options dialog", () => {
 			target: { value: "" },
 		});
 		expect(dialog.getByRole("button", { name: /start mock server/i })).toBeDisabled();
+		expect(startMockServer).not.toHaveBeenCalled();
+	});
+
+	/*
+	 * Allowed origins (#2367). The key rides the payload only when something is
+	 * listed: the untouched-dialog case above asserts the exact object, which is
+	 * what proves an empty box sends no `allowedOrigins: []`.
+	 */
+	it("sends the origins that were listed, one per line, in the engine's spelling", async () => {
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByRole("textbox", { name: /allowed origins/i }), {
+			target: { value: " https://App.example.com:443 \n\nhttp://localhost:5173\n" },
+		});
+		fireEvent.click(dialog.getByRole("button", { name: /start mock server/i }));
+
+		await waitFor(() =>
+			expect(startMockServer).toHaveBeenCalledWith({
+				collectionId: "col_1",
+				latencyMs: 0,
+				errorRatePct: 0,
+				allowedOrigins: ["https://app.example.com", "http://localhost:5173"],
+			})
+		);
+	});
+
+	it("sends no allowedOrigins for a box left blank", async () => {
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByRole("textbox", { name: /allowed origins/i }), {
+			target: { value: "  \n \n" },
+		});
+		fireEvent.click(dialog.getByRole("button", { name: /start mock server/i }));
+
+		await waitFor(() => expect(startMockServer).toHaveBeenCalled());
+		expect(startMockServer.mock.calls[0][0]).not.toHaveProperty("allowedOrigins");
+	});
+
+	it("says what is wrong with an origin, and sends nothing", async () => {
+		const dialog = await openDialog();
+		fireEvent.change(dialog.getByRole("textbox", { name: /allowed origins/i }), {
+			target: { value: "https://app.example.com/" },
+		});
+
+		expect(dialog.getByRole("alert")).toHaveTextContent(
+			/Couldn't use "https:\/\/app\.example\.com\/"/
+		);
+		const start = dialog.getByRole("button", { name: /start mock server/i });
+		expect(start).toBeDisabled();
+		fireEvent.click(start);
 		expect(startMockServer).not.toHaveBeenCalled();
 	});
 

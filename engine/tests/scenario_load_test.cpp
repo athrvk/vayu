@@ -756,6 +756,104 @@ TEST_F (ScenarioLoadTest, AnUnreachedStepReportsZeroesRatherThanAnEmptyHistogram
     EXPECT_EQ (unreached.max, 0.0);
 }
 
+// #2384: a step whose transfer ran and failed (here a timeout) joins its own
+// histogram at its duration, so the step's p99 and the run's describe the same
+// attempts, and `finish_step` still counts it once. Mutation check: drop the
+// `record_failed_transfer` call in `record_step_response` and the step holds
+// no samples and reports a 0 ms max beside a run p99 at the timeout.
+TEST_F (ScenarioLoadTest, AStepThatTimedOutJoinsItsHistogramAtItsDuration) {
+    vayu::tests::SlowMockServer upstream;
+    constexpr int64_t TIMEOUT_MS = 300;
+    auto execution = plan_over ({ upstream.fast_url (), upstream.hang_url () });
+    execution.plan.steps[1].request.timeout_ms = TIMEOUT_MS;
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (state->steps.no_response (1), 3u)
+    << "the hanging step did not time out";
+    EXPECT_EQ (state->steps.completed (1), 3u)
+    << "a failed transfer was counted as executed more than once";
+    EXPECT_EQ (state->steps_executed.load (), 6u);
+    EXPECT_EQ (state->steps.latency_samples (1), 3u);
+    const auto timed_out = state->steps.percentiles (1);
+    EXPECT_GE (timed_out.min, 0.9 * static_cast<double> (TIMEOUT_MS))
+    << "a timed-out step's duration is about its timeout";
+
+    auto& collector = *context_->metrics_collector;
+    EXPECT_EQ (collector.latency_samples (),
+    state->steps.latency_samples (0) + state->steps.latency_samples (1))
+    << "the run's histogram and the steps' hold different attempts";
+    const auto whole_run = collector.calculate_percentiles ();
+    EXPECT_NEAR (whole_run.p99, timed_out.p99, 0.001 * timed_out.p99);
+    EXPECT_NEAR (whole_run.max, timed_out.max, 0.001 * timed_out.max);
+}
+
+// The other side of #2384's line: a step refused before the wire (a scheme
+// nothing sends) is a noResponse error with no duration to record. Mutation
+// check: record a failed transfer whether or not it ran and the step reports
+// samples it never took.
+TEST_F (ScenarioLoadTest, AStepRefusedBeforeTheWireRecordsNoLatency) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/s0"), "ftp://127.0.0.1/never-sent" });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (state->steps.no_response (1), 2u)
+    << "the ftp step was not refused";
+    EXPECT_EQ (state->steps.completed (1), 2u);
+    EXPECT_EQ (state->steps.latency_samples (1), 0u)
+    << "a step that never reached the wire recorded a duration";
+    EXPECT_EQ (state->steps.percentiles (1).max, 0.0);
+    EXPECT_EQ (state->steps.latency_samples (0), 2u);
+    EXPECT_EQ (context_->metrics_collector->latency_samples (), 2u);
+}
+
+// #2384, step 6: `control.transaction` always summed an errored member, and the
+// run's histogram now holds that member's failed transfer too, so a mixed
+// transaction (one answered member, one that timed out) and the run describe
+// one set of attempts: the transaction is the sum of its members' durations.
+TEST_F (ScenarioLoadTest, AMixedTransactionAgreesWithTheRunsHistogram) {
+    vayu::tests::SlowMockServer upstream;
+    auto execution = plan_over ({ upstream.fast_url (), upstream.hang_url () });
+    execution.plan.steps[1].request.timeout_ms = 300;
+    // One element id on both steps is one folder's inherited occurrence.
+    for (auto& step : execution.plan.steps) {
+        step.elements = vayu::tests::compiled_elements (
+        { json{ { "id", "el_txn" }, { "kind", "control.transaction" },
+        { "enabled", true }, { "config", { { "name", "checkout" } } } } });
+    }
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+    ASSERT_EQ (state->steps.no_response (1), 1u)
+    << "the hanging member did not time out";
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_TRUE (summary.contains ("transactions")) << summary.dump ();
+    ASSERT_EQ (summary["transactions"].size (), 1u) << summary.dump ();
+    const auto& transaction = summary["transactions"][0];
+    EXPECT_EQ (transaction["count"], 1);
+    EXPECT_EQ (transaction["errors"], 1);
+
+    auto& collector = *context_->metrics_collector;
+    ASSERT_EQ (collector.latency_samples (), 2u)
+    << "the run's histogram left out the member that timed out";
+    const auto whole_run = collector.calculate_percentiles ();
+    const double members =
+    state->steps.percentiles (0).max + state->steps.percentiles (1).max;
+    // The transaction sums whole milliseconds per member.
+    EXPECT_NEAR (transaction["latency"]["max"].get<double> (), members, 2.5);
+    EXPECT_NEAR (
+    whole_run.max, state->steps.percentiles (1).max, 0.001 * whole_run.max);
+}
+
 // Contract coverage under load (issue #629). What this pins that the tally's
 // own tests cannot: the completion callback records on the real event loop, so
 // every virtual user's send lands on the right operation - and the count is
@@ -1543,6 +1641,29 @@ TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelinesTimeIntoTheRecordedL
        "however noisy the machine's own baseline transfer latency is";
 }
 
+// The same rule for a failed transfer (#2384): the step's duration carries its
+// pipeline time under `includeScriptTime`, and the run's, which never does,
+// stays at the transfer alone. Mutation check: record the failed transfer's
+// `total_ms` without the pipeline and the margin closes.
+TEST_F (ScenarioLoadTest, IncludeScriptTimeFoldsThePipelineIntoAFailedTransfersStepLatency) {
+    auto execution = plan_over ({ "http://127.0.0.1:1/unreachable" });
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "let s = 0; for (let i = 0; i < 8000000; i++) { s += i; }",
+    /*inline_script=*/true) });
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "elements", { { "includeScriptTime", true } } } };
+    auto state        = run (config, execution);
+
+    ASSERT_EQ (state->steps.no_response (0), 1u) << "port 1 answered";
+    ASSERT_EQ (state->steps.latency_samples (0), 1u);
+    const double step_ms = state->steps.percentiles (0).max;
+    const double run_ms = context_->metrics_collector->calculate_percentiles ().max;
+    EXPECT_GT (step_ms - run_ms, 15.0)
+    << "step=" << step_ms << "ms run=" << run_ms
+    << "ms - the failed step's latency left out its own script time";
+}
+
 // `elements.scripts: "allInline"` forces every `script.*` element inline
 // regardless of its own `config.inline` - the override, not the per-element
 // mark, decides.
@@ -1999,6 +2120,8 @@ TEST_F (ScenarioLoadTest, AnAbsentColumnErrorsTheStepInsteadOfSendingIt) {
     EXPECT_EQ (state->steps.errors (1), 2u)
     << "the failure was not attributed to the step that could not bind";
     EXPECT_EQ (state->steps.completed (1), 2u);
+    EXPECT_EQ (state->steps.latency_samples (1), 0u)
+    << "a step that was never sent recorded a duration (#2384)";
     EXPECT_EQ (state->steps_errored.load (), 2u);
     EXPECT_EQ (state->iterations_abandoned.load (), 2u);
     EXPECT_EQ (context_->in_flight (), 0u)

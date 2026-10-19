@@ -60,6 +60,7 @@ function mock(overrides: Partial<MockServer> = {}): MockServer {
 		routeCount: 3,
 		routesWithoutExample: 0,
 		createdAt: 1700000000000,
+		allowedOrigins: [],
 		...overrides,
 	};
 }
@@ -109,6 +110,18 @@ describe("the mock servers group", () => {
 		// By port, not by engine map order: the list must not reshuffle on a poll.
 		const ports = screen.getAllByText(/^Port 43\d00$/).map((node) => node.textContent);
 		expect(ports).toEqual(["Port 43100", "Port 43200"]);
+	});
+
+	it("marks a mock that lets only some origins in, and says nothing for the default", async () => {
+		listMockServers.mockResolvedValue([
+			mock({ mockId: "mock_a", port: 43100, allowedOrigins: ["https://a.example"] }),
+			mock({ mockId: "mock_b", port: 43200 }),
+		]);
+		renderPanel();
+
+		const note = await screen.findByText("1 origin");
+		expect(note).toHaveAttribute("title", "Origins: https://a.example");
+		expect(screen.queryByText(/any origin/i)).not.toBeInTheDocument();
 	});
 
 	/*

@@ -251,6 +251,9 @@ TEST_F (EventLoopTest, HandleInvalidUrl) {
     // (rather than Result::Error) to allow load testing to process failed requests
     EXPECT_TRUE (result.is_ok ());
     EXPECT_TRUE (result.value ().has_error ());
+    // A refused connection is still a transfer libcurl ran, so its timing is a
+    // measurement a load run's latency population takes (#2384).
+    EXPECT_TRUE (result.value ().transfer_attempted);
 }
 
 TEST_F (EventLoopTest, CounterStats) {

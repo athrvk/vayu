@@ -90,6 +90,7 @@ function inbox(overrides: Partial<Inbox> = {}): Inbox {
 		running: true,
 		loopback: true,
 		captureCount: 1,
+		allowedOrigins: [],
 		response: { status: 200, body: "", headers: {}, delayMs: 0 },
 		...overrides,
 	};

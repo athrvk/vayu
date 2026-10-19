@@ -78,6 +78,8 @@ import { DeleteInboxDialog } from "@/modules/inbox/DeleteInboxDialog";
 import { useInboxDeletion } from "@/modules/inbox/useInboxDeletion";
 import type { InboxWatchSummary } from "@/services/inbox-watch-service";
 import { isCommitEnter } from "@/lib/keyboard";
+import { describeOriginPolicy, summarizeOriginPolicy } from "@/lib/allowed-origins";
+import { InboxStartOptions } from "@/modules/inbox/InboxStartOptions";
 import { useInboxWatchSummary } from "./useInboxWatchSummary";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
@@ -237,6 +239,26 @@ function NotNotifyingBadge() {
 	);
 }
 
+/**
+ * A listener's origin policy on a drawer row, only when it is not the default.
+ *
+ * A row is 32px and its payload is a URL, so "Any origin" on every one of them
+ * would cost the URL its width to repeat what the absence of a list already
+ * says. A list is the unusual case worth a mark; the tab beside the drawer
+ * spells the policy out either way (#2367).
+ */
+function OriginPolicyNote({ allowedOrigins }: { allowedOrigins: readonly string[] }) {
+	if (allowedOrigins.length === 0) return null;
+	return (
+		<span
+			className="shrink-0 text-xs text-muted-foreground"
+			title={describeOriginPolicy(allowedOrigins)}
+		>
+			{summarizeOriginPolicy(allowedOrigins)}
+		</span>
+	);
+}
+
 function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
@@ -323,6 +345,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 				<TruncatedText className="font-mono text-xs text-muted-foreground">
 					{inbox.url}
 				</TruncatedText>
+				<OriginPolicyNote allowedOrigins={inbox.allowedOrigins} />
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				{notNotifying && <NotNotifyingBadge />}
 				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
@@ -672,6 +695,7 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 			    not to lead with. */}
 			<TruncatedText className="text-xs">{mock.collectionName}</TruncatedText>
 			<span className="shrink-0 text-xs text-muted-foreground">Port {mock.port}</span>
+			<OriginPolicyNote allowedOrigins={mock.allowedOrigins} />
 		</ServiceRow>
 	);
 }
@@ -741,14 +765,16 @@ export default function ServicesPanel() {
 	// `createdAt` would reorder the list every time one is restarted.
 	const orderedMocks = [...mocks].sort((a, b) => a.port - b.port);
 
+	const onInboxStarted = (started: Inbox) => {
+		showToast(`Inbox started on port ${started.port}`, "success");
+		flashInbox(started.inboxId);
+	};
+
 	const start = () =>
 		startInbox.mutate(
 			{},
 			{
-				onSuccess: (started) => {
-					showToast(`Inbox started on port ${started.port}`, "success");
-					flashInbox(started.inboxId);
-				},
+				onSuccess: onInboxStarted,
 				onError: (error) =>
 					showToast(
 						error instanceof Error
@@ -772,12 +798,18 @@ export default function ServicesPanel() {
 						   not a thing an inbox does - delete it and start another,
 						   since the captures are what a restart would have to decide
 						   about and this way the user decides instead. */
-						<TooltipIconButton
-							label="New inbox"
-							icon={<Plus className="size-icon-sm" aria-hidden="true" />}
-							disabled={startInbox.isPending}
-							onClick={start}
-						/>
+						<>
+							<InboxStartOptions
+								onStarted={onInboxStarted}
+								disabled={startInbox.isPending}
+							/>
+							<TooltipIconButton
+								label="New inbox"
+								icon={<Plus className="size-icon-sm" aria-hidden="true" />}
+								disabled={startInbox.isPending}
+								onClick={start}
+							/>
+						</>
 					}
 				>
 					{showInboxError ? (

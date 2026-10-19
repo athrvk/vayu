@@ -40,6 +40,7 @@ const MOCK: MockServer = {
 	routeCount: 1,
 	routesWithoutExample: 0,
 	createdAt: 0,
+	allowedOrigins: [],
 };
 
 const ROUTE: MockServerRoute = {
@@ -118,6 +119,24 @@ describe("MockServerView", () => {
 		} as ReturnType<typeof useMockServersQuery>);
 		render(<MockServerView />);
 		expect(screen.getByText("250ms latency, 30% of answers fail")).toBeInTheDocument();
+	});
+
+	it("says any origin for the default policy", () => {
+		render(<MockServerView />);
+		expect(screen.getByText("Origins: any")).toBeInTheDocument();
+	});
+
+	it("lists the origins the mock was started with", () => {
+		vi.mocked(useMockServersQuery).mockReturnValue({
+			data: [
+				{ ...MOCK, allowedOrigins: ["https://app.example.com", "http://localhost:5173"] },
+			],
+		} as ReturnType<typeof useMockServersQuery>);
+		render(<MockServerView />);
+		expect(
+			screen.getByText("Origins: https://app.example.com, http://localhost:5173")
+		).toBeInTheDocument();
+		expect(screen.queryByText("Origins: any")).not.toBeInTheDocument();
 	});
 
 	it("labels an injected failure distinctly, regardless of requestId/exampleName", () => {

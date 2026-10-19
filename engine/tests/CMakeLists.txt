@@ -28,6 +28,7 @@ add_executable(vayu_tests
     design_read_cap_test.cpp
     element_body_bound_test.cpp
     json_test.cpp
+    json_depth_test.cpp
     invariant_test.cpp
     optional_assert_test.cpp
     script_engine_test.cpp

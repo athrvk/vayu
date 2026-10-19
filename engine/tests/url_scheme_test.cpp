@@ -203,6 +203,8 @@ void expect_scheme_refusal (const vayu::Response& response, const char* scheme) 
     << response.error_message;
     EXPECT_EQ (response.body.find (SECRET), std::string::npos)
     << "the file was read";
+    // Refused before any transfer, so no timing to measure (#2384).
+    EXPECT_FALSE (response.transfer_attempted);
 }
 
 TEST (UrlSchemeTransfer, TheSingleRequestClientRefusesAFileUrl) {

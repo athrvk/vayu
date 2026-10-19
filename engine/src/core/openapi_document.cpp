@@ -20,6 +20,7 @@
 #include "openapi_walk.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/json_depth.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
@@ -61,6 +62,12 @@ class ReadFailure : public std::runtime_error {
     : std::runtime_error (message) {
     }
 };
+
+/// The one sentence for a document past `MAX_READ_DEPTH`, shared by the YAML
+/// walk and the JSON branch so both refuse in the same words.
+std::string nesting_too_deep_message () {
+    return "document nests deeper than " + std::to_string (limits::MAX_READ_DEPTH) + " levels";
+}
 
 std::string to_string (ryml::csubstr text) {
     return { text.str, text.len };
@@ -244,8 +251,7 @@ class Converter {
      */
     nlohmann::ordered_json convert_value (ryml::ConstNodeRef node, size_t depth) {
         if (depth > limits::MAX_READ_DEPTH) {
-            throw ReadFailure ("document nests deeper than " +
-            std::to_string (limits::MAX_READ_DEPTH) + " levels");
+            throw ReadFailure (nesting_too_deep_message ());
         }
         spend ();
 
@@ -384,29 +390,6 @@ class Converter {
         }
     }
 };
-
-/**
- * The JSON branch's half of the depth promise.
- *
- * The YAML walk enforces `MAX_READ_DEPTH` as it converts; a JSON document is
- * handed to nlohmann whole, whose parser is iterative and so has no depth of
- * its own to run out of - but every reader *below* here recurses, and the schema
- * translation recurses over exactly the subtrees an attacker chooses the shape
- * of. So the same bound is checked once, on the way in, rather than by each
- * reader guessing at its own.
- */
-void check_json_depth (const nlohmann::ordered_json& node, size_t depth) {
-    if (depth > limits::MAX_READ_DEPTH) {
-        throw ReadFailure ("document nests deeper than " +
-        std::to_string (limits::MAX_READ_DEPTH) + " levels");
-    }
-    if (!node.is_structured ()) {
-        return;
-    }
-    for (const auto& child : node) {
-        check_json_depth (child, depth + 1);
-    }
-}
 
 /// The node budget for @p text - see `read_document`'s contract.
 size_t node_budget_for (size_t bytes) {
@@ -943,10 +926,12 @@ DocumentRead read_document (const std::string& text) {
     nlohmann::ordered_json parsed =
     nlohmann::ordered_json::parse (text, /*cb=*/nullptr, /*allow_exceptions=*/false);
     if (!parsed.is_discarded ()) {
-        try {
-            check_json_depth (parsed, 0);
-        } catch (const ReadFailure& failure) {
-            result.error = failure.what ();
+        // The YAML walk enforces `MAX_READ_DEPTH` as it converts; nlohmann's
+        // parser is iterative and has no depth of its own to run out of, but
+        // every reader below here recurses over subtrees the document's author
+        // shaped. So the bound is checked once, on the way in.
+        if (!json_within_depth (parsed, limits::MAX_READ_DEPTH)) {
+            result.error = nesting_too_deep_message ();
             return result;
         }
         result.root = std::move (parsed);

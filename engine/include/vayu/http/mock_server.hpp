@@ -113,6 +113,9 @@ struct MockServerInfo {
     int route_count            = 0;
     int routes_without_example = 0;
     int64_t created_at         = 0;
+    /// The origins granted credentialed CORS, canonical; empty is the
+    /// anonymous `*` default (`routes::CorsPolicy`).
+    std::vector<std::string> allowed_origins;
 };
 
 /** A validated `POST /mock/start` payload. */
@@ -121,6 +124,8 @@ struct MockStartRequest {
     int port           = 0; // 0 = pick an ephemeral port
     int latency_ms     = 0;
     int error_rate_pct = 0;
+    /// `allowedOrigins`, canonical (`canonical_origin`); empty is the default.
+    std::vector<std::string> allowed_origins;
 };
 
 /**

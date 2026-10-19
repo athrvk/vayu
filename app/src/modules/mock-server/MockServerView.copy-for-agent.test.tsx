@@ -50,6 +50,7 @@ const MOCK: MockServer = {
 	routeCount: 1,
 	routesWithoutExample: 0,
 	createdAt: 0,
+	allowedOrigins: [],
 };
 
 const writeText = vi.fn();
