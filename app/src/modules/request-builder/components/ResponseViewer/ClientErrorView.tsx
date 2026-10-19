@@ -68,7 +68,8 @@ const ErrorHints: Record<string, string> = {
 		"The certificate wasn't accepted. If this host is behind a TLS-inspecting proxy or an internal authority, paste its certificate into Settings › Network & connectivity › Custom CA Certificates. To skip verification for this request only, turn off Verify TLS certificate in its Settings tab.",
 	PROXY_ERROR:
 		"The proxy failed, not the endpoint. Check Settings › Network & connectivity › Proxy, and whether this proxy needs credentials in its URL.",
-	INVALID_URL: "The URL has to start with http:// or https://.",
+	INVALID_URL:
+		"Vayu couldn't use that URL. It has to start with http:// or https://, and a space or other raw character has to be percent-encoded.",
 	TOO_MANY_REDIRECTS:
 		"The server kept redirecting. Raise Maximum redirects in this request's Settings tab, or turn off Follow redirects to see where it goes.",
 	BAD_CONTENT_ENCODING:
@@ -95,9 +96,11 @@ const ErrorHints: Record<string, string> = {
  * engine rather than borrowing the network template (docs/ux-writing.md,
  * "Errors have three sources").
  *
- * `INVALID_URL` covers a URL that does not parse and one that parses but names
- * a scheme other than http or https, so its heading claims neither cause; the
- * engine's message under it says which.
+ * `INVALID_URL` covers a URL that does not parse, one that parses but names a
+ * scheme other than http or https, and one the engine will not send to (its
+ * own port, a host with no ASCII name, a redirect to another scheme), so its
+ * heading and its tip claim no one cause; the engine's message under it says
+ * which.
  */
 const ErrorTitles: Record<string, string> = {
 	TIMEOUT: "No response before the timeout",
