@@ -349,7 +349,7 @@ TEST_F (RunsRouteTest, SummaryCarriesIterationsAndTargetRpsUnderTheOneName) {
     // ASSERT before each read: operator[] on a missing key of a const json
     // aborts the process rather than reporting a diff.
     ASSERT_TRUE (body["data"][1]["summary"].contains ("targetRps"));
-    EXPECT_EQ (body["data"][1]["summary"]["targetRps"], 20);
+    EXPECT_EQ (body["data"][1]["summary"]["targetRps"], 10);
     EXPECT_FALSE (body["data"][1]["summary"].contains ("rps"));
 
     const auto& renamed = body["data"][2]["summary"];
@@ -364,6 +364,34 @@ TEST_F (RunsRouteTest, SummaryCarriesIterationsAndTargetRpsUnderTheOneName) {
     ASSERT_TRUE (body["data"][4]["summary"].contains ("iterations"));
     EXPECT_EQ (body["data"][4]["summary"]["iterations"], 500);
     EXPECT_FALSE (body["data"][4]["summary"].contains ("targetRps"));
+}
+
+// The row records the rate the run paced at: `requested_rps` reads `rps` first
+// and falls to `targetRps` only when `rps` is absent, null or zero. Mutation
+// check: put `targetRps` ahead of `rps` in `add_target_rps` and this reds.
+TEST_F (RunsRouteTest, SummaryTargetRpsIsTheRateTheEnginePacedAt) {
+    seed ({ .id      = "run_both",
+    .config_snapshot = R"({"url":"https://a/","rps":10,"targetRps":20})" });
+    seed ({ .id      = "run_zero_rps",
+    .start_time      = 1,
+    .config_snapshot = R"({"url":"https://b/","rps":0,"targetRps":20})" });
+    seed ({ .id      = "run_null_rps",
+    .start_time      = 2,
+    .config_snapshot = R"({"url":"https://c/","rps":null,"targetRps":30})" });
+    seed ({ .id = "run_zero_only", .start_time = 3, .config_snapshot = R"({"url":"https://d/","rps":0})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    // Newest first: run_zero_only, run_null_rps, run_zero_rps, run_both.
+    ASSERT_EQ (body["data"].size (), 4u);
+
+    ASSERT_TRUE (body["data"][0]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][0]["summary"]["targetRps"], 0);
+    ASSERT_TRUE (body["data"][1]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][1]["summary"]["targetRps"], 30);
+    ASSERT_TRUE (body["data"][2]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][2]["summary"]["targetRps"], 20);
+    ASSERT_TRUE (body["data"][3]["summary"].contains ("targetRps"));
+    EXPECT_EQ (body["data"][3]["summary"]["targetRps"], 10);
 }
 
 // A collection run's row has no url and no method - its work is a sequence -
@@ -1109,7 +1137,9 @@ TEST (RunReportConfigTest, CarriesIterationsOnlyWhenTheSnapshotHasThem) {
 }
 
 // `rps` is the POST /runs body's other spelling of `targetRps`; the report
-// names the rate one way, and `targetRps` wins when both were sent.
+// names the rate one way, as the engine paced at it: `rps` first, `targetRps`
+// when `rps` is zero. Mutation check: put `targetRps` ahead of `rps` in
+// `add_target_rps` and this reds.
 TEST (RunReportMetadataTest, ConfigurationNamesTheRateTargetRps) {
     vayu::db::Run run;
     run.config_snapshot = R"({"mode":"constant_rps","rps":40})";
@@ -1121,6 +1151,11 @@ TEST (RunReportMetadataTest, ConfigurationNamesTheRateTargetRps) {
     run.config_snapshot = R"({"mode":"constant_rps","rps":40,"targetRps":60})";
     configuration =
     vayu::http::routes::build_report_metadata ("run_2", run)["configuration"];
+    EXPECT_EQ (configuration.value ("targetRps", 0), 40);
+
+    run.config_snapshot = R"({"mode":"constant_rps","rps":0,"targetRps":60})";
+    configuration =
+    vayu::http::routes::build_report_metadata ("run_2b", run)["configuration"];
     EXPECT_EQ (configuration.value ("targetRps", 0), 60);
 
     run.config_snapshot = R"({"mode":"constant_concurrency"})";

@@ -8678,8 +8678,8 @@ alone is always present. `iterations` and `targetRps` (issue #2437) are what
 the run was sent, never a default the engine filled in: an iterations run's
 request count, and a paced run's rate. `targetRps` is the one rename - the
 `POST /runs` body may name the rate `rps` or `targetRps`, the row reports it
-as `targetRps` (the value of `targetRps` when both were sent), and the
-report's `configuration` does the same. A field the run was not sent has no key
+as `targetRps` (the rate the engine paced at: `rps`, or `targetRps` when `rps`
+is absent, null or zero), and the report's `configuration` does the same. A field the run was not sent has no key
 here even though the engine ran its default (see
 [POST /runs](#post-runs)); a client that wants a default
 visible sends it. `startConcurrency` and `rampUpDuration` (issue #1935)
@@ -9560,8 +9560,9 @@ the engine filled in; issue #2437) plus `httpVersion`, which is always present w
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
 above), and `acceptEncoding` (issue #1488), read out of the snapshot's
 `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
-of the same name. `rps` in the raw snapshot is renamed to `targetRps` here
-(the value of `targetRps` when both were sent), as in `GET /runs`'s `summary`.
+of the same name. `rps` in the raw snapshot is renamed to `targetRps` here,
+and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
+null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
 `dataFileHash` (issue #2051) the file it came from, by display name and
 SHA-256 of its bytes, never its path. A single-request run's are read off the

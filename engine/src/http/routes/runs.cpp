@@ -45,14 +45,21 @@ void add_if_present (nlohmann::json& dst, const nlohmann::json& src, const char*
 }
 
 // The run's open-loop rate, recorded as `targetRps`. The POST /runs body names
-// it `rps` or `targetRps` (the engine reads `rps` first); the list row and the
-// report both expose the one name, and `targetRps` wins when both are present,
-// as in the report.
+// it `rps` or `targetRps`; the list row and the report both expose the one name
+// and record the rate the run paced at, which `requested_rps`
+// (load_strategy.cpp) decides: `rps` unless it is absent, null or zero, then
+// `targetRps`. A zero `rps` with no `targetRps` is recorded as the zero it was.
 void add_target_rps (nlohmann::json& dst, const nlohmann::json& src) {
-    for (const char* key : { "rps", "targetRps" }) {
-        if (src.contains (key) && !src[key].is_null ())
-            dst["targetRps"] = src[key];
-    }
+    const auto present = [&src] (const char* key) -> const nlohmann::json* {
+        const auto it = src.find (key);
+        return it == src.end () || it->is_null () ? nullptr : &*it;
+    };
+    const nlohmann::json* rps    = present ("rps");
+    const nlohmann::json* target = present ("targetRps");
+    const bool rps_paces         = rps != nullptr && *rps != 0;
+    const nlohmann::json* rate = rps_paces || target == nullptr ? rps : target;
+    if (rate != nullptr)
+        dst["targetRps"] = *rate;
 }
 
 // httpVersion is handled separately from add_if_present, and always ends up

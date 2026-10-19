@@ -295,8 +295,7 @@ export type LoadMode = (typeof LOAD_MODES)[number];
  * {@link LOAD_MODES} as a set. Anything outside it falls through
  * `LoadStrategy::create`, so the guard mirrors that fallback rather than
  * trusting the string it was given. `prompts.test.ts` measures the
- * `suggest_load_profile` prompt's enumeration against it - that prompt named
- * four of five for as long as `capacity` had existed.
+ * `suggest_load_profile` prompt's enumeration against it.
  */
 export const KNOWN_LOAD_MODES: ReadonlySet<string> = new Set<string>(LOAD_MODES);
 
@@ -324,8 +323,7 @@ export interface EngineLoadDefaults {
  *
  * Keyed by mode because the defaults are: `capacity` walks a level every
  * `stepDuration`, so its deadline is 300s rather than the 60s the others fall
- * back to, and a guard assuming one default let a search run past a cap it was
- * under. Its other knobs (`sloMs`, `stepDuration`, its virtual-user ceiling)
+ * back to. Its other knobs (`sloMs`, `stepDuration`, its virtual-user ceiling)
  * stay the engine's. `iterations` has no duration: the mode never reads one.
  */
 export const ENGINE_LOAD_DEFAULTS = {
