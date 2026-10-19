@@ -402,7 +402,9 @@ export function useTreeCrud({
 				const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
 				const copy = await createRequestMutation.mutateAsync({
 					...rest,
-					body: withoutBodyFileTrust(rest.body),
+					// The derived flag is stripped from a body the row has; a row
+					// without one copies none rather than throwing here.
+					...(rest.body ? { body: withoutBodyFileTrust(rest.body) } : {}),
 					name: `${request.name} (Copy)`,
 				});
 				openTab({ type: "request", entityId: copy.id });
