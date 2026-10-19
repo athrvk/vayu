@@ -4,8 +4,8 @@
  *
  * The custom message exists for exactly one moment: the failure. A script that
  * asserts the same shape in a loop, or from two code paths, writes the message
- * to say *which* one broke - the generic matcher text ("Expected value to
- * exist") never can. Dropping it silently is worse than rejecting it, because
+ * to say *which* one broke - the generic matcher text ("Expected value to be
+ * truthy") never can. Dropping it silently is worse than rejecting it, because
  * the script looks correct and the report is merely useless.
  *
  * So the assertions here are on the reported error text, per matcher. The

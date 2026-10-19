@@ -725,10 +725,8 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
 /**
  * @brief `.to.be.true` / `.to.be.false`: the boolean itself, not its truthiness.
  *
- * chai compares with `=== true` and `=== false`, so `expect(1).to.be.true` and
- * `expect("").to.be.false` fail there. Reading them through `JS_ToBool` passed
- * both, and `.not.be.false` on `null` as well. `.ok` is the truthy matcher and
- * keeps `JS_ToBool` (#2523).
+ * chai compares with `=== true` and `=== false`; `.ok` is the coercing matcher
+ * and keeps `JS_ToBool` (#2523).
  */
 JSValue expect_boolean_literal (JSContext* ctx, JSValueConst this_val, bool expected) {
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));

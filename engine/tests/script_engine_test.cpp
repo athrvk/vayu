@@ -512,9 +512,8 @@ TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
     EXPECT_TRUE (result.tests[2].passed);
 }
 
-// `.true` / `.false` are `=== true` / `=== false`, as in chai, not truthiness
-// (#2523). Each script below holds one assertion per test so a pass or a fail
-// is read per value, and `.ok` is the matcher that keeps the coercion.
+// `.true` / `.false` are `=== true` / `=== false`, as in chai; `.ok` is the
+// coercing matcher (#2523).
 TEST_F (ScriptEngineTest, ExpectTrueAndFalseRequireARealBoolean) {
     auto result = engine.execute_test (R"(
         pm.test("true is true", function() { pm.expect(true).to.be.true; });
@@ -542,10 +541,10 @@ TEST_F (ScriptEngineTest, ExpectTrueAndFalseRequireARealBoolean) {
 TEST_F (ScriptEngineTest, ExpectNotTrueAndNotFalseInvertTheStrictCheck) {
     auto result = engine.execute_test (R"(
         pm.test("1 is not true", function() { pm.expect(1).to.not.be.true; });
-        pm.test("true is true", function() { pm.expect(true).to.not.be.true; });
+        pm.test("true is refused by not.true", function() { pm.expect(true).to.not.be.true; });
         pm.test("0 is not false", function() { pm.expect(0).to.not.be.false; });
         pm.test("null is not false", function() { pm.expect(null).to.not.be.false; });
-        pm.test("false is false", function() { pm.expect(false).to.not.be.false; });
+        pm.test("false is refused by not.false", function() { pm.expect(false).to.not.be.false; });
     )",
     request, response, env);
 
