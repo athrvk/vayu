@@ -117,9 +117,9 @@ std::optional<std::vector<JsonPathStep>> parse_json_path (std::string_view path)
 
 namespace {
 
-void eval_member (const nlohmann::json& node,
+void eval_member (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (!node.is_object ()) {
         return;
     }
@@ -128,9 +128,9 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_index (const nlohmann::json& node,
+void eval_index (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (!node.is_array ()) {
         return;
     }
@@ -143,7 +143,8 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_index_any (const nlohmann::json& node, std::vector<const nlohmann::json*>& out) {
+void eval_index_any (const nlohmann::ordered_json& node,
+std::vector<const nlohmann::ordered_json*>& out) {
     if (node.is_array ()) {
         for (const auto& element : node) {
             out.push_back (&element);
@@ -156,9 +157,9 @@ void eval_index_any (const nlohmann::json& node, std::vector<const nlohmann::jso
     }
 }
 
-void eval_recursive_walk (const nlohmann::json& node,
+void eval_recursive_walk (const nlohmann::ordered_json& node,
 const std::string& name,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (node.is_object ()) {
         for (const auto& [key, value] : node.items ()) {
             if (key == name) {
@@ -173,9 +174,9 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_step (const nlohmann::json& node,
+void eval_step (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     switch (step.kind) {
     case JsonPathStep::Kind::Member: eval_member (node, step, out); break;
     case JsonPathStep::Kind::Index: eval_index (node, step, out); break;
@@ -188,11 +189,12 @@ std::vector<const nlohmann::json*>& out) {
 
 } // namespace
 
-std::vector<const nlohmann::json*> evaluate_json_path (const nlohmann::json& root,
+std::vector<const nlohmann::ordered_json*> evaluate_json_path (
+const nlohmann::ordered_json& root,
 const std::vector<JsonPathStep>& steps) {
-    std::vector<const nlohmann::json*> current{ &root };
+    std::vector<const nlohmann::ordered_json*> current{ &root };
     for (const auto& step : steps) {
-        std::vector<const nlohmann::json*> next;
+        std::vector<const nlohmann::ordered_json*> next;
         for (const auto* node : current) {
             eval_step (*node, step, next);
         }

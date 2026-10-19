@@ -46,8 +46,26 @@ struct JsonPathStep {
 [[nodiscard]] std::optional<std::string>
 json_path_problem (const nlohmann::json& holder, std::string_view key, std::string_view label);
 
-/** Every node the compiled path reaches, in encounter order. */
-[[nodiscard]] std::vector<const nlohmann::json*>
-evaluate_json_path (const nlohmann::json& root, const std::vector<JsonPathStep>& steps);
+/**
+ * Every node the compiled path reaches, in encounter order. The tree is an
+ * `ordered_json`, so `[*]` and `..name` visit an object's members in the
+ * body's own order (#2459), which is what `matchNo` counts in.
+ */
+[[nodiscard]] std::vector<const nlohmann::ordered_json*> evaluate_json_path (
+const nlohmann::ordered_json& root,
+const std::vector<JsonPathStep>& steps);
+
+/**
+ * A match as the text a variable, a message or a regex reads: a string
+ * unquoted, anything else as compact JSON (an object in its own member order).
+ * Takes a config value (`nlohmann::json`) as well as a body match.
+ */
+template <typename Json>
+[[nodiscard]] std::string json_value_to_string (const Json& value) {
+    if (value.is_string ()) {
+        return value.template get<std::string> ();
+    }
+    return value.dump ();
+}
 
 } // namespace vayu::core::detail

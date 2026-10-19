@@ -36,13 +36,6 @@ namespace vayu::core {
 
 namespace {
 
-std::string json_value_to_string (const nlohmann::json& value) {
-    if (value.is_string ()) {
-        return value.get<std::string> ();
-    }
-    return value.dump ();
-}
-
 /// The one response-derived value @p field names, or `nullopt` for a field
 /// this kind does not know (already refused by the config schema's `enum`)
 /// or a response that is not there yet (`step.after` runs after the send, so
@@ -74,7 +67,7 @@ read_field (ElementContext& ctx, const std::string& field, const nlohmann::json&
         if (!path) {
             return std::nullopt;
         }
-        const nlohmann::json* body = ensure_parsed_body (ctx);
+        const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
             return std::nullopt;
         }
@@ -82,6 +75,8 @@ read_field (ElementContext& ctx, const std::string& field, const nlohmann::json&
         if (matches.empty ()) {
             return std::nullopt;
         }
+        // Plain from here: `condition`'s `eq` / `ne` compare it against the
+        // config, and `ordered_json` object equality is order-sensitive.
         return std::make_optional<nlohmann::json> (*matches.front ());
     }
     return std::nullopt;
@@ -124,8 +119,8 @@ std::optional<bool> evaluate_condition (ElementContext& ctx, const nlohmann::jso
     const auto& expected = condition["value"];
 
     if (op == "contains") {
-        return json_value_to_string (*actual).find (
-               json_value_to_string (expected)) != std::string::npos;
+        return detail::json_value_to_string (*actual).find (
+               detail::json_value_to_string (expected)) != std::string::npos;
     }
     if (op == "eq") {
         return *actual == expected;

@@ -293,14 +293,14 @@ std::mt19937_64* rng) {
     return own_wait_ms; // Unreachable for a value the enum actually holds.
 }
 
-const nlohmann::json* ensure_parsed_body (ElementContext& ctx) {
+const nlohmann::ordered_json* ensure_parsed_body (ElementContext& ctx) {
     if (ctx.response == nullptr) {
         return nullptr;
     }
     if (!ctx.body_parse_attempted) {
         ctx.body_parse_attempted = true;
         if (ctx.response->body.size () <= ctx.max_body_bytes) {
-            auto parsed = nlohmann::json::parse (
+            auto parsed = nlohmann::ordered_json::parse (
             ctx.response->body, nullptr, /*allow_exceptions=*/false);
             // nlohmann's parser is iterative, so it is the kinds that recurse
             // over the tree (#2361) that need this bound.

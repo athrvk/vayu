@@ -121,7 +121,13 @@ shipping silently mismatched.
 `$["a.b"]` for a name that holds a `.`, `[` or `]` (the name runs to the next matching quote and has
 no escape for it; an empty name or an unterminated quote is refused), `[n]` (negative counts from the
 end), `[*]` and `..name`. A path outside it, a filter (`[?...]`) included, is refused at validate
-through the one parser, not a pattern per kind. `extract.regex` compiles its `pattern` once, when the element is compiled (once
+through the one parser, not a pattern per kind. `[*]` over an object and `..name` return their
+matches in the body's own member order (issue #2459), so which one `matchNo: 1` picks is the member
+the server wrote first; before #2459 they came back sorted by key. An object match written to a
+variable, or quoted in a failure message, keeps that order too, while `assert.jsonpath`'s `expected`
+and a `metric.record` condition's `eq` / `ne` still compare an object member by member, in any
+order. A key the body repeats keeps the position of its first occurrence and the value of its last,
+so `$.b` on `{"b": 1, "a": 3, "b": 2}` is `2` and `$[*]` is `2`, `3`. `extract.regex` compiles its `pattern` once, when the element is compiled (once
 per run plan, or once per design send), and writes a `$1$`-style template of the match's groups for
 every non-overlapping match, leftmost first (`$N$` past the pattern's last group writes nothing).
 `extract.boundary` (issue #1518, JMeter's Boundary Extractor) takes everything between the first
@@ -130,7 +136,8 @@ occurrence of `leftBoundary` and the next occurrence of `rightBoundary` on the r
 either. All four - plus `extract.header` - share `variable`, `scope` (`env` | `collection` |
 `globals`), `default` and the JMeter `matchNo` convention: `1`-based picks a match, `0` picks one at
 random, `-1` writes every match as `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr`
-count. A miss without a `default`
+count, numbered in the order the matches were found (document order for `extract.json`, leftmost
+first for the two text extractors). A miss without a `default`
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
@@ -199,7 +206,8 @@ balance beside a timestamp, which no single compare-exchange can swap as a unit.
 identically, same as `timer.pacing`.
 
 The JSON-reading kinds (`extract.json`, `assert.jsonpath`) share one parse of the response body per
-step, through `ElementContext`'s lazily filled slot - a body over the
+step, through `ElementContext`'s lazily filled slot, which keeps every object's members in the order
+the body wrote them (`nlohmann::ordered_json`, issue #2459) - a body over the
 [`maxElementBodyBytes`](api-reference.md#get-config) config entry (default 1 MiB, restart-free)
 is not parsed, and so is a body that nests deeper than 100 levels (the kinds that read the tree
 recurse over it, and a hostile server chooses its shape); every such kind on that step reports
@@ -540,3 +548,5 @@ only `extract.*`, `assert.*`, `timer.think` and `script.pre`/`script.post`
 - #1516 - the app's `ElementList` primitive and editor.
 - #1517 - MCP's `elements` fields and the `vayu://elements/kinds` resource.
 - #1518 - OpenAPI round-trip (`x-vayu-elements`), Postman import, and a JMeter `.jmx` importer.
+- #2459 - the JSONPath kinds read the body in its own member order (the shared subset's
+  paragraph and the shared-parse paragraph).

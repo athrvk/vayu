@@ -698,4 +698,105 @@ TEST_F (ElementKindsTest, MetricJsonPathRecordsNothingFromABodyNestedPastTheDept
     EXPECT_TRUE (recorded.empty ());
 }
 
+// ---------------------------------------------------------------------------
+// A wildcard visits an object's members in the body's own order (#2459)
+// ---------------------------------------------------------------------------
+// Every body below names its members out of alphabetical order, so a parse
+// into a key-sorted object answers differently. Mutation check: parse into
+// `nlohmann::json` in `ensure_parsed_body` and the wildcard tests read the
+// alphabetically first member instead.
+
+nlohmann::json extract_every_json_match_at (const std::string& path) {
+    return nlohmann::json{ { "id", "e1" }, { "kind", "extract.json" },
+        { "config", { { "path", path }, { "variable", "v" }, { "matchNo", -1 } } } };
+}
+
+TEST_F (ElementKindsTest, ExtractJsonWildcardFirstMatchIsTheBodysFirstMember) {
+    response = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$.m[*]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "1");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonEveryWildcardMatchIsNumberedInBodyOrder) {
+    response = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+
+    ASSERT_EQ (
+    run_after (one_element (extract_every_json_match_at ("$.m[*]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v_1"], "1");
+    EXPECT_EQ (variables["collection:v_2"], "2");
+    EXPECT_EQ (variables["collection:v_matchNr"], "2");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonRecursiveDescentFindsTheBodysFirstMemberFirst) {
+    response = ok_json_response (200, R"({"z": {"id": 1}, "a": {"id": 2}})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$..id")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "1");
+}
+
+TEST_F (ElementKindsTest, ExtractJsonWritesAnObjectMatchInItsOwnMemberOrder) {
+    response = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$.m")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], R"({"b":1,"a":2})");
+}
+
+// A repeated key keeps its first position and its last value: nlohmann's
+// parser writes each value through `operator[]`, which on `ordered_json`
+// finds the existing member rather than appending a second.
+TEST_F (ElementKindsTest, ExtractJsonRepeatedKeyKeepsTheFirstPositionAndTheLastValue) {
+    response = ok_json_response (200, R"({"b": 1, "a": 3, "b": 2})");
+
+    ASSERT_EQ (run_after (one_element (extract_json_at ("$.b")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v"], "2");
+
+    variables.clear ();
+    ASSERT_EQ (run_after (one_element (extract_every_json_match_at ("$[*]")))[0].status, "ok");
+    EXPECT_EQ (variables["collection:v_1"], "2");
+    EXPECT_EQ (variables["collection:v_2"], "3");
+    EXPECT_EQ (variables["collection:v_matchNr"], "2");
+}
+
+// Mutation check: compare `*matches.front ()` with `expected` directly in
+// `AssertJsonPathElement::apply` and this fails, the ordered comparison
+// seeing two different member orders.
+TEST_F (ElementKindsTest, AssertJsonPathExpectedObjectIgnoresMemberOrder) {
+    response = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+    auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.m" }, { "expected", nlohmann::json::parse (R"({"a": 2, "b": 1})") } } } });
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "ok") << message_of (outcomes[0]);
+}
+
+TEST_F (ElementKindsTest, AssertJsonPathReportsAnObjectMatchInItsOwnMemberOrder) {
+    response = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+    auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.m" }, { "expected", 3 } } } });
+
+    auto outcomes = run_after (elements);
+    ASSERT_EQ (outcomes.size (), 1u);
+    EXPECT_EQ (outcomes[0].status, "failed");
+    EXPECT_EQ (message_of (outcomes[0]), R"(expected '$.m' to equal 3, got {"b":1,"a":2})");
+}
+
+TEST_F (ElementKindsTest, MetricJsonPathWildcardRecordsTheBodysFirstMember) {
+    response           = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+    ElementContext ctx = make_context ();
+    std::vector<double> recorded;
+    ctx.record_metric = [&recorded] (const std::string&, vayu::core::CustomMetricType,
+                        double value) { recorded.push_back (value); };
+    std::vector<ElementOutcome> sink;
+    ElementPipeline::run (
+    Phase::StepAfter, ctx, one_element (metric_trend_at ("$.m[*]")), sink);
+
+    ASSERT_EQ (sink.size (), 1u);
+    EXPECT_EQ (sink[0].status, "ok");
+    EXPECT_EQ (recorded, std::vector<double>{ 1.0 });
+}
+
 } // namespace
