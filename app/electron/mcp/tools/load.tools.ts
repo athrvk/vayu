@@ -15,8 +15,10 @@ import {
 	checkAllowlist,
 	checkLoadCaps,
 	checkMonitorHost,
-	defaultDurationUnderCap,
-	type LoadRunParams,
+	ENGINE_LOAD_DEFAULTS,
+	type EngineLoadDefaults,
+	LOAD_MODES,
+	type LoadDefaultsTable,
 } from "../safety.js";
 import { HTTP_VERSIONS } from "../http-versions.js";
 import { WITHHELD_PLANNED_RUN_SENTENCE, withholdPlannedRequest } from "../withhold.js";
@@ -26,6 +28,7 @@ import {
 	confirmedInput,
 	engineErrorResult,
 	errorResult,
+	num,
 	str,
 	ToolArgError,
 	watchedRun,
@@ -38,10 +41,14 @@ import {
 	applyRecordingKnobs,
 	composeLoadRunRequest,
 	DEFAULT_LOAD_MODE,
+	describeLoadShape,
+	loadShapePayload,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_REDIRECTS_BOUND,
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SUCCESS_SAMPLE_PERIOD,
+	readLoadParams,
+	resolveLoadShape,
 	withMcpOrigin,
 } from "./compose.js";
 import {
@@ -61,7 +68,26 @@ import {
 	validationScriptInput,
 } from "./input-schemas.js";
 import { startedRunResult } from "./run-status.js";
-import { readScenarioArg, startScenarioLoadRun } from "./scenario-runs.js";
+import { readScenarioArg, SCENARIO_LOAD_DEFAULTS, startScenarioLoadRun } from "./scenario-runs.js";
+
+/**
+ * One field's engine defaults as the schema states them, read from
+ * {@link ENGINE_LOAD_DEFAULTS} so a description cannot fall behind the values
+ * the tool actually sends: "100 (constant_concurrency, constant_rps, ramp_up),
+ * 10 (iterations)".
+ */
+function statedDefaults(field: keyof EngineLoadDefaults, unit = ""): string {
+	const table: LoadDefaultsTable = ENGINE_LOAD_DEFAULTS;
+	const modesByValue = new Map<number, string[]>();
+	for (const mode of LOAD_MODES) {
+		const value = table[mode]?.[field];
+		if (typeof value !== "number") continue;
+		modesByValue.set(value, [...(modesByValue.get(value) ?? []), mode]);
+	}
+	return [...modesByValue]
+		.map(([value, modes]) => `${value}${unit} (${modes.join(", ")})`)
+		.join(", ");
+}
 
 export const LOAD_TOOLS: McpTool[] = [
 	{
@@ -113,9 +139,11 @@ export const LOAD_TOOLS: McpTool[] = [
 					'Protocol to negotiate for this ad-hoc run: "auto" | "http1.1" | "http2" (default "auto"). There is no saved request behind this call, so this is how the protocol gets specified at all - not an override of a per-run setting.'
 				),
 			mode: z
-				.string()
+				.enum(LOAD_MODES)
 				.optional()
-				.describe("constant_rps | constant_concurrency | ramp_up | iterations | capacity."),
+				.describe(
+					`${LOAD_MODES.join(" | ")} (default ${DEFAULT_LOAD_MODE}). A shape field left out is sent as the engine's default for the mode (each field names its own), and the confirmation preview and the started result's \`shape\` state the run that will start.`
+				),
 			// Positive, because an agent's natural guess for "unlimited" is -1 or
 			// 0, and the engine reads concurrency as an eager per-worker
 			// pre-allocation count. It rejects those with a 400; failing here
@@ -126,7 +154,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe(
-					"Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by `targetRps`."
+					`Number of virtual users, each keeping one request in flight (constant_concurrency, iterations); the target a ramp_up climbs to and the ceiling a capacity search will not climb past. Not a target for constant_rps, which is paced by \`targetRps\`. Default ${statedDefaults("concurrency")}; none when a \`targetRps\` paces the run, and a capacity search's ceiling is the engine's own. A scenario run's default is ${SCENARIO_LOAD_DEFAULTS.constant_concurrency.concurrency} virtual users in each of its modes.`
 				),
 			// Positive for the same reason `concurrency` is: the ramp is seeded
 			// with this count, so a negative casts to ~1.8e19 engine-side and a
@@ -137,18 +165,20 @@ export const LOAD_TOOLS: McpTool[] = [
 				.positive()
 				.optional()
 				.describe(
-					"Virtual users at the start of the ramp (ramp_up), or the first level a capacity search measures. Above `concurrency` ramps down."
+					`Virtual users at the start of the ramp (ramp_up), or the first level a capacity search measures. Above \`concurrency\` ramps down. Default ${statedDefaults("startConcurrency")}.`
 				),
 			duration: z
 				.string()
 				.optional()
 				.describe(
-					'Duration with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h"; a bare number is seconds (non-iterations modes).'
+					`Duration with an optional ms/s/m/h unit, e.g. "500ms", "30s", "5m", "2h"; a bare number is seconds (non-iterations modes). Default ${statedDefaults("durationSeconds", "s")}, or the duration cap when that is shorter.`
 				),
 			rampUpDuration: z
 				.string()
 				.optional()
-				.describe("Ramp time (ramp_up), same units as `duration`."),
+				.describe(
+					`Ramp time (ramp_up), same units as \`duration\`. Default ${statedDefaults("rampUpDurationSeconds", "s")}.`
+				),
 			// Capacity discovery reuses `startConcurrency` (where the search
 			// begins), `concurrency` (the ceiling it will not climb past) and
 			// `duration` (the whole search's deadline), so it adds only these
@@ -173,7 +203,9 @@ export const LOAD_TOOLS: McpTool[] = [
 				.int()
 				.positive()
 				.optional()
-				.describe("Iteration count (iterations mode)."),
+				.describe(
+					`Iteration count (iterations mode). Default ${statedDefaults("iterations")}.`
+				),
 			targetRps: z.number().optional().describe("Target RPS (constant_rps)."),
 			// Streaming under load (issue #576). Forwarded verbatim and bounded
 			// only by the engine's own `constants::sse` ranges, on the
@@ -433,27 +465,18 @@ export const LOAD_TOOLS: McpTool[] = [
 				if (!monitorGate.ok) return errorResult(monitorGate.error!);
 			}
 
-			// One mode string for both the guard and the payload: which strategy
-			// the engine picks decides which cap applies, so a guard reading a
-			// different mode than the run uses is a guard reading the wrong run.
-			const mode = str(args, "mode") ?? DEFAULT_LOAD_MODE;
-			const loadParams: LoadRunParams = {
-				mode,
-				targetRps: typeof args.targetRps === "number" ? args.targetRps : undefined,
-				concurrency: typeof args.concurrency === "number" ? args.concurrency : undefined,
-				startConcurrency:
-					typeof args.startConcurrency === "number" ? args.startConcurrency : undefined,
-				iterations: typeof args.iterations === "number" ? args.iterations : undefined,
-				duration: (args.duration as string | number | undefined) ?? undefined,
-				rampUpDuration: (args.rampUpDuration as string | number | undefined) ?? undefined,
-				stepDuration: (args.stepDuration as string | number | undefined) ?? undefined,
-			};
-			const caps = checkLoadCaps(loadParams, ctx.config, ctx.host);
+			// One shape for the guard, the preview and the payload: the caps judge
+			// the run the engine will actually start, defaults included (#2437).
+			const shape = resolveLoadShape(
+				{ ...readLoadParams(args), targetRps: num(args, "targetRps") },
+				ctx.config
+			);
+			const caps = checkLoadCaps(shape, ctx.config, ctx.host);
 			if (!caps.ok) return errorResult(caps.error!);
 
 			const payload: Record<string, unknown> = {
 				...composed.payload,
-				mode,
+				...loadShapePayload(shape),
 				// The run-level timers/scripts override (issue #1594), same as a
 				// scenario's - `validate_elements_run_override` reads it on every
 				// `POST /runs` payload regardless of mode, and a single target's
@@ -462,16 +485,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					? { elements: args.elements }
 					: {}),
 			};
-			for (const key of [
-				"concurrency",
-				"startConcurrency",
-				"iterations",
-				"targetRps",
-				"maxInFlight",
-				"sloMs",
-				"maxStreamDurationMs",
-				"maxStreamEvents",
-			]) {
+			for (const key of ["maxInFlight", "sloMs", "maxStreamDurationMs", "maxStreamEvents"]) {
 				if (typeof args[key] === "number") payload[key] = args[key];
 			}
 			// Forwarded only when present: the engine refuses a cap on a
@@ -479,10 +493,6 @@ export const LOAD_TOOLS: McpTool[] = [
 			// defaulted `false` here would turn "the caller said nothing" into
 			// a claim the engine then has to judge (issue #576).
 			if (typeof args.stream === "boolean") payload.stream = args.stream;
-			for (const key of ["duration", "rampUpDuration", "stepDuration"]) {
-				const v = str(args, key);
-				if (v !== undefined) payload[key] = v;
-			}
 			// Forwarded verbatim, rows and all: the engine validates the set
 			// before the run row exists and its refusal names the field, so a
 			// second copy of those rules here could only drift (issue #993).
@@ -511,11 +521,6 @@ export const LOAD_TOOLS: McpTool[] = [
 			// steps are composed one by one and nothing reads a run-level
 			// opt-out - see SINGLE_TARGET_LOAD_FIELDS.
 			applyDefaultHeaderOptOuts(args, payload);
-			// An omitted duration is 60s engine-side, not "unbounded" and not
-			// "capped" - so a cap under 60s has to be sent as an explicit field
-			// or it never reaches the run.
-			const cappedDuration = defaultDurationUnderCap(loadParams, ctx.config);
-			if (cappedDuration !== null) payload.duration = cappedDuration;
 
 			// A saved request's unmarked pre-request script does not run under
 			// load unless this run's own `elements.scripts` forces every script
@@ -532,7 +537,7 @@ export const LOAD_TOOLS: McpTool[] = [
 			// The composed payload holds every secret the run will send, so the
 			// preview shows it as the run will record it (#1809).
 			const shown = await withholdPlannedRequest(ctx, payload, signal);
-			const summary = `Start a load test against ${shown.url} (mode: ${shown.mode})?`;
+			const summary = `Start a load test against ${shown.url} (${describeLoadShape(shape)})?`;
 
 			const unconfirmed = await confirmDestructive(args, ctx, {
 				message: `${summary}\n\nThis generates real traffic within Vayu's caps.`,
@@ -541,6 +546,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				declined: "Load run not started - the user declined.",
 				preview:
 					"AWAITING CONFIRMATION - no run was started.\n\n" +
+					`${summary}\n\n` +
 					"This is a preview. To start the load test, call start_load_run again with confirmed: true and the same arguments.\n\n" +
 					`Planned run:\n${JSON.stringify(shown, null, 2)}${caveat}`,
 			});
@@ -556,7 +562,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				return engineErrorResult(err, ctx);
 			}
 			return watchedRun(
-				withCaveat(startedRunResult(started, payload.mode, payload.duration), caveat),
+				withCaveat(startedRunResult(started, shape), caveat),
 				"load",
 				started
 			);

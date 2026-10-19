@@ -140,4 +140,14 @@ describe("below the threshold", () => {
 		expect(editorProps.current!.language).toBe("json");
 		expect(screen.getByRole("radiogroup", { name: /Body view mode/i })).toBeInTheDocument();
 	});
+
+	it("indents the received text, keeping a duplicate key and a big integer (#2459)", () => {
+		const received = '{"b":1,"id":9007199254740993,"b":2}';
+		renderBody(received);
+
+		expect(received.length).toBeGreaterThan(0);
+		expect(editorValue()).toBe(
+			["{", '  "b": 1,', '  "id": 9007199254740993,', '  "b": 2', "}"].join("\n")
+		);
+	});
 });

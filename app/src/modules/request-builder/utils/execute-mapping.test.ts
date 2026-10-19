@@ -80,11 +80,80 @@ describe("responseFromExecuteResult", () => {
 });
 
 /**
- * The mapping used to build a second, indented copy of every body - the one the
- * Pretty view reads - on the main thread, on the send path. Above
- * `LARGE_BODY_BYTES` the pane never formats anything (`ResponseBody` shows a raw
- * prefix instead), so that copy was multi-megabyte work whose output nothing
- * rendered.
+ * The pane's `body` is the received text, indented (issue #2459).
+ *
+ * The mapping used to indent the engine's parsed `body` instead, and that copy
+ * is key-sorted, collapses a repeated key and has rounded any integer past
+ * 2^53 - so Pretty showed, and Copy and Save as example took, a document the
+ * server never sent. The engine still sends that parse, so every fixture here
+ * carries both halves, as the real answer does.
+ */
+describe("responseFromExecuteResult, on a JSON body", () => {
+	// Parsed the way the engine's `body` is: sorted keys, last duplicate wins,
+	// the large integer rounded to the nearest double.
+	const RECEIVED = '{"z":1,"a":{"id":9007199254740993},"10":2,"2":3,"dup":1,"dup":2}';
+	const ENGINE_PARSE = { "2": 3, "10": 2, a: { id: 9007199254740992 }, dup: 2, z: 1 };
+
+	it("formats the received text, keeping order, duplicates and digits", () => {
+		expect(RECEIVED.length).toBeGreaterThan(0);
+
+		const mapped = responseFromExecuteResult(
+			result({ body: ENGINE_PARSE, bodyRaw: RECEIVED, bodySize: RECEIVED.length })
+		);
+
+		expect(mapped.body).toBe(
+			[
+				"{",
+				'  "z": 1,',
+				'  "a": {',
+				'    "id": 9007199254740993',
+				"  },",
+				'  "10": 2,',
+				'  "2": 3,',
+				'  "dup": 1,',
+				'  "dup": 2',
+				"}",
+			].join("\n")
+		);
+		expect(mapped.bodyRaw).toBe(RECEIVED);
+	});
+
+	it("keeps a JSON null, a scalar and a JSON string as the server wrote them", () => {
+		// The engine parses a JSON `null` to nothing and a string to its
+		// unquoted characters; the pane shows the text it received for all three.
+		expect(responseFromExecuteResult(result({ body: null, bodyRaw: "null" })).body).toBe(
+			"null"
+		);
+		expect(responseFromExecuteResult(result({ body: 12, bodyRaw: "12" })).body).toBe("12");
+		expect(responseFromExecuteResult(result({ body: "abc", bodyRaw: '"abc"' })).body).toBe(
+			'"abc"'
+		);
+	});
+
+	it("leaves text that is not JSON as received", () => {
+		const text = "<p>hello {not: json}</p>";
+		const mapped = responseFromExecuteResult(result({ body: null, bodyRaw: text }));
+
+		expect(mapped.body).toBe(text);
+		expect(mapped.bodyRaw).toBe(text);
+	});
+
+	it("rebuilds a missing bodyRaw compactly, and the pane indents that", () => {
+		// Guard for a producer that sends no `bodyRaw`: the original bytes are
+		// gone, so the reconstruction must not claim formatting nobody sent.
+		const mapped = responseFromExecuteResult(
+			result({ body: { a: [1] }, bodyRaw: undefined as unknown as string })
+		);
+
+		expect(mapped.bodyRaw).toBe('{"a":[1]}');
+		expect(mapped.body).toBe('{\n  "a": [\n    1\n  ]\n}');
+	});
+});
+
+/**
+ * Above `LARGE_BODY_BYTES` the pane never formats anything (`ResponseBody`
+ * shows a raw prefix instead), so an indented copy there would be
+ * multi-megabyte work whose output nothing rendered.
  *
  * The sub-threshold half of this is an acceptance criterion, not a nicety: the
  * gate must be invisible for every body anyone actually reads.
@@ -105,9 +174,20 @@ describe("responseFromExecuteResult, on a large body", () => {
 		);
 
 		expect(mapped.body).toBe(raw);
-		// The distinguishing evidence: `JSON.stringify(x, null, 2)` of an object
-		// always contains a newline, and the raw string never does.
+		// The distinguishing evidence: an indented copy always contains a
+		// newline, and the raw string never does.
 		expect(mapped.body).not.toContain("\n");
+	});
+
+	it("formats a body just under the threshold", () => {
+		const { parsed, raw } = jsonOfLength(LARGE_BODY_BYTES - 1024);
+
+		const mapped = responseFromExecuteResult(
+			result({ body: parsed, bodyRaw: raw, bodySize: raw.length })
+		);
+
+		expect(mapped.body).toContain("\n");
+		expect(mapped.body).toBe(JSON.stringify(parsed, null, 2));
 	});
 
 	it("leaves a body under the threshold byte-identical to the indented copy", () => {
@@ -117,21 +197,20 @@ describe("responseFromExecuteResult, on a large body", () => {
 			result({ body: parsed, bodyRaw: raw, bodySize: raw.length })
 		);
 
+		expect(raw.length).toBeGreaterThan(1000);
 		expect(mapped.body).toBe(JSON.stringify(parsed, null, 2));
 		expect(mapped.bodyRaw).toBe(raw);
 	});
 
-	it("leaves a large string body alone - it was never a second copy", () => {
-		// The gate belongs to the object branch only. A string body is already
-		// the string the pane shows, so swapping in `bodyRaw` here would change
-		// what is displayed to save work that was never being done.
+	it("leaves a large non-JSON body alone", () => {
 		const text = "y".repeat(LARGE_BODY_BYTES + 1024);
 
 		const mapped = responseFromExecuteResult(
-			result({ body: text, bodyRaw: "DIFFERENT", bodySize: text.length })
+			result({ body: null, bodyRaw: text, bodySize: text.length })
 		);
 
 		expect(mapped.body).toBe(text);
+		expect(mapped.bodyRaw).toBe(text);
 	});
 });
 

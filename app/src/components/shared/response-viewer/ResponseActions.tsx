@@ -8,22 +8,19 @@
 /**
  * Copy and download, the pair that sits at the right of a response tab strip.
  *
- * Duplicated between `ResponseViewer` and `UnifiedResponseViewer`: same two
- * buttons, same icons, same tick-for-a-moment feedback. The copies had already
- * drifted three ways, and each difference is a real one rather than an accident
- * of transcription, so all three are **props** here instead of a winner picked
- * between them:
+ * Only the request builder's response pane mounts it; the history viewer has no
+ * copy or download. What differs per caller is two props, not decisions made
+ * here:
  *
- *   - **What gets copied.** The request builder copies the formatted body; the
- *     history viewer prefers `bodyRaw` and falls back. Caller decides.
+ *   - **What gets copied.** The caller passes the body as received
+ *     (`receivedBody`), never the indented copy the Pretty view reads: Copy and
+ *     Download hand back what the server sent (issue #2459).
  *   - **What the file is called.** The request builder names it after the
- *     detected body type; history always used `.txt`, and has to keep doing so -
- *     `ResponseData` has no `bodyType` field at all, so unifying on it would
- *     have produced `response-1234.undefined` on every history download.
+ *     detected body type; a caller with no type gets `.txt`, never
+ *     `response-1234.undefined`.
  *
- * The third difference, how long the tick lasts, is gone rather than a prop:
- * one copy used a shared status constant and the other a literal `2000`, and
- * the tick is now `useCopy`'s (`TIMING.COPY_RESET_MS`) for the whole app.
+ * The tick-for-a-moment feedback is `useCopy`'s (`TIMING.COPY_RESET_MS`) for the
+ * whole app.
  *
  * A body the engine sent as base64 (`rawBytes`, issue #2458) downloads as its
  * exact bytes under the response's own Content-Type; its text, when it has
@@ -50,7 +47,7 @@ import {
 } from "@/modules/request-builder/utils/response-bytes";
 
 export interface ResponseActionsProps {
-	/** The text to copy and to download. */
+	/** The text to copy and to download: the body as received, not its indented copy. */
 	content: string;
 	/**
 	 * Extension for the downloaded file, without the dot. Defaults to `txt`

@@ -172,21 +172,20 @@ TEST_F (XmlBodyTest, LoadDriverSendsTheSameBytes) {
 // ---------------------------------------------------------------------------
 
 // Adding a mode to the enum is the kind of edit that reaches the modes beside
-// it - a misplaced `case` in either switch would give `text` a Content-Type it
-// never had, or hand a form body the wrong encoder.
+// it - a misplaced `case` in either switch would give `text` the XML type, or
+// hand a form body the wrong encoder.
 TEST (XmlBodyNeighbourTest, OtherModesAreUntouched) {
     Body text;
     text.mode    = BodyMode::Text;
     text.content = "plain";
-    EXPECT_EQ (implied_content_type (text), "");
+    // `text/plain` since issue #2464.
+    EXPECT_EQ (implied_content_type (text), "text/plain");
     EXPECT_EQ (wire_body_bytes (text), "plain");
 
     Body json_body;
     json_body.mode    = BodyMode::Json;
     json_body.content = R"({"a":1})";
-    // `application/json` since issue #889. `text` above is the mode that still
-    // derives nothing, and the pair is the point: the engine names a type when
-    // the mode has one answer and stays out of the way when it does not.
+    // `application/json` since issue #889.
     EXPECT_EQ (implied_content_type (json_body), "application/json");
     EXPECT_EQ (wire_body_bytes (json_body), R"({"a":1})");
 

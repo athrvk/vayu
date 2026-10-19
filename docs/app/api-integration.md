@@ -126,7 +126,12 @@ untransformed. The mode strings are a contract: the engine matches
 `"form-data"` and `"x-www-form-urlencoded"` exactly and reads the content out
 of `fields`, so a renamed mode or a flattened `content` string sends an empty
 body rather than failing. Disabled rows are sent and dropped engine-side, and the
-engine writes the Content-Type each form mode implies. A `form-data` row may be
+engine writes the Content-Type each mode implies when the request declares none:
+`application/json` for `json`, `graphql` and `jsonrpc`, `application/xml` for
+`xml`, `text/plain` for `text`, the form type for each form mode and the file's
+own type for `binary`. A bodyless POST goes out with no Content-Type at all,
+where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
+`form-data` row may be
 a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
 sends the path the user picked - never the bytes - and the engine opens the file
 at send time. A **`binary`** body is one file as the whole body,
@@ -176,7 +181,23 @@ which encodings can even be asked for), so a renderer working it out from the
 config entries would be a second definition of the same rule. The Headers tab
 renders it as the read-only "Added by Vayu" group, and a row ticked off there
 rides the send as `disabledDefaultHeaders`, which `POST /execute` and
-`POST /runs` both take. None of it is persisted on the request.
+`POST /runs` both take. None of it is persisted on the request. The engine also
+leaves libcurl no default of its own to fill (issue #2464).
+
+What the transport adds on its own (`Host`, `Accept`, `Content-Length`, the
+`Cookie` the jar matched) is not part of that set and not part of
+`requestHeaders`: it exists only on the wire. The response's Headers tab lists
+the request as it was sent, taken from the engine's recorded raw request when it
+has one: one read-only, collapsed "Request headers" table holding every line of
+the `rawRequest` header block in wire order, the author's rows and the
+transport's alike, and a repeated name as separate rows. The renderer reads it
+off that block and carries it as `ResponseState.wireRequestHeaders`, set by
+`responseFromExecuteResult` and `responseFromRunResult` alike. It is a display
+of what went out: nothing in it is sent, stored on the request or visible to
+`pm.request.headers`. A restored row with no recorded frame shows `requestHeaders`
+instead, because the Raw tab's fallback frame is fabricated from the composed
+request, and so does a send that failed, whose frame the engine may have
+synthesized because nothing was sent.
 
 The *stored* counterpart is a different field (issue #1765):
 `disabledSystemHeaders`, Postman's per-request list, kept on the request as
@@ -255,7 +276,8 @@ apiService.deleteRequestExample(requestId, exampleId): Promise<void>
 Saved example responses stored against a request (issue #481) - what an import
 found next to it, and what a mock server will serve. **Not read-only any more**
 (issue #588): the response viewer's *Save as example* keeps the response on
-screen as one, and the Examples tab removes one. `PUT` still has no caller and
+screen as one, with its body as received (`bodyRaw`, not the indented
+pane copy), and the Examples tab removes one. `PUT` still has no caller and
 so no endpoint constant - the panel is a viewer, and editing a stored example is
 its own change. The three consumers are in `queries/request-examples.ts`
 (`useRequestExamplesQuery`, `useCreateRequestExampleMutation`,
@@ -1527,13 +1549,28 @@ truncated for storage" tells the user to re-send, "Body capped while reading"
 tells them to raise the setting, and collapsing the two into one notice would
 give the wrong instruction to half the cases.
 
+The pane reads the **received text** (`bodyRaw`), never the engine's parsed
+`body`, which is key-sorted, keeps only the last of a repeated key and has
+rounded any integer past 2^53 (issue #2459). `responseFromExecuteResult`
+builds `ResponseState.body` - the string Pretty reads - by indenting `bodyRaw`
+with `lib/json-format.ts`, a single pass that copies every token through
+without parsing a value, so member order, duplicate keys and number spellings
+survive; text that is not well-formed JSON comes back as received. The stored
+trace takes the same path (`paneBody`, shared by `responseFromRunResult`), so a
+send reads the same live and from History (`json-body-funnels.test.ts`).
+Everything that takes the body *out* of the pane reads the text as received
+(`receivedBody`, `request-builder/utils/response-bytes.ts`) and not the indented
+copy: Copy, Download, Save as example and the Raw tab, which therefore print
+what the server sent.
+
 A third limit is the renderer's alone and reaches no wire field:
 `LARGE_BODY_BYTES` (2MB, `shared/response-viewer/utils.ts`). Above it
-`responseFromExecuteResult` stops building the indented `body` copy - it hands
-back `bodyRaw`, which is what would be displayed anyway - and `ResponseBody`
-stops formatting, hides the view toggle and shows the first 2MB of the raw body
-under its own notice. Both are about *rendering* cost, not about what arrived,
-and both count the decoded text below, never base64 characters.
+`paneBody` stops indenting - it hands back `bodyRaw`, which is what would be
+displayed anyway - and `ResponseBody` stops formatting, hides the view toggle
+and shows the first 2MB of the raw body under its own notice. Copy and Download
+still take the whole received text. Both limits are about *rendering* cost, not
+about what arrived, and both count the decoded text below, never base64
+characters.
 
 `bodyEncoding` says how to read `bodyRaw` (issue #2458): `"utf8"` is the text
 itself, `"base64"` is a body that is not UTF-8 text (an image, a PDF, Latin-1,

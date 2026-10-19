@@ -22,8 +22,8 @@
  * highlighting, and a prefix of the raw body in the editor, with a notice
  * saying so. Everything this component does to a body it does synchronously
  * during render, so a multi-megabyte response used to freeze the window between
- * Send and the pane painting. See the constant in `utils.ts` for the three
- * passes and why 2MB.
+ * Send and the pane painting. See the constant in `utils.ts` for the passes and
+ * why 2MB.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -112,7 +112,7 @@ export default function ResponseBody({
 	// Pretty mode: use formatted body
 	const formattedBody = useMemo(() => {
 		// The gate, and the reason the toggle is hidden with it: there is one
-		// view left, so `formatBody`'s parse-and-reindent pass never runs and the
+		// view left, so `formatBody`'s indent pass never runs and the
 		// editor is handed a bounded prefix rather than a model it will spend
 		// seconds tokenising.
 		if (isLargeBody) return (bodyRaw || body).slice(0, LARGE_BODY_BYTES);

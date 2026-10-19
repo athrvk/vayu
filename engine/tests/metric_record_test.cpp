@@ -250,6 +250,21 @@ TEST_F (MetricRecordTest, RateRecordsZeroWhenTheConditionDoesNotMatch) {
     EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 0.0);
 }
 
+// The body is parsed in its own member order (#2459), and an ordered object
+// compares equal only to one in the same order; the condition's `value` is
+// still matched member by member, whatever order either side names them in.
+TEST_F (MetricRecordTest, RateConditionEqualsAnObjectWhateverItsMemberOrder) {
+    response      = ok_json_response (200, R"({"m": {"b": 1, "a": 2}})");
+    auto elements = one_element (metric_element ("shape", "rate",
+    nlohmann::json{ { "condition",
+    { { "field", "jsonpath" }, { "jsonpath", "$.m" }, { "operator", "eq" },
+    { "value", nlohmann::json::parse (R"({"a": 2, "b": 1})") } } } }));
+
+    (void)run_after (elements);
+    ASSERT_EQ (recorded.size (), 1u);
+    EXPECT_DOUBLE_EQ (std::get<2> (recorded[0]), 1.0);
+}
+
 TEST_F (MetricRecordTest, RateRefusesATrendStyleSource) {
     response      = ok_json_response (200, "");
     auto elements = one_element (

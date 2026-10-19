@@ -33,13 +33,6 @@ namespace vayu::core {
 
 namespace {
 
-std::string json_value_to_string (const nlohmann::json& value) {
-    if (value.is_string ()) {
-        return value.get<std::string> ();
-    }
-    return value.dump ();
-}
-
 void mark_required_miss (ElementContext& ctx, const std::string& variable, const std::string& why) {
     ctx.post_script_result.tests.push_back (
     vayu::TestResult{ "extract " + variable, false, why });
@@ -138,7 +131,7 @@ class ExtractJsonElement final : public Element {
             ctx.outcome_message = "invalid JSONPath";
             return;
         }
-        const nlohmann::json* body = ensure_parsed_body (ctx);
+        const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
             ctx.outcome_status  = "skipped";
             ctx.outcome_message = constants::elements::BODY_UNREADABLE_MESSAGE;
@@ -147,7 +140,9 @@ class ExtractJsonElement final : public Element {
         const auto matches = detail::evaluate_json_path (*body, *path_);
         write_matches (ctx, matches, scope_, variable_, match_no_, fallback_,
         required_, "no match for '" + config_.value ("path", "") + "'",
-        [] (const nlohmann::json* m) { return json_value_to_string (*m); });
+        [] (const nlohmann::ordered_json* m) {
+            return detail::json_value_to_string (*m);
+        });
     }
 
     private:

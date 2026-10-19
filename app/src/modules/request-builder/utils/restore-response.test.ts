@@ -78,7 +78,9 @@ describe("responseFromRunResult", () => {
 		expect(restored?.status).toBe(200);
 		expect(restored?.statusText).toBe("OK");
 		expect(restored?.headers).toEqual({ "content-type": "application/json" });
-		expect(restored?.body).toBe('{"ok":true}');
+		// `body` is the Pretty copy; `bodyRaw` is what the trace held.
+		expect(restored?.body).toBe('{\n  "ok": true\n}');
+		expect(restored?.bodyRaw).toBe('{"ok":true}');
 		expect(restored?.bodyType).toBe("json");
 		expect(restored?.time).toBe(254.5);
 		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });

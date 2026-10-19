@@ -726,9 +726,10 @@ pre-request script sees the **composed** headers - the set it is there to edit,
 and the set the write-back applies back onto the request. A test script sees the
 **sent record**: those same headers as the transfer actually issued them, which
 means the ones the engine derives at send time are there too - the body-implied
-`Content-Type` (`graphql` and `jsonrpc` -> `application/json`, `xml` ->
-`application/xml`, `x-www-form-urlencoded` ->
-`application/x-www-form-urlencoded`) and the
+`Content-Type` (`json`, `graphql` and `jsonrpc` -> `application/json`, `text`
+-> `text/plain`, `xml` -> `application/xml`, `x-www-form-urlencoded` ->
+`application/x-www-form-urlencoded`; a bodyless `POST` sends none, issue #2464)
+and the
 [default headers](api-reference.md#default-request-headers) the send added - the
 `User-Agent`, a negotiated `Accept-Encoding`, and a correlation id where one is
 switched on. So a test
@@ -1542,7 +1543,7 @@ and must be a function.
 | `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
-| `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw |
+| `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw. Sent as `text/plain` unless `header` names a Content-Type |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
@@ -2285,8 +2286,8 @@ if (pm.environment.get('mode') === 'bulk') {
 Two edges worth knowing. A **HEAD** request that carries a body is refused by
 the send path with a clear error rather than silently stripped, so do not switch
 to HEAD without also `delete pm.request.body`. And a body set on a request that
-had none is sent as raw text - Vayu does not infer a `Content-Type`, so set it
-yourself as above.
+had none becomes a `text` body, which goes out as `text/plain`; for any other
+type set the header yourself, as above.
 
 ### Replace engine-applied auth with a custom scheme
 

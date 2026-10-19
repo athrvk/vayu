@@ -16,9 +16,14 @@
  * is validated by the same probe the main file gets before it is restored over
  * anything, because "we assume the backup itself is valid" was how a torn copy
  * came to be written over the last good one.
+ *
+ * Since #2420 only a corrupt file takes that branch: one the probe could not
+ * examine (locked, disk full, read-only) refuses to start and is left alone.
  */
 
 #include <gtest/gtest.h>
+
+#include <sqlite3.h>
 
 #include <chrono>
 #include <cstdint>
@@ -27,7 +32,9 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -35,6 +42,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/recovery.hpp"
 
@@ -486,6 +494,296 @@ TEST_F (DbRecoveryTest, ABackgroundRefreshLandsAWholeBackup) {
     write_corrupt_database ();
     vayu::db::Database db (DB_PATH);
     EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::RestoredFromBackup);
+}
+
+// ==================== Unavailable is not corrupt (#2420) ====================
+//
+// The probe used to read any exception as "this database is invalid", so a
+// healthy file met by a lock, a full disk or a read-only directory at startup
+// was quarantined and replaced by its `.bak`.
+
+/// A raw connection a test opens beside the engine's, closed on scope exit.
+using RawConnection = std::unique_ptr<sqlite3, decltype (&sqlite3_close)>;
+
+RawConnection open_raw (const std::string& path) {
+    sqlite3* handle = nullptr;
+    sqlite3_open (path.c_str (), &handle);
+    return { handle, &sqlite3_close };
+}
+
+/// Runs @p sql on @p connection, answering SQLite's error text or "".
+std::string exec_sql (sqlite3* connection, const std::string& sql) {
+    char* raw_error = nullptr;
+    if (sqlite3_exec (connection, sql.c_str (), nullptr, nullptr, &raw_error) == SQLITE_OK) {
+        return "";
+    }
+    std::string error = raw_error != nullptr ? raw_error : "unknown error";
+    sqlite3_free (raw_error);
+    return error;
+}
+
+int64_t read_user_version (sqlite3* connection) {
+    sqlite3_stmt* statement = nullptr;
+    int64_t version         = -1;
+    if (sqlite3_prepare_v2 (connection, "PRAGMA user_version", -1, &statement, nullptr) == SQLITE_OK &&
+    sqlite3_step (statement) == SQLITE_ROW) {
+        version = sqlite3_column_int64 (statement, 0);
+    }
+    sqlite3_finalize (statement);
+    return version;
+}
+
+bool runs_has_origin_column (sqlite3* connection) {
+    sqlite3_stmt* statement = nullptr;
+    bool found              = false;
+    if (sqlite3_prepare_v2 (connection, "PRAGMA table_info(runs)", -1,
+        &statement, nullptr) == SQLITE_OK) {
+        while (!found && sqlite3_step (statement) == SQLITE_ROW) {
+            const char* name = vayu::db::column_text (statement, 1);
+            found = name != nullptr && std::string (name) == "origin";
+        }
+    }
+    sqlite3_finalize (statement);
+    return found;
+}
+
+/// A database at @p path holding one collection, then taken back to schema
+/// version 4 without `runs.origin`: the next open has to `ADD COLUMN`, which
+/// is a write and so meets any lock another connection holds.
+void write_database_needing_a_column (const std::string& path) {
+    {
+        vayu::db::Database db (path);
+        db.init ();
+        vayu::db::Collection col;
+        col.id    = "col_kept";
+        col.name  = "Kept";
+        col.order = 0;
+        db.create_collection (col);
+    }
+    const RawConnection connection = open_raw (path);
+    ASSERT_EQ (exec_sql (connection.get (), "ALTER TABLE runs DROP COLUMN origin"), "");
+    ASSERT_EQ (exec_sql (connection.get (), "PRAGMA user_version = 4"), "");
+}
+
+/// Startup's wait for a lock, lowered so the refusal is reached in a test.
+constexpr std::chrono::milliseconds SHORT_WAIT{ 100 };
+
+TEST_F (DbRecoveryTest, ALockedDatabaseIsRefusedAndLeftExactlyAsItWas) {
+    write_database_needing_a_column (DB_PATH);
+    const std::string backup = std::string (DB_PATH) + ".bak";
+    write_corrupt_file (backup, "-backup-evidence");
+    const std::string database_bytes = read_file (DB_PATH);
+    const std::string backup_bytes   = read_file (backup);
+    ASSERT_FALSE (database_bytes.empty ());
+
+    RawConnection holder = open_raw (DB_PATH);
+    ASSERT_EQ (exec_sql (holder.get (), "BEGIN IMMEDIATE"), "");
+
+    std::string refusal;
+    try {
+        vayu::db::Database db (DB_PATH, SHORT_WAIT);
+        ADD_FAILURE () << "a database another connection holds was opened";
+    } catch (const std::runtime_error& e) {
+        refusal = e.what ();
+    }
+
+    EXPECT_NE (refusal.find (DB_PATH), std::string::npos) << refusal;
+    EXPECT_NE (refusal.find ("database is locked (SQLite result code 5)"), std::string::npos)
+    << refusal;
+    EXPECT_NE (refusal.find ("Nothing was changed"), std::string::npos) << refusal;
+    EXPECT_EQ (read_file (DB_PATH), database_bytes)
+    << "the database was written to";
+    EXPECT_EQ (read_file (backup), backup_bytes) << "the backup was touched";
+    EXPECT_TRUE (vayu::db::quarantined_database_paths (DB_PATH).empty ())
+    << "a database that was only locked was quarantined";
+    EXPECT_FALSE (std::filesystem::exists (vayu::db::recovery_marker_path (DB_PATH)));
+
+    ASSERT_EQ (exec_sql (holder.get (), "ROLLBACK"), "");
+    holder.reset ();
+
+    // Once the lock is gone the same file opens and migrates, data intact.
+    {
+        vayu::db::Database db (DB_PATH, SHORT_WAIT);
+        EXPECT_FALSE (db.recovery ().has_value ());
+        const auto collections = db.get_collections ();
+        ASSERT_EQ (collections.size (), 1u);
+        EXPECT_EQ (collections.front ().id, "col_kept");
+    }
+    const RawConnection reopened = open_raw (DB_PATH);
+    EXPECT_EQ (read_user_version (reopened.get ()), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (runs_has_origin_column (reopened.get ()));
+}
+
+TEST_F (DbRecoveryTest, ABackupThatCannotBeExaminedStopsRecoveryBeforeAnythingMoves) {
+    // The main file is corrupt, but whether the backup would restore is
+    // unknown while another connection holds it: moving the corrupt file
+    // aside on that basis could leave a fresh database in its place.
+    const std::string backup = std::string (DB_PATH) + ".bak";
+    write_database_needing_a_column (backup);
+    write_corrupt_database ("-original");
+    const std::string corrupt_bytes = read_file (DB_PATH);
+
+    RawConnection holder = open_raw (backup);
+    ASSERT_EQ (exec_sql (holder.get (), "BEGIN IMMEDIATE"), "");
+
+    std::string refusal;
+    try {
+        vayu::db::Database db (DB_PATH, SHORT_WAIT);
+        ADD_FAILURE () << "recovery ran against a backup it could not examine";
+    } catch (const std::runtime_error& e) {
+        refusal = e.what ();
+    }
+
+    EXPECT_NE (refusal.find (backup), std::string::npos) << refusal;
+    EXPECT_EQ (read_file (DB_PATH), corrupt_bytes);
+    EXPECT_TRUE (vayu::db::quarantined_database_paths (DB_PATH).empty ());
+    EXPECT_FALSE (std::filesystem::exists (vayu::db::recovery_marker_path (DB_PATH)));
+}
+
+TEST_F (DbRecoveryTest, AStartWaitsOutABriefLockRatherThanRefusing) {
+    // The busy timeout has to be on the connection before its first
+    // statement. On a rollback journal, switching to WAL needs the whole
+    // file, so a reader's shared lock blocks `Impl`'s very first pragma -
+    // which, run ahead of the timeout, failed at once.
+    {
+        vayu::db::Database db (DB_PATH);
+    }
+    {
+        const RawConnection connection = open_raw (DB_PATH);
+        ASSERT_EQ (exec_sql (connection.get (), "PRAGMA journal_mode = DELETE"), "");
+    }
+    RawConnection reader = open_raw (DB_PATH);
+    ASSERT_EQ (exec_sql (reader.get (), "BEGIN; SELECT count(*) FROM collections;"), "");
+    std::thread release ([&reader] {
+        std::this_thread::sleep_for (std::chrono::milliseconds (300));
+        exec_sql (reader.get (), "COMMIT");
+    });
+
+    std::string refusal;
+    try {
+        vayu::db::Database db (DB_PATH, std::chrono::seconds (10));
+    } catch (const std::exception& e) {
+        refusal = e.what ();
+    }
+    release.join ();
+
+    EXPECT_EQ (refusal, "") << "the start gave up instead of waiting";
+}
+
+TEST_F (DbRecoveryTest, TheStartupWaitIsOnTheConnectionUntilInitAppliesTheSetting) {
+    vayu::db::Database db (DB_PATH, std::chrono::milliseconds (1234));
+    EXPECT_EQ (db.applied_busy_timeout_ms (), 1234);
+
+    db.init ();
+    EXPECT_EQ (db.applied_busy_timeout_ms (), vayu::core::constants::database::BUSY_TIMEOUT_MS);
+}
+
+TEST_F (DbRecoveryTest, ATruncatedDatabaseStillTakesTheRecoveryBranch) {
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+    }
+    const auto size = std::filesystem::file_size (DB_PATH);
+    ASSERT_GT (size, 8192u);
+    // Two pages: the header survives, so this is SQLite's to judge rather
+    // than `has_sqlite_header`'s, and the tables past them are gone.
+    std::filesystem::resize_file (DB_PATH, 8192);
+    const std::string truncated_bytes = read_file (DB_PATH);
+
+    vayu::db::Database db (DB_PATH);
+
+    EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::StartedFreshQuarantined);
+    const std::string quarantined = only_quarantined_path ();
+    ASSERT_FALSE (quarantined.empty ());
+    EXPECT_EQ (read_file (quarantined), truncated_bytes);
+}
+
+TEST_F (DbRecoveryTest, ADamagedPageBehindAValidHeaderIsCorruptAndRestored) {
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+        ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
+    }
+    // Page 1's b-tree header starts at byte 100, after the file header; a
+    // page type no b-tree page has makes the schema unreadable
+    // (`SQLITE_CORRUPT`) while the first sixteen bytes still say SQLite.
+    {
+        std::fstream file (DB_PATH, std::ios::binary | std::ios::in | std::ios::out);
+        file.seekp (100);
+        const std::string garbage (8, '\x7f');
+        file.write (garbage.data (), static_cast<std::streamsize> (garbage.size ()));
+    }
+    const std::string damaged_bytes = read_file (DB_PATH);
+
+    vayu::db::Database db (DB_PATH);
+
+    EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::RestoredFromBackup);
+    const std::string quarantined = only_quarantined_path ();
+    ASSERT_FALSE (quarantined.empty ());
+    EXPECT_EQ (read_file (quarantined), damaged_bytes);
+}
+
+// ==================== The probe's classification (#2420) ====================
+
+std::system_error sqlite_failure (int code) {
+    return { std::error_code (code, sqlite_orm::get_sqlite_error_category ()), "probe" };
+}
+
+TEST (ProbeClassification, OnlyCorruptAndNotADatabaseAreCorrupt) {
+    for (const int code : { SQLITE_CORRUPT, SQLITE_NOTADB }) {
+        const auto found = vayu::db::classify_probe_failure (sqlite_failure (code));
+        EXPECT_TRUE (found.verdict == vayu::db::ProbeResult::Verdict::Corrupt) << code;
+        EXPECT_EQ (found.sqlite_code, code);
+    }
+    for (const int code : { SQLITE_BUSY, SQLITE_LOCKED, SQLITE_FULL,
+         SQLITE_READONLY, SQLITE_IOERR, SQLITE_CANTOPEN, SQLITE_PERM }) {
+        const auto found = vayu::db::classify_probe_failure (sqlite_failure (code));
+        EXPECT_TRUE (found.verdict == vayu::db::ProbeResult::Verdict::Unavailable) << code;
+        EXPECT_EQ (found.sqlite_code, code);
+    }
+}
+
+TEST (ProbeClassification, TheReasonSaysWhatSqliteSaidOnce) {
+    const std::system_error locked (
+    std::error_code (SQLITE_BUSY, sqlite_orm::get_sqlite_error_category ()), "database is locked");
+    EXPECT_EQ (vayu::db::classify_probe_failure (locked).reason, "database is locked");
+
+    // A specific message is kept whole beside the generic one.
+    const std::system_error specific (
+    std::error_code (SQLITE_ERROR, sqlite_orm::get_sqlite_error_category ()),
+    "no such table: runs");
+    EXPECT_EQ (vayu::db::classify_probe_failure (specific).reason,
+    std::string (specific.what ()));
+}
+
+TEST (ProbeClassification, AnythingNotSqlitesIsUnavailable) {
+    // errno 11 is EAGAIN, not SQLITE_CORRUPT: the category decides, not the
+    // number.
+    const std::system_error errno_failure (
+    std::error_code (SQLITE_CORRUPT, std::generic_category ()), "create_directories");
+    const auto from_errno = vayu::db::classify_probe_failure (errno_failure);
+    EXPECT_TRUE (from_errno.verdict == vayu::db::ProbeResult::Verdict::Unavailable);
+    EXPECT_EQ (from_errno.sqlite_code, 0);
+
+    const auto from_migration = vayu::db::classify_probe_failure (
+    std::runtime_error ("Vayu could not migrate the database"));
+    EXPECT_TRUE (from_migration.verdict == vayu::db::ProbeResult::Verdict::Unavailable);
+    EXPECT_EQ (from_migration.reason, "Vayu could not migrate the database");
+}
+
+TEST (ProbeClassification, TheRefusalNamesTheCodeOnlyWhenThereIsOne) {
+    const vayu::db::ProbeResult locked{ vayu::db::ProbeResult::Verdict::Unavailable,
+        SQLITE_BUSY, "database is locked" };
+    const std::string with_code =
+    vayu::db::unavailable_database_message ("/d/vayu.db", locked);
+    EXPECT_NE (with_code.find ("/d/vayu.db"), std::string::npos);
+    EXPECT_NE (with_code.find ("database is locked (SQLite result code 5)"),
+    std::string::npos);
+
+    const vayu::db::ProbeResult migration{ vayu::db::ProbeResult::Verdict::Unavailable,
+        0, "migration failed" };
+    EXPECT_EQ (vayu::db::unavailable_database_message ("/d/vayu.db", migration).find ("SQLite result code"),
+    std::string::npos);
 }
 
 } // namespace

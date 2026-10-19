@@ -65,7 +65,7 @@ import { TabOverflowMenu } from "@/components/layout/TabOverflowMenu";
 import { useFittedTabs } from "@/components/layout/useFittedTabs";
 import { MARK_ALLOWANCE } from "@/components/layout/tab-fit";
 import type { ResponseState, ResponseTab } from "../../types";
-import { contentTypeOf, heldBodySize } from "../../utils/response-bytes";
+import { contentTypeOf, heldBodySize, receivedBody } from "../../utils/response-bytes";
 import { exampleRefusal } from "./save-as-example";
 
 /**
@@ -708,8 +708,9 @@ export default function ResponseViewer() {
 									/*
 									 * Copy and download live *here*, not on the tab row.
 									 *
-									 * They act on the body - `content={shown.body}` - and
-									 * always did, so on the tab row they sat above Headers,
+									 * They act on the body - the text as received, not the
+									 * indented copy Pretty shows (issue #2459) - and always
+									 * did, so on the tab row they sat above Headers,
 									 * Timing and Raw claiming to act on whatever you were
 									 * looking at while copying something else. Moving them
 									 * beside the Pretty/Raw switch puts them with the thing
@@ -723,7 +724,7 @@ export default function ResponseViewer() {
 									 */
 									actions={
 										<ResponseActions
-											content={shown.body}
+											content={receivedBody(shown)}
 											fileExtension={shown.bodyType}
 											rawBytes={shown.rawBytes}
 											contentType={contentTypeOf(shown.headers)}
@@ -737,6 +738,7 @@ export default function ResponseViewer() {
 				<TabsContent value="headers" className="mt-0 flex-1 overflow-hidden">
 					<ResponseHeadersPanel
 						requestHeaders={shown.requestHeaders}
+						wireRequestHeaders={shown.wireRequestHeaders}
 						responseHeaders={shown.headers}
 					/>
 				</TabsContent>

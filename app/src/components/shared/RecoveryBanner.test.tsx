@@ -93,6 +93,31 @@ describe("RecoveryBanner", () => {
 		).toBeTruthy();
 	});
 
+	it.each(["restored_from_backup", "started_fresh_quarantined", "backup_also_corrupt"] as const)(
+		"says where the previous file is and how to put it back after %s",
+		(outcome) => {
+			// The engine judged the file corrupt, and a judgement can be wrong
+			// (issue #2420): the one thing that undoes it is the user copying the
+			// kept set back, and nothing but this banner tells them it is there.
+			const quarantinedPath = "/home/someone/.vayu/vayu.db.corrupt-1755870000000";
+			useEngineStore.setState({ recovery: { ...DELETED, outcome, quarantinedPath } });
+			render(<RecoveryBanner />);
+
+			expect(screen.getByText(quarantinedPath)).toBeTruthy();
+			expect(screen.getByText(DELETED.databasePath)).toBeTruthy();
+			expect(
+				screen.getByText(
+					/quit Vayu and copy it back over the database file above to undo this/
+				)
+			).toBeTruthy();
+			expect(
+				screen.getByText(
+					/its -wal and -shm files, and delete any -wal and -shm beside the database that the set does not have/
+				)
+			).toBeTruthy();
+		}
+	);
+
 	it("does not promise a kept copy when the engine deleted the file", () => {
 		// `deleted_corrupt` still happens - an engine older than #984, or one
 		// whose rename failed - and it carries no path. Telling that user to
@@ -102,6 +127,7 @@ describe("RecoveryBanner", () => {
 		render(<RecoveryBanner />);
 
 		expect(screen.queryByText(/\.recover/)).toBeNull();
+		expect(screen.queryByText(/copy it back over/)).toBeNull();
 		expect(screen.getByText(/it was deleted/)).toBeTruthy();
 	});
 

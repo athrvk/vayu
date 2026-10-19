@@ -271,6 +271,17 @@ struct BackupFailure {
 class Database {
     public:
     explicit Database (const std::string& db_path);
+    /**
+     * @param startup_busy_timeout how long every connection the constructor
+     *        opens waits for another connection's lock before the database is
+     *        refused as unavailable (issue #2420). The one-argument form uses
+     *        `BUSY_TIMEOUT_MS`; a test lowers it to reach the refusal quickly.
+     *        `init` replaces it with `dbBusyTimeout` on the open connection.
+     * @throws std::runtime_error when the database cannot be examined (locked,
+     *         disk full, read-only, an I/O error) - nothing is renamed,
+     *         restored or deleted - or when it was written by a newer schema.
+     */
+    Database (const std::string& db_path, std::chrono::milliseconds startup_busy_timeout);
     ~Database ();
 
     // Neither copyable nor movable: the handle behind the pImpl owns the open
@@ -1023,6 +1034,13 @@ class Database {
      */
     int applied_synchronous () const; // db_maintenance.cpp
 
+    /**
+     * @brief SQLite's busy timeout on this database's connection, in
+     * milliseconds, read back from SQLite: the constructor's
+     * `startup_busy_timeout` until `init` applies `dbBusyTimeout`.
+     */
+    int applied_busy_timeout_ms () const; // db_maintenance.cpp
+
     // Type-safe config getters (replaces ConfigManager)
     int get_config_int (const std::string& key, int default_value = 0);
     std::string get_config_string (const std::string& key,
@@ -1036,10 +1054,12 @@ class Database {
 
     /**
      * @brief Whether the database at @p path opens and carries this build's
-     *        schema: the constructor's validation of the file and of its
-     *        `.bak`, and @ref refresh_recovery_backup's of its own snapshot.
+     *        schema - or is corrupt, or could not be examined at all: the
+     *        constructor's validation of the file and of its `.bak`, and
+     *        @ref refresh_recovery_backup's of its own snapshot.
      */
-    static bool probe_database (const std::string& path); // db_maintenance.cpp
+    static ProbeResult probe_database (const std::string& path,
+    std::chrono::milliseconds busy_timeout); // db_maintenance.cpp
 
     /// The startup recovery record, read from the marker file in the
     /// constructor. See `recovery()`.

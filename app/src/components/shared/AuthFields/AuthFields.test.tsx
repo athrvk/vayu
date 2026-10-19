@@ -148,6 +148,29 @@ describe("AuthFields host parameterisation", () => {
 		expect(screen.getByText(/Authorization: Basic/i)).toBeInTheDocument();
 	});
 
+	it("warns that a header API key follows a redirect to another host", () => {
+		// libcurl drops Authorization and Cookie on a cross-host redirect and
+		// nothing else, so an API key in a header travels on (issue #2476).
+		renderFields({ mode: "apikey", key: "X-Api-Key", value: "v", in: "header" });
+		expect(screen.getByText(/redirect leads to/i)).toBeInTheDocument();
+		expect(screen.getByText(/Turn off Follow redirects/i)).toBeInTheDocument();
+	});
+
+	it("keeps the redirect warning off a query API key, which is part of the URL sent", () => {
+		renderFields({ mode: "apikey", key: "api_key", value: "v", in: "query" });
+		expect(screen.queryByText(/redirect/i)).not.toBeInTheDocument();
+	});
+
+	it("keeps the redirect warning off modes whose credential is Authorization", () => {
+		// The engine's redirect handling drops Authorization, so the sentence
+		// would be false for bearer and basic.
+		const { unmount } = renderFields({ mode: "bearer", token: "t" });
+		expect(screen.queryByText(/redirect/i)).not.toBeInTheDocument();
+		unmount();
+		renderFields({ mode: "basic", username: "u", password: "p" });
+		expect(screen.queryByText(/redirect/i)).not.toBeInTheDocument();
+	});
+
 	it("uses the host's own words for No Auth", () => {
 		// A request sends nothing; a collection hands nothing down. Different
 		// statements, one empty state.

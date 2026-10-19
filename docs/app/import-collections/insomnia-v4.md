@@ -137,7 +137,7 @@ Applied to: request `url`; every `params` and `headers` value (inside `map_key_v
 
 **GraphQL bodies (`to_graphql_envelope` in `import_document.cpp`):** Insomnia writes `application/graphql` for both shapes its editor produces - the GraphQL-over-HTTP envelope (`{query, variables}`) and, for a hand-written or older request, the **bare query document**. A bare document stored verbatim went on the wire as the whole HTTP body: not JSON, so a GraphQL server reads no `query` at all. Nothing showed it, because the query pane's raw-string fallback renders a bare document exactly as it renders a healthy one. It is normalized at import - the one place the shape is known to be GraphQL - and an envelope is returned untouched, so a mislabelled JSON envelope is never double-wrapped.
 
-**GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** the envelope is JSON, so the request needs `Content-Type: application/json`; the request builder adds it only on an interactive mode switch, which an import never performs. Written at import through the same `contentTypeToAdd` rule, so a Content-Type the export declares wins and a disabled row does not count as declaring one.
+**GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** the envelope is JSON, so the request needs `Content-Type: application/json`; the request builder adds it only on an interactive mode switch, which an import never performs. Written at import by the engine's port of the mode picker's `contentTypeToAdd` rule, so a Content-Type the export declares wins and a disabled row does not count as declaring one.
 
 ## Auth mapping
 

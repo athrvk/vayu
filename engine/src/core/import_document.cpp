@@ -74,9 +74,8 @@ std::string file_base_name (const std::string& path) {
 nlohmann::ordered_json
 postman_raw_body (const std::string& content, const std::string* language) {
     if (language != nullptr) {
-        // `xml` is what gets an imported SOAP request its `application/xml`:
-        // `text` requires no Content-Type, so before this the envelope went out
-        // as libcurl's `x-www-form-urlencoded`.
+        // `xml` is what gets an imported SOAP request its `application/xml`;
+        // `text` would send the envelope as `text/plain`.
         for (const std::string_view mode : postman::RAW_LANGUAGES) {
             if (*language == mode) {
                 return nlohmann::ordered_json{ { "mode", std::string (mode) },
@@ -355,8 +354,9 @@ int count_examples (const json& collections) {
 /// The app-side half of the engine's own `implied_content_type`
 /// (`http/form_body.cpp`), which is what actually reaches the wire; this one
 /// writes the header *row* an imported request carries, so the user can see it.
-/// `json` and `text` are deliberately absent - they are the modes a user writes
-/// the header for themselves.
+/// `json` and `text` are deliberately absent: the engine derives each at send
+/// time (`application/json`, `text/plain`) with no row, as the Body panel
+/// writes none for `text`.
 std::string required_content_type (const std::string& mode) {
     if (mode == "graphql" || mode == "jsonrpc") {
         return "application/json";

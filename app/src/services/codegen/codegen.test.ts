@@ -1085,7 +1085,9 @@ describe("a streaming request", () => {
  * header, so a copied curl of a GraphQL or JSON-RPC request went out under
  * libcurl's `x-www-form-urlencoded` default and most servers answered 400 - the
  * snippet not doing what the app had just done, which is the one thing it is
- * for. The table mirrors the engine's `implied_content_type`.
+ * for. The table mirrors the engine's `implied_content_type` (`text` included,
+ * issue #2464) and `implied-content-type.conformance.test.ts` pins it to the
+ * shared fixture.
  *
  * Asserted across every target rather than on curl alone: the rule lives in
  * `prepare.ts`, so a target that stopped emitting prepared headers would be the
@@ -1103,6 +1105,7 @@ describe("the Content-Type a body mode implies", () => {
 		["graphql", '{"query":"{ hero { name } }"}', "application/json"],
 		["jsonrpc", '{"method":"eth_blockNumber","params":[]}', "application/json"],
 		["xml", "<soap:Envelope><soap:Body/></soap:Envelope>", "application/xml"],
+		["text", "plain words", "text/plain"],
 	] as const;
 
 	for (const [mode, content, expected] of CASES) {
@@ -1136,15 +1139,26 @@ describe("the Content-Type a body mode implies", () => {
 		expect(code).not.toContain("application/xml");
 	});
 
-	// `text` is the one mode a user writes the header for themselves - a
-	// `text/plain`, a CSV, a JWT and a raw signature are all this mode, and the
-	// engine derives nothing for it either (issue #1445; `json` used to be
-	// grouped here, which is the bug: the engine implies `application/json` for
-	// it exactly like GraphQL and JSON-RPC, so a copied snippet with no header
-	// went out under libcurl's `x-www-form-urlencoded` default too).
-	it("adds nothing for a text body", () => {
-		const { code } = generateCurl(withBody("text", '{"a":1}'));
-		expect(code).not.toContain("Content-Type");
+	// A text body that is really a CSV or a JWT declares its own header, and that
+	// one wins like any other (issue #2464).
+	it("keeps a declared Content-Type on a text body", () => {
+		for (const target of CODE_TARGETS) {
+			const { code } = target.generate({
+				...withBody("text", "a,b"),
+				headers: { "Content-Type": "text/csv" },
+			});
+			expect(code, target.id).toContain("text/csv");
+			expect(code, target.id).not.toContain("text/plain");
+		}
+	});
+
+	// A bodyless POST sends no Content-Type under the engine (#2464), so a
+	// snippet that wrote one would describe another request.
+	it("adds nothing to a POST that has no body", () => {
+		for (const target of CODE_TARGETS) {
+			const { code } = target.generate({ ...GET, method: "POST", body: { mode: "none" } });
+			expect(code, target.id).not.toMatch(/content-type/i);
+		}
 	});
 
 	it("a json-mode snippet's Content-Type parses back as json (issue #1445)", () => {

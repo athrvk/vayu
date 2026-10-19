@@ -368,7 +368,7 @@ so a body that round-trips through storage sends the same bytes.
 
 | `mode` | Carries | On the wire |
 |---|---|---|
-| `none` | nothing | no body |
+| `none` | nothing | no body; a `POST` sends `Content-Length: 0` and no Content-Type |
 | `json` / `text` | `content` (string) | `content`, verbatim |
 | `graphql` | `content` (string) | the GraphQL-over-HTTP envelope on POST, query parameters on GET (see below) |
 | `jsonrpc` | `content` (string) | the JSON-RPC 2.0 call envelope (see below) |
@@ -386,13 +386,14 @@ but never sent, so switching one back on needs no re-compose; `{{variables}}`
 resolve inside `key`, `value`, and a file reference's `src` / `fileName` /
 `contentType` (a file part's, or a binary body's `file`) during composition.
 
-Five Content-Type rules follow from the encoding:
+The Content-Type rules follow from the encoding:
 
 - `x-www-form-urlencoded` sets `Content-Type: application/x-www-form-urlencoded`
   **only when the request declares no Content-Type of its own** - an explicit
   header wins.
 - `json` sets `Content-Type: application/json` under the same rule (issue #889).
-  It did **not** until then, and libcurl's default for a POST carrying a body is
+  It did **not** until then, and libcurl's default for a `CURLOPT_POSTFIELDS`
+  body (every mode but `form-data` and a streamed `binary`, on every verb) is
   `application/x-www-form-urlencoded` - so a request whose `body.mode` said
   `json` went out declaring itself a form. The app's body panel wrote the header
   row for a request built in the UI, which is why it survived: every request
@@ -403,9 +404,15 @@ Five Content-Type rules follow from the encoding:
   rule - a Content-Type the caller wrote wins. `graphql` only on the method
   that carries a body at all: a GraphQL `GET` has no body and derives no
   Content-Type, since there is nothing to describe (see below).
+- `text` sets `Content-Type: text/plain` under the same rule (issue #2464).
+  Until then it derived nothing, by decision - `text/csv`, a JWT and a raw
+  signature are all `text` - but an author who wrote no header got libcurl's
+  form type rather than no type. Postman and Bruno send `text/plain` for the
+  same body. A typed row (`text/csv`, `application/jwt`) still wins, and
+  `disabledSystemHeaders: ["content-type"]` sends none.
 - `xml` sets `Content-Type: application/xml`, again only when the caller
   declared none. It has no envelope and nothing is done to `content`; the header
-  is the whole of what the mode adds over `text`, which is why an endpoint
+  is the whole of what sets the mode apart from `text`, which is why an endpoint
   expecting `application/soap+xml` keeps the header it was given.
 - `form-data` **always** sets its own Content-Type, and a caller-supplied one is
   dropped. The header has to carry the boundary of the body that was actually
@@ -414,16 +421,22 @@ Five Content-Type rules follow from the encoding:
 - `binary` derives its Content-Type from the file, in four tiers, an empty
   string counting as absent at each: an enabled `Content-Type` header row, then
   `file.contentType`, then the type the file's extension names (one engine
-  table of common types), then `application/octet-stream`. A binary body never
-  goes out as libcurl's `x-www-form-urlencoded` default. `POST /compose` writes
+  table of common types), then `application/octet-stream`. `POST /compose` writes
   the effective type into an empty `file.contentType` (unless a non-blank
   `Content-Type` header row is present, which wins at send anyway), so the
   composed payload - and a snippet generated from it - names the type the send
   uses.
 
-`text` derives nothing, and that is a decision rather than a gap:
-`text/plain`, `text/csv`, a JWT and a raw signature are all `text`, so there is
-no single right answer and the header stays the author's.
+**No request goes out under libcurl's `x-www-form-urlencoded` default**
+(issue #2464). libcurl writes that type into any `CURLOPT_POSTFIELDS` body,
+and into a bodyless `POST`, whenever the header list names no Content-Type. So
+where nothing declares one - a `content-type` refusal in
+`disabledSystemHeaders`, a typed `Content-Type` row left blank (on any mode but
+`binary`, where a blank row is absent), a body mode of `none` on a `POST` - the
+engine hands libcurl its removal line instead, and the request carries no
+Content-Type at all, as Postman sends a bodyless `POST`. A bodyless `PUT`,
+`PATCH` or `GET` never had one. The removal line is not a sent header and is
+not in `requestHeaders`.
 
 #### The `graphql` envelope
 
@@ -5307,6 +5320,17 @@ headers). Header names are matched case-insensitively, so `authorization` or
 appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
+**Redirects.** With `followRedirects` on, a redirect to another host (a different
+host name or port) drops the `Authorization` header, so `bearer`, `basic` and an
+`oauth2` token placed in the header stop at the first host, as libcurl does.
+Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
+the request carries - is sent to the host the redirect leads to. A query-located
+key is part of the URL as sent; the next hop is whatever the response's
+`Location` names, so the key reaches it only if that URL repeats it. Set
+`followRedirects: false` on a request whose key must not leave the host it was
+sent to; the app says this beside the API Key fields.
+(`engine/tests/redirect_credentials_test.cpp`)
+
 ### OAuth 2.0 token cache
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
@@ -6352,6 +6376,11 @@ declared charset: a body that is valid UTF-8 is `"utf8"` whatever its
 for the client to decode by the declared charset. A header value that is not
 UTF-8 has no such field and is answered with U+FFFD in place of each bad byte.
 
+`bodyRaw` of a `"utf8"` answer is the byte-exact text received; `body` is the
+parsed convenience copy, whose member order is unspecified and in which a
+duplicate key collapses to the last value. A client that shows or re-saves the
+body should use `bodyRaw`, as the app does (issue #2459).
+
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.
 
@@ -6468,19 +6497,22 @@ that frame declares one* (`Content-Length` above zero, or `Transfer-Encoding:
 chunked`). So it carries what libcurl added on its own - the `Cookie` line the
 [cookie jar](architecture.md#cookie-jar) matched, `Accept`, `Content-Length`,
 and an h2 request rendered in HTTP/1 form - none of which appear in
-`requestHeaders`. When the final hop sent no body, the string ends at the blank
-line that closes the header block: a `POST` answered `301`, `302` or `303` is
-re-sent as a body-less `GET`, so the body it started with is not shown on a
-request that never carried it (issue #2462). `307` and `308` keep the method and
-the body, and so does the view.
+`requestHeaders`. The app's Headers tab lists the sent request from this block,
+line by line in wire order, so the tab shows the whole wire while the
+script-visible record stays the engine's. When the final hop sent no body, the
+string ends at the blank line that closes the header block: a `POST` answered
+`301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started
+with is not shown on a request that never carried it (issue #2462). `307` and
+`308` keep the method and the body, and so does the view.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
 issued them on its **first hop**. After a followed redirect that changes the
 request (a `POST` answered `303`, which becomes a `GET`) the final hop's own
 header block is `rawRequest`'s. It carries what the engine derives at send
-time - the body-implied `Content-Type`, and every
-[default header](#default-request-headers) this send adds (the `User-Agent`,
-the negotiated `Accept-Encoding`, an enabled correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
+time - the body-implied `Content-Type` (`text/plain` for a `text` body since
+issue #2464), and every [default header](#default-request-headers) this send
+adds (the `User-Agent`, the negotiated `Accept-Encoding`, an enabled
+correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
 itself with the boundary. It
 also drops **an enabled header whose value is empty or only whitespace**: a
 header line with nothing after the colon is libcurl's spelling for *remove this
@@ -6490,7 +6522,9 @@ give it a value - the engine does not emit libcurl's `Key;` form. It
 does not carry libcurl's own additions or the jar's `Cookie` line; those are
 `rawRequest`'s alone. A test script's `pm.request.headers` reads this same set
 (see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion
-about what went out and the response pane's Headers tab cannot disagree.
+about what was composed to go out reads the same set the engine recorded; the
+Headers tab lists `rawRequest`'s header block instead, which is that set plus
+the transport's own lines.
 
 **The stored trace keeps this map too**, as `trace_data.request.sentHeaders`
 beside the composed `request.headers` (issue #664) - so a restored response
@@ -7995,6 +8029,14 @@ crash guards, not policy: each client caps itself far lower (the load dialog
 offers `concurrency` &le; 1000; the MCP `start_load_run` tool has a
 user-settable cap in Settings).
 
+**The defaults** an absent field takes are the `run_config::DEFAULT_*`
+constants in `engine/include/vayu/core/constants.hpp`: `duration` 60 s for a
+constant or ramp-up run, `concurrency` 100 for a constant or ramp-up run
+(closed loop when no `rps`/`targetRps` paces it) and 10 for an `iterations`
+run, `iterations` 1000, `rampUpDuration` 10 s, `startConcurrency` 1. A
+`capacity` run's `duration` defaults to its own 300 s search deadline instead.
+None of them is written to the stored snapshot; only what the body carried is.
+
 **`constant_rps` needs a rate.** A `mode` of `constant_rps` with neither `rps`
 nor `targetRps` positive (`rps` is read first, and `targetRps` when `rps` is
 absent or `0`) is a `400` with `error.code` `invalid_run_config`. It used to run
@@ -8731,13 +8773,22 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these fourteen snapshot keys: `url`, `method`,
-`mode`, `duration`, `concurrency`, `startConcurrency`, `rampUpDuration`,
-`comment`, `followRedirects`, `maxRedirects`, `requestName`, `dataFileName`,
-`dataFileHash`, and `httpVersion`.
-The first thirteen are each **omitted** when absent from the snapshot (a
+**`summary`** carries exactly these sixteen snapshot keys: `url`, `method`,
+`mode`, `duration`, `concurrency`, `iterations`, `targetRps`,
+`startConcurrency`, `rampUpDuration`, `comment`, `followRedirects`,
+`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`, and
+`httpVersion`.
+The first fifteen are each **omitted** when absent from the snapshot (a
 malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
-alone is always present. `startConcurrency` and `rampUpDuration` (issue #1935)
+alone is always present. `iterations` and `targetRps` (issue #2437) are what
+the run was sent, never a default the engine filled in: an iterations run's
+request count, and a paced run's rate. `targetRps` is the one rename - the
+`POST /runs` body may name the rate `rps` or `targetRps`, the row reports it
+as `targetRps` (the rate the engine paced at: `rps`, or `targetRps` when `rps`
+is absent, null or zero), and the report's `configuration` does the same. A field the run was not sent has no key
+here even though the engine ran its default (see
+[POST /runs](#post-runs)); a client that wants a default
+visible sends it. `startConcurrency` and `rampUpDuration` (issue #1935)
 are the ramp-up knobs, so only a `ramp_up` run has them, e.g.
 `"startConcurrency": 2, "rampUpDuration": "10s"` beside `"concurrency": 50`;
 they are the same two keys the report's `configuration` carries. `requestName`
@@ -8754,7 +8805,7 @@ script sandbox's `pm.info.requestName`. `dataFileName` and `dataFileHash`
 (issue #2051) name the file a single-request run's `data` rows came from, by
 display name and SHA-256 of its bytes (64 lowercase hex), never its path; a run
 sent without a file name has neither. Every run since issue #1488 adds a
-fifteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+seventeenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -8770,7 +8821,7 @@ lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
-the full `configSnapshot`, which already holds every key above. The same fourteen
+the full `configSnapshot`, which already holds every key above. The same sixteen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
 with, since both are built by one function; that row carries no
 `resultSummary`.
@@ -8778,7 +8829,7 @@ with, since both are built by one function; that row carries no
 A **collection run** (`type: "scenario"`) carries none of the single-request
 keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
 single `url`, `method` or `mode` to report. Its row instead carries a
-sixteenth key, `scenario`, present on scenario runs only:
+eighteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -8798,7 +8849,7 @@ six keys is omitted when the stored snapshot has no such key: `dataFileName` and
 `dataFileHash` (issue #2051) are the data file a run's `scenario.data` came
 from, so a run sent without one has neither.
 
-**`hasWarnings`** (issue #1527) is `summary`'s seventeenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s nineteenth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
@@ -9202,6 +9253,7 @@ named it.
       "mode": "constant_rps",
       "duration": "60s",
       "concurrency": 100,
+      "targetRps": 500,
       "followRedirects": true,
       "maxRedirects": 10,
       "httpVersion": "auto",
@@ -9610,13 +9662,16 @@ readings are served separately by
 than 0.15.0. The rows are listed by `timestamp`, not by `id`.
 
 `metadata.configuration` carries the load-test tuning knobs present in the
-snapshot (`mode`, `duration`, `concurrency`, `startConcurrency`,
+snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`,
 `rampUpDuration`, `timeout`, `comment`, `followRedirects`, `maxRedirects` -
-each omitted when absent) plus `httpVersion`, which is always present with the
+each omitted when absent, and recording what the run was sent, never a default
+the engine filled in; issue #2437) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
 above), and `acceptEncoding` (issue #1488), read out of the snapshot's
 `defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
-of the same name. `rps` in the raw snapshot is renamed to `targetRps` here.
+of the same name. `rps` in the raw snapshot is renamed to `targetRps` here,
+and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
+null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
 `dataFileHash` (issue #2051) the file it came from, by display name and
 SHA-256 of its bytes, never its path. A single-request run's are read off the

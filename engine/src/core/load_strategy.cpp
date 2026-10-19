@@ -1101,7 +1101,8 @@ class ConstantLoadStrategy : public LoadStrategy {
     vayu::db::Database& db,
     const vayu::Request& request) override {
         const auto& config  = context->config;
-        int64_t duration_ms = duration_field_ms (config, "duration", 60000);
+        int64_t duration_ms = duration_field_ms (
+        config, "duration", constants::run_config::DEFAULT_DURATION_MS);
         SubmissionRequest live (context, request);
 
         const double target_rps = requested_rps (config);
@@ -1109,8 +1110,8 @@ class ConstantLoadStrategy : public LoadStrategy {
             run_rate_limited (context, db, live, duration_ms, target_rps);
         } else {
             // Concurrency-based mode: closed-loop, hold ~N in flight.
-            size_t concurrency =
-            static_cast<size_t> (config.value ("concurrency", 100));
+            size_t concurrency = static_cast<size_t> (
+            config.value ("concurrency", constants::run_config::DEFAULT_CONCURRENCY));
 
             vayu::utils::log_info ("run", "Starting Constant Load Test (Concurrency-Based)");
             vayu::utils::log_info (
@@ -1290,8 +1291,10 @@ class IterationsLoadStrategy : public LoadStrategy {
     const vayu::Request& request) override {
         const auto& config = context->config;
         SubmissionRequest live (context, request);
-        size_t iterations = static_cast<size_t> (config.value ("iterations", 1000));
-        size_t concurrency = static_cast<size_t> (config.value ("concurrency", 10));
+        size_t iterations = static_cast<size_t> (
+        config.value ("iterations", constants::run_config::DEFAULT_ITERATIONS));
+        size_t concurrency = static_cast<size_t> (config.value (
+        "concurrency", constants::run_config::DEFAULT_ITERATIONS_CONCURRENCY));
 
         vayu::utils::log_info ("run", "Starting Iterations Load Test");
         vayu::utils::log_info ("run", "  Iterations: " + std::to_string (iterations));
@@ -1331,13 +1334,15 @@ class RampUpLoadStrategy : public LoadStrategy {
         const auto& config = context->config;
         SubmissionRequest live (context, request);
 
-        int64_t duration_ms = duration_field_ms (config, "duration", 60000);
-        int64_t ramp_duration_ms = duration_field_ms (config, "rampUpDuration", 10000);
+        int64_t duration_ms = duration_field_ms (
+        config, "duration", constants::run_config::DEFAULT_DURATION_MS);
+        int64_t ramp_duration_ms = duration_field_ms (config, "rampUpDuration",
+        constants::run_config::DEFAULT_RAMP_DURATION_MS);
 
-        size_t start_concurrency =
-        static_cast<size_t> (config.value ("startConcurrency", 1));
-        size_t target_concurrency =
-        static_cast<size_t> (config.value ("concurrency", 100));
+        size_t start_concurrency  = static_cast<size_t> (config.value (
+        "startConcurrency", constants::run_config::DEFAULT_START_CONCURRENCY));
+        size_t target_concurrency = static_cast<size_t> (
+        config.value ("concurrency", constants::run_config::DEFAULT_CONCURRENCY));
 
         vayu::utils::log_info ("run", "Starting Ramp Up Load Test");
         vayu::utils::log_info (

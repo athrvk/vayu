@@ -7,9 +7,12 @@
 
 #include "json_path.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <format>
 #include <functional>
+#include <unordered_map>
+#include <utility>
 
 #include "vayu/utils/parse.hpp"
 
@@ -117,9 +120,9 @@ std::optional<std::vector<JsonPathStep>> parse_json_path (std::string_view path)
 
 namespace {
 
-void eval_member (const nlohmann::json& node,
+void eval_member (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (!node.is_object ()) {
         return;
     }
@@ -128,9 +131,9 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_index (const nlohmann::json& node,
+void eval_index (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (!node.is_array ()) {
         return;
     }
@@ -143,7 +146,8 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_index_any (const nlohmann::json& node, std::vector<const nlohmann::json*>& out) {
+void eval_index_any (const nlohmann::ordered_json& node,
+std::vector<const nlohmann::ordered_json*>& out) {
     if (node.is_array ()) {
         for (const auto& element : node) {
             out.push_back (&element);
@@ -156,9 +160,9 @@ void eval_index_any (const nlohmann::json& node, std::vector<const nlohmann::jso
     }
 }
 
-void eval_recursive_walk (const nlohmann::json& node,
+void eval_recursive_walk (const nlohmann::ordered_json& node,
 const std::string& name,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     if (node.is_object ()) {
         for (const auto& [key, value] : node.items ()) {
             if (key == name) {
@@ -173,9 +177,9 @@ std::vector<const nlohmann::json*>& out) {
     }
 }
 
-void eval_step (const nlohmann::json& node,
+void eval_step (const nlohmann::ordered_json& node,
 const JsonPathStep& step,
-std::vector<const nlohmann::json*>& out) {
+std::vector<const nlohmann::ordered_json*>& out) {
     switch (step.kind) {
     case JsonPathStep::Kind::Member: eval_member (node, step, out); break;
     case JsonPathStep::Kind::Index: eval_index (node, step, out); break;
@@ -188,17 +192,173 @@ std::vector<const nlohmann::json*>& out) {
 
 } // namespace
 
-std::vector<const nlohmann::json*> evaluate_json_path (const nlohmann::json& root,
+std::vector<const nlohmann::ordered_json*> evaluate_json_path (
+const nlohmann::ordered_json& root,
 const std::vector<JsonPathStep>& steps) {
-    std::vector<const nlohmann::json*> current{ &root };
+    std::vector<const nlohmann::ordered_json*> current{ &root };
     for (const auto& step : steps) {
-        std::vector<const nlohmann::json*> next;
+        std::vector<const nlohmann::ordered_json*> next;
         for (const auto* node : current) {
             eval_step (*node, step, next);
         }
         current = std::move (next);
     }
     return current;
+}
+
+namespace {
+
+using OrderedJson = nlohmann::ordered_json;
+
+/// Builds an `OrderedJson` from the parser's events with an explicit stack,
+/// one frame per open container, so nothing here recurses. An object frame
+/// indexes its keys once it outgrows a short scan, which is what lets a member
+/// be placed without `ordered_map::emplace`'s scan of every member before it.
+class OrderedTreeBuilder final : public nlohmann::json_sax<OrderedJson> {
+    public:
+    explicit OrderedTreeBuilder (size_t max_depth) : max_depth_ (max_depth) {
+    }
+
+    bool null () override {
+        return place_leaf (nullptr);
+    }
+    bool boolean (bool val) override {
+        return place_leaf (val);
+    }
+    bool number_integer (number_integer_t val) override {
+        return place_leaf (val);
+    }
+    bool number_unsigned (number_unsigned_t val) override {
+        return place_leaf (val);
+    }
+    bool number_float (number_float_t val, const string_t& /*raw*/) override {
+        return place_leaf (val);
+    }
+    bool string (string_t& val) override {
+        return place_leaf (std::move (val));
+    }
+    bool binary (binary_t& val) override {
+        return place_leaf (OrderedJson::binary (std::move (val)));
+    }
+    // The element-count hints are always "unknown" for JSON text.
+    bool start_object (size_t /*elements*/) override {
+        return open (OrderedJson::object ());
+    }
+    bool start_array (size_t /*elements*/) override {
+        return open (OrderedJson::array ());
+    }
+    bool key (string_t& val) override {
+        frames_.back ().key = std::move (val);
+        return true;
+    }
+    bool end_object () override {
+        return close ();
+    }
+    bool end_array () override {
+        return close ();
+    }
+    bool parse_error (size_t /*position*/,
+    const std::string& /*last_token*/,
+    const nlohmann::detail::exception& /*ex*/) override {
+        return false;
+    }
+
+    [[nodiscard]] OrderedJson take_root () {
+        return std::move (root_);
+    }
+
+    private:
+    using Members = OrderedJson::object_t::Container;
+
+    /// Below this many members a scan beats hashing every key of the small
+    /// objects most bodies are made of; past it the scan would be the O(n^2).
+    static constexpr size_t SCANNED_MEMBERS = 16;
+
+    struct Frame {
+        OrderedJson container;
+        /// Key -> index into `container`'s members, once an object has
+        /// `SCANNED_MEMBERS`; empty before that and for an array.
+        std::unordered_map<std::string, size_t> member_index;
+        /// The key the next value is placed under; objects only.
+        std::string key;
+    };
+
+    /// A value is placed at depth `frames_.size ()`.
+    [[nodiscard]] bool too_deep () const {
+        return frames_.size () > max_depth_;
+    }
+
+    bool place_leaf (OrderedJson value) {
+        return !too_deep () && place (std::move (value));
+    }
+
+    bool open (OrderedJson container) {
+        if (too_deep ()) {
+            return false;
+        }
+        frames_.push_back (Frame{ std::move (container), {}, {} });
+        return true;
+    }
+
+    bool close () {
+        OrderedJson done = std::move (frames_.back ().container);
+        frames_.pop_back ();
+        return place (std::move (done));
+    }
+
+    bool place (OrderedJson value) {
+        if (frames_.empty ()) {
+            root_ = std::move (value);
+            return true;
+        }
+        Frame& top = frames_.back ();
+        if (top.container.is_array ()) {
+            top.container.get_ref<OrderedJson::array_t&> ().push_back (std::move (value));
+            return true;
+        }
+        // The vector underneath: `ordered_map` hides `operator[] (size_t)`
+        // and its `emplace` is the unbounded scan this class exists to avoid.
+        auto& members =
+        static_cast<Members&> (top.container.get_ref<OrderedJson::object_t&> ());
+        const size_t slot = member_slot (top, members);
+        if (slot == members.size ()) {
+            members.emplace_back (std::move (top.key), std::move (value));
+        } else {
+            members.at (slot).second = std::move (value);
+        }
+        return true;
+    }
+
+    /// Where `top.key` already sits in @p members, or `members.size ()`.
+    static size_t member_slot (Frame& top, const Members& members) {
+        if (top.member_index.empty () && members.size () < SCANNED_MEMBERS) {
+            const auto found =
+            std::ranges::find (members, top.key, &Members::value_type::first);
+            return static_cast<size_t> (found - members.begin ());
+        }
+        if (top.member_index.empty ()) {
+            for (size_t i = 0; i < members.size (); ++i) {
+                top.member_index.emplace (members.at (i).first, i);
+            }
+        }
+        return top.member_index.try_emplace (top.key, members.size ()).first->second;
+    }
+
+    size_t max_depth_;
+    std::vector<Frame> frames_;
+    OrderedJson root_;
+};
+
+} // namespace
+
+std::optional<nlohmann::ordered_json>
+parse_ordered_json (std::string_view text, size_t max_depth) {
+    OrderedTreeBuilder builder (max_depth);
+    if (!nlohmann::ordered_json::sax_parse (text, &builder)) {
+        return std::nullopt;
+    }
+    // In place: a json converts to anything, `std::optional` included.
+    return std::optional<nlohmann::ordered_json>{ std::in_place, builder.take_root () };
 }
 
 } // namespace vayu::core::detail
