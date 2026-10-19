@@ -14,9 +14,9 @@
 import { z } from "zod";
 import { EngineRequestError } from "../engine-client.js";
 import { compareReports } from "../compare.js";
-import { RUN_ERROR_DEFINITION_SENTENCE } from "../error-definition.js";
+import { RUN_ERROR_DEFINITION_POINTER } from "../error-definition.js";
 import { defaultMcpExportFormat, MCP_EXPORT_FORMAT_IDS } from "../run-export-formats.js";
-import { runOutputShape, WITHHELD_RUN_OUTPUT_SENTENCE } from "../withhold.js";
+import { runOutputShape, withheldPointer } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -93,11 +93,11 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "set_run_baseline",
 		category: "write",
 		invalidates: ["run"],
-		description:
+		description: (config) =>
 			"Pin a run as the baseline for its saved request, or unpin it. The baseline is the known-good run later runs are compared against: once pinned, compare_runs can be called with only `targetRunId` and resolves this run as the base. It is also the one run history retention will not expire. One pin per request - pinning another run moves it. A run of an unsaved request has no request to be the baseline of, so pinning it changes what nothing reads. " +
 			GUARDED_WRITE_SENTENCE +
-			". " +
-			WITHHELD_RUN_OUTPUT_SENTENCE,
+			"." +
+			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Pin run as baseline",
 			readOnlyHint: false,
@@ -199,7 +199,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Get a snapshot of the most recent live metrics ticks for a run (RPS, latency percentiles, error rate, status mix). Returns the last N ticks; does not stream. " +
-			RUN_ERROR_DEFINITION_SENTENCE,
+			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Get live metrics",
 			readOnlyHint: true,
@@ -232,7 +232,7 @@ export const RUN_TOOLS: McpTool[] = [
 		invalidates: [],
 		description:
 			"Compare two completed runs and return the deltas in latency percentiles, throughput, error rate, and status-code mix, each labelled with which direction is an improvement. Use to answer 'did this change regress performance?'. Omit baseRunId to compare against the run pinned as the baseline for the same saved request. Two runs of different types (list_runs' type) are refused, not compared. Read comparability before the deltas: each entry (code, message, base, target) is a way the two runs were not the same experiment - run type, mode, virtual users, target rate, duration (more than 2x apart), status (a stopped run against a completed one), HTTP version, data file, request, or compression negotiation. An empty list means like for like. When it is not empty, say so before calling anything a regression: a short stopped run always looks slower and lower-throughput than a long one. compressionNegotiationDiffers is the compression entry on its own. " +
-			RUN_ERROR_DEFINITION_SENTENCE,
+			RUN_ERROR_DEFINITION_POINTER,
 		annotations: {
 			title: "Compare runs",
 			readOnlyHint: true,
@@ -280,11 +280,10 @@ export const RUN_TOOLS: McpTool[] = [
 		name: "export_run_report",
 		category: "read",
 		invalidates: [],
-		description:
+		description: (config) =>
 			"Export a finished load run as one self-contained document: the same report the Export menu in Vayu's History saves, returned as its text (Markdown as Markdown, JSON as JSON) rather than wrapped in a result object. It holds the run's aggregates (latency percentiles, throughput, error rate, status-code mix), its budgets and their verdicts, the configuration it ran under and, with `baseRunId` or `baseline: true`, a comparison against a second run. It does NOT hold traces, captured samples, per-tick series or request values - call get_run_samples for the samples and get_run_report for the live report data. Not offered for Design-mode or collection-sequence runs, and refused while the run is still executing. The `html` format is the Export menu's alone and is refused here. " +
-			RUN_ERROR_DEFINITION_SENTENCE +
-			" " +
-			WITHHELD_RUN_OUTPUT_SENTENCE,
+			RUN_ERROR_DEFINITION_POINTER +
+			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Export run report",
 			readOnlyHint: true,

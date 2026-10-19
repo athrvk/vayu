@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { secretsShape, WITHHELD_COOKIE_SENTENCE, withholdCookieValues } from "../withhold.js";
+import { secretsShape, withheldPointer, withholdCookieValues } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import { callEngine, errorResult, str, writesDisabled } from "./kit.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
@@ -21,9 +21,9 @@ export const COOKIE_TOOLS: McpTool[] = [
 		name: "get_cookies",
 		category: "read",
 		invalidates: [],
-		description:
-			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment. " +
-			WITHHELD_COOKIE_SENTENCE,
+		description: (config) =>
+			"Read the design-mode cookie jars - one entry per environment that holds anything, plus the jar used when no environment is selected, each cookie with its name, value, domain, path, secure/httpOnly flags and expiry. This is how 'why is this request already authenticated' gets answered: run_request and run_collection_smoke send through these jars and store what comes back, and the same jars serve the user's own sends in that environment." +
+			withheldPointer(config),
 		annotations: {
 			title: "Get cookie jars",
 			readOnlyHint: true,

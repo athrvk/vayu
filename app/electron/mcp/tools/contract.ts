@@ -236,9 +236,17 @@ export interface ToolResult {
  */
 export type ToolCategory = "read" | "execute" | "write" | "load";
 
+/**
+ * A tool's description, or how to build it from the session's config. A
+ * function where the text explains a setting the session may have lifted:
+ * `tools/list` is paid on every connect, and a rule that does not apply to the
+ * session reading it is only cost (#2441).
+ */
+export type ToolDescription = string | ((config: McpSafetyConfig) => string);
+
 export interface McpTool {
 	name: string;
-	description: string;
+	description: ToolDescription;
 	/**
 	 * Zod raw shape for the tool's arguments (SDK validates + builds JSON Schema).
 	 * Spelled out rather than written `z.ZodRawShape`, which in Zod 4 is an alias
@@ -271,6 +279,14 @@ export interface McpTool {
 		ctx: ToolContext,
 		signal?: AbortSignal
 	) => Promise<ToolResult>;
+}
+
+/** @p tool's description as a session under @p config lists it. */
+export function resolveDescription(
+	tool: Pick<McpTool, "description">,
+	config: McpSafetyConfig
+): string {
+	return typeof tool.description === "string" ? tool.description : tool.description(config);
 }
 
 /** Tool metadata safe to cross the IPC boundary (no handler/schema). */
