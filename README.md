@@ -69,7 +69,7 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 |---|---|---|---|---|---|
 | **Execution Engine** | C++ (Native) | Node.js / Electron | Go | Java (JVM) | Node.js / Electron |
 | **API Client + Load Test** | Both, one app | Client only | Load test only | Load test only | Client only |
-| **Load Test Throughput** | Tens of thousands RPS | Limited by JS runtime | High (Go routines) | Moderate (thread-heavy) | Requires separate tool |
+| **Load Test Throughput** | Tens of thousands RPS | Limited by JS runtime | High (Go routines) | Moderate (thread-heavy) | Built-in performance runner (fixed, ramp up, spike, peak); local runs capped by your hardware |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) | JavaScript (ES6) | Groovy / BeanShell | JavaScript |
 | **UI** | Native desktop app | Native desktop app | CLI only | Java Swing (dated) | Native desktop app |
 | **UI Responsiveness** | High (sidecar arch) | Good | N/A | Laggy under load | Slows with large collections |

@@ -17,8 +17,8 @@ native C++ load engine in the same app.
 | | Vayu | Postman |
 |---|---|---|
 | **Execution engine** | C++ (native) | Node.js / Electron |
-| **API client + load test** | Both, one app | Client only |
-| **Load test throughput** | Tens of thousands of req/s | Requires a separate tool |
+| **API client + load test** | Both, one app | Client, plus a built-in performance runner |
+| **Load test throughput** | Tens of thousands of req/s | Built-in performance runner (fixed, ramp up, spike and peak profiles); local runs are capped by your hardware, cloud runs need a paid plan |
 | **Privacy / offline** | 100% local, no account | Cloud-heavy (optional local) |
 | **Telemetry / signing** | None; releases ship with checksums, not code-signed | Cloud account, usage analytics |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript |
@@ -30,6 +30,13 @@ native C++ load engine in the same app.
 | **Postman collection import** | Yes (v2.0 + v2.1) | Native |
 | **OpenAPI import** | Yes (3.1 / 3.0 / 2.0) | Yes |
 | **Open source** | Yes (dual-license) | Partial |
+
+Postman facts checked on 2026-10-19 against
+[Configure and run performance tests](https://learning.postman.com/docs/tests-and-scripts/performance-testing/performance-test-configuration)
+and [performance test metrics](https://learning.postman.com/docs/tests-and-scripts/performance-testing/performance-test-metrics):
+load profiles, local versus cloud runs and the hardware-bound virtual user
+count. The documentation states no per-plan virtual user cap, so none is claimed
+here. Re-check them before editing the Postman column.
 
 \* **One asterisk that row has earned.** `system` proxy mode resolves a PAC
 script **once**, against a probe URL, applying that one answer engine-wide
@@ -43,11 +50,12 @@ in both PEM-pair and PKCS#12 form. Detail:
 
 ## One app instead of two
 
-The workflow Postman does not cover is the one that starts the moment a request
-works: *does it still work at a thousand a second?* That is a second tool - k6,
-JMeter, or the Postman collection runner at a fraction of the throughput - which
-means a second config, a second copy of the endpoint, and a context switch every
-time. In Vayu the load tester points at the request you already built. The
+The workflow that starts the moment a request works - *does it still work at a
+thousand a second?* - is where the tools part. Postman answers with its built-in
+performance runner; its local runs are bounded by your machine's resources, not
+by a documented virtual user cap. Teams that need more reach for k6 or JMeter,
+which means a second config, a second copy of the endpoint, and a context switch
+every time. In Vayu the load tester points at the request you already built. The
 engine is a multi-worker libcurl event loop in C++23, running as a sidecar
 process so the UI never shares a thread with the request load, and it sustains
 **tens of thousands of req/s** while the dashboard streams percentiles live.
