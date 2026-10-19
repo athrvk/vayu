@@ -44,7 +44,7 @@
 
 import type { McpSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
-import { REVEAL_SETTING_TOKEN } from "./remedy.js";
+import { ENGINE_DOWN_TOKEN, REVEAL_SETTING_TOKEN } from "./remedy.js";
 import { withValue } from "./variable-origins.js";
 
 /** The one setting this module reads off a tool context. */
@@ -1246,7 +1246,7 @@ export class MaskingIncompleteError extends Error {
 		super(
 			`Nothing is returned: masking this result's secrets could not complete, because the ${failed.join(", ")} lookup${failed.length === 1 ? "" : "s"} it reads the secret values from failed (${detail}). ` +
 				`With ${REVEAL_SETTING_NAME} off, a result that could carry a secret is withheld whole rather than returned partly masked. ` +
-				`Retry once the engine answers; a call that sent a request has already sent it, so check list_runs before sending it again.`
+				`Retry once the engine answers (${ENGINE_DOWN_TOKEN}); a call that sent a request has already sent it, so check list_runs before sending it again.`
 		);
 		this.name = "MaskingIncompleteError";
 	}

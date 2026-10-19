@@ -90,6 +90,7 @@ export function engineRestartRemedy(host: McpHost): string {
  */
 const PHRASES = {
 	restartEngine: { app: engineRestartRemedy("app"), cli: engineRestartRemedy("cli") },
+	engineDown: { app: engineDownRemedy("app"), cli: engineDownRemedy("cli") },
 	// The Files allowlist lives in the app's Settings; the stdio server has no
 	// setting that edits it and no request editor to pick a file in.
 	binaryFileAccess: {
@@ -152,6 +153,7 @@ export const GUARDED_WRITE_SENTENCE = `GUARDED: requires write access (to enable
 /** Completes "unless the user has chosen to ...". */
 export const REVEAL_SETTING_TOKEN = remedyToken("revealSecretsToAgents");
 export const NETWORK_SETTINGS_TOKEN = remedyToken("allowNetworkSettings");
+export const ENGINE_DOWN_TOKEN = remedyToken("engineDown");
 export const RESTART_ENGINE_TOKEN = remedyToken("restartEngine");
 export const BINARY_FILE_ACCESS_TOKEN = remedyToken("binaryFileAccess");
 export const TRUST_AUTHORITY_TOKEN = remedyToken("trustAuthority");

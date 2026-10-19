@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { MaskingIncompleteError } from "./withhold.js";
 import { DEFAULT_MCP_SAFETY_CONFIG, SAFETY_ENV_VARS, type McpSafetyConfig } from "./config.js";
 import {
 	BINARY_FILE_ACCESS_TOKEN,
@@ -149,5 +150,14 @@ describe("resolveRemedyTokens", () => {
 	it("leaves braces it does not own, so a user's text is never rewritten", () => {
 		const text = "Variable {{remedy:nothing}} and {{token}} stay as written.";
 		expect(resolveRemedyTokens(text, "cli")).toBe(text);
+	});
+
+	it("names the host's own way to bring the engine back in a masking-incomplete refusal", () => {
+		const message = new MaskingIncompleteError(["globals"], new Error("fetch failed")).message;
+		const cli = resolveRemedyTokens(message, "cli");
+		expect(cli).toContain("vayu-engine");
+		expect(cli).toContain("VAYU_ENGINE_URL");
+		expect(cli).not.toMatch(/Vayu app|\{\{remedy:/);
+		expect(resolveRemedyTokens(message, "app")).toContain("Vayu app");
 	});
 });
