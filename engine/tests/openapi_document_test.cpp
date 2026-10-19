@@ -285,7 +285,8 @@ TEST (OpenApiDocumentRead, AJsonDocumentNestedPastTheDepthBoundGetsTheNestingErr
     for (size_t i = 0; i < depth; ++i) {
         deep += R"({"a":)";
     }
-    deep += "1" + std::string (depth, '}');
+    deep.append ("1");
+    deep.append (depth, '}');
 
     const auto result = read_document (deep);
     EXPECT_FALSE (result.ok ());
