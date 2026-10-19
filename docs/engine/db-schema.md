@@ -224,7 +224,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `5`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `6`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path rather than being read
    as "will not open" and quarantined the way a genuinely corrupt file is. Equal to `SCHEMA_VERSION`
@@ -259,27 +259,52 @@ row this migration folds is not just storage-compatible but immediately runnable
 
 ### The file-trust restatement (schema version 4)
 
-The file-body trust flag fails closed: an absent `unresolved` on a file reference means nobody
-chose the path. Rows written before that rule may lack the key, and the writer that left it out
-was the editor (importers, curl paste and MCP always wrote `true` on a path they carried), so the
-same `migrate_before_sync` transaction, for any database below version `4`, after the fold (after
-it, no stored body lacks the key and nothing reads one as chosen):
+Version `4` stated an explicit `unresolved` on every stored file reference (absent written as
+`false`: the editor was the one writer that left the key out) and removed the allowed folders the
+root rule refuses. The restatement is superseded by
+[the file-grants migration](#the-file-grants-migration-schema-version-6), which now runs in its
+place for every older database and reads an absent key the way version `4` did when the database
+predates it. The folder removal still runs, in the same step:
 
-- **States the key on every stored body.** `requests.body` (trash included) and the top-level
-  `body` of `runs.config_snapshot` (the payload a history entry is re-opened from): a binary
-  `file` and every `type: "file"` form part gets an explicit boolean, absent written as `false`
-  and a non-boolean as `true` (`vayu::json::state_file_trust`). Only values whose text contains
-  `"file"` are parsed; one that is not JSON is left byte-identical and logged at warning level,
-  never dropped. `request_examples`, `collections` and the other tables store no request body.
 - **Removes the allowed folders the root rule refuses.** A [`file_roots`](#file_roots) row whose
   path `refused_root_reason` rejects - a filesystem or drive root, the home folder, or a folder containing it - is
   deleted and logged at warning level with the reason, so a user can see why Settings > Files no
   longer lists it. `FileAccessPolicy::from_database` therefore reads only rows the route would
   accept, and carries no second check.
 
-Both are planned before anything is written, so a database with nothing to change is only
-stamped; otherwise `<db>.pre-migration.bak` is written first, as for the fold. A second run finds
-nothing to change.
+### The file-grants migration (schema version 6)
+
+From version `6` the engine derives a file reference's trust from the allowed folders and the
+picked files ([`file_grants`](#file_grants)) and never reads it from a body (#2356). Stored bodies
+still carry the old `unresolved` key, so the same `migrate_before_sync` transaction, for any
+database below version `6`, after the fold:
+
+- **Grants every file a person chose.** A file reference stored as chosen - `unresolved: false`,
+  or, on a database below version `4`, no key at all - whose `src` is an absolute path holding no
+  `{{` and still resolves to a regular file becomes one `file_grants` row, its canonical path,
+  deduplicated (`vayu::http::grantable_file_path`). A path that is gone, a templated one, `true`,
+  a non-boolean, and (from version `4` on) an absent key grant nothing. A chosen concrete path
+  that is gone (deleted, or on a drive or share not mounted at upgrade time) is the one of those a
+  person loses, so each is logged at warning level once the step has run, with its `table`, row
+  `id` and `path`, followed by one warning carrying the `count`; this happens on the stamp-only
+  path too, where a pre-version-`4` body without the key leaves nothing to rewrite. The step runs
+  once, so such a file reads as not chosen even after the drive returns, until it is picked again.
+- **Removes the key from every stored body.** The two places a body `FilePlan` sends is stored:
+  `requests.body` (trash included) and the top-level `body` of `runs.config_snapshot` (the payload
+  a history entry is re-opened from), a binary `file` and every `type: "file"` form part. Only
+  values whose text contains `"file"` are parsed; one that is not JSON is left byte-identical and
+  logged at warning level, never dropped. `request_examples.body` is a response's text and
+  `inbox_requests.body` the bytes a listener received: neither is ever parsed as a request body,
+  so neither is visited. `collections` and the other tables store no request body.
+- **Removes the allowed folders the root rule refuses**, as version `4` did.
+
+`file_grants` is created by this step (`CREATE TABLE IF NOT EXISTS`, `FILE_GRANTS_DDL` in
+`db_maintenance.cpp`) because it runs before `sync_schema ()`; the statement is exactly what the
+mapping generates, or `sync_schema ()` would rebuild the table empty. All of it is planned before
+anything is written, so a database with nothing to change is only stamped; otherwise
+`<db>.pre-migration.bak` is written first, as for the fold. A second run finds nothing to change
+and grants nothing twice. **The cost**: a body a non-editor caller managed to store as
+`unresolved: false` before the upgrade is granted once, like a pick.
 
 ### Schema versions
 
@@ -287,7 +312,7 @@ nothing to change.
 changes `make_vayu_storage`'s mapping - an added column included - because `sync_schema ()` runs
 without `preserve`: an older engine opening a database with a column it does not map would rebuild
 that table without it. It is also bumped by a migration step that must run exactly once and that an
-older engine must not read past (version `4`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
+older engine must not read past (versions `4` and `6`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
 workspace, every engine built before the bump refuses it at startup (the refusal above), so the
 release that carries a bump says so in its notes.
 
@@ -299,6 +324,7 @@ release that carries a bump says so in its notes.
 | `3` | [`file_roots`](#file_roots) added - the folders request-body files may be read from. Also the fence for the `binary` body's `file` reference: an engine at `2` would send such a body bodiless | none: `sync_schema ()` creates the table, the migration only stamps |
 | `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
 | `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read; [`runs.origin` and `runs.origin_client`](#runs) added (#1817) | none: `sync_schema ()` drops the one column at the constructor's probe and adds the defaulted and nullable two, the migration only stamps |
+| `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -315,6 +341,11 @@ same `git grep` against the last tag must still show `4`; if a release shipped
 `5` without these columns, they need their own bump to `6`. The release notes of
 the release that carries version `5` say so under Changed (one-way: every
 earlier engine refuses the workspace), naming both #1781 and #1817.
+
+Version `6` is a bump of its own: `0.41.0` released `5`, and every release since
+stamps it. **Merge gate:** the `git grep` against the last tag must show `5`; a
+column that joins `6` later must check the tag the same way. The release that
+carries `6` says so under Changed, naming #2356.
 
 ---
 
@@ -518,18 +549,17 @@ query row's boolean `equals`.
 {"mode":"none"}
 {"mode":"json"|"text"|"graphql"|"jsonrpc"|"xml","content":"..."}
 {"mode":"form-data"|"x-www-form-urlencoded","fields":[{"key":"...","value":"...","enabled":true}]}
-{"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png","unresolved":true}}
+{"mode":"binary","file":{"src":"/abs/a.bin","fileName":"a.bin","contentType":"image/png"}}
 ```
 A `form-data` file part carries `"type":"file"` and, in place of `value`, the
 same file members a binary body's `file` does: `src` (an absolute path, stored
-as written), `fileName` and `contentType` (both optional, omitted when empty) and
-`unresolved` (`true` when no person chose the path in the editor - an import,
-a curl paste, an MCP agent - so it is sent only from under an allowed folder,
-see [`file_roots`](#file_roots)). Every write states it (`apply_request_fields`,
-absent in the payload stored as `true`), and the
-[schema version 4 migration](#the-file-trust-restatement-schema-version-4)
-stated it on every row written before, absent as `false`. No row lacks it, so
-an absent key is read as `true` like any payload's. A text part may also carry
+as written) and `fileName` and `contentType` (both optional, omitted when
+empty). No trust is stored: whether `src` may be sent is decided by the
+[`file_roots`](#file_roots) and [`file_grants`](#file_grants) at each send, and
+the `unresolved` a read answers is derived then (#2356). Every write drops the
+key an older client sends (`apply_request_fields`), and the
+[schema version 6 migration](#the-file-grants-migration-schema-version-6)
+removed it from every row written before. A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
 A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:
@@ -1049,11 +1079,12 @@ forbids.
 
 ### `file_roots`
 
-The folders a request-body file may be read from without a person having chosen
-it in the editor (schema version 3). A file reference marked `unresolved` (see
-[`requests.body`](#requests)) is sent only when its canonical path lies under
-one of these; read once per design send and once per run. See
-[api-reference.md](api-reference.md#allowed-folders-file-roots) for the routes.
+The folders a request-body file may be read from without being picked file by
+file (schema version 3). A file reference (see [`requests.body`](#requests)) is
+sent when its canonical path lies under one of these or is a
+[`file_grants`](#file_grants) row; both are read once per design send and once
+per run. See [api-reference.md](api-reference.md#allowed-folders-file-roots)
+for the routes.
 
 | Column       | Type         | Notes                                                    |
 |--------------|--------------|----------------------------------------------------------|
@@ -1067,6 +1098,29 @@ second is backed by the constraint. A filesystem or drive root and the home
 folder itself are never stored: the route refuses them, and the
 [schema version 4 migration](#the-file-trust-restatement-schema-version-4)
 removed any stored before.
+
+---
+
+### `file_grants`
+
+The files a person picked, each of which may be sent from wherever it lies (schema version 6,
+#2356): the per-file half of the trust rule beside [`file_roots`](#file_roots), read with it once
+per design send and once per run (`FileAccessPolicy::from_database`).
+
+| Column       | Type         | Notes                                                    |
+|--------------|--------------|----------------------------------------------------------|
+| `id`         | TEXT PK      | `fgrant_` + UUID                                         |
+| `path`       | TEXT UNIQUE  | Canonical absolute path of a regular file                |
+| `created_at` | INTEGER      | Unix ms                                                  |
+
+`path` is the file's canonical form when it was picked (`grantable_file_path`: every symlink
+resolved, never a `{{` template), and a send compares the canonical form of what it is about to
+read with it exactly, never resolving the stored path again: a link re-pointed after the pick
+resolves to another file and is refused. The
+[schema version 6 migration](#the-file-grants-migration-schema-version-6) wrote the first rows,
+one per file a stored body marked chosen. See
+[api-reference.md](api-reference.md#picked-files-file-grants) for the routes; like `file_roots`,
+this table is written only by a caller holding the engine's grant secret.
 
 ---
 

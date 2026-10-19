@@ -373,11 +373,11 @@ graph, the window it creates and the renderer inside it, with the sidecar
 spawn running alongside. It does not include the engine handshake, and should
 not - #1144 deliberately put the window ahead of that, and this number is what
 a user waits for. Between launches it waits for the
-engine to stop listening on port 9876, because `sidecar.ts` adopts an engine
-that is already running rather than starting a fresh one, and an adopted
-engine is not a cold start; a launch that fails, or an engine that will not go
-away in time, is reported `"unavailable"` with the reason in `note` rather
-than retried.
+engine to stop listening on port 9876, because `sidecar.ts` stops an engine
+that is already running and waits for it to go before spawning its own, so a
+launch that finds one is not a cold start; a launch that fails, or an engine
+that will not go away in time, is reported `"unavailable"` with the reason in
+`note` rather than retried.
 
 The first of the three launches is a first run - it creates the user-data
 directory the other two find waiting, and measured several times the others on

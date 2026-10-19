@@ -165,11 +165,12 @@ std::string read_file (const std::filesystem::path& path) {
 /// anchors are and ours must not be the one tool that ignores it.
 std::filesystem::path system_ca_bundle_path () {
     for (const char* variable : { "CURL_CA_BUNDLE", "SSL_CERT_FILE" }) {
-        // The one mt-unsafe call in the engine with no reentrant spelling to
-        // move to (#945). `getenv` races only against a *write* to the
-        // environment, and nothing in the engine writes one - no `setenv`,
-        // `putenv` or `_putenv_s` anywhere in `src`, which
-        // `tests/reentrant_test.cpp` scans for and keeps true. Caching the
+        // An mt-unsafe call with no reentrant spelling to move to (#945).
+        // `getenv` races only against a *write* to the environment, and the
+        // engine's one write - `take_grant_secret_from_environment` removing
+        // `VAYU_GRANT_SECRET` - runs at start, before any thread exists; no
+        // other `setenv`, `unsetenv`, `putenv` or `_putenv_s` is in `src`,
+        // which `tests/reentrant_test.cpp` scans for and keeps true. Caching the
         // answer in a function-local static would silence the check and cost
         // more than it buys: the resolved bundle would then be fixed for the
         // process, so a `CURL_CA_BUNDLE` exported for a later run would go

@@ -8,7 +8,7 @@
 /**
  * @file request-body.ts
  * @brief The body a write tool stores, from the `body` / `bodyType` / `file`
- *        arguments, and the rule that an agent-named file is never trusted.
+ *        arguments.
  */
 
 import { z } from "zod";
@@ -44,8 +44,8 @@ export function bodyPayload(bodyType: string, content: string): Record<string, u
 
 /**
  * The `file` argument of a `binary` body, as the two write tools declare it.
- * No `unresolved` member: what an agent says about it is never read (see
- * `shapeBody`).
+ * No trust member: the engine decides from its allowed folders and the files
+ * the user picked, which this server can neither read nor add to (#2356).
  */
 export const fileRefInput = z
 	.object({
@@ -64,7 +64,7 @@ export const fileRefInput = z
 	})
 	.optional()
 	.describe(
-		'The file a `bodyType: "binary"` body sends, instead of `body`. Stored as a path the user has not chosen: the engine sends it only once they pick it again in the request editor, or when it lives under a folder they allowed in Settings > Files.'
+		'The file a `bodyType: "binary"` body sends, instead of `body`. Stored as a path: the engine sends it only once the user picks that file in the request editor of the Vayu app, or when it lies under a folder they allowed in Settings > Files. Nothing an agent sends can choose a file for the user.'
 	);
 
 /**
@@ -84,17 +84,15 @@ export const inlineFileInput = z
  * every tool that sends an ad-hoc request, so the advice cannot drift.
  */
 export const INLINE_FILE_REFUSAL =
-	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. A file must be chosen in the editor or live under an allowed folder in Settings > Files before the engine sends it.';
+	'A request body that sends a file cannot be given inline. Save the request (create_request with bodyType "binary" and `file`) and run the saved request by id - start_load_run with `requestId`, or run_collection / run_collection_smoke over its collection. The engine sends a file only once the user picks it in the request editor or it lies under an allowed folder in Settings > Files.';
 
 /**
  * The body a write tool stores, from the `body` / `bodyType` / `file`
  * arguments, or undefined when the caller named none of them.
  *
- * The one funnel every MCP-written body passes through, which is why the
- * trust rule lives here: every file reference it emits - a binary body's
- * `file`, or a form-data file part - is `unresolved: true`, whatever the
- * arguments said. An agent names a path; only a person in the editor (or an
- * allowed folder) makes the engine read it.
+ * A file reference carries `src`, `fileName` and `contentType` and nothing
+ * else the agent wrote: an agent names a path, and only a person's pick in the
+ * app (or an allowed folder) makes the engine read it.
  */
 export function shapeBody(
 	args: Record<string, unknown>
@@ -135,17 +133,5 @@ export function shapeBody(
 		}
 		body = bodyPayload(bodyType, content);
 	}
-	return { body: withUnresolvedFileRefs(body), bodyType };
-}
-
-/** The body with every file reference it carries marked `unresolved: true`. */
-function withUnresolvedFileRefs(body: Record<string, unknown>): Record<string, unknown> {
-	const out = { ...body };
-	if (isRecord(out.file)) out.file = { ...out.file, unresolved: true };
-	if (Array.isArray(out.fields)) {
-		out.fields = out.fields.map((field: unknown) =>
-			isRecord(field) && field.type === "file" ? { ...field, unresolved: true } : field
-		);
-	}
-	return out;
+	return { body, bodyType };
 }

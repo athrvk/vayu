@@ -10,6 +10,7 @@
  * @brief Run management and reporting routes
  */
 
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/sse_stream.hpp"
@@ -1684,6 +1685,39 @@ vayu::db::RunFilter run_filter_from_query (const httplib::Request& req) {
     return filter;
 }
 
+/**
+ * Testable core of GET /runs/:id, returning {http_status, json_body}.
+ *
+ * A design run is one exchange, so it travels with the run. Load runs keep
+ * theirs in the report, where `results` means the sampled subset - guarded
+ * here, before fetching, because a load run's results are not bounded (one row
+ * per error, uncapped) and must never be pulled just to be discarded.
+ *
+ * The snapshot's body is the payload a history entry is re-opened into the
+ * editor from, so its file references carry the `unresolved` the allowed
+ * folders and picked files derive now, never what was sent (#2356).
+ */
+std::pair<int, nlohmann::json>
+get_run_response (vayu::db::Database& db, const std::string& run_id) {
+    const auto run = db.get_run (run_id);
+    if (!run) {
+        return { 404, error_body (404, "Run not found") };
+    }
+    vayu::utils::log_debug ("run", "Found run",
+    { { "runId", run_id }, { "type", to_string (run->type) },
+    { "status", to_string (run->status) } });
+    auto payload = vayu::json::serialize (*run);
+    if (run->type == vayu::RunType::Design) {
+        vayu::json::attach_design_result (payload, *run, db.get_results (run_id));
+    }
+    const auto snapshot = payload.find ("configSnapshot");
+    if (snapshot != payload.end () && snapshot->is_object () && snapshot->contains ("body")) {
+        vayu::json::derive_file_trust (
+        snapshot->at ("body"), vayu::http::FileAccessPolicy::from_database (db));
+    }
+    return { 200, std::move (payload) };
+}
+
 namespace {
 
 void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
@@ -1723,25 +1757,12 @@ void handle_list_runs (RouteContext& ctx, const httplib::Request& req, httplib::
 void handle_get_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     try {
-        auto run = ctx.db.get_run (run_id);
-        if (run) {
-            vayu::utils::log_debug ("run", "Found run",
-            { { "runId", run_id }, { "type", to_string (run->type) },
-            { "status", to_string (run->status) } });
-            auto payload = vayu::json::serialize (*run);
-            // A design run is one exchange, so it travels with the run.
-            // Load runs keep theirs in the report, where `results` means
-            // the sampled subset. Guard here, before fetching - a load
-            // run's results are not bounded (one row per error, uncapped)
-            // and must never be pulled just to be discarded.
-            if (run->type == vayu::RunType::Design)
-                vayu::json::attach_design_result (
-                payload, *run, ctx.db.get_results (run_id));
-            res.set_content (payload.dump (), "application/json");
-        } else {
+        auto [status, body] = get_run_response (ctx.db, run_id);
+        if (status == 404) {
             vayu::utils::log_warning ("run", "GET /runs/:id - Run not found: " + run_id);
-            send_error (res, 404, "Run not found");
         }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "GET /runs/:id - Error fetching run " + run_id + ": " + e.what ());

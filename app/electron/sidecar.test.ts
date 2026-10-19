@@ -6,28 +6,25 @@
  */
 
 /**
- * An engine the app did not spawn is still the app's engine.
+ * The engine the app talks to is the one it spawned this session.
  *
- * `start()` has two paths that attach to an engine already on the port - the
- * lock file and the health probe - and both used to return with `this.process`
- * still null, while every other method keyed off exactly that. So a healthy
- * adopted engine reported `isRunning() === false`, `stop()` returned early and
- * left it running past quit (re-adopted, and orphaned again, on every launch),
- * and `restart()` "restarted" it by stopping nothing, waiting 500ms and
- * re-adopting the same process - reporting success, so Settings cleared its
- * restart-required banner while the config change never took effect.
+ * `start()` has two paths that find an engine already on the port - the lock
+ * file and the health probe. An engine found running lacks this session's
+ * grant secret, so both stop and replace it (#2356), and a quit landing during
+ * the replacement still stops it (#270). A build for another version is
+ * replaced the same way (#1492).
  *
  * The lifecycle is driven through a fake `SidecarSystem` rather than real
- * processes and ports: adoption, shutdown and the restart/quit race are
+ * processes and ports: replacement, shutdown and the restart/quit race are
  * ownership logic, and the alternative is a spawned binary and a 45-second
  * health ceiling per assertion. The lock file, the data directory and the
  * binary lookup are real, against a temp directory - those are the parts a mock
  * would have "passed" against.
  *
  * The same harness covers the other end of `start()`: an engine that dies at
- * spawn. That path used to poll a dead port for the full 45-second ceiling with
- * no window on screen, so the assertions there are about *when* the failure
- * arrives and what it says, not only that it arrives.
+ * spawn. It must not poll a dead port for the full 45-second ceiling, so the
+ * assertions there are about *when* the failure arrives and what it says, not
+ * only that it arrives.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +56,14 @@ vi.mock("electron", () => ({
 	},
 }));
 
+// Only `spawn`, so the default system's spawn options can be read; `execSync`
+// stays real for the PID probes.
+vi.mock("child_process", async (importOriginal) => ({
+	...(await importOriginal<typeof import("child_process")>()),
+	spawn: vi.fn(),
+}));
+
+import { spawn } from "child_process";
 import {
 	EngineSidecar,
 	EngineNotReadyError,
@@ -70,6 +75,7 @@ import {
 	ENGINE_HEALTH_POLL_BUDGET_MS,
 	ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS,
 	ENGINE_HEALTH_POLL_MAX_INTERVAL_MS,
+	ENGINE_GRANT_SECRET_ENV,
 	ENGINE_LOCK_FILE,
 	ENGINE_PORT_RELEASE_DELAY_MS,
 	ENGINE_RESTART_BASE_DELAY_MS,
@@ -139,6 +145,10 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 	const system: SidecarSystem = {
 		spawnEngine: vi.fn(() => {
 			const child = new FakeChild();
+			// The port is the engine's until it exits, as it is a real one's.
+			child.once("exit", () => {
+				state.healthy = false;
+			});
 			state.spawned.push(child);
 			state.healthy = true;
 			return child as unknown as ChildProcess;
@@ -150,9 +160,6 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 			return killed;
 		}),
 		probeHealth: vi.fn(async () => state.healthy),
-		// Matches the mocked `app.getVersion()` below, so existing adoption
-		// cases keep adopting unless a test overrides it to something else.
-		probeVersion: vi.fn(async () => "0.0.0-test"),
 		requestShutdown: vi.fn(async () => true),
 		isPortFree: vi.fn(async () => !state.healthy),
 		sleep: vi.fn(async () => {}),
@@ -191,43 +198,53 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("EngineSidecar - adoption", () => {
-	it("adopts the engine the lock file points at, and knows it is running", async () => {
+/**
+ * The environment the engine was spawned with, by spawn. The fake's `spawnEngine`
+ * records it as its third argument.
+ */
+function spawnedEnvs(system: SidecarSystem): NodeJS.ProcessEnv[] {
+	return vi.mocked(system.spawnEngine).mock.calls.map(([, , env]) => env);
+}
+
+/** A running engine that leaves when `POST /shutdown` asks it to, as a real one does. */
+function shutsDownWhenAsked(
+	system: SidecarSystem,
+	state: { alivePids: Set<number>; healthy: boolean }
+) {
+	vi.mocked(system.requestShutdown).mockImplementation(async () => {
+		state.alivePids.delete(ADOPTED_PID);
+		state.healthy = false;
+		return true;
+	});
+}
+
+/*
+ * #2356: every write to file trust needs the grant secret the engine was
+ * spawned with, and an engine already running was given another session's or
+ * none. So an engine found at start is stopped and replaced, never adopted, on
+ * every path that used to adopt one. Mutation check: let `start()` return after
+ * a healthy engine is found (the old adoption) and each case here reds on
+ * `spawnEngine` never being called.
+ */
+describe("EngineSidecar - an engine already running at start", () => {
+	it("stops the engine the lock file points at and spawns its own", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
+		shutsDownWhenAsked(system, state);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
-		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
+		expect(system.killEngineProcess).not.toHaveBeenCalled();
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
 		expect(sidecar.isRunning()).toBe(true);
 	});
 
-	it("adopts an engine answering on the port with no readable lock PID", async () => {
+	it("stops an engine answering on the port with no readable lock PID", async () => {
 		const { system, state } = fakeSystem();
 		state.healthy = true;
-		const sidecar = new EngineSidecar([TEST_PORT], system);
-
-		await sidecar.start();
-
-		expect(system.spawnEngine).not.toHaveBeenCalled();
-		expect(sidecar.isRunning()).toBe(true);
-	});
-
-	// Issue #1492: a daemon built for a different Vayu version is not safe to
-	// adopt silently - it is stopped, the same way `stop()` stops any adopted
-	// engine, and this instance spawns its own. Mutation check: read
-	// `probeVersion`'s answer as advisory (adopt regardless), and both of these
-	// red on `spawnEngine` never being called.
-	it("stops a mismatched-version engine at the lock-PID adoption path and spawns its own", async () => {
-		const { system, state } = fakeSystem();
-		engineAlreadyRunning(state);
-		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue("0.1.0-old");
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.alivePids.delete(ADOPTED_PID);
-			state.healthy = false;
-			return true;
-		});
+		shutsDownWhenAsked(system, state);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
@@ -237,34 +254,19 @@ describe("EngineSidecar - adoption", () => {
 		expect(sidecar.isRunning()).toBe(true);
 	});
 
-	it("stops a mismatched-version engine at the no-lock-PID adoption path and spawns its own", async () => {
-		const { system, state } = fakeSystem();
-		state.healthy = true;
-		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue("0.1.0-old");
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.healthy = false;
-			return true;
-		});
-		const sidecar = new EngineSidecar([TEST_PORT], system);
-
-		await sidecar.start();
-
-		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
-		expect(system.spawnEngine).toHaveBeenCalledOnce();
-		expect(sidecar.isRunning()).toBe(true);
-	});
-
-	it("adopts rather than disrupts a healthy engine when its version cannot be read", async () => {
+	it("force-kills one that ignores the shutdown request, then spawns", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		(system.probeVersion as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		await sidecar.start();
 
-		expect(system.requestShutdown).not.toHaveBeenCalled();
-		expect(system.spawnEngine).not.toHaveBeenCalled();
-		expect(sidecar.isRunning()).toBe(true);
+		// The HTTP request was accepted but the process stayed up - the PID kill
+		// is what frees the port and the database lock for this session's engine.
+		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
+		expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
+		expect(state.alivePids.has(ADOPTED_PID)).toBe(false);
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
 	});
 
 	// Issue #1905: a live lock PID that does not answer /health is an engine
@@ -275,7 +277,7 @@ describe("EngineSidecar - adoption", () => {
 			return vi.fn(async () => state.spawned.length > 0);
 		}
 
-		it("is waited for, then stopped and replaced", async () => {
+		it("is waited for, then killed and replaced", async () => {
 			const { system, state } = fakeSystem();
 			engineAlreadyRunning(state);
 			state.healthy = false;
@@ -295,22 +297,21 @@ describe("EngineSidecar - adoption", () => {
 			expect(sleeps).toContain(ENGINE_PORT_RELEASE_DELAY_MS);
 		});
 
-		it("is adopted when it answers late", async () => {
+		it("is asked to shut down, not killed, when it answers late", async () => {
 			const { system, state } = fakeSystem();
 			engineAlreadyRunning(state);
+			shutsDownWhenAsked(system, state);
 			let probes = 0;
-			system.probeHealth = vi.fn(async () => ++probes > 3);
+			system.probeHealth = vi.fn(async () => state.spawned.length > 0 || ++probes > 3);
 			const sidecar = new EngineSidecar([TEST_PORT], system);
 
 			await sidecar.start();
 
 			expect(probes).toBe(4);
-			expect(system.spawnEngine).not.toHaveBeenCalled();
+			expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
 			expect(system.killEngineProcess).not.toHaveBeenCalled();
+			expect(system.spawnEngine).toHaveBeenCalledOnce();
 			expect(sidecar.isRunning()).toBe(true);
-			// Adopted with the lock PID, so quit can still find it.
-			await sidecar.stop();
-			expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
 		});
 	});
 
@@ -339,77 +340,43 @@ describe("EngineSidecar - adoption", () => {
 		expect(system.spawnEngine).not.toHaveBeenCalled();
 	});
 
-	it("stops an adopted engine on quit, force-killing one that ignores the request", async () => {
+	it("reports the port held when the engine it stopped has not let go of it", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
+		shutsDownWhenAsked(system, state);
+		system.isPortFree = vi.fn(async () => false);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
-		await sidecar.start();
 
-		await sidecar.stop();
-
-		expect(system.requestShutdown).toHaveBeenCalledWith(TEST_PORT);
-		// The HTTP request was accepted but the process stayed up - the PID kill
-		// is what makes "zero engines left behind" true rather than hopeful.
-		expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
-		expect(state.alivePids.has(ADOPTED_PID)).toBe(false);
+		await expect(sidecar.start()).rejects.toThrow(EnginePortInUseError);
+		expect(system.spawnEngine).not.toHaveBeenCalled();
 		expect(sidecar.isRunning()).toBe(false);
 	});
 
-	it("does not kill an adopted engine that shuts down when asked", async () => {
+	it("leaves no stale lock behind once a restart has spawned its own engine", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.alivePids.delete(ADOPTED_PID);
-			state.healthy = false;
-			return true;
-		});
-		const sidecar = new EngineSidecar([TEST_PORT], system);
-		await sidecar.start();
-
-		await sidecar.stop();
-
-		expect(system.killEngineProcess).not.toHaveBeenCalled();
-		expect(sidecar.isRunning()).toBe(false);
-	});
-
-	it("really restarts an adopted engine instead of re-adopting it", async () => {
-		const { system, state } = fakeSystem();
-		engineAlreadyRunning(state);
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.alivePids.delete(ADOPTED_PID);
-			state.healthy = false;
-			return true;
-		});
+		shutsDownWhenAsked(system, state);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.restart(0);
 
-		// A spawn, not a 500ms pause and the same process again: this is what makes
-		// the Settings restart-required banner tell the truth.
-		expect(system.spawnEngine).toHaveBeenCalledOnce();
-		expect(state.spawned).toHaveLength(1);
+		expect(system.spawnEngine).toHaveBeenCalledTimes(2);
 		expect(sidecar.isRunning()).toBe(true);
-		// The stale lock of the engine we stopped must not survive into the new one.
+		// The lock of the engine stopped at start must not survive into ours.
 		expect(existsSync(join(fake.userData, ENGINE_LOCK_FILE))).toBe(false);
 	});
 
 	it("reports failure when the restarted engine never becomes healthy", async () => {
 		const { system, state } = fakeSystem();
-		engineAlreadyRunning(state);
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.alivePids.delete(ADOPTED_PID);
-			state.healthy = false;
-			return true;
-		});
-		// Spawns, but never answers /health.
-		(system.spawnEngine as ReturnType<typeof vi.fn>).mockImplementation(() => {
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+		// From here on it spawns, but never answers /health.
+		vi.mocked(system.spawnEngine).mockImplementation(() => {
 			const child = new FakeChild();
 			state.spawned.push(child);
 			return child as unknown as ChildProcess;
 		});
-		const sidecar = new EngineSidecar([TEST_PORT], system);
-		await sidecar.start();
 
 		const failure = await sidecar.restart(1).catch((error: unknown) => error);
 		expect(failure).toBeInstanceOf(Error);
@@ -421,6 +388,71 @@ describe("EngineSidecar - adoption", () => {
 		);
 		expect((cause as Error).message).not.toBe("");
 		expect(message).not.toMatch(/please/i);
+	});
+});
+
+/*
+ * #2356: the grant secret reaches the engine in its environment and nowhere
+ * else, and this process learns it from the spawn that minted it.
+ */
+describe("EngineSidecar - the grant secret", () => {
+	it("spawns the engine with a fresh secret in its environment and none in its arguments", async () => {
+		const { system } = fakeSystem();
+		const onGrantSecret = vi.fn();
+		const sidecar = new EngineSidecar([TEST_PORT], system, () => {}, onGrantSecret);
+
+		await sidecar.start();
+
+		const [[, args, env]] = vi.mocked(system.spawnEngine).mock.calls;
+		const secret = env[ENGINE_GRANT_SECRET_ENV] ?? "";
+		// 32 random bytes as hex; the engine ignores anything under 32 characters.
+		expect(secret).toMatch(/^[0-9a-f]{64}$/);
+		expect(args.join(" ")).not.toContain(secret);
+		expect(onGrantSecret.mock.calls).toEqual([[secret]]);
+	});
+
+	it("keeps the rest of this process's environment", async () => {
+		vi.stubEnv("VAYU_SIDECAR_TEST_MARKER", "kept");
+		const { system } = fakeSystem();
+
+		await new EngineSidecar([TEST_PORT], system).start();
+
+		expect(spawnedEnvs(system)[0]?.VAYU_SIDECAR_TEST_MARKER).toBe("kept");
+		vi.unstubAllEnvs();
+	});
+
+	it("mints a different secret for every spawn, a restart included", async () => {
+		const { system } = fakeSystem();
+		const onGrantSecret = vi.fn();
+		const sidecar = new EngineSidecar([TEST_PORT], system, () => {}, onGrantSecret);
+
+		await sidecar.start();
+		await sidecar.restart(0);
+
+		const secrets = spawnedEnvs(system).map((env) => env[ENGINE_GRANT_SECRET_ENV]);
+		expect(secrets).toHaveLength(2);
+		expect(secrets[0]).not.toBe(secrets[1]);
+		expect(onGrantSecret.mock.calls).toEqual(secrets.map((secret) => [secret]));
+	});
+
+	it("reaches the real spawn as the child's environment", () => {
+		const env = { [ENGINE_GRANT_SECRET_ENV]: "s".repeat(64) };
+
+		defaultSidecarSystem.spawnEngine("/opt/vayu-engine", ["--port", "1"], env);
+
+		expect(vi.mocked(spawn)).toHaveBeenCalledWith(
+			"/opt/vayu-engine",
+			["--port", "1"],
+			expect.objectContaining({ env })
+		);
+	});
+
+	it("is never written to this process's own environment", async () => {
+		const { system } = fakeSystem();
+
+		await new EngineSidecar([TEST_PORT], system).start();
+
+		expect(process.env[ENGINE_GRANT_SECRET_ENV]).toBeUndefined();
 	});
 });
 
@@ -481,35 +513,50 @@ describe("EngineSidecar - choosing a port", () => {
 		expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
 	});
 
-	it("adopts a healthy Vayu engine on a fallback port rather than spawning", async () => {
+	/** The engine on `port` leaves when asked, freeing the port and its PID. */
+	function leavesWhenAsked(
+		system: SidecarSystem,
+		state: { alivePids: Set<number> },
+		held: Set<number>,
+		port: number
+	) {
+		system.requestShutdown = vi.fn(async (asked: number) => {
+			if (asked !== port) return false;
+			held.delete(port);
+			state.alivePids.delete(ADOPTED_PID);
+			return true;
+		});
+	}
+
+	it("replaces a Vayu engine on a fallback port there, rather than moving", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		ports(system, state, { foreign: [TEST_PORT], vayu: [FALLBACK] });
+		const { held } = ports(system, state, { foreign: [TEST_PORT], vayu: [FALLBACK] });
+		leavesWhenAsked(system, state, held, FALLBACK);
 		const onPortFixed = vi.fn();
 		const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
 
 		await sidecar.start();
 
-		expect(system.spawnEngine).not.toHaveBeenCalled();
-		expect(sidecar.isRunning()).toBe(true);
-		expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
-		await sidecar.stop();
 		expect(system.requestShutdown).toHaveBeenCalledWith(FALLBACK);
+		expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
 	});
 
 	// Mutation check: walk the candidates in order for a live lock too, and the
-	// free default is taken, the orphan waited out for the whole budget, killed
-	// and replaced.
-	it("adopts a crash orphan on a fallback port even once the default is free", async () => {
+	// free default is taken, the orphan waited out there for the whole budget and
+	// killed rather than asked to leave.
+	it("replaces a crash orphan on its fallback port even once the default is free", async () => {
 		const { system, state } = fakeSystem();
 		engineAlreadyRunning(state);
-		ports(system, state, { vayu: [FALLBACK] });
+		const { held } = ports(system, state, { vayu: [FALLBACK] });
+		leavesWhenAsked(system, state, held, FALLBACK);
 		const sidecar = new EngineSidecar(CANDIDATES, system);
 
 		await sidecar.start();
 
-		expect(system.spawnEngine).not.toHaveBeenCalled();
 		expect(system.killEngineProcess).not.toHaveBeenCalled();
+		expect(spawnedPorts(system)).toEqual([FALLBACK]);
 		expect(sidecar.getApiUrl()).toBe(`http://127.0.0.1:${FALLBACK}`);
 	});
 
@@ -848,13 +895,7 @@ describe("EngineSidecar - the missing-binary message", () => {
 
 describe("EngineSidecar - restart racing quit", () => {
 	it("does not spawn an engine when quit lands in the stop-to-spawn gap", async () => {
-		const { system, state } = fakeSystem();
-		engineAlreadyRunning(state);
-		(system.requestShutdown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-			state.alivePids.delete(ADOPTED_PID);
-			state.healthy = false;
-			return true;
-		});
+		const { system } = fakeSystem();
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
@@ -862,7 +903,7 @@ describe("EngineSidecar - restart racing quit", () => {
 		// is not spawned yet. A quit arriving here used to leave a fresh engine
 		// nothing would ever kill.
 		let quitting: Promise<void> | null = null;
-		(system.sleep as ReturnType<typeof vi.fn>).mockImplementation(async (ms: number) => {
+		vi.mocked(system.sleep).mockImplementation(async (ms: number) => {
 			if (ms === ENGINE_PORT_RELEASE_DELAY_MS && !quitting) {
 				quitting = sidecar.shutdown();
 			}
@@ -871,20 +912,20 @@ describe("EngineSidecar - restart racing quit", () => {
 		await expect(sidecar.restart(0)).rejects.toThrow(/shutting down/i);
 		await quitting;
 
-		expect(system.spawnEngine).not.toHaveBeenCalled();
+		// The first start's spawn, and nothing after it.
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
 		expect(sidecar.isRunning()).toBe(false);
 	});
 
 	it("refuses to restart once the app is shutting down", async () => {
-		const { system, state } = fakeSystem();
-		engineAlreadyRunning(state);
+		const { system } = fakeSystem();
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		await sidecar.start();
 
 		await sidecar.shutdown();
 
 		await expect(sidecar.restart(0)).rejects.toThrow(/shutting down/i);
-		expect(system.spawnEngine).not.toHaveBeenCalled();
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
 	});
 });
 
@@ -933,29 +974,35 @@ describe("defaultSidecarSystem - recognising a Vayu engine", () => {
 		expect(await defaultSidecarSystem.probeHealth(port)).toBe(true);
 	});
 
-	it("skips a marker-less listener as held and adopts the Vayu engine on the next candidate", async () => {
+	it("skips a marker-less listener as held and replaces the Vayu engine on the next candidate", async () => {
 		const foreignPort = await serveHealth({ status: "ok" });
 		const enginePort = await serveHealth(VAYU_HEALTH);
-		const { system } = fakeSystem({
-			probeHealth: defaultSidecarSystem.probeHealth,
-			probeVersion: defaultSidecarSystem.probeVersion,
+		const engineServer = servers[servers.length - 1];
+		const { system, state } = fakeSystem({
+			// The real probe until this test's own engine exists, which has no
+			// socket to answer on.
+			probeHealth: async (port: number) =>
+				state.spawned.length > 0 || (await defaultSidecarSystem.probeHealth(port)),
 			isPortFree: defaultSidecarSystem.isPortFree,
+			requestShutdown: vi.fn(async () => {
+				engineServer.closeAllConnections();
+				await new Promise((resolve) => engineServer.close(resolve));
+				return true;
+			}),
 		});
 		const sidecar = new EngineSidecar([foreignPort, enginePort], system);
 
 		await sidecar.start();
 
 		expect(sidecar.getApiUrl()).toBe(`http://127.0.0.1:${enginePort}`);
-		expect(system.spawnEngine).not.toHaveBeenCalled();
-		await sidecar.stop();
 		expect(vi.mocked(system.requestShutdown).mock.calls).toEqual([[enginePort]]);
+		expect(system.spawnEngine).toHaveBeenCalledOnce();
 	});
 
 	it("never shuts down a marker-less listener, even when it is the only candidate", async () => {
 		const foreignPort = await serveHealth({ status: "ok" });
 		const { system } = fakeSystem({
 			probeHealth: defaultSidecarSystem.probeHealth,
-			probeVersion: defaultSidecarSystem.probeVersion,
 			isPortFree: defaultSidecarSystem.isPortFree,
 		});
 		const sidecar = new EngineSidecar([foreignPort], system);

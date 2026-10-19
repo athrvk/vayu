@@ -34,7 +34,7 @@ namespace vayu::db {
  * `sync_schema ()` runs without `preserve`, so an older engine opening a
  * database with a column it does not map would rebuild the table without it.
  * Also bumped by a migration step that must run once and that an older engine
- * must not read past (4). A database stamped newer than this is refused at startup. The
+ * must not read past (4, 6). A database stamped newer than this is refused at startup. The
  * history is in `docs/engine/db-schema.md` (Schema versions):
  * 1 - scripts folded into `elements` (#1514);
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
@@ -51,9 +51,14 @@ namespace vayu::db {
  * 5 - `oauth_tokens.raw_response` dropped (#1781): it held the provider's
  *     response, refresh and id tokens included, and nothing read it;
  *     `runs.origin` and `runs.origin_client` (#1817, folded into the same
- *     unreleased version).
+ *     unreleased version);
+ * 6 - `file_grants`, the files a person picked (#2356). The migration grants
+ *     every existing regular file a stored body marked `unresolved: false`,
+ *     then removes the key from every stored body: trust is the engine's to
+ *     derive from roots and grants, and an older engine would read the
+ *     missing key as untrusted and refuse every picked file.
  */
-inline constexpr int SCHEMA_VERSION = 5;
+inline constexpr int SCHEMA_VERSION = 6;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
@@ -629,6 +634,20 @@ class Database {
     std::vector<FileRoot> get_file_roots ();
     std::optional<FileRoot> get_file_root (const std::string& id);
     void delete_file_root (const std::string& id);
+
+    /**
+     * Files a person picked (`file_grants`, schema version 6, #2356). Plain
+     * CRUD like the allowed folders above: the caller canonicalises `path` and
+     * owns the uniqueness answer (the column is UNIQUE, and `save_file_grant`
+     * replaces). Read with the folders, once per design send and once per run
+     * (`FileAccessPolicy::from_database`). `get_file_grants` answers ordered by
+     * path.
+     */
+    // db_credentials.cpp
+    void save_file_grant (const FileGrant& grant);
+    std::vector<FileGrant> get_file_grants ();
+    std::optional<FileGrant> get_file_grant (const std::string& id);
+    void delete_file_grant (const std::string& id);
 
     // Globals (singleton) - db_environments.cpp
     void save_globals (const Globals& g);

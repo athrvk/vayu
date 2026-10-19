@@ -85,30 +85,27 @@ TEST (VayuExtensions, BlanksOnlyTheVariablesMarkedSecret) {
 
 TEST (VayuExtensions, NeverCarriesAFilePartsLocalPath) {
     const Json body = ext::portable_body (Json::parse (R"({"mode":"form-data","fields":[
-        {"key":"f","value":"","enabled":true,"type":"file","src":"/home/me/a.png","unresolved":true}]})"));
+        {"key":"f","value":"","enabled":true,"type":"file","src":"/home/me/a.png"}]})"));
     EXPECT_FALSE (body["fields"][0].contains ("src"));
-    EXPECT_FALSE (body["fields"][0].contains ("unresolved"));
     EXPECT_EQ (body["fields"][0]["type"], "file");
 }
 
-/// A binary body's file travels by name and type: the path is one machine's,
-/// and `unresolved` describes that path.
+/// A binary body's file travels by name and type: the path is one machine's.
 TEST (VayuExtensions, StripsTheLocalPathFromABinaryBodysFile) {
     const Json body = ext::portable_body (Json::parse (R"({"mode":"binary","file":{
-        "src":"/home/me/a.png","fileName":"a.png","contentType":"image/png","unresolved":true}})"));
+        "src":"/home/me/a.png","fileName":"a.png","contentType":"image/png"}})"));
     EXPECT_EQ (body,
     Json::parse (R"({"mode":"binary","file":{"fileName":"a.png","contentType":"image/png"}})"));
 }
 
-/// Re-reading a binary body: a path it carries is nobody's choice here, so it
-/// is marked unresolved whatever the document says; a `file` member that is
-/// not an object, or one whose members are not strings, is refused.
-TEST (VayuExtensions, ReadsABinaryBodyAndMarksACarriedPathUnresolved) {
+/// Re-reading a binary body: a path it carries is kept and what the document
+/// says about its trust is dropped (#2356); a `file` member that is not an
+/// object, or one whose members are not strings, is refused.
+TEST (VayuExtensions, ReadsABinaryBodyAndDropsWhatItSaysAboutTrust) {
     const auto carried = ext::body_of (Json::parse (
     R"({"mode":"binary","file":{"src":"/x/a.bin","unresolved":false}})"));
     ASSERT_HAS_VALUE (carried);
-    EXPECT_EQ (*carried,
-    Json::parse (R"({"mode":"binary","file":{"src":"/x/a.bin","unresolved":true}})"));
+    EXPECT_EQ (*carried, Json::parse (R"({"mode":"binary","file":{"src":"/x/a.bin"}})"));
     const auto bare = ext::body_of (Json::parse (R"({"mode":"binary"})"));
     ASSERT_HAS_VALUE (bare);
     EXPECT_EQ (*bare, Json::parse (R"({"mode":"binary","file":{"src":""}})"));

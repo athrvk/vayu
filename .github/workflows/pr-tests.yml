@@ -269,6 +269,7 @@ jobs:
             app_engine_inputs:
               - 'engine/include/vayu/core/constants.hpp'
               - 'engine/src/daemon.cpp'
+              - 'engine/include/vayu/http/grant_secret.hpp'
               - 'engine/src/http/routes/execution.cpp'
               - 'engine/src/db/config_seeds/general.cpp'
               - 'engine/src/db/config_seeds/network.cpp'

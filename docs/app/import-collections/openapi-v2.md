@@ -242,7 +242,7 @@ One case overrides the table: **a form carrying a file part is always `form-data
 
 A `formData` parameter with `type: file` imports as a **file part** - `{ key, value: "", enabled: true, type: "file", src: "" }` - not as a text row. Until this landed it became an ordinary empty-value text row, so an operation documenting an upload produced a request that looked healthy and sent nothing (the silent-loss class fixed for the other importers by the [file-part mapping](./postman.md), and on the wire before that).
 
-The part carries **no path**: a spec documents *that* a field is an upload, never *which* file it uploads. The user picks the file in the request editor, and the engine refuses the send by field name until they do (`Form field 'avatar' is a file part with no file selected`). The row is deliberately **not** marked `unresolved` - that flag warns that a path came from somewhere else and was never verified here, and there is no path to warn about; the row reads "Choose file", exactly like one a user turned into a file part by hand.
+The part carries **no path**: a spec documents *that* a field is an upload, never *which* file it uploads. The user picks the file in the request editor, and the engine refuses the send by field name until they do (`Form field 'avatar' is a file part with no file selected`). The row carries **no** `unresolved` - the engine derives that flag only for a path it would refuse, and there is no path to judge; the row reads "Choose file", exactly like one a user turned into a file part by hand.
 
 The import preview counts these as `N file parts need a file`, beside the skip counters, so a spec full of uploads says so before the import rather than one failed send at a time.
 

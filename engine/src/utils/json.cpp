@@ -13,6 +13,7 @@
 #include "vayu/utils/json.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <ostream>
 #include <sstream>
 #include <string_view>
@@ -22,6 +23,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
@@ -64,8 +66,7 @@ namespace {
 
 // A text field serializes exactly as it always did - the file members are
 // emitted only for a file part, so a stored body that has none round-trips
-// byte-identically through this. A file part always states `unresolved`,
-// because reading it back treats an absent key as unresolved.
+// byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
@@ -80,7 +81,6 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.content_type.empty ()) {
                 entry["contentType"] = field.content_type;
             }
-            entry["unresolved"] = field.unresolved;
         }
         out.push_back (std::move (entry));
     }
@@ -88,8 +88,7 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
 }
 
 // A binary body's file reference. The plan-time members (`inline_bytes`,
-// `sha256`, `size`) are engine-internal and never leave it. `unresolved` is
-// always stated, for the reason `serialize_form_fields` gives.
+// `sha256`, `size`) are engine-internal and never leave it.
 Json serialize_file_ref (const FileRef& file) {
     Json out{ { "src", file.src } };
     if (!file.file_name.empty ()) {
@@ -98,7 +97,6 @@ Json serialize_file_ref (const FileRef& file) {
     if (!file.content_type.empty ()) {
         out["contentType"] = file.content_type;
     }
-    out["unresolved"] = file.unresolved;
     return out;
 }
 
@@ -523,7 +521,7 @@ Json serialize (const vayu::db::Collection& c) {
     return json;
 }
 
-Json serialize (const vayu::db::Request& r) {
+Json serialize (const vayu::db::Request& r, const vayu::http::FileAccessPolicy& files) {
     Json json;
     json["id"]           = r.id;
     json["collectionId"] = r.collection_id;
@@ -568,6 +566,7 @@ Json serialize (const vayu::db::Request& r) {
             json["body"] = Json::object ({ { "mode", "none" } });
         }
     }
+    derive_file_trust (json["body"], files);
 
     json["bodyType"] = r.body_type.empty () ? "none" : r.body_type;
 
@@ -854,7 +853,6 @@ Result<FormField> parse_form_field (const Json& item, BodyMode mode) {
         }
         *target = member->get<std::string> ();
     }
-    field.unresolved = reads_as_unresolved (item);
     // A text part carrying a file's source is ambiguous in the one direction
     // that matters: the caller pointed at a file and nothing would send it.
     if (field.type == FormFieldType::Text && !field.src.empty ()) {
@@ -937,7 +935,6 @@ Result<FileRef> parse_file_ref (const Json& body_json) {
         }
         *target = member->get<std::string> ();
     }
-    file.unresolved = reads_as_unresolved (*entry);
     return file;
 }
 
@@ -1177,24 +1174,7 @@ void read_request_options (const Json& json, Request& request) {
 
 } // namespace
 
-bool reads_as_unresolved (const Json& ref) {
-    const auto found = ref.find ("unresolved");
-    return found == ref.end () || !found->is_boolean () || found->get<bool> ();
-}
-
 namespace {
-
-void state_ref_trust (Json& ref, AbsentFileTrust absent) {
-    if (!ref.is_object ()) {
-        return;
-    }
-    const auto found = ref.find ("unresolved");
-    if (found == ref.end ()) {
-        ref["unresolved"] = absent == AbsentFileTrust::Unresolved;
-    } else if (!found->is_boolean ()) {
-        *found = true;
-    }
-}
 
 bool is_file_part (const Json& field) {
     if (!field.is_object ()) {
@@ -1207,12 +1187,12 @@ bool is_file_part (const Json& field) {
 
 } // namespace
 
-void state_file_trust (Json& body, AbsentFileTrust absent) {
+void for_each_file_ref (Json& body, const std::function<void (Json& ref)>& visit) {
     if (!body.is_object ()) {
         return;
     }
-    if (const auto file = body.find ("file"); file != body.end ()) {
-        state_ref_trust (*file, absent);
+    if (const auto file = body.find ("file"); file != body.end () && file->is_object ()) {
+        visit (*file);
     }
     const auto fields = body.find ("fields");
     if (fields == body.end () || !fields->is_array ()) {
@@ -1220,9 +1200,26 @@ void state_file_trust (Json& body, AbsentFileTrust absent) {
     }
     for (Json& field : *fields) {
         if (is_file_part (field)) {
-            state_ref_trust (field, absent);
+            visit (field);
         }
     }
+}
+
+void erase_file_trust (Json& body) {
+    for_each_file_ref (body, [] (Json& ref) { ref.erase ("unresolved"); });
+}
+
+void derive_file_trust (Json& body, const vayu::http::FileAccessPolicy& files) {
+    for_each_file_ref (body, [&files] (Json& ref) {
+        const auto src = ref.find ("src");
+        if (src == ref.end () || !src->is_string () ||
+        src->get_ref<const std::string&> ().empty ()) {
+            ref.erase ("unresolved");
+            return;
+        }
+        const std::string& path = src->get_ref<const std::string&> ();
+        ref["unresolved"] = path.find ("{{") == std::string::npos && !files.allows (path);
+    });
 }
 
 Result<Request> deserialize_request (const Json& json) {
@@ -1477,12 +1474,16 @@ namespace {
  * @p max_field_size, so the caller can name the field in `truncatedFields`
  * (issue #1485) - a column that is merely empty or unparseable is not
  * "truncated" and does not count.
+ *
+ * @p shape, when set, adjusts the parsed value before it is written; a
+ * fallback is written as it stands.
  */
 bool write_json_column (std::ostream& out,
 const char* wire_name,
 const std::string& stored,
 const char* fallback,
-size_t max_field_size) {
+size_t max_field_size,
+const std::function<void (Json&)>& shape = nullptr) {
     out << "\"" << wire_name << "\":";
     if (stored.size () > max_field_size) {
         out << fallback;
@@ -1493,7 +1494,11 @@ size_t max_field_size) {
         return false;
     }
     try {
-        out << Json::parse (stored).dump ();
+        Json value = Json::parse (stored);
+        if (shape) {
+            shape (value);
+        }
+        out << value.dump ();
     } catch (const std::exception&) {
         out << fallback;
     }
@@ -1502,7 +1507,9 @@ size_t max_field_size) {
 
 } // namespace
 
-void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
+void serialize_to_stream (const vayu::db::Request& r,
+std::ostream& out,
+const vayu::http::FileAccessPolicy& files) {
     const size_t max_field_size = vayu::core::constants::json::MAX_FIELD_SIZE;
     std::vector<std::string> truncated_fields;
 
@@ -1530,8 +1537,9 @@ void serialize_to_stream (const vayu::db::Request& r, std::ostream& out) {
     }
     out << ",";
 
-    // Body - JSON discriminated union
-    if (write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size)) {
+    // Body - JSON discriminated union, its file trust derived as `serialize` does
+    if (write_json_column (out, "body", r.body, "{\"mode\":\"none\"}", max_field_size,
+        [&files] (Json& body) { derive_file_trust (body, files); })) {
         truncated_fields.emplace_back ("body");
     }
     out << ",";
@@ -1721,6 +1729,9 @@ const std::vector<std::string>& secret_values) {
 
     // Stored in its own columns (#1817); a second copy here could only disagree.
     parsed.erase ("origin");
+    if (const auto body_it = parsed.find ("body"); body_it != parsed.end ()) {
+        erase_file_trust (*body_it);
+    }
     withhold_credential_headers (parsed, api_key_header_names (parsed));
     // Allowlist within the auth subtree: keep only the mode, drop every
     // credential field. Because we keep a fixed key rather than blocking

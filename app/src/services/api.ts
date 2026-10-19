@@ -7,9 +7,10 @@
 
 // API Service Layer - All backend endpoints
 
-import { httpClient, ApiError } from "./http-client";
+import { httpClient, ApiError, EngineUnreachableError } from "./http-client";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { IMPORT_FETCH_EVENTS } from "@/constants/import";
+import type { AllowFolderReply } from "@/types/electron";
 import {
 	RequestTransformer,
 	CollectionTransformer,
@@ -64,7 +65,6 @@ import type {
 	ClientCertificate,
 	ClientCertificateInput,
 	FileRoot,
-	FileRootInput,
 	ConnectionTestResult,
 	WorkspaceBackupResult,
 	GetConfigResponse,
@@ -176,6 +176,19 @@ function proxiedRequestTimeoutMs(): number {
 function withoutId<T extends object>(data: T): Omit<T, "id"> {
 	const { id: _engineAssigned, ...rest } = data as T & { id?: unknown };
 	return rest;
+}
+
+/**
+ * The Electron bridge's two allowed-folder writes. Absent outside Electron,
+ * where nothing holds the secret the engine requires for either.
+ */
+function fileTrustBridge(): Pick<
+	NonNullable<Window["electronAPI"]>,
+	"allowFolder" | "removeAllowedFolder"
+> {
+	const bridge = typeof window === "undefined" ? undefined : window.electronAPI;
+	if (!bridge) throw new Error("Allowed folders change only in the Vayu app.");
+	return bridge;
 }
 
 export const apiService = {
@@ -614,18 +627,33 @@ export const apiService = {
 		await httpClient.delete(API_ENDPOINTS.CLIENT_CERTIFICATE_BY_ID(id));
 	},
 
-	// Allowed folders for request-body files (Settings > Files)
+	// Allowed folders for request-body files (Settings > Files). The list is a
+	// plain read; both writes need the grant secret only the main process holds
+	// (#2356), so they cross the Electron bridge instead of reaching the engine.
 	async getFileRoots(): Promise<FileRoot[]> {
 		return await httpClient.get<FileRoot[]>(API_ENDPOINTS.FILE_ROOTS);
 	},
 
-	/** Rejects with the engine's 400 (not a directory) or 409 (already allowed). */
-	async createFileRoot(input: FileRootInput): Promise<FileRoot> {
-		return await httpClient.post<FileRoot>(API_ENDPOINTS.FILE_ROOTS, { path: input.path });
+	/**
+	 * Open the folder picker and allow what the user chooses; the main process
+	 * makes the write. Resolves with the engine's answer rather than rejecting
+	 * on a refusal, so a caller can tell cancelled, allowed, already allowed (a
+	 * `refused` 409) and refused apart and still name the folder chosen.
+	 */
+	async allowChosenFolder(options?: {
+		defaultPath?: string;
+		title?: string;
+	}): Promise<AllowFolderReply> {
+		return await fileTrustBridge().allowFolder(options);
 	},
 
+	/** Rejects with the engine's refusal as an `ApiError`, or `EngineUnreachableError`. */
 	async deleteFileRoot(id: string): Promise<void> {
-		await httpClient.delete(API_ENDPOINTS.FILE_ROOT_BY_ID(id));
+		const reply = await fileTrustBridge().removeAllowedFolder(id);
+		if (reply.outcome === "refused") {
+			throw new ApiError(reply.status, reply.code, reply.message);
+		}
+		if (reply.outcome === "unreachable") throw new EngineUnreachableError(reply.message);
 	},
 
 	// Webhook inbox (issue #480)

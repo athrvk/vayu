@@ -11,17 +11,20 @@
  *
  * Three layers, asserted where each one can be seen:
  *
- * 1. **The rule** - `FileAccessPolicy` containment and `FilePlan`'s refusals,
- *    on real files in a scratch directory: no file selected, an unresolved
- *    variable, a directory or device, a missing file, and the trust half (a
- *    path nobody chose in the editor is sent only from under an allowed
- *    folder, a symlink escaping one included).
+ * 1. **The rule** - `FileAccessPolicy` containment and grants, and
+ *    `FilePlan`'s refusals, on real files in a scratch directory: no file
+ *    selected, an unresolved variable, a directory or device, a missing file,
+ *    and the trust half (a path is sent only from under an allowed folder or
+ *    as a picked file, whatever the body says, a symlink escaping a root or
+ *    re-pointed after a pick included).
  * 2. **The wire** - both drivers against the in-process echo server: the bytes
  *    arrive identical, the Content-Type follows its four tiers, a small file is
  *    shared from the plan and a large one streams, and a streamed body is
  *    rewound for a redirect (the seek callback).
  * 3. **The callers** - a design send through `execute_exchange`, a load run
- *    through its strategy, and the `/file-roots` route cores.
+ *    through its strategy, every send path reading the stored roots and grants,
+ *    the derived `unresolved` the read routes answer, and the `/file-roots`
+ *    route cores.
  */
 
 #include <gtest/gtest.h>
@@ -62,6 +65,14 @@
 #include "vayu/utils/sha256.hpp"
 
 namespace vayu::http::routes {
+// Defined in requests.cpp and runs.cpp; each is the testable core of one route.
+std::pair<int, nlohmann::json>
+create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+get_request_response (vayu::db::Database& db, const std::string& id);
+std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
+std::pair<int, nlohmann::json>
+get_run_response (vayu::db::Database& db, const std::string& run_id);
 // Defined in file_roots.cpp; each is the testable core of one route.
 std::pair<int, nlohmann::json> create_file_root_response (vayu::db::Database& db,
 const nlohmann::json& json,
@@ -140,26 +151,33 @@ std::string sha256_hex (std::string_view bytes) {
     return vayu::utils::hex_encode (vayu::utils::byte_view (digest));
 }
 
-/// A binary request whose file a person chose in the editor, so the trust
-/// half of the rule stays out of the way of a test about the wire.
+/// A binary request sending the file at @p src.
 Request binary_request (const std::string& url,
 const std::string& src,
 HttpMethod method = HttpMethod::POST) {
     Request request;
-    request.method               = method;
-    request.url                  = url;
-    request.body.mode            = BodyMode::Binary;
-    request.body.file.src        = src;
-    request.body.file.unresolved = false;
+    request.method        = method;
+    request.url           = url;
+    request.body.mode     = BodyMode::Binary;
+    request.body.file.src = src;
     return request;
 }
 
-FileRef ref (std::string src, bool unresolved = false) {
+FileRef ref (std::string src) {
     FileRef file;
-    file.src        = std::move (src);
-    file.unresolved = unresolved;
+    file.src = std::move (src);
     return file;
 }
+
+/// Everything under @p scratch allowed, so the trust half of the rule stays
+/// out of the way of a test about something else.
+FileAccessPolicy allowing (const ScratchDir& scratch) {
+    return FileAccessPolicy ({ scratch.path ().string () });
+}
+
+/// The refusal a path outside every root and every grant gets.
+constexpr std::string_view UNTRUSTED =
+"was not picked on this machine and is not under an allowed folder";
 
 constexpr std::size_t LARGE = INLINE_FILE_LIMIT + 4096;
 
@@ -189,6 +207,80 @@ TEST (FileAccessPolicy, AllowsAFileUnderARootAndNothingBesideIt) {
     EXPECT_FALSE (policy.allows (scratch.path ().string () + "/allowed/missing.bin"));
     EXPECT_FALSE (FileAccessPolicy{}.allows (inside))
     << "no root allows nothing";
+}
+
+// A grant is one file, matched on its canonical form: another spelling of the
+// same file is allowed, a sibling or the folder holding it is not. Mutation
+// check: drop the grant lookup from `FileAccessPolicy::allows` and the picked
+// file is refused.
+TEST (FileAccessPolicy, AGrantAllowsExactlyThePickedFile) {
+    ScratchDir scratch;
+    const std::string picked  = scratch.write ("picked/a.bin", "a");
+    const std::string sibling = scratch.write ("picked/b.bin", "b");
+    const FileAccessPolicy policy ({}, { fs::canonical (picked).string () });
+
+    EXPECT_TRUE (policy.allows (picked));
+    EXPECT_TRUE (policy.allows (scratch.dir ("picked") + "/../picked/a.bin"))
+    << "another spelling of the picked file";
+    EXPECT_FALSE (policy.allows (sibling));
+    EXPECT_FALSE (policy.allows (scratch.dir ("picked")));
+}
+
+// The grant holds the target the link resolved to when it was picked, and a
+// send resolves the link again: re-pointed, it names another file. Mutation
+// check: compare the path as written (or re-resolve the stored grant) in
+// `allows` and the re-pointed link is sent.
+TEST (FileAccessPolicy, ALinkRepointedAfterThePickIsRefused) {
+    ScratchDir scratch;
+    const std::string first  = scratch.write ("first.bin", "first");
+    const std::string secret = scratch.write ("secret/key.pem", "secret");
+    const fs::path link      = scratch.path () / "upload.bin";
+    std::error_code ec;
+    fs::create_symlink (first, link, ec);
+    if (ec) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink: " << ec.message ();
+    }
+    const auto granted = grantable_file_path (link.string ());
+    ASSERT_HAS_VALUE (granted);
+    EXPECT_EQ (*granted, fs::canonical (first).string ())
+    << "the grant is the target";
+    const FileAccessPolicy policy ({}, { *granted });
+    EXPECT_TRUE (policy.allows (link.string ()));
+
+    fs::remove (link);
+    fs::create_symlink (secret, link, ec);
+    ASSERT_FALSE (ec) << ec.message ();
+    EXPECT_FALSE (policy.allows (link.string ()));
+    const auto refusal = unsendable_file_ref (ref (link.string ()), "Body file", policy);
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_NE (refusal->find (UNTRUSTED), std::string::npos) << *refusal;
+}
+
+// What may be granted: an absolute path to a regular file, holding no `{{`.
+// Mutation check: drop the `{{` test from `grantable_file_path` and the file
+// literally named with braces is granted.
+TEST (FileAccessPolicy, OnlyAConcreteRegularFileIsGrantable) {
+    ScratchDir scratch;
+    const std::string file = scratch.write ("a.bin", "a");
+    EXPECT_EQ (grantable_file_path (file), fs::canonical (file).string ());
+    EXPECT_FALSE (grantable_file_path (""));
+    EXPECT_FALSE (grantable_file_path ("relative/a.bin"));
+    EXPECT_FALSE (grantable_file_path (scratch.dir ("folder")));
+    EXPECT_FALSE (grantable_file_path (scratch.path ().string () + "/missing.bin"));
+    EXPECT_FALSE (grantable_file_path (scratch.write ("{{name}}.bin", "t")))
+    << "a template names no file, even one spelled like it";
+}
+
+// A path still holding `{{` is refused as an unresolved variable before any
+// grant is consulted, so even a grant for a file literally named that way
+// sends nothing.
+TEST (FileAccessPolicy, ATemplatedPathIsNeverSentOnAGrant) {
+    ScratchDir scratch;
+    const std::string braces = scratch.write ("{{name}}.bin", "t");
+    const FileAccessPolicy policy ({}, { fs::canonical (braces).string () });
+    const auto refusal = unsendable_file_ref (ref (braces), "Body file", policy);
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_NE (refusal->find ("unresolved variable"), std::string::npos) << *refusal;
 }
 
 // Mutation check: canonicalise with `weakly_canonical` on a lexical path (or
@@ -248,7 +340,8 @@ TEST (FileRule, AMissingFileIsRefusedNamingThePath) {
 TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
     ScratchDir scratch;
     const std::string folder = scratch.dir ("folder");
-    const auto refusal = unsendable_file_ref (ref (folder), "Body file", {});
+    const auto refusal =
+    unsendable_file_ref (ref (folder), "Body file", allowing (scratch));
     ASSERT_HAS_VALUE (refusal);
     EXPECT_NE (refusal->find ("not a regular file"), std::string::npos) << *refusal;
 
@@ -257,84 +350,69 @@ TEST (FileRule, ADirectoryOrADeviceIsNotAFile) {
         << "no /dev/zero on this platform; the directory case stands";
     }
     Request request = binary_request ("http://127.0.0.1:1/", "/dev/zero");
-    FilePlan plan;
+    FilePlan plan (FileAccessPolicy ({ "/dev" }));
     const auto device = plan.prepare (request);
     ASSERT_HAS_VALUE (device);
     EXPECT_NE (device->find ("not a regular file"), std::string::npos) << *device;
 }
 
 // The trust half. Mutation check: make `check_locked` skip the
-// `file.unresolved && !under_root` refusal and the outside path is sent.
-TEST (FileRule, APathNobodyChoseIsSentOnlyFromUnderAnAllowedFolder) {
+// `policy_.allows` refusal and the outside path is sent.
+TEST (FileRule, APathIsSentFromUnderAnAllowedFolderOrAsAPickedFile) {
     ScratchDir scratch;
     const std::string inside  = scratch.write ("allowed/a.bin", "a");
     const std::string outside = scratch.write ("elsewhere/b.bin", "b");
     const FileAccessPolicy policy ({ scratch.dir ("allowed") });
 
-    EXPECT_FALSE (unsendable_file_ref (ref (inside, true), "Body file", policy));
-    const auto refused = unsendable_file_ref (ref (outside, true), "Body file", policy);
+    EXPECT_FALSE (unsendable_file_ref (ref (inside), "Body file", policy));
+    const auto refused = unsendable_file_ref (ref (outside), "Body file", policy);
     ASSERT_HAS_VALUE (refused);
-    EXPECT_NE (refused->find ("was not chosen in the editor and is not under "
-                              "an allowed folder"),
-    std::string::npos)
-    << *refused;
+    EXPECT_NE (refused->find (UNTRUSTED), std::string::npos) << *refused;
     EXPECT_NE (refused->find ("Settings > Files"), std::string::npos) << *refused;
     EXPECT_NE (refused->find (outside), std::string::npos) << *refused;
 
-    // A path a person chose is sent from anywhere.
-    EXPECT_FALSE (unsendable_file_ref (ref (outside, false), "Body file", policy));
+    const FileAccessPolicy picked (
+    { scratch.dir ("allowed") }, { fs::canonical (outside).string () });
+    EXPECT_FALSE (unsendable_file_ref (ref (outside), "Body file", picked))
+    << "a picked file is sent from anywhere";
 }
 
-// The trust flag fails closed: only `"unresolved": false` in so many words says
-// a person chose the path. An absent key, `null` or a string is a path nobody
-// chose, refused outside an allowed folder before the file is opened.
-// Mutation check: make `reads_as_unresolved` answer `false` for an absent key
-// and the first payload is read and planned.
-TEST (FileRule, APayloadThatDoesNotSayAPersonChoseThePathIsUnresolved) {
+// Nothing a payload says about trust is read (#2356): `unresolved: false`, the
+// value that used to mean "a person chose this", is refused outside every root
+// and grant exactly like an absent key, a `null` or a string, before the file
+// is opened, for a binary body and a form-data part alike. Mutation check:
+// read `"unresolved": false` back as trusted in `parse_file_ref` /
+// `parse_form_field` and skip the policy for it, and the first payload is read.
+TEST (FileRule, WhatAPayloadSaysAboutTrustIsIgnored) {
     ScratchDir scratch;
     const std::string outside = scratch.write ("elsewhere/a.bin", "secret");
     const json bare           = { { "src", outside } };
 
-    for (const json& file : { bare, json{ { "src", outside }, { "unresolved", nullptr } },
-         json{ { "src", outside }, { "unresolved", "false" } } }) {
-        const json payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+    for (const json& stated :
+    { json (false), json (nullptr), json ("false"), json (true) }) {
+        json file          = bare;
+        file["unresolved"] = stated;
+        const json binary = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
             { "body", { { "mode", "binary" }, { "file", file } } } };
-        auto parsed = vayu::json::deserialize_request (payload);
-        ASSERT_TRUE (parsed.is_ok ()) << file.dump ();
-        Request request = std::move (parsed).value ();
-        EXPECT_TRUE (request.body.file.unresolved) << file.dump ();
+        json part    = file;
+        part["key"]  = "f";
+        part["type"] = "file";
+        const json form = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
+            { "body", { { "mode", "form-data" }, { "fields", json::array ({ part }) } } } };
+        for (const json& payload : { binary, form }) {
+            auto parsed = vayu::json::deserialize_request (payload);
+            ASSERT_TRUE (parsed.is_ok ()) << payload.dump ();
+            Request request = std::move (parsed).value ();
 
-        FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
-        const auto opens   = body_file_opens ();
-        const auto refusal = plan.prepare (request);
-        ASSERT_HAS_VALUE (refusal) << file.dump ();
-        EXPECT_NE (refusal->find ("was not chosen in the editor"), std::string::npos)
-        << *refusal;
-        EXPECT_EQ (body_file_opens (), opens) << "the file was opened";
-        EXPECT_EQ (request.body.file.inline_bytes, nullptr);
+            FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
+            const auto opens   = body_file_opens ();
+            const auto refusal = plan.prepare (request);
+            ASSERT_HAS_VALUE (refusal) << payload.dump ();
+            EXPECT_NE (refusal->find (UNTRUSTED), std::string::npos) << *refusal;
+            EXPECT_EQ (body_file_opens (), opens) << "the file was opened";
+            EXPECT_EQ (request.body.file.inline_bytes, nullptr);
+        }
     }
-
-    const json part_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
-        { "body",
-        { { "mode", "form-data" },
-        { "fields",
-        json::array ({ { { "key", "f" }, { "type", "file" }, { "src", outside } } }) } } } };
-    auto part = vayu::json::deserialize_request (part_payload);
-    ASSERT_TRUE (part.is_ok ());
-    ASSERT_EQ (part.value ().body.fields.size (), 1u);
-    EXPECT_TRUE (part.value ().body.fields[0].unresolved);
-
-    json chosen          = bare;
-    chosen["unresolved"] = false;
-    const json chosen_payload = { { "method", "POST" }, { "url", "http://127.0.0.1:1/" },
-        { "body", { { "mode", "binary" }, { "file", chosen } } } };
-    auto chosen_parsed = vayu::json::deserialize_request (chosen_payload);
-    ASSERT_TRUE (chosen_parsed.is_ok ());
-    Request chosen_request = std::move (chosen_parsed).value ();
-    EXPECT_FALSE (chosen_request.body.file.unresolved);
-    FilePlan plan (FileAccessPolicy ({ scratch.dir ("allowed") }));
-    EXPECT_FALSE (plan.prepare (chosen_request))
-    << "a path a person chose is sent from anywhere";
 }
 
 TEST (FileRule, AnUnresolvedSymlinkEscapingARootIsRefused) {
@@ -348,7 +426,7 @@ TEST (FileRule, AnUnresolvedSymlinkEscapingARootIsRefused) {
         GTEST_SKIP () << "this filesystem cannot create a symlink: " << ec.message ();
     }
     const auto refusal = unsendable_file_ref (
-    ref (link.string (), true), "Body file", FileAccessPolicy ({ root }));
+    ref (link.string ()), "Body file", FileAccessPolicy ({ root }));
     ASSERT_HAS_VALUE (refusal);
     EXPECT_NE (refusal->find ("not under an allowed folder"), std::string::npos) << *refusal;
 }
@@ -359,17 +437,16 @@ TEST (FileRule, AFormPartIsNamedByItsKey) {
     Request request;
     request.body.mode = BodyMode::FormData;
     FormField part;
-    part.key        = "avatar";
-    part.type       = FormFieldType::File;
-    part.src        = outside;
-    part.unresolved = true;
+    part.key  = "avatar";
+    part.type = FormFieldType::File;
+    part.src  = outside;
     request.body.fields.push_back (part);
 
     FilePlan plan;
     const auto refusal = plan.prepare (request);
     ASSERT_HAS_VALUE (refusal);
     EXPECT_EQ (
-    refusal->rfind ("Form field 'avatar' '" + outside + "' was not chosen", 0), 0u)
+    refusal->rfind ("Form field 'avatar' '" + outside + "' was not picked", 0), 0u)
     << *refusal;
 }
 
@@ -381,7 +458,7 @@ TEST (FileRule, ThePlanReadsAFileOnceAndFillsEveryCopy) {
     const std::string payload = binary_payload (1000);
     const std::string src     = scratch.write ("a.bin", payload);
 
-    FilePlan plan;
+    FilePlan plan (allowing (scratch));
     Request first     = binary_request ("http://127.0.0.1:1/", src);
     const auto before = body_file_opens ();
     ASSERT_FALSE (plan.prepare (first));
@@ -410,7 +487,7 @@ TEST (FileRule, ALargeFileIsHashedNotHeld) {
     const std::string payload = binary_payload (LARGE);
     Request request =
     binary_request ("http://127.0.0.1:1/", scratch.write ("big.bin", payload));
-    FilePlan plan;
+    FilePlan plan (allowing (scratch));
     ASSERT_FALSE (plan.prepare (request));
     EXPECT_EQ (request.body.file.inline_bytes, nullptr);
     EXPECT_EQ (request.body.file.size, payload.size ());
@@ -434,7 +511,7 @@ class BinaryBodyWireTest : public ::testing::Test {
 
     /// Checked and sent through the single-request client, as a design send is.
     Response send (Request request) {
-        FilePlan plan;
+        FilePlan plan (allowing (scratch_));
         const auto refusal = plan.prepare (request);
         EXPECT_FALSE (refusal) << refusal.value_or ("");
         Client client;
@@ -445,7 +522,7 @@ class BinaryBodyWireTest : public ::testing::Test {
 
     /// The same, through the event loop every load run drives.
     Response submit (Request request) {
-        FilePlan plan;
+        FilePlan plan (allowing (scratch_));
         const auto refusal = plan.prepare (request);
         EXPECT_FALSE (refusal) << refusal.value_or ("");
         EventLoop loop;
@@ -465,7 +542,7 @@ TEST_F (BinaryBodyWireTest, ASmallFileArrivesByteForByteWithoutTheTransferOpenin
     const std::string src     = scratch_.write ("a.bin", payload);
     Request request           = binary_request (server_->url (), src);
 
-    FilePlan plan;
+    FilePlan plan (allowing (scratch_));
     ASSERT_FALSE (plan.prepare (request));
     const auto before = body_file_opens ();
     Client client;
@@ -650,15 +727,14 @@ class BinaryBodyExchangeTest : public BinaryBodyWireTest {
 // the outside file reaches the server (an unprepared body is then refused by
 // the gate instead, with the wrong message).
 TEST_F (BinaryBodyExchangeTest, AnImportedPathOutsideTheAllowedFoldersIsRefusedBeforeTheSend) {
-    const std::string outside    = scratch_.write ("elsewhere/a.bin", "secret");
-    Request request              = binary_request (server_->url (), outside);
-    request.body.file.unresolved = true;
+    const std::string outside = scratch_.write ("elsewhere/a.bin", "secret");
+    Request request           = binary_request (server_->url (), outside);
 
     FilePlan files (FileAccessPolicy ({ scratch_.dir ("allowed") }));
     const auto outcome = exchange (request, &files);
     EXPECT_EQ (outcome.response.status_code, 0);
     EXPECT_NE (outcome.response.error_message.find (
-               "Body file '" + outside + "' was not chosen in the editor"),
+               "Body file '" + outside + "' was not picked on this machine"),
     std::string::npos)
     << outcome.response.error_message;
     EXPECT_EQ (server_->body (), "");
@@ -673,8 +749,7 @@ TEST_F (BinaryBodyExchangeTest, AnImportedPathUnderAnAllowedFolderIsSentAndRecor
     const std::string payload = binary_payload (500);
     const std::string inside = scratch_.write ("allowed/sub/data.bin", payload);
     Request request          = binary_request (server_->url (), inside);
-    request.body.file.unresolved = true;
-    request.body.file.file_name  = "upload.bin";
+    request.body.file.file_name = "upload.bin";
 
     FilePlan files (FileAccessPolicy ({ scratch_.dir ("allowed") }));
     const auto outcome = exchange (request, &files);
@@ -763,14 +838,13 @@ TEST (BinaryBodyLoadRun, ASmallFileIsOpenedOnceForTheWholeRun) {
         constexpr int ITERATIONS = 20;
         const json config{ { "method", "POST" }, { "url", server.url () },
             { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 2 },
-            { "body",
-            { { "mode", "binary" }, { "file", { { "src", src }, { "unresolved", false } } } } } };
+            { "body", { { "mode", "binary" }, { "file", { { "src", src } } } } } };
 
         auto built = build_request (config, &db, 5000, AuthResolution::Apply);
         ASSERT_TRUE (built.ok) << built.error_message;
 
         const auto before = body_file_opens ();
-        auto files        = std::make_shared<FilePlan> ();
+        auto files        = std::make_shared<FilePlan> (allowing (scratch));
         ASSERT_FALSE (vayu::core::plan_load_files (*files, built.request, nullptr));
 
         auto context =
@@ -794,12 +868,10 @@ TEST (BinaryBodyLoadRun, ASmallFileIsOpenedOnceForTheWholeRun) {
     global_cleanup ();
 }
 
-// A path a data row binds was chosen by the data set: the bind marks it
-// unresolved, and the plan checks each distinct bound path once, naming the row
-// at fault. Mutation check: drop the `unresolved = true` in
-// `visit_file_strings` (scenario_data.cpp) and row 1 is sent from outside the
-// allowed folder; drop the `src` visit and row 0 is refused as an unresolved
-// variable.
+// A path a data row binds is held to the same rule as any other, and the plan
+// checks each distinct bound path once, naming the row at fault. Mutation
+// check: drop the `src` visit in `visit_file_strings` (scenario_data.cpp) and
+// row 0 is refused as an unresolved variable.
 TEST (BinaryBodyPlan, EachPathADataRowBindsIsCheckedNamingTheRow) {
     ScratchDir scratch;
     const std::string inside  = scratch.write ("allowed/a.bin", "a");
@@ -827,10 +899,292 @@ TEST (BinaryBodyPlan, EachPathADataRowBindsIsCheckedNamingTheRow) {
     ASSERT_TRUE (vayu::core::apply_iteration_template (bound,
     vayu::core::tokenize_bindable_fields (templated, data.bound_columns), binding)
     .ok);
-    EXPECT_TRUE (bound.body.file.unresolved);
     EXPECT_TRUE (vayu::core::fill_bound_files (&only_inside, /*tmpl=*/templated, /*request=*/bound)
     .ok);
     EXPECT_EQ (bound.body.file.size, 1u);
+}
+
+// ===========================================================================
+// The stored roots and grants, on every send path
+// ===========================================================================
+
+constexpr const char* TRUST_DB_PATH = "test_file_trust.db";
+
+/// A design send, a load run's plan and a collection run, each reading the
+/// stored `file_roots` and `file_grants` as its route does
+/// (`FileAccessPolicy::from_database`).
+class StoredTrustTest : public BinaryBodyExchangeTest {
+    protected:
+    void SetUp () override {
+        BinaryBodyExchangeTest::SetUp ();
+        vayu::tests::remove_database_files (TRUST_DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (TRUST_DB_PATH);
+        db_->init ();
+        vayu::db::Collection collection;
+        collection.id   = "col";
+        collection.name = "C";
+        db_->create_collection (collection);
+    }
+    void TearDown () override {
+        db_.reset ();
+        vayu::tests::remove_database_files (TRUST_DB_PATH);
+        BinaryBodyExchangeTest::TearDown ();
+    }
+
+    /// Records @p path as picked, the way the grant route stores it.
+    void grant (const std::string& path) {
+        const auto canonical = grantable_file_path (path);
+        ASSERT_HAS_VALUE (canonical) << path;
+        FileGrant row;
+        row.id         = "fgrant_" + std::to_string (++grants_);
+        row.path       = *canonical;
+        row.created_at = 1;
+        db_->save_file_grant (row);
+    }
+
+    void allow_folder (const std::string& folder) {
+        FileRoot row;
+        row.id         = "froot_1";
+        row.path       = folder;
+        row.created_at = 1;
+        db_->save_file_root (row);
+    }
+
+    /// The `POST /execute` payload sending @p body to the echo server.
+    json payload (const json& body) const {
+        return { { "method", "POST" }, { "url", server_->url () }, { "body", body } };
+    }
+
+    /// `execution.cpp`'s buffered design send: parse, plan over the stored
+    /// roots and grants, send.
+    routes::ExchangeOutcome design_send (const json& body) {
+        auto parsed = vayu::json::deserialize_request (payload (body));
+        EXPECT_TRUE (parsed.is_ok ()) << body.dump ();
+        FilePlan files (FileAccessPolicy::from_database (*db_));
+        return exchange (std::move (parsed).value (), &files);
+    }
+
+    /// A single-request load run's plan (`plan_load_files`).
+    std::optional<std::string> load_plan (const json& body) {
+        auto parsed = vayu::json::deserialize_request (payload (body));
+        EXPECT_TRUE (parsed.is_ok ()) << body.dump ();
+        Request request = std::move (parsed).value ();
+        FilePlan files (FileAccessPolicy::from_database (*db_));
+        return vayu::core::plan_load_files (files, request, nullptr);
+    }
+
+    /// A collection run over one stored request carrying @p body.
+    vayu::core::ScenarioResolution collection_run (const json& body) {
+        vayu::db::Request row;
+        row.id            = "req";
+        row.collection_id = "col";
+        row.name          = "Upload";
+        row.method        = HttpMethod::POST;
+        row.url           = server_->url ();
+        row.body          = body.dump ();
+        db_->save_request (row);
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms            = 30000;
+        options.limits.max_steps      = 10;
+        options.limits.max_data_rows  = 10;
+        options.limits.max_data_bytes = 1024;
+        return vayu::core::resolve_scenario (*db_,
+        json{ { "source", "collection" }, { "collectionId", "col" } }, options);
+    }
+
+    /// Both shapes that name a file, each saying a person chose it - the
+    /// claim the engine no longer takes from a body.
+    static std::vector<json> bodies_claiming_trust (const std::string& src) {
+        return { { { "mode", "binary" },
+                 { "file", { { "src", src }, { "unresolved", false } } } },
+            { { "mode", "form-data" },
+            { "fields",
+            json::array ({ { { "key", "f" }, { "type", "file" }, { "src", src },
+            { "unresolved", false } } }) } } };
+    }
+
+    /// True when the last design send delivered @p contents, as a binary body
+    /// or as the form part `f`.
+    bool delivered (const std::string& contents) const {
+        const auto parts = server_->parts ();
+        const auto part  = parts.find ("f");
+        return server_->body () == contents ||
+        (part != parts.end () && part->second.content == contents);
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    int grants_ = 0;
+};
+
+// The finding #2356 names: a body saying `unresolved: false` used to skip the
+// folder rule. Outside every root and every grant it is refused on all three
+// send paths, for a binary body and a form-data part. Mutation check: restore
+// the body-read trust (parse the key and let `false` skip `policy_.allows` in
+// `check_locked`) and every refusal here turns into a send.
+TEST_F (StoredTrustTest, AFalseBodyOutsideEveryRootAndGrantIsRefusedOnEverySendPath) {
+    const std::string outside = scratch_.write ("elsewhere/a.bin", "secret");
+    for (const json& body : bodies_claiming_trust (outside)) {
+        const auto sent = design_send (body);
+        EXPECT_EQ (sent.response.status_code, 0) << body.dump ();
+        EXPECT_NE (sent.response.error_message.find (UNTRUSTED), std::string::npos)
+        << sent.response.error_message;
+        EXPECT_FALSE (delivered ("secret")) << "the file reached the server";
+
+        const auto run = collection_run (body);
+        EXPECT_FALSE (run.ok) << body.dump ();
+        EXPECT_NE (run.error.find (UNTRUSTED), std::string::npos) << run.error;
+
+        const auto planned = load_plan (body);
+        ASSERT_HAS_VALUE (planned) << body.dump ();
+        EXPECT_NE (planned->find (UNTRUSTED), std::string::npos) << *planned;
+    }
+}
+
+// Mutation check: make `FileAccessPolicy::from_database` skip
+// `get_file_grants` (or `allows` ignore the grant set) and every path here is
+// refused.
+TEST_F (StoredTrustTest, TheSamePathGrantedIsSentOnEverySendPath) {
+    const std::string picked = scratch_.write ("elsewhere/a.bin", "picked bytes");
+    grant (picked);
+    for (const json& body : bodies_claiming_trust (picked)) {
+        const auto sent = design_send (body);
+        EXPECT_EQ (sent.response.status_code, 200) << sent.response.error_message;
+        EXPECT_TRUE (delivered ("picked bytes")) << body.dump ();
+        EXPECT_FALSE (load_plan (body));
+        const auto run = collection_run (body);
+        EXPECT_TRUE (run.ok) << run.error;
+    }
+}
+
+TEST_F (StoredTrustTest, APathUnderAnAllowedFolderIsSentOnEverySendPath) {
+    const std::string inside = scratch_.write ("allowed/a.bin", "allowed bytes");
+    allow_folder (scratch_.dir ("allowed"));
+    for (const json& body : bodies_claiming_trust (inside)) {
+        const auto sent = design_send (body);
+        EXPECT_EQ (sent.response.status_code, 200) << sent.response.error_message;
+        EXPECT_TRUE (delivered ("allowed bytes")) << body.dump ();
+        EXPECT_FALSE (load_plan (body));
+        const auto run = collection_run (body);
+        EXPECT_TRUE (run.ok) << run.error;
+    }
+}
+
+// The stored grant is the target the link named when it was picked; read
+// back through the database it is never resolved again. Mutation check:
+// canonicalise each grant in `from_database` or the constructor and the
+// re-pointed link is sent.
+TEST_F (StoredTrustTest, AGrantedLinkRepointedAfterThePickIsRefused) {
+    const std::string first  = scratch_.write ("first.bin", "first");
+    const std::string secret = scratch_.write ("secret/key.pem", "secret");
+    const fs::path link      = scratch_.path () / "upload.bin";
+    std::error_code ec;
+    fs::create_symlink (first, link, ec);
+    if (ec) {
+        GTEST_SKIP () << "this filesystem cannot create a symlink: " << ec.message ();
+    }
+    grant (link.string ());
+    const json body = bodies_claiming_trust (link.string ()).front ();
+    EXPECT_EQ (design_send (body).response.status_code, 200);
+
+    fs::remove (link);
+    fs::create_symlink (secret, link, ec);
+    ASSERT_FALSE (ec) << ec.message ();
+    const auto sent = design_send (body);
+    EXPECT_EQ (sent.response.status_code, 0);
+    EXPECT_NE (sent.response.error_message.find (UNTRUSTED), std::string::npos)
+    << sent.response.error_message;
+    EXPECT_NE (server_->body (), "secret");
+}
+
+// ===========================================================================
+// The derived `unresolved` the read routes answer
+// ===========================================================================
+
+/// The `unresolved` of a request's binary `file`, or of its first part.
+json trust_of (const json& request) {
+    const json& body = request.at ("body");
+    return body.contains ("file") ? body.at ("file").at ("unresolved") :
+                                    body.at ("fields").at (0).at ("unresolved");
+}
+
+// A write keeps no trust (the key an older client sends is dropped), and every
+// read answers what the roots and grants say now. Mutation checks: drop the
+// `erase_file_trust` call in `apply_request_fields` and the stored body keeps
+// `false`; drop `derive_file_trust` from either request serializer and its
+// read answers no key.
+TEST_F (StoredTrustTest, ARequestStoresNoTrustAndEveryReadDerivesIt) {
+    const std::string outside = scratch_.write ("elsewhere/a.bin", "a");
+    for (const json& body : bodies_claiming_trust (outside)) {
+        const json write = { { "collectionId", "col" }, { "name", "r" },
+            { "method", "POST" }, { "url", "https://example.test" }, { "body", body } };
+        const auto [status, created] = routes::create_request_response (*db_, write);
+        ASSERT_EQ (status, 200) << created.dump ();
+        const std::string id = created.at ("id").get<std::string> ();
+        const auto stored    = db_->get_request (id);
+        ASSERT_HAS_VALUE (stored);
+        EXPECT_EQ (stored->body.find ("unresolved"), std::string::npos)
+        << stored->body;
+
+        EXPECT_EQ (trust_of (created), true) << created.dump ();
+        EXPECT_EQ (trust_of (routes::get_request_response (*db_, id).second), true);
+        const json listed = json::parse (routes::list_requests_body (*db_, "col"));
+        EXPECT_EQ (trust_of (listed.back ()), true) << listed.dump ();
+    }
+
+    grant (outside);
+    const json listed = json::parse (routes::list_requests_body (*db_, "col"));
+    ASSERT_EQ (listed.size (), 2u);
+    for (const json& request : listed) {
+        EXPECT_EQ (trust_of (request), false) << request.dump ();
+        EXPECT_EQ (trust_of (routes::get_request_response (
+                   *db_, request.at ("id").get<std::string> ())
+                   .second),
+        false);
+    }
+}
+
+// Nothing to doubt yet: a path a variable still has to fill, which composition
+// decides and the editor marks with its own line, and no path at all, which
+// carries no key - the shape an import has always written for one.
+TEST_F (StoredTrustTest, AnEmptyOrTemplatedPathIsNotDerivedUnresolved) {
+    const auto created_body = [this] (const std::string& src) {
+        const json write = { { "collectionId", "col" }, { "name", "r" },
+            { "method", "POST" }, { "url", "https://example.test" },
+            { "body", bodies_claiming_trust (src).front () } };
+        const auto [status, created] = routes::create_request_response (*db_, write);
+        EXPECT_EQ (status, 200) << created.dump ();
+        return created.at ("body").at ("file");
+    };
+    EXPECT_EQ (created_body ("{{fixtures}}/a.bin").at ("unresolved"), false);
+    EXPECT_FALSE (created_body ("").contains ("unresolved"));
+}
+
+// A run's snapshot is the payload a history entry is re-opened from: stored
+// without the key, read back derived. Mutation checks: drop the
+// `erase_file_trust` call in `sanitize_config_snapshot` and the stored text
+// keeps `false`; drop the derivation in `get_run_response` and the snapshot
+// still says `false`.
+TEST_F (StoredTrustTest, ARunSnapshotStoresNoTrustAndAnswersTheDerivedOne) {
+    const std::string outside = scratch_.write ("elsewhere/a.bin", "a");
+    const json sent = payload (bodies_claiming_trust (outside).front ());
+    vayu::db::Run run;
+    run.id         = "run_trust";
+    run.type       = RunType::Design;
+    run.status     = RunStatus::Completed;
+    run.start_time = 1;
+    run.config_snapshot = vayu::json::sanitize_config_snapshot (sent.dump (), 4096, {});
+    EXPECT_EQ (run.config_snapshot.find ("unresolved"), std::string::npos)
+    << run.config_snapshot;
+    db_->create_run (run);
+
+    const auto [status, answered] = routes::get_run_response (*db_, "run_trust");
+    ASSERT_EQ (status, 200) << answered.dump ();
+    EXPECT_EQ (trust_of (answered.at ("configSnapshot")), true) << answered.dump ();
+
+    grant (outside);
+    EXPECT_EQ (trust_of (routes::get_run_response (*db_, "run_trust").second.at ("configSnapshot")),
+    false);
+    EXPECT_EQ (routes::get_run_response (*db_, "run_missing").first, 404);
 }
 
 // ===========================================================================

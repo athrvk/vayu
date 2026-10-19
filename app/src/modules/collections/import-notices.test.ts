@@ -268,7 +268,7 @@ describe("fileReferenceNeeds", () => {
 		});
 	}
 
-	it("groups unresolved binary and form-part paths by their folder", () => {
+	it("groups the paths the parse answered unresolved by their folder", () => {
 		const needs = fileReferenceNeeds([
 			result({
 				collections: [
@@ -287,7 +287,7 @@ describe("fileReferenceNeeds", () => {
 		expect(needs.bodiesWithoutFile).toBe(0);
 	});
 
-	it("leaves out paths someone chose, and folders that are still a variable", () => {
+	it("leaves out paths the engine would send, and folders that are still a variable", () => {
 		const needs = fileReferenceNeeds([
 			result({
 				collections: [

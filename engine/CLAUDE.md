@@ -64,8 +64,10 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   force-shutdown branch is `std::_Exit`: it runs inside the signal handler,
   where `exit` would run every static destructor under live worker threads.
   Guard: `tests/reentrant_test.cpp` scans `src` and `include` for the classic
-  names and for `setenv`/`putenv`, which would make the single exempted
-  `getenv` (`transport_policy.cpp`) unsafe.
+  names and for `setenv`/`unsetenv`/`putenv`/`_putenv_s`, which would make the
+  exempted `getenv` reads (`transport_policy.cpp`, `grant_secret.cpp`) unsafe.
+  The one write exempted, per (file, call), is `grant_secret.cpp` removing
+  `VAYU_GRANT_SECRET` once at start, before any thread exists (#2356).
 - **Nothing at namespace scope is built at run time** (#945, `cert-err58-cpp`).
   A constant is `constexpr` (`std::string_view`, `std::array`, `const char*`);
   an object that cannot be one (`std::regex`, `nlohmann::json`, `std::mt19937`,
@@ -884,19 +886,36 @@ logged as a warning: it means a client skipped composition.
   `POST /import/apply` section.
 - **A file a request body names is sent under one trust rule**
   (`http/file_ref.hpp`, `http/file_access_policy.hpp`): a `binary` body's
-  `file` and a `form-data` file part are sendable iff `!unresolved ||
-  allowed(canonical(src))` against the `file_roots` folders (schema version 3,
+  `file` and a `form-data` file part are sendable iff `FileAccessPolicy::allows
+  (src)`: `canonical(src)` lies under a `file_roots` folder (schema version 3,
   `/file-roots`, which refuses a filesystem root, the home folder and any
-  folder containing it - `refused_root_reason`), compared component-wise on canonical paths so a
-  symlink escaping a root is outside. Every non-editor writer forces `unresolved`, and
-  so does composition (and a data-row bind) whenever `src` held `{{`; the
-  residual pass never resolves `src`, so a script cannot choose a file. The
-  flag fails closed: `FileRef`/`FormField` default it to `true`, a payload
-  that omits it parses as `true` (`vayu::json::reads_as_unresolved`), and
-  `apply_request_fields` stores every written body with the key stated
-  (`state_file_trust`); the schema-version-4 migration stated it, as
-  `false`, on every body stored before. An absent key means `true`
-  everywhere, storage included.
+  folder containing it - `refused_root_reason`), compared component-wise so a
+  symlink escaping a root is outside, or equals a `file_grants` row (schema
+  version 6, #2356), the canonical path recorded when a person picked the
+  file and never resolved again, so a link re-pointed after the pick is
+  refused (`/file-grants`, `routes/file_grants.cpp`). **Both tables change only
+  with the grant secret**: `POST`/`DELETE` on `/file-roots` and `/file-grants`
+  call `admit_file_trust_write` (`routes.hpp`) first and answer `403`
+  `grant_secret_required` unless `X-Vayu-Grant-Secret` matches the per-start
+  `GrantSecret` (`http/grant_secret.hpp`: SHA-256 digests compared with
+  `sodium_memcmp`, at least 32 characters). `daemon.cpp` takes it from
+  `VAYU_GRANT_SECRET`, which the app's main process sets, and removes the
+  variable before any thread starts; it reaches the routes through `Server`'s
+  constructor and `RouteContext::grant_secret`, so a test hands one in without
+  the environment. An engine with no
+  secret refuses all four writes. **Trust is derived, never read**: a body's `unresolved` is ignored
+  when a payload is parsed (an older client still sends it), dropped from
+  every stored body (`erase_file_trust` in `apply_request_fields` and
+  `sanitize_config_snapshot`) and written back on every read as the policy's
+  answer (`derive_file_trust`, a required parameter of both request
+  serializers, plus `GET /runs/:id`'s snapshot and `POST /import/parse`):
+  `true` for a concrete path neither allowed nor granted, `false` for an
+  allowed one and one still holding `{{`, no key for an empty one. A `src` holding `{{`
+  is refused at send whatever the policy says, and `grantable_file_path`
+  refuses it, so no grant names a template; the residual pass never resolves
+  `src`, so a script cannot choose a file. The schema-version-6 migration
+  granted every existing regular file a stored body marked `false` (or, on a
+  database older than version 4, left unmarked) and removed the key.
   `FilePlan` applies the rule once per design send (`execute_exchange`, the
   stream branch) and once per run at plan time (`plan_load_files`,
   `plan_step_files`), reading a file of at most `INLINE_FILE_LIMIT` once and

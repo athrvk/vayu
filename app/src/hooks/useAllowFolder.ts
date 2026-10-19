@@ -10,73 +10,83 @@
  *
  * Three surfaces offer it - Settings > Files, the binary body editor's
  * "Allow folder...", and the import preview's per-folder action - and each
- * would otherwise grow its own copy of the same three outcomes: the folder is
+ * would otherwise grow its own copy of the same outcomes: the folder is
  * allowed now; it already was (the engine's 409, which is the result the user
- * wanted, so it is not an error); or the engine refused it (400: not an
- * existing directory on this machine, which is what an imported path from
- * another computer usually is). The engine's own message is shown for the
- * refusal, since it names the path and the reason.
+ * wanted, so it is not an error); or the engine refused it (400: a folder it
+ * will not allow, which names the path and the reason in its own message).
+ *
+ * The folder is always one the user chose in the system picker, which the
+ * main process opens and then allows itself: an allowed folder widens what
+ * every request may read from disk, so the renderer cannot name one (#2356).
+ * A surface that knows a likely folder - an imported file's - passes it as
+ * where the picker opens. Outside Electron there is no picker and nothing that
+ * may make the write, so `chooseAndAllow` is absent.
  */
 
 import { useCallback } from "react";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
-import { useCreateFileRootMutation } from "@/queries";
-import { ApiError } from "@/services/http-client";
+import { useAllowChosenFolderMutation } from "@/queries";
 import { useToastStore } from "@/stores";
+import type { AllowFolderReply } from "@/types/electron";
 
 export interface AllowFolder {
-	/** Allow `path` as typed. Resolves true when the folder is allowed afterwards. */
-	allow: (path: string) => Promise<boolean>;
 	/**
-	 * Open the system folder picker (starting at `defaultPath`), then allow
-	 * what was chosen. Resolves false on cancel. Absent outside Electron.
+	 * Open the system folder picker (starting at `defaultPath`), then allow what
+	 * was chosen. Resolves true when the chosen folder is allowed afterwards,
+	 * false on cancel or refusal. Absent outside Electron.
 	 */
 	chooseAndAllow?: (defaultPath?: string) => Promise<boolean>;
 	isPending: boolean;
 }
 
-export function useAllowFolder(): AllowFolder {
-	const create = useCreateFileRootMutation();
-	const showToast = useToastStore((s) => s.showToast);
+type ShowToast = (message: string, kind: "success" | "info" | "error") => void;
 
-	const allow = useCallback(
-		async (path: string): Promise<boolean> => {
-			try {
-				const row = await create.mutateAsync(path);
-				showToast(`Files under ${row.path} can be sent now.`, "success");
+/** Tell the user what became of the folder they chose. True when it is allowed now. */
+function announce(reply: AllowFolderReply, showToast: ShowToast): boolean {
+	switch (reply.outcome) {
+		case "cancelled":
+			return false;
+		case "done":
+			showToast(`Files under ${reply.value.path} can be sent now.`, "success");
+			return true;
+		case "refused":
+			if (reply.status === 409) {
+				showToast(`${reply.path} is already an allowed folder.`, "info");
 				return true;
-			} catch (error) {
-				if (error instanceof ApiError && error.statusCode === 409) {
-					showToast(`${path} is already an allowed folder.`, "info");
-					return true;
-				}
-				const detail =
-					error instanceof ApiError && error.message ? error.message : ENGINE_NO_ANSWER;
-				showToast(`Couldn't allow ${path}: ${detail}`, "error");
-				return false;
 			}
-		},
-		[create, showToast]
-	);
+			showToast(`Couldn't allow ${reply.path}: ${reply.message}`, "error");
+			return false;
+		case "unreachable":
+			showToast(`Couldn't allow ${reply.path}: ${ENGINE_NO_ANSWER}`, "error");
+			return false;
+	}
+}
 
-	const selectDirectory =
-		typeof window !== "undefined" ? window.electronAPI?.selectDirectory : undefined;
+export function useAllowFolder(): AllowFolder {
+	const allowChosen = useAllowChosenFolderMutation();
+	const showToast = useToastStore((s) => s.showToast);
+	const bridged = typeof window !== "undefined" && Boolean(window.electronAPI?.allowFolder);
+
 	const chooseAndAllow = useCallback(
 		async (defaultPath?: string): Promise<boolean> => {
-			if (!selectDirectory) return false;
-			const chosen = await selectDirectory({
-				title: "Allow a folder",
-				...(defaultPath ? { defaultPath } : {}),
-			});
-			if (!chosen) return false;
-			return await allow(chosen);
+			let reply: AllowFolderReply;
+			try {
+				reply = await allowChosen.mutateAsync({
+					title: "Allow a folder",
+					...(defaultPath ? { defaultPath } : {}),
+				});
+			} catch {
+				// The bridge itself refused or broke: nothing reached the engine.
+				showToast("Couldn't open the folder picker. Restart Vayu.", "error");
+				return false;
+			}
+			return announce(reply, showToast);
 		},
-		[allow, selectDirectory]
+		[allowChosen, showToast]
 	);
 
 	return {
-		allow,
-		...(selectDirectory ? { chooseAndAllow } : {}),
-		isPending: create.isPending,
+		...(bridged ? { chooseAndAllow } : {}),
+		isPending: allowChosen.isPending,
 	};
 }

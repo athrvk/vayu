@@ -17,6 +17,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/grant_secret.hpp"
 #include "vayu/http/inbox.hpp"
 #include "vayu/http/mock_issuer.hpp"
 #include "vayu/http/mock_server.hpp"
@@ -28,7 +29,12 @@ namespace vayu::http {
 
 class Server {
     public:
-    Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port);
+    /// @p grant_secret gates every write to file trust (`grant_secret.hpp`);
+    /// without one those writes are refused.
+    Server (vayu::db::Database& db,
+    vayu::core::RunManager& run_manager,
+    int port,
+    GrantSecret grant_secret = {});
     ~Server ();
     Server (const Server&)            = delete;
     Server& operator= (const Server&) = delete;
@@ -73,6 +79,7 @@ class Server {
     vayu::db::Database& db_;
     vayu::core::RunManager& run_manager_;
     int port_;
+    GrantSecret grant_secret_;
     std::string bind_error_;
     // Everything from here down to server_ is declared *before* it so it is
     // destroyed *after* it (reverse member order): the httplib lambdas that

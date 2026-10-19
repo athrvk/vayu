@@ -205,9 +205,11 @@ describe("parseCommand - curl", () => {
 				type: "file",
 				src: "/tmp/pic.png",
 				fileName: "pic.png",
-				unresolved: true,
 			},
 		]);
+		// A pasted path is not a pick: the engine answers for it on the next
+		// read, and nothing here claims it was chosen (#2356).
+		expect(r.formData[1]).not.toHaveProperty("unresolved");
 	});
 
 	test("-F reads curl's per-part type and filename modifiers", () => {
@@ -223,7 +225,6 @@ describe("parseCommand - curl", () => {
 				src: "/tmp/a.bin",
 				fileName: "people.csv",
 				contentType: "text/csv",
-				unresolved: true,
 			},
 		]);
 	});
@@ -274,7 +275,6 @@ describe("parseCommand - curl", () => {
 		expect(r.binaryFile).toEqual({
 			src: "/data/upload.bin",
 			fileName: "upload.bin",
-			unresolved: true,
 		});
 		// Carried, so nothing to disclose.
 		expect(imported.dropped).toEqual([]);
@@ -345,7 +345,7 @@ describe("parseCommand - curl", () => {
 		expect(imported.dropped.map((d) => d.flag)).toContain("--negotiate");
 	});
 
-	test("--data-binary @file is a binary body, unresolved, POST by default", () => {
+	test("--data-binary @file is a binary body, POST by default", () => {
 		const imported = importCommand(`curl https://x.com --data-binary @/data/body.bin`)!;
 		const r = imported.request;
 		expect(r.method).toBe("POST");
@@ -354,8 +354,8 @@ describe("parseCommand - curl", () => {
 		expect(r.binaryFile).toEqual({
 			src: "/data/body.bin",
 			fileName: "body.bin",
-			unresolved: true,
 		});
+		expect(r.binaryFile).not.toHaveProperty("unresolved");
 		expect(imported.dropped).toEqual([]);
 	});
 
@@ -388,10 +388,7 @@ describe("parseCommand - curl", () => {
 	});
 
 	test("every paste resets the binary file, so no stale one survives", () => {
-		expect(parseCommand(`curl https://x.com`)?.binaryFile).toEqual({
-			src: "",
-			unresolved: true,
-		});
+		expect(parseCommand(`curl https://x.com`)?.binaryFile).toEqual({ src: "" });
 	});
 
 	test("query string in URL is mirrored to params", () => {
@@ -528,7 +525,7 @@ describe("parseCommand - wget", () => {
 		expect(r.auth).toEqual({ mode: "basic", username: "admin", password: "secret" });
 	});
 
-	test("--post-file is a binary body, POST, unresolved", () => {
+	test("--post-file is a binary body, POST", () => {
 		const imported = importCommand(`wget --post-file=/d/body.txt https://x.com`)!;
 		expect(imported.request.bodyMode).toBe("binary");
 		expect(imported.request.method).toBe("POST");
@@ -536,7 +533,6 @@ describe("parseCommand - wget", () => {
 		expect(imported.request.binaryFile).toEqual({
 			src: "/d/body.txt",
 			fileName: "body.txt",
-			unresolved: true,
 		});
 		// wget sends the file as is, so there is no newline caveat to say.
 		expect(imported.dropped).toEqual([]);
