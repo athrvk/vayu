@@ -30,15 +30,22 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import ResponseBody from "./ResponseBody";
 
+// The bytes each body arrives as: base64 on the wire, decoded by the funnels
+// into `rawBytes` (issue #2458), with no text beside them.
 const PREVIEWS = [
 	["image", "image/png", "iVBORw0KGgo="],
 	["pdf", "application/pdf", "JVBERi0="],
 	["binary", "application/octet-stream", "AAAA"],
 ] as const;
 
-function renderPreview(contentType: string, body: string) {
+function renderPreview(contentType: string, base64: string) {
+	const data = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 	return render(
-		<ResponseBody body={body} bodyRaw={body} headers={{ "content-type": contentType }} />
+		<ResponseBody
+			body=""
+			rawBytes={{ data, isText: false }}
+			headers={{ "content-type": contentType }}
+		/>
 	);
 }
 

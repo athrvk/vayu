@@ -312,6 +312,10 @@ export const ENGINE_READING_GUARDS = {
 		reader: "app/src/modules/request-builder/utils/query-encoding.conformance.test.ts",
 		paths: ["engine/tests/fixtures/query-encoding-conformance.json"],
 	},
+	authHeaderPrecedence: {
+		reader: "app/src/services/codegen/prepare.conformance.test.ts",
+		paths: ["engine/tests/fixtures/auth-header-precedence.json"],
+	},
 	importPayloads: {
 		reader: "app/src/services/importers/orchestrator.payload-conformance.test.ts",
 		paths: ["engine/tests/fixtures/import-conformance.json"],

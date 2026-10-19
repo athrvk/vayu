@@ -10,6 +10,7 @@
  */
 
 import { formatXml } from "@/lib/xml-format";
+import { mediaTypeOf, type MediaType } from "@/modules/request-builder/utils/response-bytes";
 import type { BodyType } from "./types";
 
 /**
@@ -17,63 +18,12 @@ import type { BodyType } from "./types";
  */
 export function detectBodyType(headers: Record<string, string>, body: string): BodyType {
 	const contentType = headers["content-type"] || headers["Content-Type"] || "";
-	const lowerContentType = contentType.toLowerCase();
-
-	// Image types
-	if (lowerContentType.includes("image/")) {
-		return "image";
-	}
-
-	// PDF
-	if (lowerContentType.includes("application/pdf")) {
-		return "pdf";
-	}
-
-	// JSON
-	if (lowerContentType.includes("application/json") || lowerContentType.includes("+json")) {
-		return "json";
-	}
-
-	// JavaScript
-	if (lowerContentType.includes("javascript") || lowerContentType.includes("application/js")) {
-		return "javascript";
-	}
-
-	// CSS
-	if (lowerContentType.includes("text/css")) {
-		return "css";
-	}
-
-	// HTML
-	if (lowerContentType.includes("text/html") || lowerContentType.includes("application/xhtml")) {
-		return "html";
-	}
-
-	// XML
-	if (
-		lowerContentType.includes("xml") ||
-		lowerContentType.includes("application/xml") ||
-		lowerContentType.includes("+xml")
-	) {
-		return "xml";
-	}
-
-	// Markdown
-	if (lowerContentType.includes("text/markdown")) {
-		return "markdown";
-	}
-
-	// Binary types
-	if (
-		lowerContentType.includes("application/octet-stream") ||
-		lowerContentType.includes("application/zip") ||
-		lowerContentType.includes("application/gzip")
-	) {
-		return "binary";
-	}
+	const media = mediaTypeOf(contentType);
+	const declared = declaredBodyType(media);
+	if (declared) return declared;
 
 	// Try to detect from body content if content-type is generic or missing
-	if (!contentType || lowerContentType.includes("text/plain")) {
+	if (!contentType || (media.type === "text" && media.subtype === "plain")) {
 		// Try JSON detection
 		const trimmed = body.trim();
 		if (
@@ -103,6 +53,33 @@ export function detectBodyType(headers: Record<string, string>, body: string): B
 	}
 
 	return "text";
+}
+
+const BINARY_ESSENCES: ReadonlySet<string> = new Set([
+	"application/octet-stream",
+	"application/zip",
+	"application/gzip",
+]);
+
+/**
+ * What the Content-Type alone says the body is, compared by whole token
+ * (#2458). The order is the meaning: SVG is checked before `image/` so it
+ * reads and formats as the XML it is, which is also what the engine sends it
+ * as.
+ */
+function declaredBodyType({ type, subtype, name, suffix }: MediaType): BodyType | undefined {
+	const essence = `${type}/${subtype}`;
+	if (essence === "image/svg+xml") return "xml";
+	if (type === "image") return "image";
+	if (essence === "application/pdf") return "pdf";
+	if (name === "json" || suffix === "json") return "json";
+	if (name === "javascript") return "javascript";
+	if (essence === "text/css") return "css";
+	if (essence === "text/html" || name === "xhtml") return "html";
+	if (name === "xml" || suffix === "xml") return "xml";
+	if (essence === "text/markdown") return "markdown";
+	if (BINARY_ESSENCES.has(essence)) return "binary";
+	return undefined;
 }
 
 /**

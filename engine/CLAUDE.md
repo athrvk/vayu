@@ -942,7 +942,11 @@ which is the only place a Params row reaches the wire. A query pair the engine
 writes (an api key or OAuth 2.0 token in the query, a Postman import's query
 join) goes through `core::encode_query_component` (`core/query_encoding.hpp`,
 #1771, Postman's query rule; a stored URL is never re-encoded), whose app copy
-is pinned by `tests/fixtures/query-encoding-conformance.json`. Compose is pure (sends nothing, no run row) and is the one place a
+is pinned by `tests/fixtures/query-encoding-conformance.json`. A header an `auth` block
+would write (bearer, basic, an api key in a header) is skipped when the request already
+carries that name, matched case-insensitively (`apply_auth`, #2475); the snippet
+generators' copy in `prepare.ts` is pinned by
+`tests/fixtures/auth-header-precedence.json`. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 (stored request; MCP uses this and gates its allowlist on the *composed* URL)
 and an inline `request` plus `collectionId` scope (the renderer, because Send

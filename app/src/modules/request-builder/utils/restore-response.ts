@@ -21,6 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
+import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
@@ -154,18 +155,6 @@ export function validationFromTrace(
 	return node && typeof node === "object" ? { validation: node } : {};
 }
 
-/** Sniff a body's render mode the same way the live execute path does. */
-function detectBodyType(body: string): ResponseState["bodyType"] {
-	try {
-		JSON.parse(body);
-		return "json";
-	} catch {
-		if (body.includes("<html") || body.includes("<!DOCTYPE")) return "html";
-		if (body.includes("<?xml") || body.includes("<xml")) return "xml";
-		return "text";
-	}
-}
-
 /**
  * The parts of a restored response that are the same whether the run succeeded
  * or failed: what was sent.
@@ -293,26 +282,39 @@ export function responseFromRunResult(
 	 * The moment a trace arrives holding a parsed object instead - the branch
 	 * below exists because that can happen - `body` becomes pretty-printed and
 	 * Raw would have silently shown formatting the server never sent.
+	 *
+	 * A base64 one (issue #2458) goes through the live funnel's decoder, so
+	 * both hold the same text and the same bytes.
 	 */
 	const raw = trace.response.body;
-	const body =
-		typeof raw === "string" ? raw : raw === undefined ? "" : JSON.stringify(raw, null, 2);
-	const bodyRaw = typeof raw === "string" ? raw : raw === undefined ? "" : JSON.stringify(raw);
+	const headers = trace.response.headers || {};
+	const decoded =
+		typeof raw === "string"
+			? decodeResponseBody({
+					bodyRaw: raw,
+					bodyEncoding: trace.response.bodyEncoding,
+					headers,
+				})
+			: undefined;
+	const body = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw, null, 2);
+	const bodyRaw = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw);
+	const rawBytes = decoded?.bytes;
 
 	return {
 		status: result.statusCode || 0,
 		statusText: result.statusText || "",
-		headers: trace.response.headers || {},
+		headers,
 		...sentSide(trace),
 		httpVersion: trace.response.httpVersion,
 		httpVersionDowngraded: trace.response.httpVersionDowngraded,
 		body,
 		bodyRaw,
-		bodyType: detectBodyType(body),
+		...(rawBytes && { rawBytes }),
+		bodyType: responseBodyType(headers, rawBytes),
 		// `size` is what the pane's byte count shows. When the body was truncated
 		// for storage the stored slice is not the real size, so prefer the
 		// original `bodyBytes` the engine recorded and fall back to the slice.
-		size: trace.response.bodyBytes ?? body.length,
+		size: trace.response.bodyBytes ?? heldBodySize({ body, rawBytes }),
 		bodyTruncated: trace.response.bodyTruncated,
 		bodyBytes: trace.response.bodyBytes,
 		// A second, separate fact about the same body (issue #1157): the live

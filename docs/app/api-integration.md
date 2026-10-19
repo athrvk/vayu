@@ -1435,6 +1435,7 @@ replay puts the run's recorded list back on its seeded rows.
   headers: { "content-type": "application/json" },
   body: { users: [...] },
   bodyRaw: '{"users":[...]}',
+  bodyEncoding: "utf8",
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
   clientCertificate: "",
@@ -1531,7 +1532,34 @@ A third limit is the renderer's alone and reaches no wire field:
 `responseFromExecuteResult` stops building the indented `body` copy - it hands
 back `bodyRaw`, which is what would be displayed anyway - and `ResponseBody`
 stops formatting, hides the view toggle and shows the first 2MB of the raw body
-under its own notice. Both are about *rendering* cost, not about what arrived.
+under its own notice. Both are about *rendering* cost, not about what arrived,
+and both count the decoded text below, never base64 characters.
+
+`bodyEncoding` says how to read `bodyRaw` (issue #2458): `"utf8"` is the text
+itself, `"base64"` is a body that is not UTF-8 text (an image, a PDF, Latin-1,
+UTF-16) in standard padded base64, with `body` null and `bodySize` still the
+byte count. The stored trace writes `trace.response.bodyEncoding: "base64"` only
+when it applies and keeps the same base64 in `trace.response.body`; absent is
+text, as on every older row. Both funnels hand the body to one decoder,
+`decodeResponseBody` (`request-builder/utils/response-bytes.ts`), so the live
+and the restored pane hold the same state: the bytes go to
+`ResponseState.rawBytes`, and `body` / `bodyRaw` get their decoding - by the
+byte-order mark, else the declared `charset`, else UTF-8, through
+`TextDecoder` - for a text Content-Type, and nothing for any other. A text type
+is `text/*`, a declared `charset`, or a subtype whose name (after any `x-`) or
+`+suffix` is one of the text syntaxes (`json`, `xml`, `yaml`, `javascript`,
+`graphql` and their kin), compared as whole tokens by `mediaTypeOf`: an Office
+document's `vnd.openxmlformats-...` subtype holds `xml` and is still a zip. The
+pane's `detectBodyType` and `bodyType` read the type through the same parts. A
+label the
+platform does not know, or bytes the charset cannot read, put a notice in
+`rawBytes.notice` that `ResponseBody` shows over the text. A non-text body sets
+`bodyType: "binary"`; the pane draws an image from its bytes through a Blob
+object URL, names a PDF or other bytes with their size, and Download writes the
+bytes as a Blob under the response's own Content-Type. Copy is off for such a
+body and the Raw tab prints one line in place of it; Save as example is off for
+any base64 body, since an example's body is UTF-8 text. Both disabled controls
+carry their reason. `binary-body-funnels.test.ts` holds the two funnels together.
 
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind
