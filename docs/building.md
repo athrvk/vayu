@@ -396,6 +396,9 @@ The project uses GitHub Actions for automated builds:
 - **PR Tests**: `.github/workflows/pr-tests.yml`
   - Runs on every pull request
   - Tests engine and frontend on Linux/Windows/macOS
+  - Also runs on a push to `master` that touches the engine, where it only
+    builds the engine matrix: that run is what fills the `master` sccache scope
+    a pull request's first push reads (see below)
   - Lint, formatting and type-check run once, on their own Linux job, rather
     than in front of a suite they cannot affect. That job also runs ESLint over
     the JavaScript outside `app/` (`scripts/perf/*.{mjs,cjs}` today), from the
@@ -421,10 +424,11 @@ The project uses GitHub Actions for automated builds:
   - See [Engine building - Sanitizers](engine/building.md#sanitizers)
 
 - **Warm build cache**: `.github/workflows/cache-warm.yml`
-  - Runs on `master` when `engine/vcpkg.json` or `app/pnpm-lock.yaml` changes,
-    weekly, or on demand
-  - Resolves the vcpkg dependencies and populates the pnpm store for all three
-    platforms, so both exist in the **default-branch cache scope**
+  - Runs on `master` when `VERSION`, `engine/vcpkg.json` or
+    `app/pnpm-lock.yaml` changes, weekly, or on demand
+  - Resolves the vcpkg dependencies, populates the pnpm store and compiles the
+    engine's release configuration for all three platforms, so all three exist
+    in the **default-branch cache scope** a release tag reads
 
 These workflows use the same CMakePresets as local development for consistency.
 
@@ -449,13 +453,26 @@ key. For the same reason `engine/vcpkg.json` carries no `version` field - the
 key hashes that file, so bumping it per release minted a new key every time and
 guaranteed a cold cache exactly at release.
 
-**sccache is deliberately not warmed here.** Its entries would be just as
-unreachable, but warming them means compiling the engine on every triggering
-push, and a release commit cannot use the result anyway: `version.hpp` reaches
-nearly every translation unit through `core/constants.hpp`, so a version bump
-changes the preprocessed text sccache keys on. Narrowing that include is the
-prerequisite; until then a warmed sccache would only help the first run of a
-pull request, at a recurring cost measured in tens of runner-minutes per merge.
+**sccache has two writers on `master`, one per kind of reader.** sccache keys
+each object on its whole compile command - compiler binary, preset and every
+flag - so an entry serves only a build that compiles exactly the same way.
+
+- `cache-warm.yml` compiles the **release** configuration when `VERSION`
+  changes, so a tag build finds its objects warm. That works because the
+  version reaches one translation unit (`core/user_agent.hpp` keeps it behind a
+  declaration, #659), so the rest of the tree is byte-identical across a bump.
+- `pr-tests.yml` builds its own **pull-request** engine matrix on every push to
+  `master` that touches the engine. The pull-request legs compile differently
+  from the release (`-DVAYU_WERROR=ON` on Linux and macOS, `macos-prod` rather
+  than `macos-prod-arm64`, an ubuntu-latest leg), so the release warm-up never
+  served them: the first push of a one-file pull request read 28 hits against
+  371 misses on three legs. Building the same job definition on `master` keeps
+  writer and reader identical by construction. That run builds only - tests,
+  lint and the `CI gate` ran on the pull request.
+
+A pull request still writes its own scope as well, which only its own later
+pushes can read. That keeps a pull request that edits a widely included header
+from compiling it from scratch on every push.
 
 ## Resources
 
