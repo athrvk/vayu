@@ -59,6 +59,7 @@ import {
 	ENGINE_DEFAULT_HEADERS_POINTER,
 	environmentIdInput,
 	LOAD_RUN_SCHEMA_GATE_REFUSAL,
+	requestHeadersInput,
 	scenarioDataInput,
 	dataFileNameInput,
 	dataFileHashInput,
@@ -116,7 +117,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
-			headers: z.record(z.string(), z.string()).optional(),
+			headers: requestHeadersInput,
 			body: z.string().optional().describe("Request body content."),
 			file: inlineFileInput,
 			// The two sibling tools have carried this text since they existed and

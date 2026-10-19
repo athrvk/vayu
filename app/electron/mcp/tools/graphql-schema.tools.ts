@@ -25,7 +25,12 @@ import {
 } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
 import { composeViaEngine, readAuthArg, withMcpOrigin } from "./compose.js";
-import { authInput, collectionIdInput, environmentIdInput } from "./input-schemas.js";
+import {
+	authInput,
+	collectionIdInput,
+	environmentIdInput,
+	requestHeadersInput,
+} from "./input-schemas.js";
 import {
 	introspectionPayload,
 	MAX_SCHEMA_SDL_BYTES,
@@ -64,10 +69,9 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 				),
 			collectionId: collectionIdInput,
 			environmentId: environmentIdInput,
-			headers: z
-				.record(z.string(), z.string())
-				.optional()
-				.describe("Headers to send with `url`, as a string map. Inline form only."),
+			headers: requestHeadersInput.describe(
+				"Headers to send with `url`, as `{name, value}` lines or a string map. Inline form only."
+			),
 			auth: authInput.describe(
 				"Auth block to send with `url` (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it. Inline form only."
 			),

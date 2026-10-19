@@ -40,6 +40,34 @@ import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 
 /**
+ * The `headers` an agent passed: the ordered `[{ name, value }]` lines, a
+ * repeated name sent once per line in order (issue #2466), or the single-valued
+ * `{ name: value }` map, one line per key. Both go to `POST /compose` as given;
+ * it answers lines either way.
+ *
+ * A line that is not an object with a string `name` is refused here by name
+ * rather than forwarded for the engine to refuse without saying which one.
+ */
+function readHeaderOverrides(
+	raw: unknown
+): Record<string, string> | Array<{ name: string; value: string }> | undefined {
+	if (Array.isArray(raw)) {
+		return raw.map((line, index) => {
+			if (!isRecord(line) || typeof line.name !== "string") {
+				throw new ToolArgError(
+					`headers[${index}] must be an object with a string "name" and a "value".`
+				);
+			}
+			return { name: line.name, value: String(line.value) };
+		});
+	}
+	if (!raw || typeof raw !== "object") return undefined;
+	return Object.fromEntries(
+		Object.entries(raw as Record<string, unknown>).map(([key, value]) => [key, String(value)])
+	);
+}
+
+/**
  * The request fields an agent stated directly, raw - and *only* the ones it
  * actually supplied, so this can be laid over a saved request by `POST
  * /compose` without a `method: "GET"` default clobbering its stored verb.
@@ -58,13 +86,8 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
 	if (method !== undefined) out.method = method.toUpperCase();
 	const url = str(args, "url");
 	if (url !== undefined) out.url = url;
-	if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
-		const headers: Record<string, string> = {};
-		for (const [key, value] of Object.entries(args.headers as Record<string, unknown>)) {
-			headers[key] = String(value);
-		}
-		out.headers = headers;
-	}
+	const headers = readHeaderOverrides(args.headers);
+	if (headers !== undefined) out.headers = headers;
 	// Before anything is composed: an inline body is never a file, because
 	// nothing here can stand for the person who has to choose it.
 	if (str(args, "bodyType") === "binary" || args.file !== undefined) {
