@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 // `DEFAULT_USER_AGENT` only, and deliberately *not* "vayu/version.hpp" (issue
 // #659 item 5). This header is reached by essentially every translation unit, so
@@ -964,7 +965,8 @@ constexpr size_t MAX_OPERATIONS = 2000;
 /// stack bound rather than a policy: an OpenAPI document nests tens of levels,
 /// a schema that references itself through `$ref` nests none at all (the
 /// reference is a string), and a document that nests a hundred is being written
-/// at the reader rather than describing an API.
+/// at the reader rather than describing an API. A response body is bounded by
+/// its own `elements::MAX_BODY_DEPTH`, not by this.
 constexpr size_t MAX_READ_DEPTH = 100;
 
 /// Nodes a stored document may expand to when it is read, over and above one
@@ -1229,5 +1231,24 @@ namespace elements {
 /// that step (`extract.json`, `assert.jsonpath`, ...) reports `skipped`
 /// rather than paying for - or failing on - a parse of an oversized body.
 constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
+
+/// Deepest a response body may nest and still be handed to the JSON-reading
+/// kinds (issue #2361). nlohmann's parser is iterative, so a body of any depth
+/// parses; the recursion is in what the kinds do with the tree afterwards
+/// (`dump`, a copy of a matched subtree), and a body of ~100 KB of `[` is enough
+/// to overflow a worker's stack there. A deeper body is dropped as if it were
+/// not JSON. Its own constant rather than `spec_document::MAX_READ_DEPTH`
+/// because the two bound different things: that one is an OpenAPI document's
+/// policy, this one is a stack bound on untrusted server output, and tuning
+/// either should not move the other. Real API responses nest a handful of
+/// levels; 100 leaves them every margin.
+constexpr size_t MAX_BODY_DEPTH = 100;
+
+/// The `skipped` reason every JSON-reading kind reports when
+/// `ensure_parsed_body` returns null. One literal, so the kinds cannot drift
+/// apart on what a skip means. `maxElementBodyBytes` stays in it: the setting
+/// is the one a user can act on, and `element_body_bound_test.cpp` pins it.
+constexpr std::string_view BODY_UNREADABLE_MESSAGE =
+"response body is not JSON, nests too deeply, or exceeds maxElementBodyBytes";
 } // namespace elements
 } // namespace vayu::core::constants
