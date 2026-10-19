@@ -19,16 +19,9 @@ import {
 	withholdRequestUrl,
 } from "../withhold.js";
 import type { McpTool } from "./contract.js";
-import {
-	engineErrorResult,
-	errorResult,
-	jsonResult,
-	str,
-	stringArray,
-	ToolArgError,
-} from "./kit.js";
+import { engineErrorResult, errorResult, jsonResult, stringArray, ToolArgError } from "./kit.js";
 import { boundText } from "./inline-body-bounds.js";
-import { composeViaEngine, readAuthArg, withMcpOrigin } from "./compose.js";
+import { composeViaEngine, readAuthArg, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
 import { authInput, collectionIdInput, environmentIdInput } from "./input-schemas.js";
 import {
 	introspectionPayload,
@@ -88,9 +81,15 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 
 			// Gate on the composed URL before any traffic, as run_request does: the
 			// stored row or a {{variable}} decides the host, not the arguments.
+			let environmentId: string | undefined;
 			let composed: Record<string, unknown>;
 			try {
-				composed = await composeViaEngine(ctx.client, composeBody, signal);
+				environmentId = await resolveEnvironmentId(args, ctx, signal);
+				composed = await composeViaEngine(
+					ctx.client,
+					{ ...composeBody, environmentId },
+					signal
+				);
 			} catch (err) {
 				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
@@ -99,7 +98,7 @@ export const GRAPHQL_SCHEMA_TOOLS: McpTool[] = [
 			const gate = checkAllowlist(url, ctx.config, ctx.host);
 			if (!gate.ok) return errorResult(gate.error!);
 
-			const payload = await introspectionPayload(composed, str(args, "environmentId"));
+			const payload = await introspectionPayload(composed, environmentId);
 			let answer: unknown;
 			try {
 				answer = await ctx.client.executeRequest(withMcpOrigin(payload, ctx), signal);

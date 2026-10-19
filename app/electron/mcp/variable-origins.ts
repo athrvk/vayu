@@ -346,6 +346,15 @@ export const VARIABLE_PRECEDENCE_SENTENCE =
 	"Resolution order (lowest to highest): globals < collection chain (root to leaf) < active environment, with a bound data row's bare column names above all three.";
 
 /**
+ * Which environment a tool resolves against when the call names none (#2480).
+ * One sentence for every tool that takes `environmentId`, so the preview and
+ * the sends cannot come to describe different defaults; `resolveEnvironmentId`
+ * (`tools/compose.ts`) is the rule it describes.
+ */
+export const ENVIRONMENT_DEFAULT_SENTENCE =
+	'An omitted environmentId means the active environment, the one the app\'s Send uses; "none" means no environment, and an unknown id is refused.';
+
+/**
  * The precedence sentence, this tier's own position in it, and the pointer to
  * the full model - the three things every variable tool's description owes an
  * agent that is about to change a value.

@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
-import { VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
+import { ENVIRONMENT_DEFAULT_SENTENCE, VARIABLE_RESOLUTION_URI } from "../variable-origins.js";
 import {
 	runOutputShape,
 	WITHHELD_RUN_OUTPUT_SENTENCE,
@@ -30,7 +30,7 @@ import {
 	watchedRun,
 	withCaveat,
 } from "./kit.js";
-import { composeViaEngine, withMcpOrigin } from "./compose.js";
+import { composeViaEngine, resolveEnvironmentId, withMcpOrigin } from "./compose.js";
 import {
 	elementsTimersInput,
 	ENGINE_DEFAULT_HEADERS_SENTENCE,
@@ -77,7 +77,9 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			environmentId: z
 				.string()
 				.optional()
-				.describe("Environment for variable resolution during execution."),
+				.describe(
+					`Environment whose variables resolve {{templates}} in every request, and whose cookie jar they share. ${ENVIRONMENT_DEFAULT_SENTENCE}`
+				),
 			failOnSchemaError: failOnSchemaErrorInput({
 				unit: "request",
 				defaultsOn: true,
@@ -88,15 +90,19 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		outputSchema: smokeResultSchema,
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
-			const environmentId = str(args, "environmentId");
 			// Absent means the gate stays on - this tool's behaviour since #681.
 			// Read once, before any traffic: it decides how every row is judged,
 			// and a per-row read of one argument could only ever be wrong twice.
 			const failOnSchemaError = args.failOnSchemaError !== false;
+			// Before the per-row loop: inside it, an unknown id would be one failed
+			// row per request rather than the one refusal it is.
+			let environmentId: string | undefined;
 			let requests: unknown;
 			try {
+				environmentId = await resolveEnvironmentId(args, ctx, signal);
 				requests = await ctx.client.listRequests(collectionId, signal);
 			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
 			}
 			const list = Array.isArray(requests) ? requests : [];
@@ -246,7 +252,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Environment whose variables resolve {{templates}} in every step, and whose cookie jar the run uses."
+					`Environment whose variables resolve {{templates}} in every step, and whose cookie jar the run uses. ${ENVIRONMENT_DEFAULT_SENTENCE}`
 				),
 			recursive: scenarioRecursiveInput,
 			// Positive: the engine reads the count as a pass total, so a zero is a
@@ -292,15 +298,16 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 		},
 		handler: async (args, ctx, signal) => {
 			const collectionId = requireStr(args, "collectionId");
-			const environmentId = str(args, "environmentId");
 			const recursive = args.recursive === true;
 			const iterations = typeof args.iterations === "number" ? args.iterations : undefined;
 			const data = Array.isArray(args.data) ? (args.data as unknown[]) : undefined;
 			const dataFileName = str(args, "dataFileName");
 			const dataFileHash = str(args, "dataFileHash");
 
+			let environmentId: string | undefined;
 			let plannedSteps: number;
 			try {
+				environmentId = await resolveEnvironmentId(args, ctx, signal);
 				plannedSteps = await preflightScenarioSteps(
 					{ collectionId, recursive, environmentId },
 					ctx,

@@ -37,6 +37,7 @@ import {
 	ToolArgError,
 } from "./kit.js";
 import { bodyPayload, INLINE_FILE_REFUSAL } from "./request-body.js";
+import { selectEnvironment } from "./variable-blobs.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 
 /**
@@ -143,6 +144,25 @@ export async function composeViaEngine(
 		}
 		throw err;
 	}
+}
+
+/**
+ * The `environmentId` a send composes with: the active environment when the
+ * call names none, nothing for `"none"`, and a {@link ToolArgError} for an id
+ * no environment has (#2480). `POST /compose` degrades an unknown id to an
+ * empty scope, so without this a mistyped id would send every environment
+ * token literally with nothing naming the cause.
+ *
+ * Call it once per tool call, before any compose: a sequence that resolved it
+ * per step would turn one bad argument into one failure per step.
+ */
+export async function resolveEnvironmentId(
+	args: Record<string, unknown>,
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<string | undefined> {
+	const row = await selectEnvironment(ctx, str(args, "environmentId"), signal);
+	return typeof row?.id === "string" ? row.id : undefined;
 }
 
 /**
@@ -516,7 +536,6 @@ export async function composeLoadRunRequest(
 
 	const composeBody: Record<string, unknown> = {
 		collectionId: str(args, "collectionId"),
-		environmentId: str(args, "environmentId"),
 		// This composed payload is repeated once per iteration, per virtual
 		// user, so the `{{$guid}}` family belongs to each repetition, not to
 		// this one-time composition - leave the tokens written as-is and let
@@ -539,6 +558,7 @@ export async function composeLoadRunRequest(
 		composeBody.requestId = savedId;
 		if (Object.keys(overrides).length > 0) composeBody.request = overrides;
 	}
+	composeBody.environmentId = await resolveEnvironmentId(args, ctx, signal);
 
 	const payload = await composeViaEngine(ctx.client, composeBody, signal);
 

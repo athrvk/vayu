@@ -35,6 +35,7 @@ import {
 	readRequestOverrides,
 	readValidationScript,
 	refuseAgentScripts,
+	resolveEnvironmentId,
 	runStreamingRequest,
 	scriptElement,
 	withMcpOrigin,
@@ -141,7 +142,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 		category: "execute",
 		invalidates: ["run", "cookie", "variables"],
 		description:
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved when an environmentId (and/or collectionId) is given, using the same precedence as the app. " +
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain, using the same precedence as the app; the environment's cookie jar is the one the send uses, and its History row names it. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` See ${VARIABLE_RESOLUTION_URI}.` +
 			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. " +
@@ -248,7 +249,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 					{
 						...target,
 						collectionId: str(args, "collectionId"),
-						environmentId: str(args, "environmentId"),
+						environmentId: await resolveEnvironmentId(args, ctx, signal),
 					},
 					signal
 				);

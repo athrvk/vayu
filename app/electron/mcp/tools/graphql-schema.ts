@@ -45,14 +45,14 @@ const INLINE_ONLY_ARGS = ["url", "headers", "auth", "collectionId"] as const;
 /**
  * The `POST /compose` body for the call: the saved request by id, or an
  * inline POST to `url`. Exactly one of the two, because the stored row would
- * silently win over inline fields given beside its id.
+ * silently win over inline fields given beside its id. The environment is the
+ * caller's to add, resolved once for the compose and the introspection send.
  */
 export function schemaComposeBody(
 	args: Record<string, unknown>,
 	auth: Record<string, unknown> | undefined
 ): Record<string, unknown> {
 	const requestId = str(args, "requestId");
-	const environmentId = str(args, "environmentId");
 	if (requestId !== undefined) {
 		const inline = INLINE_ONLY_ARGS.filter((key) => args[key] !== undefined);
 		if (inline.length > 0) {
@@ -60,7 +60,7 @@ export function schemaComposeBody(
 				`${inline.map((key) => `"${key}"`).join(", ")} cannot be combined with "requestId": a saved request is composed as stored, through its own collection, so they would be ignored. Pass "requestId" alone, or "url" for an endpoint with no saved request.`
 			);
 		}
-		return { requestId, environmentId };
+		return { requestId };
 	}
 	const url = str(args, "url");
 	if (url === undefined || url === "") {
@@ -77,7 +77,6 @@ export function schemaComposeBody(
 			...(auth !== undefined ? { auth } : {}),
 		},
 		collectionId: str(args, "collectionId"),
-		environmentId,
 	};
 }
 
