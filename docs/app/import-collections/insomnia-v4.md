@@ -165,7 +165,7 @@ Notes:
 - **OAuth2 `tokenPrefix`** maps to `OAuth2Config.headerPrefix` (absent or empty → `"Bearer"`), matching `map_postman_oauth2`'s `headerPrefix`. Vayu executes OAuth2, so an unread prefix would send `Bearer` and 401 against a server expecting another scheme.
 - **`disabled` takes precedence over `type`.** If `authentication.disabled === true`, the result is `{ mode: "none" }` regardless of `type`. If `authentication` is missing or has no `type` (and is not disabled), the result is `{ mode: "inherit" }`.
 - `oauth2` is mapped to an executable `OAuth2Config` (`map_insomnia_oauth2`) and does **not** count. `digest`/`ntlm`/`iam` are stored as opaque `config` bags (the auth object with `type` and `disabled` removed) and are **not executed** by Vayu - each occurrence increments `meta.nonExecutableAuth`.
-- The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
+- The same `insomniaAuth` is called for **collection-level** auth (workspace/request_group), sharing the same `authCtx`. So a non-executable auth on a workspace or folder also counts toward `nonExecutableAuth`. This is a count per declaration and not per resolved request, which is how [Postman](./postman.md#auth-mapping) counts since #2537; the Insomnia rule is unchanged. For collections, an `inherit` result is coerced to `{ mode: "none" }` (collections can never inherit).
 
 ## Environments
 
