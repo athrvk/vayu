@@ -312,9 +312,9 @@ std::vector<vayu::http::CookieWrite>* writes);
  * never touched still falls through to the run's shared value.
  *
  * The run-local scope (#2564) rides here too, which is what makes it per-VU:
- * it starts each iteration as the base scopes' own `local` (what a
- * `script.setup` left, shared by every VU as the setup's environment writes
- * are) and is cleared with the rest at the iteration boundary.
+ * it starts each iteration empty (a load run's base scopes hold no local,
+ * `run_collection_setup` discards what `script.setup` set) and is cleared with
+ * the rest at the iteration boundary.
  */
 class ScopeOverlay {
     public:

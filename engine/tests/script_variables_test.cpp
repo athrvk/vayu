@@ -370,25 +370,20 @@ TEST_F (ScriptVariablesTest, LocalUnsetAndClearTouchOnlyTheLocalScope) {
 }
 
 // A load VU's local scope rides its `ScopeOverlay` from one step's script to
-// the next, typed, and above the environment on the residual pass's map. A
-// new iteration clears it, back to what the base scopes hold - here a
-// `script.setup`'s local. Mutation check: drop `local` from
+// the next, typed, and above the environment on the residual pass's map; a
+// new iteration clears it. Mutation check: drop `local` from
 // `ScopeOverlay::materialize` and the second step reads `undefined`.
 TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) {
     vayu::http::routes::ScopeOverlay overlay;
     ScriptVariableScopes base;
     base.environment["n"] = vayu::Variable{ "from-env", false, true };
-    base.local["setup"]   = vayu::Variable{ "from-setup", false, true };
 
     scopes_ = overlay.materialize (base);
     run ("pm.variables.set('n', 0);");
     overlay.replace_from (scopes_);
 
     scopes_ = overlay.materialize (base);
-    run (R"JS(
-        pm.expect(pm.variables.get('setup')).to.equal('from-setup');
-        pm.variables.set('n', pm.variables.get('n') + 1);
-    )JS");
+    run ("pm.variables.set('n', pm.variables.get('n') + 1);");
     overlay.replace_from (scopes_);
 
     auto vars = vayu::http::routes::flatten_variable_scopes (base);
@@ -398,10 +393,7 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) 
 
     overlay.clear ();
     scopes_ = overlay.materialize (base);
-    run (R"JS(
-        pm.expect(pm.variables.get('n')).to.equal('from-env');
-        pm.expect(pm.variables.get('setup')).to.equal('from-setup');
-    )JS");
+    run ("pm.expect(pm.variables.get('n')).to.equal('from-env');");
 }
 
 // ---------------------------------------------------------------------------

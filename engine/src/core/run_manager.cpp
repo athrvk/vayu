@@ -1844,6 +1844,10 @@ vayu::http::routes::ScriptVariableScopes& base_scopes) {
     };
     vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
     collection_elements, context->setup_outcomes);
+    // A virtual user's local scope starts empty each iteration (#2564), and
+    // setup is no user's iteration, so its `pm.variables.set` ends with it
+    // rather than reaching every user through the base scopes.
+    base_scopes.local.clear ();
     // `run_setup_script` above binds `base_scopes` by reference and writes a
     // `script.setup`'s `pm.environment.set`/`pm.collectionVariables.set` calls
     // into it in place - so the copies taken before this call

@@ -1549,13 +1549,14 @@ How long it lives is the run that owns it:
 |---|---|
 | A single Send or `POST /execute` (buffered or streaming) | that send: the pre-request script, the send and the test script |
 | A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
-| A scenario load run | one virtual user's iteration: each user holds its own, cleared at its iteration boundary with the user's other writes, and starting from what `script.setup` left |
-| A single-request load run with `requestElements` | one submission, starting from what `script.setup` left |
+| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary with the user's other writes |
+| A single-request load run with `requestElements` | one submission, starting empty |
 | A load run's deferred `tests` replay | the replay pass, shared by every replayed sample the way the replay's other writes are |
 
-Under load, a name `script.setup` set locally comes back at the user's next
-step if a step unsets it, because each step starts again from the run's base
-scopes; the named scopes behave the same way under load.
+Under load, `script.setup` and `script.teardown` belong to no virtual user,
+so what they set with `pm.variables.set` ends with them: setup's local scope is
+discarded before the first submission, and a value every user should start
+from belongs in a named scope instead.
 
 **`pm.variables.replaceIn(template)`** - Postman's `{{name}}` interpolation of
 an arbitrary string - runs the same resolver `POST /compose` uses
