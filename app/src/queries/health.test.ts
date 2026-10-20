@@ -75,6 +75,12 @@ beforeEach(() => {
 	});
 });
 
+// A case that fails mid-way never reaches its own `mockRestore`, and a
+// `Date.now` left pinned would fail every case after it for a reason of its own.
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 describe("useHealthQuery", () => {
 	it("carries a reported recovery into the engine store", async () => {
 		getHealth.mockResolvedValue({
@@ -153,7 +159,18 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		// Mutation check: restore `retry: 1` and the retry succeeds, so the error
 		// state this waits for never arrives.
 		getHealth.mockRejectedValueOnce(new Error("Network error: fetch failed"));
-		getHealth.mockResolvedValue({ status: "ok", version: "1.0.0", workers: 8 });
+		// The engine stays silent until the test says it answers. The startup
+		// poll runs every 100ms on real timers, so an answer available at once
+		// can land between the error state and the assertions below on a slow
+		// runner, and the store reads `connected` before this checks `starting`.
+		let engineAnswers: () => void = () => {};
+		const answered = new Promise<void>((resolve) => {
+			engineAnswers = resolve;
+		});
+		getHealth.mockImplementation(async () => {
+			await answered;
+			return { status: "ok", version: "1.0.0", workers: 8 };
+		});
 
 		const { result } = renderHook(() => useHealthQuery(), { wrapper: wrapperFor(client) });
 		// The query's own state, not the store's: the store starts on `starting`,
@@ -165,6 +182,7 @@ describe("useHealthQuery - an engine that arrives after the window", () => {
 		expect(invalidate).not.toHaveBeenCalled();
 		expect(flushAll).not.toHaveBeenCalled();
 
+		engineAnswers();
 		await act(async () => {
 			await result.current.refetch();
 		});

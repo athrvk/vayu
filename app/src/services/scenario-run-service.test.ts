@@ -215,10 +215,23 @@ const storedReport = {
 };
 
 describe("ScenarioRunService", () => {
+	const appDefaults = queryClient.getDefaultOptions();
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		queryClient.clear();
+		// The report refetch a closing run makes otherwise waits out the app's
+		// real retry backoff, about 3s a case on real timers: most of each case's
+		// budget, spent on a delay none of them is about.
+		queryClient.setDefaultOptions({
+			...appDefaults,
+			queries: { ...appDefaults.queries, retry: false },
+		});
 		resetService();
+	});
+
+	afterEach(() => {
+		queryClient.setDefaultOptions(appDefaults);
 	});
 
 	it("attaches to the stream once per run, with a step handler", () => {

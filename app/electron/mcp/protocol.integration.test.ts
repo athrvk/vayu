@@ -34,6 +34,7 @@ import { PROMPTS } from "./prompts.js";
 import { STATIC_RESOURCES, RUN_REPORT_RESOURCE } from "./resources.js";
 import type { EngineClient } from "./engine-client.js";
 import type { Logger } from "../log.js";
+import { freePort } from "./free-port.testkit.js";
 
 const REPORT = {
 	summary: { totalRequests: 100, errorCount: 1 },
@@ -817,9 +818,8 @@ describe("prompts", () => {
 
 describe("Streamable HTTP host", () => {
 	const HOST = "127.0.0.1";
-	// A fresh port per test avoids TIME_WAIT / socket-reuse races on rapid
-	// start/stop of the same fixed port.
-	let nextPort = 9878;
+	// A fresh port per test, from the OS: a fixed number fails whenever anything
+	// else on the runner holds it.
 	let activePort = 0;
 	let httpServer: McpHttpServer | null = null;
 
@@ -832,7 +832,7 @@ describe("Streamable HTTP host", () => {
 		safety?: Partial<McpSafetyConfig>,
 		extra: Partial<McpHttpServerOptions> = {}
 	) {
-		activePort = nextPort++;
+		activePort = await freePort();
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port: activePort,
@@ -881,6 +881,12 @@ describe("Streamable HTTP host", () => {
 				}
 			);
 			req.on("error", () => resolve({ status: 0, json: undefined }));
+			// The host answers an oversized upload while it is still arriving and
+			// closes the connection once it has drained, so the rest of the write
+			// can fail with EPIPE after the answer was read. By then the request
+			// has let go of its socket, and an error with no listener is an
+			// uncaught exception that fails the whole run.
+			req.on("socket", (socket) => socket.on("error", () => {}));
 			if (data) req.write(data);
 			req.end();
 		});
@@ -1036,7 +1042,6 @@ describe("Streamable HTTP host", () => {
  */
 describe("Streamable HTTP host - real SDK client end-to-end", () => {
 	const HOST = "127.0.0.1";
-	let nextPort = 9895;
 	let httpServer: McpHttpServer | null = null;
 	let client: Client | null = null;
 
@@ -1048,7 +1053,7 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
 	});
 
 	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
-		const port = nextPort++;
+		const port = await freePort();
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port,
@@ -1195,7 +1200,6 @@ describe("Streamable HTTP host - real SDK client end-to-end", () => {
  */
 describe("Streamable HTTP host - 2026-07-28 clients", () => {
 	const HOST = "127.0.0.1";
-	let nextPort = 9930;
 	let httpServer: McpHttpServer | null = null;
 	let service: VayuMcpService | null = null;
 	const clients: Client[] = [];
@@ -1209,7 +1213,7 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 	});
 
 	async function host(opts: { safety?: Partial<McpSafetyConfig>; client?: EngineClient } = {}) {
-		const port = nextPort++;
+		const port = await freePort();
 		httpServer = new McpHttpServer({
 			host: HOST,
 			port,
@@ -1376,7 +1380,7 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 	});
 
 	it("tells a listening client when a Settings change alters tools/list", async () => {
-		const port = nextPort++;
+		const port = await freePort();
 		service = new VayuMcpService({
 			engineBaseUrl: "http://127.0.0.1:1",
 			host: HOST,
@@ -1425,7 +1429,9 @@ describe("Streamable HTTP host - 2026-07-28 clients", () => {
 		const c = await connectTo(port, { modern: true });
 		const subscription = await c.listen({ toolsListChanged: true });
 		const stopped = httpServer!.stop().then(() => "stopped");
-		const waited = new Promise((resolve) => setTimeout(() => resolve("still waiting"), 3000));
+		// A healthy stop takes milliseconds; the bound only has to outlast a
+		// runner that stalls the event loop, not a stream that is never ended.
+		const waited = new Promise((resolve) => setTimeout(() => resolve("still waiting"), 15_000));
 		expect(await Promise.race([stopped, waited])).toBe("stopped");
 		httpServer = null;
 		expect(await subscription.closed).not.toBe("local");

@@ -6,22 +6,11 @@
  */
 
 import http from "node:http";
-import net from "node:net";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { McpListener, type McpRequestHandler } from "./listener.js";
 import { MCP_PATH } from "../constants.js";
 import type { Logger } from "../log.js";
-
-/** A port nothing holds right now, so the fixed MCP port stays out of the tests. */
-function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const probe = net.createServer();
-		probe.listen(0, "127.0.0.1", () => {
-			const { port } = probe.address() as net.AddressInfo;
-			probe.close(() => resolve(port));
-		});
-	});
-}
+import { freePort } from "./free-port.testkit.js";
 
 interface Answer {
 	status: number;

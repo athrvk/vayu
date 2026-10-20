@@ -100,7 +100,9 @@ describe("formatJson", () => {
 		expect(text.length).toBeGreaterThan(2_000_000);
 		const start = performance.now();
 		const out = formatJson(text);
-		expect(performance.now() - start).toBeLessThan(2000);
+		// A quadratic pass over 2MB runs for hours; a linear one measured 1.6s
+		// in a loaded full-suite run, so a tight bound here measured the runner.
+		expect(performance.now() - start).toBeLessThan(20_000);
 		expect(out).toBe(JSON.stringify(JSON.parse(text), null, 2));
 	});
 
