@@ -366,6 +366,17 @@ class Database {
      * visits each collection once.
      */
     std::vector<Request> get_requests_in_subtree (const std::string& root_id);
+    /**
+     * The `order` a row appended under @p parent_id takes: one past the
+     * highest held by a live sibling of either kind, the sub-folders whose
+     * `parent_id` it is and the requests whose `collection_id` it is
+     * (`sibling_order.hpp`, #2535). `std::nullopt` is the roots, which hold
+     * collections only. @p excluded_id is left out of the scan, so a row
+     * asked to reset its own position lands after its *other* siblings
+     * rather than one past itself. `0` for a parent with no live child.
+     */
+    int next_sibling_order (const std::optional<std::string>& parent_id,
+    const std::string& excluded_id = {}); // db_collections.cpp
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
     /// takes them with it.

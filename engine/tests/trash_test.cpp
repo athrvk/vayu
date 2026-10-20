@@ -48,6 +48,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 
 using nlohmann::json;
 
@@ -417,6 +418,49 @@ TEST_F (TrashTest, RestoreReparentsToTheRootWhenTheParentIsInTheTrash) {
     ASSERT_HAS_VALUE (restored);
     EXPECT_FALSE (restored->parent_id.has_value ())
     << "a collection whose parent is gone comes back at the tree root";
+}
+
+// A restore rewrites nothing but the stamp, `order` included, and the append
+// rule counts live siblings only (#2535): a folder created while a request sat
+// in the trash may take its slot. The restored request then ties with it, and
+// the sibling order settles the tie the same way every time, folder first.
+TEST_F (TrashTest, ARestoredRequestKeepsItsOrderAndSortsAfterAFolderThatTookItsSlot) {
+    make_collection ("col_p", "API");
+    make_collection ("col_f", "first", "col_p");
+    make_request ("req_a", "col_p");
+    auto request = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (request);
+    request->order = 1;
+    db_->save_request (*request);
+
+    db_->delete_request ("req_a");
+    auto [status, created] = routes::create_collection_response (
+    *db_, json{ { "name", "second" }, { "parentId", "col_p" } });
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["order"], 1) << "the trashed request's slot is free";
+    ASSERT_HAS_VALUE (db_->restore_deleted ("req_a"));
+
+    const auto restored = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (restored);
+    EXPECT_EQ (restored->order, 1);
+
+    const std::vector<Collection> collections = db_->get_collections ();
+    std::vector<const Collection*> folders;
+    for (const auto& c : collections) {
+        if (c.parent_id == "col_p") {
+            folders.push_back (&c);
+        }
+    }
+    const std::vector<Request> requests =
+    db_->get_requests_in_collection ("col_p");
+    std::vector<std::string> listed;
+    for (const auto& slot : merge_siblings (folders, requests)) {
+        listed.push_back (slot.kind == SiblingKind::Folder ?
+        folders.at (slot.index)->id :
+        requests.at (slot.index).id);
+    }
+    EXPECT_EQ (listed,
+    (std::vector<std::string>{ "col_f", created["id"].get<std::string> (), "req_a" }));
 }
 
 TEST_F (TrashTest, RestoringARequestUnderADeletedCollectionIsRefused) {

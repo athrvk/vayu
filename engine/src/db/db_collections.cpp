@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -82,6 +83,30 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
     if (cols.empty ())
         return std::nullopt;
     return cols.front ();
+}
+
+int Database::next_sibling_order (const std::optional<std::string>& parent_id,
+const std::string& excluded_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    int highest      = -1;
+    const auto raise = [&highest] (const std::unique_ptr<int>& found) {
+        if (found) {
+            highest = std::max (highest, *found);
+        }
+    };
+    if (!parent_id) {
+        raise (impl_->storage.max (&Collection::order,
+        where (c (&Collection::id) != excluded_id &&
+        is_null (&Collection::parent_id) && is_null (&Collection::deleted_at))));
+        return highest + 1;
+    }
+    raise (impl_->storage.max (&Collection::order,
+    where (c (&Collection::id) != excluded_id &&
+    c (&Collection::parent_id) == *parent_id && is_null (&Collection::deleted_at))));
+    raise (impl_->storage.max (&Request::order,
+    where (c (&Request::id) != excluded_id &&
+    c (&Request::collection_id) == *parent_id && is_null (&Request::deleted_at))));
+    return highest + 1;
 }
 
 bool Database::collection_is_trashed (const std::string& id) {

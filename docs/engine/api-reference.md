@@ -323,8 +323,10 @@ to state, and a stated `order` may put a request between two sub-collections.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
-payload's items consecutive slots starting from the append point - see
-[POST /import/apply](#post-importapply).
+payload's items consecutive slots per parent starting from the append point, one
+run across both kinds - the parent's sub-collections first, in payload order,
+then its requests - see [POST /import/apply](#post-importapply). `POST
+/specs/sync` numbers the folders and requests it creates the same way.
 
 **Any writer producing several sibling rows at once owes them distinct
 `order`s** - the import applier is the instance of a general rule, not a special
@@ -1595,8 +1597,8 @@ the null-vs-absent rule.
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
-  "order": 0,                        // Optional, appended after the collection's requests if
-                                      // omitted - see Ordering
+  "order": 0,                        // Optional, appended after the collection's sub-collections
+                                      // and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
@@ -3692,14 +3694,16 @@ accepted a client-supplied `id` - which they no longer do (see
   same defaults and the same null rule - the engine runs the same per-resource
   field appliers for both paths. `id` is **not** accepted here: the engine owns
   ID generation on this path.
-- `order` is optional. For collections, an omitted `order` appends after the
-  existing siblings and then in payload order (each sibling gets the next slot -
-  the per-item default cannot do this in bulk, because none of the payload's own
-  siblings are stored yet). For requests it defaults to `0` on this path only:
-  `POST /requests` appends by scanning the collection's stored rows, which a bulk
-  write cannot do for a collection it is creating in the same call, so a client
-  that cares about request order must state it here. The app's importer does -
-  and deliberately omits `order` on its **root** collections, so an import into a
+- `order` is optional, and a stated one is written as given. An omitted `order`
+  appends after the parent's existing children and then in payload order: each
+  row gets the next slot of its parent (the per-item default cannot do this in
+  bulk, because none of the payload's own siblings are stored yet). A parent's
+  sub-collections and requests share those slots (#2535): the sub-collections
+  that state no `order` take them first, in payload order, and then its
+  requests, so a request with no `order` lands after its folder's
+  sub-collections rather than tied with the first of them. The roots hold
+  collections only. The app's importer states every order below the roots and
+  deliberately omits it on its **root** collections, so an import into a
   non-empty workspace lands after the roots already there instead of colliding
   with their `0, 1, 2...`.
 - A request may carry **`examples`**, an array of
