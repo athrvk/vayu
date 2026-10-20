@@ -1752,7 +1752,7 @@ A load run's captured response headers and bodies are **not** here - they live i
 `Database::get_results` loads every row for a run with no limit and
 `calculate_detailed_report` JSON-parses each `trace_data` on every report fetch of a finished
 run. At ~200 bytes per trace that is free; with bodies inline it would be megabytes read and
-parsed per fetch, to compute aggregates that never look at a body. A run that is not terminal
+parsed per fetch, to compute aggregates that never look at a body. A load run that is not terminal
 yet is read through `Database::get_results_without_traces` instead (#2548), which selects every
 column but `trace_data`, so a report polled while the run is in flight copies and parses no
 trace at all.

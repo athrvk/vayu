@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1985,6 +1986,21 @@ TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
         }
     }
     EXPECT_EQ (live, expected);
+}
+
+// #2548: only a load run is read trace-free. A design or scenario run stores
+// its rows just before the status flips, and a one-shot reader (response
+// restore, the step list) fetching in that gap needs `trace`.
+TEST_F (RunsRouteTest, ARunningScenarioOrDesignRunsReportKeepsItsTraces) {
+    for (const auto type : { vayu::RunType::Scenario, vayu::RunType::Design }) {
+        const std::string id = std::string ("run_traced_") + vayu::to_string (type);
+        seed ({ .id = id, .type = type, .status = vayu::RunStatus::Running, .start_time = 1000 });
+        seed_traced_result (id, 200, 10.0, R"({"dnsMs":1.0})");
+        auto [status, report] = vayu::http::routes::run_report_response (*db_, id);
+        ASSERT_EQ (status, 200);
+        ASSERT_EQ (report["results"].size (), 1u);
+        EXPECT_TRUE (report["results"][0].contains ("trace")) << id;
+    }
 }
 
 TEST_F (RunsRouteTest, ResultsWithoutTracesKeepEveryOtherColumnInIdOrder) {

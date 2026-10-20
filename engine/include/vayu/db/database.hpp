@@ -821,8 +821,8 @@ class Database {
     /**
      * @brief A run's results with every column but `trace_data`, in id order.
      *
-     * What GET /runs/:id/report reads for a run that is not terminal yet
-     * (#2548): its aggregate needs the status, latency and error of each row,
+     * What GET /runs/:id/report reads for a load run that is not terminal
+     * yet (#2548): its aggregate needs the status, latency and error of each row,
      * and the poll that repeats it every few seconds should not copy and parse
      * every stored trace to get them. Each row's `trace_data` comes back empty,
      * which every reader of a `Result` already takes to mean "no trace".
