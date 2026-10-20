@@ -13,9 +13,12 @@
 #include "pm_internal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,6 +40,10 @@ struct ExpectState {
     // the same matcher compares rather than needing matchers of their own.
     bool deep   = false;
     bool nested = false;
+    // Set by reading `.length` / `.lengthOf`, which is chai's `doLength`: the
+    // ordering matchers then compare the target's length (a Map's or Set's
+    // size) instead of the target.
+    bool do_length = false;
     // chai's second argument to `expect(value, message)`, empty when the script
     // passed one argument. Read only by `throw_expect_failure`. The `{}` keeps
     // `create_expectation`'s two-field aggregate init, which assigns this
@@ -812,40 +819,210 @@ OrderingValue js_ordering_value (JSContext* ctx, JSValueConst value, bool& faile
     return out;
 }
 
-// The four ordering matchers differ in one comparison and one word, so they are
-// one function reached by magic rather than four copies - the type assertion
-// above is the same rule in all four, and a fourth copy of it is the one a later
-// fix would miss.
+/**
+ * @brief What `.length` / `.lengthOf` measure on the target.
+ *
+ * chai reads `length`, except on a Map or a Set, which have none and are
+ * measured by `size`. The descriptor travels with the number so a failure says
+ * which of the two it read.
+ */
+enum class LengthRead { Found, Missing, Failed };
+
+struct LengthSubject {
+    LengthRead status      = LengthRead::Missing;
+    double value           = 0;
+    const char* descriptor = "length";
+};
+
+LengthSubject read_length_subject (JSContext* ctx, JSValueConst target) {
+    LengthSubject out;
+    if (JS_IsObject (target) && !JS_IsArray (target)) {
+        bool tag_failed       = false;
+        const std::string tag = js_class_tag (ctx, target, &tag_failed);
+        if (tag_failed) {
+            out.status = LengthRead::Failed;
+            return out;
+        }
+        if (tag == "[object Map]" || tag == "[object Set]") {
+            out.descriptor = "size";
+        }
+    }
+
+    ScopedValue measured (ctx, JS_GetPropertyStr (ctx, target, out.descriptor));
+    // A measurement the read could not produce is neither absent nor a number:
+    // the script's own error is the answer, not "requires a value with a
+    // length" and not a comparison against an uninitialised double.
+    if (JS_IsException (measured.get ())) {
+        out.status = LengthRead::Failed;
+    } else if (JS_IsUndefined (measured.get ())) {
+        out.status = LengthRead::Missing;
+    } else if (JS_ToFloat64 (ctx, &out.value, measured.get ()) < 0) {
+        out.status = LengthRead::Failed;
+    } else {
+        out.status = LengthRead::Found;
+    }
+    return out;
+}
+
+// The throw to propagate when the length could not be read, nothing when it
+// could. @p matcher names the call the script wrote.
+std::optional<JSValue>
+length_read_refusal (JSContext* ctx, const LengthSubject& subject, const char* matcher) {
+    switch (subject.status) {
+    case LengthRead::Found: return std::nullopt;
+    case LengthRead::Failed: return JS_EXCEPTION;
+    case LengthRead::Missing: break;
+    }
+    return JS_ThrowTypeError (ctx, "%s() requires a value with a length", matcher);
+}
+
+// The ordering matchers differ in one comparison and one word, so they are one
+// function reached by magic rather than a copy each - the type assertion above
+// is the same rule in all of them, and another copy of it is the one a later
+// fix would miss. The aliases (`gt`, `greaterThan`, ...) are rows of their own
+// that name the relation they share, so a row is one registered name.
+enum class Relation { Above, Below, AtLeast, AtMost, Within };
+
 struct OrderingMatcher {
     const char* name;
     const char* relation;
+    Relation which;
 };
-constexpr OrderingMatcher ordering_matchers[] = { { "above", "above" },
-    { "below", "below" }, { "least", "at least" }, { "most", "at most" } };
+constexpr auto ordering_matchers = std::to_array<OrderingMatcher> ({
+{ "above", "above", Relation::Above },
+{ "below", "below", Relation::Below },
+{ "least", "at least", Relation::AtLeast },
+{ "most", "at most", Relation::AtMost },
+{ "gt", "above", Relation::Above },
+{ "greaterThan", "above", Relation::Above },
+{ "lt", "below", Relation::Below },
+{ "lessThan", "below", Relation::Below },
+{ "gte", "at least", Relation::AtLeast },
+{ "lte", "at most", Relation::AtMost },
+{ "within", "within", Relation::Within },
+});
 
-// The magic a matcher is registered with is its index in that table, and this
-// switch reads the same index. A fifth entry appended to the table would run as
-// `at.most` through the default arm and read past the table in the lookup, so
-// the count is asserted here rather than trusted: an ordering matcher that
-// silently answered the wrong comparison is the failure this file exists to
-// stop.
-static_assert (std::size (ordering_matchers) == 4,
-"add an arm to ordering_holds and a case below before growing this table");
+// The magic a matcher is registered with is its index in that table, and
+// `expect_ordering` reads the same row back. The count is asserted so that a
+// row added to the table is a decision made here, next to `ordering_holds` and
+// the completion entry every registered name needs, rather than one that
+// registers without either: an ordering matcher that silently answered the
+// wrong comparison is the failure this file exists to stop.
+static_assert (std::size (ordering_matchers) == 11,
+"a new ordering row needs its completion entry, and an arm in ordering_holds "
+"if "
+"it is a new relation");
 
-bool ordering_holds (size_t which, double actual, double expected) {
+// `within` is the one relation with two bounds, both inclusive as in chai.
+constexpr size_t ordering_bound_count (const OrderingMatcher& matcher) {
+    return matcher.which == Relation::Within ? 2 : 1;
+}
+
+bool ordering_holds (Relation which, double actual, double lower, double upper) {
     switch (which) {
-    case 0: return actual > expected;
-    case 1: return actual < expected;
-    case 2: return actual >= expected;
-    case 3: return actual <= expected;
-    default: return false;
+    case Relation::Above: return actual > lower;
+    case Relation::Below: return actual < lower;
+    case Relation::AtLeast: return actual >= lower;
+    case Relation::AtMost: return actual <= lower;
+    case Relation::Within: return actual >= lower && actual <= upper;
     }
+    return false;
+}
+
+// The target and the bounds an ordering matcher compares, already
+// type-checked. `measured` names what was measured (`length` or `size`) under
+// `.length` and is null when the target itself was compared.
+struct OrderingOperands {
+    OrderingValue actual;
+    std::array<OrderingValue, 2> bounds;
+    const char* measured = nullptr;
+};
+
+// The throw for an operand of the wrong kind, nothing when the target and every
+// bound can be compared with one another.
+std::optional<JSValue> refuse_ordering_kinds (JSContext* ctx,
+const OrderingMatcher& matcher,
+const OrderingOperands& operands,
+const ExpectState& state,
+JSValueConst* argv) {
+    if (operands.actual.kind == OrderingKind::NotOrderable) {
+        return JS_ThrowTypeError (ctx, "%s() expects the target to be a number or a Date, got %s",
+        matcher.name, js_type_name (ctx, state.actual));
+    }
+    for (size_t i = 0; i < ordering_bound_count (matcher); i++) {
+        const OrderingValue& bound = operands.bounds.at (i);
+        if (bound.kind == OrderingKind::NotOrderable) {
+            return JS_ThrowTypeError (ctx, "%s() expects a number or a Date, got %s",
+            matcher.name, js_type_name (ctx, argv[i]));
+        }
+        // chai orders like with like: a Date read as milliseconds against a
+        // number is a comparison neither side asked for, so the mixed pair is
+        // refused rather than answered.
+        if (operands.actual.kind != bound.kind) {
+            return JS_ThrowTypeError (ctx,
+            "%s() compares a number with a number and a Date with a "
+            "Date, got %s and %s",
+            matcher.name, ordering_kind_name (operands.actual.kind),
+            ordering_kind_name (bound.kind));
+        }
+    }
+    return std::nullopt;
+}
+
+// Reads the target (its length under `.length`) and the bounds. Answers the
+// throw to propagate when one of them cannot be compared.
+std::optional<JSValue> read_ordering_operands (JSContext* ctx,
+const ExpectState& state,
+const OrderingMatcher& matcher,
+JSValueConst* argv,
+OrderingOperands& operands) {
+    bool failed = false;
+    if (state.do_length) {
+        const LengthSubject length = read_length_subject (ctx, state.actual);
+        if (auto refusal = length_read_refusal (ctx, length, matcher.name)) {
+            return refusal;
+        }
+        operands.actual   = { OrderingKind::Number, length.value };
+        operands.measured = length.descriptor;
+    } else {
+        operands.actual = js_ordering_value (ctx, state.actual, failed);
+    }
+    for (size_t i = 0; i < ordering_bound_count (matcher) && !failed; i++) {
+        operands.bounds.at (i) = js_ordering_value (ctx, argv[i], failed);
+    }
+    if (failed) {
+        return JS_EXCEPTION;
+    }
+    return refuse_ordering_kinds (ctx, matcher, operands, state, argv);
+}
+
+std::string ordering_failure_message (JSContext* ctx,
+const ExpectState& state,
+const OrderingMatcher& matcher,
+const OrderingOperands& operands,
+JSValueConst* argv) {
+    std::string message = "Expected ";
+    if (operands.measured != nullptr) {
+        message += std::string (operands.measured) + " " +
+        js_describe (ctx, JS_NewFloat64 (ctx, operands.actual.value));
+    } else {
+        message += js_describe (ctx, state.actual);
+    }
+    message += state.negated ? " to not be " : " to be ";
+    message += std::string (matcher.relation) + " " + js_describe (ctx, argv[0]);
+    if (matcher.which == Relation::Within) {
+        message += ".." + js_describe (ctx, argv[1]);
+    }
+    return message;
 }
 
 JSValue
 expect_ordering (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
-    const auto& matcher = ordering_matchers[static_cast<size_t> (magic)];
-    if (argc < 1) {
+    const auto& matcher = ordering_matchers.at (static_cast<size_t> (magic));
+    if (argc < static_cast<int> (ordering_bound_count (matcher))) {
+        if (matcher.which == Relation::Within) {
+            return JS_ThrowTypeError (ctx, "within() requires a start and a finish");
+        }
         return JS_ThrowTypeError (ctx, "%s() requires an argument", matcher.name);
     }
 
@@ -854,41 +1031,17 @@ expect_ordering (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    bool failed                = false;
-    const OrderingValue actual = js_ordering_value (ctx, state->actual, failed);
-    const OrderingValue expected =
-    failed ? OrderingValue{} : js_ordering_value (ctx, argv[0], failed);
-    if (failed) {
-        return JS_EXCEPTION;
-    }
-    if (actual.kind == OrderingKind::NotOrderable) {
-        return JS_ThrowTypeError (ctx, "%s() expects the target to be a number or a Date, got %s",
-        matcher.name, js_type_name (ctx, state->actual));
-    }
-    if (expected.kind == OrderingKind::NotOrderable) {
-        return JS_ThrowTypeError (ctx, "%s() expects a number or a Date, got %s",
-        matcher.name, js_type_name (ctx, argv[0]));
-    }
-    // chai orders like with like: a Date read as milliseconds against a number
-    // is a comparison neither side asked for, so the mixed pair is refused
-    // rather than answered.
-    if (actual.kind != expected.kind) {
-        return JS_ThrowTypeError (ctx,
-        "%s() compares a number with a number and a Date with a "
-        "Date, got %s and %s",
-        matcher.name, ordering_kind_name (actual.kind),
-        ordering_kind_name (expected.kind));
+    OrderingOperands operands;
+    if (auto refusal = read_ordering_operands (ctx, *state, matcher, argv, operands)) {
+        return *refusal;
     }
 
-    const bool holds =
-    ordering_holds (static_cast<size_t> (magic), actual.value, expected.value);
-    const bool pass = state->negated ? !holds : holds;
-
+    const bool holds = ordering_holds (matcher.which, operands.actual.value,
+    operands.bounds.at (0).value, operands.bounds.at (1).value);
+    const bool pass  = state->negated ? !holds : holds;
     if (!pass) {
-        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
-        (state->negated ? " to not be " : " to be ") + matcher.relation + " " +
-        js_describe (ctx, argv[0]);
-        return throw_expect_failure (ctx, state, msg);
+        return throw_expect_failure (ctx, state,
+        ordering_failure_message (ctx, *state, matcher, operands, argv));
     }
 
     return expect_chained (ctx, this_val);
@@ -1340,35 +1493,165 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    ScopedValue length_val (ctx, JS_GetPropertyStr (ctx, state->actual, "length"));
-    // A `length` the read could not produce is neither absent nor a number:
-    // the script's own error is the answer, not "requires a value with a
-    // length" and not a comparison against an uninitialised double.
-    if (JS_IsException (length_val.get ())) {
-        return JS_EXCEPTION;
-    }
-    if (JS_IsUndefined (length_val.get ())) {
-        return JS_ThrowTypeError (ctx, "length() requires a value with a length");
+    const LengthSubject subject = read_length_subject (ctx, state->actual);
+    if (auto refusal = length_read_refusal (ctx, subject, "length")) {
+        return *refusal;
     }
 
-    double actual_len = 0, expected = 0;
-    if (JS_ToFloat64 (ctx, &actual_len, length_val.get ()) < 0) {
-        return JS_EXCEPTION;
-    }
+    double expected = 0;
     if (JS_ToFloat64 (ctx, &expected, argv[0]) < 0) {
         return JS_ThrowTypeError (ctx, "length() requires a numeric argument");
     }
 
-    bool matches = (actual_len == expected);
+    bool matches = (subject.value == expected);
     bool pass    = state->negated ? !matches : matches;
 
     if (!pass) {
-        std::string msg = "Expected length " + std::to_string (actual_len) +
-        (state->negated ? " to not equal " : " to equal ") + std::to_string (expected);
+        std::string msg = std::string ("Expected ") + subject.descriptor + " " +
+        js_describe (ctx, JS_NewFloat64 (ctx, subject.value)) +
+        (state->negated ? " to not equal " : " to equal ") +
+        js_describe (ctx, JS_NewFloat64 (ctx, expected));
         return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
+}
+
+// The words `.length` keeps reachable, as chai's chainable method does: the
+// function the getter returns stands in for the expectation, so
+// `.to.have.length.of.at.least(1)` and `.lengthOf.not.above(3)` read as English
+// the way every other chain does. Each forwards to the expectation's own
+// member of that name, so what a word does - setting `not`, say - is defined
+// once, in `create_expectation`. The index is the magic the forwarder is made
+// with.
+constexpr auto length_chain_words = std::to_array<const char*> (
+{ "to", "be", "have", "at", "of", "is", "that", "which", "with", "not" });
+
+JSValue length_chain_call (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)magic;
+    return expect_length (ctx, func_data[0], argc, argv);
+}
+
+JSValue length_chain_ordering (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    return expect_ordering (ctx, func_data[0], argc, argv, magic);
+}
+
+JSValue length_chain_word (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_GetPropertyStr (
+    ctx, func_data[0], length_chain_words.at (static_cast<size_t> (magic)));
+}
+
+/**
+ * `.length` / `.lengthOf` - both the call `length(n)` and the start of a chain.
+ *
+ * chai's is a chainable method: reading it sets `doLength` and what it returns
+ * is callable *and* carries the ordering matchers, so `.to.have.length(3)`,
+ * `.to.have.length.above(2)` and `.to.have.lengthOf.within(1, 3)` are all one
+ * member. A plain property could be only the call, which is why the chained
+ * forms threw "not a function" (#2528).
+ *
+ * The flag is set on the read, not by a matcher, so it stays set for the rest
+ * of the chain exactly as it does in chai.
+ */
+JSValue expect_length_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    state->do_length = true;
+
+    JSValue chain = JS_NewCFunctionData (ctx, length_chain_call, 1, 0, 1, &this_val);
+    if (JS_IsException (chain)) {
+        return chain;
+    }
+
+    // Each member below is created with the expectation as its data, so none
+    // of them reads `this`: `.length.above` is called on the function.
+    int magic = 0;
+    for (const auto& matcher : ordering_matchers) {
+        JS_SetPropertyStr (ctx, chain, matcher.name,
+        JS_NewCFunctionData (ctx, length_chain_ordering, 1, magic, 1, &this_val));
+        magic++;
+    }
+    magic = 0;
+    for (const char* word : length_chain_words) {
+        JSAtom atom = JS_NewAtom (ctx, word);
+        JS_DefinePropertyGetSet (ctx, chain, atom,
+        JS_NewCFunctionData (ctx, length_chain_word, 0, magic, 1, &this_val),
+        JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+        magic++;
+    }
+    return chain;
+}
+
+/**
+ * @brief The name `.a()` / `.an()` compare against, chai's `type-detect` lowered.
+ *
+ * The primitives and the three shapes a script most often asks about keep
+ * their direct reads. Anything else is named by its `Object.prototype.toString`
+ * tag, which is what `type-detect` reports for it: `Date`, `RegExp`, `Map`,
+ * `Set`, `Error`, `Promise`, `Symbol` and `BigInt` become `date`, `regexp`,
+ * `map`, `set`, `error`, `promise`, `symbol` and `bigint`, and a plain object
+ * stays `object` (#2528). Answers nothing, with the exception pending, when
+ * reading the tag threw.
+ */
+std::optional<std::string> expect_type_name (JSContext* ctx, JSValueConst value) {
+    if (JS_IsNull (value)) {
+        return "null";
+    }
+    if (JS_IsUndefined (value)) {
+        return "undefined";
+    }
+    if (JS_IsArray (value)) {
+        return "array";
+    }
+    if (JS_IsString (value)) {
+        return "string";
+    }
+    if (JS_IsNumber (value)) {
+        return "number";
+    }
+    if (JS_IsBool (value)) {
+        return "boolean";
+    }
+    if (JS_IsFunction (ctx, value)) {
+        return "function";
+    }
+
+    bool failed           = false;
+    const std::string tag = js_class_tag (ctx, value, &failed);
+    if (failed) {
+        return std::nullopt;
+    }
+    constexpr std::string_view prefix = "[object ";
+    if (!tag.starts_with (prefix) || !tag.ends_with (']')) {
+        return "object";
+    }
+    return vayu::utils::ascii_lower (
+    tag.substr (prefix.size (), tag.size () - prefix.size () - 1));
 }
 
 JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1381,26 +1664,11 @@ JSValue expect_a (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst*
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    std::string type_name;
-    if (JS_IsNull (state->actual)) {
-        type_name = "null";
-    } else if (JS_IsUndefined (state->actual)) {
-        type_name = "undefined";
-    } else if (JS_IsArray (state->actual)) {
-        type_name = "array";
-    } else if (JS_IsString (state->actual)) {
-        type_name = "string";
-    } else if (JS_IsNumber (state->actual)) {
-        type_name = "number";
-    } else if (JS_IsBool (state->actual)) {
-        type_name = "boolean";
-    } else if (JS_IsFunction (ctx, state->actual)) {
-        type_name = "function";
-    } else if (JS_IsObject (state->actual)) {
-        type_name = "object";
-    } else {
-        type_name = "undefined";
+    const std::optional<std::string> detected = expect_type_name (ctx, state->actual);
+    if (!detected) {
+        return JS_EXCEPTION;
     }
+    const std::string& type_name = *detected;
 
     const std::string expected = vayu::utils::ascii_lower (js_to_string (ctx, argv[0]));
 
@@ -1954,6 +2222,16 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_NewCFunction (ctx, expect_nested_getter, "nested", 0), JS_UNDEFINED, 0);
     JS_FreeAtom (ctx, nested_atom);
 
+    // `length` and `lengthOf` are getters because reading one sets chai's
+    // `doLength` flag; what they return is both the call and the start of the
+    // chain. See `expect_length_getter`.
+    for (const char* name : { "length", "lengthOf" }) {
+        JSAtom atom = JS_NewAtom (ctx, name);
+        JS_DefinePropertyGetSet (ctx, obj, atom,
+        JS_NewCFunction (ctx, expect_length_getter, name, 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+
     // Terminal matchers assert on access (Chai/Postman paren-less idiom), so
     // register them as getters rather than function-valued properties - a bare
     // `.to.be.true` must run the check, not silently return an uncalled function.
@@ -1976,6 +2254,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     // on purpose: chai's `equal` is `===` (reference identity for objects) and
     // `eql` is deep, so aliasing them passes assertions Postman fails.
     JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
+    JS_SetPropertyStr (ctx, obj, "eq", JS_NewCFunction (ctx, expect_equal, "eq", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "equals", JS_NewCFunction (ctx, expect_equal, "equals", 1));
     JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_eql, "eql", 1));
     JS_SetPropertyStr (ctx, obj, "eqls", JS_NewCFunction (ctx, expect_eql, "eqls", 1));
     JS_SetPropertyStr (ctx, obj, "oneOf", JS_NewCFunction (ctx, expect_one_of, "oneOf", 1));
@@ -1988,10 +2269,16 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     ctx, obj, "throws", JS_NewCFunction (ctx, expect_throw, "throws", 1));
     JS_SetPropertyStr (ctx, obj, "instanceOf",
     JS_NewCFunction (ctx, expect_instance_of, "instanceOf", 1));
+    JS_SetPropertyStr (ctx, obj, "instanceof",
+    JS_NewCFunction (ctx, expect_instance_of, "instanceof", 1));
     JS_SetPropertyStr (
     ctx, obj, "closeTo", JS_NewCFunction (ctx, expect_close_to, "closeTo", 2));
+    JS_SetPropertyStr (ctx, obj, "approximately",
+    JS_NewCFunction (ctx, expect_close_to, "approximately", 2));
     JS_SetPropertyStr (
     ctx, obj, "satisfy", JS_NewCFunction (ctx, expect_satisfy, "satisfy", 1));
+    JS_SetPropertyStr (ctx, obj, "satisfies",
+    JS_NewCFunction (ctx, expect_satisfy, "satisfies", 1));
     JS_SetPropertyStr (
     ctx, obj, "string", JS_NewCFunction (ctx, expect_string, "string", 1));
     int ordering_magic = 0;
@@ -2006,12 +2293,14 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_SetPropertyStr (
     ctx, obj, "contain", JS_NewCFunction (ctx, expect_include, "contain", 1));
     JS_SetPropertyStr (
-    ctx, obj, "length", JS_NewCFunction (ctx, expect_length, "length", 1));
+    ctx, obj, "includes", JS_NewCFunction (ctx, expect_include, "includes", 1));
     JS_SetPropertyStr (
-    ctx, obj, "lengthOf", JS_NewCFunction (ctx, expect_length, "lengthOf", 1));
+    ctx, obj, "contains", JS_NewCFunction (ctx, expect_include, "contains", 1));
     JS_SetPropertyStr (ctx, obj, "a", JS_NewCFunction (ctx, expect_a, "a", 1));
     JS_SetPropertyStr (ctx, obj, "an", JS_NewCFunction (ctx, expect_a, "an", 1));
     JS_SetPropertyStr (ctx, obj, "match", JS_NewCFunction (ctx, expect_match, "match", 1));
+    JS_SetPropertyStr (
+    ctx, obj, "matches", JS_NewCFunction (ctx, expect_match, "matches", 1));
     JS_SetPropertyStr (ctx, obj, "property",
     JS_NewCFunction (ctx, expect_have_property, "property", 2));
 

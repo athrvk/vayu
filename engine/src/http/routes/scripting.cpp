@@ -10,6 +10,7 @@
  * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
  */
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <string>
@@ -1991,13 +1992,20 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "to.have.length" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.length(${1:n})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.length(n: number)" },
-    { "documentation", "Assert array or string length.\n\nExample:\npm.expect(items).to.have.length(5);" },
+    { "documentation",
+    "Assert array or string length (a Map's or Set's size). It is also a "
+    "chain: the ordering matchers that follow compare the length instead of "
+    "the value.\n\nExample:\npm.expect(items).to.have.length(5);\n"
+    "pm.expect(items).to.have.length.above(2);" },
     { "sortText", "2_to_have_length" }, { "filterText", ".to.have.length" } });
 
     completions.push_back ({ { "label", "to.have.lengthOf" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.lengthOf(${1:n})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.lengthOf(n: number)" },
-    { "documentation", "Assert array or string length (alias for .to.have.length)." },
+    { "documentation",
+    "Assert array or string length (alias for .to.have.length), and the start "
+    "of the same "
+    "chain.\n\nExample:\npm.expect(items).to.have.lengthOf.at.least(1);" },
     { "sortText", "2_to_have_lengthOf" }, { "filterText", ".to.have.lengthOf" } });
 
     completions.push_back ({ { "label", "to.include" },
@@ -2020,9 +2028,10 @@ nlohmann::json get_script_completions () {
     { "insertText", "to.be.a(\"${1:type}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.a(type: string)" },
     { "documentation",
-    "Assert the value is of a specific "
-    "type.\n\nExample:\npm.expect(name).to.be.a('string');\npm.expect("
-    "count).to.be.a('number');" },
+    "Assert the value is of a specific type, named as chai's type-detect names "
+    "it: string, number, boolean, null, undefined, array, object, function, "
+    "date, regexp, map, set, error, promise, symbol, bigint.\n\nExample:\n"
+    "pm.expect(name).to.be.a('string');\npm.expect(count).to.be.a('number');" },
     { "sortText", "2_to_be_a" }, { "filterText", ".to.be.a" } });
 
     completions.push_back ({ { "label", "to.be.an" }, { "kind", KIND_FUNCTION },
@@ -2165,6 +2174,83 @@ nlohmann::json get_script_completions () {
     "target.\n\nExample:\npm.expect(n).to.satisfy(function(v) { return v % 2 "
     "=== 0; });" },
     { "sortText", "2_to_satisfy" }, { "filterText", ".to.satisfy" } });
+
+    // chai's other spellings of matchers listed above. Each is the same function
+    // under a second name, so an entry says which one and carries the same
+    // shape the full entries do.
+    const auto push_matcher = [&] (const std::string& label, const std::string& signature,
+                              const std::string& snippet_args,
+                              const std::string& documentation) {
+        std::string sort_key = "2_" + label;
+        std::replace (sort_key.begin (), sort_key.end (), '.', '_');
+        completions.push_back ({ { "label", label }, { "kind", KIND_FUNCTION },
+        { "insertText", label + "(" + snippet_args + ")" }, { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", "." + label + "(" + signature + ")" }, { "documentation", documentation },
+        { "sortText", sort_key }, { "filterText", "." + label } });
+    };
+
+    push_matcher ("to.eq", "expected: any", "${1:expected}",
+    "Assert strict equality (alias for .to.equal).");
+    push_matcher ("to.equals", "expected: any", "${1:expected}",
+    "Assert strict equality (alias for .to.equal).");
+    push_matcher ("to.includes", "value: any", "${1:value}",
+    "Assert an array includes the value or a string contains the substring "
+    "(alias for .to.include).");
+    push_matcher ("to.contains", "value: any", "${1:value}",
+    "Assert an array includes the value or a string contains the substring "
+    "(alias for .to.include).");
+    push_matcher ("to.matches", "regex: RegExp", "/${1:pattern}/",
+    "Assert the string matches a regular expression (alias for .to.match).");
+    push_matcher ("to.satisfies", "predicate: (value: any) => boolean",
+    "function(value) { return ${1:true}; }",
+    "Assert the predicate returns a truthy value for the target (alias for "
+    ".to.satisfy).");
+    push_matcher ("to.be.instanceof", "constructor: Function", "${1:Array}",
+    "Assert the value is an instance of a constructor (alias for "
+    ".to.be.instanceOf).");
+    push_matcher ("to.be.approximately", "expected: number, delta: number",
+    "${1:expected}, ${2:delta}",
+    "Assert the number is within delta of expected (alias for .to.be.closeTo). "
+    "The delta is required.");
+
+    const std::string ordering_note =
+    "Both sides must be a number or a Date, as in chai: a string is refused "
+    "rather than coerced.";
+    push_matcher ("to.be.gt", "n: number | Date", "${1:n}",
+    "Assert the number is greater than n (alias for .to.be.above). " + ordering_note);
+    push_matcher ("to.be.greaterThan", "n: number | Date", "${1:n}",
+    "Assert the number is greater than n (alias for .to.be.above). " + ordering_note);
+    push_matcher ("to.be.lt", "n: number | Date", "${1:n}",
+    "Assert the number is less than n (alias for .to.be.below). " + ordering_note);
+    push_matcher ("to.be.lessThan", "n: number | Date", "${1:n}",
+    "Assert the number is less than n (alias for .to.be.below). " + ordering_note);
+    push_matcher ("to.be.gte", "n: number | Date", "${1:n}",
+    "Assert the number is greater than or equal to n (alias for "
+    ".to.be.at.least). " +
+    ordering_note);
+    push_matcher ("to.be.lte", "n: number | Date", "${1:n}",
+    "Assert the number is less than or equal to n (alias for "
+    ".to.be.at.most). " +
+    ordering_note);
+    push_matcher ("to.be.within", "start: number | Date, finish: number | Date",
+    "${1:start}, ${2:finish}",
+    "Assert the number lies between start and finish, both inclusive. " + ordering_note +
+    "\n\nExample:\npm.expect(pm.response.code).to.be.within(200, 299);");
+
+    // `length` and `lengthOf` are chains as well as calls: reading one makes the
+    // ordering matchers compare the target's length (a Map's or Set's size).
+    const std::string length_note =
+    "After .length the ordering matchers (above, below, least, most, within "
+    "and "
+    "their aliases) compare the length instead of the value.";
+    push_matcher ("to.have.length.within", "start: number, finish: number",
+    "${1:start}, ${2:finish}",
+    "Assert the length lies between start and finish, both inclusive. " +
+    length_note + "\n\nExample:\npm.expect(items).to.have.length.within(1, 10);");
+    push_matcher ("to.have.lengthOf.within", "start: number, finish: number",
+    "${1:start}, ${2:finish}",
+    "Assert the length lies between start and finish, both inclusive. " +
+    length_note + "\n\nExample:\npm.expect(items).to.have.lengthOf.within(1, 10);");
 
     completions.push_back ({ { "label", "and" }, { "kind", KIND_FIELD },
     { "insertText", "and" }, { "detail", ".and" },

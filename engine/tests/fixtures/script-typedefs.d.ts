@@ -7,7 +7,7 @@ interface VayuExpectation {
 	 */
 	NaN: VayuExpectation;
 	/**
-	 * Assert the value is of a specific type.
+	 * Assert the value is of a specific type, named as chai's type-detect names it: string, number, boolean, null, undefined, array, object, function, date, regexp, map, set, error, promise, symbol, bigint.
 	 * 
 	 * Example:
 	 * pm.expect(name).to.be.a('string');
@@ -44,6 +44,10 @@ interface VayuExpectation {
 	 * pm.expect(n).to.be.above(0).and.to.be.below(10);
 	 */
 	and: VayuExpectation;
+	/**
+	 * Assert the number is within delta of expected (alias for .to.be.closeTo). The delta is required.
+	 */
+	approximately(expected: number, delta: number): VayuExpectation;
 	at: VayuExpectation;
 	be: VayuExpectation;
 	/**
@@ -78,6 +82,10 @@ interface VayuExpectation {
 	 * Assert array includes value (alias for .to.include).
 	 */
 	contain(value: any): VayuExpectation;
+	/**
+	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
+	 */
+	contains(value: any): VayuExpectation;
 	deep: VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
@@ -90,6 +98,10 @@ interface VayuExpectation {
 	 * Assert the array/string/object is empty.
 	 */
 	empty: VayuExpectation;
+	/**
+	 * Assert strict equality (alias for .to.equal).
+	 */
+	eq(expected: any): VayuExpectation;
 	/**
 	 * Assert deep equality (for objects/arrays). Key order does not matter.
 	 * 
@@ -115,6 +127,10 @@ interface VayuExpectation {
 	 */
 	equal(expected: any): VayuExpectation;
 	/**
+	 * Assert strict equality (alias for .to.equal).
+	 */
+	equals(expected: any): VayuExpectation;
+	/**
 	 * Assert the value is not null or undefined.
 	 */
 	exist: VayuExpectation;
@@ -122,6 +138,18 @@ interface VayuExpectation {
 	 * Assert the value is false.
 	 */
 	false: VayuExpectation;
+	/**
+	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	greaterThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	gt(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than or equal to n (alias for .to.be.at.least). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	gte(n: number | Date): VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -145,12 +173,20 @@ interface VayuExpectation {
 	 */
 	include(value: any): VayuExpectation;
 	/**
+	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
+	 */
+	includes(value: any): VayuExpectation;
+	/**
 	 * Assert the value is an instance of a constructor.
 	 * 
 	 * Example:
 	 * pm.expect(json.items).to.be.instanceOf(Array);
 	 */
 	instanceOf(constructor: Function): VayuExpectation;
+	/**
+	 * Assert the value is an instance of a constructor (alias for .to.be.instanceOf).
+	 */
+	instanceof(constructor: Function): VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -177,16 +213,32 @@ interface VayuExpectation {
 	 */
 	least(n: number | Date): VayuExpectation;
 	/**
-	 * Assert array or string length.
+	 * Assert array or string length (a Map's or Set's size). It is also a chain: the ordering matchers that follow compare the length instead of the value.
 	 * 
 	 * Example:
 	 * pm.expect(items).to.have.length(5);
+	 * pm.expect(items).to.have.length.above(2);
 	 */
-	length(n: number): VayuExpectation;
+	length: ((n: number) => VayuExpectation) & VayuExpectation;
 	/**
-	 * Assert array or string length (alias for .to.have.length).
+	 * Assert array or string length (alias for .to.have.length), and the start of the same chain.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.lengthOf.at.least(1);
 	 */
-	lengthOf(n: number): VayuExpectation;
+	lengthOf: ((n: number) => VayuExpectation) & VayuExpectation;
+	/**
+	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lessThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lt(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than or equal to n (alias for .to.be.at.most). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lte(n: number | Date): VayuExpectation;
 	/**
 	 * Assert the string matches a regular expression.
 	 * 
@@ -194,6 +246,10 @@ interface VayuExpectation {
 	 * pm.expect(email).to.match(/^[\w-]+@[\w-]+\.[a-z]+$/);
 	 */
 	match(regex: RegExp): VayuExpectation;
+	/**
+	 * Assert the string matches a regular expression (alias for .to.match).
+	 */
+	matches(regex: RegExp): VayuExpectation;
 	/**
 	 * Assert the array has the same members in any order. Prefix with `deep` to compare object members by value.
 	 * 
@@ -275,6 +331,10 @@ interface VayuExpectation {
 	 */
 	same: VayuExpectation;
 	/**
+	 * Assert the predicate returns a truthy value for the target (alias for .to.satisfy).
+	 */
+	satisfies(predicate: (value: any) => boolean): VayuExpectation;
+	/**
 	 * Assert the predicate returns a truthy value for the target.
 	 * 
 	 * Example:
@@ -337,6 +397,25 @@ interface VayuExpectation {
 	 * pm.expect(json).to.be.an('object').with.property('id');
 	 */
 	with: VayuExpectation;
+	/**
+	 * Assert the number lies between start and finish, both inclusive. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 * 
+	 * Example:
+	 * pm.expect(pm.response.code).to.be.within(200, 299);
+	 * 
+	 * `to.have.length.within`:
+	 * Assert the length lies between start and finish, both inclusive. After .length the ordering matchers (above, below, least, most, within and their aliases) compare the length instead of the value.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.length.within(1, 10);
+	 * 
+	 * `to.have.lengthOf.within`:
+	 * Assert the length lies between start and finish, both inclusive. After .length the ordering matchers (above, below, least, most, within and their aliases) compare the length instead of the value.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.lengthOf.within(1, 10);
+	 */
+	within(start: number | Date, finish: number | Date): VayuExpectation;
 }
 
 /**

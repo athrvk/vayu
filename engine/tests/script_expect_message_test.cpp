@@ -13,7 +13,7 @@
  * one helper (`throw_expect_failure`) and a matcher that threw around it would
  * be invisible to a test that only checked one matcher. Mutation-check: make
  * that helper ignore `state->message` and `EveryMatcherCarriesTheMessage`
- * fails for all 26 chains, while the boundary tests below stay green.
+ * fails for every chain, while the boundary tests below stay green.
  */
 
 #include <gtest/gtest.h>
@@ -117,6 +117,25 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
     { R"(pm.expect(1, "M").to.be.closeTo(5, 0.1))", "to be within" },
     { R"(pm.expect(1, "M").to.satisfy(function (v) { return v > 2; }))", "satisfy the predicate" },
     { R"(pm.expect("abc", "M").to.have.string("z"))", "to contain" },
+    { R"(pm.expect(1, "M").to.eq(2))", "to equal" },
+    { R"(pm.expect(1, "M").to.equals(2))", "to equal" },
+    { R"(pm.expect([1], "M").to.includes(2))", "to include" },
+    { R"(pm.expect([1], "M").to.contains(2))", "to include" },
+    { R"(pm.expect("abc", "M").to.matches(/z/))", "to match the pattern" },
+    { R"(pm.expect({}, "M").to.be.instanceof(Array))", "instance of" },
+    { R"(pm.expect(1, "M").to.satisfies(function (v) { return v > 2; }))", "satisfy the predicate" },
+    { R"(pm.expect(1, "M").to.be.approximately(5, 0.1))", "to be within" },
+    { R"(pm.expect(1, "M").to.be.gt(2))", "to be above" },
+    { R"(pm.expect(1, "M").to.be.greaterThan(2))", "to be above" },
+    { R"(pm.expect(2, "M").to.be.lt(1))", "to be below" },
+    { R"(pm.expect(2, "M").to.be.lessThan(1))", "to be below" },
+    { R"(pm.expect(1, "M").to.be.gte(2))", "at least" },
+    { R"(pm.expect(3, "M").to.be.lte(2))", "at most" },
+    { R"(pm.expect(5, "M").to.be.within(1, 3))", "to be within 1..3" },
+    { R"(pm.expect([1], "M").to.have.length.above(2))", "Expected length 1 to be above 2" },
+    { R"(pm.expect([1], "M").to.have.lengthOf.at.least(2))", "Expected length 1 to be at least 2" },
+    { R"(pm.expect([1], "M").to.have.length.within(2, 3))", "Expected length 1 to be within 2..3" },
+    { R"(pm.expect(1, "M").to.be.a("date"))", "Expected type number" },
     });
 
     for (const auto& c : cases) {

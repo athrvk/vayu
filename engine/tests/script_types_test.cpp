@@ -408,6 +408,20 @@ TEST (ScriptTypesTest, ObjectFieldsStayIndexable) {
     EXPECT_TRUE (contains (dts, "[key: string]: any;"));
 }
 
+// `length` is a call and a chain at run time (`length(3)`, `length.above(2)`),
+// and the table says so by listing `to.have.length.within` under the call's own
+// entry. Declared as a method alone, `.length.above(2)` would be an editor error
+// for a script that runs; and a member that is only a call must stay one, so the
+// rule is read off the table rather than applied to every function.
+TEST (ScriptTypesTest, ACallTheTableContinuesIsDeclaredAsCallAndChain) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "\tlength: ((n: number) => VayuExpectation) & VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tlengthOf: ((n: number) => VayuExpectation) & VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tabove(n: number | Date): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts,
+    "\twithin(start: number | Date, finish: number | Date): VayuExpectation;"));
+}
+
 // Two entries document an overload in prose TypeScript cannot parse
 // (`upsert({ key, value }) | (name, value)`). Emitting that verbatim would
 // produce a file that does not compile, taking every other declaration with it,

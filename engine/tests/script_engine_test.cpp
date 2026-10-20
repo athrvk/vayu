@@ -53,6 +53,20 @@ class ScriptEngineTest : public ::testing::Test {
         env["api_key"]  = Variable{ "secret123", true, true };
         env["base_url"] = Variable{ "https://api.example.com", false, true };
     }
+
+    /**
+     * Runs one assertion inside a `pm.test`. Answers an empty string when it
+     * held and the report's error text when it did not, so a case can assert
+     * both that it failed and what it said.
+     */
+    std::string verdict_of (const std::string& assertion) {
+        const std::string script = "pm.test(\"t\", function() {\n" + assertion + ";\n});";
+        const auto result = engine.execute_test (script, request, response, env);
+        if (result.tests.size () != 1u) {
+            return "<no test recorded for: " + assertion + ">";
+        }
+        return result.tests[0].passed ? std::string{} : result.tests[0].error_message;
+    }
 };
 
 // ============================================================================
@@ -1410,6 +1424,280 @@ TEST_F (ScriptEngineTest, ExpectOrderingMatchersTypeAssert) {
         EXPECT_NE (result.tests[i].error_message.find ("a Date with a Date"), std::string::npos)
         << result.tests[i].error_message;
     }
+}
+
+// chai spells several matchers two ways, and a script written in either has to
+// run (#2528): each alias is the matcher it names, so each is held to both
+// verdicts and to its `.not` form. A failure must be the assertion failing, not
+// the unknown-member hook ("is not a supported assertion").
+TEST_F (ScriptEngineTest, ChaiAliasesGiveTheirTargetsVerdict) {
+    struct Alias {
+        const char* passes;
+        const char* fails;
+        const char* negated_passes;
+        const char* negated_fails;
+    };
+    const auto aliases = std::to_array<Alias> ({
+    { "pm.expect(1).to.eq(1)", "pm.expect(1).to.eq(2)",
+    "pm.expect(1).to.not.eq(2)", "pm.expect(1).to.not.eq(1)" },
+    { "pm.expect(1).to.equals(1)", "pm.expect(1).to.equals(2)",
+    "pm.expect(1).to.not.equals(2)", "pm.expect(1).to.not.equals(1)" },
+    { "pm.expect([1, 2]).to.includes(2)", "pm.expect([1, 2]).to.includes(3)",
+    "pm.expect([1, 2]).to.not.includes(3)", "pm.expect([1, 2]).to.not.includes(2)" },
+    { "pm.expect('abc').to.contains('b')", "pm.expect('abc').to.contains('z')",
+    "pm.expect('abc').to.not.contains('z')", "pm.expect('abc').to.not.contains('b')" },
+    { "pm.expect('a1').to.matches(/[0-9]/)", "pm.expect('aa').to.matches(/[0-9]/)",
+    "pm.expect('aa').to.not.matches(/[0-9]/)", "pm.expect('a1').to.not.matches(/[0-9]/)" },
+    { "pm.expect([]).to.be.instanceof(Array)", "pm.expect({}).to.be.instanceof(Array)",
+    "pm.expect({}).to.not.be.instanceof(Array)", "pm.expect([]).to.not.be.instanceof(Array)" },
+    { "pm.expect(2).to.satisfies(function (v) { return v > 1; })",
+    "pm.expect(0).to.satisfies(function (v) { return v > 1; })",
+    "pm.expect(0).to.not.satisfies(function (v) { return v > 1; })",
+    "pm.expect(2).to.not.satisfies(function (v) { return v > 1; })" },
+    { "pm.expect(1.04).to.be.approximately(1, 0.05)", "pm.expect(1.2).to.be.approximately(1, 0.05)",
+    "pm.expect(1.2).to.not.be.approximately(1, 0.05)", "pm.expect(1.04).to.not.be.approximately(1, 0.05)" },
+    { "pm.expect(3).to.be.gt(2)", "pm.expect(2).to.be.gt(2)",
+    "pm.expect(2).to.not.be.gt(2)", "pm.expect(3).to.not.be.gt(2)" },
+    { "pm.expect(3).to.be.greaterThan(2)", "pm.expect(2).to.be.greaterThan(2)",
+    "pm.expect(2).to.not.be.greaterThan(2)", "pm.expect(3).to.not.be.greaterThan(2)" },
+    { "pm.expect(1).to.be.lt(2)", "pm.expect(2).to.be.lt(2)",
+    "pm.expect(2).to.not.be.lt(2)", "pm.expect(1).to.not.be.lt(2)" },
+    { "pm.expect(1).to.be.lessThan(2)", "pm.expect(2).to.be.lessThan(2)",
+    "pm.expect(2).to.not.be.lessThan(2)", "pm.expect(1).to.not.be.lessThan(2)" },
+    { "pm.expect(2).to.be.gte(2)", "pm.expect(1).to.be.gte(2)",
+    "pm.expect(1).to.not.be.gte(2)", "pm.expect(2).to.not.be.gte(2)" },
+    { "pm.expect(2).to.be.lte(2)", "pm.expect(3).to.be.lte(2)",
+    "pm.expect(3).to.not.be.lte(2)", "pm.expect(2).to.not.be.lte(2)" },
+    });
+
+    for (const auto& alias : aliases) {
+        EXPECT_EQ (verdict_of (alias.passes), "") << alias.passes;
+        EXPECT_EQ (verdict_of (alias.negated_passes), "") << alias.negated_passes;
+        for (const char* failing : { alias.fails, alias.negated_fails }) {
+            const std::string reported = verdict_of (failing);
+            EXPECT_NE (reported, "") << failing << " passed but should not";
+            EXPECT_EQ (reported.find ("not a supported assertion"), std::string::npos)
+            << failing << " -> " << reported;
+            EXPECT_EQ (reported.find ("not a function"), std::string::npos)
+            << failing << " -> " << reported;
+        }
+    }
+}
+
+// `within` is chai's two-bound ordering matcher and inclusive at both ends. The
+// bounds are the cases that matter: an off-by-one here is a status-class check
+// (`within(200, 299)`) that rejects 299 or admits 300.
+TEST_F (ScriptEngineTest, ExpectWithinIsInclusiveAtBothBounds) {
+    for (const char* passing :
+    { "pm.expect(200).to.be.within(200, 299)", "pm.expect(299).to.be.within(200, 299)",
+    "pm.expect(250).to.be.within(200, 299)", "pm.expect(5).to.be.within(5, 5)",
+    "pm.expect(new Date(5)).to.be.within(new Date(1), new Date(9))",
+    "pm.expect(300).to.not.be.within(200, 299)", "pm.expect(199).to.not.be.within(200, 299)" }) {
+        EXPECT_EQ (verdict_of (passing), "") << passing;
+    }
+
+    for (const char* failing : { "pm.expect(199).to.be.within(200, 299)",
+         "pm.expect(300).to.be.within(200, 299)", "pm.expect(200).to.not.be.within(200, 299)",
+         "pm.expect(299).to.not.be.within(200, 299)",
+         "pm.expect(new Date(10)).to.be.within(new Date(1), new Date(9))" }) {
+        const std::string reported = verdict_of (failing);
+        EXPECT_NE (reported, "") << failing << " passed but should not";
+        EXPECT_NE (reported.find ("AssertionError: Expected"), std::string::npos) << reported;
+    }
+
+    EXPECT_NE (verdict_of ("pm.expect(300).to.be.within(200, 299)").find ("within 200..299"),
+    std::string::npos);
+    EXPECT_NE (verdict_of ("pm.expect(250).to.not.be.within(200, 299)").find ("to not be within"),
+    std::string::npos);
+}
+
+// The same type rules as the other ordering matchers, applied to both bounds,
+// and a call with a bound missing is a mistake in the script rather than a
+// verdict.
+TEST_F (ScriptEngineTest, ExpectWithinTypeAssertsBothBounds) {
+    struct Refusal {
+        const char* assertion;
+        const char* message;
+    };
+    for (const auto& refusal : std::to_array<Refusal> ({
+         { "pm.expect('5').to.be.within(1, 9)", "number or a Date" },
+         { "pm.expect(5).to.be.within('1', 9)", "number or a Date" },
+         { "pm.expect(5).to.be.within(1, '9')", "number or a Date" },
+         { "pm.expect(5).to.be.within(new Date(1), 9)", "a Date with a Date" },
+         { "pm.expect(5).to.be.within(1, new Date(9))", "a Date with a Date" },
+         { "pm.expect(5).to.be.within(1)", "requires a start and a finish" },
+         { "pm.expect(5).to.be.within()", "requires a start and a finish" },
+         })) {
+        const std::string reported = verdict_of (refusal.assertion);
+        EXPECT_NE (reported.find (refusal.message), std::string::npos)
+        << refusal.assertion << " -> " << reported;
+    }
+}
+
+// `length` is a chain as well as a call: reading it makes the ordering matchers
+// compare the length, which is how `.to.have.length.above(2)` and
+// `.lengthOf.at.least(1)` are written in the wild (#2528).
+TEST_F (ScriptEngineTest, LengthChainsCompareTheLength) {
+    for (const char* passing :
+    { "pm.expect([1, 2, 3]).to.have.length.above(2)", "pm.expect([1, 2, 3]).to.have.length.below(4)",
+    "pm.expect([1, 2, 3]).to.have.length.within(3, 3)", "pm.expect([1, 2, 3]).to.have.length.within(1, 3)",
+    "pm.expect([1, 2, 3]).to.have.length.within(3, 9)", "pm.expect([1, 2, 3]).to.have.lengthOf.at.least(3)",
+    "pm.expect([1, 2, 3]).to.have.lengthOf.at.most(3)", "pm.expect([1, 2, 3]).to.have.length.of.at.least(1)",
+    "pm.expect('abcd').to.have.length.gt(3)", "pm.expect('abcd').to.have.length.gte(4)",
+    "pm.expect('abcd').to.have.length.lt(5)", "pm.expect('abcd').to.have.length.lte(4)",
+    "pm.expect('abcd').to.have.length.greaterThan(3)", "pm.expect('abcd').to.have.length.lessThan(5)",
+    "pm.expect([1, 2, 3]).to.not.have.length.above(3)", "pm.expect([1, 2, 3]).to.have.length.not.above(3)",
+    "pm.expect([1, 2, 3]).to.have.length.within(1, 9).and.length(3)",
+    // The call form on the same member still compares exactly.
+    "pm.expect([1, 2, 3]).to.have.length(3)", "pm.expect([1, 2, 3]).to.have.lengthOf(3)",
+    "pm.expect([1, 2, 3]).to.not.have.lengthOf(4)" }) {
+        EXPECT_EQ (verdict_of (passing), "") << passing;
+    }
+
+    for (const char* failing : { "pm.expect([1, 2, 3]).to.have.length.above(3)",
+         "pm.expect([1, 2, 3]).to.have.length.below(3)", "pm.expect([1, 2, 3]).to.have.length.within(4, 9)",
+         "pm.expect([1, 2, 3]).to.have.length.within(1, 2)",
+         "pm.expect([1, 2, 3]).to.have.lengthOf.at.least(4)",
+         "pm.expect([1, 2, 3]).to.have.lengthOf.at.most(2)",
+         "pm.expect('abcd').to.have.length.gt(4)", "pm.expect('abcd').to.have.length.lte(3)",
+         "pm.expect([1, 2, 3]).to.not.have.length.within(1, 9)",
+         "pm.expect([1, 2, 3]).to.have.length.not.below(9)",
+         "pm.expect([1, 2, 3]).to.have.length(2)" }) {
+        const std::string reported = verdict_of (failing);
+        EXPECT_NE (reported, "") << failing << " passed but should not";
+        EXPECT_NE (reported.find ("AssertionError: Expected"), std::string::npos)
+        << failing << " -> " << reported;
+    }
+}
+
+// The length is measured, not the target: an array of three is not above 2 as a
+// value, and the failure says which quantity was compared.
+TEST_F (ScriptEngineTest, LengthChainFailuresSayLength) {
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.have.length.above(5)"),
+    "AssertionError: Expected length 3 to be above 5");
+    EXPECT_EQ (verdict_of ("pm.expect('abc').to.have.lengthOf.at.most(1)"),
+    "AssertionError: Expected length 3 to be at most 1");
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.have.length.within(5, 9)"),
+    "AssertionError: Expected length 3 to be within 5..9");
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.not.have.length.below(9)"),
+    "AssertionError: Expected length 3 to not be below 9");
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.have.length(2)"),
+    "AssertionError: Expected length 3 to equal 2");
+    // Without `.length` the same matcher compares the target, which an array is
+    // not: the chain flag is what changed the answer.
+    EXPECT_NE (verdict_of ("pm.expect([1, 2, 3]).to.be.above(2)").find ("expects the target to be a number or a Date"),
+    std::string::npos);
+}
+
+// chai measures a Map or a Set by `size`, since neither has a `length`.
+TEST_F (ScriptEngineTest, LengthMeasuresAMapOrSetBySize) {
+    for (const char* passing :
+    { "pm.expect(new Map([[1, 1], [2, 2]])).to.have.length(2)",
+    "pm.expect(new Set([1, 2, 3])).to.have.lengthOf(3)",
+    "pm.expect(new Set([1, 2, 3])).to.have.length.above(2)",
+    "pm.expect(new Map([[1, 1]])).to.have.lengthOf.within(1, 1)",
+    "pm.expect(new Set([1])).to.not.have.length.above(1)" }) {
+        EXPECT_EQ (verdict_of (passing), "") << passing;
+    }
+    EXPECT_EQ (
+    verdict_of ("pm.expect(new Set([1, 2, 3])).to.have.length.above(5)"),
+    "AssertionError: Expected size 3 to be above 5");
+    EXPECT_EQ (verdict_of ("pm.expect(new Map([[1, 1]])).to.have.length(2)"),
+    "AssertionError: Expected size 1 to equal 2");
+}
+
+// What is measured has to have a length, and the refusal is the script's
+// mistake - a TypeError - rather than a verdict that `.not` could turn into a
+// pass.
+TEST_F (ScriptEngineTest, LengthChainsRefuseATargetWithNoLength) {
+    for (const char* refused :
+    { "pm.expect(5).to.have.length.above(1)", "pm.expect(5).to.not.have.length.above(1)",
+    "pm.expect({}).to.have.length.within(0, 1)", "pm.expect(5).to.have.length(1)" }) {
+        const std::string reported = verdict_of (refused);
+        EXPECT_NE (reported.find ("requires a value with a length"), std::string::npos)
+        << refused << " -> " << reported;
+    }
+    // Bounds are lengths, so a Date is not one.
+    EXPECT_NE (verdict_of ("pm.expect([1]).to.have.length.above(new Date(1))").find ("a Date with a Date"),
+    std::string::npos);
+    EXPECT_NE (verdict_of ("pm.expect([1]).to.have.length.within(0)").find ("requires a start and a finish"),
+    std::string::npos);
+}
+
+// Each word the length chain forwards must exist on the expectation it forwards
+// to: a word that did not would throw by name the first time it was read.
+TEST_F (ScriptEngineTest, EveryWordAfterLengthIsReadable) {
+    for (const char* word :
+    { "to", "be", "have", "at", "of", "is", "that", "which", "with", "not" }) {
+        // `not` inverts what follows it, so it is read against bounds the
+        // length of one is outside.
+        const std::string bounds = std::string (word) == "not" ? "(5, 9)" : "(0, 9)";
+        const std::string assertion =
+        std::string ("pm.expect([1]).to.have.length.") + word + ".within" + bounds;
+        EXPECT_EQ (verdict_of (assertion), "") << assertion;
+    }
+}
+
+// `.a()` names a type the way chai's type-detect does, lowered. The names the
+// runtime answered before keep their answers; the ones it could not name
+// (everything below the first group) were "object" or, for a symbol, "undefined".
+TEST_F (ScriptEngineTest, ExpectATypeNamesFollowChai) {
+    struct Named {
+        const char* value;
+        const char* type;
+        const char* other_type;
+    };
+    const auto named = std::to_array<Named> ({
+    { "'s'", "string", "number" },
+    { "1", "number", "string" },
+    { "true", "boolean", "string" },
+    { "null", "null", "object" },
+    { "undefined", "undefined", "null" },
+    { "[]", "array", "object" },
+    { "({})", "object", "array" },
+    { "function () {}", "function", "object" },
+    { "new Date(0)", "date", "object" },
+    { "/x/", "regexp", "object" },
+    { "new Map()", "map", "object" },
+    { "new Set()", "set", "object" },
+    { "new Error('e')", "error", "object" },
+    { "new TypeError('e')", "error", "object" },
+    { "Symbol('s')", "symbol", "undefined" },
+    { "10n", "bigint", "number" },
+    { "Promise.resolve(1)", "promise", "object" },
+    });
+
+    for (const auto& n : named) {
+        const std::string positive =
+        std::string ("pm.expect(") + n.value + ").to.be.a('" + n.type + "')";
+        const std::string wrong =
+        std::string ("pm.expect(") + n.value + ").to.be.a('" + n.other_type + "')";
+        const std::string negated =
+        std::string ("pm.expect(") + n.value + ").to.not.be.a('" + n.type + "')";
+        EXPECT_EQ (verdict_of (positive), "") << positive;
+        EXPECT_NE (verdict_of (wrong), "") << wrong << " passed but should not";
+        EXPECT_NE (verdict_of (negated), "") << negated << " passed but should not";
+        EXPECT_EQ (verdict_of (std::string ("pm.expect(") + n.value +
+                   ").to.not.be.a('" + n.other_type + "')"),
+        "")
+        << n.value;
+    }
+
+    EXPECT_EQ (verdict_of ("pm.expect(new Date(0)).to.be.an('Date')"), "");
+    EXPECT_EQ (verdict_of ("pm.expect(1).to.be.a('date')"),
+    "AssertionError: Expected type number to be date");
+    EXPECT_EQ (verdict_of ("pm.expect(new Map()).to.be.an('object')"),
+    "AssertionError: Expected type map to be object");
+}
+
+// A target whose tag cannot be read is a read that did not happen, and `.not`
+// must not turn it into a pass.
+TEST_F (ScriptEngineTest, ExpectATypeFailsLoudWhenTheTagCannotBeRead) {
+    const std::string reported =
+    verdict_of ("var hostile = new Proxy({}, { get: function () { throw new "
+                "Error('from the tag'); } });\n"
+                "pm.expect(hostile).to.not.be.a('date')");
+    EXPECT_NE (reported.find ("from the tag"), std::string::npos) << reported;
 }
 
 // `String(err)` is "Error: boom", so `.to.throw("Error")` passed for every

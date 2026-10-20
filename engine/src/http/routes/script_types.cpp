@@ -743,6 +743,14 @@ const std::vector<ChainEntry>& entries) {
     if (declared != nullptr && declared->kind == KIND_FUNCTION) {
         const Signature sig      = parse_signature (declared->detail, name);
         const std::string params = sig.parsed ? sig.params : "...args: any[]";
+        // A call the table also continues with a longer label - `to.have.length`
+        // beside `to.have.length.within` - is the call *and* the chain, as the
+        // runtime's `length` is (#2528). Typed as a method it would make
+        // `.length.above(2)` an editor error for a script that runs.
+        if (!declared->children.empty ()) {
+            out += "\t" + name + ": ((" + params + ") => " + CHAIN + ") & " + CHAIN + ";\n";
+            return out;
+        }
         out += "\t" + name + "(" + params + "): " + CHAIN + ";\n";
         return out;
     }
