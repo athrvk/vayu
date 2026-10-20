@@ -897,7 +897,13 @@ logged as a warning: it means a client skipped composition.
   `curl_to_error` reports that abort as the same `InvalidUrl` sentence. A new
   driver gets both by going through those two functions, never a check of
   its own. Tests share one registered stand-in (`tests/engine_port_stand_in.hpp`)
-  because the registry is set once per process.
+  because the registry is set once per process. A `$ref` fetch
+  (`POST /import/fetch` with `reference`, #2364) adds `LocalPeerRule` from the
+  same header on the same callback: `ClientConfig::local_peer_rule` reaches the
+  applier as a `ConnectedPeerCheck`, which is `CURLOPT_PREREQDATA` (written on
+  every call, null included, because handles are pooled) and records the
+  refusal `curl_to_error` words. A new address class goes into
+  `loopback_guard.cpp`'s one classifier, never a second copy.
 - **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
   `openssl` feature with `default-features: false`. That does not make Windows
   a single-backend build: the port's `http2` feature depends on `curl[ssl]`,

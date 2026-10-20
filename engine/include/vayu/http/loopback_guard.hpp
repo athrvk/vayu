@@ -27,6 +27,10 @@
  * what catches a redirect and a name that resolves to loopback). With a proxy
  * in force the connected peer is the proxy, so only the first check sees the
  * origin; where a user's proxy forwards to is the user's choice.
+ *
+ * A fetch made on a document's behalf (a `$ref`, #2364) runs a wider rule on
+ * the same callback: `LocalPeerRule` refuses every loopback and link-local
+ * peer that is not the source document's own host and port.
  */
 
 #include <optional>
@@ -80,6 +84,42 @@ std::optional<int> reserved_target_port (const std::string& url);
 /// @p port is. One sentence for the literal and the connected-address
 /// refusal, so the three drivers report a refused target alike.
 std::string reserved_target_refusal (int port);
+
+/**
+ * @brief The connect-time rule for a fetch a document asked for rather than a
+ *        person (#2364): a `$ref` names its URL, so a hostile document could
+ *        point it, by address, by name or by redirect, at a service on the
+ *        user's machine or link-local network.
+ *
+ * Refuses a peer on loopback (`is_reserved_loopback_target`'s spellings, at
+ * any port) or link-local (`169.254.0.0/16`, `fe80::/10`, and the IPv4-mapped
+ * `::ffff:169.254.0.0/16`), unless it is the source's own: the peer's port is
+ * @ref source_port, and either the source host is itself a loopback name or
+ * address (`localhost`, `*.localhost` included) and the peer is loopback, or
+ * the source host is the peer's address written as a literal. A source host
+ * that is a name resolving to loopback earns nothing; it is what a rebinding
+ * DNS answer looks like.
+ */
+struct LocalPeerRule {
+    /// The source document's host as its URL names it (brackets removed from
+    /// an IPv6 literal). Empty when the caller named no source, which refuses
+    /// every loopback and link-local peer.
+    std::string source_host;
+    /// The source URL's port, the scheme default when it names none; 0 with no
+    /// source, which no peer has.
+    int source_port = 0;
+};
+
+/// The rule for a reference found in the document at @p source_url, or
+/// nullopt when that URL names no host.
+std::optional<LocalPeerRule> local_peer_rule_for_source (const std::string& source_url);
+
+/// Whether @p rule refuses a connection to @p peer_ip on @p peer_port. An
+/// address that cannot be read as one is refused: the rule fails closed.
+bool is_refused_local_peer (std::string_view peer_ip, int peer_port, const LocalPeerRule& rule);
+
+/// The sentence a peer `LocalPeerRule` refused reports, for every driver.
+std::string local_peer_refusal ();
 
 namespace detail {
 
