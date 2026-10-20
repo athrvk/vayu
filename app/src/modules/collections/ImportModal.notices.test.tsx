@@ -166,6 +166,28 @@ describe("the import preview's notices", () => {
 		expect(screen.queryByText(/·.*·.*not imported/)).not.toBeInTheDocument();
 	});
 
+	it("warns that a Postman script uses an API Vayu does not run, without blocking the import (#2576)", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Sign in" })] }),
+				],
+				meta: {
+					format: "Postman Collection v2.1",
+					requestCount: 1,
+					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]", "CryptoJS"] }],
+				},
+			})
+		);
+		preview();
+
+		const line = await screen.findByText(
+			"Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)"
+		);
+		expect(line.className).toContain("text-warning-text");
+		expect(screen.getByRole("button", { name: /^Import\b/i })).toBeEnabled();
+	});
+
 	it("announces the preview through one status region and no alert (#2291)", async () => {
 		stubParse(() =>
 			result({

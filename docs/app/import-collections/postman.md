@@ -149,7 +149,7 @@ parameter named `data`) is not reading the global. It is a notice, so it errs
 toward naming too much - an object with a property bare-called `tests[...]` is
 named - and never toward missing a listed name. A disabled event runs nothing
 and names nothing; with `importScripts` off nothing is read. The scripts are
-imported either way: this never blocks or alters the import.
+imported either way: this never blocks or alters the import. The import preview shows it as one amber line naming the requests and the APIs (`Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)`), and the import-scripts toggle is untouched.
 
 ### Saved responses
 

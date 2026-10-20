@@ -359,6 +359,15 @@ export interface ImportMeta {
 	 */
 	nonExecutableAuthRequests?: string[];
 	/**
+	 * Postman requests, folders and collections whose imported scripts use an API
+	 * Vayu does not run (`tests[...]`, `require()`, a bundled library, ...), with
+	 * the names they use (#2576). The scripts import either way; this is what
+	 * the user finds out at import rather than at first run. Set by the Postman
+	 * parser only (`script_api_scan.cpp`), absent when empty; read by
+	 * `importNotices`.
+	 */
+	unsupportedScriptApis?: UnsupportedScriptApis[];
+	/**
 	 * Form-data file parts that arrived without a file to send. An OpenAPI spec
 	 * documents that a field is an upload and never which file it uploads, so the
 	 * row imports complete-but-empty and the user attaches the file. Surfaced in
@@ -368,6 +377,12 @@ export interface ImportMeta {
 	 * them get it from `unattachedFileParts`, which reads the drafts.
 	 */
 	unattachedFileParts: number;
+}
+
+/** One subject of `ImportMeta.unsupportedScriptApis`: a request, or the folder or collection that declares the script. */
+export interface UnsupportedScriptApis {
+	request: string;
+	names: string[];
 }
 
 /**

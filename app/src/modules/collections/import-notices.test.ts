@@ -181,6 +181,71 @@ describe("importNotices", () => {
 		]);
 	});
 
+	describe("scripts that use an API Vayu does not run (#2576)", () => {
+		const scriptApis = (entries: { request: string; names: string[] }[]) =>
+			importNotices(meta({ unsupportedScriptApis: entries }));
+
+		it("names the one request and its APIs, as an action", () => {
+			expect(scriptApis([{ request: "Sign in", names: ["tests[]", "CryptoJS"] }])).toEqual([
+				{
+					tier: "action",
+					text: "Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)",
+				},
+			]);
+		});
+
+		it("counts and names several requests, with the APIs as a deduplicated union", () => {
+			expect(
+				scriptApis([
+					{ request: "Sign in", names: ["tests[]", "CryptoJS"] },
+					{ request: "List users", names: ["tests[]"] },
+				])
+			).toEqual([
+				{
+					tier: "action",
+					text: "2 requests: script uses APIs Vayu does not run yet (tests[], CryptoJS) - Sign in, List users",
+				},
+			]);
+		});
+
+		it("cuts both lists short with how many were left out", () => {
+			const [notice] = scriptApis([
+				{
+					request: "A",
+					names: ["tests[]", "responseBody", "postman.*", "require()", "tv4"],
+				},
+				{ request: "B", names: ["moment"] },
+				{ request: "C", names: [] },
+				{ request: "D", names: [] },
+				{ request: "E", names: [] },
+			]);
+			expect(notice.text).toBe(
+				"5 requests: script uses APIs Vayu does not run yet (tests[], responseBody, postman.*, require(), +2 more) - A, B, C, +2 more"
+			);
+		});
+
+		it("drops the parentheses when an entry names no API", () => {
+			expect(scriptApis([{ request: "Sign in", names: [] }])[0].text).toBe(
+				"Sign in: script uses APIs Vayu does not run yet"
+			);
+		});
+
+		it("says nothing when the member is absent or empty", () => {
+			expect(importNotices(meta())).toEqual([]);
+			expect(scriptApis([])).toEqual([]);
+		});
+
+		it("sits among the other actions, ahead of the notes", () => {
+			const notices = importNotices(
+				meta({
+					skipped: [{ kind: "proxy_config", count: 1 }],
+					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]"] }],
+				})
+			);
+			expect(notices.map((n) => n.tier)).toEqual(["action", "note"]);
+		});
+	});
+
 	it("falls back to the count when the engine named no request", () => {
 		expect(importNotices(meta({ skipped: [{ kind: "unmapped_body", count: 2 }] }))).toEqual([
 			{ tier: "action", text: "2 request bodies not imported (unsupported media type)" },
