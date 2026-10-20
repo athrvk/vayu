@@ -69,7 +69,7 @@ import { responseFromRunResult } from "@/modules/request-builder/utils/restore-r
 import { heldBodySize } from "@/modules/request-builder/utils/response-bytes";
 import { cn } from "@/lib/utils";
 import type { StepOutcome } from "@/types";
-import { tallyTests, type ScenarioStepRow } from "../scenario-steps";
+import { stepsNotRunText, tallyTests, type ScenarioStepRow } from "../scenario-steps";
 
 /**
  * How each outcome reads in the row.
@@ -149,6 +149,7 @@ function ScenarioStepCard({
 	// error that ended the iteration. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
 	const error = step.result?.error;
+	const notRun = stepsNotRunText(step.stepsNotRun);
 
 	// "Iteration 2 · Row 3". The row is shown whenever the run had a data set,
 	// including a single-iteration one, because it is the only place the step
@@ -237,6 +238,14 @@ function ScenarioStepCard({
 			latencyMs={step.latencyMs}
 			timestamp={context}
 			error={error}
+			details={
+				notRun && (
+					// On the step that ended its iteration (issue #2526), live and
+					// stored alike: the error above is one thing and what it cost
+					// the iteration is another.
+					<p className="text-xs text-muted-foreground">Ended this iteration: {notRun}</p>
+				)
+			}
 			phases={phases}
 			isExpanded={isExpanded}
 			onToggle={() => onToggle(step)}

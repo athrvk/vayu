@@ -869,6 +869,19 @@ into its stored snapshot - where `SampledSchemaValidation` reads it back to say
 so. It is never sent on a load payload, whose executor validates after the run
 has drained and cannot demote a step on it.
 
+`stopOnError` follows the same shape (issue #2526): top-level on the design-mode
+payload, from the dialog's **Stop the iteration on a script error** switch,
+**omitted when off** and never sent on a load payload, whose executor does not
+read it. Off, the engine's default, a step whose script threw after its
+exchange completed stays `errored` and the iteration walks on, as in Postman;
+on, every errored step ends its iteration. What an error that did end one cost
+comes back as `stepsNotRun`, which the renderer reads on three layers: the
+report's `scenario.stepsNotRun` (the run tab's header prints "N steps did not
+run" beside the iteration tally), and `stepsNotRun` on the `step` frame and on
+the stored row's trace (the step that ended its iteration prints "Ended this
+iteration: N steps did not run" in its expansion). Each is absent, never `0`,
+when nothing was lost, and a report from before the field has none.
+
 Adding a load `mode` beside the block makes it a **scenario load run** (issue
 #357): the same plan, driven by `concurrency` virtual users on the event loop.
 The *presence* of `mode` is the whole discriminator, so a design-mode payload

@@ -74,6 +74,7 @@ import {
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
+	stepsNotRunText,
 	summarizeSteps,
 	thinningDisclosure,
 	type ScenarioStepRow,
@@ -156,6 +157,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	);
 	const thinned = thinningDisclosure(report);
 	const scenario = report?.scenario;
+	const notRun = stepsNotRunText(scenario?.stepsNotRun);
 
 	const inProgress = isRunInProgress(run.status);
 
@@ -292,6 +294,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 						{scenario.stepsExecuted === 1 ? "" : "s"}
 					</span>
 				)}
+
+				{/* A sibling, not a clause of the tally: a run that did less than
+				    its plan because errors ended iterations should say so beside
+				    the count of what it did, without changing that sentence
+				    (issue #2526). Absent for 0 and for a report that predates it. */}
+				{notRun && <span className="text-xs text-muted-foreground">{notRun}</span>}
 
 				{dataFileName && (
 					<span className="text-xs text-muted-foreground">

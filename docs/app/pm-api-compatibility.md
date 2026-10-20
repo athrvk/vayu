@@ -813,7 +813,9 @@ script that throws (a top-level `pm.response.to.have.status(200)` on a 500
 included) is reported on the step, and the run moves on to the next request -
 Postman's and Newman's default with `stopOnError` unset. The step is `errored`
 with the script's message, never `passed`. The run option `stopOnError: true`
-restores the old rule (Newman's `--bail` shape). One divergence stays: a
+restores the old rule (Newman's `--bail` shape); the Run Collection dialog's
+**Stop the iteration on a script error** switch and `run_collection`'s
+`stopOnError` argument set it. One divergence stays: a
 request that got no response at all still ends the iteration, where Postman
 carries on, because the requests after it nearly always read the response that
 never arrived. A run whose iterations an error cut short says how many steps
