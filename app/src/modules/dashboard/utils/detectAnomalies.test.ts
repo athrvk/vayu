@@ -785,14 +785,14 @@ function windowFrame(previous: LoadTestMetrics, next: LoadTestMetrics, k: number
 }
 
 /**
- * The gate frame for a stored tick: the tick's second in `second_*`, its own
- * `latency_p99_ms` a 30 ms window, and its own `current_rps` the last ~100 ms.
+ * The gate frame for a stored tick: the tick's second in `second_*` and its own
+ * `latency_p99_ms` a 30 ms window. Its `current_rps` is the stored tick's, as
+ * the engine reads both off one trailing window (#2393).
  */
-function gateFrame(m: LoadTestMetrics, ownRps: number): LoadTestMetrics {
+function gateFrame(m: LoadTestMetrics): LoadTestMetrics {
 	return {
 		...m,
 		live: true,
-		current_rps: ownRps,
 		latency_p99_ms: 30,
 		second_samples: 500,
 		second_p50_ms: m.latency_p50_ms,
@@ -804,19 +804,16 @@ function gateFrame(m: LoadTestMetrics, ownRps: number): LoadTestMetrics {
 /**
  * The live stream a stored series was recorded from: nine window frames leading
  * up to each stored tick after the first, then its gate at the tick's elapsed
- * time. `gateRps` is the gate's own 100 ms throughput, which no stored tick holds.
+ * time.
  */
-function liveStream(
-	stored: LoadTestMetrics[],
-	gateRps: (m: LoadTestMetrics, i: number) => number = (m) => m.current_rps
-): LoadTestMetrics[] {
+function liveStream(stored: LoadTestMetrics[]): LoadTestMetrics[] {
 	const frames: LoadTestMetrics[] = [];
 	stored.forEach((m, i) => {
 		const previous = stored[i - 1];
 		if (previous) {
 			for (let k = 1; k < FRAMES_PER_SECOND; k++) frames.push(windowFrame(previous, m, k));
 		}
-		frames.push(gateFrame(m, gateRps(m, i)));
+		frames.push(gateFrame(m));
 	});
 	return frames;
 }
@@ -833,10 +830,6 @@ function recorded(run: LoadTestMetrics[]): LoadTestMetrics[] {
 	let completed = 0;
 	return run.map((m) => ({ ...m, requests_completed: (completed += m.current_rps) }));
 }
-
-/** A gate's own 100 ms throughput dipping to a fifth for two seconds in every eight. */
-const lullingGateRps = (m: LoadTestMetrics, i: number) =>
-	i % 8 >= 6 ? m.current_rps * 0.2 : m.current_rps;
 
 /** A stored run that trips every rule once: a drop, a burst, a spike, then a 5xx. */
 function eventfulRun(): LoadTestMetrics[] {
@@ -862,7 +855,7 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 			"throughput_drop",
 		]);
 
-		const live = liveStream(stored, lullingGateRps);
+		const live = liveStream(stored);
 		expect(detectAnomalies(wholeSecondTicks(live))).toEqual(expected);
 	});
 
@@ -883,11 +876,9 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		expect(found[0]).toMatchObject({ kind: "latency_spike", startSeconds: BASELINE_TICKS });
 	});
 
-	it("restates a gate's throughput over the interval since the previous gate", () => {
-		// The gate's own figure is a 100 ms delta, which lulls two seconds in eight
-		// here; read as it is, that would be a throughput drop every eight seconds.
+	it("reads a gate's own current_rps, the figure its stored row holds (#2393)", () => {
 		const stored = eventfulRun();
-		const series = wholeSecondTicks(liveStream(stored, lullingGateRps));
+		const series = wholeSecondTicks(liveStream(stored));
 
 		expect(series.map((m) => m.current_rps)).toEqual(stored.map((m) => m.current_rps));
 		const drops = detectAnomalies(series).filter((a) => a.kind === "throughput_drop");
@@ -895,32 +886,19 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		expect(drops[0]).toMatchObject({ startSeconds: 25, endSeconds: 27 });
 	});
 
-	it("restates the final gate over its own part of a second", () => {
-		// The final frame closes whatever followed the last gate, here 0.3 s at
-		// the run's steady 500/s, and reports a 100 ms figure of its own.
+	it("keeps the final gate, which closes less than a second", () => {
 		const stored = recorded(healthyRun(30));
 		const last = stored[stored.length - 1];
 		const final = {
-			...gateFrame(last, 40),
+			...gateFrame(last),
 			elapsed_seconds: last.elapsed_seconds + 0.3,
-			requests_completed: last.requests_completed + 150,
 			second_samples: 150,
 		};
 
 		const series = wholeSecondTicks([...liveStream(stored), final]);
 		expect(series).toHaveLength(stored.length + 1);
-		expect(series[series.length - 1].current_rps).toBeCloseTo(500, 6);
+		expect(series[series.length - 1]).toBe(final);
 		expect(detectAnomalies(series)).toEqual([]);
-	});
-
-	it("restates the first gate over the time since the run started", () => {
-		// No gate precedes it, and its stored row is completions over the
-		// elapsed time, not the 100 ms figure the frame carries.
-		const stored = recorded(healthyRun(5));
-		const first = { ...gateFrame(stored[0], 40), elapsed_seconds: 1, requests_completed: 600 };
-
-		const [restated] = wholeSecondTicks([first]);
-		expect(restated.current_rps).toBeCloseTo(600, 6);
 	});
 
 	it("passes a stored series through as it is", () => {
@@ -931,16 +909,13 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 	});
 
 	it("maps a gate to the same object after the gate before it is trimmed", () => {
-		// The detector recognises the next buffer by tick identity, and a gate's
-		// figure depends on the gate before it, which the front trim removes.
-		const live = liveStream(recorded(healthyRun(30)), lullingGateRps);
+		// The detector recognises the next buffer by tick identity.
+		const live = liveStream(recorded(healthyRun(30)));
 		const full = wholeSecondTicks(live);
 		const trimmed = wholeSecondTicks(live.slice(gateIndex(6)));
 
 		expect(trimmed).toHaveLength(full.length - 6);
 		trimmed.forEach((m, i) => expect(m).toBe(full[i + 6]));
-		// Gate 6 lulls on its own figure; it keeps the one it was restated to.
-		expect(trimmed[0].current_rps).toBe(500);
 	});
 });
 
