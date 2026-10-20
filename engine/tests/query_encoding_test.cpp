@@ -239,10 +239,10 @@ TEST_F (PostmanQueryOnTheWire, TheIssuesItemReachesTheServerAsStored) {
 // ---------------------------------------------------------------------------
 // Literal URL text on the wire (issue #2465): a URL that reaches a driver
 // without passing through a substitution (a raw `POST /execute` or
-// `POST /runs` URL, one with no token) has its unsendable bytes encoded by
-// `wire_url`. Mutation check: drop the encoding call in `wire_url`
-// (form_body.cpp) and the first two tests fail: libcurl refuses the space and
-// nothing reaches the server.
+// `POST /runs` URL, one with no token) is written by `wire_url` as Postman
+// writes it. Mutation check: drop the encoding call in `wire_url`
+// (form_body.cpp) and the first three tests fail: libcurl refuses the space,
+// and sends `"`, the braces, `'` and `<` raw.
 // ---------------------------------------------------------------------------
 
 vayu::Request wire_get (const std::string& url, bool disable_url_encoding = false) {
@@ -264,20 +264,34 @@ TEST_F (PostmanQueryOnTheWire, TheLoadDriverEncodesTheSameLiteralBytes) {
     vayu::http::EventLoop loop;
     loop.start ();
     auto result =
-    loop.submit_async (wire_get (server_->url () + "/a b?q=é")).future.get ();
+    loop.submit_async (wire_get (server_->url () + "/a b{c}?q='é")).future.get ();
     loop.stop ();
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
-    EXPECT_EQ (server_->target (), "/echo/a%20b?q=%C3%A9");
+    EXPECT_EQ (server_->target (), "/echo/a%20b%7Bc%7D?q=%27%C3%A9");
 }
 
-// Every byte libcurl already sends goes out exactly as before.
-TEST_F (PostmanQueryOnTheWire, AUrlThatSentBeforeIsSentByteForByte) {
-    for (const std::string suffix :
-    { "/a\"b?q=a\"b", "/{a}?q={}", "/a\\b?q=a\\b", "/%41?q=%41", "/a+b?q=a+b" }) {
+TEST_F (PostmanQueryOnTheWire, PostmansBytesReachTheServerEncoded) {
+    auto result = client_->send (wire_get (server_->url () + "/a\"b{c}?q='<x>"));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (server_->target (), "/echo/a%22b%7Bc%7D?q=%27%3Cx%3E");
+}
+
+// An escape and every byte no Postman set holds go out exactly as typed, so a
+// pre-signed URL's signature is untouched.
+TEST_F (PostmanQueryOnTheWire, AnEscapeAndAnUnlistedByteAreSentByteForByte) {
+    for (const std::string suffix : { "/%41?q=%41", "/a+b?q=a+b", "/p'|!?q=`{}|",
+         "/k?X-Amz-Credential=AK%2F20261020&X-Amz-Signature=ab%2Bcd%3D" }) {
         auto result = client_->send (wire_get (server_->url () + suffix));
         ASSERT_TRUE (result.is_ok ()) << suffix << ": " << result.error ().message;
         EXPECT_EQ (server_->target (), "/echo" + suffix);
     }
+}
+
+// The toggle hands libcurl the URL as typed, and it sends these bytes raw.
+TEST_F (PostmanQueryOnTheWire, DisableUrlEncodingSendsPostmansBytesAsTyped) {
+    auto result = client_->send (wire_get (server_->url () + "/a\"b{c}?q='<x>", true));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (server_->target (), "/echo/a\"b{c}?q='<x>");
 }
 
 // The toggle sends the URL as typed, and libcurl refuses a raw space: the
@@ -317,7 +331,7 @@ TEST_F (PostmanQueryOnTheWire, TheLoadDriverNamesTheSpaceTheToggleLeftInTheUrl) 
 TEST (QueryEncodingConformance, EverySubstitutionIsWrittenByTheRuleOfItsComponent) {
     const json fixture = load_fixture ();
     const json& cases  = fixture.at ("substitutions").at ("cases");
-    ASSERT_GT (cases.size (), 10U);
+    ASSERT_GT (cases.size (), 45U);
     for (const json& c : cases) {
         vayu::http::VariableValues vars;
         for (const auto& [name, value] : c.at ("variables").items ()) {
@@ -370,7 +384,8 @@ class SendTimeQueryValues : public PostmanQueryOnTheWire {
             ADD_FAILURE () << payload.dump ();
             return {};
         }
-        return send (payload.at ("url").get<std::string> ());
+        return send (payload.at ("url").get<std::string> (),
+        !payload.value ("disableUrlEncoding", false));
     }
 
     std::string send (const std::string& url, bool encode = true) {

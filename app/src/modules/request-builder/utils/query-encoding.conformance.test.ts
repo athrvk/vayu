@@ -14,7 +14,8 @@
  * The Params table writes the URL the engine then sends verbatim, and the
  * snippets append an API key the engine appends on send, so a case answered
  * two ways is a table edit that sends another query than an import of the same
- * rows would.
+ * rows would. The substitution cases hold the whole URL line (issue #2465):
+ * the Sends line and the snippets show what the engine's `wire_url` sends.
  */
 
 import { describe, it, expect } from "vitest";
@@ -60,7 +61,7 @@ describe("query encoding conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
 		expect(fixture.components.length).toBeGreaterThan(20);
 		expect(fixture.queries.length).toBeGreaterThan(10);
-		expect(fixture.substitutions.cases.length).toBeGreaterThan(10);
+		expect(fixture.substitutions.cases.length).toBeGreaterThan(45);
 	});
 
 	it.each(fixture.components.map((c) => [c.name, c] as const))("component: %s", (_name, c) => {

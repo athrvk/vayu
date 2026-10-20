@@ -30,6 +30,7 @@ import { substitutePathVariables } from "@/modules/request-builder/utils/path-va
 import {
 	encodeAtUrlComponent,
 	encodeQueryComponent,
+	resolveUrlTemplate,
 } from "@/modules/request-builder/utils/query-encoding";
 import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
@@ -402,10 +403,16 @@ export function prepareRequest(
 	// Path variables first, as the engine composes them (issue #1764), so a
 	// query-located API key appended below lands after the substituted path.
 	// Raw under `disableUrlEncoding` (issue #1765), as the engine substitutes.
+	// Then the URL written as Send puts it on the wire (issue #2465): the
+	// `{{token}}`s stay (a snippet is templated), the literal text around them
+	// is encoded and the host lowercased, so the snippet carries the line Vayu
+	// sends and not the one typed.
 	const encode = request.disableUrlEncoding !== true;
-	let url = substitutePathVariables(request.url ?? "", request.params ?? [], undefined, {
-		encode,
-	});
+	let url = resolveUrlTemplate(
+		substitutePathVariables(request.url ?? "", request.params ?? [], undefined, { encode }),
+		(text) => text,
+		{ encode }
+	);
 	const headers = headerPairs(request.headers);
 	let basicAuth: { username: string; password: string } | null = null;
 

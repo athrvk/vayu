@@ -100,20 +100,4 @@ enum class UrlComponent : std::uint8_t {
 [[nodiscard]] std::string
 encode_at_url_component (std::string_view value, UrlComponent& where);
 
-/**
- * @brief Literal URL text at @p where, which is advanced past it, with only
- *        the bytes no request target may carry raw percent-encoded.
- *
- * `is_unsendable_url_byte` outside the head: space, the C0 controls, DEL and
- * every byte above `~`, so `/a b?q=é` sends `/a%20b?q=%C3%A9` (issue #2465).
- * Every other byte is kept, so a URL libcurl sent before is sent byte for
- * byte (`"`, `{`, `}`, `\`, `+` and an escape such as `%41` go out as typed),
- * and since every Postman set contains these bytes, text a substitution
- * already encoded passes unchanged. The head is kept for the reason
- * @ref encode_at_url_component keeps it, and every whole `{{...}}` token is
- * kept verbatim. `disableUrlEncoding` is the caller's to honour.
- */
-[[nodiscard]] std::string
-encode_literal_at_url_component (std::string_view text, UrlComponent& where);
-
 } // namespace vayu::core

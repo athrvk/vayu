@@ -779,8 +779,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // neither the enclosing request's `disableUrlEncoding` nor anything the
     // script passes turns this off.
     //
-    // Send's `wire_url` encodes a subset of what a script's URL gets, so the
-    // whole-URL pass stays here (#2465).
+    // `wire_url` writes the same line again (the encoder is idempotent); it
+    // is written here too so the reserved-port check below reads the host the
+    // transfer will dial, leading whitespace dropped and lowercased (#2465).
     request.url = vayu::core::encode_url_as_postman (request.url);
     // The engine's own composition rather than a second copy of it: a header
     // the script set still wins, and an api key sent as a query parameter is

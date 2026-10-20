@@ -13,7 +13,7 @@
 #include <string_view>
 
 #include "vayu/core/postman_encode_sets.hpp"
-#include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
@@ -237,9 +237,40 @@ std::optional<std::string> graphql_url_transport (const Request& request) {
     return graphql_get_parameters (request.body.content);
 }
 
-bool has_unsendable_byte (std::string_view url) {
-    return std::ranges::any_of (url, [] (char ch) {
-        return vayu::core::is_unsendable_url_byte (static_cast<unsigned char> (ch));
+/// A byte some Postman set encodes in the component it can sit in, or a
+/// backslash the encoder makes a `/` before the query. `#` and `?` are in the
+/// sets but are structure wherever the encoder meets them.
+bool is_postman_rewritten_byte (unsigned char byte) {
+    if (byte == '#' || byte == '?') {
+        return false;
+    }
+    return byte == '\\' || vayu::core::in_postman_path_encode_set (byte) ||
+    vayu::core::in_postman_query_encode_set (byte);
+}
+
+/// Whether the authority holds user info (written by the wider user-info set)
+/// or an uppercase letter (the host is lowercased). The authority is found as
+/// `encode_url_as_postman` finds it: after the first `://` before the query
+/// and any further slashes, else from the start, up to the next `/`.
+bool authority_is_rewritten (std::string_view url) {
+    const std::string_view head  = url.substr (0, url.find_first_of ("?#"));
+    const std::size_t scheme_end = head.find ("://");
+    std::size_t begin            = 0;
+    if (scheme_end != std::string_view::npos) {
+        begin = std::min (head.find_first_not_of ('/', scheme_end + 3), head.size ());
+    }
+    const std::string_view authority = head.substr (begin, head.find ('/', begin) - begin);
+    return std::ranges::any_of (
+    authority, [] (char ch) { return ch == '@' || (ch >= 'A' && ch <= 'Z'); });
+}
+
+/// False only when `core::encode_url_as_postman` would return @p url
+/// unchanged; a true answer costs no more than the encoder's copy. A `{{...}}`
+/// token answers true through its braces, so the encoder's token rule is
+/// never second-guessed here.
+bool postman_would_rewrite (std::string_view url) {
+    return authority_is_rewritten (url) || std::ranges::any_of (url, [] (char ch) {
+        return is_postman_rewritten_byte (static_cast<unsigned char> (ch));
     });
 }
 
@@ -280,16 +311,14 @@ std::string wire_url (const Request& request) {
     if (request.disable_url_encoding) {
         return url;
     }
-    // Runs once per request on the load path, and almost every URL is already
-    // sendable: the literal set is a subset of the unsendable bytes, so a URL
-    // with none of them is returned as is, without the encoder's copy.
-    if (!has_unsendable_byte (url)) {
+    // Runs once per request on the load path, where almost every URL is
+    // already what the encoder would write, so that URL skips its copy.
+    if (!postman_would_rewrite (url)) {
         return url;
     }
     // Here and not only at composition: a raw `POST /execute` or `POST /runs`
-    // URL, and one with no token, never passes through a substitution.
-    auto where = vayu::core::UrlComponent::Head;
-    return vayu::core::encode_literal_at_url_component (url, where);
+    // URL and a script's `pm.request.url` edit never pass through it.
+    return vayu::core::encode_url_as_postman (url);
 }
 
 bool content_type_is_engine_owned (const Body& body) {

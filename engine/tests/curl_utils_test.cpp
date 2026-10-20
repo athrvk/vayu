@@ -14,7 +14,13 @@
 #include <string>
 
 #include "optional_assert.hpp"
+#include "vayu/http/client.hpp"
+#include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/event_loop/event_loop_worker.hpp"
+#include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/sse_stream.hpp"
+#include "vayu/http/transport_policy.hpp"
 
 using vayu::http::detail::apply_phase_timings;
 using vayu::http::detail::curl_to_error;
@@ -545,4 +551,88 @@ TEST (CurlToError, ATargetsVerificationFailureDoesNotBlameTheProxy) {
         EXPECT_EQ (error.message.find ("proxy"), std::string::npos) << error.message;
     }
     curl_easy_cleanup (curl);
+}
+
+// ============================================================================
+// The host and port beside the transfer are the ones it dials (#2465)
+// ============================================================================
+//
+// With encoding on, `wire_url` drops a URL's leading whitespace, so the typed
+// `" https://localhost/x"` names no scheme (port 80) while the transfer dials
+// `https://localhost/x` on 443. The DNS pin and the client-certificate match must key
+// on the second. Mutation-check: pass `request.url` instead of the wire URL to
+// `parse_authority` in `setup_easy_handle`, or to `apply_transport_policy` in
+// `Client::send` or `consume_sse_stream`, and the matching case reads port 80.
+
+constexpr const char* LEADING_SPACE_HTTPS = " https://localhost/x";
+
+TEST (WireAuthority, TheDnsPinKeysOnTheSchemeTheWireSends) {
+    vayu::http::detail::DnsCache cache (
+    [] (const std::string&) { return std::string ("10.0.0.1"); });
+    vayu::http::EventLoopConfig config;
+    config.dns_cache_timeout = 300;
+
+    vayu::http::detail::TransferData data;
+    data.request.method = vayu::HttpMethod::GET;
+    data.request.url    = LEADING_SPACE_HTTPS;
+    CURL* curl = vayu::http::detail::setup_easy_handle (nullptr, &data, config, &cache);
+    ASSERT_NE (curl, nullptr);
+    ASSERT_NE (data.resolve_list, nullptr) << "the host was never pinned";
+    EXPECT_STREQ (data.resolve_list->data, "localhost:443:10.0.0.1");
+    curl_easy_cleanup (curl);
+}
+
+class WireAuthorityTransfer : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        vayu::http::global_init ();
+    }
+
+    void TearDown () override {
+        vayu::http::global_cleanup ();
+    }
+
+    /// A registry answering only for `localhost:443`, behind a proxy nothing
+    /// listens on: the match is made while the handle is configured, and the
+    /// refused proxy ends the transfer before anything reaches port 443.
+    static vayu::http::TransportPolicy port_443_only () {
+        vayu::http::TransportPolicy policy;
+        policy.proxy_mode = vayu::http::ProxyMode::Manual;
+        policy.proxy_url  = "http://127.0.0.1:1";
+        vayu::http::ClientCertRule rule;
+        rule.id        = "cert_443";
+        rule.host      = "localhost";
+        rule.port      = 443;
+        rule.cert_path = "unread-cert.pem";
+        rule.key_path  = "unread-key.pem";
+        policy.client_certificates.push_back (rule);
+        return policy;
+    }
+
+    static vayu::Request leading_space_get () {
+        vayu::Request request;
+        request.method     = vayu::HttpMethod::GET;
+        request.url        = LEADING_SPACE_HTTPS;
+        request.timeout_ms = 5000;
+        return request;
+    }
+};
+
+TEST_F (WireAuthorityTransfer, SendMatchesTheCertificateOnThePortTheWireDials) {
+    vayu::http::ClientConfig config;
+    config.transport = port_443_only ();
+    const auto result = vayu::http::Client{ config }.send (leading_space_get ());
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().client_certificate, "localhost:443")
+    << result.value ().error_message;
+}
+
+TEST_F (WireAuthorityTransfer, AStreamMatchesTheCertificateOnThePortTheWireDials) {
+    vayu::http::SseStreamRequest spec;
+    spec.run_id    = "run_wire_authority";
+    spec.request   = leading_space_get ();
+    spec.transport = port_443_only ();
+    vayu::http::SseStreamContext context (spec.run_id, spec.limits);
+    const vayu::Response response = vayu::http::consume_sse_stream (spec, context);
+    EXPECT_EQ (response.client_certificate, "localhost:443") << response.error_message;
 }

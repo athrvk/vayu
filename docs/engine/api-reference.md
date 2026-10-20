@@ -1715,7 +1715,7 @@ null-vs-absent rule (absent keeps on update, `null` resets):
 - `disableUrlEncoding` writes the URL as typed rather than percent-encoded:
   a path variable's value skips Postman's path encode set, an api-key (or
   OAuth 2.0 query-placed) credential and a substituted `{{variable}}` skip
-  their rules, and the literal text keeps its spaces and non-ASCII bytes
+  their rules, and the rest of the URL is not rewritten either
   ([Query encoding](#query-encoding)), so `a"b` goes out as `a"b`, not
   `a%22b`, as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
   encoding on, a raw space is percent-encoded to `%20`; with the toggle on
@@ -5809,20 +5809,44 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 
 #### Query encoding
 
-A stored URL is sent as stored with one exception: with `disableUrlEncoding`
-off, the bytes no HTTP request target may carry raw are percent-encoded
-outside the scheme and the authority (issue #2465,
-`core::encode_literal_at_url_component`): space, the C0 controls, DEL and
-every byte above `~` (each UTF-8 byte). So `GET http://h/a b?q=é` goes out as
-`GET /a%20b?q=%C3%A9`, where libcurl would refuse the space and send the `é`
-raw. Every other byte is sent as typed (`"`, `{`, `}`, `\`, `+`, `|` and an
-escape such as `%41`), so a URL that sent before sends the same bytes, and a
-non-ASCII host is still dialled by its punycode name. The rule is applied
-where every driver takes its URL (`wire_url`) and by composition, so
-`POST /compose` answers the URL that will be sent. With `disableUrlEncoding`
-on the URL goes out exactly as typed, and libcurl refuses a raw space: the
-send fails with status `0` and error code `INVALID_URL`, and a message that
-names the space and the toggle
+With `disableUrlEncoding` off, a URL is sent as Postman sends it, by every
+writer: Send, a load or collection run, a streaming request, MCP and
+`pm.sendRequest` put out one request line for one URL (issue #2465,
+`core::encode_url_as_postman` in `core/url_encoding.hpp`, after
+`postman-url-encoder` 3.0.8's `toNodeUrl`). Each component is percent-encoded
+by its own Postman set, every one of which holds the C0 controls, space, DEL
+and every byte above `~` (each UTF-8 byte):
+
+- the path by `PATH_ENCODE_SET`, which adds `"`, `<`, `>`, backtick, `{` and
+  `}`;
+- the query by `QUERY_ENCODE_SET`, which adds `"`, `'`, `<` and `>` (a
+  backtick, the braces and a backslash are not in it);
+- the fragment by `FRAGMENT_ENCODE_SET`, which adds `"`, `<`, `>` and
+  backtick;
+- user info by `USERINFO_ENCODE_SET`, the path set plus
+  `/ : ; = @ [ \ ] ^ |`, with the last `@` ending it.
+
+Two normalisations come with it: a backslash before the query becomes `/`, and
+the host is lowercased and a non-ASCII one written by its punycode name
+([Non-ASCII hosts](#non-ascii-hosts)). Leading whitespace is dropped, as
+Postman's parser drops it. So `GET http://H/a"b{c}?q='<x>` goes to host `h` as
+`GET /a%22b%7Bc%7D?q=%27%3Cx%3E`, and `GET http://h/a b?q=é` as
+`GET /a%20b?q=%C3%A9`. `%` is in no set, so an escape such as `%41` is sent as
+typed and nothing is encoded twice: a pre-signed URL's signature is sent
+unchanged, as is every byte no set holds (`+`, `|`, `^`, `[`, `]`, `!`, `'`
+outside the query). A `{{token}}` nothing answered is kept whole, where
+Postman would encode its braces in the path. The rule is applied where every
+driver takes its URL (`wire_url`) and at the end of composition, so
+`POST /compose` answers the line that will be sent. Every check made beside
+the transfer reads that same URL - the [scheme rule](#url-schemes), the
+[reserved-port refusal](#reserved-local-ports), the DNS pin and the
+client-certificate match - so a leading space or a backslash cannot make the
+typed text name another scheme, host or port than the one dialled:
+`localhost:9876/x` with a leading space is refused as it is without one, and
+`https://h/` with one pins and matches port 443. With `disableUrlEncoding`
+on the URL goes out exactly as typed (a non-ASCII host still by its punycode
+name), and libcurl refuses a raw space: the send fails with status `0` and
+error code `INVALID_URL`, and a message that names the space and the toggle
 (`Cannot send this request: the URL contains a space or control character; percent-encode it, or turn Send URL without encoding off`),
 derived from scanning the URL and not from libcurl's wording.
 
@@ -5867,29 +5891,18 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   scheme and authority a `/` opens the path unless it follows a `:` or a `/`
   (so `://` is not a path), the first `?` opens the query, `#` opens the
   fragment. A layered value is resolved whole and encoded once. The scheme
-  and the authority take a value as it stands (Postman does not
-  percent-encode a host, and a non-ASCII one is dialled by its punycode
-  name), so a `{{base}}` holding `https://x/p?k=a b` has its query part
-  encoded and nothing else changed. `disableUrlEncoding` writes every value
-  as typed.
+  and the authority are never percent-encoded (the host is lowercased and
+  written by its ASCII name, as above), so a `{{base}}` holding
+  `https://x/p?k=a b` has its query part encoded and nothing else changed.
+  `disableUrlEncoding` writes every value as typed.
 - A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
   and is written by the row rule above
   ([scripting](scripting.md#writing)).
-- A `pm.sendRequest` URL is encoded whole after its variables resolve, as
-  Postman's `toNodeUrl` writes it (`core::encode_url_as_postman` in
-  `core/url_encoding.hpp`): its query text by the set above with `&` and `=`
-  left as separators, its path by the path set under
-  [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
+- A `pm.sendRequest` URL is encoded whole after its variables resolve, by the
+  same `encode_url_as_postman`, and `disableUrlEncoding` does not apply to it
   ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
-  A script and Send write the same request line for a space, a control
-  character, a non-ASCII byte and a value substituted into the path, query or
-  fragment, because the literal pass above encodes a subset of what
-  `encode_url_as_postman` does (issue #2465). They differ on purpose where
-  Send keeps a byte as typed so that a URL that sends today still does: a
-  script also writes `"`, `<`, `>`, a backtick and, in the query, `'` as `%XX`,
-  `{` and `}` in the path, turns a backslash before the query into `/` and
-  lowercases the host. `tests/url_encoding_test.cpp`
-  (`PostmanUrlEncodingAgreement`) pins both halves.
+  A script and Send write the same request line for every URL;
+  `tests/url_encoding_test.cpp` (`PostmanUrlEncodingAgreement`) pins it.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
@@ -5901,9 +5914,11 @@ collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an
 OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
 The scheme is read case-insensitively from the URL as it stands just before
 the transfer - after composition, a data row's bind, the pre-request script
-and the residual pass - so a `{{baseUrl}}` that resolves to `file:///etc` is
-refused like a typed one. A refused send never reaches the network: status
-`0`, error code `INVALID_URL`, and the message
+and the residual pass, and as the transfer is handed it
+([Query encoding](#query-encoding)) - so a `{{baseUrl}}` that resolves to
+`file:///etc` is refused like a typed one, and so is `file:///etc` with a
+leading space. A refused send never reaches the network: status `0`, error code
+`INVALID_URL`, and the message
 `Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent`,
 naming the scheme as written. A `pm.sendRequest` gets the same code and
 message as its callback's `err`.
@@ -5941,16 +5956,18 @@ DNS resolves, the `Host` header and TLS SNI carry and the server certificate is
 checked against. It is the name Postman sends to (`url.domainToASCII`, UTS #46
 nontransitional processing): uppercase and full-width letters are mapped
 (`BÜCHER`, `ＡＢＣ`), and `ß` is kept, so `faß.de` is `xn--fa-hia.de`, not
-`fass.de`. The stored URL and `pm.request.url` keep the spelling that was
-typed.
+`fass.de`. The stored URL keeps the spelling that was typed; a composed URL,
+and so `pm.request.url` in the request's own scripts, carries the ASCII name,
+because composition ends with the encoder the send uses
+([Query encoding](#query-encoding)).
 
 The conversion is ada's, the WHATWG URL library Node's `domainToASCII` is
 built on, applied to the one URL every driver hands libcurl (which is built
 without IDN support), so it matches Postman case for case, the IDNA hyphen
 rules included: Node does not enforce them, so `bücher-.example` and
-`ab--cd.bücher.example` convert. Only the host is rewritten; userinfo, port,
-path, query and fragment keep their bytes, and an ASCII host, an unresolved
-`{{host}}` included, is not touched. The raw request a response carries shows
+`ab--cd.bücher.example` convert. The conversion rewrites only the host, and an
+ASCII host, an unresolved `{{host}}` included, is not converted; the rest of
+the URL is written as [Query encoding](#query-encoding) says. The raw request a response carries shows
 the punycode name, because that is what was sent. Everything that compares a
 host beside the transfer uses the same name - the cookie jar, the DNS cache,
 the client-certificate registry, the proxy bypass list and a proxy URL - so a
@@ -5981,7 +5998,8 @@ or without a trailing dot - and the unspecified `0.0.0.0` and `::`, which
 connect to the local host. Every other port on loopback is sent as usual. The
 rule is applied twice:
 
-- **The URL as written**, before anything is dialled: status `0`, error code
+- **The URL the transfer is handed** ([Query encoding](#query-encoding)),
+  before anything is dialled: status `0`, error code
   `INVALID_URL`, and the message
   `Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine - not when the URL names it, a redirect leads there or a host name resolves there`
   (`MCP port 9877` for the other). This holds with a proxy configured too.

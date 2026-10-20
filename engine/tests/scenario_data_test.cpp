@@ -667,21 +667,23 @@ TEST (ScenarioDataUrlTest, ABoundValueThatOpensTheQueryMovesTheTokensAfterIt) {
 
 // Issue #2465: the bind encodes a value by the component it lands in, as
 // composition does - the path set in the path, the fragment set in the
-// fragment, and the authority as it stands.
+// fragment - and ends as composition ends, the host by its ASCII name.
+// Mutation check: drop the `encode_url_as_postman` call that ends the bind's
+// URL (scenario_data.cpp) and the host stays as typed.
 TEST (ScenarioDataUrlTest, ABoundValueIsEncodedByTheSetOfItsComponent) {
     auto request = request_with_url (
     "http://{{data.host}}/u/{{data.name}}?q={{data.q}}#{{data.f}}");
 
-    const json row    = { { "host", "bücher.de" }, { "name", "John Doe{}" },
+    const json row    = { { "host", "BÜcher.de" }, { "name", "John Doe{}" },
            { "q", "a b{}" }, { "f", "c d`" } };
     const auto result = bind_data_row (request, row, 0);
 
     ASSERT_TRUE (result.ok) << result.error;
-    EXPECT_EQ (request.url, "http://bücher.de/u/John%20Doe%7B%7D?q=a%20b{}#c%20d%60");
+    EXPECT_EQ (request.url, "http://xn--bcher-kva.de/u/John%20Doe%7B%7D?q=a%20b{}#c%20d%60");
     EXPECT_EQ (request.url,
     vayu::http::resolve_url_template (
     "http://{{host}}/u/{{name}}?q={{q}}#{{f}}",
-    vayu::http::VariableValues{ { "host", "bücher.de" },
+    vayu::http::VariableValues{ { "host", "BÜcher.de" },
     { "name", "John Doe{}" }, { "q", "a b{}" }, { "f", "c d`" } },
     true))
     << "the bind and composition answer the same URL differently";

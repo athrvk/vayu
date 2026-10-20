@@ -1496,17 +1496,29 @@ the flag on or off writes only the flag: the URL and the rows stay as they
 are. With the flag on, the Sends line and the code snippets substitute path
 values raw, the Sends line writes a value a `{{variable}}` brings into the URL,
 and the literal text around it, as typed, and a query-located API key is
-appended raw, all matching what the engine sends. With the flag off the Sends
-line encodes a
-value by the part of the URL it lands in (issues #1773 and #2465): the path
-by `PATH_ENCODE_SET`, the query by `QUERY_ENCODE_SET`, the fragment by
-`FRAGMENT_ENCODE_SET`, and the scheme and authority as typed. Literal text
-outside the scheme and authority has only what a request target cannot carry
-raw encoded (space, controls, DEL and non-ASCII bytes, so `/a b` is
-`/a%20b`) and every other byte as typed, as the engine's `wire_url` does
-(`resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`). A `:name`
-path value is already encoded by then and `%` is never encoded, so nothing is
-encoded twice. The Sends line draws that
+appended raw, all matching what the engine sends. With the flag off, the Sends
+line and the snippets show the line Vayu sends, which is the URL written as
+Postman's `toNodeUrl` writes it (issue #2465; the engine's
+`core::encode_url_as_postman`, pinned by
+`engine/tests/fixtures/query-encoding-conformance.json`). A value a
+`{{variable}}` brings in is first encoded by the part of the URL it lands in
+(issues #1773 and #2465): the path by `PATH_ENCODE_SET`, the query by
+`QUERY_ENCODE_SET`, the fragment by `FRAGMENT_ENCODE_SET`, and the scheme and
+authority as they stand. The whole URL is then written: leading whitespace
+dropped, a backslash before the query a `/`, user info by
+`USERINFO_ENCODE_SET`, the host lowercased and a non-ASCII one written by its
+punycode name (the `url.domainToASCII` `toNodeUrl` calls; the renderer asks
+`URL` for it, and a host with no ASCII name stays as typed), and the path, each
+query key and value and the fragment by their sets, so a literal `"`, `<`, `>`,
+backtick, `{` or `}` in the path is `%22 %3C %3E %60 %7B %7D` and `/a b` is
+`/a%20b`. `%` is in no set, so an escape already in the text, a `:name` path
+value or a pre-signed URL's signature passes unchanged and nothing is encoded
+twice; a byte no set holds (`+`, `|`, `^`, `[`, `]`, and a backtick or brace
+in the query) goes out as typed. A `{{token}}` is kept whole wherever it sits.
+`resolveUrlTemplate` and `encodeUrlAsPostman` in
+`request-builder/utils/query-encoding.ts` are the one writer; `prepare.ts`
+runs the same resolver, with the tokens left in place, so a snippet carries the
+line Vayu sends and not the one typed. The Sends line draws that
 URL with every secret variable value and auth credential (each encoded
 spelling too) replaced by `••••`; the masking is at render, so what
 resolves and what is sent are unchanged (#1806). The imported

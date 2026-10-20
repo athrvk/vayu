@@ -101,8 +101,7 @@ TEST (PostmanUrlEncoding, AFileUrlKeepsItsPathSlash) {
 // pm.sendRequest against Send (issue #2465). A script's URL is written with
 // `encode_url_as_postman` and then handed to the same transfer layer as Send,
 // which applies `wire_url`; Send's URL is composed and goes through `wire_url`
-// alone. These tests pin where the two produce the same request line and
-// where they deliberately do not.
+// alone. Both put out one request line for one URL.
 // ---------------------------------------------------------------------------
 
 std::string sent_by_send (const std::string& url) {
@@ -131,12 +130,15 @@ TEST (PostmanUrlEncodingAgreement, SpaceControlsAndNonAsciiAreWrittenAlike) {
     }
 }
 
-// A URL with no unsendable byte takes `wire_url`'s early return, so the bytes
-// Postman would also write (`{`, `"`, `'`, `<`, `>`, a backtick) must come back
-// exactly as typed.
-TEST (PostmanUrlEncodingAgreement, ASendableUrlIsReturnedAsTyped) {
-    const std::string url = "http://h/p{x}/%20?q='\"<>&r=a+b#f`g";
-    EXPECT_EQ (sent_by_send (url), url);
+// What `wire_url`'s early return may skip: a URL the encoder leaves alone,
+// including bytes no set holds and a `://` or uppercase after the head.
+TEST (PostmanUrlEncodingAgreement, AUrlTheEncoderLeavesAloneIsReturnedAsTyped) {
+    for (const std::string url :
+    { "http://h/p'|^[]!*()~/%20?q=`{}\\|^[]+&r=a+b#f'{}|",
+    "https://h.example:8443/A/B?Q=Upper&r=HTTP://Y@Z#Frag" }) {
+        EXPECT_EQ (sent_by_send (url), url);
+        EXPECT_EQ (sent_by_script (url), url);
+    }
 }
 
 // Send substitutes a value into the component it lands in; a script's value is
@@ -167,28 +169,30 @@ TEST (PostmanUrlEncodingAgreement, APathQueryOrFragmentSubstitutionIsWrittenAlik
     }
 }
 
-// The deliberate difference. Send changes only the bytes no request target may
-// carry, so a URL that sends today is never rewritten; a script follows
-// Postman's `toNodeUrl`, which also writes `"`, `<`, `>`, a backtick, `'` in
-// the query and the braces, turns a head backslash into `/` and lowercases the
-// host. Each case is (typed, Send, script).
-TEST (PostmanUrlEncodingAgreement, ASendKeepsWhatAScriptRewrites) {
-    struct Case {
-        std::string typed;
-        std::string send;
-        std::string script;
+// Each URL holds one thing the encoder rewrites, so a `wire_url` early return
+// that missed it would send the URL as typed. Mutation check: drop a byte from
+// `is_postman_rewritten_byte`, or the authority check from
+// `postman_would_rewrite` (form_body.cpp), and its row fails in the Send
+// column only.
+TEST (PostmanUrlEncodingAgreement, ASendWritesWhatAScriptWrites) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { "http://h/a\"b?q=a\"b", "http://h/a%22b?q=a%22b" },
+        { "http://h/<x>`?q=<x>", "http://h/%3Cx%3E%60?q=%3Cx%3E" },
+        { "http://h/{a}?q={a}", "http://h/%7Ba%7D?q={a}" },
+        { "http://h/x?q='", "http://h/x?q=%27" },
+        { "http://h/x#a`b", "http://h/x#a%60b" },
+        { "http://h/a\\b?q=a\\b", "http://h/a/b?q=a\\b" },
+        { "  http://h/x", "http://h/x" },
+        { "http://EXAMPLE.com/x", "http://example.com/x" },
+        { "http:////Example.com/x", "http:////example.com/x" },
+        { "EXAMPLE.com:8080/x", "example.com:8080/x" },
+        { "HOST/x?r=a://b", "host/x?r=a://b" },
+        { "http://[::FFFF:1]/x", "http://[::ffff:1]/x" },
+        { "http://u;s@h/x", "http://u%3Bs@h/x" },
     };
-    const std::vector<Case> cases = {
-        { "http://h/a\"b?q=a\"b", "http://h/a\"b?q=a\"b", "http://h/a%22b?q=a%22b" },
-        { "http://h/<x>`?q=<x>", "http://h/<x>`?q=<x>", "http://h/%3Cx%3E%60?q=%3Cx%3E" },
-        { "http://h/{a}?q={a}", "http://h/{a}?q={a}", "http://h/%7Ba%7D?q={a}" },
-        { "http://h/x?q='", "http://h/x?q='", "http://h/x?q=%27" },
-        { "http://h/a\\b?q=a\\b", "http://h/a\\b?q=a\\b", "http://h/a/b?q=a\\b" },
-        { "http://EXAMPLE.com/x", "http://EXAMPLE.com/x", "http://example.com/x" },
-    };
-    for (const auto& c : cases) {
-        EXPECT_EQ (sent_by_send (c.typed), c.send) << c.typed;
-        EXPECT_EQ (sent_by_script (c.typed), c.script) << c.typed;
+    for (const auto& [typed, line] : cases) {
+        EXPECT_EQ (sent_by_send (typed), line) << typed;
+        EXPECT_EQ (sent_by_script (typed), line) << typed;
     }
 }
 

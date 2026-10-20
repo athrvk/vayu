@@ -28,10 +28,12 @@
 
 #include "echo_server.hpp"
 #include "engine_port_stand_in.hpp"
+#include "optional_assert.hpp"
 #include "proxy_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/sse_stream.hpp"
 
@@ -120,6 +122,25 @@ TEST (LoopbackGuardRegistry, ReadsTheReservedPortOffAUrl) {
     EXPECT_EQ (vayu::http::reserved_target_port ("http://example.com" + tail), std::nullopt);
     EXPECT_EQ (vayu::http::reserved_target_port ("http://127.0.0.1/health"), std::nullopt)
     << "the scheme default port is not a reserved one";
+}
+
+// The literal check reads the URL the handle is given (#2465): with encoding
+// on, a leading space and a backslash are gone before libcurl parses the URL,
+// so neither may hide the engine port from it. Mutation-check: let
+// `validate_transferable` read `request.url` and both pass the gate.
+TEST (LoopbackGuardRegistry, TheLiteralCheckReadsTheUrlTheWireSends) {
+    const int port         = vayu::tests::engine_port_stand_in ().port ();
+    const std::string tail = ":" + std::to_string (port) + "/x";
+    for (const std::string& url : { " localhost" + tail, "http:\\\\localhost" + tail }) {
+        vayu::Request request;
+        request.url = url;
+        const auto refused = vayu::http::detail::validate_transferable (request);
+        ASSERT_HAS_VALUE (refused) << url;
+        EXPECT_EQ (refused->code, vayu::ErrorCode::InvalidUrl) << url;
+        EXPECT_NE (refused->message.find ("own engine port " + std::to_string (port)),
+        std::string::npos)
+        << url << ": " << refused->message;
+    }
 }
 
 TEST (LoopbackGuardRegistry, TheRefusalNamesWhichPortItIs) {
@@ -248,6 +269,38 @@ TEST_F (LoopbackGuardTransport, ALiteralEnginePortIsRefusedEvenThroughAProxy) {
     proxied.proxy_url  = proxy.url ();
     expect_refused_everywhere (on_reserved_port ("127.0.0.1"), proxied);
     EXPECT_EQ (proxy.count (), 0U) << "the request was handed to the proxy";
+}
+
+// A leading space the wire drops (#2465), where the proxy leaves the literal
+// check as the only one that can refuse.
+TEST_F (LoopbackGuardTransport, ALeadingSpaceDoesNotHideTheEnginePortFromAnyDriver) {
+    vayu::tests::MockProxy proxy;
+    vayu::http::TransportPolicy proxied;
+    proxied.proxy_mode = vayu::http::ProxyMode::Manual;
+    proxied.proxy_url  = proxy.url ();
+    expect_refused_everywhere (
+    " localhost:" + std::to_string (reserved_port) + "/echo", proxied);
+    EXPECT_EQ (proxy.count (), 0U) << "the request was handed to the proxy";
+}
+
+// `disableUrlEncoding` sends the URL as typed, leading space included, and
+// libcurl refuses that as malformed; the gate reads the same URL, so the
+// refusal is about the space and nothing is dialled.
+TEST_F (LoopbackGuardTransport, SentAsTypedALeadingSpaceIsAMalformedUrl) {
+    const auto& stand_in  = vayu::tests::engine_port_stand_in ();
+    const int seen_before = stand_in.requests_seen ();
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = " localhost:" + std::to_string (reserved_port) + "/echo";
+    request.disable_url_encoding = true;
+    vayu::http::ClientConfig config;
+    config.transport = direct ();
+    const vayu::Response response = vayu::http::Client{ config }.send (request).value ();
+
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
+    EXPECT_NE (response.error_message.find ("space or control character"), std::string::npos)
+    << response.error_message;
+    EXPECT_EQ (stand_in.requests_seen (), seen_before);
 }
 
 TEST_F (LoopbackGuardTransport, ARedirectToTheEnginePortIsRefusedByEveryDriver) {
