@@ -44,6 +44,7 @@ interface VayuExpectation {
 	 * pm.expect(n).to.be.above(0).and.to.be.below(10);
 	 */
 	and: VayuExpectation;
+	any: VayuExpectation;
 	/**
 	 * Assert the number is within delta of expected (alias for .to.be.closeTo). The delta is required.
 	 */
@@ -81,7 +82,7 @@ interface VayuExpectation {
 	/**
 	 * Assert array includes value (alias for .to.include).
 	 */
-	contain(value: any): VayuExpectation;
+	contain: ((value: any) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
 	 */
@@ -139,6 +140,10 @@ interface VayuExpectation {
 	 */
 	false: VayuExpectation;
 	/**
+	 * Assert the value is a finite number. The type is checked, not coerced: a numeric string, NaN and the infinities are not finite.
+	 */
+	finite: VayuExpectation;
+	/**
 	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 */
 	greaterThan(n: number | Date): VayuExpectation;
@@ -159,7 +164,11 @@ interface VayuExpectation {
 	has: VayuExpectation;
 	have: VayuExpectation;
 	/**
-	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value.
+	 * Assert the object has an own property (alias for .to.have.own.property). Only the object's own properties count; an inherited one does not.
+	 */
+	haveOwnProperty(name: string, value?: any): VayuExpectation;
+	/**
+	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value. It is also a chain: .include.keys and .include.members accept a superset.
 	 * 
 	 * Example:
 	 * pm.expect(tags).to.include('featured');
@@ -170,8 +179,20 @@ interface VayuExpectation {
 	 * 
 	 * Example:
 	 * pm.expect(items).to.deep.include({id: 1});
+	 * 
+	 * `to.nested.include`:
+	 * Assert the object holds every path of the given object with an equal value, each key read as a dotted or indexed path.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.nested.include({'data.items[0].id': 1});
+	 * 
+	 * `to.have.own.include`:
+	 * Assert the object holds every key of the given object as an own property with an equal value. Only the object's own properties count; an inherited one does not.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.own.include({status: 'ok'});
 	 */
-	include(value: any): VayuExpectation;
+	include: ((value: any) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
 	 */
@@ -199,13 +220,25 @@ interface VayuExpectation {
 	 */
 	key(key: string): VayuExpectation;
 	/**
-	 * Assert the object has exactly these keys - not a subset. Accepts names or one array.
+	 * Assert the object has exactly these keys - not a subset. Accepts names or one array. Use .include.keys for at least these keys and .any.keys for at least one of them.
 	 * 
 	 * Example:
 	 * pm.expect(json).to.have.keys("id", "name");
 	 * 
+	 * `to.include.keys`:
+	 * Assert the object has at least these keys; others may be present too (also .contain.keys).
+	 * 
+	 * Example:
+	 * pm.expect(json).to.include.keys("id");
+	 * 
 	 * `to.have.all.keys`:
-	 * Assert the object has exactly these keys. `all` is chai's default and changes nothing; `any` is not supported.
+	 * Assert the object has exactly these keys. `all` is chai's default quantifier; after .include it asks for at least these keys.
+	 * 
+	 * `to.have.any.keys`:
+	 * Assert the object has at least one of these keys.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.any.keys("id", "uuid");
 	 */
 	keys(...keys: string[]): VayuExpectation;
 	/**
@@ -256,11 +289,29 @@ interface VayuExpectation {
 	 * Example:
 	 * pm.expect(ids).to.have.members([3, 1, 2]);
 	 * 
+	 * `to.include.members`:
+	 * Assert the array holds every one of these values, in any order; other members may be present too.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.include.members([1, 2]);
+	 * 
 	 * `to.have.deep.members`:
 	 * Assert the array has the same members in any order, comparing them by value.
 	 * 
 	 * Example:
 	 * pm.expect(rows).to.have.deep.members([{id: 1}, {id: 2}]);
+	 * 
+	 * `to.have.ordered.members`:
+	 * Assert the array has exactly these members in this order.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.have.ordered.members([1, 2, 3]);
+	 * 
+	 * `to.include.ordered.members`:
+	 * Assert the array starts with these members, in this order.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.include.ordered.members([1, 2]);
 	 */
 	members(values: any[]): VayuExpectation;
 	/**
@@ -296,6 +347,12 @@ interface VayuExpectation {
 	 * Example:
 	 * pm.expect(pm.response.code).to.be.oneOf([200, 201]);
 	 * 
+	 * `to.contain.oneOf`:
+	 * Assert the string contains one of these substrings, or the array one of these values.
+	 * 
+	 * Example:
+	 * pm.expect(tags).to.contain.oneOf(['new', 'sale']);
+	 * 
 	 * `to.be.deep.oneOf`:
 	 * Assert the value deeply equals one of the candidates.
 	 * 
@@ -303,6 +360,12 @@ interface VayuExpectation {
 	 * pm.expect(body.status).to.be.deep.oneOf([{code: 1}, {code: 2}]);
 	 */
 	oneOf(values: any[]): VayuExpectation;
+	ordered: VayuExpectation;
+	own: VayuExpectation;
+	/**
+	 * Assert the object has an own property (alias for .to.have.own.property). Only the object's own properties count; an inherited one does not.
+	 */
+	ownProperty(name: string, value?: any): VayuExpectation;
 	/**
 	 * Assert the object has a property, and optionally that it equals a value. The value is compared strictly unless the chain is `deep`.
 	 * 
@@ -321,6 +384,12 @@ interface VayuExpectation {
 	 * 
 	 * Example:
 	 * pm.expect(json).to.have.nested.property("data.items[0].id");
+	 * 
+	 * `to.have.own.property`:
+	 * Assert the object has an own property, and optionally that it equals a value. Only the object's own properties count; an inherited one does not.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.own.property('id');
 	 */
 	property(name: string, value?: any): VayuExpectation;
 	/**

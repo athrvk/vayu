@@ -1153,14 +1153,18 @@ TEST_F (ScriptEngineTest, ExpectChainRejectsUnknownMembers) {
     const auto scripts = std::to_array<const char*> ({
     R"(pm.test("t", function() { pm.expect(1).to.be.trueish; });)",
     // chai has these and Vayu does not: they must fail loudly rather than pass.
-    R"(pm.test("t", function() { pm.expect(1).to.be.finite; });)",
+    R"(pm.test("t", function() { pm.expect({}).to.be.extensible; });)",
     R"(pm.test("t", function() { pm.expect({}).to.be.frozen; });)",
     R"(pm.test("t", function() { pm.expect({}).to.be.sealed; });)",
     // A typo in the middle of a chain names itself too.
     R"(pm.test("t", function() { pm.expect({a:1}).to.hve.property("a"); });)",
     // The negated form is a property read like any other, so it throws rather
     // than negating its way to a pass.
-    R"(pm.test("t", function() { pm.expect(1).to.not.be.finite; });)",
+    R"(pm.test("t", function() { pm.expect({}).to.not.be.extensible; });)",
+    // A chainable method's function finds members through the expectation,
+    // so an unknown one after it reaches the same hook.
+    R"(pm.test("t", function() { pm.expect([1]).to.include.membrs([1]); });)",
+    R"(pm.test("t", function() { pm.expect([1]).to.have.length.abov(0); });)",
     });
 
     for (const char* script : scripts) {
@@ -1255,14 +1259,11 @@ TEST_F (ScriptEngineTest, LanguageChainsCarryTheChainsFlags) {
     }
 }
 
-// The three chai words that are *not* prose. `.any` quantifies `.keys` and
-// aliasing it to `all` would assert more than the script asked; `.own` and
-// `.itself` change what `.property` looks at. Each stays a throw naming itself,
-// which is the only honest answer while the semantics are unimplemented.
+// `.itself` reads as prose and is not: chai's only reader of it is
+// `respondTo`, which Vayu does not have, so it stays a throw naming itself
+// rather than a flag nothing reads.
 TEST_F (ScriptEngineTest, LanguageChainsExcludeTheFlagSetters) {
     const auto scripts = std::to_array<const char*> ({
-    R"(pm.test("t", function() { pm.expect({a:1}).to.have.any.keys("a"); });)",
-    R"(pm.test("t", function() { pm.expect({a:1}).to.have.own.property("a"); });)",
     R"(pm.test("t", function() { pm.expect({a:1}).to.itself.have.property("a"); });)",
     });
 
@@ -1698,6 +1699,234 @@ TEST_F (ScriptEngineTest, ExpectATypeFailsLoudWhenTheTagCannotBeRead) {
                 "Error('from the tag'); } });\n"
                 "pm.expect(hostile).to.not.be.a('date')");
     EXPECT_NE (reported.find ("from the tag"), std::string::npos) << reported;
+}
+
+// ============================================================================
+// Issue #2528: the flag-dependent chai forms
+// ============================================================================
+
+/**
+ * One table per form: each line in `passing` must hold, and each in `failing`
+ * must fail *as an assertion* - an AssertionError the chain's own matcher
+ * reported, not the unknown-member hook or a TypeError about the call.
+ */
+class ExpectFlagFormTest : public ScriptEngineTest {
+    protected:
+    void expect_verdicts (std::initializer_list<const char*> passing,
+    std::initializer_list<const char*> failing) {
+        for (const char* assertion : passing) {
+            EXPECT_EQ (verdict_of (assertion), "") << assertion;
+        }
+        for (const char* assertion : failing) {
+            const std::string reported = verdict_of (assertion);
+            EXPECT_NE (reported.find ("AssertionError: Expected"), std::string::npos)
+            << assertion << " -> " << (reported.empty () ? "<passed>" : reported);
+        }
+    }
+};
+
+// `any` is a real quantifier: a response carrying one of two keys passes
+// `.any.keys` and fails `.all.keys`. Mutation check: make `any` set nothing in
+// `flag_chainers` and the one-of-two lines fail.
+TEST_F (ExpectFlagFormTest, AnyKeysNeedsOneAndAllKeysNeedsEvery) {
+    expect_verdicts ({ "pm.expect({a: 1}).to.have.any.keys('a', 'b')",
+                     "pm.expect({a: 1, b: 2}).to.have.any.keys(['b', 'z'])",
+                     "pm.expect({a: 1}).to.not.have.any.keys('x', 'y')",
+                     "pm.expect({a: 1}).to.not.have.all.keys('a', 'b')",
+                     "pm.expect({a: 1, b: 2}).to.have.all.keys('a', 'b')",
+                     "pm.expect({a: 1, b: 2}).to.include.any.keys('a')",
+                     // The later quantifier wins, as each clears the other in chai.
+                     "pm.expect({a: 1}).to.have.any.all.keys('a')",
+                     "pm.expect({a: 1}).to.have.all.any.keys('a', 'b')" },
+    { "pm.expect({a: 1}).to.have.all.keys('a', 'b')", "pm.expect({a: 1}).to.have.keys('a', 'b')",
+    "pm.expect({a: 1}).to.have.any.keys('x', 'y')", "pm.expect({a: 1}).to.not.have.any.keys('a', 'z')",
+    "pm.expect({a: 1}).to.have.any.all.keys('a', 'b')" });
+
+    EXPECT_EQ (verdict_of ("pm.expect({a: 1}).to.have.any.keys('x', 'y')"),
+    "AssertionError: Expected object to have any of the keys 'x', 'y'");
+    EXPECT_EQ (verdict_of ("pm.expect({a: 1}).to.not.have.any.keys('a', 'z')"),
+    "AssertionError: Expected object to not have any of the keys 'a', 'z'");
+}
+
+// After `include` / `contain` the keys are a subset of the target's, where
+// `have.keys` is the exact set.
+TEST_F (ExpectFlagFormTest, IncludeKeysAcceptsASuperset) {
+    expect_verdicts (
+    { "pm.expect({a: 1, b: 2, c: 3}).to.include.keys('a', 'b')",
+    "pm.expect({a: 1, b: 2}).to.contain.keys(['a'])",
+    "pm.expect({a: 1, b: 2}).to.include.key('b')", "pm.expect({a: 1, b: 2}).to.includes.keys('a')",
+    "pm.expect({a: 1, b: 2}).to.contains.all.keys('a')", "pm.expect({a: 1}).to.not.include.keys('z')",
+    // chai sets the flag on the read, so it holds for the rest of the chain.
+    "pm.expect({a: 1, b: 2}).to.include({a: 1}).and.have.keys('b')" },
+    { "pm.expect({a: 1}).to.include.keys('a', 'z')", "pm.expect({a: 1, b: 2}).to.not.include.keys('a')",
+    "pm.expect({a: 1}).to.contain.keys('z')", "pm.expect({a: 1, b: 2}).to.have.keys('a')" });
+
+    EXPECT_EQ (verdict_of ("pm.expect({a: 1}).to.include.keys('a', 'z')"),
+    "AssertionError: Expected object to contain the keys 'a', 'z'");
+    EXPECT_EQ (verdict_of ("pm.expect({a: 1, b: 2}).to.not.include.keys('a')"),
+    "AssertionError: Expected object to not contain the keys 'a'");
+    // An empty list would hold for every target, asserting nothing.
+    EXPECT_NE (verdict_of ("pm.expect({a: 1}).to.include.keys([])").find ("requires at least one key name"),
+    std::string::npos);
+}
+
+TEST_F (ExpectFlagFormTest, IncludeAndOrderedMembers) {
+    expect_verdicts (
+    { "pm.expect([1, 2, 3]).to.include.members([3, 1])",
+    // chai's subset check does not consume what it matched.
+    "pm.expect([1, 2, 3]).to.include.members([1, 1])", "pm.expect([1, 2, 3]).to.contain.members([2])",
+    "pm.expect([{a: 1}, {b: 2}]).to.include.deep.members([{b: 2}])",
+    "pm.expect([1, 2, 3]).to.not.include.members([4])",
+    "pm.expect([1, 2, 3]).to.have.ordered.members([1, 2, 3])",
+    "pm.expect([1, 2, 3]).to.not.have.ordered.members([3, 2, 1])",
+    "pm.expect([1, 2, 3]).to.include.ordered.members([1, 2])",
+    "pm.expect([1, 2, 3]).to.not.include.ordered.members([2, 3])",
+    "pm.expect([{a: 1}]).to.have.deep.ordered.members([{a: 1}])" },
+    { "pm.expect([1, 2, 3]).to.include.members([4])", "pm.expect([1, 2]).to.include.members([1, 2, 3])",
+    "pm.expect([{a: 1}]).to.include.members([{a: 1}])", "pm.expect([1, 2, 3]).to.not.include.members([1])",
+    "pm.expect([1, 2, 3]).to.have.ordered.members([3, 2, 1])",
+    "pm.expect([1, 2, 3]).to.have.ordered.members([1, 2])",
+    "pm.expect([1, 2, 3]).to.include.ordered.members([2, 3])",
+    "pm.expect([1]).to.include.ordered.members([1, 2])",
+    "pm.expect([1, 2, 3]).to.not.include.ordered.members([1, 2])" });
+
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.include.members([4])"),
+    "AssertionError: Expected [1,2,3] to be a superset of [4]");
+    EXPECT_EQ (
+    verdict_of ("pm.expect([1, 2, 3]).to.have.ordered.members([3, 2, 1])"),
+    "AssertionError: Expected [1,2,3] to have ordered members [3,2,1]");
+    EXPECT_EQ (
+    verdict_of ("pm.expect([1, 2, 3]).to.include.ordered.members([2, 3])"),
+    "AssertionError: Expected [1,2,3] to be an ordered superset of [2,3]");
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2, 3]).to.not.include.members([1])"),
+    "AssertionError: Expected [1,2,3] to not be a superset of [1]");
+}
+
+// `own` narrows `.property` and `.include({...})` to own properties; without
+// it an inherited property counts, as in chai.
+TEST_F (ExpectFlagFormTest, OwnLooksAtOwnPropertiesOnly) {
+    const std::string setup =
+    "var child = Object.create({inherited: 1}); child.mine = 2;\n"
+    "var box = {a: child};\n";
+    for (const char* passing :
+    { "pm.expect(child).to.have.property('inherited')",
+    "pm.expect(child).to.include({inherited: 1})", "pm.expect(child).to.have.own.property('mine')",
+    "pm.expect(child).to.not.have.own.property('inherited')",
+    "pm.expect(child).to.have.ownProperty('mine', 2)", "pm.expect(child).to.haveOwnProperty('mine')",
+    "pm.expect(child).to.not.have.ownProperty('mine', 3)",
+    "pm.expect(child).to.have.own.property('mine').that.equals(2)",
+    "pm.expect(child).to.have.own.include({mine: 2})",
+    "pm.expect(child).to.not.have.own.include({inherited: 1})",
+    // The retarget carries the flag, as chai's one assertion object does.
+    "pm.expect(box).to.have.own.property('a').not.property('inherited')" }) {
+        EXPECT_EQ (verdict_of (setup + passing), "") << passing;
+    }
+    for (const char* failing :
+    { "pm.expect(child).to.have.own.property('inherited')",
+    "pm.expect(child).to.have.ownProperty('inherited')",
+    "pm.expect(child).to.have.own.include({inherited: 1})",
+    "pm.expect(child).to.not.have.own.property('mine')",
+    "pm.expect(child).to.have.ownProperty('mine', 3)" }) {
+        const std::string reported = verdict_of (setup + failing);
+        EXPECT_NE (reported.find ("AssertionError: Expected"), std::string::npos)
+        << failing << " -> " << (reported.empty () ? "<passed>" : reported);
+    }
+
+    EXPECT_EQ (verdict_of (setup + "pm.expect(child).to.have.own.property('inherited')"),
+    "AssertionError: Expected object to have own property 'inherited'");
+    EXPECT_EQ (verdict_of (setup + "pm.expect(child).to.have.own.include({inherited: 1})"),
+    "AssertionError: Expected {\"mine\":2} to include own properties "
+    "{\"inherited\":1}");
+    EXPECT_NE (verdict_of ("pm.expect({a: 1}).to.have.nested.own.property('a')").find ("cannot combine the nested and own flags"),
+    std::string::npos);
+}
+
+// `nested.include` reads each key as a path, which plain `include` does not.
+TEST_F (ExpectFlagFormTest, NestedIncludeReadsKeysAsPaths) {
+    expect_verdicts (
+    { "pm.expect({a: {b: ['x', 'y']}}).to.nested.include({'a.b[1]': 'y'})",
+    "pm.expect({a: {b: 1}, c: 2}).to.nested.include({'a.b': 1, c: 2})",
+    "pm.expect({a: {b: {c: 1}}}).to.deep.nested.include({'a.b': {c: 1}})",
+    "pm.expect({a: {b: 1}}).to.not.nested.include({'a.b': 2})",
+    "pm.expect({a: {b: 1}}).to.not.nested.include({'a.z': 1})",
+    "pm.expect({'a.b': 1}).to.include({'a.b': 1})" },
+    { "pm.expect({a: {b: 1}}).to.nested.include({'a.b': 2})",
+    "pm.expect({a: {b: 1}}).to.nested.include({'a.c': 1})",
+    "pm.expect({a: {b: {c: 1}}}).to.nested.include({'a.b': {c: 1}})",
+    "pm.expect({a: {b: 1}}).to.not.nested.include({'a.b': 1})",
+    "pm.expect({a: {b: 1}}).to.include({'a.b': 1})" });
+
+    EXPECT_EQ (
+    verdict_of ("pm.expect({a: {b: 1}}).to.nested.include({'a.b': 2})"),
+    "AssertionError: Expected {\"a\":{\"b\":1}} to include nested properties "
+    "{\"a.b\":2}");
+    EXPECT_NE (verdict_of ("pm.expect({a: 1}).to.nested.own.include({a: 1})").find ("cannot combine the nested and own flags"),
+    std::string::npos);
+}
+
+// A getter that throws under `own` or `nested` is a read that did not happen,
+// and `.not` must not turn it into a pass.
+TEST_F (ExpectFlagFormTest, AThrowingGetterIsReportedNotNegated) {
+    const std::string hostile =
+    "var o = {}; Object.defineProperty(o, 'x', { enumerable: true, get: "
+    "function () { throw new Error('from the getter'); } });\n";
+    for (const char* assertion :
+    { "pm.expect(o).to.not.have.own.include({x: 1})", "pm.expect({p: o}).to.not.nested.include({'p.x': 1})",
+    "pm.expect({p: o}).to.not.nested.include({'p.x.y': 1})",
+    "pm.expect(o).to.not.have.ownProperty('x', 1)" }) {
+        EXPECT_NE (verdict_of (hostile + assertion).find ("from the getter"), std::string::npos)
+        << assertion;
+    }
+}
+
+// chai's `typeof value === 'number' && isFinite(value)`: no coercion.
+TEST_F (ExpectFlagFormTest, FiniteIsANumberThatIsFinite) {
+    expect_verdicts (
+    { "pm.expect(1).to.be.finite", "pm.expect(0).to.be.finite",
+    "pm.expect(-1.5).to.be.finite", "pm.expect(Number.MAX_VALUE).to.be.finite",
+    "pm.expect(NaN).to.not.be.finite", "pm.expect(Infinity).to.not.be.finite",
+    "pm.expect(-Infinity).to.not.be.finite", "pm.expect('1').to.not.be.finite",
+    "pm.expect(null).to.not.be.finite", "pm.expect(new Number(1)).to.not.be.finite" },
+    { "pm.expect(NaN).to.be.finite", "pm.expect(Infinity).to.be.finite",
+    "pm.expect('1').to.be.finite", "pm.expect(1).to.not.be.finite" });
+
+    EXPECT_EQ (verdict_of ("pm.expect('1').to.be.finite"),
+    "AssertionError: Expected '1' to be a finite number");
+    EXPECT_EQ (verdict_of ("pm.expect(1).to.not.be.finite"),
+    "AssertionError: Expected 1 to not be a finite number");
+}
+
+// After `include` / `contain`, `oneOf` asks whether the target contains a
+// candidate rather than whether it is one.
+TEST_F (ExpectFlagFormTest, ContainOneOfAsksWhetherTheTargetContainsOne) {
+    expect_verdicts (
+    { "pm.expect([1, 2]).to.contain.oneOf([2, 5])", "pm.expect([1, 2]).to.include.oneOf([5, 1])",
+    "pm.expect('Today is sunny').to.contain.oneOf(['sunny', 'cloudy'])",
+    "pm.expect([1, 2]).to.not.contain.oneOf([3, 4])",
+    "pm.expect([{a: 1}]).to.deep.contain.oneOf([{a: 1}])", "pm.expect(2).to.be.oneOf([1, 2])" },
+    { "pm.expect([1, 2]).to.contain.oneOf([3, 4])", "pm.expect('abc').to.contain.oneOf(['z'])",
+    "pm.expect([1, 2]).to.not.contain.oneOf([2])", "pm.expect([{a: 1}]).to.contain.oneOf([{a: 1}])",
+    "pm.expect([1, 2]).to.be.oneOf([1, 2])" });
+
+    EXPECT_EQ (verdict_of ("pm.expect([1, 2]).to.contain.oneOf([3, 4])"),
+    "AssertionError: Expected [1,2] to contain one of [3,4]");
+    EXPECT_NE (verdict_of ("pm.expect(5).to.contain.oneOf([5])").find ("expects the target to be a string or an array, got number"),
+    std::string::npos);
+}
+
+// `include` and `length` are a call and the rest of the chain at once: the
+// function a read answers finds every other member through the expectation,
+// so flags set after it reach the matcher that ends the chain.
+TEST_F (ExpectFlagFormTest, AChainableMethodIsTheCallAndTheChain) {
+    expect_verdicts (
+    { "pm.expect(typeof pm.expect([1]).to.include).to.equal('function')",
+    "pm.expect([1, 2]).to.include(1).and.include(2)", "pm.expect([1, 2, 3]).to.include.not.members([4])",
+    "pm.expect([1, 2, 3]).to.include.deep.ordered.members([1, 2])",
+    "pm.expect({a: 1, b: 2}).to.include.any.keys('a', 'z')",
+    // A function's own `length` would shadow the matcher.
+    "pm.expect('abc').to.include.length(3)", "pm.expect([1, 2]).to.have.length.which.is.above(1)" },
+    { "pm.expect([1, 2, 3]).to.include.not.members([1])",
+    "pm.expect('abc').to.include.length(4)" });
 }
 
 // `String(err)` is "Error: boom", so `.to.throw("Error")` passed for every

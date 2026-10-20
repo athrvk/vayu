@@ -2014,7 +2014,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Assert an array includes the value, a string contains the substring, or - "
     "given an object - that the target holds every one of its keys with an "
-    "equal value.\n\nExample:\npm.expect(tags).to.include('featured');\n"
+    "equal value. It is also a chain: .include.keys and .include.members "
+    "accept a superset.\n\nExample:\npm.expect(tags).to.include('featured');\n"
     "pm.expect(body).to.include({status: 'ok'});" },
     { "sortText", "2_to_include" }, { "filterText", ".to.include" } });
 
@@ -2082,15 +2083,17 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.keys(...keys: string[])" },
     { "documentation",
     "Assert the object has exactly these keys - not a subset. Accepts names or "
-    "one array.\n\nExample:\npm.expect(json).to.have.keys(\"id\", \"name\");" },
+    "one array. Use .include.keys for at least these keys and .any.keys for at "
+    "least one of them.\n\nExample:\npm.expect(json).to.have.keys(\"id\", "
+    "\"name\");" },
     { "sortText", "2_to_have_keys" }, { "filterText", ".to.have.keys" } });
 
     completions.push_back ({ { "label", "to.have.all.keys" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.all.keys(\"${1:key}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.all.keys(...keys: string[])" },
     { "documentation",
-    "Assert the object has exactly these keys. `all` is chai's default and "
-    "changes nothing; `any` is not supported." },
+    "Assert the object has exactly these keys. `all` is chai's default "
+    "quantifier; after .include it asks for at least these keys." },
     { "sortText", "2_to_have_all_keys" }, { "filterText", ".to.have.all.keys" } });
 
     completions.push_back ({ { "label", "to.have.key" },
@@ -2251,6 +2254,58 @@ nlohmann::json get_script_completions () {
     "${1:start}, ${2:finish}",
     "Assert the length lies between start and finish, both inclusive. " +
     length_note + "\n\nExample:\npm.expect(items).to.have.lengthOf.within(1, 10);");
+
+    // The flag-dependent forms: `any`, `own` and `ordered` are flags a later
+    // matcher reads, and `include` / `contain` are a call and a flag at once,
+    // so `.include.keys` asks for a superset where `.have.keys` asks for
+    // exactly these.
+    push_matcher ("to.have.any.keys", "...keys: string[]", "\"${1:key}\"",
+    "Assert the object has at least one of these keys.\n\nExample:\n"
+    "pm.expect(json).to.have.any.keys(\"id\", \"uuid\");");
+    push_matcher ("to.include.keys", "...keys: string[]", "\"${1:key}\"",
+    "Assert the object has at least these keys; others may be present too "
+    "(also "
+    ".contain.keys).\n\nExample:\npm.expect(json).to.include.keys(\"id\");");
+    push_matcher ("to.include.members", "values: any[]", "[${1:values}]",
+    "Assert the array holds every one of these values, in any order; other "
+    "members may be present "
+    "too.\n\nExample:\npm.expect(ids).to.include.members([1, 2]);");
+    push_matcher ("to.have.ordered.members", "values: any[]", "[${1:values}]",
+    "Assert the array has exactly these members in this order.\n\nExample:\n"
+    "pm.expect(ids).to.have.ordered.members([1, 2, 3]);");
+    push_matcher ("to.include.ordered.members", "values: any[]", "[${1:values}]",
+    "Assert the array starts with these members, in this order.\n\nExample:\n"
+    "pm.expect(ids).to.include.ordered.members([1, 2]);");
+    push_matcher ("to.contain.oneOf", "values: any[]", "[${1:values}]",
+    "Assert the string contains one of these substrings, or the array one of "
+    "these values.\n\nExample:\npm.expect(tags).to.contain.oneOf(['new', "
+    "'sale']);");
+
+    const std::string own_note =
+    "Only the object's own properties count; an inherited one does not.";
+    push_matcher ("to.have.own.property", "name: string, value?: any", "\"${1:name}\"",
+    "Assert the object has an own property, and optionally that it equals a "
+    "value. " +
+    own_note + "\n\nExample:\npm.expect(json).to.have.own.property('id');");
+    push_matcher ("to.have.ownProperty", "name: string, value?: any",
+    "\"${1:name}\"", "Assert the object has an own property (alias for .to.have.own.property). " + own_note);
+    push_matcher ("to.haveOwnProperty", "name: string, value?: any",
+    "\"${1:name}\"", "Assert the object has an own property (alias for .to.have.own.property). " + own_note);
+    push_matcher ("to.have.own.include", "value: object", "{${1}}",
+    "Assert the object holds every key of the given object as an own property "
+    "with an equal value. " +
+    own_note + "\n\nExample:\npm.expect(json).to.have.own.include({status: 'ok'});");
+    push_matcher ("to.nested.include", "value: object", "{${1}}",
+    "Assert the object holds every path of the given object with an equal "
+    "value, each key read as a dotted or indexed path.\n\nExample:\n"
+    "pm.expect(json).to.nested.include({'data.items[0].id': 1});");
+
+    completions.push_back ({ { "label", "to.be.finite" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.finite" }, { "detail", ".to.be.finite" },
+    { "documentation",
+    "Assert the value is a finite number. The type is checked, not coerced: a "
+    "numeric string, NaN and the infinities are not finite." },
+    { "sortText", "2_to_be_finite" }, { "filterText", ".to.be.finite" } });
 
     completions.push_back ({ { "label", "and" }, { "kind", KIND_FIELD },
     { "insertText", "and" }, { "detail", ".and" },

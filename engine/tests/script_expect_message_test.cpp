@@ -136,6 +136,18 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
     { R"(pm.expect([1], "M").to.have.lengthOf.at.least(2))", "Expected length 1 to be at least 2" },
     { R"(pm.expect([1], "M").to.have.length.within(2, 3))", "Expected length 1 to be within 2..3" },
     { R"(pm.expect(1, "M").to.be.a("date"))", "Expected type number" },
+    { R"(pm.expect({ a: 1 }, "M").to.have.any.keys("b", "c"))", "any of the keys" },
+    { R"(pm.expect({ a: 1 }, "M").to.include.keys("b"))", "contain the keys" },
+    { R"(pm.expect([1], "M").to.include.members([2]))", "to be a superset of" },
+    { R"(pm.expect([1, 2], "M").to.have.ordered.members([2, 1]))", "ordered members" },
+    { R"(pm.expect([1, 2], "M").to.include.ordered.members([2]))", "ordered superset of" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.own.property("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.ownProperty("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.haveOwnProperty("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.own.include({ a: 1 }))", "own properties" },
+    { R"(pm.expect({ a: { b: 1 } }, "M").to.nested.include({ "a.b": 2 }))", "nested properties" },
+    { R"(pm.expect("1", "M").to.be.finite)", "finite number" },
+    { R"(pm.expect([1], "M").to.contain.oneOf([2]))", "contain one of" },
     });
 
     for (const auto& c : cases) {

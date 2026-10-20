@@ -417,6 +417,16 @@ TEST (ScriptTypesTest, ACallTheTableContinuesIsDeclaredAsCallAndChain) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "\tlength: ((n: number) => VayuExpectation) & VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "\tlengthOf: ((n: number) => VayuExpectation) & VayuExpectation;"));
+    // `include` and `contain` are chainable the same way (`.include.keys`,
+    // `.contain.oneOf`), and the flag words they are followed by are chain
+    // members like any other word.
+    EXPECT_TRUE (contains (dts, "\tinclude: ((value: any) => VayuExpectation) & VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tcontain: ((value: any) => VayuExpectation) & VayuExpectation;"));
+    for (const char* word : { "\tany: VayuExpectation;", "\town: VayuExpectation;",
+         "\tordered: VayuExpectation;", "\tfinite: VayuExpectation;" }) {
+        EXPECT_TRUE (contains (dts, word)) << word;
+    }
+    EXPECT_TRUE (contains (dts, "\townProperty(name: string, value?: any): VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "\tabove(n: number | Date): VayuExpectation;"));
     EXPECT_TRUE (contains (dts,
     "\twithin(start: number | Date, finish: number | Date): VayuExpectation;"));
@@ -565,7 +575,7 @@ TEST (ScriptTypesTest, AStringLiteralUnionIsAType) {
 TEST (ScriptTypesTest, TheChainDeclaresWhatTheDocsClaimAndTheRuntimeAnswers) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "property(name: string, value?: any): VayuExpectation;"));
-    EXPECT_TRUE (contains (dts, "include(value: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "include: ((value: any) => VayuExpectation) & VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "members(values: any[]): VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "oneOf(values: any[]): VayuExpectation;"));
 }
