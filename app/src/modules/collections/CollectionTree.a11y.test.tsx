@@ -243,6 +243,22 @@ describe("ArrowLeft leaves the group", () => {
 	});
 });
 
+describe("* expands the focused row's sibling folders", () => {
+	// The tree hands the key handler its rows rather than its DOM (#2543), so
+	// the expansion goes through the store by id rather than through a click on
+	// a toggle that might not be mounted.
+	it("opens every collapsed sibling and leaves other levels alone", () => {
+		renderTree();
+
+		collectionRow("acme").focus();
+		fireEvent.keyDown(collectionRow("acme"), { key: "*" });
+
+		const expanded = useCollectionsStore.getState().expandedCollectionIds;
+		expect([...expanded].sort()).toEqual(["acme", "beta"]);
+		expect(collectionRow("beta")).toHaveAttribute("aria-expanded", "true");
+	});
+});
+
 describe("the Delete key", () => {
 	/*
 	 * A delete is a soft delete with an undo toast behind it, so the key acts at

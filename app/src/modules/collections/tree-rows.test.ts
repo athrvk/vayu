@@ -9,8 +9,14 @@ import { describe, it, expect } from "vitest";
 import type { Collection, Request } from "@/types";
 import {
 	flattenVisibleRows,
+	folderIdOfRowKey,
+	folderRowKey,
+	navigableRows,
+	requestRowKey,
 	rowKeysUnder,
+	rowsAroundFocus,
 	rowSpacingAbove,
+	rowStrides,
 	type TreeRow,
 	type VisibleRowsInput,
 } from "./tree-rows";
@@ -275,5 +281,89 @@ describe("rowKeysUnder", () => {
 		const rows = flatten([folder("acme", 0), folder("hidden", 0, "acme")]);
 		expect(rowKeysUnder(rows, "acme").size).toBe(0);
 		expect(rowKeysUnder(rows, "hidden").size).toBe(0);
+	});
+});
+
+/**
+ * acme > [form], billing > [empty], r1, r2; beta. The form makes the first
+ * child of acme a non-treeitem, which is what the neighbour walk has to step
+ * over.
+ */
+function windowFixture(creatingSubfolder: string | null = "acme") {
+	return flatten([folder("acme", 0), folder("billing", 0, "acme"), folder("beta", 1)], {
+		requests: { acme: [request("r1", "acme", 0), request("r2", "acme", 1)] },
+		expanded: ["acme", "billing"],
+		creatingSubfolder,
+	});
+}
+
+describe("rowStrides", () => {
+	it("is each row's gap above plus its height, the form two units taller", () => {
+		const rows = windowFixture();
+		expect(shape(rows)).toEqual([
+			"folder acme @0",
+			"form in acme @1",
+			"folder billing @1",
+			"empty in billing @2",
+			"request r1 @1",
+			"request r2 @1",
+			"folder beta @0",
+		]);
+		expect(rowStrides(rows)).toEqual([8, 11, 8.5, 9, 8.5, 8.5, 8.5]);
+	});
+});
+
+describe("navigableRows", () => {
+	it("lists the treeitems alone, with level, name and expansion", () => {
+		const rows = windowFixture(null);
+		expect(navigableRows(rows, new Set(["acme", "billing"]))).toEqual([
+			{ key: "folder:acme", level: 1, label: "acme", expanded: true },
+			{ key: "folder:billing", level: 2, label: "billing", expanded: true },
+			{ key: "request:r1", level: 2, label: "r1", expanded: null },
+			{ key: "request:r2", level: 2, label: "r2", expanded: null },
+			{ key: "folder:beta", level: 1, label: "beta", expanded: false },
+		]);
+	});
+});
+
+describe("row keys", () => {
+	it("give back the folder a folder key names, and nothing for any other", () => {
+		expect(folderIdOfRowKey(folderRowKey("acme"))).toBe("acme");
+		expect(folderIdOfRowKey(requestRowKey("acme"))).toBeNull();
+	});
+});
+
+describe("rowsAroundFocus", () => {
+	// A row can be two of these at once (the row before it is often its
+	// parent), so the answer is read as a set.
+	const keysAround = (rows: TreeRow[], key: string) => {
+		const index = rows.findIndex((row) => row.key === key);
+		return [...new Set(rowsAroundFocus(rows, index).map((at) => rows[at].key))].sort();
+	};
+
+	it("holds the treeitems either side, the ancestors and the row past the subtree", () => {
+		const rows = windowFixture();
+		// billing: acme before it (past the form), r1 after it (past the empty
+		// line, which is also its subtree), and acme as its parent.
+		expect(keysAround(rows, "folder:billing")).toEqual(
+			["folder:acme", "folder:billing", "request:r1"].sort()
+		);
+		// r2 is last in acme: the row past it is beta, a root - where a delete of
+		// r2 would not go, but a delete of acme would.
+		expect(keysAround(rows, "request:r2")).toEqual(
+			["folder:acme", "folder:beta", "request:r1", "request:r2"].sort()
+		);
+	});
+
+	it("reaches past a whole subtree for a folder", () => {
+		const rows = windowFixture();
+		// billing is the next treeitem (past the form); beta is past the subtree.
+		expect(keysAround(rows, "folder:acme")).toEqual(
+			["folder:acme", "folder:beta", "folder:billing"].sort()
+		);
+	});
+
+	it("is empty for an index outside the rows", () => {
+		expect(rowsAroundFocus(windowFixture(), -1)).toEqual([]);
 	});
 });

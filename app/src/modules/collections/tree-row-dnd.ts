@@ -27,6 +27,7 @@ import type {
 	CollectionTreeRowHandlers,
 } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
+import { entityRowKey } from "./tree-rows";
 import type { RowAction } from "@/components/shared";
 
 export interface RowDnd {
@@ -99,4 +100,17 @@ export function rowDndClasses(row: RowDnd): string {
 	]
 		.filter(Boolean)
 		.join(" ");
+}
+
+/**
+ * The key of the row being dragged, which has to stay mounted while the drawer
+ * auto-scrolls under it (#2543): it holds the pointer capture, and an unmounted
+ * row takes the rest of the gesture with it. A string, so the list re-renders
+ * when a drag starts or ends and not on every pointer move.
+ */
+export function useDraggingRowKey(): string | null {
+	const { dnd } = useCollectionTreeHandlers();
+	return useStore(dnd?.dragState ?? IDLE_DRAG_STATE, ({ dragging }) =>
+		dragging ? entityRowKey(dragging) : null
+	);
 }

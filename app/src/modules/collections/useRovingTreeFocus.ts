@@ -12,12 +12,11 @@
  * the tree costs one press instead of one per row - previously a workspace with
  * 2 collections and 4 requests cost 17.
  *
- * Visible order comes from the DOM (`[role="treeitem"]` in document order):
- * collapsed subtrees are not rendered, so the NodeList is exactly the rows a
- * user can see, in the order they see them - in the collection tree, the list
- * `flattenVisibleRows` built - with no second copy kept purely for navigation.
+ * Visible order comes from the DOM (`[role="treeitem"]` in document order),
+ * collapsed subtrees unrendered - except in a windowed tree, which mounts only
+ * the rows in view and passes them all as a `TreeRowModel` to be walked instead.
  *
- * **Depth, though, comes from `aria-level`** - `parentRow` in `tree-focus.ts`,
+ * **Depth, though, comes from `aria-level`** - `parentIndex` in `tree-focus.ts`,
  * the same reading the delete refocus uses (#1237). Order is the one thing the
  * DOM states plainly here; hierarchy it does not, since a row's children are
  * rendered beside it rather than within it and two trees render no nesting at
@@ -69,7 +68,15 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { TIMING } from "@/config/timing";
 import { isTextEntryTarget } from "@/lib/keyboard";
-import { TREE_ITEM as ITEM, focusTreeRow, parentRow, treeRows } from "./tree-focus";
+import {
+	TREE_ITEM as ITEM,
+	focusTreeRow,
+	parentIndex,
+	rowLevels,
+	siblingIndices,
+	treeRows,
+	type TreeRowModel,
+} from "./tree-focus";
 
 /**
  * Alt+Arrow moves the row itself, rather than the focus - the keyboard half of
@@ -102,7 +109,7 @@ function labelOf(el: HTMLElement): string {
 	return (el.getAttribute("data-tree-label") ?? el.textContent ?? "").trim().toLowerCase();
 }
 
-export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
+export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>, model?: TreeRowModel) {
 	// The typeahead buffer and when it was last appended to. A ref, not state:
 	// nothing renders from it, and a render per keystroke would rebuild every
 	// row in the tree just to move focus by one.
@@ -139,8 +146,8 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 			// the header note.
 			if (e.ctrlKey || e.metaKey) return;
 
-			const list = items();
-			const i = list.indexOf(current);
+			const nav = treeNavigator(model, current, items, focusItem);
+			const i = nav.current;
 			const expanded = current.getAttribute("aria-expanded");
 			const click = (sel: string) => current.querySelector<HTMLElement>(sel)?.click();
 			const take = () => {
@@ -159,19 +166,19 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 			switch (e.key) {
 				case "ArrowDown":
 					take();
-					focusItem(list[i + 1]);
+					nav.focus(i + 1);
 					break;
 				case "ArrowUp":
 					take();
-					focusItem(list[i - 1]);
+					nav.focus(i - 1);
 					break;
 				case "Home":
 					take();
-					focusItem(list[0]);
+					nav.focus(0);
 					break;
 				case "End":
 					take();
-					focusItem(list[list.length - 1]);
+					nav.focus(nav.levels.length - 1);
 					break;
 				case "ArrowRight":
 					take();
@@ -185,16 +192,15 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 						// order is its sibling and stepping to it was an ArrowDown
 						// wearing ArrowRight's key (#931 review). Parentage decides,
 						// the same reading the `*` case uses.
-						const next = list[i + 1];
-						if (next && parentRow(list, i + 1) === current) focusItem(next);
+						if (i >= 0 && parentIndex(nav.levels, i + 1) === i) nav.focus(i + 1);
 					}
 					break;
 				case "ArrowLeft":
 					take();
 					if (expanded === "true") click("[data-tree-toggle]");
 					else {
-						const parent = parentRow(list, i);
-						if (parent) focusItem(parent);
+						const parent = parentIndex(nav.levels, i);
+						if (parent >= 0) nav.focus(parent);
 					}
 					break;
 				case "Enter":
@@ -229,16 +235,10 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 					take();
 					// Expand every sibling folder of the focused row. Siblinghood
 					// comes from the announced hierarchy rather than from props:
-					// two rows are siblings when `parentRow` returns the same row,
-					// which is `null` for two roots. Already-expanded rows are
-					// skipped, so this never collapses anything.
-					const parent = parentRow(list, i);
-					for (let n = 0; n < list.length; n++) {
-						const item = list[n];
-						if (item.getAttribute("aria-expanded") !== "false") continue;
-						if (parentRow(list, n) !== parent) continue;
-						item.querySelector<HTMLElement>("[data-tree-toggle]")?.click();
-					}
+					// two rows are siblings when they share a parent, which is
+					// none for two roots. Already-expanded rows are skipped, so
+					// this never collapses anything.
+					nav.expand(siblingIndices(nav.levels, i).filter(nav.isCollapsed));
 					break;
 				}
 				default: {
@@ -266,10 +266,11 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 					// otherwise typing "in" would jump off "Invoices" the moment the
 					// "n" landed.
 					const start = search.length === 1 ? i + 1 : i;
-					for (let n = 0; n < list.length; n++) {
-						const candidate = list[(start + n + list.length) % list.length];
-						if (labelOf(candidate).startsWith(search)) {
-							focusItem(candidate);
+					const count = nav.levels.length;
+					for (let n = 0; n < count; n++) {
+						const candidate = (start + n + count) % count;
+						if (nav.label(candidate).startsWith(search)) {
+							nav.focus(candidate);
 							break;
 						}
 					}
@@ -277,7 +278,7 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 				}
 			}
 		},
-		[items, focusItem, treeRef]
+		[items, focusItem, treeRef, model]
 	);
 
 	// Clicking a row makes it the tabbable one, so Tab returns where you left off.
@@ -292,4 +293,65 @@ export function useRovingTreeFocus(treeRef: RefObject<HTMLElement | null>) {
 	);
 
 	return { onKeyDown, onFocus };
+}
+
+/**
+ * What the key handler walks: the rows in order, and how to act on one. The
+ * DOM's mounted rows for most trees, a `TreeRowModel`'s rows for a windowed one.
+ */
+interface TreeNavigator {
+	/** Each row's 1-based level, in order. */
+	levels: readonly number[];
+	/** The focused row's index, `-1` when it is not one of the rows. */
+	current: number;
+	/** A row's name for typeahead, lower-cased. */
+	label: (index: number) => string;
+	isCollapsed: (index: number) => boolean;
+	/** Focus a row and give it the tab stop; an index outside the rows is a no-op. */
+	focus: (index: number) => void;
+	expand: (indices: readonly number[]) => void;
+}
+
+function treeNavigator(
+	model: TreeRowModel | undefined,
+	current: HTMLElement,
+	items: () => HTMLElement[],
+	focusItem: (el: HTMLElement | undefined) => void
+): TreeNavigator {
+	return model ? modelNavigator(model, current) : domNavigator(items(), current, focusItem);
+}
+
+function domNavigator(
+	list: HTMLElement[],
+	current: HTMLElement,
+	focusItem: (el: HTMLElement | undefined) => void
+): TreeNavigator {
+	return {
+		levels: rowLevels(list),
+		current: list.indexOf(current),
+		label: (index) => labelOf(list[index]),
+		isCollapsed: (index) => list[index].getAttribute("aria-expanded") === "false",
+		focus: (index) => focusItem(list[index]),
+		expand: (indices) => {
+			for (const index of indices) {
+				list[index].querySelector<HTMLElement>("[data-tree-toggle]")?.click();
+			}
+		},
+	};
+}
+
+function modelNavigator(model: TreeRowModel, current: HTMLElement): TreeNavigator {
+	const { rows } = model;
+	const key = model.keyOf(current);
+	return {
+		levels: rows.map((row) => row.level),
+		current: rows.findIndex((row) => row.key === key),
+		label: (index) => rows[index].label.trim().toLowerCase(),
+		isCollapsed: (index) => rows[index].expanded === false,
+		focus: (index) => {
+			const row = rows[index];
+			if (row) model.focusRow(row.key);
+		},
+		expand: (indices) => model.expand(indices.map((index) => rows[index].key)),
+	};
 }

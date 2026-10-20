@@ -192,7 +192,7 @@ function CollectionItemRow({
 	// exactly one row to 0.
 	return (
 		<RowContextMenu label={menuLabel} actions={rowActions} disabled={isRenaming || isDeleting}>
-			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:200-208, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
+			{/* eslint-disable-next-line jsx-a11y/click-events-have-key-events -- Enter and Space reach this row through useRovingTreeFocus.ts:206-214, which clicks its `[data-tree-activate]` button; the tree's onKeyDown is on the `role="tree"` ancestor */}
 			<div
 				ref={rowRef}
 				role="treeitem"

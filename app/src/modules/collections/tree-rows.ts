@@ -22,6 +22,8 @@
 
 import type { Collection, Request } from "@/types";
 import { compareTreeOrder } from "@/types";
+import type { TreeModelRow } from "./tree-focus";
+import type { TreeEntity } from "./drop-position";
 
 interface RowBase {
 	/** Stable across renders and unique across kinds: the row's React key. */
@@ -92,6 +94,33 @@ export interface VisibleRowsInput {
 	creatingSubfolder: string | null;
 }
 
+const FOLDER_KEY_PREFIX = "folder:";
+
+/** A folder row's key. */
+export function folderRowKey(collectionId: string): string {
+	return `${FOLDER_KEY_PREFIX}${collectionId}`;
+}
+
+/** The collection a folder row's key names, `null` for any other row's key. */
+export function folderIdOfRowKey(key: string): string | null {
+	return key.startsWith(FOLDER_KEY_PREFIX) ? key.slice(FOLDER_KEY_PREFIX.length) : null;
+}
+
+/** A request row's key. */
+export function requestRowKey(requestId: string): string {
+	return `request:${requestId}`;
+}
+
+/** The key of the row an entity is shown on. */
+export function entityRowKey(entity: Pick<TreeEntity, "kind" | "id">): string {
+	return entity.kind === "collection" ? folderRowKey(entity.id) : requestRowKey(entity.id);
+}
+
+/** The key of the new-folder form open under `collectionId`. */
+export function newFolderFormRowKey(collectionId: string): string {
+	return `new-folder:${collectionId}`;
+}
+
 /** The element id of a folder's "Empty collection" line. */
 export function emptyPlaceholderId(collectionId: string): string {
 	return `tree-empty-${collectionId}`;
@@ -148,7 +177,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 
 		rows.push({
 			kind: "folder",
-			key: `folder:${collection.id}`,
+			key: folderRowKey(collection.id),
 			depth,
 			parentId,
 			...position,
@@ -163,7 +192,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 		if (hasForm) {
 			rows.push({
 				kind: "new-folder-form",
-				key: `new-folder:${owner}`,
+				key: newFolderFormRowKey(owner),
 				depth: childDepth,
 				parentId: owner,
 			});
@@ -185,7 +214,7 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 		requests.forEach((request, index) =>
 			rows.push({
 				kind: "request",
-				key: `request:${request.id}`,
+				key: requestRowKey(request.id),
 				depth: childDepth,
 				parentId: owner,
 				posInSet: folders.length + index + 1,
@@ -233,4 +262,79 @@ export function rowKeysUnder(rows: readonly TreeRow[], collectionId: string): Se
 		keys.add(rows[index].key);
 	}
 	return keys;
+}
+
+/**
+ * A row's height in spacing units, which its wrapper in `CollectionTreeRows`
+ * is given as a class: the window's arithmetic and the layout read the one
+ * number, so they cannot disagree. A folder and a request row are `h-8`, and so
+ * is the "Empty collection" line; the new-folder form is its `control-sm` field
+ * plus `py-1`, which is ten units at both densities.
+ */
+export function rowHeightUnits(row: TreeRow): 8 | 10 {
+	return row.kind === "new-folder-form" ? 10 : 8;
+}
+
+/** Each row's full pitch, in spacing units: the gap above it and its height. */
+export function rowStrides(rows: readonly TreeRow[]): number[] {
+	return rows.map((row, index) => rowSpacingAbove(rows, index) + rowHeightUnits(row));
+}
+
+function isTreeItem(row: TreeRow | undefined): row is FolderRow | RequestRow {
+	return row?.kind === "folder" || row?.kind === "request";
+}
+
+/**
+ * The treeitems alone, as the keyboard walks them: every row a screen reader
+ * can land on, mounted or not, with the name a typeahead matches.
+ */
+export function navigableRows(
+	rows: readonly TreeRow[],
+	expandedCollectionIds: ReadonlySet<string>
+): TreeModelRow[] {
+	return rows.filter(isTreeItem).map((row) =>
+		row.kind === "folder"
+			? {
+					key: row.key,
+					level: row.depth + 1,
+					label: row.collection.name,
+					expanded: expandedCollectionIds.has(row.collection.id),
+				}
+			: { key: row.key, level: row.depth + 1, label: row.request.name, expanded: null }
+	);
+}
+
+/**
+ * The rows that must stay mounted beside the one holding the tree's tab stop.
+ *
+ * The treeitems on either side of `rows[index]`, its ancestors, and the first
+ * row past its subtree. The row before it, its parent and the row past its
+ * subtree are the three places a delete hands focus to (`rowAfterRemoving`),
+ * which reads only the mounted rows: with these pinned it gives the answer the
+ * whole list would.
+ */
+export function rowsAroundFocus(rows: readonly TreeRow[], index: number): number[] {
+	const row = rows[index];
+	if (!row) return [];
+	const around = [index];
+
+	let before = index - 1;
+	while (before >= 0 && !isTreeItem(rows[before])) before--;
+	if (before >= 0) around.push(before);
+
+	let after = index + 1;
+	while (after < rows.length && !isTreeItem(rows[after])) after++;
+	if (after < rows.length) around.push(after);
+
+	let past = index + 1;
+	while (past < rows.length && rows[past].depth > row.depth) past++;
+	if (past < rows.length) around.push(past);
+
+	let depth = row.depth;
+	for (let above = index - 1; above >= 0 && depth > 0; above--) {
+		if (rows[above].depth >= depth) continue;
+		around.push(above);
+		depth = rows[above].depth;
+	}
+	return around;
 }

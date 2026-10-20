@@ -27,7 +27,7 @@ function Tree({ expanded }: { expanded: boolean }) {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
-			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
@@ -116,7 +116,7 @@ function EmptyFolderTree() {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
-			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<div
@@ -182,7 +182,7 @@ function DeepTree() {
 	const { onKeyDown, onFocus } = useRovingTreeFocus(ref);
 	return (
 		<div ref={ref}>
-			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
+			{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
 			<div role="tree" onKeyDown={onKeyDown} onFocus={onFocus}>
 				<div>
 					<Row name="root-a" level={1} expanded />

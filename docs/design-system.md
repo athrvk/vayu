@@ -2394,8 +2394,24 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
 - **The pitch is per row.** Every row is `h-8` and its wrapper carries the gap
   above it: `mt-0.5` between rows, `mt-1` above the first row inside an expanded
   folder (`rowSpacingAbove`) - the spacing the nested groups' `space-y-0.5` and
-  `mt-1` drew, said from depth alone.
+  `mt-1` drew, said from depth alone. The wrapper also carries the row's height
+  (`h-8`, `h-10` for the new-folder form, `rowHeightUnits`), so where every row
+  sits is arithmetic over spacing units rather than a measurement.
+- **Only the rows in view are in the DOM** (#2543). The drawer body mounts the
+  rows it can show plus an overscan, and one `aria-hidden` spacer of the same
+  units stands in for each run it skips, so the scrollbar is the whole list's.
+  The treeitems in the DOM are therefore not the tree's rows: `aria-posinset`,
+  `aria-setsize` and `aria-level` come from the full list and stay true of an
+  unmounted neighbour. The rows that something holds stay mounted wherever the
+  drawer is scrolled - the tab stop and the rows focus can be handed to from it,
+  the new-folder form, the row being dragged. A list under 100 rows, or one in
+  an environment with no layout, mounts everything.
 - Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
+- **The keys walk the rows, not the DOM.** `CollectionTree` hands the hook its
+  visible rows as a `TreeRowModel`, so End, Home, the arrows, a typeahead and
+  `*` reach rows that are scrolled away; moving focus scrolls the drawer to the
+  row first, mounts it, and only then focuses it. The variables sidebar and the
+  schema explorer pass no model and are walked through their mounted rows.
 - Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
   then moves to the parent, Enter/Space opens, **F2** renames, **Delete /
   Backspace** deletes, **Shift+F10 / Menu / Shift+Enter** opens row actions,
@@ -2490,10 +2506,11 @@ and is the guard on every pointer handler a row spreads.
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
 that row's own depth - the depth is the only thing separating "after this
 collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: every row in
-document order *is* the tree's row list, so an indicator node between rows would
-join it and change the tree's shape mid-drag - a row with no level, sitting
-between a folder and its children. A row that cannot take
+reuses the selected-row ring. Nothing new gets `role="treeitem"`: an indicator
+node between rows would join the tree's rows and change its shape mid-drag - a
+row with no level, sitting between a folder and its children. The row being
+dragged stays mounted however far the drawer auto-scrolls from it, since it
+holds the pointer capture the whole gesture runs on. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 
@@ -2527,6 +2544,10 @@ actually removes the row moves focus to the **next row in the deleted row's own
 set**, or to the **parent** when that row was the last in it: chosen while the
 row is still on screen, since afterwards the DOM cannot say what followed it.
 Focus moves through `focusTreeRow`, so the tree's one tab stop travels with it.
+In the windowed collection tree the successor, the parent and the row before
+are kept mounted beside the row holding the tab stop, and for a commit after it
+leaves, so the answer read from the mounted rows is the one the whole list
+gives (`rowsAroundFocus`).
 
 **A tree that runs out of rows still has to name somewhere.** The rules above
 answer for every row but one: a root falls back to the root before it, so it
@@ -2560,20 +2581,24 @@ the variables sidebar, which grew its Delete key in #1217, after the rule was
 written - reach it through the one `useDeleteRefocus`, which each tells only
 which attribute identifies its rows and where its last resort is (#1279).
 
-**Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
-states plainly - `[role="treeitem"]` in document order is exactly the rows a
-user can see, since collapsed subtrees are not rendered; in the collection tree
-it is the order `flattenVisibleRows` lists them in. Parentage it does not: a
-row's children are rendered **beside** it, never nested within it - in the
+**Order comes from the rows; hierarchy comes from `aria-level`.** In the
+variables sidebar and the schema explorer the DOM states order plainly -
+`[role="treeitem"]` in document order is exactly the rows a user can see, since
+collapsed subtrees are not rendered. The collection tree mounts only a window of
+its rows, so its order comes from the list `flattenVisibleRows` builds, handed
+to the hook as a `TreeRowModel`, and its levels with it. Parentage the DOM does
+not state in any of them: a row's children are rendered **beside** it, never
+nested within it - in the
 collection tree every row is a sibling in one flat list - so `closest()` finds
 nothing. When the children sat in a shared wrapper, a walk up the ancestors took
 whichever treeitem an ancestor held first - a group's own first row, which is a
 preceding *sibling* of every row after it. Under that walk Left moved to the top
 of a list instead of out of it, and self-corrected on the next press, so it read
 as hesitation rather than as breakage (#1237). One function answers the question
-now - `parentRow` in `tree-focus.ts`, the nearest row above with a smaller
-level - and both the Left key and the delete refocus read it, so there is one
-description of this tree's shape rather than two that can drift.
+now - `parentIndex` in `tree-focus.ts`, the nearest row above with a smaller
+level, which `parentRow` applies to a list of mounted rows - and both the Left
+key and the delete refocus read it, so there is one description of this tree's
+shape rather than two that can drift.
 
 **A consumer of the hook therefore has to announce `aria-level` on every row**,
 and all three do. It is not only for assistive tech: a tree that omits it is a

@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useCallback, useEffect, useMemo } from "react";
+import { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useImportModalStore, useSessionStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
@@ -23,8 +23,9 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import CollectionTreeRows from "./CollectionTreeRows";
-import { flattenVisibleRows } from "./tree-rows";
+import CollectionTreeRows, { type TreeRowWindow } from "./CollectionTreeRows";
+import { flattenVisibleRows, folderIdOfRowKey, navigableRows } from "./tree-rows";
+import { focusTreeRow, type TreeRowModel } from "./tree-focus";
 import ExportSpecDialog from "./ExportSpecDialog";
 import ExportPostmanDialog from "./ExportPostmanDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
@@ -47,7 +48,11 @@ export default function CollectionTree() {
 	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
 	const expandCollections = useCollectionsStore((s) => s.expandCollections);
 	const treeRef = useRef<HTMLDivElement>(null);
-	const treeFocus = useRovingTreeFocus(treeRef);
+	// The `role="tree"` element as state, not a ref: the window measures from it,
+	// and a ref on a parent is not set yet when its children's effects run.
+	const [treeList, setTreeList] = useState<HTMLDivElement | null>(null);
+	// The one way to act on a row that may be scrolled away (#2543).
+	const rowWindowRef = useRef<TreeRowWindow>(null);
 
 	// Get selected collection and request IDs from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -77,7 +82,7 @@ export default function CollectionTree() {
 		[requestsByCollection]
 	);
 
-	const { revealEntity } = useRevealActiveSelection(treeRef, {
+	const { revealEntity } = useRevealActiveSelection(treeRef, rowWindowRef, {
 		selectedCollectionId,
 		selectedRequestId,
 		collections,
@@ -103,6 +108,23 @@ export default function CollectionTree() {
 			}),
 		[collections, getRequestsByCollection, expandedCollectionIds, creatingSubfolder]
 	);
+
+	/*
+	 * The keys walk every visible row, not the mounted ones: the window holds
+	 * only what is in view, and End or a typeahead has to reach past it.
+	 */
+	const navigationModel = useMemo<TreeRowModel>(
+		() => ({
+			rows: navigableRows(rows, expandedCollectionIds),
+			keyOf: (element) => rowWindowRef.current?.keyOf(element) ?? null,
+			focusRow: (key) => {
+				rowWindowRef.current?.revealRow(key, (row) => focusTreeRow(treeRef.current, row));
+			},
+			expand: (keys) => expandCollections(keys.flatMap((key) => folderIdOfRowKey(key) ?? [])),
+		}),
+		[rows, expandedCollectionIds, expandCollections]
+	);
+	const treeFocus = useRovingTreeFocus(treeRef, navigationModel);
 
 	/*
 	 * The toolbar's "+" asks the same question every other "New request" entry
@@ -399,8 +421,9 @@ export default function CollectionTree() {
 				    contexts - see CollectionTreeContext for why it is not props. */}
 				{!isLoadingCollections && rows.length > 0 && (
 					<div className="flex-1 min-h-0">
-						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
+						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
 						<div
+							ref={setTreeList}
 							role="tree"
 							aria-label="Collections"
 							onKeyDown={treeFocus.onKeyDown}
@@ -412,7 +435,11 @@ export default function CollectionTree() {
 								state={treeState}
 								folderDraft={folderDraft}
 							>
-								<CollectionTreeRows rows={rows} />
+								<CollectionTreeRows
+									rows={rows}
+									list={treeList}
+									windowRef={rowWindowRef}
+								/>
 							</CollectionTreeProviders>
 						</div>
 					</div>

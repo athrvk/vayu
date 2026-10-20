@@ -24,6 +24,11 @@
  * whatever is off screen. Between them the rendered count stays bounded in
  * *cost* without being bounded in *content*.
  *
+ * The argument is about rows whose heights vary. A list whose rows are a fixed
+ * height by construction has no rows to measure and no map to maintain, and a
+ * real window is cheap there: the collection tree mounts only the rows in view
+ * (`modules/collections/useTreeWindow.ts`, #2543).
+ *
  * **What resets it.** A new list starts at the top again, and `resetKey` is how
  * a caller says which list it is holding. The length is the default answer and
  * the right one for a list that only ever changes by being replaced; a list that
