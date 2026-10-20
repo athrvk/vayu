@@ -7,6 +7,8 @@
 
 #include "vayu/http/header_names.hpp"
 
+#include "vayu/http/default_headers.hpp"
+
 namespace vayu::http {
 
 std::optional<HeaderNameCollision> record_produced_name (HeaderNameOrigins& origins,
@@ -38,6 +40,31 @@ std::string describe_empty_header_name (const std::string& written) {
     return subject +
     " - what would go out is a \": value\" line no name owns, so the request is"
     " refused rather than sent carrying a header the author cannot see";
+}
+
+std::string_view trim_optional_whitespace (std::string_view text) {
+    const auto first = text.find_first_not_of (OPTIONAL_WHITESPACE);
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    return text.substr (first, text.find_last_not_of (OPTIONAL_WHITESPACE) - first + 1);
+}
+
+std::optional<std::string> invalid_header_name_refusal (std::string_view name) {
+    // `{` is not a token character, but a name still holding a `{{token}}` is
+    // one nothing answered, and an unanswered token is sent as written (issue
+    // #1009), not refused.
+    if (name.find ("{{") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto reason = invalid_header_token (name);
+    if (!reason) {
+        return std::nullopt;
+    }
+    return "header " + *reason +
+    " - spaces and tabs around a name are trimmed, but a name with anything "
+    "else"
+    " in it is refused rather than rewritten into a header nobody wrote";
 }
 
 } // namespace vayu::http

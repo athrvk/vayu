@@ -342,6 +342,8 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
             ctx, resolved_name, "header name '" + name + "'")) {
             return reason;
         }
+        resolved_name =
+        std::string (vayu::http::trim_optional_whitespace (resolved_name));
         if (resolved_name.empty ()) {
             // A name written empty is refused as the headers are read; one
             // *resolved* empty reaches nothing that would notice - the pre-send
@@ -351,6 +353,9 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
             // wording is `http/header_names.hpp`'s rather than this layer's -
             // the same move the collision beside it already made.
             return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
+        }
+        if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
+            return "pm.sendRequest: " + *invalid;
         }
         if (auto collision =
             vayu::http::record_produced_name (produced, resolved_name, name)) {

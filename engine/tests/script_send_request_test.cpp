@@ -766,6 +766,40 @@ TEST_F (SendRequestTest, AHeaderNameResolvingToNothingIsRefused) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
+// The third header-name rule (issue #2467), enforced here as in every layer that
+// reads a name: the spaces and tabs around it are trimmed, and what is left must
+// be a token. Mutation check: drop the `invalid_header_name_refusal` call in
+// `resolve_send_request_headers` and the second sends; drop the trim and the
+// first is refused as a name with a space in it.
+TEST_F (SendRequestTest, APaddedHeaderNameIsSentTrimmed) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { ' X-Marker\\t': 'from-script' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('from-script'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, AHeaderNameThatIsNotATokenIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', header: { 'X Bad': 'acme' } }, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("'X Bad'"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
 // ============================================================================
 // Arguments that cannot be honoured fail loudly rather than sending something
 // the script did not write

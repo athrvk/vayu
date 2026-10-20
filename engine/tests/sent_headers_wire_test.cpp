@@ -308,6 +308,29 @@ TEST_F (SentHeadersWireTest, AnAuthorizationTypedTwiceIsSentTwiceAndAuthAddsNone
     (Lines{ { "Authorization", "Bearer first" }, { "authorization", "Bearer second" } }));
 }
 
+// Issue #2467: a name pasted with a trailing blank would go out as
+// `Authorization : Bearer x`, a space before the colon that a strict server
+// refuses and a lenient one reads as another name. The name is settled where the
+// payload is read, so the line that reaches the wire is the trimmed one; the
+// bearer token is trimmed by the auth block the same way. Mutation check: drop
+// the trim in `stored_header_name` (`utils/json.cpp`) or in the bearer branch of
+// `apply_auth`.
+TEST_F (SentHeadersWireTest, APaddedHeaderNameAndTokenReachTheWireTrimmed) {
+    auto parsed = vayu::json::deserialize_request (
+    nlohmann::json{ { "method", "GET" }, { "url", server_->url () },
+    { "headers", nlohmann::json::parse (R"([{"name":"X-Padded ","value":"kept"}])") } });
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+    Request request = std::move (parsed).value ();
+    ASSERT_TRUE (apply_auth (request, Auth{ BearerAuth{ " tok " } }, nullptr).ok);
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "X-Padded" }),
+    (Lines{ { "X-Padded", "kept" } }));
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer tok");
+}
+
 TEST_F (SentHeadersWireTest, TheLoadDriverSendsEveryLineInOrder) {
     EventLoop loop;
     loop.start ();

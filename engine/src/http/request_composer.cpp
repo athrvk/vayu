@@ -1023,13 +1023,15 @@ std::string row_text (const nlohmann::json& row, const char* member) {
     return it != row.end () && it->is_string () ? it->get<std::string> () : "";
 }
 
-// Every enabled row of a stored KeyValueEntry[] headers blob with a non-empty
-// key, as the `{name, value}` lines /execute takes: in row order, a repeated
-// name repeated, each in its own spelling (issue #2466). The renderer's
-// `toHeaderRows` is the other copy; `tests/fixtures/header-rows-conformance.json`
-// holds the two to one answer. A name whose last row carries the body mode's
-// marker is listed as `bodyModeHeaders`, so a refused Content-Type drops it
-// rather than reading it as the user's.
+// Every enabled row of a stored KeyValueEntry[] headers blob with a key that is
+// not blank, as the `{name, value}` lines /execute takes: in row order, a
+// repeated name repeated, each in its own spelling (issue #2466) with the
+// spaces and tabs around it trimmed (issue #2467), a blank one being no name.
+// The renderer's `toHeaderRows` is the other copy;
+// `tests/fixtures/header-rows-conformance.json` holds the two to one answer. A
+// name whose last row carries the body mode's marker is listed as
+// `bodyModeHeaders`, so a refused Content-Type drops it rather than reading it
+// as the user's.
 StoredHeaderRows stored_header_rows (const std::string& blob) {
     StoredHeaderRows stored;
     if (blob.empty ()) {
@@ -1041,7 +1043,8 @@ StoredHeaderRows stored_header_rows (const std::string& blob) {
     }
     std::map<std::string, bool, vayu::CaseInsensitiveLess> marked;
     for (const auto& row : rows) {
-        const std::string name = row.is_object () ? row_text (row, "key") : "";
+        const std::string name (vayu::http::trim_optional_whitespace (
+        row.is_object () ? row_text (row, "key") : ""));
         if (name.empty ()) {
             continue;
         }
@@ -1194,9 +1197,9 @@ std::string& environment_id) {
     return vars;
 }
 
-/// A resolved header block, or the first refusal that stopped it - the two
-/// reasons composition rejects a payload over a header rather than over its
-/// shape, gathered so the caller answers them in one place.
+/// A resolved header block, or the first refusal that stopped it - the reasons
+/// composition rejects a payload over a header rather than over its shape,
+/// gathered so the caller answers them in one place.
 struct ResolvedHeaders {
     /// `{name, value}` lines, in the order the block held them.
     nlohmann::json lines = nlohmann::json::array ();
@@ -1204,9 +1207,38 @@ struct ResolvedHeaders {
     std::optional<HeaderTextRefusal> unspellable;
     /// Two names written differently that resolved to one (#1051).
     std::optional<vayu::http::HeaderNameCollision> collision;
-    /// A name that resolved to nothing, as it was written (#1084).
+    /// A name that resolved to nothing, as it was written (#1084). A name of
+    /// nothing but spaces and tabs is one: it trims to nothing (#2467).
     std::optional<std::string> nameless;
+    /// The first name that is not a token once trimmed, as the refusal
+    /// words it (#2467).
+    std::optional<std::string> invalid_name;
 };
+
+/**
+ * Settle a header name resolution produced (issue #2467): trim the spaces and
+ * tabs around it, then file what is wrong with what is left. A name that trims
+ * to nothing is `nameless`, however it got there; one that is not a token is
+ * `invalid_name`. A name still holding a `{{token}}` is not judged here: the
+ * residual pass resolves it against what a pre-request script defines and
+ * judges what it produces (`http/request_exchange.cpp`).
+ *
+ * @param key the name as written, for the nameless message.
+ */
+void settle_header_name (std::string& name, const std::string& key, ResolvedHeaders& out) {
+    name = std::string (vayu::http::trim_optional_whitespace (name));
+    if (name.empty ()) {
+        if (!out.nameless) {
+            // However it got there, unlike a collision: a name that is not
+            // there is nothing the author can see, whoever wrote it.
+            out.nameless = key;
+        }
+        return;
+    }
+    if (!out.invalid_name) {
+        out.invalid_name = vayu::http::invalid_header_name_refusal (name);
+    }
+}
 
 /**
  * A payload's `headers` in either shape `POST /execute` takes (issue #2466) as
@@ -1238,6 +1270,8 @@ nlohmann::json header_lines_of (const nlohmann::json& headers) {
  *
  * A line that is not an object with a string `name` is passed through as it
  * stands: `POST /execute` refuses it, naming the shape it wants.
+ *
+ * Each name is trimmed and judged by `settle_header_name`.
  */
 ResolvedHeaders resolve_header_block (const nlohmann::json& headers,
 const VariableValues& vars,
@@ -1254,12 +1288,10 @@ DynamicResolution dynamic) {
         const std::string key = written->get<std::string> ();
         std::string name =
         resolve_header_template (key, vars, bound_columns, dynamic, out.unspellable);
-        if (name.empty () && !out.nameless) {
-            // However it got there, unlike a collision: a name that is not
-            // there is nothing the author can see, whoever wrote it.
-            out.nameless = key;
-        }
-        auto collision = vayu::http::record_produced_name (produced, name, key);
+        settle_header_name (name, key, out);
+        // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.
+        auto collision = vayu::http::record_produced_name (produced, name,
+        std::string (vayu::http::trim_optional_whitespace (key)));
         if (collision && !out.collision) {
             out.collision = std::move (collision);
         }
@@ -1288,8 +1320,8 @@ bool url_encoding_disabled (const nlohmann::json& payload) {
  * escape for it, so a substituted CR or LF ends the line rather than sitting in
  * it (`http/header_text.hpp`), and a substituted name can quietly repeat
  * another header the author did not repeat - or leave the line with no name at
- * all (`http/header_names.hpp`). Both files carry the rules and the layers that
- * share them.
+ * all, or with one that is not a token (`http/header_names.hpp`). Both files
+ * carry the rules and the layers that share them.
  *
  * @return the refusal, or nothing.
  */
@@ -1320,6 +1352,10 @@ nlohmann::json& payload) {
         if (resolved.nameless) {
             return compose_error (400, vayu::http::EMPTY_HEADER_NAME_CODE,
             vayu::http::describe_empty_header_name (*resolved.nameless));
+        }
+        if (resolved.invalid_name) {
+            return compose_error (
+            400, vayu::http::INVALID_HEADER_NAME_CODE, *resolved.invalid_name);
         }
         if (resolved.collision) {
             return compose_error (400, vayu::http::COLLIDING_HEADER_NAMES_CODE,

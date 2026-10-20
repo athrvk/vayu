@@ -31,6 +31,17 @@ bool is_token_char (char c) {
     return SYMBOLS.find (c) != std::string_view::npos;
 }
 
+/// A byte of a refused name as a message can show it. A byte outside printable
+/// ASCII is spelled as a number: written out raw it would be a fragment of a
+/// UTF-8 sequence, and the JSON the message travels in cannot carry one.
+std::string spelled_byte (char c) {
+    const auto byte = static_cast<unsigned char> (c);
+    if (byte >= 0x20 && byte < 0x7F) {
+        return std::format ("'{}'", c);
+    }
+    return std::format ("byte 0x{:02X}", byte);
+}
+
 /// The encodings libcurl was built to decode, in the order curl itself lists
 /// them. Built once, on first use: nothing at namespace scope is built at run
 /// time, and `curl_version_info` is a call.
@@ -197,7 +208,8 @@ std::optional<std::string> invalid_header_token (std::string_view name) {
     const auto offending = std::find_if_not (name.begin (), name.end (), is_token_char);
     if (offending != name.end ()) {
         return std::format (
-        "'{}' is not a header name: '{}' cannot appear in one", name, *offending);
+        "'{}' is not a header name: {} cannot appear in one", name,
+        spelled_byte (*offending));
     }
     return std::nullopt;
 }

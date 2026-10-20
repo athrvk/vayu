@@ -1726,7 +1726,10 @@ pre-send gate reads header text for the bytes that break a line, and what is
 left of an empty name is the line `: value`, which libcurl sends. This call met
 that rule first, a script writing header names of its own; since #1084
 composition and the execute-time residual pass refuse it in the same words, so
-one wording answers wherever a name is resolved.
+one wording answers wherever a name is resolved. A resolved name is also
+trimmed of the spaces and tabs around it and must then be an RFC 9110 token:
+` X-Trace` goes out as `X-Trace`, and `X Trace` throws with the same wording as
+the `invalid_header_name` refusal (#2467).
 
 ```javascript
 pm.environment.set("tenant", "acme");

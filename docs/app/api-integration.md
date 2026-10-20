@@ -1381,6 +1381,15 @@ record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
 longer sends it: a record keeps one value per key and sends a different header
 from the one its table shows. The same holds for `POST /runs`.
 
+The engine trims the spaces and tabs around every header name (`Authorization `
+goes out as `Authorization`, never as a wire line with a space before its colon)
+and then requires a token: a name with an interior space, a colon or a
+non-ASCII byte is a `400` with code `invalid_header_name`, quoting the name, from
+`POST /compose`, `POST /execute` and `POST /runs` alike. A name of only spaces
+and tabs is no name (`empty_header_name`). A bearer token and an API key's name
+and value are trimmed the same way when auth is resolved; see the
+[API reference](../engine/api-reference.md#post-compose).
+
 **Example Request:**
 ```typescript
 await apiService.executeRequest({

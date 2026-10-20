@@ -18,6 +18,7 @@
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/encoding.hpp"
 
 using nlohmann::json;
 
@@ -52,6 +53,70 @@ TEST (AuthResolver, BearerSetsAuthorizationHeader) {
     req, json{ { "mode", "bearer" }, { "token", "abc123" } }, nullptr);
     EXPECT_TRUE (result.ok);
     EXPECT_EQ (req.headers.at ("Authorization"), "Bearer abc123");
+}
+
+// A pasted token carries its newline-less trailing blank into the header value
+// (issue #2467); the ends are trimmed, the inside is the token's own. Mutation
+// check: drop the trim in the bearer branch of `apply_auth`.
+TEST (AuthResolver, BearerTokenIsTrimmedAtBothEndsOnly) {
+    auto req    = make_request ();
+    auto result = vayu::http::apply_auth (
+    req, json{ { "mode", "bearer" }, { "token", " \ttok en \t" } }, nullptr);
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer tok en");
+}
+
+TEST (AuthResolver, BasicCredentialsAreNotTrimmed) {
+    auto req    = make_request ();
+    auto result = vayu::http::apply_auth (req,
+    json{ { "mode", "basic" }, { "username", " u " }, { "password", " p " } }, nullptr);
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.headers.at ("Authorization"),
+    "Basic " + vayu::utils::base64_encode (" u : p "));
+}
+
+TEST (AuthResolver, ApiKeyNameAndValueAreTrimmedInBothPlacements) {
+    auto header_req = make_request ();
+    auto header     = vayu::http::apply_auth (header_req,
+        json{ { "mode", "apikey" }, { "key", " X-Api-Key " },
+        { "value", " secret " }, { "in", "header" } },
+        nullptr);
+    EXPECT_TRUE (header.ok);
+    EXPECT_EQ (header_req.headers.at ("X-Api-Key"), "secret");
+    EXPECT_EQ (header_req.secret_header_names, std::vector<std::string>{ "X-Api-Key" });
+
+    auto query_req = make_request ("https://api.example.com/v1");
+    auto query     = vayu::http::apply_auth (query_req,
+        json{ { "mode", "apikey" }, { "key", " key " }, { "value", " v " }, { "in", "query" } },
+        nullptr);
+    EXPECT_TRUE (query.ok);
+    EXPECT_EQ (query_req.url, "https://api.example.com/v1?key=v");
+    EXPECT_EQ (query_req.auth_query_param, "key");
+}
+
+// An API key header whose name is not a token is refused with nothing written.
+// Mutation check: drop the `invalid_header_name_refusal` call in
+// `apply_api_key` and the line goes out as `X Key`.
+TEST (AuthResolver, ApiKeyHeaderNameThatIsNotATokenIsRefused) {
+    auto req    = make_request ();
+    auto result = vayu::http::apply_auth (req,
+    json{ { "mode", "apikey" }, { "key", "X Key" }, { "value", "secret" }, { "in", "header" } },
+    nullptr);
+    EXPECT_FALSE (result.ok);
+    EXPECT_EQ (result.code, vayu::ErrorCode::AuthFailed);
+    EXPECT_EQ (result.detail_code, "invalid_header_name");
+    EXPECT_NE (result.message.find ("'X Key'"), std::string::npos) << result.message;
+    EXPECT_TRUE (req.headers.empty ());
+    EXPECT_TRUE (req.secret_header_names.empty ());
+}
+
+TEST (AuthResolver, ApiKeyOfOnlyPaddingIsNoKey) {
+    auto req    = make_request ();
+    auto result = vayu::http::apply_auth (req,
+    json{ { "mode", "apikey" }, { "key", "  " }, { "value", "secret" }, { "in", "header" } },
+    nullptr);
+    EXPECT_TRUE (result.ok);
+    EXPECT_TRUE (req.headers.empty ());
 }
 
 TEST (AuthResolver, BasicEncodesCredentials) {

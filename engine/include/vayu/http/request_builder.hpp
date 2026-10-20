@@ -46,7 +46,8 @@ enum class AuthResolution : std::uint8_t { Apply, Defer };
  *
  * `ok == true` yields a ready-to-send `request`. `parse_failed` distinguishes a
  * malformed payload (→ 400) from an auth failure (→ carries error_code /
- * detail_code for the client).
+ * detail_code for the client). A malformed payload carries a `detail_code` too
+ * when the refusal has a name (`invalid_header_name`), empty otherwise.
  */
 struct RequestBuild {
     bool ok = true;

@@ -114,6 +114,55 @@ TEST (JsonTest, RefusesAHeaderLineThatIsNotANameAndAValue) {
     }
 }
 
+// A name is trimmed of the spaces and tabs around it, in either shape (issue
+// #2467). Mutation check: drop the trim in `stored_header_name` and both fail.
+TEST (JsonTest, PaddedHeaderNamesAreTrimmedInBothShapes) {
+    auto array_form = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"Authorization ","value":"v"},{"name":"\tX-A","value":" w "}]})"));
+    ASSERT_TRUE (array_form.is_ok ()) << array_form.error ().message;
+    EXPECT_EQ (array_form.value ().headers,
+    (HeaderList{ { "Authorization", "v" }, { "X-A", " w " } }));
+
+    auto object_form = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":{" X-A ":"1"}})"));
+    ASSERT_TRUE (object_form.is_ok ()) << object_form.error ().message;
+    EXPECT_EQ (object_form.value ().headers, (HeaderList{ { "X-A", "1" } }));
+}
+
+// What is left after the trim must be a token, and the refusal carries the code
+// a route answers under. Mutation check: drop the `invalid_header_name_refusal`
+// call in `stored_header_name`.
+TEST (JsonTest, RefusesAHeaderNameThatIsNotATokenInBothShapes) {
+    for (const std::string name : { "X Bad", "X:Bad", "X-\u00e9" }) {
+        const std::vector<std::string> shapes = { R"([{"name":")" + name + R"(","value":"v"}])",
+            R"({")" + name + R"(":"v"})" };
+        for (const std::string& shape : shapes) {
+            auto result = deserialize_request (
+            R"({"method":"GET","url":"https://x.test","headers":)" + shape + "}");
+
+            ASSERT_TRUE (result.is_error ()) << shape;
+            EXPECT_EQ (result.error ().code, vayu::ErrorCode::InvalidHeaderName) << shape;
+            EXPECT_NE (result.error ().message.find ("'" + name + "'"), std::string::npos)
+            << result.error ().message;
+        }
+    }
+}
+
+// A name of nothing but padding is stored empty, for the empty-name refusal
+// every send makes - the same answer the compose route gives it.
+// A name still holding a token waits for the layer that resolves it.
+TEST (JsonTest, ABlankOrTemplatedHeaderNameIsNotThisRefusal) {
+    auto blank = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"  ","value":"v"}]})"));
+    ASSERT_TRUE (blank.is_ok ()) << blank.error ().message;
+    EXPECT_EQ (blank.value ().headers, (HeaderList{ { "", "v" } }));
+
+    auto templated = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":" {{h}} ","value":"v"}]})"));
+    ASSERT_TRUE (templated.is_ok ()) << templated.error ().message;
+    EXPECT_EQ (templated.value ().headers, (HeaderList{ { "{{h}}", "v" } }));
+}
+
 TEST (JsonTest, DeserializesRequestWithBody) {
     std::string json_str = R"({
         "method": "POST",

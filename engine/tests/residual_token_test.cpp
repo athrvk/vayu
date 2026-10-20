@@ -500,6 +500,88 @@ TEST (ResidualTokens, ARequestWithNeitherATokenNorAnEmptyNameIsUntouched) {
     EXPECT_EQ (request.url, before.url);
 }
 
+// --- a name that is not a token (#2467) --------------------------------------
+//
+// The third rule `http/header_names.hpp` holds. A pre-request script can set any
+// string as a name, and a payload names whatever it likes, so this pass trims the
+// spaces and tabs around a name and refuses what is left when it is not a token.
+//
+// Mutation-check: drop `!is_sendable_header_name (line.name)` from
+// `a_header_name_needs_reading` and the first two fail - the walk never runs for
+// a name holding no token - and drop the `invalid_header_name_refusal` call in
+// `resolve_header_names` and the refusals below fail.
+
+TEST (ResidualTokens, APaddedNameThatArrivesResolvedIsTrimmed) {
+    vayu::Request request;
+    request.url = "https://api.example.com/x";
+    request.headers.add (" X-Trace\t", "abc");
+
+    ScriptVariableScopes scopes;
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers, (vayu::HeaderList{ { "X-Trace", "abc" } }));
+}
+
+TEST (ResidualTokens, ANameThatIsNotATokenIsRefusedAndTheHeadersLeftAlone) {
+    vayu::Request request;
+    request.url                = "https://api.example.com/x";
+    request.headers["X Bad"]   = "v";
+    request.headers["X-Other"] = "kept";
+    const vayu::Request before = request;
+
+    ScriptVariableScopes scopes;
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->error.code, vayu::ErrorCode::InternalError);
+    EXPECT_EQ (refusal->code, "invalid_header_name");
+    EXPECT_NE (refusal->error.message.find ("'X Bad'"), std::string::npos)
+    << refusal->error.message;
+    EXPECT_EQ (request.headers, before.headers);
+}
+
+TEST (ResidualTokens, AResolvedNameIsJudgedAfterTheTrim) {
+    vayu::Request padded;
+    padded.url                   = "https://api.example.com/x";
+    padded.headers["{{header}}"] = "v";
+    EXPECT_FALSE (
+    resolve_residual_tokens (padded, environment_with ("header", " X-Trace ")));
+    EXPECT_EQ (padded.headers, (vayu::HeaderList{ { "X-Trace", "v" } }));
+
+    vayu::Request spaced;
+    spaced.url                   = "https://api.example.com/x";
+    spaced.headers["{{header}}"] = "v";
+    const auto refusal =
+    resolve_residual_tokens (spaced, environment_with ("header", "X Trace"));
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, "invalid_header_name");
+}
+
+// A token nothing answered is sent as written (#1009), here as everywhere: it is
+// not a name this rule judges.
+TEST (ResidualTokens, ANameNothingAnsweredIsLeftWritten) {
+    vayu::Request request;
+    request.url                   = "https://api.example.com/x";
+    request.headers["{{header}}"] = "v";
+
+    ScriptVariableScopes scopes;
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers, (vayu::HeaderList{ { "{{header}}", "v" } }));
+}
+
+TEST (ResidualTokens, ANameOfOnlyPaddingIsTheEmptyNameRefusal) {
+    vayu::Request request;
+    request.url = "https://api.example.com/x";
+    request.headers.add (" \t", "v");
+
+    ScriptVariableScopes scopes;
+    const auto refusal = resolve_residual_tokens (request, scopes);
+
+    ASSERT_HAS_VALUE (refusal);
+    EXPECT_EQ (refusal->code, "empty_header_name");
+}
+
 // --- the load path's per-VU overlay (issue #1495) ----------------------------
 //
 // `ScopeOverlay` is what makes `resolve_residual_tokens` safe to call once per

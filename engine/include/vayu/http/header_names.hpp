@@ -18,12 +18,16 @@
 
 /**
  * @file header_names.hpp
- * @brief What resolution can do to a header *name* - the rules, one place.
+ * @brief What a header *name* can be, and what resolution can do to one - the
+ * rules, one place.
  *
- * Two of them, both about a name a variable produced rather than a name the
- * author typed: two names that become one (below), and a name that becomes
+ * Three of them. Two are about a name a variable produced rather than a name
+ * the author typed: two names that become one (below), and a name that becomes
  * nothing at all (`describe_empty_header_name`). Neither is visible from the
- * response, and neither is caught anywhere further down the send.
+ * response, and neither is caught anywhere further down the send. The third is
+ * about any name, typed or produced: it must be an RFC 9110 token once its
+ * surrounding spaces and tabs are trimmed (`trim_optional_whitespace`,
+ * `invalid_header_name_refusal`, "The name that is not a token" below).
  *
  * A header name is substituted like any other field, so two names can come out
  * of resolution as one. `{{tenant_header}}: acme` beside a literal
@@ -37,6 +41,9 @@
  * and neither is visible from the response.
  *
  * ## Refusal, never repair
+ *
+ * (For the two rules about *produced* names. The third rule trims, and says why
+ * under its own heading.)
  *
  * The alternative is to define which of the two survives, and there is no
  * honest answer: the names are equally the author's, and one is not more meant
@@ -121,6 +128,47 @@
  *   collision rule keeps the narrower reach and loses nothing by it: a request
  *   that arrives already resolved carries no written name that differs from
  *   what it sends, so every repeat in it is a repeat as written.
+ *
+ * ## The name that is not a token (issue #2467)
+ *
+ * `Authorization ` with a trailing space is a header name no one meant: the
+ * wire line `Authorization : Bearer x` has a space before its colon, which a
+ * strict server answers `400` and a lenient one reads as a header of another
+ * name. So a name is **trimmed** of the SP and HTAB around it - an obvious
+ * paste error with one reading, the same repair every client makes for the
+ * leading and trailing blanks of a field - and the result must then be an RFC
+ * 9110 `token` (`invalid_header_token`, `default_headers.hpp`). Whatever is
+ * left over - an interior space, a colon, a byte outside ASCII - has no single
+ * intended reading, so it is **refused** (`INVALID_HEADER_NAME_CODE`), never
+ * rewritten into a different header: trimming is for what has one reading,
+ * refusal for what has none.
+ *
+ * A name that is only whitespace trims to nothing and is the empty-name rule's
+ * (`EMPTY_HEADER_NAME_CODE`), not this one: there is no spelling left to quote.
+ * A name still holding a `{{token}}` is not judged: `{` is not a token
+ * character, but a token nothing answered is sent as written (issue #1009), and
+ * a layer that resolves later (the residual pass) judges the name it produces.
+ *
+ * Enforced wherever a name enters, each layer in its own words only where it
+ * alone knows something:
+ *
+ * - **The stored rows composition flattens** are trimmed there
+ *   (`stored_header_rows`; the renderer's `toHeaderRows` is the other copy).
+ * - **A composed name** (`http/request_composer.cpp`) is judged after its
+ *   variables resolve.
+ * - **The `headers` of a `POST /execute` or `POST /runs` payload**
+ *   (`utils/json.cpp`) are judged as the payload is read, and
+ *   `ErrorCode::InvalidHeaderName` carries the refusal to the route that answers it.
+ * - **The residual pass** (`http/request_exchange.cpp`) judges what it resolves,
+ *   and reads every name for it, as it does for the empty one - the layer that
+ *   meets a name a pre-request script has just defined.
+ * - **A bound data cell** (`core/scenario_data.cpp`) is judged at bind time with
+ *   the row in front of the message, since the load path runs no residual pass.
+ * - **A script's own `pm.sendRequest`** (`runtime/pm/pm_send_request.cpp`) throws
+ *   it with the call named in front.
+ *
+ * An auth credential is trimmed on the same set, and an API key's header name
+ * judged by the same rule (`http/auth_resolver.cpp`).
  */
 
 namespace vayu::http {
@@ -203,5 +251,29 @@ const std::string& written);
 inline constexpr std::string_view COLLIDING_HEADER_NAMES_CODE =
 "colliding_header_names";
 inline constexpr std::string_view EMPTY_HEADER_NAME_CODE = "empty_header_name";
+inline constexpr std::string_view INVALID_HEADER_NAME_CODE =
+"invalid_header_name";
+
+/// SP and HTAB: RFC 9110's optional whitespace, the only padding a header name
+/// or a credential is trimmed of. CR, LF and NUL are not padding - they end or
+/// cut the line, which `header_text.hpp` refuses.
+inline constexpr std::string_view OPTIONAL_WHITESPACE = " \t";
+
+/// @p text without the SP and HTAB at either end; interior ones stay.
+[[nodiscard]] std::string_view trim_optional_whitespace (std::string_view text);
+
+/**
+ * @brief The refusal a header name that is not a token reads as, or nothing
+ *        for one that is.
+ *
+ * @p name is the name as it will be sent: already trimmed
+ * (`trim_optional_whitespace`) and not empty - an empty one is
+ * `describe_empty_header_name`'s. A name holding `{{` is never refused (see the
+ * rule above). The message quotes the name and says which character cannot
+ * appear in one. One wording for every layer that reads a
+ * name, on the same reasoning as the two above: a layer may name itself in
+ * front of it, never inside it.
+ */
+[[nodiscard]] std::optional<std::string> invalid_header_name_refusal (std::string_view name);
 
 } // namespace vayu::http
