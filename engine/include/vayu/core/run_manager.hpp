@@ -939,7 +939,8 @@ struct RunContext {
      *
      * So the producer publishes what it already computed, and the strategy
      * copies it out. One writer (the metrics thread), cheap reads, and the
-     * controller steers by exactly the figures the live chart is drawing.
+     * controller steers by the percentiles the live chart is drawing; its
+     * rate is the shorter `interval_rps` below.
      */
     struct LiveTick {
         /// Monotonic per run, starting at 1. A reader compares it against the
@@ -950,8 +951,11 @@ struct RunContext {
         double latency_p50_ms = 0.0;
         double latency_p95_ms = 0.0;
         double latency_p99_ms = 0.0;
-        double current_rps    = 0.0;
-        size_t in_flight      = 0;
+        /// Completions per second since the previous reading at least 100 ms
+        /// old. Not the frame's `currentRps`, a trailing second (#2393): a
+        /// level's first counted ticks must not average in the level before.
+        double interval_rps = 0.0;
+        size_t in_flight    = 0;
         /// Completions the percentiles above were computed over. Zero means an
         /// idle window, whose percentiles are zeros and must not be read as a
         /// service answering instantly.
@@ -1060,18 +1064,26 @@ struct MetricTickSample {
     double elapsed_seconds = 0.0; // Seconds since the run's first persisted tick
     size_t requests_completed = 0; // Responses received (success + error)
     size_t requests_failed = 0; // Of those, errors (vayu::count_status_failures)
-    size_t http_errors         = 0; // Of the errors, those that got a response
-    size_t no_response         = 0; // Of the errors, those that got none
-    size_t cancelled           = 0; // By a Stop; in none of the above (#2136)
-    double current_rps         = 0.0;
+    size_t http_errors = 0;     // Of the errors, those that got a response
+    size_t no_response = 0;     // Of the errors, those that got none
+    size_t cancelled   = 0;     // By a Stop; in none of the above (#2136)
+    // The trailing window of the live frame of the same tick (TrailingWindow,
+    // #2393): completions and dispatches per second over at least the last
+    // second, and the window's mean latency and queue wait, absent (stored as
+    // null) when the window completed nothing.
+    double current_rps       = 0.0;
+    double current_send_rate = 0.0;
+    std::optional<double> window_avg_latency_ms;
+    std::optional<double> window_avg_queue_wait_ms;
     size_t current_concurrency = 0;
-    double send_rate           = 0.0;
-    double throughput          = 0.0;
-    size_t backpressure        = 0;   // In flight, think-timer slots included
-    double error_rate          = 0.0; // Percent
-    size_t dropped_requests    = 0;
-    size_t bytes_sent          = 0;
-    size_t bytes_received      = 0;
+    // Cumulative means since load start, the hero card's figures.
+    double send_rate        = 0.0;
+    double throughput       = 0.0;
+    size_t backpressure     = 0;   // In flight, think-timer slots included
+    double error_rate       = 0.0; // Percent
+    size_t dropped_requests = 0;
+    size_t bytes_sent       = 0;
+    size_t bytes_received   = 0;
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
     // The second since the previous row, every 100 ms window merged
     // (MetricsCollector::take_second_percentiles, #2385); neither the last

@@ -85,23 +85,26 @@ class StatsRouteTest : public ::testing::Test {
     // The tick the producer would persist for one second of a run.
     static vayu::core::MetricTickSample sample_at (int64_t ts, double elapsed) {
         vayu::core::MetricTickSample sample;
-        sample.timestamp           = ts;
-        sample.elapsed_seconds     = elapsed;
-        sample.requests_completed  = 10;
-        sample.requests_failed     = 0;
-        sample.current_rps         = 100.0;
-        sample.current_concurrency = 4;
-        sample.send_rate           = 101.5;
-        sample.throughput          = 99.25;
-        sample.backpressure        = 2;
-        sample.error_rate          = 0.0;
-        sample.dropped_requests    = 1;
-        sample.bytes_sent          = 512;
-        sample.bytes_received      = 4096;
-        sample.status_codes        = { { 200, 10 } };
-        sample.latency_p50_ms      = 5.0;
-        sample.latency_p95_ms      = 8.0;
-        sample.latency_p99_ms      = 12.0;
+        sample.timestamp                = ts;
+        sample.elapsed_seconds          = elapsed;
+        sample.requests_completed       = 10;
+        sample.requests_failed          = 0;
+        sample.current_rps              = 100.0;
+        sample.current_send_rate        = 101.0;
+        sample.window_avg_latency_ms    = 7.5;
+        sample.window_avg_queue_wait_ms = 0.25;
+        sample.current_concurrency      = 4;
+        sample.send_rate                = 101.5;
+        sample.throughput               = 99.25;
+        sample.backpressure             = 2;
+        sample.error_rate               = 0.0;
+        sample.dropped_requests         = 1;
+        sample.bytes_sent               = 512;
+        sample.bytes_received           = 4096;
+        sample.status_codes             = { { 200, 10 } };
+        sample.latency_p50_ms           = 5.0;
+        sample.latency_p95_ms           = 8.0;
+        sample.latency_p99_ms           = 12.0;
         return sample;
     }
 
@@ -172,6 +175,9 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
         { "no_response", nlohmann::json::value_t::number_unsigned },
         { "cancelled", nlohmann::json::value_t::number_unsigned },
         { "current_rps", nlohmann::json::value_t::number_float },
+        { "current_send_rate", nlohmann::json::value_t::number_float },
+        { "window_avg_latency_ms", nlohmann::json::value_t::number_float },
+        { "window_avg_queue_wait_ms", nlohmann::json::value_t::number_float },
         { "current_concurrency", nlohmann::json::value_t::number_unsigned },
         { "send_rate", nlohmann::json::value_t::number_float },
         { "throughput", nlohmann::json::value_t::number_float },
@@ -198,8 +204,31 @@ TEST_F (StatsRouteTest, StoredTickPayloadKeysAndTypesArePinned) {
     EXPECT_EQ (entry["timestamp"].get<int64_t> (), 1000);
     EXPECT_EQ (entry["requests_completed"].get<int> (), 10);
     EXPECT_DOUBLE_EQ (entry["current_rps"].get<double> (), 100.0);
+    EXPECT_DOUBLE_EQ (entry["current_send_rate"].get<double> (), 101.0);
+    EXPECT_DOUBLE_EQ (entry["window_avg_latency_ms"].get<double> (), 7.5);
+    EXPECT_DOUBLE_EQ (entry["window_avg_queue_wait_ms"].get<double> (), 0.25);
     EXPECT_DOUBLE_EQ (entry["latency_p50_ms"].get<double> (), 5.0);
     EXPECT_EQ (entry["status_codes"]["200"].get<size_t> (), 10u);
+}
+
+// #2393: a window that completed nothing has no mean. The keys stay, as null,
+// so a reader tells an idle window from a row stored before the keys existed.
+TEST_F (StatsRouteTest, AnIdleWindowStoresItsMeansAsNull) {
+    const std::string id = seed_run ();
+    auto sample          = sample_at (1000, 0.0);
+    sample.window_avg_latency_ms.reset ();
+    sample.window_avg_queue_wait_ms.reset ();
+    add_tick (id, sample.timestamp, vayu::core::build_metric_tick_payload (sample));
+
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (body["data"].size (), 1u);
+    const auto& entry = body["data"][0];
+    for (const auto* key : { "window_avg_latency_ms", "window_avg_queue_wait_ms" }) {
+        ASSERT_TRUE (entry.contains (key)) << key << ": " << entry.dump ();
+        EXPECT_TRUE (entry[key].is_null ()) << key << ": " << entry.dump ();
+    }
 }
 
 // Pagination is by tick, so a page boundary can never hand back a bucket with

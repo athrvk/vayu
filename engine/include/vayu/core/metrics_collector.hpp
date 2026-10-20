@@ -825,6 +825,10 @@ class MetricsCollector {
         return total_latency_sum_.load (std::memory_order_relaxed);
     }
 
+    [[nodiscard]] double total_queue_wait_sum () const {
+        return total_queue_wait_sum_.load (std::memory_order_relaxed);
+    }
+
     [[nodiscard]] double average_latency () const {
         const size_t count = latency_samples ();
         return count > 0 ? total_latency_sum () / static_cast<double> (count) : 0.0;
@@ -832,9 +836,7 @@ class MetricsCollector {
 
     [[nodiscard]] double average_queue_wait () const {
         const size_t count = latency_samples ();
-        return count > 0 ? total_queue_wait_sum_.load (std::memory_order_relaxed) /
-        static_cast<double> (count) :
-                           0.0;
+        return count > 0 ? total_queue_wait_sum () / static_cast<double> (count) : 0.0;
     }
 
     // ========================================================================

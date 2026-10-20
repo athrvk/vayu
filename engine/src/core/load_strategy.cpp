@@ -1515,7 +1515,7 @@ class CapacitySearch {
         if (ticks_seen_ <= constants::capacity::SETTLE_TICKS) {
             return;
         }
-        rps_sum_ += tick->current_rps;
+        rps_sum_ += tick->interval_rps;
         ++rps_windows_;
         // An idle window reports percentiles of zero, which averaged in with
         // real ones would understate the level's latency by however much of the

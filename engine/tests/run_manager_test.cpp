@@ -916,6 +916,93 @@ TEST (LoadClock, StoredRowsCarryTheWholeSecondsPercentiles) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #2393: every frame carries the trailing window, and a gate frame and its
+// stored row carry one reading of it. A hundred 50 ms completions land before
+// tick 0, so they are in the run's mean and in no window; the 5 ms ones fed
+// until a row lands are the only ones a window holds. Mutation checks: put
+// the >= 100 ms delta back on the frame's `currentRps`, or store
+// `current_total / run_elapsed_s` as the row's `current_rps`, and the
+// frame/row equality fails; read the run's mean into the window's and the
+// 5 ms assertions fail.
+TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
+    const std::string db_path = "test_collect_metrics_trailing_window.db";
+    vayu::tests::remove_database_files (db_path);
+
+    vayu::db::Database db (db_path);
+    db.init ();
+
+    vayu::db::Run run;
+    run.id              = "trailing_window_run";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
+    nlohmann::json cfg;
+    auto ctx = std::make_shared<RunContext> (run.id, cfg);
+    auto& mc = *ctx->metrics_collector;
+    for (int i = 0; i < 100; ++i) {
+        mc.record_success (200, 50.0, 4.0);
+    }
+    ctx->requests_sent = 100;
+    ctx->is_running    = true;
+
+    std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return ctx->published_count.load () > 0; }))
+    << "the metrics thread never published tick 0";
+    // Paced feeding, so every window up to the first row holds completions.
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+        mc.record_success (200, 5.0, 0.5);
+        ++ctx->requests_sent;
+        return !db.get_metric_ticks_since (run.id, 0).empty ();
+    }))
+    << "no tick was persisted";
+    ctx->is_running = false;
+    metrics.join ();
+
+    const auto ticks = db.get_metric_ticks_since (run.id, 0);
+    ASSERT_FALSE (ticks.empty ()) << "no tick was persisted; nothing is proven";
+    const auto stored = nlohmann::json::parse (ticks.front ().payload);
+    EXPECT_GT (stored.at ("current_rps").get<double> (), 0.0) << stored.dump ();
+    EXPECT_GT (stored.at ("current_send_rate").get<double> (), 0.0) << stored.dump ();
+    EXPECT_DOUBLE_EQ (stored.at ("window_avg_latency_ms").get<double> (), 5.0);
+    EXPECT_DOUBLE_EQ (stored.at ("window_avg_queue_wait_ms").get<double> (), 0.5);
+
+    const auto batch = ctx->ticks_since (0);
+    ASSERT_FALSE (batch.payloads.empty ());
+    size_t gate_frames = 0;
+    for (const auto& payload : batch.payloads) {
+        const auto frame = live_frame_json (payload);
+        for (const auto* key : { "currentRps", "currentSendRate" }) {
+            ASSERT_TRUE (frame.contains (key) && frame.at (key).is_number ())
+            << key << ": " << frame.dump ();
+        }
+        for (const auto* key : { "windowAvgLatencyMs", "windowAvgQueueWaitMs" }) {
+            ASSERT_TRUE (frame.contains (key)) << key << ": " << frame.dump ();
+            EXPECT_TRUE (frame.at (key).is_null () || frame.at (key).is_number ())
+            << frame.dump ();
+        }
+        if (frame.at ("timestamp") != stored.at ("timestamp")) {
+            continue;
+        }
+        ++gate_frames;
+        EXPECT_DOUBLE_EQ (frame.at ("currentRps").get<double> (),
+        stored.at ("current_rps").get<double> ());
+        EXPECT_DOUBLE_EQ (frame.at ("currentSendRate").get<double> (),
+        stored.at ("current_send_rate").get<double> ());
+        EXPECT_EQ (frame.at ("windowAvgLatencyMs"), stored.at ("window_avg_latency_ms"));
+        EXPECT_EQ (frame.at ("windowAvgQueueWaitMs"), stored.at ("window_avg_queue_wait_ms"));
+        EXPECT_GT (frame.at ("avgLatencyMs").get<double> (), 5.0)
+        << "the run's mean lost the completions before tick 0";
+    }
+    EXPECT_EQ (gate_frames, 1u)
+    << "no live frame carried the stored row's timestamp";
+
+    vayu::tests::remove_database_files (db_path);
+}
+
 TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
     RunManager mgr;
     nlohmann::json cfg;
