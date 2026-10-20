@@ -7854,7 +7854,8 @@ when they were sent, never its path or rows. The full contract is in
 is read *after* a step's request was built, so it cannot change where the
 request goes; the `data.*` namespace can. A step whose URL, header or body
 carries `{{data.email}}` has it substituted with that iteration's row, per
-iteration, immediately before the send.
+iteration, immediately before the send. A form-data part's `contentType` binds
+the same way, on a text part as on a file part.
 
 The `{{data.column}}` spelling is **reserved and disjoint from the variable
 tiers** - not a fourth, higher tier. `{{data.id}}` and `{{id}}` are different

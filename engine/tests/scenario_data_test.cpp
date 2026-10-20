@@ -468,6 +468,23 @@ TEST (ScenarioDataBindTest, TheRawBodyAndEveryFormFieldBind) {
     EXPECT_EQ (request.body.fields[0].value, "v");
 }
 
+TEST (ScenarioDataBindTest, ATextFormPartsContentTypeBinds) {
+    // The composer resolves `{{vars}}` in `contentType` on every field, so the
+    // row's walk has to visit it on a text part too. Restore the file-only
+    // guard and the part keeps the literal token.
+    auto request        = request_with_url ("https://api.test/");
+    request.body.mode   = vayu::BodyMode::FormData;
+    request.body.fields = { { "meta", "{}", true } };
+    request.body.fields[0].content_type = "{{data.type}}";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"type":"application/json"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    ASSERT_EQ (request.body.fields.size (), 1u);
+    EXPECT_EQ (request.body.fields[0].content_type, "application/json");
+}
+
 TEST (ScenarioDataBindTest, AColumnTheRowDoesNotCarryIsAnErrorNotAnEmptyString) {
     // The whole point of the token is that the value came from the file, so a
     // silently blank field is the failure this namespace exists to remove.

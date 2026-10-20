@@ -272,6 +272,10 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
         visit (field.value, FieldContext::Plain);
         if (field.type == FormFieldType::File) {
             visit_file_strings (field.src, field.file_name, field.content_type, visit);
+        } else {
+            // A text part can carry its own `contentType` (the composer binds
+            // it on every field), so the row has to reach it here too.
+            visit (field.content_type, FieldContext::Plain);
         }
     }
     if (request.body.mode == BodyMode::Binary) {
