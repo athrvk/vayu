@@ -7,7 +7,8 @@
 
 /**
  * Cross-language conformance: the documentation's own `pm.*` examples against
- * the declarations the engine generates for them.
+ * the declarations the engine generates for them, and the declarations of the
+ * names the sandbox lacks against the scripts that reach for them.
  *
  * The engine's `script_types_test.cpp` guards the derivation by asserting on
  * substrings of the generated text - every listed member appears, the chain
@@ -112,12 +113,18 @@ function createCompiler(declarations: string) {
 	const defaultHost = ts.createCompilerHost(COMPILER_OPTIONS, true);
 	const cache = new Map<string, ts.SourceFile | undefined>();
 
-	let current: ts.SourceFile | undefined;
+	let currentSource = "";
 
 	const host: ts.CompilerHost = {
 		...defaultHost,
 		getSourceFile: (fileName, languageVersion, onError, shouldCreate) => {
-			if (fileName === SCRIPT_NAME) return current;
+			// Built from the options the compiler hands the host, not from a bare
+			// target: they carry what decides whether the file is a module
+			// (`moduleDetection`), and a script created without them is always a
+			// global script - the editor's does not.
+			if (fileName === SCRIPT_NAME) {
+				return ts.createSourceFile(fileName, currentSource, languageVersion, true);
+			}
 			if (!cache.has(fileName)) {
 				cache.set(
 					fileName,
@@ -146,18 +153,12 @@ function createCompiler(declarations: string) {
 
 	/**
 	 * The diagnostics the editor would show, so the codes the app suppresses are
-	 * dropped here too. Both come from the editor holding a fragment while the
-	 * engine runs something larger: 1108 (top-level `return`, legal because the
-	 * engine wraps the script in an IIFE) and 2304 (a name a collection-level
-	 * script part declared).
+	 * dropped here too: 1108 (top-level `return`, legal because the engine wraps
+	 * the script in an IIFE) and 2304 (see SUPPRESSED_DIAGNOSTICS for why a
+	 * correct script produces it).
 	 */
 	return function compile(block: DocBlock): string[] {
-		current = ts.createSourceFile(
-			SCRIPT_NAME,
-			block.source,
-			COMPILER_OPTIONS.target ?? ts.ScriptTarget.ESNext,
-			true
-		);
+		currentSource = block.source;
 		// `oldProgram` lets the compiler keep the structure for every file that
 		// did not change, which is all of them but the block - the same
 		// mechanism a watching editor uses between keystrokes.
@@ -217,4 +218,79 @@ describe("the documented pm.* examples compile against the generated declaration
 		const errors = blocks.flatMap(compile);
 		expect(errors.join("\n")).toBe("");
 	}, 120_000);
+});
+
+/**
+ * The names the sandbox lacks (`ABSENT_GLOBALS`) are declared so that using one
+ * is an error with the replacement on hover. Whether it *is* an error depends on
+ * the compiler options and on how a script uses the name, neither of which a
+ * substring of the generated text can show - so these compile real scripts.
+ */
+describe("the names the sandbox lacks, as the editor reports them", () => {
+	const declarations = readFileSync(DECLARATIONS_PATH, "utf8");
+	const compile = createCompiler(declarations);
+	const errorsOf = (source: string) => compile({ doc: "inline", line: 1, source }).join("\n");
+
+	/*
+	 * A script that declares one of these names itself is correct: the engine
+	 * runs it inside a function, where the declaration is local. Compiled as a
+	 * file in the global scope each line is "Cannot redeclare block-scoped
+	 * variable" (2451), which is `moduleDetection` in SCRIPT_COMPILER_OPTIONS
+	 * being what these lines hold up. `URL` and `fetch` are older absent names
+	 * with the same exposure.
+	 */
+	it.each([
+		["const data = pm.response.json();\ndata.id;"],
+		["let responseBody = pm.response.text();\nJSON.parse(responseBody);"],
+		["var request = pm.request;\nrequest.url;"],
+		["const environment = pm.environment.toObject();\nenvironment.baseUrl;"],
+		["const tests = [];\ntests.push(1);"],
+		["function postman() { return 1; }\npostman();"],
+		["const URL = pm.request.url;\nURL.host;"],
+		["function fetch(url) { return url; }\nfetch('x');"],
+	])("a script declaring the name itself is clean: %s", (source) => {
+		expect(errorsOf(source)).toBe("");
+	});
+
+	/*
+	 * Each line is what a script imported from Postman opens with. `never` is
+	 * assignable to everything, so a bare read of one is only an error where the
+	 * declaration is `void`: the first three here are what keeps that difference
+	 * from being lost.
+	 */
+	it.each([
+		["JSON.parse(responseBody);", 2345],
+		["if (responseTime < 200) { }", 2365],
+		["pm.environment.set('i', iteration + 1);", 2365],
+		["tests['Status code is 200'] = responseCode.code === 200;", 2339],
+		["tests['ok'] = true;", 2322],
+		["postman.setEnvironmentVariable('token', 'x');", 2349],
+		["responseHeaders.get('Content-Type');", 2339],
+		["environment.baseUrl;", 2339],
+		["_.map([1], function (n) { return n; });", 2339],
+		["CryptoJS.MD5('x').toString();", 2339],
+		["xml2Json(pm.response.text());", 2349],
+		["moment().format();", 2349],
+		["fetch('https://example.com');", 2349],
+	])("%s is an error (TS%i)", (source, code) => {
+		expect(errorsOf(source)).toContain(`TS${code}`);
+	});
+
+	/*
+	 * The replacement is what a script author should write, so the same lines
+	 * rewritten with it must stay clean - a declaration that made `pm.*` itself
+	 * an error would pass every case above.
+	 */
+	it("is quiet on the replacements", () => {
+		expect(
+			errorsOf(
+				[
+					"const body = JSON.parse(pm.response.text());",
+					"pm.test('fast', function () { pm.expect(pm.response.responseTime).to.be.below(200); });",
+					"pm.environment.set('token', body.token);",
+					"pm.execution.setNextRequest(null);",
+				].join("\n")
+			)
+		).toBe("");
+	});
 });

@@ -2565,6 +2565,12 @@ There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded rather than a Promise-returning stand-in.
 
+Postman's pre-`pm.*` globals (`responseBody`, `tests[...]`, `postman.*`, ...) and
+the libraries it bundles (`CryptoJS`, `_`, `moment`, ...) are absent too. The
+editor declares each as unusable, so a use is underlined and the hover names the
+replacement; [the compatibility page](../app/pm-api-compatibility.md#postmans-pre-pm-globals-and-what-to-write-instead)
+maps every one.
+
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based and covers algorithms this sandbox does not implement, so a
 script written against that name would meet a different surface. Vayu

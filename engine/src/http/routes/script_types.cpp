@@ -98,25 +98,42 @@ bool is_language_chain (const std::string& name) {
 }
 
 /**
- * @brief Host globals a browser or Node would have and this sandbox does not.
+ * @brief Names a script may reach for that this sandbox does not have: the host
+ *        globals of a browser or Node, and Postman's pre-`pm.*` globals and
+ *        bundled libraries.
  *
  * Declared, rather than simply left out, so that using one is an *error the
- * editor can explain* instead of a bare "Cannot find name". That distinction
- * matters because the app has to suppress `Cannot find name` wholesale: a
- * collection-level script part is joined to the request's before the engine
- * runs it, so a name defined there is genuinely undeclared as far as the
- * editor's model can see, and flagging it would be a false positive on correct
- * code. Typing these as `never` keeps the real mistake caught (calling one is
- * "not callable") while that suppression is in force, and the documentation
- * below is what hover shows in place of the error text.
+ * editor can explain* instead of silence. The app suppresses `Cannot find name`
+ * (2304, see `SUPPRESSED_DIAGNOSTICS` in `useScriptTypeDefinitions.ts`), so a
+ * name that is merely undeclared draws no squiggle at all. Typed `never`, the
+ * call, member access or assignment that follows is an error ("not callable",
+ * "property does not exist"), and the documentation below is what hover shows
+ * in place of the error text.
+ *
+ * `never` is assignable to every type, so a bare read passes: passing a `never`
+ * to `JSON.parse` is no error. The three legacy names whose only use is as a
+ * bare value (`responseBody`, `responseTime`, `iteration`) are `void` instead,
+ * which is assignable to nothing: passing it, comparing it, adding to it or
+ * testing it for truthiness is an error.
+ *
+ * A dotted name is a member of the name before the dot, which is then declared
+ * as an object type holding it (`postman.setEnvironmentVariable`), so hover
+ * over the method says what replaces *that* method. The root has an entry of
+ * its own.
+ *
+ * Declaring a name does not take it from a script that declares it itself:
+ * the editor compiles each script as a module (`moduleDetection` in
+ * `SCRIPT_COMPILER_OPTIONS`), where `const data = ...` shadows the global the
+ * way it does inside the function the engine wraps the script in.
  *
  * `script_types_test.cpp` executes `typeof <name>` in the real script engine
- * for every entry, so the list cannot drift from the sandbox: giving the
+ * for every root, so the list cannot drift from the sandbox: giving the
  * runtime a `setTimeout` fails the test that says it has none.
  */
 struct AbsentGlobal {
     const char* name;
     const char* reason;
+    const char* type = "never";
 };
 constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "setTimeout",
@@ -156,6 +173,92 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "alert",
 "Not a browser. Use console.log, shown in the response pane's "
 "Console tab." },
+
+// Postman's pre-`pm.*` globals. The replacements are Postman's own
+// (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox), each one a `pm.*` member
+// this engine has.
+{ "tests",
+"Postman's pre-pm.* assertion object, written tests[\"name\"] = bool. Use "
+"pm.test(\"name\", function () { ... })." },
+{ "responseBody",
+"Postman's pre-pm.* global for the response body. Use pm.response.text() "
+"for the text, or pm.response.json() for the parsed body.",
+"void" },
+{ "responseCode",
+"Postman's pre-pm.* global for the status, read as responseCode.code. Use "
+"pm.response.code for the number and pm.response.reason() for the reason "
+"phrase." },
+{ "responseHeaders",
+"Postman's pre-pm.* global for the response headers. Use "
+"pm.response.headers.get(name), which is case-insensitive, or "
+"pm.response.headers.toObject()." },
+{ "responseCookies",
+"Postman's pre-pm.* global for the response cookies. Use "
+"pm.response.cookies for the cookies this response set, or "
+"pm.cookies.get(name) for the stored session." },
+{ "responseTime",
+"Postman's pre-pm.* global for the response time in milliseconds. Use "
+"pm.response.responseTime.",
+"void" },
+{ "environment",
+"Postman's pre-pm.* environment object. Use pm.environment.get(name) and "
+"pm.environment.set(name, value)." },
+{ "globals",
+"Postman's pre-pm.* globals object. Use pm.globals.get(name) and "
+"pm.globals.set(name, value)." },
+{ "data",
+"Postman's pre-pm.* iteration data. Use pm.iterationData.get(name), or "
+"pm.iterationData.toObject() for the whole row; it is undefined outside a "
+"data-driven run." },
+{ "iteration",
+"Postman's pre-pm.* iteration index. Use pm.info.iteration, which is "
+"undefined outside a run.",
+"void" },
+{ "request",
+"Postman's pre-pm.* request object. Use pm.request - its url, method, "
+"headers and body." },
+{ "postman",
+"Postman's pre-pm.* helper object. Every method it had has a pm.* "
+"replacement; hover the method." },
+{ "postman.setEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.set(name, value)." },
+{ "postman.getEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.get(name)." },
+{ "postman.clearEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.unset(name)." },
+{ "postman.clearEnvironmentVariables", "Postman's pre-pm.* call. Use pm.environment.clear()." },
+{ "postman.setGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.set(name, value)." },
+{ "postman.getGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.get(name)." },
+{ "postman.clearGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.unset(name)." },
+{ "postman.clearGlobalVariables", "Postman's pre-pm.* call. Use pm.globals.clear()." },
+{ "postman.setNextRequest",
+"Postman's pre-pm.* call. Use pm.execution.setNextRequest(name), in a "
+"collection run." },
+{ "postman.getResponseHeader", "Postman's pre-pm.* call. Use pm.response.headers.get(name)." },
+{ "postman.getResponseCookie", "Postman's pre-pm.* call. Use pm.cookies.get(name)." },
+
+// The libraries Postman bundles. Its replacement for most is a require() this
+// sandbox has no loader for, so each says what Vayu has instead.
+{ "_",
+"Postman's bundled lodash. Its replacement is require('lodash'); Vayu has "
+"neither. The Array and Object built-ins (map, filter, flatMap, "
+"Object.entries, Object.fromEntries) cover most uses." },
+{ "CryptoJS",
+"Postman's bundled crypto-js; its replacement is the global crypto object. "
+"Vayu has pm.crypto.sha256(data) and pm.crypto.hmacSha256(key, data), and "
+"no other hash or cipher." },
+{ "tv4",
+"Postman's bundled JSON Schema validator. Its replacement is "
+"require('ajv'); Vayu has neither." },
+{ "xml2Json",
+"Postman's bundled XML parser. Its replacement is require('xml2js'); Vayu "
+"has neither." },
+{ "cheerio",
+"Postman's bundled HTML parser. Its replacement is require('cheerio'); "
+"Vayu has neither." },
+{ "moment",
+"Postman's bundled moment. Its replacement is require('moment'); Vayu has "
+"neither. The Date built-in is what a script has." },
+{ "Backbone",
+"Postman's bundled Backbone, which it names no replacement for. Vayu has "
+"no Backbone." },
 });
 
 /**
@@ -750,6 +853,48 @@ const std::vector<ChainEntry>& entries) {
     return out;
 }
 
+/// The part of @p name after @p root and a dot, or empty if @p name is not a
+/// member of @p root.
+std::string_view member_of (std::string_view name, std::string_view root) {
+    if (name.size () <= root.size () + 1 || !name.starts_with (root) ||
+    name.at (root.size ()) != '.') {
+        return {};
+    }
+    return name.substr (root.size () + 1);
+}
+
+/// The members of absent @p root, each typed `never` so calling one is an error
+/// and documented with the replacement for that one method.
+std::string render_absent_members (std::string_view root) {
+    std::string out;
+    for (const auto& entry : ABSENT_GLOBALS) {
+        const std::string_view member = member_of (entry.name, root);
+        if (member.empty ()) {
+            continue;
+        }
+        append_doc (out, entry.reason, "\t");
+        out += "\t";
+        out += member;
+        out += ": never;\n";
+    }
+    return out;
+}
+
+void render_absent_global (std::string& out, const AbsentGlobal& absent) {
+    // Every root carries this sentence: `script_types_test.cpp` finds the
+    // absent names by it.
+    out += "\n/**\n * Not available in the Vayu script sandbox.\n *\n * ";
+    out += absent.reason;
+    out += "\n */\ndeclare const ";
+    out += absent.name;
+    const std::string members = render_absent_members (absent.name);
+    if (members.empty ()) {
+        out += std::string (": ") + absent.type + ";\n";
+        return;
+    }
+    out += ": {\n" + members + "};\n";
+}
+
 } // namespace
 
 /**
@@ -853,16 +998,15 @@ std::string render_globals (const TypeNode& global_root) {
 
     // The globals the sandbox does *not* have - see ABSENT_GLOBALS. Skipped if
     // the table ever starts offering one for real, so the runtime gaining a
-    // capability can never produce a file that declares it twice.
+    // capability can never produce a file that declares it twice. A member
+    // (`postman.setNextRequest`) is rendered inside its root.
     for (const auto& absent : ABSENT_GLOBALS) {
-        if (global_root.children.count (absent.name) != 0) {
+        const bool is_member =
+        std::string_view (absent.name).find ('.') != std::string_view::npos;
+        if (is_member || global_root.children.count (absent.name) != 0) {
             continue;
         }
-        out += "\n/**\n * Not available in the Vayu script sandbox.\n *\n * ";
-        out += absent.reason;
-        out += "\n */\ndeclare const ";
-        out += absent.name;
-        out += ": never;\n";
+        render_absent_global (out, absent);
     }
     return out;
 }

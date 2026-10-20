@@ -942,8 +942,18 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `assimilate`, `populate`, `clear`, `eachParent`, `toString`. Only the read
   half and the three mutators named under [Header methods](#header-methods)
   ship
-- `pm.visualizer`
-- The `tests["name"] = bool` legacy assertion style (use `pm.test`)
+- `pm.visualizer`, `pm.test.skip` and `pm.require`
+- **Postman's pre-`pm.*` globals** (`tests[...]`, `responseBody`, `responseCode`,
+  `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
+  `data`, `iteration`, `request`, `postman.*`) are not defined: a script that reads
+  one throws a `ReferenceError`. Each has a `pm.*` replacement, listed
+  [below](#postmans-pre-pm-globals-and-what-to-write-instead)
+- **`require(...)`, `script.packages` and the libraries Postman bundles** -
+  `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
+  The sandbox has no module system and none of those libraries; `pm.crypto` covers
+  SHA-256 and HMAC-SHA256 and nothing else of `CryptoJS`
+- `setTimeout`, `setInterval`, `Buffer` and a top-level `await` - the sandbox is
+  synchronous and is not Node
 - Chai matchers outside the list above: `.include.keys` (the subset form),
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
   the property-style `.finite` / `.sealed` / `.frozen` / `.extensible`, and the
@@ -956,6 +966,33 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   itself is supported, including the chai behaviour of moving the chain onto the
   property's value (see [Assertion chains](#assertion-chains-pmexpect)); only
   the `.own` form is missing
+
+The editor underlines a use of any of the names above that the sandbox lacks
+(see [Type declarations](#type-declarations-hover-signature-help)) and its hover
+gives the replacement Postman itself names.
+
+### Postman's pre-pm.* globals and what to write instead
+
+| Legacy | Write instead |
+|--------|---------------|
+| `tests["name"] = bool` | `pm.test("name", function () { ... })` |
+| `responseBody` | `pm.response.text()`, or `pm.response.json()` for the parsed body |
+| `responseCode.code` | `pm.response.code` (the number), `pm.response.reason()` (the phrase) |
+| `responseHeaders` | `pm.response.headers.get(name)`, case-insensitive |
+| `responseCookies` | `pm.response.cookies`, or `pm.cookies.get(name)` for the stored session |
+| `responseTime` | `pm.response.responseTime` |
+| `environment`, `globals` | `pm.environment`, `pm.globals` |
+| `data` | `pm.iterationData` (`undefined` outside a data-driven run) |
+| `iteration` | `pm.info.iteration` |
+| `request` | `pm.request` |
+| `postman.setEnvironmentVariable` / `getEnvironmentVariable` / `clearEnvironmentVariable` / `clearEnvironmentVariables` | `pm.environment.set` / `get` / `unset` / `clear` |
+| `postman.setGlobalVariable` / `getGlobalVariable` / `clearGlobalVariable` / `clearGlobalVariables` | `pm.globals.set` / `get` / `unset` / `clear` |
+| `postman.setNextRequest` | `pm.execution.setNextRequest`, in a collection run |
+| `postman.getResponseHeader` / `getResponseCookie` | `pm.response.headers.get` / `pm.cookies.get` |
+
+A collection imported from Postman lists the requests whose scripts use any of these,
+under `meta.unsupportedScriptApis` (see
+[Postman import](./import-collections/postman.md#scripts)).
 
 ---
 
@@ -1177,22 +1214,76 @@ enabled in Monaco; `useScriptTypeDefinitions` sets them explicitly so a changed 
 cannot remove them silently.
 
 Exactly two diagnostics are suppressed (`diagnosticCodesToIgnore`), because a *correct*
-script in this editor produces them. Both follow from the editor holding a fragment while
-the engine runs something larger:
+script in this editor produces them:
 
 | Code | Message | Why it is wrong here |
 |------|---------|----------------------|
 | `1108` | A `return` statement can only be used within a function body | The engine wraps every script in an IIFE before running it, so a top-level `return` to bail out early is legal |
-| `2304` | Cannot find name `x` | A collection-level script part is joined to the request's (with `\n\n`) before the engine runs the result, so a name declared there is undeclared as far as this model can see |
+| `2304` | Cannot find name `x` | An assignment to an undeclared name (`jsonData = pm.response.json()`) creates a global in the sloppy-mode IIFE, which the engine runs; and quickjs-ng provides nine globals the `es2022` lib does not declare |
 
-Suppressing `2304` would normally cost the best diagnostic of all - `fetch` and
-`setTimeout`, which the sandbox does not have. It does not, because the engine **declares
-the globals it lacks** as `never` (`ABSENT_GLOBALS` in `script_types.cpp`): calling one is
-"not callable" rather than "cannot find name", and hover explains why. That list is held
-to the runtime by a test that executes `typeof <name>` in the real script engine for every
-entry - it caught `queueMicrotask`, which quickjs-ng does provide, on its first run.
+`2304` was once suppressed for a different reason, that a collection-level script part
+is joined to the request's before the engine runs it. That no longer holds: each script
+element runs in a context of its own, so a name declared in the collection's script is
+not visible in the request's (see [Isolation between
+scripts](../engine/scripting.md#isolation-between-scripts)). Only the deferred load-test
+replay still joins `script.post` parts.
 
-Narrow that suppression list rather than widening it: each code on it is a real mistake
+Un-suppressing `2304` was weighed and declined. Typing an undeclared name would then be
+an error, which is the more useful behaviour, but it would flag correct code, and it
+costs more than it returns today:
+
+- **Implicit globals run.** `jsonData = pm.response.json();` with no `var` is legal in
+  the engine's sloppy-mode wrapper and is a common habit in scripts imported from
+  Postman. Each use would be underlined.
+- **Nine runtime globals are missing from `lib.es2022`** and would each need declaring,
+  and holding to the runtime by a test of their own: `queueMicrotask`, `performance`,
+  `DOMException`, `Float16Array`, `Iterator`, `DisposableStack`,
+  `AsyncDisposableStack`, `SuppressedError` and `InternalError`. A quickjs-ng upgrade
+  can add more.
+- **The examples on this page and in `scripting.md` elide their placeholders** (`value`,
+  `id`, `token`). Compiled as written, the corpus draws 89 diagnostics, all of
+  them 2304.
+
+What suppressing it costs is that an undeclared name draws nothing. So the engine
+**declares the names a script is likeliest to reach for that the sandbox lacks**
+(`ABSENT_GLOBALS` in `script_types.cpp`), and the editor underlines a use:
+
+- the host globals of a browser or Node: `setTimeout`, `fetch`, `require`, `URL`, ...
+- Postman's pre-`pm.*` globals: `tests`, `responseBody`, `responseCode`,
+  `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
+  `data`, `iteration`, `request` and `postman.*`
+- the libraries Postman bundles: `CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
+  `moment` and `Backbone`
+
+Hover names the replacement Postman itself gives: `responseBody` is `pm.response.text()`,
+`postman.setEnvironmentVariable` is `pm.environment.set()`, `tests` is `pm.test()`.
+
+A name is declared `never`, so a call, a member access or an assignment is an error
+(`responseCode.code`, `tests['x'] = true`, `postman.setNextRequest(...)`, `_.map(...)`).
+`never` is assignable to everything, so a bare read would pass; the three names only ever
+read bare are `void` instead, which makes `JSON.parse(responseBody)`,
+`responseTime < 200` and `iteration + 1` errors too. What is left unflagged is a bare
+read into something that takes anything (`console.log(responseBody)`) and an index read
+(`environment['baseUrl']`, `responseHeaders['Content-Type']`): hover still names the
+replacement there.
+
+**A script that declares one of these names itself is not flagged.** `const data =
+pm.response.json()` and `var request = pm.request` are common and correct: the engine
+runs the script inside a function, where they are local. The editor compiles each script
+as a module (`moduleDetection: Force` in `SCRIPT_COMPILER_OPTIONS`) so the declaration
+shadows the global. Compiled as a global script, the same line reported "Cannot
+redeclare block-scoped variable" (2451), and did for `const URL` or `function fetch`
+before these names were added. A module is strict-mode to TypeScript, so a script that
+runs sloppy draws TypeScript's strict-mode errors on `with`, `delete name`, an octal
+literal, `yield` or `let` as a name, and a top-level `this`; a top-level `await` was an
+error before and still is.
+
+An entry leaves `ABSENT_GLOBALS` in the commit that makes the runtime provide the name,
+and a test that executes `typeof <name>` in the real script engine for every entry holds
+the list to the sandbox: it caught `queueMicrotask`, which quickjs-ng does provide, on
+its first run.
+
+Narrow the suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.
 
 #### Every `pm.*` example on this page is compiled against those declarations

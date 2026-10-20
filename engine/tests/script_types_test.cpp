@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -418,15 +419,20 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
     EXPECT_TRUE (contains (dts, "add(...args: any[])"));
 }
 
-// The declarations name the host globals the sandbox lacks (`setTimeout`,
-// `fetch`, …) so that using one is an error the editor can explain, rather than
-// the bare "Cannot find name" the app has to suppress wholesale.
+// The declarations name the globals the sandbox lacks (`setTimeout`, `fetch`,
+// Postman's `responseBody`, ...) so that using one is an error the editor can
+// explain, rather than the silence the app's suppression of "Cannot find name"
+// would otherwise leave.
 //
 // A hand-written list of what a runtime does *not* have is exactly the kind
 // that rots silently - nothing fails when the runtime gains one. So rather than
 // trusting it, this runs `typeof <name>` in the real script engine for every
 // entry. Give QuickJS a `setTimeout` and the test that claims it has none
 // fails, which is the only honest way to hold this list to the sandbox.
+//
+// An absent root is found by the sentence every one of them carries, because
+// `postman` is declared as an object type and so is `pm`: the type alone does
+// not say which is which.
 TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #ifdef VAYU_HAS_QUICKJS
     const std::string dts = generate_script_typedefs ();
@@ -436,22 +442,19 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
     vayu::runtime::ScriptContext ctx;
     ctx.environment = &env;
 
+    const std::string banner  = "Not available in the Vayu script sandbox.";
+    const std::string declare = "declare const ";
+
     size_t checked = 0;
     // Read the names back out of the generated file rather than restating them,
     // so the test cannot agree with a stale copy of the list.
-    for (size_t pos = dts.find ("declare const "); pos != std::string::npos;
-    pos             = dts.find ("declare const ", pos + 1)) {
-        const size_t start = pos + std::string ("declare const ").size ();
-        const size_t colon = dts.find (':', start);
-        if (colon == std::string::npos) {
-            continue;
-        }
-        const std::string name = dts.substr (start, colon - start);
-        const size_t end       = dts.find (';', colon);
-        if (end == std::string::npos ||
-        dts.substr (colon, end - colon).find ("never") == std::string::npos) {
-            continue; // a real global (`pm`, `console`), not an absent one
-        }
+    for (size_t pos = dts.find (banner); pos != std::string::npos;
+    pos             = dts.find (banner, pos + 1)) {
+        const size_t decl = dts.find (declare, pos);
+        ASSERT_NE (decl, std::string::npos)
+        << "an absent global has no declaration";
+        const size_t start = decl + declare.size ();
+        const std::string name = dts.substr (start, dts.find (':', start) - start);
 
         const auto result = engine.execute ("pm.__t = typeof " + name + ";", ctx);
         EXPECT_TRUE (result.success)
@@ -464,11 +467,113 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
         checked++;
     }
 
-    EXPECT_GT (checked, 15u)
-    << "no absent globals were probed - the scan found nothing";
+    EXPECT_GT (checked, 35u)
+    << "too few absent globals were probed - the scan found nothing";
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif
+}
+
+/**
+ * @brief The documentation comment directly above @p declaration, or empty.
+ *
+ * A reason is only worth having if hover shows it, so the replacement tests
+ * below read it from the comment the declaration carries rather than from the
+ * table.
+ */
+std::string documentation_above (const std::string& dts, const std::string& declaration) {
+    const size_t at = dts.find (declaration);
+    if (at == std::string::npos) {
+        return {};
+    }
+    const size_t open = dts.rfind ("/**", at);
+    return open == std::string::npos ? std::string{} : dts.substr (open, at - open);
+}
+
+// Postman's pre-`pm.*` globals and the libraries it bundles (#2576), each with
+// the replacement Postman itself names (`LEGACY_GLOBS_ALTERNATIVES` in
+// postman-sandbox). A script imported from Postman reaches for these by habit,
+// and the editor says what to write instead on hover.
+//
+// The pairs are pinned here rather than read from the table, so a name dropped
+// from it, or reworded until it no longer names the replacement, fails. A name
+// leaves this list in the commit that makes Vayu run it, and not before.
+TEST (ScriptTypesTest, EveryPostmanLegacyGlobalIsAbsentAndNamesItsReplacement) {
+    const std::string dts = generate_script_typedefs ();
+
+    struct Legacy {
+        const char* name;
+        const char* replacement;
+    };
+    constexpr auto globals = std::to_array<Legacy> ({
+    { "tests", "pm.test(" },
+    { "globals", "pm.globals" },
+    { "environment", "pm.environment" },
+    { "data", "pm.iterationData" },
+    { "request", "pm.request" },
+    { "responseCookies", "pm.cookies" },
+    { "responseHeaders", "pm.response.headers" },
+    { "responseTime", "pm.response.responseTime" },
+    { "responseCode", "pm.response.code" },
+    { "responseBody", "pm.response.text()" },
+    { "iteration", "pm.info.iteration" },
+    { "_", "require('lodash')" },
+    { "CryptoJS", "crypto" },
+    { "tv4", "require('ajv')" },
+    { "xml2Json", "require('xml2js')" },
+    { "cheerio", "require('cheerio')" },
+    { "moment", "require('moment')" },
+    { "Backbone", "Backbone" },
+    });
+    for (const auto& legacy : globals) {
+        const std::string doc =
+        documentation_above (dts, std::string ("declare const ") + legacy.name + ":");
+        EXPECT_TRUE (contains (doc, "Not available in the Vayu script sandbox."))
+        << legacy.name << " is not declared absent";
+        EXPECT_TRUE (contains (doc, legacy.replacement))
+        << legacy.name << "'s hover does not name " << legacy.replacement;
+    }
+
+    constexpr auto methods = std::to_array<Legacy> ({
+    { "setEnvironmentVariable", "pm.environment.set(" },
+    { "getEnvironmentVariable", "pm.environment.get(" },
+    { "clearEnvironmentVariable", "pm.environment.unset(" },
+    { "clearEnvironmentVariables", "pm.environment.clear(" },
+    { "setGlobalVariable", "pm.globals.set(" },
+    { "getGlobalVariable", "pm.globals.get(" },
+    { "clearGlobalVariable", "pm.globals.unset(" },
+    { "clearGlobalVariables", "pm.globals.clear(" },
+    { "setNextRequest", "pm.execution.setNextRequest(" },
+    { "getResponseHeader", "pm.response.headers.get(" },
+    { "getResponseCookie", "pm.cookies.get(" },
+    });
+    for (const auto& method : methods) {
+        // Typed `never` so that calling one is an error, and documented on the
+        // member itself so hover over the method names *its* replacement.
+        const std::string doc =
+        documentation_above (dts, std::string ("\t") + method.name + ": never;\n");
+        EXPECT_TRUE (contains (doc, method.replacement))
+        << "postman." << method.name << "'s hover does not name " << method.replacement;
+    }
+    EXPECT_TRUE (contains (dts, "declare const postman: {\n"))
+    << "the helper object is not an object holding its methods";
+    EXPECT_FALSE (contains (dts, "declare const postman: never"));
+}
+
+// `never` is assignable to every type, so `JSON.parse(responseBody)` - the one
+// line most legacy scripts open with - would pass a `never`. A name whose only
+// use is as a bare value is `void`, assignable to nothing, so that line, a
+// comparison against it and arithmetic on it are errors. The names that are
+// used through a member, a call or an index stay `never`: assigning to
+// `tests["x"]` is only an error on that.
+TEST (ScriptTypesTest, ALegacyValueIsVoidSoThatReadingItIsAnError) {
+    const std::string dts = generate_script_typedefs ();
+    for (const char* value : { "responseBody", "responseTime", "iteration" }) {
+        EXPECT_TRUE (contains (dts, std::string ("declare const ") + value + ": void;\n"))
+        << value << " is not a value that cannot be read";
+    }
+    EXPECT_TRUE (contains (dts, "declare const tests: never;\n"));
+    EXPECT_TRUE (contains (dts, "declare const fetch: never;\n"));
 }
 
 // `pm.cookies.jar` is listed in its own right *and* is the parent of the
