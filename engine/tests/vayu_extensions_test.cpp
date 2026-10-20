@@ -41,6 +41,44 @@ TEST (VayuExtensions, BlanksEveryCredentialAndKeepsWhatDescribesIt) {
     EXPECT_EQ (omitted, 3);
 }
 
+// An OAuth 2.0 config's extra parameter rows (issue #2536) are redacted per
+// row: what names and places a row survives, a credential's value does not,
+// and a row or member nothing describes is blanked whole.
+// Mutation-check: take the lists back out of `is_config_param_list` and every
+// key is blanked; drop `names_param_credential` from the value test and the
+// assertion and the header secret leave; admit an empty key as a key and the
+// pasted value leaves.
+TEST (VayuExtensions, BlanksTheCredentialRowsOfAnOAuth2ConfigsParamLists) {
+    int omitted         = 0;
+    const Json redacted = ext::redact_auth (Json::parse (R"({"mode":"oauth2",
+        "config":{"clientId":"cid",
+          "tokenParams":[
+            {"key":"audience","value":"https://api","enabled":true,"sendAs":"body"},
+            {"key":"client_assertion","value":"eyJ.jwt","sendAs":"body"},
+            {"key":"X-Api-Key","value":"k-1","sendAs":"header"},
+            {"key":"org","value":"{{org}}","note":"internal"}],
+          "authorizationParams":[{"key":"prompt","value":"login"},
+            {"key":7,"value":"odd"},{"key":"","value":"pasted"}],
+          "refreshParams":"refresh_token=rt"}})"),
+    omitted);
+    const Json& token   = redacted["config"]["tokenParams"];
+    EXPECT_EQ (token[0],
+    Json::parse (R"({"key":"audience","value":"https://api","enabled":true,"sendAs":"body"})"));
+    EXPECT_EQ (token[1]["key"], "client_assertion");
+    EXPECT_EQ (token[1]["value"], "");
+    EXPECT_EQ (token[1]["sendAs"], "body");
+    EXPECT_EQ (token[2]["key"], "X-Api-Key");
+    EXPECT_EQ (token[2]["value"], "");
+    EXPECT_EQ (token[3]["value"], "{{org}}");
+    EXPECT_EQ (token[3]["note"], "");
+    const Json& authorization = redacted["config"]["authorizationParams"];
+    EXPECT_EQ (authorization[0]["value"], "login");
+    EXPECT_EQ (authorization[1]["value"], "");
+    EXPECT_EQ (authorization[2]["value"], "");
+    EXPECT_EQ (redacted["config"]["refreshParams"], "");
+    EXPECT_EQ (omitted, 6);
+}
+
 TEST (VayuExtensions, BlanksTheCredentialsOfAPostmanImportsAuthSource) {
     int omitted = 0;
     const Json redacted = ext::redact_auth (Json::parse (R"({"mode":"bearer","token":"t",

@@ -271,14 +271,18 @@ TEST_F (AssertionErrorTest, AMisusedMatcherIsStillATypeError) {
 
 /**
  * A name nothing implements is a misspelling, not a failure - the loud throw
- * that stops `pm.response.to.not.be.ok` from silently passing keeps reporting
- * itself as the script-text mistake it is.
+ * that stops it from silently passing keeps reporting itself as the
+ * script-text mistake it is, on the negated chain as on the positive one. A
+ * negated matcher that exists fails as an assertion (#2528).
  */
 TEST_F (AssertionErrorTest, AnUnsupportedResponseAssertionIsStillATypeError) {
     EXPECT_TRUE (starts_with (
     failure_of (R"(pm.response.to.be.definitelyNotAMatcher)"), "TypeError: "))
     << failure_of (R"(pm.response.to.be.definitelyNotAMatcher)");
-    EXPECT_TRUE (starts_with (failure_of (R"(pm.response.to.not.be.ok)"), "TypeError: "))
+    EXPECT_TRUE (starts_with (
+    failure_of (R"(pm.response.to.not.be.definitelyNotAMatcher)"), "TypeError: "))
+    << failure_of (R"(pm.response.to.not.be.definitelyNotAMatcher)");
+    EXPECT_TRUE (starts_with (failure_of (R"(pm.response.to.not.be.ok)"), "AssertionError: "))
     << failure_of (R"(pm.response.to.not.be.ok)");
 }
 

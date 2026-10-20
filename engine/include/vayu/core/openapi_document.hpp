@@ -399,9 +399,15 @@ class ImportTally {
     /// never counted.
     void name_requests (std::string_view kind, const std::vector<std::string>& requests);
 
-    /// `[{kind, count, requests?}]`, non-zero kinds only - `[]` for a parse
-    /// that lost nothing. `requests` is the distinct subjects in the order
-    /// first met, absent when no count of that kind had one.
+    /// Names what an already counted @p kind dropped (a parameter's key,
+    /// never its value), for a preview to say which. A no-op for a kind
+    /// never counted.
+    void name_dropped (std::string_view kind, const std::vector<std::string>& names);
+
+    /// `[{kind, count, requests?, names?}]`, non-zero kinds only - `[]` for a
+    /// parse that lost nothing. `requests` is the distinct subjects in the
+    /// order first met, absent when no count of that kind had one; `names`
+    /// is the distinct @ref name_dropped names the same way.
     [[nodiscard]] nlohmann::ordered_json items () const;
 
     private:
@@ -409,6 +415,7 @@ class ImportTally {
         std::string kind;
         int count = 0;
         std::vector<std::string> requests;
+        std::vector<std::string> names;
     };
     std::vector<Entry> counts_;
     std::string subject_;

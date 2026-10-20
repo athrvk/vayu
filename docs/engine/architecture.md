@@ -661,7 +661,11 @@ reaches, decided rather than inherited (#1095): the empty-name rule reads
 posted straight to `POST /execute` are refused here too, while the collision
 rule reads only the names that still held a token - a request that arrives
 already resolved cannot carry a collision to find, two names that are already
-equal being already one key. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+equal being already one key. The same pass also trims the spaces and tabs
+around every name and refuses one that is not an RFC 9110 token once trimmed
+(#2467, `invalid_header_name`), which is how a name a script defined is judged;
+it reads every name for that rule as it does for the empty one, and a token
+nothing answered is left written while the text around it is judged. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 

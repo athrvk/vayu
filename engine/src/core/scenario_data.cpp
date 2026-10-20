@@ -148,9 +148,29 @@ struct HeaderFaults {
     /// order composition already answers these two in
     /// (`http/request_composer.cpp`).
     std::optional<std::string> emptied;
+    /// A name a row bound that is not a token once trimmed, as the shared
+    /// refusal words it (issue #2467). Before the collision for the reason
+    /// `emptied` is: a name that is no name is the nearer fault.
+    std::optional<std::string> invalid;
     /// Two names that became one (issue #732).
     std::optional<HeaderCollision> collision;
 };
+
+/**
+ * Settle a header name a row has just been bound into (issue #2467): trim the
+ * spaces and tabs a cell can carry, and record the first that is not a token.
+ * A name no row touched is left alone - it is composition's, which judged it.
+ */
+void settle_bound_header_name (std::string& bound, const std::string& written, HeaderFaults& faults) {
+    if (bound == written) {
+        return;
+    }
+    bound = std::string (vayu::http::trim_optional_whitespace (bound));
+    if (bound.empty () || faults.invalid) {
+        return;
+    }
+    faults.invalid = vayu::http::invalid_header_name_refusal (bound);
+}
 
 /**
  * The one list of strings a data row binds: URL, header names and values, raw
@@ -213,6 +233,7 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
             std::string bound_value = value;
             visit (bound_name, FieldContext::Header);
             visit (bound_value, FieldContext::Header);
+            settle_bound_header_name (bound_name, name, faults);
             // Recorded before the collision below, on the reasoning in
             // `HeaderFaults`. A name bound to nothing is still kept: what the
             // walk owes its caller is the field count, and refusing here would
@@ -251,6 +272,10 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
         visit (field.value, FieldContext::Plain);
         if (field.type == FormFieldType::File) {
             visit_file_strings (field.src, field.file_name, field.content_type, visit);
+        } else {
+            // A text part can carry its own `contentType` (the composer binds
+            // it on every field), so the row has to reach it here too.
+            visit (field.content_type, FieldContext::Plain);
         }
     }
     if (request.body.mode == BodyMode::Binary) {
@@ -1110,6 +1135,10 @@ const IterationBinding& binding) {
     if (faults.emptied) {
         return DataBindResult{ false,
             describe_empty_bound_header_name (*faults.emptied, binding) };
+    }
+    if (faults.invalid) {
+        return DataBindResult{ false,
+            "binding against " + bound_subject (binding) + ": " + *faults.invalid };
     }
     if (faults.collision) {
         return DataBindResult{ false,

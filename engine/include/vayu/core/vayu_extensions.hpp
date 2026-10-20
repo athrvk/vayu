@@ -130,6 +130,17 @@ const std::vector<std::string>& extra_param_names,
 int& omitted);
 
 /**
+ * Whether an OAuth 2.0 extra request parameter row (`tokenParams`, a Postman
+ * block's `tokenRequestParams`, ...) named @p name carries a credential: an
+ * auth member's name (`clientSecret`, `token`), a wire name a credential goes
+ * by (`client_assertion`, `refresh_token`), or a name
+ * @ref blank_credential_param_rows treats as one, which holds the credential
+ * header names a row sent as a header can take. An export blanks such a row's
+ * value, and the token cache key leaves it out (`oauth::cache_key`).
+ */
+[[nodiscard]] bool names_param_credential (std::string_view name);
+
+/**
  * A `[{key, value, ...}, ...]` list of cookies (a Postman saved response's
  * `cookie[]`) with every cookie's value blanked in place, whatever its name:
  * a cookie name does not say whether the value is a session. The name and the

@@ -264,6 +264,7 @@ inline std::string js_to_string (JSContext* ctx, JSValue val) {
 extern JSClassID request_url_class_id;
 extern JSClassID request_body_class_id;
 extern JSClassID expect_class_id;
+extern JSClassID expect_member_class_id;
 extern JSClassID response_chain_class_id;
 
 // The definitions `ScriptEngine::Impl` registers those ids with. Each stays in
@@ -271,6 +272,7 @@ extern JSClassID response_chain_class_id;
 extern JSClassDef request_url_class;
 extern JSClassDef request_body_class;
 extern JSClassDef expect_class;
+extern JSClassDef expect_member_class;
 extern JSClassDef response_chain_class;
 
 // Name a rejected value the way the script author wrote it, so the error says
@@ -299,6 +301,22 @@ using DeepEqualPath = std::vector<std::pair<void*, void*>>;
 enum class ZeroRule { SameValueZero, Signed };
 
 int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros);
+
+// The two numbers chai-postman's `responseTime` / `responseSize` chainables
+// retarget an assertion at (#2528).
+enum class ResponseMeasure { Time, Size };
+
+// `pm.response.to.have.responseTime` / `.responseSize`: a `pm.expect` chain
+// on @p measured, negated when @p negated (the `not` read before it), that is
+// also the call `responseTime(value)` chai-postman defines (pm_expect.cpp).
+JSValue response_measure_chain (JSContext* ctx, double measured, bool negated, ResponseMeasure which);
+
+// `jsonSchema`'s verdict on @p document, shared by `pm.expect(...)` and
+// `pm.response.to.have` (pm_expect.cpp): the failure message when the
+// assertion fails under @p negated, empty when it holds, nullopt with an
+// exception pending when @p schema is not a schema or a value has no JSON form.
+std::optional<std::string>
+json_schema_failure (JSContext* ctx, JSValueConst document, JSValueConst schema, bool negated);
 
 // `pm.test`, `pm.expect` and `pm.expect.fail` (pm_expect.cpp), which
 // `setup_pm_object` installs.

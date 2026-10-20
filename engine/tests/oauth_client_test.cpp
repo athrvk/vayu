@@ -129,6 +129,112 @@ TEST (OAuthCacheKey, SharedVectors) {
     "https://idp/token\x1f"
     "cid\x1f"
     "default\x1f");
+    // Vector 4: extra parameter rows (issue #2536), one segment per list in
+    // the order authorization, token, refresh, each row's pairs sorted by key
+    // then value; sendAs is not read.
+    EXPECT_EQ (
+    oauth::cache_key (json{ { "grantType", "client_credentials" },
+    { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+    { "refreshParams", json::array ({ { { "key", "audience" }, { "value", "api" } } }) },
+    { "tokenParams",
+    json::array ({ { { "key", "tenant" }, { "value", "t1" }, { "sendAs", "url" } },
+    { { "key", "audience" }, { "value", "b" } },
+    { { "key", "audience" }, { "value", "a" }, { "sendAs", "header" } } }) },
+    { "authorizationParams", json::array ({ { { "key", "prompt" }, { "value", "login" } } }) } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f"
+    "authorizationParams:prompt=login\x1f"
+    "tokenParams:audience=a\x1e"
+    "audience=b\x1e"
+    "tenant=t1\x1f"
+    "refreshParams:audience=api");
+    // Vector 5: rows the engine would never send add nothing - disabled, no
+    // key, an engine-written name, an unknown sendAs, a non-object row - and
+    // neither does a list that is not an array. A non-string value reads "".
+    EXPECT_EQ (
+    oauth::cache_key (json{ { "grantType", "client_credentials" },
+    { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+    { "tokenParams",
+    json::array ({ { { "key", "a" }, { "value", "1" }, { "enabled", false } },
+    { { "key", "" }, { "value", "1" } }, { { "key", 7 }, { "value", "1" } },
+    { { "key", "scope" }, { "value", "x" } },
+    { { "key", "b" }, { "value", "1" }, { "sendAs", "cookie" } }, "row", 3 }) },
+    { "refreshParams", "audience=api" },
+    { "authorizationParams", json::array ({ { { "key", "n" }, { "value", 5 } } }) } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f"
+    "authorizationParams:n=");
+    // Vector 6: a row whose key names a credential - a parameter's name or a
+    // header's, matched as the export's redaction matches it - is keyed by its
+    // name with an empty value, sorted among the rest as that.
+    EXPECT_EQ (
+    oauth::cache_key (json{ { "grantType", "client_credentials" },
+    { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+    { "tokenParams",
+    json::array ({ { { "key", "client_assertion" }, { "value", "eyJhbGciOi.e30.sig" } },
+    { { "key", "X-Api-Key" }, { "value", "k-123" }, { "sendAs", "header" } },
+    { { "key", "audience" }, { "value", "api" } } }) } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f"
+    "tokenParams:X-Api-Key=\x1e"
+    "audience=api\x1e"
+    "client_assertion=");
+}
+
+// The cache key is handed to clients (`cacheKey`) and stored as the token
+// row's primary key, so a credential row contributes its name alone: two
+// configs differing only in a client assertion share one token, while an
+// ordinary row's value still separates two.
+// Mutation-check: key a credential row by its value in
+// `extra_params_key_segment` and the first two expectations fail.
+TEST (OAuthCacheKey, CredentialRowsAreKeyedByNameAlone) {
+    const json base = { { "grantType", "client_credentials" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    const auto with_rows = [&base] (const std::string& assertion, const std::string& audience) {
+        json config = base;
+        config["tokenParams"] =
+        json::array ({ { { "key", "client_assertion" }, { "value", assertion } },
+        { { "key", "audience" }, { "value", audience } } });
+        return oauth::cache_key (config);
+    };
+
+    const std::string key = with_rows ("jwt-1", "api");
+    EXPECT_EQ (key, with_rows ("jwt-2", "api"));
+    EXPECT_EQ (key.find ("jwt-1"), std::string::npos) << key;
+    EXPECT_NE (key, with_rows ("jwt-1", "other-api"));
+}
+
+// Row order is not part of the key: two configs listing the same rows in a
+// different order share one cached token. A row's value is, so two audiences
+// on one token URL do not.
+TEST (OAuthCacheKey, ExtraParamsSeparateTokensButNotRowOrder) {
+    const json base   = { { "grantType", "client_credentials" },
+          { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    const json first  = { { "key", "audience" }, { "value", "api-1" } };
+    const json second = { { "key", "organization" }, { "value", "org" } };
+
+    json forward            = base;
+    forward["tokenParams"]  = json::array ({ first, second });
+    json reversed           = base;
+    reversed["tokenParams"] = json::array ({ second, first });
+    json other_audience     = base;
+    other_audience["tokenParams"] =
+    json::array ({ { { "key", "audience" }, { "value", "api-2" } }, second });
+
+    EXPECT_EQ (oauth::cache_key (forward), oauth::cache_key (reversed));
+    EXPECT_NE (oauth::cache_key (forward), oauth::cache_key (other_audience));
+    EXPECT_NE (oauth::cache_key (forward), oauth::cache_key (base));
+
+    json disabled           = base;
+    disabled["tokenParams"] = json::array (
+    { { { "key", "audience" }, { "value", "api-1" }, { "enabled", false } } });
+    EXPECT_EQ (oauth::cache_key (disabled), oauth::cache_key (base));
 }
 
 TEST (OAuthExpiry, SkewAndNonExpiring) {
@@ -248,6 +354,143 @@ TEST_F (OAuthClientTest, PasswordGrantSendsUserCredsAndScope) {
     EXPECT_EQ (form["username"], "u");
     EXPECT_EQ (form["password"], "p%20w");
     EXPECT_EQ (form["scope"], "read%20write");
+}
+
+// How many times @p name= appears as a whole parameter in a form body.
+size_t form_occurrences (const std::string& body, const std::string& name) {
+    size_t count             = 0;
+    const std::string wanted = name + "=";
+    for (size_t at = body.find (wanted); at != std::string::npos;
+    at             = body.find (wanted, at + 1)) {
+        if (at == 0 || body[at - 1] == '&') {
+            ++count;
+        }
+    }
+    return count;
+}
+
+// An audience an import promoted to the config is sent once in the token
+// form, and each extra row rides where its sendAs says (issue #2536).
+TEST_F (OAuthClientTest, TokenParamsRideWhereSendAsSays) {
+    MockTokenServer idp;
+    auto config           = cc_config (idp);
+    config["audience"]    = "https://api.example";
+    config["tokenParams"] = json::array ({
+    { { "key", "organization" }, { "value", "org 1" }, { "enabled", true } },
+    { { "key", "tenant" }, { "value", "t1" }, { "sendAs", "url" } },
+    { { "key", "X-Trace" }, { "value", "abc" }, { "sendAs", "header" } },
+    });
+
+    oauth::acquire_token (*db_, config, false, std::nullopt);
+
+    const auto form = parse_form (idp.last_body ());
+    EXPECT_EQ (form.at ("audience"), "https%3A%2F%2Fapi.example");
+    EXPECT_EQ (form.at ("organization"), "org%201");
+    EXPECT_EQ (form.count ("tenant"), 0u);
+    EXPECT_EQ (form.count ("X-Trace"), 0u);
+    EXPECT_EQ (idp.last_target (), "/token?tenant=t1");
+    EXPECT_EQ (idp.last_header ("X-Trace"), "abc");
+}
+
+// The engine's own value wins over a row naming it, and nothing goes on the
+// wire twice: a reserved name, an audience the config already sends, a
+// header the engine set. A disabled row is not sent at all.
+TEST_F (OAuthClientTest, TokenParamsNeverRepeatWhatTheEngineWrote) {
+    MockTokenServer idp;
+    auto config           = cc_config (idp);
+    config["audience"]    = "cfg";
+    config["scope"]       = "read";
+    config["tokenParams"] = json::array ({
+    { { "key", "scope" }, { "value", "admin" } },
+    { { "key", "grant_type" }, { "value", "password" }, { "sendAs", "url" } },
+    { { "key", "audience" }, { "value", "row" } },
+    { { "key", "audience" }, { "value", "row" }, { "sendAs", "url" } },
+    { { "key", "accept" }, { "value", "text/html" }, { "sendAs", "header" } },
+    { { "key", "authorization" }, { "value", "Bearer x" }, { "sendAs", "header" } },
+    { { "key", "Bad Name" }, { "value", "v" }, { "sendAs", "header" } },
+    { { "key", "X-Split" }, { "value", "a\r\nInjected: 1" }, { "sendAs", "header" } },
+    { { "key", "off" }, { "value", "1" }, { "enabled", false } },
+    });
+
+    oauth::acquire_token (*db_, config, false, std::nullopt);
+
+    const std::string& body = idp.last_body ();
+    EXPECT_EQ (form_occurrences (body, "audience"), 1u);
+    EXPECT_EQ (form_occurrences (body, "scope"), 1u);
+    EXPECT_EQ (form_occurrences (body, "grant_type"), 1u);
+    EXPECT_EQ (parse_form (body).at ("audience"), "cfg");
+    EXPECT_EQ (parse_form (body).at ("scope"), "read");
+    EXPECT_EQ (form_occurrences (body, "off"), 0u);
+    EXPECT_EQ (idp.last_target (), "/token") << "no row reached the query";
+    EXPECT_EQ (idp.header_count ("Accept"), 1u);
+    EXPECT_EQ (idp.last_header ("Accept"), "application/json");
+    EXPECT_EQ (idp.last_auth (), "Basic Y2lkOnNlYw==");
+    EXPECT_EQ (idp.header_count ("X-Split"), 0u);
+    EXPECT_EQ (idp.header_count ("Injected"), 0u);
+}
+
+// Mutation-check: send a row whatever its `enabled` says and the disabled
+// audience reaches the form.
+TEST_F (OAuthClientTest, ADisabledTokenParamIsNotSent) {
+    MockTokenServer idp;
+    auto config           = cc_config (idp);
+    config["tokenParams"] = json::array (
+    { { { "key", "audience" }, { "value", "api" }, { "enabled", false } } });
+
+    oauth::acquire_token (*db_, config, false, std::nullopt);
+
+    EXPECT_EQ (parse_form (idp.last_body ()).count ("audience"), 0u);
+}
+
+// A refresh sends refreshParams and not tokenParams, and still not the
+// config's audience, which a provider reads only on the first grant.
+TEST_F (OAuthClientTest, RefreshSendsRefreshParamsOnly) {
+    MockTokenServer idp;
+    auto config        = cc_config (idp, "/refresh-norotate");
+    config["audience"] = "cfg";
+    config["tokenParams"] =
+    json::array ({ { { "key", "organization" }, { "value", "org" } } });
+    config["refreshParams"] = json::array ({
+    { { "key", "audience" }, { "value", "refresh-aud" } },
+    { { "key", "region" }, { "value", "eu" }, { "sendAs", "url" } },
+    { { "key", "X-Refresh" }, { "value", "1" }, { "sendAs", "header" } },
+    { { "key", "refresh_token" }, { "value", "FORGED" } },
+    });
+    db_->save_oauth_token (seeded_row (config, 7'200'000));
+
+    auto result = oauth::acquire_token (*db_, config, false, std::nullopt);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (result).access_token, "REFRESHED");
+    const std::string& body = idp.last_body ();
+    const auto form         = parse_form (body);
+    EXPECT_EQ (form.at ("grant_type"), "refresh_token");
+    EXPECT_EQ (form.at ("refresh_token"), "RT_OLD");
+    EXPECT_EQ (form_occurrences (body, "refresh_token"), 1u);
+    EXPECT_EQ (form.at ("audience"), "refresh-aud");
+    EXPECT_EQ (form.count ("organization"), 0u);
+    EXPECT_EQ (idp.last_target (), "/refresh-norotate?region=eu");
+    EXPECT_EQ (idp.last_header ("X-Refresh"), "1");
+}
+
+// Two configs differing only in an audience row are two tokens: the second
+// is fetched, not answered from the first's cache row.
+TEST_F (OAuthClientTest, AnAudienceRowSeparatesCachedTokens) {
+    MockTokenServer idp;
+    auto first = cc_config (idp);
+    first["tokenParams"] = json::array ({ { { "key", "audience" }, { "value", "a" } } });
+    auto second = cc_config (idp);
+    second["tokenParams"] =
+    json::array ({ { { "key", "audience" }, { "value", "b" } } });
+
+    auto r1 = oauth::acquire_token (*db_, first, false, std::nullopt);
+    auto r2 = oauth::acquire_token (*db_, second, false, std::nullopt);
+
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r1));
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r2));
+    EXPECT_EQ (idp.hits (), 2);
+    EXPECT_NE (std::get<vayu::db::OAuthToken> (r1).access_token,
+    std::get<vayu::db::OAuthToken> (r2).access_token);
 }
 
 TEST_F (OAuthClientTest, MissingExpiresInMeansNonExpiring) {

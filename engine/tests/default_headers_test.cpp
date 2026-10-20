@@ -33,6 +33,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http::routes {
@@ -318,6 +319,50 @@ TEST (DefaultHeadersTest, RefusesAHeaderNameThatIsNotOne) {
     EXPECT_TRUE (vayu::http::unusable_header_name ("X-Request\r\nId").has_value ());
     EXPECT_FALSE (vayu::http::unusable_header_name ("X-Vayu-Request-Id").has_value ());
     EXPECT_FALSE (vayu::http::unusable_header_name ("x_request.id~1").has_value ());
+}
+
+// The offending byte is spelled so the message stays valid UTF-8 whatever the
+// name holds: a lone byte of an accented letter, written raw, would not be.
+TEST (DefaultHeadersTest, TheRefusalSpellsTheOffendingByteSafely) {
+    const auto spaced = vayu::http::invalid_header_token ("X Bad");
+    ASSERT_HAS_VALUE (spaced);
+    EXPECT_EQ (*spaced, "'X Bad' is not a header name: ' ' cannot appear in one");
+
+    const auto accented = vayu::http::invalid_header_token ("X-\xC3\xA9");
+    ASSERT_HAS_VALUE (accented);
+    EXPECT_EQ (*accented, "'X-\xC3\xA9' is not a header name: byte 0xC3 cannot appear in one");
+
+    const auto newline = vayu::http::invalid_header_token ("X\nY");
+    ASSERT_HAS_VALUE (newline);
+    EXPECT_EQ (*newline, "'X\nY' is not a header name: byte 0x0A cannot appear in one");
+}
+
+// A `{{token}}` stands in as one token character; a brace that closes none is
+// text and refused (issue #2467). The refusal quotes the name as written, not
+// the stand-in. Mutation check: restore a blanket skip of any name holding `{{`.
+TEST (DefaultHeadersTest, ATokenInAHeaderNameIsSetAsideAndTheRestJudged) {
+    using vayu::http::invalid_header_name_refusal;
+    for (const char* ok : { "{{h}}", "X-{{a}}-b", "{{a}}{{b}}", "X-{{ $guid }}" }) {
+        EXPECT_FALSE (invalid_header_name_refusal (ok).has_value ()) << ok;
+    }
+    for (const char* bad : { "Evil: injected{{", "X Bad {{x}}", "{{", "X-{{}}",
+         "X-{{a}", "{{{x}}}", "{{a}}:" }) {
+        const auto refusal = invalid_header_name_refusal (bad);
+        ASSERT_HAS_VALUE (refusal) << bad;
+        EXPECT_NE (refusal->find (std::string ("'") + bad + "'"), std::string::npos)
+        << *refusal;
+    }
+}
+
+// Only SP and HTAB are padding, and only at the ends (issue #2467): CR and LF
+// end a header line and are refused elsewhere, never trimmed away.
+TEST (DefaultHeadersTest, OptionalWhitespaceIsTrimmedAtTheEndsOnly) {
+    using vayu::http::trim_optional_whitespace;
+    EXPECT_EQ (trim_optional_whitespace (" \t X-A \t "), "X-A");
+    EXPECT_EQ (trim_optional_whitespace ("tok en"), "tok en");
+    EXPECT_EQ (trim_optional_whitespace (" \t "), "");
+    EXPECT_EQ (trim_optional_whitespace (""), "");
+    EXPECT_EQ (trim_optional_whitespace ("X-A\r\n"), "X-A\r\n");
 }
 
 TEST (DefaultHeadersTest, AdvertisesOnlyWhatThisLibcurlCanDecode) {

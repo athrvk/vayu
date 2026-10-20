@@ -82,6 +82,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -360,6 +361,19 @@ const SampledValidationTotals& totals);
 [[nodiscard]] ValidationVerdict validate_body_against_schema (const nlohmann::json& schema,
 const nlohmann::json& ref_roots,
 const nlohmann::json& body);
+
+/**
+ * @brief Validate @p document against a self-contained schema a script wrote
+ *        (`jsonSchema` on `pm.response.to.have` and `pm.expect`, #2528).
+ *
+ * The same validator and the same verdict as `validate_body_against_schema`,
+ * with no ref root. What differs is a schema the validator refuses: for a
+ * stored contract that is an unchecked verdict and a log line, because the fix
+ * belongs to whoever wrote the index, while a script's schema is its author's
+ * mistake and is answered as the validator's reason so they can read it.
+ */
+[[nodiscard]] std::expected<ValidationVerdict, std::string>
+validate_document_against_schema (const nlohmann::json& schema, const nlohmann::json& document);
 
 /**
  * @brief Count the schema keywords a draft-07 validator cannot evaluate.

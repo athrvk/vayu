@@ -456,6 +456,22 @@ TEST (SchemaValidationBoundsTest, ASchemaTheValidatorRefusesIsUncheckedNotInvali
     EXPECT_EQ (*verdict.reason, UncheckedReason::NoIndex);
 }
 
+// The same refusal for a schema a script wrote (#2528) is the validator's
+// reason, because that schema's author is the one reading the answer.
+TEST (SchemaValidationBoundsTest, AScriptSchemaTheValidatorRefusesNamesWhy) {
+    const auto refused = validate_document_against_schema (
+    json{ { "type", "not-a-type" } }, json::parse (R"({"a":1})"));
+    ASSERT_FALSE (refused.has_value ());
+    EXPECT_NE (refused.error ().find ("not-a-type"), std::string::npos)
+    << refused.error ();
+
+    const auto judged =
+    validate_document_against_schema (json{ { "type", "string" } }, json (1));
+    ASSERT_HAS_VALUE (judged);
+    EXPECT_TRUE (judged->checked);
+    EXPECT_FALSE (judged->valid);
+}
+
 // ─── Sampled tallies, for a load run (issue #682) ───────────────────────────
 
 namespace {

@@ -37,6 +37,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/file_ref.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
@@ -1513,6 +1514,18 @@ struct DesignSend {
 };
 
 
+/// What a pre-row refusal of `POST /execute` answers with: the message, and the
+/// code when the refusal has one (`invalid_header_name`). A bare message
+/// converts, so a refusal with no code is written as it always was.
+struct ExecuteRefusal {
+    std::string message;
+    std::string code;
+
+    ExecuteRefusal (std::string text, std::string refusal_code = {})
+    : message (std::move (text)), code (std::move (refusal_code)) {
+    }
+};
+
 /**
  * Everything `POST /execute` reads and can refuse before any run row exists.
  *
@@ -1520,9 +1533,10 @@ struct DesignSend {
  * whole pre-row section is ordered by: a request that could not be flagged,
  * bound or built must leave no trace of an execution that never happened.
  *
- * @return the message to answer with, already logged, or nothing.
+ * @return the message (and code, when it has one) to answer with, already
+ *         logged, or nothing.
  */
-std::optional<std::string>
+std::optional<ExecuteRefusal>
 read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePayload& out) {
     // Parse and validate request
     nlohmann::json json;
@@ -1625,8 +1639,9 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     auto built =
     vayu::http::build_request (json, &ctx.db, request_timeout_ms, row_auth.resolution);
     if (built.parse_failed) {
-        vayu::utils::log_warning ("http", "POST /execute - Invalid request format");
-        return built.error_message;
+        vayu::utils::log_warning ("http",
+        "POST /execute - Invalid request format: " + built.error_message);
+        return ExecuteRefusal{ built.error_message, built.detail_code };
     }
 
     // Bind the row into what composition left written, before anything is
@@ -2354,7 +2369,7 @@ httplib::Response& res) {
     const auto handler_start = std::chrono::steady_clock::now ();
     ExecutePayload payload;
     if (auto rejection = read_execute_payload (ctx, req, payload)) {
-        send_error (res, 400, *rejection);
+        send_error (res, 400, rejection->message, rejection->code);
         return;
     }
 
@@ -2461,6 +2476,22 @@ std::optional<std::string> refuse_monitor_on_collection_run (const nlohmann::jso
 }
 
 /**
+ * A single-request run whose payload does not parse because a header name is not
+ * a token (`invalid_header_name`, issue #2467), as the message and code to
+ * answer 400 with. Any other parse failure stays the run's own build to report,
+ * as it always was: this is not the place to start refusing them.
+ */
+std::optional<std::pair<std::string, std::string>> refuse_invalid_header_name (
+const nlohmann::json& json) {
+    const auto parsed = vayu::json::deserialize_request (json);
+    if (!parsed.is_error () || parsed.error ().code != vayu::ErrorCode::InvalidHeaderName) {
+        return std::nullopt;
+    }
+    return std::pair{ parsed.error ().message,
+        std::string (vayu::http::INVALID_HEADER_NAME_CODE) };
+}
+
+/**
  * POST /runs
  * Starts a load test run (Vayu Mode).
  *
@@ -2559,6 +2590,11 @@ RunOrigin& origin) {
             "http", "POST /runs - Missing mode/duration/iterations config");
             return RouteError{ 400,
                 error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
+        }
+
+        if (auto refusal = refuse_invalid_header_name (json)) {
+            vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
+            return RouteError{ 400, error_body (400, refusal->first, refusal->second) };
         }
     }
 

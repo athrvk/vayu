@@ -169,9 +169,13 @@ itself was wrong.
 `pm.expect(x).to.be.NaN` is an expression statement, so before the chain was
 armed a member nothing implemented evaluated to `undefined` and the test
 reported PASS whatever the value was - a typo (`.to.be.trueish`) and a chai
-matcher Vayu does not have (`.finite`, `.sealed`, `.frozen`, `.extensible`)
+member Vayu does not have (chai-postman's `.postmanResponse`)
 were equally silent. Every unimplemented name now raises a `TypeError` naming
-itself, the way `pm.response.to` has since #487.
+itself, the way `pm.response.to` has since #487. That holds for a name read off
+a matcher or a chainable method too (#2528): a matcher is a call, so
+`.within.foo` and `.equal.name` are refused, and after `include`, `length` or
+`a` only the chain's own members resolve, so `.include.name` and `.a.foo` are
+refused rather than answering a function's own `name` or `undefined`.
 
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
@@ -189,11 +193,11 @@ The full matcher inventory:
 
 ```javascript
 // Equality
-pm.expect(value).to.equal(expected);         // strict (===)
+pm.expect(value).to.equal(expected);         // strict (===); aliases .eq, .equals
 pm.expect(value).to.eql(expected);           // deep; alias .eqls
 pm.expect(value).to.deep.equal(expected);    // same as .eql
 pm.expect(value).to.be.oneOf([a, b]);
-pm.expect(value).to.be.closeTo(expected, delta);
+pm.expect(value).to.be.closeTo(expected, delta); // alias .approximately
 
 // Booleans and existence (paren-less: accessing them asserts)
 pm.expect(value).to.be.true;                 // strict: the boolean true, not 1 or 'true'
@@ -202,40 +206,66 @@ pm.expect(value).to.be.null;
 pm.expect(value).to.be.undefined;
 pm.expect(value).to.be.ok;                   // truthy (any value JavaScript reads as true)
 pm.expect(value).to.be.empty;
-pm.expect(value).to.exist;
+pm.expect(value).to.exist;                   // alias .exists
 pm.expect(value).to.be.NaN;
+pm.expect(value).to.be.finite;               // a number, and finite: '1' is not
+pm.expect(value).to.be.arguments;            // a function's own `arguments`; alias .Arguments
+pm.expect(value).to.be.extensible;           // what Object.isExtensible answers
+pm.expect(value).to.be.sealed;               // Object.isSealed
+pm.expect(value).to.be.frozen;               // Object.isFrozen
 
 // Numbers (a number or a Date on both sides - nothing is coerced)
-pm.expect(value).to.be.above(n);
-pm.expect(value).to.be.below(n);
-pm.expect(value).to.be.at.least(n);
-pm.expect(value).to.be.at.most(n);
+pm.expect(value).to.be.above(n);             // aliases .gt, .greaterThan
+pm.expect(value).to.be.below(n);             // aliases .lt, .lessThan
+pm.expect(value).to.be.at.least(n);          // aliases .gte, .greaterThanOrEqual
+pm.expect(value).to.be.at.most(n);           // aliases .lte, .lessThanOrEqual
+pm.expect(value).to.be.within(start, finish); // both bounds are in
 
 // Types
 pm.expect(value).to.be.a('string');
-pm.expect(value).to.be.an('array');
-pm.expect(value).to.be.instanceOf(Array);
+pm.expect(value).to.be.an('array');          // also 'date', 'regexp', 'map', 'set', 'error', ...
+pm.expect(value).to.be.an.instanceof(Array); // .a / .an also read as words
+pm.expect(value).to.be.instanceOf(Array);    // alias .instanceof
 
 // Strings, collections and objects
-pm.expect(value).to.include(item);           // alias .contain
+pm.expect(value).to.include(item);           // aliases .includes, .contain, .contains
 pm.expect(value).to.include({ a: 1 });       // an object target: subset match
+pm.expect(value).to.have.own.include({ a: 1 });          // own properties only
+pm.expect(value).to.nested.include({ 'a.b[0].c': 1 });   // each key is a path
 pm.expect(value).to.have.string(substring);  // string target only
-pm.expect(value).to.match(/regex/);
+pm.expect(value).to.match(/regex/);          // alias .matches
 pm.expect(value).to.have.length(n);          // alias .lengthOf
+pm.expect(value).to.have.length.above(n);    // a chain too: the length is compared
 pm.expect(value).to.have.property('key');
 pm.expect(value).to.have.property('key', expectedValue);
 pm.expect(value).to.have.nested.property('a.b[0].c');
+pm.expect(value).to.have.own.property('key'); // not an inherited one; alias .ownProperty
+pm.expect(value).to.have.ownPropertyDescriptor('key', { value: 1, writable: true, enumerable: true, configurable: true });
 pm.expect(value).to.have.property('id').that.is.a('number'); // name alone: the subject is now the value
 pm.expect(value).to.have.keys('a', 'b');     // exactly these keys; alias .key
+pm.expect(value).to.have.any.keys('a', 'b'); // at least one of them
+pm.expect(value).to.include.keys('a');       // at least these; alias .contain.keys
 pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
+pm.expect(value).to.include.members([1, 2]); // a superset is fine
+pm.expect(value).to.have.ordered.members([1, 2, 3]); // same members, same order
+pm.expect(value).to.contain.oneOf(['a', 'b']);       // holds one of these
+pm.expect(value).to.respondTo('send');       // has a method; a function: its prototype's
+pm.expect(Ctor).itself.to.respondTo('create'); // the function's own method
+pm.expect(value).to.have.jsonSchema({ type: 'object', required: ['id'] }); // draft-07
 
 // Functions
-pm.expect(fn).to.throw();                    // alias .throws
+pm.expect(fn).to.throw();                    // aliases .throws, .Throw
 pm.expect(fn).to.throw('message substring'); // matched against err.message
 pm.expect(fn).to.throw(/pattern/);
 pm.expect(fn).to.throw(TypeError);
 pm.expect(fn).to.throw(TypeError, 'substring');
-pm.expect(value).to.satisfy(function (v) { return v > 0; });
+pm.expect(value).to.satisfy(function (v) { return v > 0; });   // alias .satisfies
+
+// Functions that change something: the target is called once, and the subject
+// - a function, or an object and a property name - is read before and after
+pm.expect(fn).to.change(object, 'key');      // aliases .changes
+pm.expect(fn).to.increase(object, 'key').by(2);   // .increases
+pm.expect(fn).to.decrease(getCount).by(1);        // .decreases
 
 // Chainers
 pm.expect(value).to.not.equal(expected);     // negates the rest of the chain
@@ -287,9 +317,47 @@ Notes on the edges:
   once, so a getter runs once. Two forms keep the chain they were called on:
   `property(name, value)` (the value was already compared) and
   `.not.have.property(name)` (absence has no value to move to).
-- **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
-  (`include.keys`) is not implemented; `all` is accepted and changes nothing,
-  `any` is not.
+- **`keys` means exactly these keys**, as in chai's `have.keys`. `include.keys`
+  (alias `contain.keys`) asks for at least these, and `any.keys` for at least one
+  of them whether or not `include` came first; `all` is the default quantifier
+  and the later of `any` and `all` wins. Names may be listed or given as one
+  array, and an empty list is a `TypeError`, because `include.keys([])` would
+  hold for every target having compared nothing (#2528).
+- **`include`, `own`, `ordered` and `itself` are flags the matcher after them
+  reads** (#2528). Reading `include` or `contain` - as `include(x)` or as a chain
+  word - sets chai's `contains`: `keys` and `members` then accept a superset, and
+  `oneOf` asks whether the target contains a candidate (a substring, an element).
+  `ordered.members` compares by position, and with `include` a prefix. `own`
+  makes `property` and `include({...})` look at own properties only, and
+  `nested` together with `own` is refused. `.length` and `.lengthOf` are a call
+  and a chain: after one, `above`, `below`, `least`, `most` and `within` compare
+  the length (a Map's or Set's `size`). `length` directly after a chainable
+  method (`include`, `a`, `length` itself, `responseTime`) is a `TypeError`, as
+  chai's length guard makes it; `lengthOf` is the spelling there. The ordering matchers are chai's whole
+  family, `gt` / `gte` / `lt` / `lte` and the `greaterThan...` spellings
+  included, and `within` takes both bounds in.
+- **`.a()` and `.an()` use chai's type names**: `string`, `number`, `boolean`,
+  `null`, `undefined`, `array`, `object`, `function`, and for anything else the
+  lower-cased tag (`date`, `regexp`, `map`, `set`, `error`, `promise`, `symbol`,
+  `bigint`). Both are chai's chainable methods: read without a call they hand
+  the chain on, so `.to.be.an.instanceof(Array)` runs, and called they return
+  it, so `.an('array').that.includes(1)` does too.
+- **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
+  validator rather than ajv. A failure names the first path that broke the
+  schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
+  such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
+  in **both** polarities and is named, because ignoring it would make the schema
+  looser (or, under `not`, stricter) and neither verdict could be trusted.
+  `options` is ajv's and is accepted and not read. `format` is checked only for
+  `date`, `time`, `date-time` and `ipv4`; `email`, `uri`, `uuid` and the rest
+  pass any string, where ajv would reject some of them.
+- **Every public member of chai 4.4.1's `expect` API has a row** in
+  `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
+  one that fails, each checked against the real package. The suite holds the
+  rows to the member names read off chai and chai-postman in both directions, so
+  a row deleted, renamed or added for a member neither publishes fails by name,
+  and it fails on a member the docs claim is missing from the table. The members that differ from chai are named in
+  [pm-api-compatibility.md](../app/pm-api-compatibility.md#assertion-chains-pmexpect).
 - **`eql` refuses containers it cannot inspect.** `Map`, `Set` and typed arrays
   keep their contents outside the property list, so two distinct ones report
   *not* equal rather than silently passing. `Date` compares by instant and
@@ -390,6 +458,7 @@ pm.response.text()            // Body as string
 pm.response.json()            // Parse JSON (throws if invalid)
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
+pm.response.responseSize      // The body's bytes: size().body
 pm.response.cookies           // Set-Cookie, parsed - see below
                               // (the stored session is pm.cookies)
 pm.response.errorCode         // string | undefined - TIMEOUT, DNS_ERROR, ...
@@ -668,14 +737,24 @@ fixture's `singleLine` cases are the per-line parse.
 ```javascript
 pm.response.to.have.status(200);                          // status code
 pm.response.to.have.status('OK');                         // reason phrase, not a code
+pm.response.to.have.statusCode(200);                      // the code only; '200' is fine too
+pm.response.to.have.statusReason('OK');                   // the reason phrase, exactly
+pm.response.to.have.statusCodeClass(2);                   // 2xx
 pm.response.to.have.header('Content-Type');               // header exists
 pm.response.to.have.header('Content-Type', 'text/plain'); // exact value, strict
+pm.response.to.have.body();                               // there is a body
 pm.response.to.have.body('{"ok":true}');                  // body equals this exactly
 pm.response.to.have.body(/"ok":\s*true/);                 // regex run against the body
 pm.response.to.have.body({ ok: true });                   // parsed JSON deep-equals this
 pm.response.to.have.jsonBody();                           // body parses as JSON
 pm.response.to.have.jsonBody('data.id');                  // that property exists
 pm.response.to.have.jsonBody('data.id', 42);              // exists and deep-equals 42
+pm.response.to.have.jsonBody('[0].id', 42);               // an array root, as lodash reads it
+pm.response.to.have.jsonSchema({ type: 'object', required: ['id'] }); // draft-07
+pm.response.to.have.responseTime.below(500);              // a pm.expect chain on the time
+pm.response.to.have.responseTime(120);                    // ... and the equality call
+pm.response.to.have.responseSize.below(2048);             // body and header bytes together
+pm.response.to.not.have.status(500);                      // every member has a negated twin
 ```
 
 `have.status` means two different things depending on the argument's type: a
@@ -691,7 +770,8 @@ status that did arrive (#1048). `status(NaN)` is refused the same way.
 arrived on the wire. `header('X-Count', 5)` fails rather than stringifying `5`
 into agreement; the expected value must already be the string form.
 
-`have.body` accepts exactly three forms. A string must equal the body
+`have.body` accepts exactly three forms and, with no argument, asserts that
+there is a body at all. A string must equal the body
 **exactly** - this used to be a substring search. A regular expression is run
 against the body text. An object is deep-equalled against the parsed JSON
 body. Any other argument type - a number, a boolean - is a `TypeError` naming
@@ -703,7 +783,33 @@ nothing for those inputs, and Vayu refuses a silent non-assertion instead
 checks only that the body parses as JSON. A path checks that the property
 exists. A path plus a value checks that the property exists **and** deeply
 equals it - before #998 the value argument was accepted but never compared,
-so a wrong expected value still passed.
+so a wrong expected value still passed. The path is read the way lodash's `_.has`
+and `_.get` read it, which is how chai-postman reads it (#2528): `a.b[2].c`,
+`a['b'].c` and `a["b"]` all work, a key the root holds whole wins
+(`{"a.b": 1}` answers `a.b`), and an array root is `[0].id`. Every step is an own
+property: an array's `length` is reachable and its `map` is not.
+
+`have.statusCode(code)` compares the code (a number or a numeric string, as
+chai-postman's `Number(code)` does), `have.statusReason(reason)` compares the
+phrase exactly, and `have.statusCodeClass(digit)` the hundreds digit - which has
+to be a number, not `'2'`. `have.jsonSchema(schema[, options])` is draft-07 by
+the engine's validator, the same call `pm.expect(value).to.have.jsonSchema`
+makes: the body is read as `JSON.parse` reads it, a failure names the first
+failing path, and a keyword the validator cannot evaluate fails the assertion
+naming it, in both polarities. `options` is ajv's and is not read, and `format`
+is checked only for `date`, `time`, `date-time` and `ipv4`.
+
+`have.responseTime` and `have.responseSize` are a call and a chain, as in
+chai-postman: `responseTime(120)` asserts the time equals 120, and
+`responseTime.below(200)` / `.within(100, 150)` are `pm.expect`'s matchers on
+the number; an unknown name after one is refused naming
+`pm.response.to.have.responseTime`, the chain the script wrote. The size is the body and the header bytes added up;
+`pm.response.responseSize` is the body alone.
+
+`pm.response.to.not` negates every one of these, and as in chai-postman it
+negates **each check on its own, in order**: `not.have.header('X', 'v')` fails
+as soon as the header exists, and `not.have.jsonBody('id', 2)` as soon as `id`
+does. `not` sets the negation, so `not.not` is still negated.
 
 Status-class assertions hang off `pm.response.to.be`. They are **getters** - the
 paren-less form is the assertion:
@@ -717,10 +823,13 @@ pm.response.to.be.clientError;   // 4xx
 pm.response.to.be.serverError;   // 5xx
 pm.response.to.be.error;         // 4xx or 5xx
 pm.response.to.be.accepted;      // 202
+pm.response.to.be.withoutContent; // 204
 pm.response.to.be.badRequest;    // 400
 pm.response.to.be.unauthorized;  // 401
+pm.response.to.be.unauthorised;  // 401
 pm.response.to.be.forbidden;     // 403
 pm.response.to.be.notFound;      // 404
+pm.response.to.be.notAcceptable; // 406
 pm.response.to.be.rateLimited;   // 429
 pm.response.to.be.json;          // body parses as JSON
 pm.response.to.be.withBody;      // body is not empty
@@ -728,12 +837,14 @@ pm.response.to.be.withBody;      // body is not empty
 
 **`ok` is status 200 only, not any 2xx** (#998) - `success` is the 2xx one. A
 script that meant "any 2xx" and asserted `.ok` needs `.success` instead.
-Postman's named statuses (`accepted`, `badRequest`, ...) also match by reason
-phrase; Vayu's stay code-only.
+Postman's named statuses (`accepted`, `withoutContent`, `badRequest`, ...) also
+match by reason phrase; Vayu's stay code-only. chai-postman's phrase for
+`unauthorised` is `Unauthorised` and for `notAcceptable` is `Acceptable`,
+which no server sends, so in Postman those two fail against a real 401 and 406
+where Vayu passes on the code.
 
 **Anything else under `pm.response.to` throws.** A misspelled or unimplemented
-name - `pm.response.to.be.definitelyNotAMatcher`, or the negated
-`pm.response.to.not.be.ok`, which Vayu does not have - raises a `TypeError`
+name - `pm.response.to.be.definitelyNotAMatcher` - raises a `TypeError`
 naming the chain rather than evaluating to `undefined`. A paren-less assertion
 is an expression statement, so a silent `undefined` would report PASS against a
 broken API; failing loudly is the point.
@@ -1769,7 +1880,10 @@ pre-send gate reads header text for the bytes that break a line, and what is
 left of an empty name is the line `: value`, which libcurl sends. This call met
 that rule first, a script writing header names of its own; since #1084
 composition and the execute-time residual pass refuse it in the same words, so
-one wording answers wherever a name is resolved.
+one wording answers wherever a name is resolved. A resolved name is also
+trimmed of the spaces and tabs around it and must then be an RFC 9110 token:
+` X-Trace` goes out as `X-Trace`, and `X Trace` throws with the same wording as
+the `invalid_header_name` refusal (#2467).
 
 ```javascript
 pm.environment.set("tenant", "acme");

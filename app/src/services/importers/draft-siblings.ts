@@ -12,10 +12,11 @@
  * A parsed collection keeps its two kinds in two arrays, `children` and
  * `requests`; stored, they share one `order` space and the sidebar and a
  * recursive run read them merged. A draft's own `order` places it (a Postman
- * item's document position, a Vayu-written document's stored order); a draft
- * that states none keeps the listing every other importer produces, its
- * folders first and its requests after them. On a tie a folder comes first,
- * the stored tree's rule, then list position.
+ * item's or a JMeter element's document position, an Insomnia item's rank by
+ * sort key, a Vayu-written document's stored order); a draft that states none
+ * keeps the listing the other importers produce, its folders first and its
+ * requests after them. On a tie a folder comes first, the stored tree's rule,
+ * then list position.
  *
  * The engine's `sibling_positions` (`import_document.cpp`) is the other copy;
  * `import-conformance.json`'s payloads pin the two together.

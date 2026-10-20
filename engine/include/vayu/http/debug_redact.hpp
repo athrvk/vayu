@@ -22,6 +22,7 @@
 
 #include <curl/curl.h>
 
+#include "vayu/http/header_names.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/log_redact.hpp"
 
@@ -45,13 +46,11 @@ const std::vector<std::string>& extra_secret_headers = {}) {
     }
 
     // The header name, trimmed; the comparison below folds case itself.
-    std::string name = line.substr (0, colon);
-    const auto first = name.find_first_not_of (" \t");
-    const auto last  = name.find_last_not_of (" \t");
-    if (first == std::string::npos) {
+    const std::string name (
+    vayu::http::trim_optional_whitespace (std::string_view (line).substr (0, colon)));
+    if (name.empty ()) {
         return line;
     }
-    name = name.substr (first, last - first + 1);
 
     if (!vayu::utils::is_secret_header_name (name, extra_secret_headers)) {
         return line;

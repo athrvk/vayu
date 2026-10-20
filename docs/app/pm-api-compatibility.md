@@ -23,12 +23,12 @@ that the most common Postman scripts paste in and run unchanged.
 | Group               | API                                                                              |
 | ------------------- | -------------------------------------------------------------------------------- |
 | Core                | `pm`, `pm.test(name, fn)` - in either script, each result naming the one that made it, returning `pm` so calls chain, and handing a `done` to a callback that declares one (see below), `pm.expect(value[, message])` - the message prefixes the failure, as in chai, `pm.expect.fail([message])` |
-| Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
+| Response            | `pm.response.code`, `.status`, `.responseTime`, `.responseTimeWire`, `.responseTimeQueueWait`, `.responseSize` (the body's bytes, `.size().body`), `.headers`, `.json()`, `.text()`, `.reason()`, `.size()`, plus `.errorCode` / `.errorMessage` on a transport failure - see [Response timings](#response-timings-and-the-two-error-fields) |
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)`, see below |
-| Response assertions | `pm.response.to.have.status(code \| reason)`, `.header(name[, value])`, `.body(expected)`, `.jsonBody(path?[, value])`, and the `pm.response.to.be.*` status classes below |
+| Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
@@ -421,42 +421,85 @@ A rejected promise outside any test reads `Unhandled promise rejection:
 ### Assertion chains (`pm.expect`)
 
 Chai-style chains on a `pm.expect(value)` expectation, implemented in the QuickJS
-runtime. `pm.response.to` is a **separate** object: it answers only to the
-response assertions in the table above and the status classes below, not to
-these:
+runtime and held to **every public member of chai 4.4.1's `expect` API**
+(`engine/tests/fixtures/chai-conformance.json`: a snippet that must pass, one
+that must fail and the shape of its message, per member, each checked against
+the real package; `ChaiConformanceTest` runs them, and fails when a member
+listed below has no row). `pm.response.to` is a **separate** object: it
+answers only to the response assertions in the table above and the status
+classes below, not to these:
 
 ```
-.to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
-.to.exist         .to.be.true       .to.be.false
+.to.equal(v) / .eq(v) / .equals(v)  .to.eql(v) / .eqls(v)        .to.deep.equal(v)
+.to.exist / .exists                 .to.be.true       .to.be.false
                   (.true / .false are strict, `=== true` / `=== false`: `1`, `'true'`
                    and `{}` are not `.true`, `0`, `''` and `null` are not `.false`;
                    `.ok` is the truthy check)
 .to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
-.to.be.NaN
-.to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
-                  (each takes a number or a Date on both sides, never a coercion)
-.to.be.closeTo(v, delta)            .to.be.oneOf([…])
-.to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor)
+.to.be.NaN        .to.be.finite
+                  (.finite is a number that is finite: the string '1' is not)
+.to.be.arguments / .Arguments       (a function's own `arguments` object)
+.to.be.extensible .to.be.sealed     .to.be.frozen
+                  (what Object.isExtensible / isSealed / isFrozen answer, so a
+                   primitive is sealed and frozen and is not extensible)
+.to.be.above(n) / .gt(n) / .greaterThan(n)
+.to.be.below(n) / .lt(n) / .lessThan(n)
+.to.be.at.least(n) / .gte(n) / .greaterThanOrEqual(n)
+.to.be.at.most(n)  / .lte(n) / .lessThanOrEqual(n)
+.to.be.within(start, finish)
+                  (each takes a number or a Date on both sides, never a coercion;
+                   within takes both bounds in)
+.to.be.closeTo(v, delta) / .approximately(v, delta)          .to.be.oneOf([…])
+.to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor) / .instanceof(Ctor)
+                  (.a / .an are also words: .to.be.an.instanceof(Ctor))
 .to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
-                  (name alone moves the chain's subject to the property's value;
-                   with v, or under .not, the subject stays the object)
+.to.have.own.property(name[, v]) / .ownProperty(name[, v]) / .haveOwnProperty(name[, v])
+.to.have.ownPropertyDescriptor(name[, d]) / .haveOwnPropertyDescriptor(name[, d])
+                  (name alone moves the chain's subject to the property's value,
+                   or its descriptor; with v, or under .not, the subject stays
+                   the object)
 .to.have.length(n)                  .to.have.lengthOf(n)
+                  (also the start of a chain: .length.above(n) and
+                   .lengthOf.within(a, b) compare the length, a Map's or Set's size)
 .to.have.keys(…) / .to.have.key(k)  .to.have.members([…])
-.to.include(v)    .to.contain(v)    .to.have.string(sub)
-.to.match(/regex/)                  .to.satisfy(fn)
-.to.throw([Ctor | msg | /regex/][, msg | /regex/]) / .to.throws(…)
+.to.have.any.keys(…)                .to.have.all.keys(…)
+.to.include.keys(…) / .to.contain.keys(…)
+.to.include.members([…])            .to.have.ordered.members([…])
+.to.include.ordered.members([…])    .to.contain.oneOf([…])
+.to.include(v) / .includes(v) / .contain(v) / .contains(v)   .to.have.string(sub)
+.to.include({ a: 1 })               .to.have.own.include({ a: 1 })
+.to.nested.include({ 'a.b[0]': 1 })
+.to.match(/regex/) / .matches(/regex/)                       .to.satisfy(fn) / .satisfies(fn)
+.to.throw([Ctor | msg | /regex/][, msg | /regex/]) / .to.throws(…) / .to.Throw(…)
                   (a string or pattern is matched against err.message)
+.to.respondTo(name) / .respondsTo(name)     .itself.to.respondTo(name)
+.to.change(obj, 'prop') / .changes(…)       .to.increase(obj, 'prop') / .increases(…)
+.to.decrease(obj, 'prop') / .decreases(…)   .and.by(n)
+                  (each takes a function, or an object and a property name, calls
+                   the target once and compares before and after; by(n) is how far)
+.to.have.jsonSchema(schema[, options])
+                  (chai-postman's, draft-07: see jsonSchema below)
 .to.not …         (sets the negation for the rest of the chain; a second
                    .not in one chain is a no-op, not a double negative)
 .deep …           (deep comparison for equal / include / property / members / oneOf)
-.nested …         (dotted or indexed path for property)
+.nested …         (dotted or indexed path for property and include)
+.own …            (own properties only, for property and include)
+.any … .all …     (any: one of the keys is enough; all, the default, wants them all)
+.ordered …        (members by position)
+.itself …         (respondTo on a function's own members, not its prototype's)
 .and …            (continues a chain; flags, `not` included, carry over)
-.all …            (accepted before .keys, chai's default, changes nothing)
 .that … .which … .is … .has … .been … .with …
 .does … .but … .also … .of … .same … .still …
                   (chai's language chains: they assert nothing and read as
                    English, and carry the chain's flags like .and)
 ```
+
+The table holds a row for each of chai's 96 members of `Assertion.prototype`
+and for `expect.fail`, and for nothing else: the test holds the rows to the
+names read off the package in both directions, so a row deleted, renamed or
+added for a member chai does not have fails by name. The `pm.response.to` rows
+are held to chai-postman's names the same way, and to the response assertions
+and status classes this page lists.
 
 **The chain words above are a vocabulary, not a route.** The dotted spellings
 in that table are how the completion popup offers each matcher, not the only
@@ -507,6 +550,71 @@ having compared nothing); a getter that throws is reported rather than read as
 "these differ"; and a `Map`, `Set` or boxed `String` target is refused rather
 than answered, since deep equality here does not inspect the first two.
 
+**Quantifiers, order and ownership are flags the matcher after them reads** (#2528),
+as in chai. `any` and `all` (the default) say how many of the `keys` are
+enough, and the later word wins. Reading `include` or `contain` - as the call
+`include(x)` or as a chain word - sets chai's `contains`, which turns `keys` and
+`members` into "at least these" and makes `oneOf` ask whether the target
+*contains* a candidate (a substring, an element). `ordered` makes `members`
+compare by position, and `include.ordered.members` checks a prefix. `own` makes
+`property` and `include({...})` look at own properties only, `nested.include`
+reads each key as a path, and `nested` together with `own` is a `TypeError`, as
+chai refuses it. `.keys()` with no names is a `TypeError` too: `include.keys([])`
+would pass for every target having compared nothing. `.length` and `.lengthOf`
+are a call (`length(3)`) and a chain (`length.above(2)`), and the ordering
+matchers after one compare the length - a Map's or Set's `size`. `length`
+directly after a chainable method (`include`, `a`, `length` itself,
+`responseTime`) is a `TypeError`, as chai's length guard makes it; write
+`lengthOf` there.
+
+**`.a()` and `.an()` name a value the way chai's `type-detect` does**: `string`,
+`number`, `boolean`, `null`, `undefined`, `array`, `object` and `function`, and
+for anything else the lower-cased tag - `date`, `regexp`, `map`, `set`, `error`,
+`promise`, `symbol`, `bigint`. Both are chai's chainable methods: read without a
+call they hand the chain on, so `.to.be.an.instanceof(Array)` runs, and the call
+returns the chain, so `.an('array').that.includes(1)` does too.
+
+**`change`, `increase` and `decrease` call the target exactly once**, reading
+the subject before and after, and a `.by(n)` that follows judges that same
+measurement. The subject has to be a function, or an object holding the named
+property; `increase` and `decrease` need a number to start from. Only a number
+measures for `by`, so a numeric string counts as no move where chai would
+coerce it. `respondTo` asks a function about its `prototype` unless `itself`
+comes first, and refuses a function with no prototype (an arrow function) the
+way chai's `TypeError` does, because answering "does not respond" would make
+`.not.respondTo` pass for it.
+
+**`jsonSchema(schema[, options])`** is chai-postman's, on `pm.expect(value)` and
+on `pm.response.to.have`, and is checked by the engine's draft-07 validator
+rather than ajv. A failure names the first path that broke the schema
+(`at /items/1/id: ...`). A keyword the validator cannot evaluate - one from JSON Schema
+2019-09 or 2020-12 (`unevaluatedProperties`, `prefixItems`,
+`dependentSchemas`, ...) or OpenAPI's own (`nullable`, `discriminator`) - fails
+the assertion **in both polarities**, naming the keyword, because ignoring it
+makes the schema looser anywhere but inside `not`, where it makes it stricter:
+neither verdict could be trusted, so neither is given. `options` is ajv's and is accepted and not read.
+**`format` is checked only for `date`, `time`, `date-time` and `ipv4`**; the
+validator treats every other format (`email`, `uri`, `uuid`, `hostname`, ...) as
+an annotation, so a schema that relies on ajv's formats passes values it would
+fail in Postman. The body of `pm.response.to.have.jsonSchema` is read as
+`JSON.parse` reads it, so `1.0` is the integer `1`.
+
+**Where the vocabulary stops matching chai.** Each of these is a difference in
+what is accepted or how it is reported, never a quiet pass:
+
+- `expect.fail(actual, expected, message, operator)` is refused by name; only
+  `pm.expect.fail([message])` exists.
+- chai's per-matcher trailing `msg` argument (`.equal(1, 'why')`) is accepted and
+  not read. The message goes in `pm.expect(value, 'why')`, which prefixes every
+  failure of the chain.
+- chai-postman's `postmanRequest`, `postmanResponse` and `postmanRequestOrResponse`
+  are not implemented - there are no collection-SDK objects to recognise - and
+  neither is `pm.expect(pm.response).to.have.status(...)`: the response
+  assertions live on `pm.response.to`. Each throws a `TypeError` naming the
+  member.
+- A name outside this list throws, which chai would too for a misspelling but
+  not for a plugin's member; there is no plugin interface.
+
 **A wrong-typed value is a `TypeError` where chai raises an `AssertionError`** -
 `expect('5').to.be.above(3)`, `expect(5).to.include('x')`. Deliberate, and the
 same choice `pm.response.to.have.body` made for a wrong-typed argument (#998):
@@ -545,8 +653,12 @@ because nothing was asserted, the call itself was wrong. That covers
 **property-style members too** (issue #999): `pm.expect(x).to.be.NaN` is an
 expression statement, so an unimplemented name used to evaluate to `undefined`
 and report PASS whatever the value was. Every name the chain does not carry -
-a typo, or a chai matcher Vayu lacks (`.finite`, `.sealed`, `.frozen`,
-`.extensible`) - now raises a `TypeError` naming itself.
+a typo, or one of the chai-postman members Vayu lacks (`.postmanRequest`,
+`.postmanResponse`, `.postmanRequestOrResponse`) - now raises a `TypeError`
+naming itself. So does a name read off a matcher or a chainable method
+(#2528): a matcher is a call, so `.within.foo` and `.equal.name` are refused,
+and after `include`, `length` or `a` only the chain's own members resolve, so
+`.include.name` is refused rather than answering the function's own name.
 
 **`pm.expect.fail([message])` throws that same `AssertionError` on demand**
 (issue #1004), defaulting to chai's own `expect.fail()` text. Inside a
@@ -622,18 +734,36 @@ Getters, so the paren-less form is the assertion:
 .to.be.info        (1xx)                .to.be.redirection   (3xx)
 .to.be.clientError (4xx)                .to.be.serverError   (5xx)
 .to.be.error       (4xx or 5xx)
-.to.be.accepted    (202)                .to.be.badRequest    (400)
-.to.be.unauthorized(401)                .to.be.forbidden     (403)
-.to.be.notFound    (404)                .to.be.rateLimited   (429)
+.to.be.accepted    (202)                .to.be.withoutContent(204)
+.to.be.badRequest  (400)                .to.be.unauthorized  (401)
+.to.be.unauthorised(401)                .to.be.forbidden     (403)
+.to.be.notFound    (404)                .to.be.notAcceptable (406)
+.to.be.rateLimited (429)
 .to.be.json        (body parses as JSON)
 .to.be.withBody    (body is not empty)
 ```
 
+`pm.response.to.not` is the negation of every member of `pm.response.to`: the
+`have` calls and the `be` getters above, `pm.response.to.not.be.ok` and
+`pm.response.to.not.have.status(500)` alike (#2528). It **sets** the negation as
+`.not` does on `pm.expect` - `not.not` is still negated - and, as in
+chai-postman, **negates each of the checks an assertion makes on its own, in
+order**, so a two-step form fails once the first step holds: `not.have.header(
+'X-Count', '6')` fails when `X-Count` is there at all, and `not.have.jsonBody(
+'id', 2)` fails when `id` exists, whatever its value. That is Postman's verdict;
+reading it as "the pair is not equal" would pass an assertion Postman fails.
+
 **`ok` narrowed to status 200 only (#998)** - it used to match any 2xx, the same
 class `success` still matches. A script that asserted `.ok` meaning "any 2xx"
 should assert `.success` instead; a script that meant "200 exactly" needed no
-change. Postman's own named statuses (`accepted`, `badRequest`, `notFound`, ...)
-match by reason phrase as well as by code; Vayu's stay code-only.
+change. Postman's own named statuses (`accepted`, `withoutContent`, `badRequest`,
+`notFound`, ...) match by reason phrase as well as by code; Vayu's stay
+code-only. Two of chai-postman's phrases are ones no server sends -
+`unauthorised` wants `Unauthorised` and `notAcceptable` wants `Acceptable` - so
+in Postman those two fail against a real 401 and 406, where Vayu passes on the
+code. `statusReason(reason)` is the exact-phrase check for a script that wants
+it, and `statusCode(code)` takes a number or a numeric string as chai-postman's
+`Number(code)` does.
 
 **`have.body`'s substring form is gone (#998).** A string argument now has to
 equal the body exactly, not merely appear in it - `.to.have.body(sub)` written
@@ -642,10 +772,15 @@ It takes chai-postman's three argument forms and no others: a string compares
 equal, a regular expression is run against the body with its own `test`, and a
 plain object is deep-equalled against the **parsed** body - which reports
 `Response body is not valid JSON` when the body does not parse. A number or a
-boolean is a `TypeError` naming what was passed, and the argument is required.
+boolean is a `TypeError` naming what was passed. With **no argument** `have.body()`
+asserts that the response has a body (the call form of `to.be.withBody`).
 `.have.jsonBody(path, value)` also started comparing `value`, which it used to
 accept and ignore - a script relying on the old no-op should not pass an
-argument it does not want checked.
+argument it does not want checked. The path is **lodash's**, as chai-postman
+reads it with `_.has` and `_.get` (#2528): `a.b[2].c`, `a['b'].c`, a key the
+root holds whole (`{"a.b": 1}` answers `a.b`), and `[0].id` on a body that is an
+array. Each step is an own property, so an array's `length` is reachable and
+`map` is not.
 
 **`have.status` refuses a code that is not a whole finite number (#1048).**
 `status(200.5)` used to be truncated to `200` and pass against a 200; a
@@ -654,11 +789,20 @@ can carry such a code - so it raises a `TypeError` naming what was written
 rather than a verdict naming the status that arrived. Postman would report a
 failure here too, so no assertion that passes there fails here.
 
+**`responseTime` and `responseSize` are a call and a chain** (#2528), as in
+chai-postman: `pm.response.to.have.responseTime.below(200)` is `pm.expect`'s
+`below` on the time, and `responseTime(120)` asserts it equals 120. A name
+the chain does not carry is refused naming `pm.response.to.have.responseTime`,
+the chain the script wrote, not `pm.expect(...)`.
+`responseSize` is the body and the header together, which is what chai-postman
+adds up; `pm.response.responseSize`, the property, is the body alone. Under
+`not` the call form fails whatever it is given - chai-postman's own first check,
+that the measure is a number, always holds, and Postman's verdict is kept.
+
 **Every other name under `pm.response.to` throws a `TypeError`** naming the
-chain - a misspelling, or an idiom Vayu does not implement such as the negated
-`pm.response.to.not.be.ok`. This is deliberate: a paren-less assertion is an
-expression statement, so a name that merely evaluated to `undefined` would
-report PASS against a broken API.
+chain - a misspelling, or an idiom Vayu does not implement. This is deliberate:
+a paren-less assertion is an expression statement, so a name that merely
+evaluated to `undefined` would report PASS against a broken API.
 
 ### Streamed events (`pm.response.events`) - Vayu-specific
 
@@ -957,18 +1101,13 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `async` function runs (see
   [what a script can compute](../engine/scripting.md#what-a-script-can-compute));
   the import notice names only the top-level one
-- Chai matchers outside the list above: `.include.keys` (the subset form),
-  `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
-  the property-style `.finite` / `.sealed` / `.frozen` / `.extensible`, and the
-  `require()`-able libraries (`chai`, `lodash`, `moment`, …). Each throws
-  a `TypeError` rather than reporting a pass. `.any`, `.own` and `.itself` are
-  deliberately absent from the language chains above for that reason: each
-  changes what the matcher after it asserts - `.any` quantifies `.keys`, and
-  the other two change what `.property` looks at - so accepting one as a no-op
-  would assert something other than what the script wrote. `.property(name)`
-  itself is supported, including the chai behaviour of moving the chain onto the
-  property's value (see [Assertion chains](#assertion-chains-pmexpect)); only
-  the `.own` form is missing
+- Chai and chai-postman members outside the list in
+  [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
+  (`chai`, `lodash`, `moment`, …) and chai-postman's own `postmanRequest`,
+  `postmanResponse` and `postmanRequestOrResponse`. Each throws a `TypeError`
+  rather than reporting a pass. A flag that changes what the matcher after it
+  asserts (`any`, `own`, `ordered`, `itself`) is never accepted as a no-op for
+  that reason: it is either read by the matcher or it throws
 
 The editor underlines a use of any of the names above that the sandbox lacks
 (see [Type declarations](#type-declarations-hover-signature-help)) and its hover

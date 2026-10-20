@@ -153,8 +153,13 @@ const DefaultHeaderPolicy& policy);
  * `Content-Type` is exactly what those lists are for, so the correlation-id
  * rule below - which refuses the names the engine derives - must never be
  * applied to them.
+ *
+ * @param quoted_as the text the message quotes, when that is not @p name: the
+ *        name as the author wrote it, for a caller that judged a stand-in for it
+ *        (`invalid_header_name_refusal`). Empty quotes @p name.
  */
-[[nodiscard]] std::optional<std::string> invalid_header_token (std::string_view name);
+[[nodiscard]] std::optional<std::string>
+invalid_header_token (std::string_view name, std::string_view quoted_as = {});
 
 /**
  * @brief Why @p name cannot be the name the engine adds the correlation id

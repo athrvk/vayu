@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { RequestAuth } from "@/types";
+import type { RequestAuth, VariableSupport } from "@/types";
 import type { OAuth2TextInput } from "../OAuth2Form";
 
 /**
@@ -34,4 +34,6 @@ export interface AuthFieldsProps {
 	resolveString?: (value: string) => string;
 	/** Forwarded to `OAuth2Form` - see `resolveKey` on `OAuth2FormProps`. */
 	resolveKey?: string;
+	/** Forwarded to `OAuth2Form` - see `variables` on `OAuth2FormProps`. */
+	variables?: VariableSupport;
 }

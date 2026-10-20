@@ -25,11 +25,13 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <httplib.h>
@@ -46,6 +48,7 @@
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/scenario_runner.hpp"
+#include "vayu/core/transaction_histograms.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -254,6 +257,149 @@ TEST (LoadIncompatibleController, SilentOnEveryController) {
     element ("el_6", "control.switch",
     { { "variable", "v" }, { "cases", json::object () } }) }));
     EXPECT_FALSE (vayu::core::find_load_incompatible_controller (plan).has_value ());
+}
+
+// ============================================================================
+// `control.transaction`'s sum, with injected member timings (#2387)
+// ============================================================================
+
+/// Runs @p elements at `step.after` for one member whose response took
+/// @p total_ms. A null @p controller_state is the design send's context.
+void run_member (const std::vector<vayu::core::CompiledElement>& elements,
+double total_ms,
+size_t position,
+const std::unordered_map<std::string, ElementSpan>* spans,
+std::unordered_map<std::string, int64_t>* controller_state,
+std::vector<vayu::core::ElementOutcome>& sink) {
+    vayu::Request request;
+    vayu::Response response;
+    response.status_code     = 200;
+    response.timing.total_ms = total_ms;
+    vayu::ScriptResult pre_result;
+    vayu::ScriptResult post_result;
+    vayu::core::ElementContext ctx{
+        .request            = request,
+        .response           = &response,
+        .run_pre_script     = {},
+        .run_post_script    = {},
+        .pre_script_result  = pre_result,
+        .post_script_result = post_result,
+        .set_variable       = {},
+        .should_stop        = {},
+        .iteration          = 0,
+        .step_position      = position,
+        .element_spans      = spans,
+        .controller_state   = controller_state,
+        .record_metric      = {},
+    };
+    vayu::core::ElementPipeline::run (vayu::core::Phase::StepAfter, ctx, elements, sink);
+}
+
+struct TransactionPass {
+    std::vector<vayu::core::ElementOutcome> outcomes; ///< One per member, in order.
+    json latency; ///< The `checkout` row's `latency`; null when nothing closed.
+};
+
+/// One iteration of a `checkout` transaction over one plan step per entry of
+/// @p member_ms, driven the way both runners drive it: the pipeline per
+/// member, a `step.between` wait of @p wait_after_first_ms folded after the
+/// first, and every close recorded by the runners' `duration_us` rule.
+TransactionPass run_transaction (const std::vector<double>& member_ms,
+bool include_timers         = false,
+int64_t wait_after_first_ms = 0) {
+    json config{ { "name", "checkout" } };
+    if (include_timers) {
+        config["includeTimers"] = true;
+    }
+    vayu::core::ScenarioPlan plan;
+    for (size_t i = 0; i < member_ms.size (); ++i) {
+        auto step  = step_with ("m" + std::to_string (i),
+         { element ("el_txn", "control.transaction", config) });
+        step.index = i;
+        plan.steps.push_back (std::move (step));
+    }
+    const auto spans = vayu::core::compute_element_spans (plan);
+    std::unordered_map<std::string, int64_t> controller_state;
+    vayu::core::TransactionHistograms histograms (plan);
+
+    TransactionPass pass;
+    for (size_t i = 0; i < member_ms.size (); ++i) {
+        const auto& elements = *plan.steps[i].elements;
+        run_member (elements, member_ms[i], i, &spans, &controller_state, pass.outcomes);
+        if (i == 0 && wait_after_first_ms > 0) {
+            vayu::core::fold_between_wait_into_open_transactions (
+            elements, spans, i, 0, wait_after_first_ms, controller_state);
+        }
+    }
+    for (const auto& outcome : pass.outcomes) {
+        if (outcome.duration_us && outcome.message) {
+            histograms.record (
+            *outcome.message, *outcome.duration_us, outcome.status == "failed");
+        }
+    }
+    const json rows = histograms.build ();
+    if (!rows.empty ()) {
+        pass.latency = rows[0]["latency"];
+    }
+    return pass;
+}
+
+/// Within the histogram's 3-significant-figure bound (0.1%).
+void expect_transaction_ms (const TransactionPass& pass, double expected_ms) {
+    ASSERT_TRUE (pass.latency.is_object ()) << "no transaction closed";
+    EXPECT_NEAR (pass.latency["p50"].get<double> (), expected_ms, expected_ms * 0.001)
+    << pass.latency.dump ();
+    EXPECT_NEAR (pass.latency["max"].get<double> (), expected_ms, expected_ms * 0.001)
+    << pass.latency.dump ();
+}
+
+TEST (ControlTransactionSum, ThreeSubMillisecondMembersSumToTheirTrueTotal) {
+    const auto pass = run_transaction ({ 0.9, 0.9, 0.9 });
+    expect_transaction_ms (pass, 2.7);
+    ASSERT_EQ (pass.outcomes.size (), 3u);
+    const auto& close = pass.outcomes.back ();
+    ASSERT_HAS_VALUE (close.duration_us);
+    EXPECT_EQ (*close.duration_us, 2700);
+    // The trace's `waitedMs` is the sum rounded, never floored (2).
+    ASSERT_HAS_VALUE (close.waited_ms);
+    EXPECT_EQ (*close.waited_ms, 3);
+}
+
+TEST (ControlTransactionSum, MembersJustOverAMillisecondKeepTheirFraction) {
+    expect_transaction_ms (run_transaction ({ 1.9, 1.9, 1.9 }), 5.7);
+}
+
+TEST (ControlTransactionSum, IncludeTimersFoldsAWholeMillisecondWaitAsMicroseconds) {
+    expect_transaction_ms (run_transaction ({ 0.9, 0.9, 0.9 }, true, 5), 7.7);
+}
+
+TEST (ControlTransactionSum, OnlyTheClosingOutcomeCarriesADuration) {
+    const auto pass = run_transaction ({ 0.9, 0.9, 0.9 });
+    ASSERT_EQ (pass.outcomes.size (), 3u);
+    for (size_t i = 0; i + 1 < pass.outcomes.size (); ++i) {
+        EXPECT_FALSE (pass.outcomes[i].duration_us.has_value ())
+        << "member " << i << " is accumulating, not a close";
+        EXPECT_FALSE (pass.outcomes[i].waited_ms.has_value ()) << "member " << i;
+    }
+    EXPECT_TRUE (pass.outcomes.back ().duration_us.has_value ());
+
+    // `duration_us` is not part of the trace; the close shows as `waitedMs`.
+    const json trace = pass.outcomes.back ().to_json ();
+    EXPECT_EQ (trace.at ("waitedMs").get<int64_t> (), 3) << trace.dump ();
+    EXPECT_EQ (trace.size (), 6u) << "an unexpected member: " << trace.dump ();
+}
+
+TEST (ControlTransactionSum, ADesignSendReportsItsOneResponseInMicroseconds) {
+    const auto elements = compiled_elements (
+    { element ("el_txn", "control.transaction", { { "name", "checkout" } }) });
+    std::vector<vayu::core::ElementOutcome> sink;
+    run_member (*elements, 0.9, 0, nullptr, nullptr, sink);
+    ASSERT_EQ (sink.size (), 1u);
+    const auto& close = sink[0];
+    ASSERT_HAS_VALUE (close.duration_us);
+    EXPECT_EQ (*close.duration_us, 900);
+    ASSERT_HAS_VALUE (close.waited_ms);
+    EXPECT_EQ (*close.waited_ms, 1);
 }
 
 // ============================================================================

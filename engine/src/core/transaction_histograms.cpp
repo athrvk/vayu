@@ -69,7 +69,7 @@ TransactionHistograms::~TransactionHistograms () {
     }
 }
 
-void TransactionHistograms::record (const std::string& name, int64_t latency_ms, bool errored) {
+void TransactionHistograms::record (const std::string& name, int64_t latency_us, bool errored) {
     const auto found = index_of_name_.find (name);
     if (found == index_of_name_.end ()) {
         return; // Not a name the plan declared - defensively ignored.
@@ -79,7 +79,7 @@ void TransactionHistograms::record (const std::string& name, int64_t latency_ms,
     if (errored) {
         entry.errors.fetch_add (1, std::memory_order_relaxed);
     }
-    hdr_record_value_atomic (entry.histogram, std::max<int64_t> (0, latency_ms) * 1000);
+    hdr_record_value_atomic (entry.histogram, std::max<int64_t> (0, latency_us));
 }
 
 nlohmann::json TransactionHistograms::build () const {

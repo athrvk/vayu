@@ -310,6 +310,46 @@ TEST (ScenarioDataEmptyHeaderNameTest, ABlankCellThatLeavesTheNameANameStillBind
 }
 
 // ---------------------------------------------------------------------------
+// A header name a row binds to something that is not a token (issue #2467)
+// ---------------------------------------------------------------------------
+//
+// The load path runs no residual pass over what it binds, so a cell holding
+// ` X-A` or `X Bad` is judged here. Mutation-check: drop the
+// `settle_bound_header_name` call in `walk_bindable_fields` and the first reads
+// the padded name through, the second binds the space.
+
+TEST (ScenarioDataInvalidHeaderNameTest, APaddedCellBindsTrimmed) {
+    auto request                  = request_with_url ("https://api.test/");
+    request.headers["{{data.h}}"] = "acme";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":" X-A\t"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    EXPECT_EQ (request.headers, (vayu::HeaderList{ { "X-A", "acme" } }));
+}
+
+TEST (ScenarioDataInvalidHeaderNameTest, ACellThatIsNotATokenRefusesTheRow) {
+    auto request                  = request_with_url ("https://api.test/");
+    request.headers["{{data.h}}"] = "acme";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":"X Bad"})"), 2);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("'X Bad'"), std::string::npos) << result.error;
+    EXPECT_NE (result.error.find ("row 2"), std::string::npos) << result.error;
+}
+
+TEST (ScenarioDataInvalidHeaderNameTest, ACellOfOnlyPaddingIsTheEmptyNameRefusal) {
+    auto request                  = request_with_url ("https://api.test/");
+    request.headers["{{data.h}}"] = "acme";
+
+    const auto result = bind_data_row (request, json::parse (R"({"h":"  "})"), 0);
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_NE (result.error.find ("empty name"), std::string::npos) << result.error;
+}
+
+// ---------------------------------------------------------------------------
 // A cell that would end the header line it is bound into (issue #732)
 // ---------------------------------------------------------------------------
 
@@ -426,6 +466,23 @@ TEST (ScenarioDataBindTest, TheRawBodyAndEveryFormFieldBind) {
     ASSERT_EQ (request.body.fields.size (), 1u);
     EXPECT_EQ (request.body.fields[0].key, "k");
     EXPECT_EQ (request.body.fields[0].value, "v");
+}
+
+TEST (ScenarioDataBindTest, ATextFormPartsContentTypeBinds) {
+    // The composer resolves `{{vars}}` in `contentType` on every field, so the
+    // row's walk has to visit it on a text part too. Restore the file-only
+    // guard and the part keeps the literal token.
+    auto request        = request_with_url ("https://api.test/");
+    request.body.mode   = vayu::BodyMode::FormData;
+    request.body.fields = { { "meta", "{}", true } };
+    request.body.fields[0].content_type = "{{data.type}}";
+
+    const auto result =
+    bind_data_row (request, json::parse (R"({"type":"application/json"})"), 0);
+
+    ASSERT_TRUE (result.ok) << result.error;
+    ASSERT_EQ (request.body.fields.size (), 1u);
+    EXPECT_EQ (request.body.fields[0].content_type, "application/json");
 }
 
 TEST (ScenarioDataBindTest, AColumnTheRowDoesNotCarryIsAnErrorNotAnEmptyString) {

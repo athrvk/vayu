@@ -426,13 +426,15 @@ void setup_pm_object (JSContext* ctx) {
     // A class registered with JS_NewClass has no prototype until one is set, so
     // without this the pm.response.to.* and pm.expect(...) objects would answer
     // nothing but their own members - toString, hasOwnProperty and friends would
-    // reach the unknown-member hook and throw. Both chains are armed, so both
-    // need it; `JS_SetClassProto` takes ownership of the value it is given, so
-    // the first call gets a reference of its own.
+    // reach the unknown-member hook and throw. Both chains and an expectation's
+    // matchers are armed, so all three need it; `JS_SetClassProto` takes
+    // ownership of the value it is given, so the first two calls get a
+    // reference of their own.
     JSValue plain        = JS_NewObject (ctx);
     JSValue object_proto = JS_GetPrototype (ctx, plain);
     JS_FreeValue (ctx, plain);
     JS_SetClassProto (ctx, expect_class_id, JS_DupValue (ctx, object_proto));
+    JS_SetClassProto (ctx, expect_member_class_id, JS_DupValue (ctx, object_proto));
     JS_SetClassProto (ctx, response_chain_class_id, object_proto);
 
     // `pm.request.url` inherits from **String.prototype**, which is the whole
@@ -507,11 +509,11 @@ void setup_pm_object (JSContext* ctx) {
     JS_FreeValue (ctx, global);
 }
 
-// expect_class_id / response_chain_class_id / request_url_class_id /
-// request_body_class_id are process-wide: every native callback looks one up
+// expect_class_id / expect_member_class_id / response_chain_class_id /
+// request_url_class_id / request_body_class_id are process-wide: every native callback looks one up
 // by name (JS_GetOpaque (ctx, ..., xxx_class_id)) rather than through the
 // JSRuntime that happens to own its JSContext, since each OS thread owns a
-// wholly separate JSRuntime (QuickJS's own is not thread-safe) but the four
+// wholly separate JSRuntime (QuickJS's own is not thread-safe) but the five
 // ids must still agree across all of them. The zero-check-then-JS_NewClassID
 // sequence that assigns each one is neither atomic nor idempotent under a
 // race - two threads creating their first JSRuntime concurrently can
@@ -621,7 +623,7 @@ class ScriptEngine::Impl {
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
         JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);
 
-        // The four ids below are process-wide (see class_id_registration_mutex's
+        // The five ids below are process-wide (see class_id_registration_mutex's
         // comment); this lock is what makes their first assignment, and the
         // JS_NewClass calls that depend on the final value, safe across the
         // per-thread JSRuntimes that race to create their first context.
@@ -633,6 +635,13 @@ class ScriptEngine::Impl {
                 JS_NewClassID (rt, &expect_class_id);
             }
             JS_NewClass (rt, expect_class_id, &expect_class);
+
+            // Register the class of an expectation's matchers and chainable
+            // methods, callable objects whose hook refuses an unknown member.
+            if (expect_member_class_id == 0) {
+                JS_NewClassID (rt, &expect_member_class_id);
+            }
+            JS_NewClass (rt, expect_member_class_id, &expect_member_class);
 
             // Register the pm.response.to.* chain class, whose exotic hook makes
             // an unknown assertion throw instead of silently evaluating to

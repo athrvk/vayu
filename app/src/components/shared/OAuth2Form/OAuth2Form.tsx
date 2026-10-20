@@ -31,7 +31,8 @@ import {
 } from "@/components/ui";
 import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
-import type { OAuth2Config, OAuth2GrantType } from "@/types";
+import type { OAuth2Config, OAuth2GrantType, OAuth2ParamRow } from "@/types";
+import ParamRowsEditor from "./ParamRowsEditor";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
 
@@ -78,17 +79,55 @@ const PlainTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type })
  */
 const stableConfigField = createStableResolve();
 
+/**
+ * `rows` with every key and value resolved, each under a cache entry of its
+ * own (`<list>.<index>.key`). A stored list is whatever JSON the engine
+ * round-tripped, so a list that is not an array, a row that is not an object
+ * and a member that is not a string are all left as they are.
+ */
+function resolveParamRows(
+	list: string,
+	rows: OAuth2ParamRow[] | undefined,
+	resolveField: (field: string, text: string) => string
+): OAuth2ParamRow[] | undefined {
+	if (!Array.isArray(rows)) return rows;
+	const resolveMember = (index: number, member: "key" | "value", row: OAuth2ParamRow) =>
+		typeof row[member] === "string"
+			? resolveField(`${list}.${index}.${member}`, row[member])
+			: row[member];
+	return rows.map((row, index) =>
+		typeof row === "object" && row !== null
+			? {
+					...row,
+					key: resolveMember(index, "key", row),
+					value: resolveMember(index, "value", row),
+				}
+			: row
+	);
+}
+
 export default function OAuth2Form({
 	value,
 	onChange,
 	resolveString,
 	resolveKey,
 	TextInput = PlainTextInput,
+	variables,
 }: OAuth2FormProps) {
 	const [advancedOpen, setAdvancedOpen] = useState(false);
 
 	const set = <K extends keyof OAuth2Config>(key: K, v: OAuth2Config[K]) =>
 		onChange({ ...value, [key]: v });
+
+	// An emptied list is removed, not stored as `[]`: a config that sets none
+	// stays the config it was.
+	const setParams = (
+		list: "authorizationParams" | "tokenParams" | "refreshParams",
+		rows: OAuth2ParamRow[] | undefined
+	) => {
+		const { [list]: _previous, ...rest } = value;
+		onChange(rows ? { ...rest, [list]: rows } : rest);
+	};
 
 	const grant = value.grantType;
 	const isAuthCode = grant === "authorization_code";
@@ -117,6 +156,13 @@ export default function OAuth2Form({
 			resource: rz("resource", value.resource),
 			authorizationUrl: rz("authorizationUrl", value.authorizationUrl),
 			refreshTokenUrl: rz("refreshTokenUrl", value.refreshTokenUrl),
+			authorizationParams: resolveParamRows(
+				"authorizationParams",
+				value.authorizationParams,
+				r
+			),
+			tokenParams: resolveParamRows("tokenParams", value.tokenParams, r),
+			refreshParams: resolveParamRows("refreshParams", value.refreshParams, r),
 		};
 	}, [value, resolveString, resolveKey]);
 
@@ -346,6 +392,32 @@ export default function OAuth2Form({
 							placeholder="defaults to the token URL"
 						/>
 					)}
+
+					{isAuthCode && (
+						<ParamRowsEditor
+							label="Authorization request parameters"
+							hint="Added to the sign-in URL's query, such as prompt or acr_values."
+							rows={value.authorizationParams}
+							onChange={(rows) => setParams("authorizationParams", rows)}
+							variables={variables}
+						/>
+					)}
+
+					<ParamRowsEditor
+						label="Token request parameters"
+						hint="Sent in the body of each new token request, such as an Auth0 audience. Rows imported to go in the URL or a header keep that place. Different values keep separate cached tokens."
+						rows={value.tokenParams}
+						onChange={(rows) => setParams("tokenParams", rows)}
+						variables={variables}
+					/>
+
+					<ParamRowsEditor
+						label="Refresh request parameters"
+						hint="Sent when a token is refreshed."
+						rows={value.refreshParams}
+						onChange={(rows) => setParams("refreshParams", rows)}
+						variables={variables}
+					/>
 
 					<div className="flex items-center gap-6">
 						<label className="flex items-center gap-2 text-xs text-muted-foreground">

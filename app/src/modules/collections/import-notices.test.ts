@@ -11,6 +11,8 @@
  * rendered preview would need a fixture per case to show.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
 import type { CollectionDraft, ImportMeta, RequestDraft } from "@/services/importers/types";
@@ -332,6 +334,109 @@ describe("importNotices", () => {
 		expect(texts).toEqual([
 			"2 requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
 		]);
+	});
+});
+
+describe("importNotices - a Postman OAuth 2.0 block (#2536)", () => {
+	it("tells the user a saved token was not imported, naming the request, as a note", () => {
+		expect(
+			importNotices(
+				meta({
+					skipped: [{ kind: "oauth2_dropped_field", count: 1, requests: ["Sign in"] }],
+				})
+			)
+		).toEqual([
+			{
+				tier: "note",
+				text: "Sign in: saved OAuth 2.0 token not imported - Vayu fetches a new one through the grant",
+			},
+		]);
+	});
+
+	it("counts saved tokens when the engine named no request", () => {
+		expect(
+			importNotices(meta({ skipped: [{ kind: "oauth2_dropped_field", count: 3 }] }))[0].text
+		).toBe("3 saved OAuth 2.0 tokens not imported - Vayu fetches new ones through the grant");
+	});
+
+	it("says nothing about a regenerated state: nothing sent changes", () => {
+		expect(
+			importNotices(meta({ skipped: [{ kind: "oauth2_state_regenerated", count: 2 }] }))
+		).toEqual([]);
+	});
+
+	it("names the parameters not imported as something to finish, keys only", () => {
+		expect(
+			importNotices(
+				meta({
+					skipped: [
+						{
+							kind: "oauth2_unmapped_param",
+							count: 2,
+							requests: ["Sign in"],
+							names: ["acr_values", "scope"],
+						},
+					],
+				})
+			)
+		).toEqual([
+			{
+				tier: "action",
+				text: "Sign in: OAuth 2.0 request parameter not imported (acr_values, scope) - Vayu sets some itself and cannot place the rest",
+			},
+		]);
+	});
+
+	it("caps the parameter names, and names the requests beside them", () => {
+		const [notice] = importNotices(
+			meta({
+				skipped: [
+					{
+						kind: "oauth2_unmapped_param",
+						count: 5,
+						requests: ["A", "B"],
+						names: ["a", "b", "c", "d", "e"],
+					},
+				],
+			})
+		);
+		expect(notice.text).toBe(
+			"2 requests: OAuth 2.0 request parameter not imported (a, b, c, +2 more) - Vayu sets some itself and cannot place the rest - A, B"
+		);
+	});
+
+	it("counts parameters when no request or key was named, as a row with no key leaves neither", () => {
+		const text = (count: number) =>
+			importNotices(meta({ skipped: [{ kind: "oauth2_unmapped_param", count }] }))[0].text;
+		expect(text(1)).toBe(
+			"1 OAuth 2.0 request parameter not imported - Vayu sets some itself and cannot place the rest"
+		);
+		expect(text(4)).toBe(
+			"4 OAuth 2.0 request parameters not imported - Vayu sets some itself and cannot place the rest"
+		);
+	});
+});
+
+describe("the closed set of skipped kinds", () => {
+	/** The string literals of `SkippedItem["kind"]` before its open JMeter tail. */
+	function declaredKinds(): string[] {
+		const source = readFileSync(join(__dirname, "../../services/importers/types.ts"), "utf8");
+		const start = source.indexOf("export interface SkippedItem");
+		const open = source.indexOf("(string & Record<never, never>)", start);
+		return [...source.slice(start, open).matchAll(/^\s*\| "([^"]+)"/gm)].map((m) => m[1]);
+	}
+
+	it("has words, or a deliberate silence, for every kind", () => {
+		const kinds = declaredKinds();
+		// A scan over an empty read passes forever (the regexp and the path are
+		// both ways to read nothing).
+		expect(kinds.length).toBeGreaterThan(30);
+		expect(kinds).toContain("oauth2_unmapped_param");
+		const unworded = kinds.filter((kind) => {
+			const [notice] = importNotices(meta({ skipped: [{ kind, count: 1 }] }));
+			return notice !== undefined && notice.text === `1 ${kind} not imported`;
+		});
+		expect(unworded).toEqual([]);
 	});
 });
 
