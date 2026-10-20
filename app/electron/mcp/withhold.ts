@@ -159,10 +159,11 @@ const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The wire names a credential goes by in a Postman OAuth 2.0 block's extra
- * request parameters (`tokenRequestParams`, `authRequestParams`,
- * `refreshRequestParams`: `{key, value, ...}` rows), beside the members above.
- * The engine's `SECRET_PARAM_KEYS`, beside `SECRET_AUTH_KEYS`.
+ * The wire names a credential goes by in an OAuth 2.0 extra request parameter
+ * row - a Postman block's `tokenRequestParams`, `authRequestParams` and
+ * `refreshRequestParams`, or a config's `tokenParams`, `authorizationParams` and
+ * `refreshParams` - beside the members above. The engine's `SECRET_PARAM_KEYS`,
+ * beside `SECRET_AUTH_KEYS`.
  */
 const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
 	"client_secret",
@@ -214,10 +215,19 @@ function withholdRowValue(row: Record<string, unknown>): Record<string, unknown>
 	return { ...rest, ...withValue(value, true) };
 }
 
+/**
+ * Whether an OAuth 2.0 extra request parameter named @p key carries a
+ * credential: the engine's `names_param_credential`
+ * (`engine/src/core/vayu_extensions.cpp`). A row can be sent as a header as
+ * well as in a body or a query, so a credential header's or query parameter's
+ * name counts beside the auth members and {@link CREDENTIAL_PARAM_KEYS}.
+ */
 function namesCredentialParam(key: unknown): boolean {
 	return (
 		typeof key === "string" &&
-		(CREDENTIAL_AUTH_MEMBERS.has(key) || CREDENTIAL_PARAM_KEYS.has(key))
+		(CREDENTIAL_AUTH_MEMBERS.has(key) ||
+			CREDENTIAL_PARAM_KEYS.has(key) ||
+			isSecretParamName(key, undefined))
 	);
 }
 
@@ -269,6 +279,22 @@ function withholdPostmanAuth(source: unknown): unknown {
 	);
 }
 
+/** The lists of extra request parameter rows an OAuth 2.0 `config` carries (issue #2536). */
+const OAUTH2_PARAM_LISTS = ["authorizationParams", "tokenParams", "refreshParams"] as const;
+
+/**
+ * An auth `config` bag with its credential members withheld and, per row, the
+ * value of each extra request parameter whose key names a credential - the key,
+ * `enabled` and `sendAs` stay. The engine's `redact_config_bag`.
+ */
+function withholdConfig(config: Record<string, unknown>): Record<string, unknown> {
+	const out = withholdCredentialMembers(config);
+	for (const list of OAUTH2_PARAM_LISTS) {
+		if (list in out) out[list] = withholdParamRows(out[list]);
+	}
+	return out;
+}
+
 /**
  * An auth block with its credentials withheld: the flat modes keep theirs at
  * the top level (`bearer.token`, `basic.password`, `apikey.value`), the rest
@@ -280,7 +306,7 @@ function withholdAuth(auth: unknown): unknown {
 	const outer = withholdCredentialMembers(auth);
 	return {
 		...outer,
-		...(isRecord(outer.config) ? { config: withholdCredentialMembers(outer.config) } : {}),
+		...(isRecord(outer.config) ? { config: withholdConfig(outer.config) } : {}),
 		...("postman" in outer ? { postman: withholdPostmanAuth(outer.postman) } : {}),
 	};
 }
@@ -331,6 +357,11 @@ function rowMarkers(rows: unknown, path: string): string[] {
 	});
 }
 
+/** `valueWithheld` rows of an auth `config`'s extra parameter lists (issue #2536). */
+function configParamMarkers(config: Record<string, unknown>): string[] {
+	return OAUTH2_PARAM_LISTS.flatMap((list) => rowMarkers(config[list], `config.${list}`));
+}
+
 function postmanMarkers(source: unknown): string[] {
 	if (!isRecord(source)) return [];
 	return Object.entries(source).flatMap(([type, detail]) => {
@@ -348,14 +379,17 @@ function postmanMarkers(source: unknown): string[] {
 
 /**
  * The withheld markers in an auth block an agent passed back: top level,
- * `config`, and a Postman import's `postman` source. A block read with its
+ * `config` (its extra parameter rows included), and a Postman import's
+ * `postman` source. A block read with its
  * credentials withheld and written back would store, or send, no credential
  * in their place.
  */
 export function withheldAuthMembers(auth: Record<string, unknown>): string[] {
 	return [
 		...memberMarkers(auth),
-		...(isRecord(auth.config) ? memberMarkers(auth.config) : []),
+		...(isRecord(auth.config)
+			? [...memberMarkers(auth.config), ...configParamMarkers(auth.config)]
+			: []),
 		...postmanMarkers(auth.postman),
 	];
 }

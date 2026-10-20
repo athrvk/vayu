@@ -1196,6 +1196,17 @@ describe("runOutputShape", () => {
 					},
 				},
 			},
+			{
+				auth: {
+					mode: "oauth2",
+					config: {
+						tokenParams: [
+							{ key: "client_secret", value: "config-row-secret" },
+							{ key: "audience", value: "config-row-visible" },
+						],
+					},
+				},
+			},
 			// Neither is a credential: a reference names one, an empty value holds none.
 			{ auth: { mode: "bearer", token: "{{bearerToken}}" } },
 			{ auth: { mode: "basic", username: "visible-user", password: "" } },
@@ -1204,11 +1215,11 @@ describe("runOutputShape", () => {
 		expect(
 			withhold({
 				url: "https://x.test/v1?api_key=req-query-key&user=visible-user",
-				body: "col-bearer-literal col-client-secret postman-row-secret {{bearerToken}}",
+				body: "col-bearer-literal col-client-secret postman-row-secret config-row-secret config-row-visible {{bearerToken}}",
 			})
 		).toEqual({
 			url: "https://x.test/v1?api_key=<redacted>&user=visible-user",
-			body: "<redacted> <redacted> <redacted> {{bearerToken}}",
+			body: "<redacted> <redacted> <redacted> <redacted> config-row-visible {{bearerToken}}",
 		});
 	});
 
