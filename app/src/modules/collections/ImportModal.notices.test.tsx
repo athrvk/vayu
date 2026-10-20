@@ -166,6 +166,43 @@ describe("the import preview's notices", () => {
 		expect(screen.queryByText(/·.*·.*not imported/)).not.toBeInTheDocument();
 	});
 
+	it("names a Postman OAuth 2.0 block's losses by request and key, never by value (#2536)", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Sign in" })] }),
+				],
+				meta: {
+					format: "Postman Collection v2.1",
+					skipped: [
+						{ kind: "oauth2_dropped_field", count: 1, requests: ["Sign in"] },
+						{ kind: "oauth2_state_regenerated", count: 1, requests: ["Sign in"] },
+						{
+							kind: "oauth2_unmapped_param",
+							count: 1,
+							requests: ["Sign in"],
+							names: ["acr_values"],
+						},
+					],
+				},
+			})
+		);
+		preview();
+
+		const lost = await screen.findByText(/Sign in: OAuth 2.0 request parameter not imported/);
+		expect(lost.textContent).toContain("(acr_values)");
+		// A request that sends nothing the provider needs is something to finish.
+		expect(severityOf(/OAuth 2.0 request parameter not imported/)).toContain(
+			"text-warning-text"
+		);
+		// A saved token is a choice the import made; the grant fetches a new one.
+		expect(severityOf(/Sign in: saved OAuth 2.0 token not imported/)).toContain(
+			"text-muted-foreground"
+		);
+		// Vayu generates its own state; nothing the user sends changed.
+		expect(screen.queryByText(/state/i)).not.toBeInTheDocument();
+	});
+
 	it("announces the preview through one status region and no alert (#2291)", async () => {
 		stubParse(() =>
 			result({

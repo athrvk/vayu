@@ -56,6 +56,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "wide_json.hpp"
 
@@ -2331,8 +2332,12 @@ TEST (PostmanImport, CountsAPreFetchedOAuth2TokenDroppedAlongsideAGrantConfig) {
     // the general shape always fetches through `accessTokenUrl` instead.
     EXPECT_FALSE (auth.at ("config").contains ("accessToken"));
     EXPECT_FALSE (auth.at ("config").contains ("token"));
+    // The visible kind means the saved token alone, named per request.
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+    EXPECT_EQ (skipped_named (parsed, "oauth2_dropped_field"), Names{ "R" });
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_state_regenerated"));
 }
 
 TEST (PostmanImport, CountsAnOAuth2StateThatVayuNeverStores) {
@@ -2354,8 +2359,11 @@ TEST (PostmanImport, CountsAnOAuth2StateThatVayuNeverStores) {
     // Vayu generates and validates its own CSRF state per authorization
     // attempt; a fixed imported value has no field to sit in.
     EXPECT_FALSE (config.contains ("state"));
-    EXPECT_EQ (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+    // Counted apart from the saved-token kind (issue #2536): a regenerated
+    // state changes nothing sent, so the preview can leave it out.
+    const json counts = skip_counts (parsed.result.at ("meta").at ("skipped"));
+    EXPECT_EQ (counts.at ("oauth2_state_regenerated"), 1);
+    EXPECT_FALSE (counts.contains ("oauth2_dropped_field"));
 }
 
 TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
@@ -2379,6 +2387,154 @@ TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
     // Stored, not dropped: `tokenName` alone must not tally as a loss.
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_dropped_field"));
+}
+
+/// The `names` a count carries (issue #2536), `[]` when it has none.
+Names skipped_dropped_names (const ImportParse& parsed, const std::string& kind) {
+    for (const auto& item : parsed.result.at ("meta").at ("skipped")) {
+        if (item.at ("kind") == kind) {
+            return item.contains ("names") ? item.at ("names").get<Names> () : Names{};
+        }
+    }
+    ADD_FAILURE () << "no " << kind << " counted";
+    return {};
+}
+
+/**
+ * Postman's extra token, authorization and refresh request parameters
+ * (issue #2536). An `audience` or `resource` sent in a token or authorization
+ * request's body is the config field the engine already sends; every other
+ * enabled row is carried in its list; a row with no key, a `send_as` with no
+ * Vayu target, or a name the engine writes itself is counted by key alone.
+ * Mutation checks: stop reading `tokenRequestParams` and the config
+ * assertions fail; drop the `credentialsId` assignment and its assertion
+ * fails.
+ */
+TEST (PostmanImport, ReadsOAuth2ExtraRequestParameters) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Auth0","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"authorization_code"},
+                {"key":"authUrl","value":"https://auth.example.com/authorize"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"tokenRequestParams","value":[
+                    {"key":"audience","value":"https://off.example","enabled":false,"send_as":"request_body"},
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"resource","value":"{{ resource }}","enabled":true},
+                    {"key":"tenant","value":"t1","enabled":true,"send_as":"request_url"},
+                    {"key":"acr_values","value":"mfa","enabled":true,"send_as":"request_body"},
+                    {"key":"x-trace","value":"1","enabled":true,"send_as":"request_header"},
+                    {"key":"client_secret","value":"s3cr3t-param","enabled":true,"send_as":"request_body"},
+                    {"key":"","value":"orphan","enabled":true},
+                    {"key":"nonce","value":"n","enabled":true,"send_as":"request_cookie"}
+                ],"type":"any"},
+                {"key":"authRequestParams","value":[
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"prompt","value":"consent","enabled":true,"send_as":"request_url"},
+                    {"key":"audience","value":"https://other.example","enabled":true,"send_as":"request_body"}
+                ],"type":"any"},
+                {"key":"refreshRequestParams","value":[
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"refresh_token","value":"rt-1","enabled":true}
+                ],"type":"any"}
+            ]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // The disabled row ahead of it is not read, so the enabled one is promoted.
+    EXPECT_EQ (config.at ("audience"), "https://api.example");
+    EXPECT_EQ (config.at ("resource"), "{{resource}}");
+    // No `tokenName`: the audience separates this config's cached token.
+    EXPECT_EQ (config.at ("credentialsId"), "https://api.example");
+    EXPECT_EQ (config.at ("tokenParams"), json::parse (R"([
+        {"key":"tenant","value":"t1","enabled":true,"sendAs":"url"},
+        {"key":"acr_values","value":"mfa","enabled":true,"sendAs":"body"},
+        {"key":"x-trace","value":"1","enabled":true,"sendAs":"header"}])"));
+    // The repeated audience is already sent; a different one is carried
+    // rather than contradicting it. No target: it rides in the authorize URL.
+    EXPECT_EQ (config.at ("authorizationParams"), json::parse (R"([
+        {"key":"prompt","value":"consent","enabled":true},
+        {"key":"audience","value":"https://other.example","enabled":true}])"));
+    // A refresh does not send the config's audience, so it stays a row.
+    EXPECT_EQ (config.at ("refreshParams"), json::parse (R"([
+        {"key":"audience","value":"https://api.example","enabled":true,"sendAs":"body"}])"));
+
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_unmapped_param"), 4);
+    EXPECT_EQ (skipped_named (parsed, "oauth2_unmapped_param"), Names{ "Auth0" });
+    EXPECT_EQ (skipped_dropped_names (parsed, "oauth2_unmapped_param"),
+    (Names{ "client_secret", "nonce", "refresh_token" }));
+    // A key is named, a value never: either can be a credential.
+    const std::string skipped = parsed.result.at ("meta").at ("skipped").dump ();
+    for (const char* value : { "s3cr3t-param", "rt-1", "orphan" }) {
+        EXPECT_EQ (skipped.find (value), std::string::npos) << value;
+    }
+}
+
+TEST (PostmanImport, ReadsOAuth2ExtraRequestParametersFromAV20DetailObject) {
+    const ImportParse parsed = parse_import (R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},"item":[
+        {"name":"V2","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":{
+                "grant_type":"client_credentials",
+                "accessTokenUrl":"https://auth.example.com/token",
+                "tokenRequestParams":[
+                    {"key":"resource","value":"https://graph.example"},
+                    {"key":"scope","value":"read"},
+                    {"key":"acr_values","value":"mfa","enabled":false}],
+                "authRequestParams":[{"key":"prompt","value":"login","send_as":"request_url"}],
+                "refreshRequestParams":[{"key":"tenant","value":"t1","send_as":"request_url"}]
+            }}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // A row with no `enabled` is on, and with no `send_as` is sent in the body.
+    EXPECT_EQ (config.at ("resource"), "https://graph.example");
+    EXPECT_FALSE (config.contains ("audience"));
+    EXPECT_EQ (config.at ("credentialsId"), "https://graph.example");
+    EXPECT_FALSE (config.contains ("tokenParams"));
+    EXPECT_EQ (config.at ("authorizationParams"),
+    json::parse (R"([{"key":"prompt","value":"login","enabled":true}])"));
+    EXPECT_EQ (config.at ("refreshParams"), json::parse (R"([
+        {"key":"tenant","value":"t1","enabled":true,"sendAs":"url"}])"));
+    EXPECT_EQ (skipped_dropped_names (parsed, "oauth2_unmapped_param"), Names{ "scope" });
+}
+
+/// Two imports differing only in their audience must not share one cached
+/// token: the cache key reads `credentialsId` and not `audience`, so the
+/// audience fills it when Postman named no token. A `tokenName` still wins.
+TEST (PostmanImport, SeparatesTheCachedTokensOfTwoImportedAudiences) {
+    const auto request = [] (const std::string& name, const std::string& extra) {
+        return R"({"name":")" + name + R"(","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"client_credentials"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"clientId","value":"abc"})" +
+        extra + R"(]}}})";
+    };
+    const auto audience = [] (const std::string& value) {
+        return R"(,{"key":"tokenRequestParams","value":[{"key":"audience","value":")" +
+        value + R"(","enabled":true,"send_as":"request_body"}]})";
+    };
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[)" + request ("A", audience ("https://a.example")) + "," +
+    request ("B", audience ("https://b.example")) + "," +
+    request ("Named", audience ("https://a.example") + R"(,{"key":"tokenName","value":"Prod"})") + "]}",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    const auto key_of    = [&requests] (size_t at) {
+        return vayu::http::oauth::cache_key (requests.at (at).at ("auth").at ("config"));
+    };
+    EXPECT_NE (key_of (0), key_of (1));
+    EXPECT_EQ (requests.at (2).at ("auth").at ("config").at ("credentialsId"), "Prod");
 }
 
 // Issue #1771: a query row holds raw query text, as Postman's

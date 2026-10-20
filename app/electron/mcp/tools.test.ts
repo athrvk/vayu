@@ -12498,6 +12498,164 @@ describe("secret withholding", () => {
 		expect(client.createCollection).not.toHaveBeenCalled();
 	});
 
+	// An OAuth 2.0 config's extra request parameter lists (#2536): redacted per
+	// row, so the key, `enabled` and `sendAs` stay and only a credential's value
+	// goes. A row can be sent as a header, so the header names count too.
+	const CONFIG_PARAM_REQUEST = {
+		id: "req_cfg",
+		name: "OAuth 2.0 with extra parameters",
+		auth: {
+			mode: "oauth2",
+			config: {
+				grantType: "authorization_code",
+				clientId: "app",
+				authorizationParams: [
+					{ key: "api_key", value: "cfg-q-raw", enabled: true },
+					{ key: "prompt", value: "login", enabled: true },
+				],
+				tokenParams: [
+					{ key: "client_secret", value: "cfg-body-raw", enabled: true, sendAs: "body" },
+					{
+						key: "Authorization",
+						value: "cfg-hdr-raw",
+						enabled: false,
+						sendAs: "header",
+					},
+					{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+				],
+				refreshParams: [
+					{ key: "refresh_token", value: "{{rt}}", enabled: true },
+					{ key: "assertion", value: "cfg-assert-raw", enabled: true },
+				],
+			},
+		},
+	};
+
+	test("list_requests withholds a credential-named extra parameter's value, row by row", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+		});
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of ["cfg-q-raw", "cfg-body-raw", "cfg-hdr-raw", "cfg-assert-raw"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.config).toEqual({
+			grantType: "authorization_code",
+			clientId: "app",
+			authorizationParams: [
+				{ key: "api_key", enabled: true, valueWithheld: true },
+				{ key: "prompt", value: "login", enabled: true },
+			],
+			tokenParams: [
+				{ key: "client_secret", enabled: true, sendAs: "body", valueWithheld: true },
+				{ key: "Authorization", enabled: false, sendAs: "header", valueWithheld: true },
+				{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+			],
+			refreshParams: [
+				{ key: "refresh_token", value: "{{rt}}", enabled: true },
+				{ key: "assertion", enabled: true, valueWithheld: true },
+			],
+		});
+	});
+
+	test("list_requests returns the extra parameter rows whole with reveal on", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+		});
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual([CONFIG_PARAM_REQUEST]);
+	});
+
+	test("an auth argument whose extra parameter row was read withheld is refused", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{
+				requestId: "req_cfg",
+				auth: {
+					mode: "oauth2",
+					config: {
+						tokenParams: [{ key: "client_secret", enabled: true, valueWithheld: true }],
+					},
+				},
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("config.tokenParams[client_secret].valueWithheld");
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	// A row the engine's export would blank whole - no key, or a member no row
+	// has - is withheld here too, not passed through because its key names no
+	// credential. Mutation check: withhold only a credential-named row's
+	// `value` and the secrets below reach the agent.
+	test("list_requests withholds an extra parameter row with no key, or a member no row has", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{
+					id: "req_odd",
+					auth: {
+						mode: "oauth2",
+						config: {
+							tokenParams: [
+								{ value: "odd-keyless-raw" },
+								{ keyy: "client_secret", value: "odd-misspelt-raw" },
+								{ key: "audience", value: "api", note: "odd-note-raw" },
+							],
+							refreshParams: "refresh_token=odd-list-raw",
+						},
+					},
+				},
+			]),
+		});
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of [
+			"odd-keyless-raw",
+			"odd-misspelt-raw",
+			"odd-note-raw",
+			"odd-list-raw",
+		]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.config).toEqual({
+			tokenParams: [
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ key: "audience", value: "api", noteWithheld: true },
+			],
+			refreshParamsWithheld: true,
+		});
+	});
+
+	test.each([
+		[
+			"a keyless row",
+			{ tokenParams: [{ valueWithheld: true }] },
+			"config.tokenParams[0].valueWithheld",
+		],
+		[
+			"a row's other member",
+			{ tokenParams: [{ key: "audience", value: "api", noteWithheld: true }] },
+			"config.tokenParams[audience].noteWithheld",
+		],
+		["a whole list", { refreshParamsWithheld: true }, "config.refreshParamsWithheld"],
+	])("an auth argument carrying %s read withheld is refused", async (_, config, marker) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_cfg", auth: { mode: "oauth2", config } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(marker);
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
 	// A header typed straight into the Headers tab is no variable: its name is
 	// the only signal, and the shared list plus the request's API-key header
 	// decide (#1809).

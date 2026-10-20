@@ -37,7 +37,16 @@ import OAuth2Form from "./OAuth2Form";
 /** Stands in for the status row, showing what the form resolved the key to. */
 vi.mock("./TokenStatusRow", () => ({
 	default: ({ resolvedConfig }: { resolvedConfig: OAuth2Config }) => (
-		<div data-testid="resolved-client-id">{resolvedConfig.clientId}</div>
+		<>
+			<div data-testid="resolved-client-id">{resolvedConfig.clientId}</div>
+			<div data-testid="resolved-params">
+				{JSON.stringify({
+					authorizationParams: resolvedConfig.authorizationParams,
+					tokenParams: resolvedConfig.tokenParams,
+					refreshParams: resolvedConfig.refreshParams,
+				})}
+			</div>
+		</>
 	),
 }));
 
@@ -134,5 +143,72 @@ describe("the resolved OAuth config", () => {
 		const second = render(form(resolveString, undefined));
 		expect(clientId()).not.toBe(before);
 		second.unmount();
+	});
+
+	describe("the extra parameter rows (#2536)", () => {
+		const WITH_ROWS: OAuth2Config = {
+			...CONFIG,
+			clientId: "cid",
+			authorizationParams: [{ key: "prompt", value: "{{$randomInt}}", enabled: true }],
+			tokenParams: [
+				{
+					key: "k-{{$randomInt}}",
+					value: "v-{{$randomInt}}",
+					enabled: true,
+					sendAs: "url",
+				},
+				{ key: "off", value: "x", enabled: false },
+			],
+			refreshParams: [{ key: "audience", value: "api-{{$randomInt}}" }],
+		};
+		const params = () =>
+			JSON.parse(screen.getByTestId("resolved-params").textContent ?? "{}") as Pick<
+				OAuth2Config,
+				"authorizationParams" | "tokenParams" | "refreshParams"
+			>;
+
+		it("resolves every row's key and value, in every list, keeping the rest of the row", () => {
+			const view = render(form(makeRerollingResolver(), "req_rows", WITH_ROWS));
+			const { authorizationParams, tokenParams, refreshParams } = params();
+			expect(authorizationParams?.[0]).toEqual({
+				key: "prompt",
+				value: expect.stringMatching(/^\d+$/),
+				enabled: true,
+			});
+			expect(tokenParams?.[0]).toEqual({
+				key: expect.stringMatching(/^k-\d+$/),
+				value: expect.stringMatching(/^v-\d+$/),
+				enabled: true,
+				sendAs: "url",
+			});
+			expect(tokenParams?.[1]).toEqual({ key: "off", value: "x", enabled: false });
+			expect(refreshParams?.[0].value).toMatch(/^api-\d+$/);
+			view.unmount();
+		});
+
+		it("holds a row's resolved text still across the unmount a tab switch causes", () => {
+			const resolveString = makeRerollingResolver();
+			const first = render(form(resolveString, "req_rows_remount", WITH_ROWS));
+			const before = screen.getByTestId("resolved-params").textContent;
+			first.unmount();
+
+			const second = render(form(resolveString, "req_rows_remount", WITH_ROWS));
+			expect(screen.getByTestId("resolved-params").textContent).toBe(before);
+			second.unmount();
+		});
+
+		it("leaves a list that is absent absent, and a malformed one as it is", () => {
+			const malformed = {
+				...CONFIG,
+				tokenParams: "audience=api",
+				refreshParams: [3, { key: 7, value: null }],
+			} as unknown as OAuth2Config;
+			const view = render(form(makeRerollingResolver(), "req_malformed", malformed));
+			expect(JSON.parse(screen.getByTestId("resolved-params").textContent ?? "{}")).toEqual({
+				tokenParams: "audience=api",
+				refreshParams: [3, { key: 7, value: null }],
+			});
+			view.unmount();
+		});
 	});
 });

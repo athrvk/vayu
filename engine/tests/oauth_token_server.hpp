@@ -48,6 +48,8 @@ class MockTokenServer {
         svr_.Post (".*", [this] (const httplib::Request& req, httplib::Response& res) {
             ++hits_;
             last_path_         = req.path;
+            last_target_       = req.target;
+            last_headers_      = req.headers;
             last_body_         = req.body;
             last_auth_         = req.get_header_value ("Authorization");
             last_content_type_ = req.get_header_value ("Content-Type");
@@ -119,12 +121,25 @@ class MockTokenServer {
     const std::string& last_content_type () const {
         return last_content_type_;
     }
+    /// The request target as sent: the path and any query, still encoded.
+    const std::string& last_target () const {
+        return last_target_;
+    }
+    /// How many lines of header @p name the last request carried.
+    size_t header_count (const std::string& name) const {
+        return last_headers_.count (name);
+    }
+    std::string last_header (const std::string& name) const {
+        const auto found = last_headers_.find (name);
+        return found == last_headers_.end () ? "" : found->second;
+    }
 
     private:
     httplib::Server svr_;
     int port_ = 0;
     int hits_ = 0;
-    std::string last_path_, last_body_, last_auth_, last_content_type_;
+    std::string last_path_, last_target_, last_body_, last_auth_, last_content_type_;
+    httplib::Headers last_headers_;
     std::thread thread_;
 };
 

@@ -14,21 +14,29 @@
  * same file's `sensitiveParamNames` (#1837). The run-output
  * mask's query form against the engine's `encode_query_component`, over
  * `engine/tests/fixtures/query-encoding-conformance.json`, for the same
- * reason (#1809).
+ * reason (#1809). The renderer's credential parameter predicate, which the
+ * token cache key reads (`src/services/oauth/credential-params.ts`, #2536),
+ * against this module's, list for list and name for name.
  *
  * Mutation check: drop `x-csrf-token` from `SENSITIVE_HEADER_NAMES` in
  * `withhold.ts` and the list-equality case reds; add a name to
  * `SENSITIVE_PARAM_NAMES` and its list-equality case reds; drop `&` from the
- * query value set and the cases holding one red.
+ * query value set and the cases holding one red; drop `assertion` from the
+ * renderer's `CREDENTIAL_PARAM_KEYS` and its list case reds, and stop its
+ * `namesCredentialParam` folding case and the upper-cased predicate cases red.
  */
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { SENSITIVE_HEADER_NAMES } from "@/lib/sensitive-headers";
+import * as rendererCredentialParams from "@/services/oauth/credential-params";
 import {
+	CREDENTIAL_AUTH_MEMBERS,
+	CREDENTIAL_PARAM_KEYS,
 	encodeQueryKey,
 	encodeQueryValue,
+	namesCredentialParam,
 	SENSITIVE_HEADER_NAMES as MCP_SENSITIVE_HEADER_NAMES,
 	SENSITIVE_PARAM_NAMES,
 	withholdRowSecrets,
@@ -175,6 +183,46 @@ describe("MCP sensitive parameter name conformance", () => {
 	it.each(fixture.sensitiveParamNames)("matches %s as a whole name only", (name) => {
 		const row = { url: `/p?${name}x=v`, params: [{ key: `${name}x`, value: "v" }] };
 		expect(withholdRowSecrets(row)).toEqual(row);
+	});
+});
+
+describe("Credential parameter predicate: the renderer's copy against this one (#2536)", () => {
+	const lists: [string, readonly string[], readonly string[]][] = [
+		[
+			"auth members",
+			[...rendererCredentialParams.CREDENTIAL_AUTH_MEMBERS],
+			[...CREDENTIAL_AUTH_MEMBERS],
+		],
+		[
+			"parameter keys",
+			[...rendererCredentialParams.CREDENTIAL_PARAM_KEYS],
+			[...CREDENTIAL_PARAM_KEYS],
+		],
+		[
+			"sensitive parameter names",
+			[...rendererCredentialParams.SENSITIVE_PARAM_NAMES],
+			[...SENSITIVE_PARAM_NAMES],
+		],
+	];
+
+	it.each(lists)("holds the same %s", (_, renderer, mcp) => {
+		expect(renderer.length).toBeGreaterThan(0);
+		expect([...renderer].sort()).toEqual([...mcp].sort());
+	});
+
+	it("holds exactly the engine's sensitive parameter names", () => {
+		expect([...rendererCredentialParams.SENSITIVE_PARAM_NAMES].sort()).toEqual(
+			[...fixture.sensitiveParamNames].sort()
+		);
+	});
+
+	const names = [...new Set(lists.flatMap(([, renderer, mcp]) => [...renderer, ...mcp]))];
+	const spellings = names.flatMap((name) => [name, name.toUpperCase(), `${name}x`]);
+
+	it.each(spellings)("judges %s as this module does", (name) => {
+		expect(rendererCredentialParams.namesCredentialParam(name)).toBe(
+			namesCredentialParam(name)
+		);
 	});
 });
 

@@ -675,7 +675,18 @@ the auth being written (`without_stale_postman_source`), so an edited
 credential does not stay behind in it.
 
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
-placement options, etc. Secret fields (`clientSecret`, `password`) are stored
+placement options, etc. Three optional lists hold extra request parameters
+(issue #2536): `tokenParams`, `authorizationParams` and `refreshParams`, each
+an array of `{key, value, enabled, sendAs?}` rows. `sendAs` is `body`, `url` or
+`header` and, when absent, `body`; an `authorizationParams` row stores none,
+because the authorization request carries its parameters in the authorize
+URL's query. A config with no extra parameters omits the lists. What the
+engine sends from them, and how they enter the token cache key, is in
+[api-reference.md](api-reference.md#post-oauth2token). A Postman
+import fills them from the block's `tokenRequestParams`, `authRequestParams`
+and `refreshRequestParams`
+([postman.md](../app/import-collections/postman.md#oauth-20-extra-request-parameters)).
+Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
@@ -1412,6 +1423,10 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
 ```json
 {
   "total_requests": 6, "test_duration": 1.8, "rps": 3.3,
+  "latency": {
+    "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
+    "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
+  },
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
     "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
@@ -1434,6 +1449,14 @@ written before the issue, and a scenario load run's, carries neither. The step
 row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
 row.
+
+`latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
+plan skipped or one refused before the wire has no duration), exact nearest-rank over the full
+sample rather than a histogram. It is computed once and is the same sample the run's `thresholds`
+judge, so `latency.p99` equals a `latencyP99Ms` check's `actual`. A run in which no step sent
+stores `{"count": 0}` alone, and the report omits its `latency` block on that marker; a summary
+with no `latency` key (a run stored before the issue) reports from the stored rows. A load run's
+`latency` carries no `count`.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
@@ -1557,7 +1580,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?` - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row, a credential-named row's value left out ([recipe](api-reference.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |
