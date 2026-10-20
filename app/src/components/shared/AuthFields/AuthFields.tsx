@@ -101,6 +101,7 @@ export default function AuthFields({
 	TextInput = PlainTextInput,
 	resolveString,
 	resolveKey,
+	variables,
 }: AuthFieldsProps) {
 	// `noauth` is the collection-only terminal form of "none" (it stops the
 	// inheritance walk instead of being stepped over). Neither has fields; the
@@ -225,6 +226,7 @@ export default function AuthFields({
 				onChange={(config) => onChange(edited(value, { config }))}
 				resolveString={resolveString}
 				resolveKey={resolveKey}
+				variables={variables}
 				TextInput={TextInput}
 			/>
 		);

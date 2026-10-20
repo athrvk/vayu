@@ -1104,7 +1104,11 @@ These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
 ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `useFetchOAuth2TokenMutation`, `useClearOAuth2TokenMutation`). The token
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
-to the engine so the app and engine agree on cache slots without a round-trip.
+to the engine so the app and engine agree on cache slots without a round-trip. The key
+reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
+#2536) beside the token URL, client id, credentials id and password-grant username, so
+two audiences sent as rows are two cached tokens; `scope`, `audience` and `resource`
+themselves are still not in it.
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine).
 
