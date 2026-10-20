@@ -101,6 +101,15 @@ constexpr double TOKEN_COST = 1.0;
 /// daemon's: the whole body crosses to the app and is held there as a string.
 /// 0 = unbounded, which is what every caller that sets nothing still gets.
 constexpr size_t MAX_DESIGN_RESPONSE_BODY_BYTES = size_t{ 32 } * 1024 * 1024;
+/// Largest UTF-8 response body `POST /execute` also answers parsed, as `body`
+/// beside `bodyRaw` (issue #2544). A JSON DOM costs several times its text in
+/// nodes and strings, and the answer is dumped from it once more, so a 20 MB
+/// body made the daemon's peak around ten times that for a copy no reader in
+/// the engine uses and the app's pane does not show (it reads `bodyRaw`). Past
+/// this the parse is skipped and `body` is `null`, whatever the caller asked
+/// for. Not a setting: it bounds the engine's own convenience copy, never what
+/// is read, shown or stored.
+constexpr size_t MAX_PARSED_RESPONSE_BODY_BYTES = size_t{ 4 } * 1024 * 1024;
 } // namespace http
 
 /**
@@ -410,6 +419,19 @@ constexpr int64_t spin_tail_us (int64_t remaining_us) {
 namespace server {
 /// Default request timeout in milliseconds
 constexpr int DEFAULT_TIMEOUT_MS = 30000;
+/// Smallest heap block the daemon gives a mapping of its own, returned to the
+/// OS when freed (`platform::return_large_frees_to_os`, issue #2544). Large
+/// enough that a load run's ordinary bodies and buffers stay in the arenas,
+/// where reuse is cheapest; a block this size is a large design-send body or a
+/// copy of one, rare and exactly what held the daemon's RSS at its peak.
+constexpr size_t OWN_MAPPING_MIN_BYTES = size_t{ 4 } * 1024 * 1024;
+/// A buffered design send whose response body is larger than this calls
+/// `platform::release_free_heap` once it has answered (issue #2544). Parsing a
+/// body leaves around ten times its size in freed small blocks in the worker
+/// thread's arena, so this bounds what one send can leave resident per worker
+/// to around ten MB, while the many small sends an agent or a script makes
+/// never pay for a walk of every arena.
+constexpr size_t RELEASE_HEAP_AFTER_BODY_BYTES = size_t{ 1 } * 1024 * 1024;
 /// Interval for collecting statistics in milliseconds
 constexpr int STATS_INTERVAL_MS = 100;
 /// Default span of live SSE history retained in memory per run, in

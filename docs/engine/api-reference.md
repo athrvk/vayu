@@ -6087,6 +6087,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
   "persistVariables": true,            // Optional, default true - see below
+  "includeParsedBody": true,           // Optional, default true - see below
   "origin": { "kind": "app" },         // Optional, who started the run - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
@@ -6550,6 +6551,16 @@ parsed convenience copy, whose member order is unspecified and in which a
 duplicate key collapses to the last value. A client that shows or re-saves the
 body should use `bodyRaw`, as the app does (issue #2459).
 
+`body` is also `null` on a `"utf8"` answer that is valid JSON in two cases
+(issue #2544): the request sent `includeParsedBody: false` (below), or the text
+is longer than 4 MiB (`MAX_PARSED_RESPONSE_BODY_BYTES`), whatever the request
+sent. Past that size the engine does not build the parsed copy at all, because
+a JSON tree costs several times its text and the answer is serialised from it
+once more; `bodyRaw` still carries the whole body, up to
+`maxDesignResponseBodyBytes` below. The key is always present. Scripts, the
+schema check and the stored trace read the body itself, so none of them is
+affected.
+
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.
 
@@ -6907,6 +6918,17 @@ row exists, for the reason `transient`'s is. It is independent of `transient`:
 that flag decides whether the *run* is recorded, this one whether the
 *variables* are. MCP's `run_request` sends `false` whenever write access is off
 ([MCP](mcp.md#safety-model)).
+
+**`includeParsedBody: false` leaves the parsed copy out** (#2544). The answer's
+`body` is `null` and the engine skips the parse that would build it; `bodyRaw`,
+`bodyEncoding`, `bodySize`, the scripts' `pm.response`, the `validation` node
+and the stored trace are what they would have been. It is for a client that
+reads `bodyRaw` only and should not pay for a second copy of every body. Absent
+and `null` mean `true`; a present non-boolean is a **400**
+(`'includeParsedBody' must be a boolean`) before any run row exists, by the
+rule `transient`'s follows. A body past 4 MiB is never parsed whatever this
+says (see the response section above). A streaming send has no `body` in its
+`202` and ignores the flag.
 
 **A run row the database cannot write is a `500`.** A recorded send whose run row
 cannot be stored (a busy or locked database, a full disk, an I/O error) answers

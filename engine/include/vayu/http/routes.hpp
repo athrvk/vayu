@@ -1141,7 +1141,8 @@ const std::optional<std::string>& request_id);
 
 /**
  * The outcome of reading one of `POST /execute`'s boolean opt-outs:
- * `transient` (issue #382) or `persistVariables` (#1904).
+ * `transient` (issue #382), `persistVariables` (#1904) or `includeParsedBody`
+ * (#2544).
  *
  * `value` is what the payload asked for, or the flag's default when it is
  * absent or `null`; `ok == false` means the field was present with a
@@ -1168,6 +1169,13 @@ ExecuteFlag read_transient_flag (const nlohmann::json& json);
  * globals (#1904); the MCP server sends it while write access is off.
  */
 ExecuteFlag read_persist_variables_flag (const nlohmann::json& json);
+
+/**
+ * Read the `includeParsedBody` flag off a `POST /execute` payload (default
+ * `true`). `false` answers `body: null` and skips the parse that builds it
+ * (issue #2544); `bodyRaw`, the stored trace and the scripts are unchanged.
+ */
+ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json);
 
 /**
  * The outcome of reading a payload's `stream` flag and its caps (issue #573;

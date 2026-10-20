@@ -19,6 +19,7 @@
  */
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -435,5 +436,40 @@ class HighResolutionTimerScope {
  * existing Windows leg already does.
  */
 void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
+
+// ============================================================================
+// Memory
+// ============================================================================
+
+/**
+ * @brief Give every heap block of at least @p min_bytes a mapping of its own,
+ *        returned to the OS when it is freed.
+ * @return false when the C library refused the setting (the default stays).
+ *
+ * glibc's malloc raises its mmap threshold to the largest block freed so far,
+ * after which a block that size comes from the allocating thread's arena and
+ * stays resident there once freed. Each HTTP worker thread has an arena of its
+ * own, and `malloc_trim` cannot shrink the end of one that is not the main
+ * thread's, where such a block lands, so one large design send per worker left
+ * the daemon hundreds of MB larger for the session (issue #2544). A fixed threshold (`mallopt (M_MMAP_THRESHOLD)`) ends the
+ * raising. macOS, the Windows CRT and musl already map a large block
+ * separately, so there this does nothing and answers true. Call it once, at
+ * daemon start, before any thread exists.
+ */
+[[nodiscard]] bool return_large_frees_to_os (std::size_t min_bytes);
+
+/**
+ * @brief Hand the freed small blocks every heap arena holds back to the OS,
+ *        best-effort.
+ *
+ * glibc keeps a freed small block in its arena's free lists for reuse, so the
+ * tens of thousands of nodes a parsed response body built stay resident in the
+ * worker thread's arena once freed (issue #2544). On glibc this is
+ * `malloc_trim (0)`, which releases the whole pages inside those free blocks
+ * in every arena; the large blocks are `return_large_frees_to_os`'s. A no-op
+ * where the C library returns memory itself (macOS, the Windows CRT, musl). It
+ * walks every arena: call it after a rare large release, never per request.
+ */
+void release_free_heap ();
 
 } // namespace vayu::platform

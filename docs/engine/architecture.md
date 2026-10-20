@@ -1301,7 +1301,17 @@ before the `Database` and `CookieJar` its workers reach through go away.
 
 - **Throughput**: 60,000+ requests per second (on capable hardware)
 - **Latency**: P99 < 50ms overhead
-- **Memory**: Pre-allocated buffers minimize allocations during tests
+- **Memory**: Pre-allocated buffers minimize allocations during tests. A
+  design send whose body is past 4 MiB (`MAX_PARSED_RESPONSE_BODY_BYTES`)
+  answers without the parsed `body` (#2544). Two glibc settings keep what a
+  large send allocated from staying resident for the session in the HTTP
+  worker thread's arena: the daemon fixes the mmap threshold at 4 MiB at start
+  (`platform::return_large_frees_to_os`, `OWN_MAPPING_MIN_BYTES`), so a block
+  that large is unmapped when freed, and a buffered design send whose body was
+  past 1 MiB calls `malloc_trim` once it has answered
+  (`platform::release_free_heap`, `RELEASE_HEAP_AFTER_BODY_BYTES`), which
+  returns the pages a parsed body's freed nodes hold. The load path does
+  neither per request.
 - **Database**: Batch writes avoid contention during high-RPS tests
 
 ## Configuration
