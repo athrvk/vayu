@@ -97,7 +97,7 @@ item in a loop, the request that came from the MCP path rather than the app.
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// fails with: user 42: Expected value to be truthy
+// fails with: user 42: Expected false to be true
 ```
 
 The message is coerced like chai's, and `undefined` / `null` mean "no message",
@@ -181,12 +181,12 @@ pm.expect(value).to.deep.equal(expected);    // same as .eql
 pm.expect(value).to.be.oneOf([a, b]);
 pm.expect(value).to.be.closeTo(expected, delta);
 
-// Truthiness and existence (paren-less: accessing them asserts)
-pm.expect(value).to.be.true;
-pm.expect(value).to.be.false;
+// Booleans and existence (paren-less: accessing them asserts)
+pm.expect(value).to.be.true;                 // strict: the boolean true, not 1 or 'true'
+pm.expect(value).to.be.false;                // strict: the boolean false, not 0, '' or null
 pm.expect(value).to.be.null;
 pm.expect(value).to.be.undefined;
-pm.expect(value).to.be.ok;
+pm.expect(value).to.be.ok;                   // truthy (any value JavaScript reads as true)
 pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
 pm.expect(value).to.be.NaN;
@@ -211,6 +211,7 @@ pm.expect(value).to.have.length(n);          // alias .lengthOf
 pm.expect(value).to.have.property('key');
 pm.expect(value).to.have.property('key', expectedValue);
 pm.expect(value).to.have.nested.property('a.b[0].c');
+pm.expect(value).to.have.property('id').that.is.a('number'); // name alone: the subject is now the value
 pm.expect(value).to.have.keys('a', 'b');     // exactly these keys; alias .key
 pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
 
@@ -264,6 +265,14 @@ Notes on the edges:
   while the declarations nest them under `be` and `have` as the completion
   labels spell them, so `.that.be.a('string')` type-checks where chai's
   `.that.is.a('string')` does not - both run.
+- **`property(name)` moves the subject to the property's value** (#2524), as in
+  chai: `expect({id: 1}).to.have.property('id').that.is.a('number')` types the
+  value `1`, not the object, and `.and.equal(v)` compares the value. With
+  `nested` the value is the one at the last path segment, and `deep`, `nested`
+  and the failure message carry over to the new subject. The value is read
+  once, so a getter runs once. Two forms keep the chain they were called on:
+  `property(name, value)` (the value was already compared) and
+  `.not.have.property(name)` (absence has no value to move to).
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
   (`include.keys`) is not implemented; `all` is accepted and changes nothing,
   `any` is not.
@@ -937,6 +946,11 @@ Rules worth knowing before you rely on them:
 - **The object is authoritative, not a diff.** The header set left in
   `pm.request.headers` is the header set that is sent, which is what makes
   `delete` work.
+- **A repeated header reads folded and survives untouched** (issue #2466).
+  `pm.request.headers` holds one value per name, so two `X-Dup` rows read as
+  `'one, two'` (a `Cookie` joined with `'; '`). A name the script leaves at the
+  value it read keeps every line it had, in place and in its own spelling; a
+  name the script writes goes out as the one line it wrote.
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it. The one
@@ -1681,11 +1695,19 @@ encode its braces in the path. A non-ASCII host is dialled by its punycode
 name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
 path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
+Send writes the same request line for a space, a control character, a
+non-ASCII byte or a value substituted into the path, query or fragment, but it
+changes only those bytes: a typed `"`, `{` or a backslash in the path goes
+out as typed from Send and as `%22`, `%7B` or `/` from a script, as Postman
+does. The difference is deliberate and listed under
+[Query encoding](api-reference.md#query-encoding).
+
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
-names that resolve to one name would send the request a header short, so the
-call throws naming both spellings and the name they produced, and nothing goes
-out. Names are compared without case, the way the header map keys them. A name
+names written differently that resolve to one name would send that header twice
+where the script wrote two different ones, so the call throws naming both
+spellings and the name they produced, and nothing goes out. Names are compared
+without case. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the
 pre-send gate reads header text for the bytes that break a line, and what is

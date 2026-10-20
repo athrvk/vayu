@@ -36,10 +36,11 @@ import { useImportModalStore, useLayoutStore, useTabsStore, useToastStore } from
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
+import { formatNumber } from "@/lib/format-number";
 import { chordKeys, isMac } from "@/lib/platform";
 import { formatInstant } from "@/lib/time-value";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import { RECENT_LIMIT } from "./ranking";
+import { PALETTE_GROUP_RENDER_LIMIT, RECENT_LIMIT } from "./ranking";
 
 /**
  * The primary modifier as this platform sends it.
@@ -900,5 +901,105 @@ describe("cost", () => {
 	it("renders no results at all while shut", () => {
 		renderPalette();
 		expect(screen.queryByText("Views")).not.toBeInTheDocument();
+	});
+});
+
+/**
+ * A workspace of thousands of requests (#2545). The ranking sees all of them
+ * and the list mounts a bounded number of rows; the group says how many it left
+ * out. The fixture is the issue's 5,001 because the property under test is that
+ * the mounted count does not follow the data - a fixture one step past the cap
+ * would pass a cap of 5,000 too. Ranking it costs milliseconds, and it is the
+ * rows that are capped, not the scoring.
+ */
+describe("a workspace with thousands of requests", () => {
+	const BULK = 5001;
+	const original = REQUESTS.get("c1")!;
+	const bulk = Array.from({ length: BULK }, (_, n) => ({
+		id: `bulk-${n}`,
+		collectionId: "c1",
+		name: `Bulk ${n}`,
+		method: "GET",
+		url: `/bulk/${n}`,
+		...stored,
+	}));
+	const requestTotal = [...REQUESTS.values()].flat().length + BULK;
+
+	beforeEach(() => REQUESTS.set("c1", [...original, ...bulk]));
+	afterEach(() => REQUESTS.set("c1", original));
+
+	/** The line a capped group closes with, or null when no group is capped. */
+	function moreRow(): HTMLElement | null {
+		return screen.queryByText(/ more - keep typing$/);
+	}
+
+	it("mounts a bounded number of rows on open, and says how many it left out", () => {
+		renderPalette();
+		open();
+
+		// The fixture really is that large, so a bound over an empty list cannot pass.
+		expect(requestTotal).toBeGreaterThan(5000);
+		expect(document.querySelectorAll("[cmdk-item]").length).toBeLessThan(150);
+		expect(rowsUnder("Requests")).toHaveLength(PALETTE_GROUP_RENDER_LIMIT);
+		expect(moreRow()?.textContent).toBe(
+			`${formatNumber(requestTotal - PALETTE_GROUP_RENDER_LIMIT)} more - keep typing`
+		);
+	});
+
+	it("stays bounded under a one-letter query, which matches nearly every row", () => {
+		renderPalette();
+		open();
+
+		typeQuery("b");
+
+		expect(document.querySelectorAll("[cmdk-item]").length).toBeLessThan(150);
+		expect(moreRow()).toBeInTheDocument();
+		// Every matched row is announced, the unrendered ones included.
+		expect(screen.getByText(/searchable results?$/).textContent).toMatch(/^[5-9]\d{3} /);
+	});
+
+	it("puts no more-row in reach of the arrow keys or Enter", () => {
+		renderPalette();
+		open();
+		typeQuery("Bulk");
+
+		const more = moreRow()!;
+		expect(more.closest("[cmdk-item]")).toBeNull();
+
+		// End goes to the last row cmdk can select; the arrow below it has
+		// nowhere further to go, because the more-row is not a row.
+		fireEvent.keyDown(input(), { key: "End" });
+		fireEvent.keyDown(input(), { key: "ArrowDown" });
+		const selected = document.querySelector("[cmdk-item][aria-selected='true']")!;
+		const rows = document.querySelectorAll("[cmdk-item]");
+		const lastRow = rows[rows.length - 1];
+		expect(selected).toBe(lastRow);
+		expect(more.contains(selected)).toBe(false);
+
+		pressEnter();
+		const { openTabs } = useTabsStore.getState();
+		expect(openTabs).toHaveLength(1);
+		expect(openTabs[0]).toMatchObject({ type: "request" });
+		expect(openTabs[0].entityId).toMatch(/^bulk-\d+$/);
+	});
+
+	it("does nothing when the more-row is clicked", () => {
+		renderPalette();
+		open();
+		typeQuery("Bulk");
+
+		fireEvent.click(moreRow()!);
+
+		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+		expect(useLayoutStore.getState().paletteOpen).toBe(true);
+	});
+
+	it("renders no more-row when nothing is left out", () => {
+		renderPalette();
+		open();
+
+		typeQuery("Refund");
+
+		expect(moreRow()).not.toBeInTheDocument();
 	});
 });

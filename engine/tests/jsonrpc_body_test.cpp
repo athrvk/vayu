@@ -22,6 +22,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <string>
 
 #include "echo_server.hpp"
@@ -30,6 +31,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/utils/json.hpp"
+#include "wide_json.hpp"
 
 namespace vayu::http {
 namespace {
@@ -315,6 +317,22 @@ TEST (JsonRpcEnvelope, OtherModesAreUntouched) {
     form.mode   = BodyMode::Form;
     form.fields = { { "a", "1", true } };
     EXPECT_EQ (wire_body_bytes (form), "a=1");
+}
+
+// A bare call is parsed to be completed, so a body of a hundred thousand
+// members has to cost what its length does (#2497). Mutation check: parse with
+// `nlohmann::ordered_json::parse` in `jsonrpc_wire_body` and this runs for tens
+// of seconds and fails the budget.
+TEST (JsonRpcBody, ACallWithAHundredThousandMembersIsCompletedInLinearTime) {
+    const std::string call = vayu::tests::wide_object_json ();
+
+    const auto started     = std::chrono::steady_clock::now ();
+    const std::string wire = jsonrpc_wire_body (call);
+    const auto elapsed     = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    // Completed, every caller member first and in its order.
+    EXPECT_EQ (wire, call.substr (0, call.size () - 1) + R"(,"jsonrpc":"2.0","id":1})");
 }
 
 } // namespace

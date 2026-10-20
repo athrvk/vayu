@@ -35,6 +35,17 @@ const FIXTURES: Array<[string, ComposedRequest]> = [
 	["an inherit auth", { ...COMPOSED_BASE, auth: { mode: "inherit" } }],
 	["no auth", { ...COMPOSED_BASE }],
 	["no headers", { method: "POST", url: "https://api.example.com/graphql" }],
+	[
+		"composed header lines, one repeated",
+		{
+			...COMPOSED_BASE,
+			headers: [
+				{ name: "X-Dup", value: "one" },
+				{ name: "content-type", value: "text/plain" },
+				{ name: "x-dup", value: "two" },
+			],
+		},
+	],
 ];
 
 describe("the introspection payload", () => {

@@ -291,8 +291,59 @@ describe("the opt-out on the wire", () => {
 			await (providerProps.onExecute as (r: RequestState) => Promise<unknown>)(seededState());
 		});
 
-		const headers = (composeRequest.mock.calls[0][0] as { request: { headers: object } })
+		const headers = (composeRequest.mock.calls[0][0] as { request: { headers: unknown } })
 			.request.headers;
-		expect(Object.keys(headers)).toEqual(["Accept"]);
+		expect(headers).toEqual([{ name: "Accept", value: "application/json" }]);
+	});
+});
+
+describe("a header typed on more than one row (#2466)", () => {
+	const row = (key: string, value: string, enabled = true) => ({
+		id: `${key}-${value}`,
+		key,
+		value,
+		enabled,
+	});
+	const THREE_ROWS = [
+		row("X-Dup", "one"),
+		row("x-dup", "two"),
+		row("X-Dup", "three"),
+		row("X-Off", "no", false),
+	];
+	const THREE_LINES = [
+		{ name: "X-Dup", value: "one" },
+		{ name: "x-dup", value: "two" },
+		{ name: "X-Dup", value: "three" },
+	];
+
+	it("composes every enabled row as its own line, for Send", async () => {
+		// Mutation check: flatten the rows to a record at this call and the three
+		// lines are one.
+		renderBuilder();
+
+		await act(async () => {
+			await (providerProps.onExecute as (r: RequestState) => Promise<unknown>)(
+				seededState({ headers: THREE_ROWS })
+			);
+		});
+
+		const sent = composeRequest.mock.calls[0][0] as { request: { headers: unknown } };
+		expect(sent.request.headers).toEqual(THREE_LINES);
+	});
+
+	it("composes the same lines for a load run", async () => {
+		renderBuilder();
+
+		await act(async () => {
+			(providerProps.onStartLoadTest as (r: RequestState) => void)(
+				seededState({ headers: THREE_ROWS })
+			);
+		});
+		await act(async () => {
+			await (dialogProps.onStart as (c: LoadTestConfig) => Promise<void>)(LOAD_CONFIG);
+		});
+
+		const sent = composeRequest.mock.calls[0][0] as { request: { headers: unknown } };
+		expect(sent.request.headers).toEqual(THREE_LINES);
 	});
 });

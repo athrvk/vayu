@@ -95,20 +95,32 @@ TEST_F (IdnHostTest, SendDialsTheAsciiName) {
 }
 
 // Only the host is rewritten: userinfo, port, path, query and fragment keep
-// their bytes, and a URL whose only non-ASCII text is outside the host is not
-// touched at all.
+// their bytes as typed under `disableUrlEncoding`, and a URL whose only
+// non-ASCII text is outside the host is not touched at all. With encoding on,
+// the path, query and fragment bytes above `~` are `%XX` (issue #2465) and the
+// head is still the host's rewrite alone.
 TEST_F (IdnHostTest, TheWireUrlRewritesTheHostAlone) {
-    const std::vector<std::pair<std::string, std::string>> cases = {
-        { "https://ü:p@BÜCHER.example:8443/ä?q=ü#ö", "https://ü:p@xn--bcher-kva.example:8443/ä?q=ü#ö" },
-        { "bücher.example/x", "xn--bcher-kva.example/x" },
-        { "https://example.com/ä?q=ü", "https://example.com/ä?q=ü" },
-        { "https://[::1]:8080/ä", "https://[::1]:8080/ä" },
-        { "https://{{host}}/ä", "https://{{host}}/ä" },
+    struct Case {
+        std::string url;
+        std::string as_typed;
+        std::string encoded;
     };
-    for (const auto& [url, wire] : cases) {
+    const std::vector<Case> cases = {
+        { "https://ü:p@BÜCHER.example:8443/ä?q=ü#ö", "https://ü:p@xn--bcher-kva.example:8443/ä?q=ü#ö",
+        "https://ü:p@xn--bcher-kva.example:8443/%C3%A4?q=%C3%BC#%C3%B6" },
+        { "bücher.example/x", "xn--bcher-kva.example/x", "xn--bcher-kva.example/x" },
+        { "https://example.com/ä?q=ü", "https://example.com/ä?q=ü",
+        "https://example.com/%C3%A4?q=%C3%BC" },
+        { "https://[::1]:8080/ä", "https://[::1]:8080/ä", "https://[::1]:8080/%C3%A4" },
+        { "https://{{host}}/ä", "https://{{host}}/ä", "https://{{host}}/%C3%A4" },
+    };
+    for (const auto& [url, as_typed, encoded] : cases) {
         vayu::Request request;
-        request.url = url;
-        EXPECT_EQ (vayu::http::wire_url (request), wire) << url;
+        request.url                  = url;
+        request.disable_url_encoding = true;
+        EXPECT_EQ (vayu::http::wire_url (request), as_typed) << url;
+        request.disable_url_encoding = false;
+        EXPECT_EQ (vayu::http::wire_url (request), encoded) << url;
     }
 }
 

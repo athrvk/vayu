@@ -18,6 +18,7 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
 #include <format>
@@ -384,14 +385,14 @@ bool is_create) {
     if (value.is_object ()) {
         dumped = value.dump ();
     } else if (value.is_string ()) {
-        const auto parsed = nlohmann::ordered_json::parse (
-        value.get<std::string> (), nullptr, /*allow_exceptions=*/false);
-        if (!parsed.is_object ()) {
+        const auto parsed = vayu::utils::parse_ordered_json (
+        value.get_ref<const std::string&> (), vayu::utils::ORDERED_JSON_UNBOUNDED);
+        if (!parsed || !parsed->is_object ()) {
             return route_error (400,
             "Invalid 'postmanProtocolBehavior': must be an object, a string "
             "holding a JSON object, or null");
         }
-        dumped = parsed.dump ();
+        dumped = parsed->dump ();
     } else {
         return route_error (400,
         "Invalid 'postmanProtocolBehavior': must be an object, a string "

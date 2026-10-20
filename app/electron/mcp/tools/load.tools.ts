@@ -15,6 +15,7 @@ import {
 	checkAllowlist,
 	checkLoadCaps,
 	checkMonitorHost,
+	checkSampleCap,
 	ENGINE_LOAD_DEFAULTS,
 	type EngineLoadDefaults,
 	LOAD_MODES,
@@ -45,6 +46,8 @@ import {
 	loadShapePayload,
 	MAX_IN_FLIGHT_BOUND,
 	MAX_REDIRECTS_BOUND,
+	MAX_RESPONSE_SAMPLE_PERIOD,
+	MAX_RESPONSE_SAMPLES_BOUND,
 	MAX_SLOW_THRESHOLD_MS,
 	MAX_SUCCESS_SAMPLE_PERIOD,
 	readLoadParams,
@@ -60,6 +63,7 @@ import {
 	environmentIdInput,
 	LOAD_RUN_SCHEMA_GATE_REFUSAL,
 	LOAD_RUN_STOP_ON_ERROR_REFUSAL,
+	requestHeadersInput,
 	scenarioDataInput,
 	dataFileNameInput,
 	dataFileHashInput,
@@ -98,7 +102,7 @@ export const LOAD_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS, `concurrency` (virtual users) and duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
 			agentScriptGateSentence("`postRequestScript` or `tests`") +
-			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, and `comment` stamps the run with why it exists; all four apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`." +
+			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, `responseSamplePeriod` and `maxResponseSamples` which are captured for get_run_samples, and `comment` stamps the run with why it exists; all of them apply to a scenario run as well. There is no per-request timeout on a run: the engine's `defaultTimeout` setting governs every transfer (change it with update_engine_config), so a slow target is a config change and not an argument here. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`." +
 			withheldPointer(config, "preview") +
 			" " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -117,7 +121,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Target URL (may contain {{variables}}). Required unless `requestId` names a saved request to load-test; supplying both retargets that request at this URL."
 				),
-			headers: z.record(z.string(), z.string()).optional(),
+			headers: requestHeadersInput,
 			body: z.string().optional().describe("Request body content."),
 			file: inlineFileInput,
 			// The two sibling tools have carried this text since they existed and
@@ -328,6 +332,24 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					`Keep 1 in N successful responses (the engine's \`success_sample_rate\`, which is a period and not a percentage): 1 keeps every one, 100 keeps 1%. Default 100. Only sampled responses carry a timing breakdown, and only if \`saveTimingBreakdown\` is on. Range 1-${MAX_SUCCESS_SAMPLE_PERIOD}; 0 is a division by zero engine-side and is refused here.`
 				),
+			responseSamplePeriod: z
+				.number()
+				.int()
+				.min(1)
+				.max(MAX_RESPONSE_SAMPLE_PERIOD)
+				.optional()
+				.describe(
+					`Capture 1 in N responses, headers and body, for get_run_samples (a period, like \`successSamplePeriod\`): 1 captures every one. Default 100. Range 1-${MAX_RESPONSE_SAMPLE_PERIOD}.`
+				),
+			maxResponseSamples: z
+				.number()
+				.int()
+				.min(0)
+				.max(MAX_RESPONSE_SAMPLES_BOUND)
+				.optional()
+				.describe(
+					`Most responses a run keeps for get_run_samples, 0-${MAX_RESPONSE_SAMPLES_BOUND}; 0 keeps none. Default 1000.`
+				),
 			slowRequestThresholdMs: z
 				.number()
 				.int()
@@ -485,6 +507,8 @@ export const LOAD_TOOLS: McpTool[] = [
 			);
 			const caps = checkLoadCaps(shape, ctx.config, ctx.host);
 			if (!caps.ok) return errorResult(caps.error!);
+			const sampleCap = checkSampleCap(num(args, "maxResponseSamples"), ctx.config, ctx.host);
+			if (!sampleCap.ok) return errorResult(sampleCap.error!);
 
 			const payload: Record<string, unknown> = {
 				...composed.payload,

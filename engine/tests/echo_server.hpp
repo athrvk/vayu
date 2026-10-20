@@ -21,6 +21,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace vayu::tests {
 
@@ -162,6 +164,14 @@ class EchoServer {
     bool has_header (const std::string& name) const {
         std::lock_guard<std::mutex> lock (mutex_);
         return headers_.find (name) != headers_.end ();
+    }
+
+    /// Every request header line in the order it arrived, each name as
+    /// received. httplib's `Headers` keeps insertion order, which is what
+    /// makes a repeated name's order assertable (issue #2466).
+    std::vector<std::pair<std::string, std::string>> header_lines () const {
+        std::lock_guard<std::mutex> lock (mutex_);
+        return { headers_.begin (), headers_.end () };
     }
 
     /// The request target as received - {@link path} plus the query string,

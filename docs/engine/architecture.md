@@ -367,7 +367,10 @@ Manages the lifecycle of load test runs:
   a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
   could end up joining itself. The wait is bounded; the join is not, because abandoning a
   worker leaves it writing through references to a `Database` that `main` is about to
-  destroy. A run started while the drain is in progress is refused with a `503`.
+  destroy. A run started while the drain is in progress is refused with a `503`. The
+  recovery backup's shutdown refresh that follows is budgeted against what the drain leaves of
+  the app's 5 s window (`SHUTDOWN_WINDOW_MS`), so a long drain shortens or skips it rather than
+  pushing the engine into the app's kill.
 - **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
   its handle outlives it until another thread collects it.
 - **Per-run auxiliary threads**: a load run has a metrics thread
@@ -646,8 +649,8 @@ A name nothing defines still goes out written as it stands, and the load path
 does not run this pass at all. What the pass can *refuse* is what resolving a
 header **name** can produce, both rules held in
 `engine/include/vayu/http/header_names.hpp`: a name landing on one the request
-already carries (#1051), where the map holds one value per name and the send
-would go out a header short; and a name landing on nothing at all (#1084),
+already carries (#1051), where the rows show two different names and the
+request would carry one header twice; and a name landing on nothing at all (#1084),
 where what would go out is a `": value"` line no name owns. Either is stopped
 rather than sent - in composition's words and under composition's refusal
 code, as a `statusCode: 0` response carrying the reason (a `400` on the
@@ -1280,8 +1283,11 @@ holds references to state `main` owns: HTTP server stopped **and its stream
 consumers drained** (`Server::stop()` calls `SseStreamManager::shutdown()`,
 which signals every stream and joins its worker) → run workers signalled and
 joined (each joins its own metrics and monitor threads and stops its event loop
-first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at scope
-exit. Nothing is detached.
+first) → the start-of-session recovery backup refresh interrupted and joined →
+the recovery backup refreshed once more, bounded by a deadline
+(`Database::refresh_recovery_backup_on_shutdown`, #2421) → `curl_global_cleanup`
+→ `Database` / `RunManager` destroyed at scope exit → the instance lock
+released. Nothing is detached.
 
 The stream drain belongs to `stop()` rather than to `~Server` because
 `curl_global_cleanup` runs *between* the two: a consumer joined only by the
@@ -1320,7 +1326,7 @@ Default configuration values (from `constants.hpp`):
 data/
 ├── db/
 │   ├── vayu.db          # SQLite database
-│   ├── vayu.db.bak      # Re-snapshotted after every clean start - crash recovery, not a user backup
+│   ├── vayu.db.bak      # Re-snapshotted once listening and at a clean shutdown - crash recovery, not a user backup
 │   ├── ca-bundle.pem    # The merged CA bundle written when custom certificates are configured
 │   └── backups/
 │       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
@@ -1348,9 +1354,9 @@ afterwards inherit, and there is no pass over existing files.
 
 `vayu.db` holds everything a person has built - collections, environments,
 stored credentials and run history - and until issue #987 there was no copy of
-it the user controlled. The `.bak` beside it is **not** one: it is rewritten on
-every clean start, so it exists to give a corrupt file something to restore
-from, not to let anyone go back to last week.
+it the user controlled. The `.bak` beside it is **not** one: it is rewritten
+once the engine listens and again at a clean shutdown, so it exists to give a
+corrupt file something to restore from, not to let anyone go back to last week.
 
 `POST /workspace/backup` (or `vayu-cli backup`) writes one snapshot into
 `db/backups/`. It runs SQLite's `VACUUM INTO`, which is why it is safe while
@@ -1380,9 +1386,10 @@ Restore by hand, with the engine stopped.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` is a
-session old at best, so when the quarantined file was healthy after all, it is
-the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
+fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` holds
+the last clean shutdown at best, and less after a session that ended in a crash
+or one whose final refresh ran out of time, so when the quarantined file was
+healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
 `db/vayu.db`, and its `-wal` and `-shm`, when the set has them, over
 `db/vayu.db-wal` and `db/vayu.db-shm` (deleting those two if the set has none).
 Unlike a snapshot, the set's sidecars are part of it: its `-wal` holds the

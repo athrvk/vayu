@@ -403,7 +403,7 @@ constexpr auto CONFIGURATION_KEYS = std::to_array<std::string_view> ({ "mode",
 "dataRowCount", "dataFileName", "dataFileHash", "carriedBudgets" });
 
 /// The names of a payload's headers or Params rows: an object's keys, or each
-/// row's `key`. Values never.
+/// row's `key` - a header line's `name` (issue #2466). Values never.
 ordered names_of (const json& rows) {
     ordered names = ordered::array ();
     if (rows.is_object ()) {
@@ -412,8 +412,10 @@ ordered names_of (const json& rows) {
         }
     } else if (rows.is_array ()) {
         for (const json& row : rows) {
-            if (const json& key = member (row, "key"); key.is_string ()) {
-                names.push_back (key.get<std::string> ());
+            const json& key = member (row, "key");
+            if (const json& name = key.is_string () ? key : member (row, "name");
+            name.is_string ()) {
+                names.push_back (name.get<std::string> ());
             }
         }
     }

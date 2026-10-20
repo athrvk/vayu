@@ -17,8 +17,8 @@ import {
 	sanitizeSafetyInput,
 	type McpCapKey,
 } from "./config.js";
-import { checkAllowlist, checkLoadCaps } from "./safety.js";
-import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { checkAllowlist, checkLoadCaps, checkSampleCap } from "./safety.js";
+import { LOAD_TEST_CEILING_BOUNDS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 
 describe("normalizeHost", () => {
 	it("strips scheme, port, path, and query and lowercases", () => {
@@ -100,7 +100,7 @@ describe("sanitizeSafetyInput", () => {
 	 */
 	it("holds each cap at its ceiling instead of storing a value no run can reach", () => {
 		const keys = Object.keys(MCP_CAP_CEILINGS) as McpCapKey[];
-		expect(keys.length).toBe(4);
+		expect(keys.length).toBe(5);
 		for (const key of keys) {
 			const ceiling = MCP_CAP_CEILINGS[key];
 			expect(sanitizeSafetyInput({ [key]: ceiling + 1 })[key]).toBe(ceiling);
@@ -119,7 +119,7 @@ describe("sanitizeSafetyInput", () => {
 	});
 
 	/*
-	 * Second copy of the same four numbers: the renderer's ceiling bounds and
+	 * Second copy of the same five numbers: the renderer's ceiling bounds and
 	 * this sanitizer. `electron/` production code may not import `src/`, so the
 	 * copy stays - this is the half of the chain that keeps it honest, the
 	 * renderer-to-engine half living in
@@ -132,6 +132,9 @@ describe("sanitizeSafetyInput", () => {
 			maxConcurrency: LOAD_TEST_CEILING_BOUNDS.concurrency.MAX,
 			maxDurationSeconds: LOAD_TEST_CEILING_BOUNDS.durationSeconds.MAX,
 			maxIterations: LOAD_TEST_CEILING_BOUNDS.iterations.MAX,
+			// Not a dialog ceiling: the dialog sends no sample count, so the
+			// renderer states the engine's own bound for the Settings input.
+			maxResponseSamples: RESPONSE_SAMPLES_CEILING,
 		});
 	});
 
@@ -225,6 +228,23 @@ describe("buildSafetyConfigFromEnv", () => {
 			false
 		);
 		expect(ignored.map((i) => i.variable)).toContain("VAYU_MCP_MAX_ITERATIONS");
+	});
+
+	it("reads the response-samples cap from the environment, and a malformed one cannot disable it", () => {
+		const { config, ignored } = buildSafetyConfigFromEnv({
+			VAYU_MCP_MAX_RESPONSE_SAMPLES: "250",
+		});
+
+		expect(ignored).toEqual([]);
+		expect(checkSampleCap(251, config, "app").ok).toBe(false);
+		expect(checkSampleCap(250, config, "app").ok).toBe(true);
+
+		const malformed = buildSafetyConfigFromEnv({ VAYU_MCP_MAX_RESPONSE_SAMPLES: "1,000" });
+		expect(malformed.ignored.map((i) => i.variable)).toEqual(["VAYU_MCP_MAX_RESPONSE_SAMPLES"]);
+		expect(malformed.config.maxResponseSamples).toBe(
+			DEFAULT_MCP_SAFETY_CONFIG.maxResponseSamples
+		);
+		expect(checkSampleCap(1_000_000, malformed.config, "app").ok).toBe(false);
 	});
 
 	it("reads the iterations cap from the environment", () => {
@@ -344,6 +364,7 @@ describe("buildSafetyConfigFromEnv", () => {
 			VAYU_MCP_MAX_CONCURRENCY: "10",
 			VAYU_MCP_MAX_DURATION_SECONDS: "30",
 			VAYU_MCP_MAX_ITERATIONS: "500",
+			VAYU_MCP_MAX_RESPONSE_SAMPLES: "200",
 			VAYU_MCP_ALLOW_ALL: "true",
 			VAYU_MCP_ALLOW_WRITES: "true",
 			VAYU_MCP_ALLOW_NETWORK_SETTINGS: "true",
@@ -363,6 +384,7 @@ describe("buildSafetyConfigFromEnv", () => {
 			maxConcurrency: 10,
 			maxDurationSeconds: 30,
 			maxIterations: 500,
+			maxResponseSamples: 200,
 			allowWrites: true,
 			allowNetworkSettings: true,
 			revealSecretsToAgents: true,

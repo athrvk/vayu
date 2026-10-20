@@ -66,8 +66,9 @@ const stableResolvedUrl = createStableResolve();
  * The cache's resolver for the "Sends" line: its input is the URL and the path
  * rows as one JSON text, and it substitutes each value resolved then encoded,
  * as compose does (#1764) - or raw under `disableUrlEncoding` (#1765) - before
- * resolving the URL itself, a value landing in the query encoded by the query
- * rule (#1773). One wrapper per
+ * resolving the URL itself, a value landing in the path, query or fragment
+ * encoded by that part's rule and the literal text around it made sendable
+ * (#1773, #2465). One wrapper per
  * `resolveString`, so the cache's identity check still means what it says.
  */
 const sendsResolvers = new WeakMap<(input: string) => string, (input: string) => string>();

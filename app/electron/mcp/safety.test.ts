@@ -14,6 +14,8 @@ import {
 	checkMonitorHost,
 	parseDurationSeconds,
 	checkLoadCaps,
+	checkSampleCap,
+	ENGINE_DEFAULT_MAX_RESPONSE_SAMPLES,
 	ENGINE_LOAD_DEFAULTS,
 	type EngineLoadDefaults,
 	type LoadMode,
@@ -346,6 +348,39 @@ describe("checkLoadCaps", () => {
 	});
 });
 
+describe("checkSampleCap", () => {
+	const config = resolveSafetyConfig({ maxResponseSamples: 5000 });
+
+	test("accepts a count at the cap and below it, zero included", () => {
+		expect(checkSampleCap(5000, config, "app").ok).toBe(true);
+		expect(checkSampleCap(1, config, "app").ok).toBe(true);
+		expect(checkSampleCap(0, config, "app").ok).toBe(true);
+	});
+
+	test("refuses a count above the cap, naming the value, the cap and the remedy", () => {
+		const res = checkSampleCap(5001, config, "app");
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/maxResponseSamples 5001 exceeds the MCP cap of 5000/);
+		expect(res.error).toMatch(/raise Max response samples in Vayu Settings/);
+		expect(checkSampleCap(5001, config, "cli").error).toMatch(/VAYU_MCP_MAX_RESPONSE_SAMPLES/);
+	});
+
+	test("judges an omitted count as the engine's default", () => {
+		// An absent field is not "no samples": the run keeps 1000, so a cap under
+		// that has to refuse it rather than wave it through.
+		const tight = resolveSafetyConfig({ maxResponseSamples: 500 });
+		const res = checkSampleCap(undefined, tight, "app");
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/maxResponseSamples 1000 \(the engine's default/);
+		expect(checkSampleCap(undefined, config, "app").ok).toBe(true);
+		expect(checkSampleCap(500, tight, "app").ok).toBe(true);
+	});
+
+	test("the default cap admits the engine's own default", () => {
+		expect(checkSampleCap(undefined, resolveSafetyConfig(), "app").ok).toBe(true);
+	});
+});
+
 describe("resolveLoadShape's duration under the cap", () => {
 	const durationOf = (params: LoadRunParams, maxDurationSeconds: number) =>
 		resolveLoadShape(params, resolveSafetyConfig({ maxDurationSeconds })).duration;
@@ -482,6 +517,14 @@ describe("the load default tables mirror the engine", () => {
 			},
 		};
 		expect(ENGINE_LOAD_DEFAULTS).toEqual(expected);
+	});
+
+	test("the omitted response-sample count is constants.hpp's default", () => {
+		const match = read(CONSTANTS_HPP).match(
+			/constexpr\s+size_t\s+DEFAULT_MAX_RESPONSE_SAMPLES\s*=\s*(\d+);/
+		);
+		expect(match, "DEFAULT_MAX_RESPONSE_SAMPLES not found in constants.hpp").not.toBeNull();
+		expect(ENGINE_DEFAULT_MAX_RESPONSE_SAMPLES).toBe(Number(match![1]));
 	});
 
 	test("the scenario table is scenario_load.cpp's fallbacks", () => {

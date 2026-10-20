@@ -733,6 +733,141 @@ TEST_F (DbRecoveryTest, ADamagedPageBehindAValidHeaderIsCorruptAndRestored) {
     EXPECT_EQ (read_file (quarantined), damaged_bytes);
 }
 
+// ==================== The refresh at shutdown (#2421) ====================
+//
+// The start-of-session snapshot holds none of the session's work, so a torn
+// main file after a long session used to restore the session's start.
+
+/// Ample for a test-sized copy; the shutdown deadline constant still applies.
+constexpr std::chrono::milliseconds AMPLE_BUDGET{ 60'000 };
+
+void write_collection_with_request (vayu::db::Database& db, const std::string& collection_id) {
+    vayu::db::Collection col;
+    col.id    = collection_id;
+    col.name  = collection_id;
+    col.order = 0;
+    db.create_collection (col);
+    vayu::db::Request request;
+    request.id            = collection_id + "_req";
+    request.collection_id = collection_id;
+    request.name          = "Kept request";
+    request.method        = vayu::HttpMethod::GET;
+    request.url           = "https://example.test/kept";
+    request.created_at    = 1;
+    request.updated_at    = 1;
+    db.save_request (request);
+}
+
+TEST_F (DbRecoveryTest, AShutdownRefreshKeepsTheSessionsWorkThroughATornFile) {
+    // Experiment 10E with the session's work kept. Mutation check: return
+    // before `replace_recovery_backup` in `refresh_recovery_backup_on_shutdown`
+    // and the restore comes back with the start-of-session backup, no rows.
+    {
+        vayu::db::Database db (DB_PATH);
+        db.init ();
+        ASSERT_HAS_VALUE (db.refresh_recovery_backup ())
+        << "the start-of-session backup";
+        write_collection_with_request (db, "col_session");
+        const auto refreshed = db.refresh_recovery_backup_on_shutdown (AMPLE_BUDGET);
+        ASSERT_HAS_VALUE (refreshed) << refreshed.error ();
+    }
+    EXPECT_FALSE (std::filesystem::exists (std::string (DB_PATH) + ".bak.tmp"));
+
+    std::filesystem::resize_file (DB_PATH, std::filesystem::file_size (DB_PATH) / 2);
+    vayu::db::Database db (DB_PATH);
+
+    EXPECT_TRUE (recorded_outcome (db) == RecoveryOutcome::RestoredFromBackup);
+    const auto collections = db.get_collections ();
+    ASSERT_EQ (collections.size (), 1u);
+    EXPECT_EQ (collections.front ().id, "col_session");
+    EXPECT_TRUE (db.get_request ("col_session_req").has_value ());
+}
+
+TEST_F (DbRecoveryTest, AShutdownAfterASessionThatWroteNothingLeavesTheBackupAlone) {
+    // Mutation check: drop the `sqlite3_total_changes64` skip in
+    // `refresh_recovery_backup_on_shutdown` and the sentinel is replaced.
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    // Bytes no snapshot could produce, so a rewrite cannot pass for a no-op.
+    write_corrupt_file (backup.string (), "-sentinel");
+    const std::string sentinel = read_file (backup.string ());
+    const auto written_at      = std::filesystem::last_write_time (backup);
+
+    EXPECT_TRUE (db.get_collections ().empty ()) << "a read is not a write";
+    const auto refreshed = db.refresh_recovery_backup_on_shutdown (AMPLE_BUDGET);
+
+    ASSERT_HAS_VALUE (refreshed) << refreshed.error ();
+    EXPECT_EQ (read_file (backup.string ()), sentinel);
+    EXPECT_EQ (std::filesystem::last_write_time (backup), written_at);
+}
+
+TEST_F (DbRecoveryTest, AShutdownRefreshPastItsDeadlineKeepsThePreviousBackup) {
+    // Mutation check: remove the `sqlite3_progress_handler` call and the copy
+    // runs to the end, to be discarded for finishing late instead.
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
+    const std::string previous = read_file (backup.string ());
+    ASSERT_FALSE (previous.empty ());
+    write_collection_with_request (db, "col_late");
+    // Rows, not a few large values: the deadline is checked between VM
+    // instructions, and a large value's pages are copied inside one. A
+    // workspace's bulk is rows too (runs, results), so this is its shape.
+    {
+        const RawConnection filler = open_raw (DB_PATH);
+        ASSERT_EQ (
+        exec_sql (filler.get (),
+        "CREATE TABLE deadline_filler (v BLOB);"
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n "
+        "WHERE i < 20000) INSERT INTO deadline_filler SELECT "
+        "randomblob(64) FROM n;"),
+        "");
+    }
+
+    const auto refreshed =
+    db.refresh_recovery_backup_on_shutdown (std::chrono::milliseconds (1));
+
+    ASSERT_FALSE (refreshed.has_value ());
+    EXPECT_NE (refreshed.error ().find ("interrupted"), std::string::npos)
+    << refreshed.error ();
+    EXPECT_EQ (read_file (backup.string ()), previous);
+    const std::string snapshot = std::string (DB_PATH) + ".bak.tmp";
+    EXPECT_FALSE (std::filesystem::exists (snapshot));
+    EXPECT_FALSE (std::filesystem::exists (snapshot + "-wal"));
+    EXPECT_FALSE (std::filesystem::exists (snapshot + "-shm"));
+}
+
+TEST_F (DbRecoveryTest, AShutdownWithNoTimeLeftCopiesNothing) {
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    ASSERT_HAS_VALUE (db.refresh_recovery_backup ());
+    const std::string previous = read_file (backup.string ());
+    write_collection_with_request (db, "col_late");
+
+    const auto refreshed =
+    db.refresh_recovery_backup_on_shutdown (std::chrono::milliseconds (0));
+
+    ASSERT_FALSE (refreshed.has_value ());
+    EXPECT_EQ (read_file (backup.string ()), previous);
+}
+
+TEST_F (DbRecoveryTest, AShutdownAfterARecoveredStartLeavesTheBackupItJudgedAlone) {
+    const std::filesystem::path backup = std::filesystem::path (DB_PATH).concat (".bak");
+    write_corrupt_file (backup.string (), "-backup");
+    const std::string backup_bytes = read_file (backup.string ());
+    write_corrupt_database ();
+    vayu::db::Database db (DB_PATH);
+    db.init ();
+    ASSERT_TRUE (recorded_outcome (db) == RecoveryOutcome::BackupAlsoCorrupt);
+    write_collection_with_request (db, "col_after_recovery");
+
+    EXPECT_FALSE (db.refresh_recovery_backup_on_shutdown (AMPLE_BUDGET).has_value ());
+    EXPECT_EQ (read_file (backup.string ()), backup_bytes);
+}
+
 // ==================== The probe's classification (#2420) ====================
 
 std::system_error sqlite_failure (int code) {

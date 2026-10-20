@@ -8,6 +8,7 @@
  */
 
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -24,34 +25,34 @@
  * nothing at all (`describe_empty_header_name`). Neither is visible from the
  * response, and neither is caught anywhere further down the send.
  *
- * A header name is substituted like any other field, and the map it lands in
- * holds one value per name. So two names that resolve alike do not both go out:
- * the second lands on the first's key and one of the two headers is gone, with
- * nothing said. `{{tenant_header}}: acme` beside a literal `X-Tenant: legacy`
- * sends one header, and `Headers` compares case-insensitively, so a `{{h}}`
- * resolving to `authorization` erases an `Authorization` the user typed too.
+ * A header name is substituted like any other field, so two names can come out
+ * of resolution as one. `{{tenant_header}}: acme` beside a literal
+ * `X-Tenant: legacy` would send `X-Tenant` twice, and names compare
+ * case-insensitively, so a `{{h}}` resolving to `authorization` would send a
+ * second credential beside the `Authorization` the user typed.
  *
  * That is the same quiet wrong request the header-text rule refuses in
- * `header_text.hpp`: there a value *forges* a header, here a value *erases*
- * one. Both are a request the author did not write, and neither is visible from
- * the response.
+ * `header_text.hpp`: there a value *forges* a header, here a value *repeats*
+ * one the author did not repeat. Both are a request the author did not write,
+ * and neither is visible from the response.
  *
  * ## Refusal, never repair
  *
  * The alternative is to define which of the two survives, and there is no
- * honest answer: the names are equally the author's, one is not more meant than
- * the other, and "the one the map iterated last" is an implementation detail
- * rather than a rule. Sending both is not on the table either - a single-valued
- * map is what the engine and libcurl both hold. So the request is refused, and
- * the message names the header as written beside the name it produced, which is
- * the pair the author has to go and look at.
+ * honest answer: the names are equally the author's, and one is not more meant
+ * than the other. Sending both is what libcurl would do, since its header list
+ * carries any number of lines under one name (issue #2466) - but then the
+ * request carries a repeated header no row in the editor shows. So the request
+ * is refused, and the message names the header as written beside the name it
+ * produced, which is the pair the author has to go and look at.
  *
  * ## Which collisions this is about
  *
- * Only the ones **resolution produced**. Two names the author typed into one
- * request are two lines they can see side by side, and composition's stored
- * flattening has always let the later one win - a rule that is visible in the
- * editor and stays as it was. A name that only collides *after* a variable is
+ * Only the ones **resolution produced**: two names *written* differently that
+ * come out as one (`record_produced_name`). Two names written alike - `X-Dup`
+ * and `x-dup` typed on two rows, or one `{{h}}` typed twice - are a repeated
+ * header the author can see side by side, and every one of those lines is sent,
+ * in order (issue #2466). A name that only collides *after* a variable is
  * substituted is invisible until the request comes back wrong, which is the
  * whole difference.
  *
@@ -79,9 +80,9 @@
  *   script asked for the send and a throw is what it can catch.
  *
  * The pre-send gate cannot be that backstop here, and this is the reason the
- * rule is enforced where the map is rebuilt rather than checked once before the
- * transfer: by the time the gate sees a request, the collision has already
- * happened and the erased header is simply not there to notice.
+ * rule is enforced where a name is resolved rather than checked once before the
+ * transfer: by the time the gate sees a request, the names are resolved and a
+ * produced repeat looks exactly like a typed one.
  *
  * ## The name that resolves to nothing
  *
@@ -118,9 +119,8 @@
  *   templated ones, so a name a script has just emptied and a payload posted
  *   straight to `POST /execute` carrying an empty key are both refused. The
  *   collision rule keeps the narrower reach and loses nothing by it: a request
- *   that arrives already resolved cannot carry a collision to find, since
- *   `Headers` holds one value per name and compares without case, so two names
- *   that are already equal are already one.
+ *   that arrives already resolved carries no written name that differs from
+ *   what it sends, so every repeat in it is a repeat as written.
  */
 
 namespace vayu::http {
@@ -141,26 +141,31 @@ struct HeaderNameCollision {
 };
 
 /**
- * @brief Each name resolution produced, against the name as written that
+ * @brief Each name resolution produced, against the name as written that first
  * produced it.
  *
- * What a layer rebuilding a header map keeps beside the map, because the
- * rebuilt `Headers` remembers only the spelling that got there first and a
- * collision has to be named with both. It is what makes `emplace` the whole of
- * the detection: the name that fails to go in has already found the one it
- * would have erased, and the value that was there says how that one was
- * written.
+ * What a layer resolving header names keeps beside the lines it builds, because
+ * a collision has to be named with both spellings and is told apart from a
+ * typed repeat by them (`record_produced_name`).
  *
  * Keyed by `Headers`' own comparison rather than by a comparator named again
- * here, because the collision this finds is the one *that* map will make - the
- * two cannot come to disagree about which two names are one. It is deliberately
- * not a `Headers` itself: its value is a header name, never a header value.
- *
- * The bind-time layer keeps none, and that is the distinction rather than an
- * omission - its message names only the surviving key, which the rebuilt
- * `Headers` already holds (`core/scenario_data.cpp`).
+ * here, so "the same header name" means one thing everywhere. It is
+ * deliberately not a `Headers` itself: its value is a header name, never a
+ * header value.
  */
 using HeaderNameOrigins = std::map<std::string, std::string, Headers::key_compare>;
+
+/**
+ * @brief Note that @p written resolved to @p produced, and answer the
+ *        collision when a name written *differently* already produced it.
+ *
+ * Nothing for the first name to produce @p produced, and nothing for a later
+ * one written alike (compared without case): that is a repeat the author typed,
+ * which is sent.
+ */
+[[nodiscard]] std::optional<HeaderNameCollision> record_produced_name (HeaderNameOrigins& origins,
+const std::string& produced,
+const std::string& written);
 
 /**
  * @brief The refusal a header-name collision reads as.

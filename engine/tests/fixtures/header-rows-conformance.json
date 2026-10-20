@@ -1,0 +1,71 @@
+[
+  {
+    "name": "a repeated name is sent once per row, in order, each in its own spelling",
+    "rows": [
+      { "key": "X-Dup", "value": "one", "enabled": true },
+      { "key": "x-dup", "value": "two", "enabled": true },
+      { "key": "X-Dup", "value": "three", "enabled": true }
+    ],
+    "expected": [
+      { "name": "X-Dup", "value": "one" },
+      { "name": "x-dup", "value": "two" },
+      { "name": "X-Dup", "value": "three" }
+    ]
+  },
+  {
+    "name": "distinct names keep the order they were written in, not an alphabetical one",
+    "rows": [
+      { "key": "Zeta-Header", "value": "z", "enabled": true },
+      { "key": "alpha-header", "value": "a", "enabled": true },
+      { "key": "Mixed-CASE", "value": "m", "enabled": true },
+      { "key": "Beta", "value": "b", "enabled": true }
+    ],
+    "expected": [
+      { "name": "Zeta-Header", "value": "z" },
+      { "name": "alpha-header", "value": "a" },
+      { "name": "Mixed-CASE", "value": "m" },
+      { "name": "Beta", "value": "b" }
+    ]
+  },
+  {
+    "name": "a disabled row is left out, and does not change the order of the rest",
+    "rows": [
+      { "key": "Accept", "value": "application/json", "enabled": true },
+      { "key": "Accept", "value": "text/html", "enabled": false },
+      { "key": "Link", "value": "<a>; rel=next", "enabled": true },
+      { "key": "Link", "value": "<b>; rel=prev", "enabled": true }
+    ],
+    "expected": [
+      { "name": "Accept", "value": "application/json" },
+      { "name": "Link", "value": "<a>; rel=next" },
+      { "name": "Link", "value": "<b>; rel=prev" }
+    ]
+  },
+  {
+    "name": "a row with no key is left out, enabled or not",
+    "rows": [
+      { "key": "", "value": "orphan", "enabled": true },
+      { "key": "X-Kept", "value": "1", "enabled": true },
+      { "key": "", "value": "", "enabled": false }
+    ],
+    "expected": [{ "name": "X-Kept", "value": "1" }]
+  },
+  {
+    "name": "an empty value is still a row",
+    "rows": [
+      { "key": "X-Blank", "value": "", "enabled": true },
+      { "key": "Cookie", "value": "a=1", "enabled": true },
+      { "key": "Cookie", "value": "b=2", "enabled": true }
+    ],
+    "expected": [
+      { "name": "X-Blank", "value": "" },
+      { "name": "Cookie", "value": "a=1" },
+      { "name": "Cookie", "value": "b=2" }
+    ]
+  },
+  {
+    "name": "every row disabled is no lines at all",
+    "rows": [{ "key": "Accept", "value": "*/*", "enabled": false }],
+    "expected": []
+  }
+]

@@ -13,17 +13,9 @@
  */
 
 import { resolveAuthForSend } from "@/modules/request-builder/utils/auth-resolution";
+import { toHeaderRows } from "@/modules/request-builder/utils/key-value";
 import type { SnippetRequest } from "@/services/codegen";
-import type { KeyValueEntry, Request } from "@/types";
-
-/** Enabled rows only, last one wins - the same rule the execute path applies. */
-function flatHeaders(entries: KeyValueEntry[] | undefined): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const entry of entries ?? []) {
-		if (entry.enabled !== false && entry.key.trim()) result[entry.key] = entry.value;
-	}
-	return result;
-}
+import type { Request } from "@/types";
 
 /**
  * Nothing is substituted - `{{host}}` stays `{{host}}`, which is the point of
@@ -42,7 +34,8 @@ export function templatedRequest(
 		url: request.url,
 		// Its path rows fill the URL's `:name` segments (#1764), as compose does.
 		params: request.params,
-		headers: flatHeaders(request.headers),
+		// Enabled rows in order, repeats kept: the lines the execute path sends.
+		headers: toHeaderRows(request.headers ?? []),
 		body: request.body,
 		auth: resolveAuthForSend(request.auth, ancestors),
 		// An execution setting, so it comes off the row in both modes - see

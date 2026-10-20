@@ -799,7 +799,7 @@ Result<Response> Client::send (const Request& request) {
         Error error = sink.limit_exceeded ?
         Error{ ErrorCode::ResponseTooLarge,
             too_large_message (response.headers, sink.max_bytes) } :
-        detail::curl_to_error (curl, res, impl_->errors);
+        detail::curl_to_error (curl, res, impl_->errors, &request);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)
@@ -842,7 +842,7 @@ Result<Response> Client::get (const std::string& url, const Headers& headers) {
     Request request;
     request.method  = HttpMethod::GET;
     request.url     = url;
-    request.headers = headers;
+    request.headers = HeaderList (headers);
     return send (request);
 }
 
@@ -853,7 +853,7 @@ Client::post (const std::string& url, const std::string& body, const Headers& he
     request.url          = url;
     request.body.mode    = BodyMode::Text;
     request.body.content = body;
-    request.headers      = headers;
+    request.headers      = HeaderList (headers);
     return send (request);
 }
 

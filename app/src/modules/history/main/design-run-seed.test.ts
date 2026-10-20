@@ -247,6 +247,73 @@ describe("seedFromRun", () => {
 		});
 	});
 
+	describe("a snapshot whose headers are the posted lines (#2466)", () => {
+		const linesRun = (headers: unknown, bodyModeHeaders?: string[]) =>
+			run({
+				configSnapshot: {
+					...(run().configSnapshot as Record<string, unknown>),
+					headers,
+					...(bodyModeHeaders ? { bodyModeHeaders } : {}),
+				},
+			} as Partial<Run>);
+
+		it("seeds one row per line, a repeated name repeated and in order", () => {
+			// Mutation check: read the lines as an object and the rows are the
+			// array's indexes.
+			const { request } = seedFromRun(
+				linesRun([
+					{ name: "X-Dup", value: "one" },
+					{ name: "x-dup", value: "two" },
+					{ name: "X-Dup", value: "three" },
+				]),
+				liveRequest
+			);
+
+			expect(
+				request.headers?.filter((h) => h.key).map(({ key, value }) => [key, value])
+			).toEqual([
+				["X-Dup", "one"],
+				["x-dup", "two"],
+				["X-Dup", "three"],
+			]);
+		});
+
+		it("names a withheld line, as the record form does", () => {
+			const seed = seedFromRun(
+				linesRun([
+					{ name: "X-Plain", value: "visible" },
+					{ name: "Authorization", value: "<redacted>" },
+				]),
+				liveRequest
+			);
+
+			expect(seed.request.headers?.filter((h) => h.key).map((h) => h.key)).toEqual([
+				"X-Plain",
+			]);
+			expect(seed.withheld.headers).toEqual(["Authorization"]);
+		});
+
+		it("marks only the last line of a name the body mode wrote", () => {
+			const { request } = seedFromRun(
+				linesRun(
+					[
+						{ name: "content-type", value: "text/csv" },
+						{ name: "Content-Type", value: "application/json" },
+					],
+					["content-type"]
+				),
+				liveRequest
+			);
+
+			expect(
+				request.headers?.filter((h) => h.key).map((h) => [h.value, h.source ?? null])
+			).toEqual([
+				["text/csv", null],
+				["application/json", "body-mode"],
+			]);
+		});
+	});
+
 	describe("a value the engine withheld from the snapshot (#1803)", () => {
 		const base = run().configSnapshot as Record<string, unknown>;
 		const withheldRun = (snapshot: Record<string, unknown>) =>

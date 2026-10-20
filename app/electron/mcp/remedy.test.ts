@@ -60,6 +60,7 @@ describe("settingRemedy", () => {
 		["maxConcurrency", "raise Max virtual users in Vayu Settings → MCP"],
 		["maxDurationSeconds", "raise Max duration in Vayu Settings → MCP"],
 		["maxIterations", "raise Max iterations in Vayu Settings → MCP"],
+		["maxResponseSamples", "raise Max response samples in Vayu Settings → MCP"],
 		["allowlist", "add the host in Vayu Settings → MCP (Target allowlist)"],
 		["disabledTools", "switch the tool back on in Vayu Settings → MCP (Tools)"],
 	] as const)("words the app sentence for %s", (key, expected) => {

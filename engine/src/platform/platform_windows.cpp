@@ -213,6 +213,44 @@ void ensure_private_directory (const std::string& path) {
     }
 }
 
+bool fsync_file (const std::string& path) {
+    // Wide, like the rename this precedes: `std::filesystem` reads a narrow
+    // path through the same code page, so both name the same file. Every share
+    // flag, so an antivirus scan or an indexer holding the file open does not
+    // fail the flush.
+    const HANDLE file = CreateFileW (std::filesystem::path (path).c_str (),
+    GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    const bool flushed = FlushFileBuffers (file) != 0;
+    CloseHandle (file);
+    return flushed;
+}
+
+bool fsync_directory (const std::string& path) {
+    // Windows offers no way to flush a directory handle, so there is nothing
+    // to do beyond confirming the argument; `replace_file_durably` is what
+    // makes a rename survive a power loss here.
+    return is_directory (path);
+}
+
+FileReplacement replace_file_durably (const std::string& from, const std::string& to) {
+    FileReplacement replacement;
+    // WRITE_THROUGH returns once the move has reached the disk, which stands
+    // in for the directory flush POSIX needs.
+    if (MoveFileExW (std::filesystem::path (from).c_str (),
+        std::filesystem::path (to).c_str (),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+        replacement.error = std::error_code (
+        static_cast<int> (GetLastError ()), std::system_category ());
+        return replacement;
+    }
+    replacement.durable = true;
+    return replacement;
+}
+
 void restrict_new_files_to_owner () {
     // Nothing to set: new files take the private directory's inherited DACL.
 }

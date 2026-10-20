@@ -1255,6 +1255,10 @@ void Database::init () {
         vayu::utils::log_warning (
         "db", "Startup database reclamation failed: " + std::string (e.what ()));
     }
+
+    if (impl_->connection != nullptr) {
+        impl_->session_changes_baseline = sqlite3_total_changes64 (impl_->connection);
+    }
 }
 
 int64_t Database::stamp_hashless_spec_bindings () {
@@ -1590,6 +1594,18 @@ std::chrono::milliseconds busy_timeout) {
 }
 
 namespace {
+/// Says so when a snapshot could not be flushed to disk. Never an error: the
+/// file is whole and validated, and failing here would delete a good backup to
+/// report a durability gap the next refresh closes.
+void warn_unless_flushed (bool flushed, std::string_view what, const fs::path& path) {
+    if (flushed) {
+        return;
+    }
+    vayu::utils::log_warning ("db",
+    "Could not flush " + std::string (what) + " to disk; it may not survive a power loss",
+    { { "path", path.string () } });
+}
+
 /// Removes a database file and the `-wal` / `-shm` beside it, reporting nothing:
 /// every caller is clearing a path it is about to write, or one it has just
 /// decided is not a snapshot, and a leftover is the next attempt's to clear.
@@ -1599,14 +1615,109 @@ void remove_db_file_set (const fs::path& file) {
     fs::remove (fs::path (file.string () + "-wal"), ec);
     fs::remove (fs::path (file.string () + "-shm"), ec);
 }
+
+constexpr std::string_view NOT_VALIDATED_REFUSAL =
+"this start did not validate the database, so the backup is left as it is";
+
+/// VM instructions between two deadline checks in the shutdown copy: a check is
+/// one clock read, and a thousand instructions run in microseconds.
+constexpr int DEADLINE_CHECK_INSTRUCTIONS = 1000;
+
+/// A `sqlite3_progress_handler`: non-zero stops the running statement with
+/// `SQLITE_INTERRUPT`. A handler rather than `sqlite3_interrupt` from a
+/// watchdog thread, because an interrupt that lands before `sqlite3_step`
+/// starts is cleared by SQLite and the copy would then run unbounded.
+int past_deadline (void* deadline) {
+    const auto& until = *static_cast<std::chrono::steady_clock::time_point*> (deadline);
+    return std::chrono::steady_clock::now () >= until ? 1 : 0;
+}
+
+/// Whole milliseconds from now to @p deadline, never negative.
+int ms_until (std::chrono::steady_clock::time_point deadline) {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds> (
+    deadline - std::chrono::steady_clock::now ());
+    return static_cast<int> (std::max<int64_t> (0, left.count ()));
+}
+
+/// Folds the WAL into the main file before the shutdown copy, waiting for
+/// another process's reader no longer than @p deadline allows. BUSY is
+/// tolerated: the snapshot reads the WAL either way.
+void checkpoint_wal (sqlite3* connection,
+std::chrono::steady_clock::time_point deadline,
+int configured_busy_timeout_ms) {
+    sqlite3_busy_timeout (connection, ms_until (deadline));
+    const int rc = sqlite3_wal_checkpoint_v2 (
+    connection, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+    sqlite3_busy_timeout (connection, configured_busy_timeout_ms);
+    if (rc != SQLITE_OK) {
+        vayu::utils::log_debug ("db", "The shutdown checkpoint did not complete; the snapshot reads the WAL instead",
+        { { "sqliteCode", rc } });
+    }
+}
 } // namespace
 
 std::expected<void, std::string> Database::refresh_recovery_backup () {
     if (!impl_->recovery_backup_due) {
-        return std::unexpected (
-        std::string ("this start did not validate the database, so the backup "
-                     "is left as it is"));
+        return std::unexpected (std::string (NOT_VALIDATED_REFUSAL));
     }
+    return replace_recovery_backup (
+    [this] (sqlite3* connection) {
+        std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
+        if (connection != nullptr && impl_->recovery_backup_cancelled) {
+            return false;
+        }
+        impl_->recovery_backup_connection = connection;
+        return true;
+    },
+    std::chrono::steady_clock::time_point::max ());
+}
+
+std::expected<void, std::string> Database::refresh_recovery_backup_on_shutdown (
+std::chrono::milliseconds budget) {
+    if (!impl_->recovery_backup_due) {
+        return std::unexpected (std::string (NOT_VALIDATED_REFUSAL));
+    }
+    if (budget <= std::chrono::milliseconds::zero ()) {
+        return std::unexpected (
+        std::string ("no time was left in the shutdown window"));
+    }
+    // Not const: the progress handler is handed its address.
+    auto deadline = std::chrono::steady_clock::now () +
+    std::min (budget,
+    std::chrono::milliseconds (vayu::core::constants::database::SHUTDOWN_BACKUP_DEADLINE_MS));
+
+    try {
+        {
+            std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+            if (impl_->connection == nullptr ||
+            sqlite3_total_changes64 (impl_->connection) <= impl_->session_changes_baseline) {
+                vayu::utils::log_debug (
+                "db", "The recovery backup was left as it is at shutdown: this session wrote nothing");
+                return {};
+            }
+            checkpoint_wal (
+            impl_->connection, deadline, impl_->storage.pragma.busy_timeout ());
+        }
+
+        const auto replaced = replace_recovery_backup (
+        [&deadline] (sqlite3* connection) {
+            if (connection != nullptr) {
+                sqlite3_busy_timeout (connection, ms_until (deadline));
+                sqlite3_progress_handler (connection,
+                DEADLINE_CHECK_INSTRUCTIONS, &past_deadline, &deadline);
+            }
+            return true;
+        },
+        deadline);
+        return replaced;
+    } catch (const std::exception& e) {
+        return std::unexpected (std::string (e.what ()));
+    }
+}
+
+std::expected<void, std::string> Database::replace_recovery_backup (
+const std::function<bool (sqlite3*)>& on_connection,
+std::chrono::steady_clock::time_point validate_by) {
     const auto started      = std::chrono::steady_clock::now ();
     const fs::path db_file  = impl_->opened_file;
     const fs::path backup   = fs::path (db_file.string () + ".bak");
@@ -1617,18 +1728,18 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
         // process that died mid-snapshot is exactly that.
         remove_db_file_set (snapshot);
 
-        const std::string refusal = vacuum_into (
-        db_file.string (), snapshot.string (), [this] (sqlite3* connection) {
-            std::lock_guard<std::mutex> lock (impl_->recovery_backup_mutex);
-            if (connection != nullptr && impl_->recovery_backup_cancelled) {
-                return false;
-            }
-            impl_->recovery_backup_connection = connection;
-            return true;
-        });
+        const std::string refusal =
+        vacuum_into (db_file.string (), snapshot.string (), on_connection);
         if (!refusal.empty ()) {
             remove_db_file_set (snapshot);
             return std::unexpected ("the snapshot did not complete: " + refusal);
+        }
+        // The probe cannot be interrupted; it costs O(schema), not O(data).
+        if (std::chrono::steady_clock::now () >= validate_by) {
+            remove_db_file_set (snapshot);
+            return std::unexpected (
+            std::string ("the snapshot finished past the deadline, so it was "
+                         "not validated"));
         }
         // Either way the previous backup stands. The snapshot is this call's
         // own scratch file, not a copy anyone else has, so it goes whatever
@@ -1651,14 +1762,20 @@ std::expected<void, std::string> Database::refresh_recovery_backup () {
         std::error_code ec;
         fs::remove (fs::path (backup.string () + "-wal"), ec);
         fs::remove (fs::path (backup.string () + "-shm"), ec);
+        // Flushed ahead of the rename: a power loss between the two would
+        // otherwise leave the backup path naming a file of zeros.
+        warn_unless_flushed (vayu::platform::fsync_file (snapshot.string ()),
+        "the recovery backup snapshot", snapshot);
         // One rename, so the backup path always names a whole database: the
         // previous one until this returns, this one after.
-        fs::rename (snapshot, backup, ec);
-        if (ec) {
+        const auto replaced =
+        vayu::platform::replace_file_durably (snapshot.string (), backup.string ());
+        if (replaced.error) {
             remove_db_file_set (snapshot);
             return std::unexpected (
-            "the snapshot could not replace the backup: " + ec.message ());
+            "the snapshot could not replace the backup: " + replaced.error.message ());
         }
+        warn_unless_flushed (replaced.durable, "the recovery backup rename", backup);
     } catch (const std::exception& e) {
         remove_db_file_set (snapshot);
         return std::unexpected (std::string (e.what ()));
@@ -1781,6 +1898,13 @@ std::expected<BackupRecord, BackupFailure> Database::backup_workspace (int64_t n
         return std::unexpected (BackupFailure{ false,
         "Could not write the backup to " + destination.string () + ": " + refusal });
     }
+
+    // The file, then the entry that names it: the user is told the backup
+    // exists, so it must not vanish with the next power loss.
+    warn_unless_flushed (vayu::platform::fsync_file (destination.string ()),
+    "the workspace backup", destination);
+    warn_unless_flushed (vayu::platform::fsync_directory (directory.string ()),
+    "the backup directory entry", directory);
 
     std::error_code size_ec;
     const auto size = fs::file_size (destination, size_ec);

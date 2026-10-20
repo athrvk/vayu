@@ -93,4 +93,22 @@ describe("the Headers tab", () => {
 		expect(screen.getByText("User-Agent")).toBeTruthy();
 		expect(screen.queryByText("Host")).toBeNull();
 	});
+
+	it("lists the request's own lines, a repeat a row each, when there is no wire frame (#2466)", () => {
+		state.response = response({
+			requestHeaders: { "X-Dup": "one, two, three" },
+			requestHeaderLines: [
+				{ name: "X-Dup", value: "one" },
+				{ name: "x-dup", value: "two" },
+				{ name: "X-Dup", value: "three" },
+			],
+		});
+		openHeadersTab();
+
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+		expect(screen.getByText("one")).toBeTruthy();
+		expect(screen.getByText("two")).toBeTruthy();
+		expect(screen.getByText("three")).toBeTruthy();
+		expect(screen.queryByText("one, two, three")).toBeNull();
+	});
 });

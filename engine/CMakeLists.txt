@@ -546,6 +546,7 @@ add_library(vayu_core STATIC
     src/utils/json.cpp
     src/utils/logger.cpp
     src/utils/metrics_helper.cpp
+    src/utils/ordered_json.cpp
     src/utils/id.cpp
     src/db/database.cpp
     src/db/db_collections.cpp

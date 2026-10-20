@@ -77,7 +77,8 @@ Database::Database (const std::string& db_path, std::chrono::milliseconds startu
         // the one step of a clean start that grew with the user's data
         // (measured: 177 ms warm and 1.1 s cold on a 280 MB workspace, every
         // start). `start_recovery_backup_refresh` takes it once the listener is
-        // up, as a consistent snapshot rather than a file copy.
+        // up, as a consistent snapshot rather than a file copy, and
+        // `refresh_recovery_backup_on_shutdown` again at a clean stop.
         vayu::utils::log_debug ("db", "Database validation successful");
     } else {
         recover_database (db_file, backup_file, db_path, probe);

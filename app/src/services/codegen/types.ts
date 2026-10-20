@@ -16,7 +16,7 @@
  * the call site needs no conversion.
  */
 
-import type { KeyValueEntry } from "@/types";
+import type { HeaderLine, KeyValueEntry } from "@/types";
 
 /**
  * The body shape the engine takes on `/compose`, `/execute` and `/runs`
@@ -56,7 +56,12 @@ export interface SnippetRequest {
 	 * holding a token only a run answers), whose `:name` is still in `url`.
 	 */
 	params?: readonly KeyValueEntry[];
-	headers?: Record<string, string>;
+	/**
+	 * Ordered lines, as `POST /compose` returns them and as the Headers table
+	 * reads: a repeated name is repeated (issue #2466). A record is the older
+	 * single-valued shape, read in its key order.
+	 */
+	headers?: HeaderLine[] | Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
 	/**

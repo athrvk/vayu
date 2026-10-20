@@ -29,12 +29,14 @@ import type {
 	ElementDef,
 	KeyValueEntry,
 	FileRef,
+	HeaderLine,
 } from "@/types";
 import type { RequestState } from "@/modules/request-builder/types";
 import { toKeyValueItems } from "@/components/shared/KeyValueEditor/key-value";
 import { parseQueryParams } from "@/modules/request-builder/utils/url";
 import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/path-variables";
 import { generateId } from "@/lib/id";
+import { headerLinesOf } from "@/lib/header-lines";
 import { holdsWithheld, isWithheld } from "@/lib/withheld-value";
 import { noFile } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
@@ -54,7 +56,12 @@ import {
 interface DesignSnapshot {
 	method?: string;
 	url?: string;
-	headers?: Record<string, string>;
+	/**
+	 * The posted lines (issue #2466) for a run the app started, the older record
+	 * for one stored before - `headerLinesOf` reads both. Values the engine
+	 * withheld hold the marker in either.
+	 */
+	headers?: HeaderLine[] | Record<string, string>;
 	/**
 	 * The path rows composition could not write into `url` (issue #1764): a
 	 * value still holding a token, left at `:name` for the send to answer.
@@ -177,44 +184,66 @@ function fileRefOf(node: unknown): FileRef {
  * the copy instead of being replayed or dropped from the saved request.
  */
 function toHeaderItems(
-	headers: Record<string, string> | undefined,
+	headers: HeaderLine[] | Record<string, string> | undefined,
 	bodyMode: unknown = [],
 	liveHeaders: KeyValueEntry[] = []
 ) {
-	// The run's `bodyModeHeaders` (issue #1765) put back on their rows, so the
-	// replay tells the engine the same thing the recorded Send did: these are
-	// the body mode's own, which a `content-type` opt-out removes.
-	const marked = new Set(Array.isArray(bodyMode) ? bodyMode : []);
+	const lines = headerLinesOf(headers).filter(
+		({ name, value }) => !isLegacyManagedHeader(name, value)
+	);
 	const own = new Map(liveHeaders.map((h) => [h.key.toLowerCase(), h]));
+	const bodyModeRows = lastRowOfEach(lines, Array.isArray(bodyMode) ? bodyMode : []);
 	return toKeyValueItems(
-		Object.entries(headers ?? {})
-			.filter(([key, value]) => !isLegacyManagedHeader(key, value))
-			.flatMap(([key, value]) => {
-				if (isWithheld(value)) {
-					const live = own.get(key.toLowerCase());
-					return live && !isWithheld(live.value) ? [live] : [];
-				}
-				return [
-					{
-						key,
-						value,
-						enabled: true,
-						...(marked.has(key) ? { source: "body-mode" as const } : {}),
-					},
-				];
-			})
+		lines.flatMap(({ name: key, value }, index) => {
+			if (isWithheld(value)) {
+				const live = own.get(key.toLowerCase());
+				return live && !isWithheld(live.value) ? [live] : [];
+			}
+			return [
+				{
+					key,
+					value,
+					enabled: true,
+					// The run's `bodyModeHeaders` (issue #1765) put back on their rows,
+					// so the replay tells the engine the same thing the recorded Send
+					// did: these are the body mode's own, which a `content-type` opt-out
+					// removes.
+					...(bodyModeRows.has(index) ? { source: "body-mode" as const } : {}),
+				},
+			];
+		})
 	);
 }
 
+/**
+ * The index of the last line carrying each of `names`, compared without case:
+ * the engine marks a name by its last row (`bodyModeHeaders`, issue #1765), so
+ * of a typed `Content-Type` repeated after the body mode's, only the one it
+ * wrote last is the body mode's.
+ */
+function lastRowOfEach(lines: HeaderLine[], names: unknown[]): Set<number> {
+	const wanted = new Set(
+		names.filter((n): n is string => typeof n === "string").map((n) => n.toLowerCase())
+	);
+	const last = new Map<string, number>();
+	lines.forEach(({ name }, index) => {
+		if (wanted.has(name.toLowerCase())) last.set(name.toLowerCase(), index);
+	});
+	return new Set(last.values());
+}
+
 /** The recorded headers whose value the engine withheld. */
-function withheldHeaderNames(headers: Record<string, string> | undefined): string[] {
-	return Object.entries(headers ?? {})
-		.filter(([, value]) => isWithheld(value))
-		.map(([key]) => key);
+function withheldHeaderNames(headers: HeaderLine[] | Record<string, string> | undefined): string[] {
+	return headerLinesOf(headers)
+		.filter(({ value }) => isWithheld(value))
+		.map(({ name }) => name);
 }
 
 /** Which parts of the snapshot hold the marker. `params` follows `url`, which they are parsed from. */
-function withheldParts(snapshot: DesignSnapshot, headers?: Record<string, string>): WithheldParts {
+function withheldParts(
+	snapshot: DesignSnapshot,
+	headers?: HeaderLine[] | Record<string, string>
+): WithheldParts {
 	const url = isWithheld(snapshot.url ?? "");
 	return {
 		headers: withheldHeaderNames(headers),

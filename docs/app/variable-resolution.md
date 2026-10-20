@@ -596,39 +596,39 @@ assigning to `pm.request.headers`, an auth credential, an import, a payload
 posted straight to `POST /execute` - is refused before the transfer starts,
 naming the header instead of a variable.
 
-### The other one: a header a variable would erase (#1051)
+### The other one: a header a variable would repeat (#1051)
 
-A header *name* is substituted like anything else, and the map it lands in holds
-one value per name. So two names that resolve alike do not both go out:
-`{{tenant_header}}: acme` beside a literal `X-Tenant: legacy` is one header once
-the variable answers `X-Tenant`, and the other is gone. Names are compared
-without case, so a `{{h}}` resolving to `authorization` takes the place of an
-`Authorization` typed beside it.
+A header *name* is substituted like anything else, so two names can come out of
+resolution as one: `{{tenant_header}}: acme` beside a literal
+`X-Tenant: legacy` would send `X-Tenant` twice once the variable answers
+`X-Tenant`, where the request's rows show two different headers. Names are
+compared without case, so a `{{h}}` resolving to `authorization` would send a
+second credential beside an `Authorization` typed next to it.
 
 That is the same quiet wrong request as the one above with the fault reversed -
-there a value forges a header, here a name erases one - so it gets the same
-answer: a `400` with code `colliding_header_names`, naming both spellings as
-written and the name they produced. Repair is not on offer for the reason it is
-not offered above: the two names are equally the author's, so choosing one is
-inventing an intention, and "whichever the map reached last" is an
-implementation detail rather than a rule.
+there a value forges a header, here a name repeats one the author did not
+repeat - so it gets the same answer: a `400` with code
+`colliding_header_names`, naming both spellings as written and the name they
+produced. Repair is not on offer for the reason it is not offered above: the two
+names are equally the author's, so choosing one is inventing an intention.
 
-**Only a collision resolution made is refused.** Two names typed into one
-request are two lines visible side by side, and the later one has always won;
-what this refuses is the collision that is invisible until the request comes
-back wrong. The distinction is the one [data-driven
+**Only a collision resolution made is refused.** Two names *written* alike -
+`X-Dup` and `x-dup` typed on two rows, or one `{{h}}` typed twice - are lines
+visible side by side, and every one of them is sent, in order and in its own
+spelling (issue #2466); what this refuses is the repeat that is invisible until
+the request comes back wrong. The distinction is the one [data-driven
 runs](./data-driven-runs.md) already draw for a bound row.
 
 The rule is layered too, one definition
 (`engine/include/vayu/http/header_names.hpp`): the bind-time one naming the
 column and the row, composition's `400`, the execute-time residual pass - which
-rebuilds the same map after a pre-request script has run, and so can meet a
+resolves names again after a pre-request script has run, and so can meet a
 collision composition never saw, refusing in the same words as a failed send
 rather than a rejected payload - and a script's own `pm.sendRequest` (#1067),
-which builds a map of its own and throws those same words with the call named in
-front of them. The pre-send gate is deliberately *not* the
-backstop here, and cannot be: by the time it sees a request the erased header is
-already missing, with nothing left to notice.
+which resolves names of its own and throws those same words with the call named
+in front of them. The pre-send gate is deliberately *not* the
+backstop here, and cannot be: by the time it sees a request the names are
+resolved, and a produced repeat looks exactly like a typed one.
 
 ### And the name that resolves to nothing (#1084)
 

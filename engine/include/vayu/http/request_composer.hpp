@@ -213,11 +213,14 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
 /**
  * @ref substitute_tokens over a URL, writing each replacement as Postman does
  * (issue #1773): it substitutes into the URL string and parses the result
- * again, so a value is URL text (`core::encode_at_url_component`). In the
- * query its `QUERY_ENCODE_SET` bytes are encoded and its `&`, `=`, `?` and
- * `#` stay structure; the head and the fragment take it as it stands. A
- * layered value is resolved whole first and encoded once, so a `%` a value
- * carries is never encoded twice.
+ * again, so a value is URL text (`core::encode_at_url_component`): its `/`,
+ * `&`, `=`, `?` and `#` stay structure, and the rest is encoded by Postman's
+ * set for the path, the query or the fragment it lands in; the scheme and
+ * the authority take it as it stands. A layered value is resolved whole
+ * first and encoded once, so a `%` a value carries is never encoded twice.
+ * The literal text around the tokens has only the bytes no request target
+ * may carry raw encoded (`core::encode_literal_at_url_component`, issue
+ * #2465), so `/a b` composes to `/a%20b` and every other byte is kept.
  *
  * The component is read left to right from the text written so far, the
  * literal around the tokens and the values already written, so a `?` that a
@@ -225,11 +228,12 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
  * tokens after it - as it does for a later pass that meets the same text as a
  * literal.
  *
- * @p encode_query false is `disableUrlEncoding`: every value as it stands.
+ * @p encode false is `disableUrlEncoding`: every value and every literal as
+ * it stands.
  */
 std::string substitute_url_tokens (const std::string& input,
 const std::function<std::optional<std::string> (const std::string& name)>& resolve,
-bool encode_query);
+bool encode);
 
 /** One string split around the `{{name}}` occurrences a caller kept. */
 struct TokenSplit {
@@ -343,13 +347,13 @@ const std::optional<IterationIdentity>& identity = std::nullopt);
 
 /**
  * @ref resolve_template for a request's URL: the same lookup, written through
- * @ref substitute_url_tokens, so a value that lands in the query is encoded by
- * Postman's query rule unless @p encode_query is false (`disableUrlEncoding`).
+ * @ref substitute_url_tokens, so a value is encoded by the rule of the
+ * component it lands in unless @p encode is false (`disableUrlEncoding`).
  * Composition and the residual pass both resolve the URL through this.
  */
 std::string resolve_url_template (const std::string& input,
 const VariableValues& vars,
-bool encode_query,
+bool encode,
 const BoundColumnNames& bound_columns = {},
 DynamicResolution dynamic             = DynamicResolution::Generate);
 

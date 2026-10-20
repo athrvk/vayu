@@ -76,8 +76,9 @@ enum class FieldContext : std::uint8_t {
     /// A form field, a text body, a URL sent as typed: no quoting rule of its
     /// own.
     Plain,
-    /// A URL whose query is encoded (issue #1773): a token in a query key or
-    /// value is written by Postman's query rule, anywhere else as @ref Plain.
+    /// A URL sent encoded (issues #1773, #2465): a token is written by
+    /// Postman's rule for the path, query or fragment it lands in, and as
+    /// @ref Plain in the scheme and authority.
     Url,
     /// A header name or value, or a credential `apply_auth` writes into a
     /// header line. Plain text like @ref Plain - a header has no quoting rule -
@@ -126,8 +127,7 @@ struct HeaderCollision {
     /// has to go and fix, so the error names this rather than the result.
     std::string original;
     /// The name already taken, equal (ignoring case) to what @ref original
-    /// became. It is the *other* header's bound name, which is the one that
-    /// survives a first-wins insert.
+    /// became: the bound name of the first header to produce it.
     std::string taken;
 };
 
@@ -173,8 +173,8 @@ struct HeaderFaults {
  * Returns the first fault of each kind the rebuild produced, for the caller to
  * refuse the bind over; an empty @ref HeaderFaults for the ordinary walk. Only
  * a *bind* can produce either, and that is why the split ignores what it
- * reports: `request.headers` compares without case already, so two of its own
- * keys cannot collide, and a name that is empty before any row is bound into it
+ * reports: a split rewrites no name, so every repeated name it walks is a
+ * repeat as written, and a name that is empty before any row is bound into it
  * is one no row emptied - it is composition's to refuse, and composition does.
  */
 /**
@@ -206,39 +206,38 @@ HeaderFaults walk_bindable_fields (vayu::Request& request, Visit&& visit) {
     }
 
     if (!request.headers.empty ()) {
-        vayu::Headers rebound;
+        vayu::HeaderList rebound;
+        vayu::http::HeaderNameOrigins produced;
         for (const auto& [name, value] : request.headers) {
             std::string bound_name  = name;
             std::string bound_value = value;
             visit (bound_name, FieldContext::Header);
             visit (bound_value, FieldContext::Header);
             // Recorded before the collision below, on the reasoning in
-            // `HeaderFaults`. A name bound to nothing is still emplaced: what
-            // the walk owes its caller is the field count, and refusing here
-            // would make that depend on a row's contents exactly as an early
-            // return would.
+            // `HeaderFaults`. A name bound to nothing is still kept: what the
+            // walk owes its caller is the field count, and refusing here would
+            // make that depend on a row's contents exactly as an early return
+            // would.
             if (bound_name.empty () && !faults.emptied) {
                 faults.emptied = name;
             }
-            // A plain `emplace` is first-wins and silent, and a dropped header
-            // is exactly the quiet wrong request this namespace exists to
-            // remove - worse than most, because the collision belongs to the
-            // *row*: a file whose row 3 binds `authorization` beside a literal
-            // `Authorization` sends two good requests and then one missing its
-            // auth, with nothing said. Recorded and refused by the caller.
+            // Two names written differently that one row binds alike would go
+            // out as a repeated header no request row shows - and the collision
+            // belongs to the *row*: a file whose row 3 binds `authorization`
+            // beside a literal `Authorization` sends two good requests and then
+            // one carrying a second credential, with nothing said. Recorded and
+            // refused by the caller. Two names written alike are a repeat the
+            // author typed, and are kept (issue #2466).
             //
             // The walk still finishes: the field positions the joiner addresses
             // are counted by it, so an early return would make the contract
             // above ("neither can address a field the other does not") depend
             // on a row's contents.
-            auto [existing, inserted] =
-            rebound.emplace (std::move (bound_name), std::move (bound_value));
-            if (!inserted && !faults.collision) {
-                // `bound_name` was consumed by the failed emplace; the key that
-                // won says what it collided with, and says it in the spelling
-                // that survives.
-                faults.collision = HeaderCollision{ name, existing->first };
+            auto collision = vayu::http::record_produced_name (produced, bound_name, name);
+            if (collision && !faults.collision) {
+                faults.collision = HeaderCollision{ name, collision->produced };
             }
+            rebound.add (std::move (bound_name), std::move (bound_value));
         }
         request.headers = std::move (rebound);
     }
@@ -289,9 +288,9 @@ std::string describe_header_collision (const HeaderCollision& collision,
 const IterationBinding& binding) {
     return "binding header \"" + collision.original + "\" against " +
     bound_subject (binding) + " produced \"" + collision.taken +
-    "\", which another header of this request already resolves to - one of the "
-    "two would be dropped, so the row is refused rather than sent with a "
-    "header missing";
+    "\", which another header of this request already resolves to - the "
+    "request would carry that header twice where its rows name two different "
+    "headers, so the row is refused rather than sent that way";
 }
 
 /// Which `FieldContext` a credential headed for @p destination binds under.

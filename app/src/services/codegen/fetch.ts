@@ -16,7 +16,7 @@
  * syntax error.
  */
 
-import { headerEncodingNotes, prepareRequest } from "./prepare";
+import { foldRepeatedHeaders, headerEncodingNotes, prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A JS string literal for this value. `JSON.stringify` *is* the escape rule. */
@@ -45,7 +45,9 @@ export function generateFetch(
 	// it.
 	const headers: Array<{ name: string; expression: string }> = [];
 	const isFormData = prepared.body?.kind === "form-data";
-	for (const [name, value] of prepared.headers) {
+	const folded = foldRepeatedHeaders(prepared.headers, "fetch");
+	notes.push(...folded.notes);
+	for (const [name, value] of folded.headers) {
 		// `fetch` sets multipart's Content-Type itself, boundary included. Keeping
 		// a boundary-less one from the composed request makes the server read the
 		// whole body as one part - so it is dropped, and said out loud.

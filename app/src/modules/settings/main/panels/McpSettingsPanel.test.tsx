@@ -45,6 +45,7 @@ const SAVED: McpSafetyConfig = {
 	maxConcurrency: 200,
 	maxDurationSeconds: 300,
 	maxIterations: 10000,
+	maxResponseSamples: 10000,
 	allowWrites: false,
 	allowNetworkSettings: false,
 	revealSecretsToAgents: false,
@@ -298,6 +299,7 @@ describe("McpSettingsPanel cap copy", () => {
 		// voice conventions.
 		expect(screen.getByLabelText("Max duration")).toHaveAttribute("max", "86400");
 		expect(screen.getByLabelText("Max iterations")).toHaveAttribute("max", "100000000");
+		expect(screen.getByLabelText("Max response samples")).toHaveAttribute("max", "1000000");
 	});
 
 	it("says a cap above that maximum is lowered rather than stored", async () => {
