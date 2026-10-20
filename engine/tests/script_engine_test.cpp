@@ -1152,15 +1152,16 @@ TEST_F (ScriptEngineTest, ExpectNewMatchersCanFail) {
 TEST_F (ScriptEngineTest, ExpectChainRejectsUnknownMembers) {
     const auto scripts = std::to_array<const char*> ({
     R"(pm.test("t", function() { pm.expect(1).to.be.trueish; });)",
-    // chai has these and Vayu does not: they must fail loudly rather than pass.
-    R"(pm.test("t", function() { pm.expect({}).to.be.extensible; });)",
-    R"(pm.test("t", function() { pm.expect({}).to.be.frozen; });)",
-    R"(pm.test("t", function() { pm.expect({}).to.be.sealed; });)",
+    // chai-postman has these and Vayu does not: they must fail loudly rather
+    // than pass.
+    R"(pm.test("t", function() { pm.expect(pm.response).to.be.postmanResponse; });)",
+    R"(pm.test("t", function() { pm.expect(pm.request).to.be.postmanRequest; });)",
+    R"(pm.test("t", function() { pm.expect(1).to.be.postmanRequestOrResponse; });)",
     // A typo in the middle of a chain names itself too.
     R"(pm.test("t", function() { pm.expect({a:1}).to.hve.property("a"); });)",
     // The negated form is a property read like any other, so it throws rather
     // than negating its way to a pass.
-    R"(pm.test("t", function() { pm.expect({}).to.not.be.extensible; });)",
+    R"(pm.test("t", function() { pm.expect({}).to.not.be.postmanResponse; });)",
     // A chainable method's function finds members through the expectation,
     // so an unknown one after it reaches the same hook.
     R"(pm.test("t", function() { pm.expect([1]).to.include.membrs([1]); });)",
@@ -1259,21 +1260,28 @@ TEST_F (ScriptEngineTest, LanguageChainsCarryTheChainsFlags) {
     }
 }
 
-// `.itself` reads as prose and is not: chai's only reader of it is
-// `respondTo`, which Vayu does not have, so it stays a throw naming itself
-// rather than a flag nothing reads.
-TEST_F (ScriptEngineTest, LanguageChainsExcludeTheFlagSetters) {
-    const auto scripts = std::to_array<const char*> ({
-    R"(pm.test("t", function() { pm.expect({a:1}).to.itself.have.property("a"); });)",
-    });
+// `.itself` reads as prose and is not: `respondTo` reads it, so a function
+// target is asked about its own members instead of its prototype's. Accepted
+// as a no-op it would answer the question the script did not write.
+TEST_F (ScriptEngineTest, ItselfIsAFlagRespondToReads) {
+    auto result = engine.execute_test (R"(
+        var C = function () {};
+        C.prototype.method = function () {};
+        C.helper = function () {};
+        pm.test("without itself, the prototype is asked", function() {
+            pm.expect(C).to.respondTo("method");
+            pm.expect(C).to.not.respondTo("helper");
+        });
+        pm.test("with itself, the function is", function() {
+            pm.expect(C).itself.to.respondTo("helper");
+            pm.expect(C).itself.to.not.respondTo("method");
+        });
+    )",
+    request, response, env);
 
-    for (const char* script : scripts) {
-        auto result = engine.execute_test (script, request, response, env);
-        ASSERT_EQ (result.tests.size (), 1u) << script;
-        EXPECT_FALSE (result.tests[0].passed) << script;
-        EXPECT_NE (
-        result.tests[0].error_message.find ("not a supported assertion"), std::string::npos)
-        << script << " -> " << result.tests[0].error_message;
+    ASSERT_EQ (result.tests.size (), 2u);
+    for (const auto& test : result.tests) {
+        EXPECT_TRUE (test.passed) << test.name << " -> " << test.error_message;
     }
 }
 

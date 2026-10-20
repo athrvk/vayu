@@ -3,9 +3,17 @@
 
 interface VayuExpectation {
 	/**
+	 * Assert the value is a function's own `arguments` object (alias for .to.be.arguments).
+	 */
+	Arguments: VayuExpectation;
+	/**
 	 * Assert the value is NaN. chai's rule is `value !== value`, so only the number NaN passes - a string that would read as NaN does not.
 	 */
 	NaN: VayuExpectation;
+	/**
+	 * Assert the function throws (alias for .to.throw).
+	 */
+	Throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
 	/**
 	 * Assert the value is of a specific type, named as chai's type-detect names it: string, number, boolean, null, undefined, array, object, function, date, regexp, map, set, error, promise, symbol, bigint.
 	 * 
@@ -49,6 +57,10 @@ interface VayuExpectation {
 	 * Assert the number is within delta of expected (alias for .to.be.closeTo). The delta is required.
 	 */
 	approximately(expected: number, delta: number): VayuExpectation;
+	/**
+	 * Assert the value is a function's own `arguments` object (also .to.be.Arguments).
+	 */
+	arguments: VayuExpectation;
 	at: VayuExpectation;
 	be: VayuExpectation;
 	/**
@@ -73,6 +85,24 @@ interface VayuExpectation {
 	 */
 	but: VayuExpectation;
 	/**
+	 * After .change, .increase or .decrease: assert the subject moved by this much. .change counts the size of the move in either direction; the other two count the move in their own.
+	 * 
+	 * Example:
+	 * pm.expect(add).to.increase(counter, 'n').and.by(2);
+	 */
+	by(delta: number): VayuExpectation;
+	/**
+	 * Assert the function changes the subject. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(function () { counter.n++; }).to.change(counter, 'n');
+	 */
+	change(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function changes the subject (alias for .to.change). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	changes(subject: Function | object, property?: string): VayuExpectation;
+	/**
 	 * Assert the number is within delta of expected. The delta is required.
 	 * 
 	 * Example:
@@ -87,6 +117,17 @@ interface VayuExpectation {
 	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
 	 */
 	contains(value: any): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a lesser number. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(drain).to.decrease(counter, 'n').by(2);
+	 */
+	decrease(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a lesser number (alias for .to.decrease). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	decreases(subject: Function | object, property?: string): VayuExpectation;
 	deep: VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
@@ -136,6 +177,17 @@ interface VayuExpectation {
 	 */
 	exist: VayuExpectation;
 	/**
+	 * Assert the value is not null or undefined (alias for .to.exist).
+	 */
+	exists: VayuExpectation;
+	/**
+	 * Assert the object can still have properties added (Object.isExtensible). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.extensible;
+	 */
+	extensible: VayuExpectation;
+	/**
 	 * Assert the value is false.
 	 */
 	false: VayuExpectation;
@@ -144,9 +196,20 @@ interface VayuExpectation {
 	 */
 	finite: VayuExpectation;
 	/**
+	 * Assert the object is frozen (Object.isFrozen). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.frozen;
+	 */
+	frozen: VayuExpectation;
+	/**
 	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 */
 	greaterThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than or equal to n (alias for .to.be.at.least). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	greaterThanOrEqual(n: number | Date): VayuExpectation;
 	/**
 	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 */
@@ -167,6 +230,10 @@ interface VayuExpectation {
 	 * Assert the object has an own property (alias for .to.have.own.property). Only the object's own properties count; an inherited one does not.
 	 */
 	haveOwnProperty(name: string, value?: any): VayuExpectation;
+	/**
+	 * Assert the object has an own property descriptor (alias for .to.have.ownPropertyDescriptor).
+	 */
+	haveOwnPropertyDescriptor(name: string, descriptor?: PropertyDescriptor): VayuExpectation;
 	/**
 	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value. It is also a chain: .include.keys and .include.members accept a superset.
 	 * 
@@ -198,6 +265,17 @@ interface VayuExpectation {
 	 */
 	includes(value: any): VayuExpectation;
 	/**
+	 * Assert the function makes the subject a greater number. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(add).to.increase(counter, 'n').by(2);
+	 */
+	increase(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a greater number (alias for .to.increase). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	increases(subject: Function | object, property?: string): VayuExpectation;
+	/**
 	 * Assert the value is an instance of a constructor.
 	 * 
 	 * Example:
@@ -215,6 +293,7 @@ interface VayuExpectation {
 	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
 	 */
 	is: VayuExpectation;
+	itself: VayuExpectation;
 	/**
 	 * Assert the value satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate fails the assertion naming it rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
 	 * 
@@ -271,6 +350,10 @@ interface VayuExpectation {
 	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 */
 	lessThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than or equal to n (alias for .to.be.at.most). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lessThanOrEqual(n: number | Date): VayuExpectation;
 	/**
 	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 */
@@ -374,6 +457,13 @@ interface VayuExpectation {
 	 */
 	ownProperty(name: string, value?: any): VayuExpectation;
 	/**
+	 * Assert the object has an own property of that name and, given a descriptor, that its descriptor deeply equals it. With the name alone the chain moves on to the descriptor.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.ownPropertyDescriptor('id').that.has.property('writable', true);
+	 */
+	ownPropertyDescriptor(name: string, descriptor?: PropertyDescriptor): VayuExpectation;
+	/**
 	 * Assert the object has a property, and optionally that it equals a value. The value is compared strictly unless the chain is `deep`.
 	 * 
 	 * Example:
@@ -400,6 +490,23 @@ interface VayuExpectation {
 	 */
 	property(name: string, value?: any): VayuExpectation;
 	/**
+	 * Assert the object has a method of that name. A function is asked about its prototype's methods - what its instances respond to - unless .itself comes first.
+	 * 
+	 * Example:
+	 * pm.expect(client).to.respondTo('send');
+	 * 
+	 * `to.itself.respondTo`:
+	 * Assert the function itself, not its prototype, has a method of that name.
+	 * 
+	 * Example:
+	 * pm.expect(Client).itself.to.respondTo('create');
+	 */
+	respondTo(method: string): VayuExpectation;
+	/**
+	 * Assert the object has a method of that name (alias for .to.respondTo).
+	 */
+	respondsTo(method: string): VayuExpectation;
+	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
 	 * Example:
@@ -417,6 +524,13 @@ interface VayuExpectation {
 	 * pm.expect(n).to.satisfy(function(v) { return v % 2 === 0; });
 	 */
 	satisfy(predicate: (value: any) => boolean): VayuExpectation;
+	/**
+	 * Assert the object is sealed (Object.isSealed). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.sealed;
+	 */
+	sealed: VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 

@@ -35,6 +35,20 @@ namespace {
 // pm.expect() Chainable Assertions
 // ============================================================================
 
+// What `change` / `increase` / `decrease` measured, kept for the `.by` that may
+// follow in the same chain.
+enum class DeltaBehavior { Change, Increase, Decrease };
+
+struct DeltaRecord {
+    DeltaBehavior behavior = DeltaBehavior::Change;
+    // How a failure names what was measured: `.prop`, or the value a measuring
+    // function answered before the call.
+    std::string subject{};
+    double initial    = 0;
+    double after      = 0;
+    double real_delta = 0;
+};
+
 // Expectation state stored in JS object
 struct ExpectState {
     JSValue actual;
@@ -55,6 +69,9 @@ struct ExpectState {
     bool any_key = false;
     // `.ordered` before `.members`: position matters.
     bool ordered = false;
+    // `.itself` before `.respondTo`: a function target is asked about its own
+    // members rather than its `prototype`'s.
+    bool itself = false;
     // Set by reading `.length` / `.lengthOf`, which is chai's `doLength`: the
     // ordering matchers then compare the target's length (a Map's or Set's
     // size) instead of the target.
@@ -64,6 +81,9 @@ struct ExpectState {
     // `create_expectation`'s two-field aggregate init, which assigns this
     // separately, out of -Wmissing-field-initializers.
     std::string message{};
+    // The last `change` / `increase` / `decrease` this chain made, which `.by`
+    // reads.
+    std::optional<DeltaRecord> delta{};
     // Whether the unknown-member hook is live. `create_expectation` installs
     // every member first and sets this last, because defining a property looks
     // up the existing own property, so a hook armed from the moment the object
@@ -741,6 +761,7 @@ constexpr auto flag_chainers = std::to_array<FlagChainer> ({
 { "ordered", &ExpectState::ordered, true },
 { "any", &ExpectState::any_key, true },
 { "all", &ExpectState::any_key, false },
+{ "itself", &ExpectState::itself, true },
 });
 
 JSValue
@@ -988,7 +1009,9 @@ constexpr auto ordering_matchers = std::to_array<OrderingMatcher> ({
 { "lt", "below", Relation::Below },
 { "lessThan", "below", Relation::Below },
 { "gte", "at least", Relation::AtLeast },
+{ "greaterThanOrEqual", "at least", Relation::AtLeast },
 { "lte", "at most", Relation::AtMost },
+{ "lessThanOrEqual", "at most", Relation::AtMost },
 { "within", "within", Relation::Within },
 });
 
@@ -998,7 +1021,7 @@ constexpr auto ordering_matchers = std::to_array<OrderingMatcher> ({
 // the completion entry every registered name needs, rather than one that
 // registers without either: an ordering matcher that silently answered the
 // wrong comparison is the failure this file exists to stop.
-static_assert (std::size (ordering_matchers) == 11,
+static_assert (std::size (ordering_matchers) == 13,
 "a new ordering row needs its completion entry, and an arm in ordering_holds "
 "if "
 "it is a new relation");
@@ -1395,8 +1418,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
 // The expectation `.property(name)` returns: the same chain with the property's
 // value as its subject, so `.that.is.a("number")` and `.and.equal(1)` assert on
 // the value. The flags that describe how a matcher reads its subject (`deep`,
-// `nested`, `own`, `contains`, `any`, `ordered`) and the failure message carry
-// over, as they do on chai's one assertion object; `not` does not, because a
+// `nested`, `own`, `contains`, `any`, `ordered`, `itself`) and the failure
+// message carry over, as they do on chai's one assertion object; `not` does
+// not, because a
 // retarget happens only on a passing positive assertion and the new subject has
 // not been negated by anything.
 JSValue expect_on_property_value (JSContext* ctx, const ExpectState* state, JSValueConst value) {
@@ -1411,6 +1435,7 @@ JSValue expect_on_property_value (JSContext* ctx, const ExpectState* state, JSVa
     next_state->contains = state->contains;
     next_state->any_key  = state->any_key;
     next_state->ordered  = state->ordered;
+    next_state->itself   = state->itself;
     return next;
 }
 
@@ -1486,6 +1511,102 @@ JSValue expect_own_property (JSContext* ctx, JSValueConst this_val, int argc, JS
     }
     state->own = true;
     return expect_have_property (ctx, this_val, argc, argv);
+}
+
+/**
+ * @brief `Object.<function>(...args)` as the new reference it answers, or the
+ * exception it raised.
+ *
+ * The questions chai answers with `Object.isFrozen` and its siblings are the
+ * language's own, so they are asked of the language: a sealed or extensible
+ * object is not a property list this file could read back.
+ */
+JSValue call_object_static (JSContext* ctx, const char* function, int argc, JSValueConst* argv) {
+    const ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+    const ScopedValue object (ctx, JS_GetPropertyStr (ctx, global.get (), "Object"));
+    const ScopedValue callee (ctx, JS_GetPropertyStr (ctx, object.get (), function));
+    if (!JS_IsFunction (ctx, callee.get ())) {
+        return JS_ThrowInternalError (ctx, "Object.%s is not available", function);
+    }
+    return JS_Call (ctx, callee.get (), object.get (), argc, argv);
+}
+
+/**
+ * chai's `ownPropertyDescriptor(name[, descriptor])`: the target has an own
+ * property of that name and, given a descriptor, its descriptor deeply equals
+ * it. Reading the descriptor retargets the chain at it, as `property` retargets
+ * at the value, so `.ownPropertyDescriptor("a").that.has.property("writable")`
+ * asserts on the descriptor.
+ *
+ * chai reads a string second argument as the failure message and Vayu has no
+ * per-call message on any matcher, so a string there is accepted and not read.
+ */
+JSValue expect_own_property_descriptor (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "ownPropertyDescriptor() requires a property name");
+    }
+    const bool has_descriptor = argc >= 2 && JS_IsObject (argv[1]);
+    if (argc >= 2 && !has_descriptor && !JS_IsString (argv[1]) &&
+    !JS_IsUndefined (argv[1]) && !JS_IsNull (argv[1])) {
+        return JS_ThrowTypeError (ctx, "ownPropertyDescriptor() expects a descriptor object, got %s",
+        js_type_name (ctx, argv[1]));
+    }
+
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    // `Object(null)` is `{}` in chai, so a null or undefined target has no
+    // property rather than being a TypeError.
+    JSValue read = JS_UNDEFINED;
+    if (!JS_IsNull (state->actual) && !JS_IsUndefined (state->actual)) {
+        std::array<JSValueConst, 2> args{ state->actual, argv[0] };
+        read = call_object_static (ctx, "getOwnPropertyDescriptor",
+        static_cast<int> (args.size ()), args.data ());
+        if (JS_IsException (read)) {
+            return JS_EXCEPTION;
+        }
+    }
+    const ScopedValue actual_descriptor (ctx, read);
+    const bool present = JS_IsObject (actual_descriptor.get ());
+
+    bool holds = present;
+    if (present && has_descriptor) {
+        DeepEqualPath path;
+        const int same = js_deep_equal (
+        ctx, argv[1], actual_descriptor.get (), 0, path, ZeroRule::Signed);
+        if (same < 0) {
+            return JS_EXCEPTION;
+        }
+        holds = (same == 1);
+    }
+
+    const bool pass = state->negated ? !holds : holds;
+    if (!pass) {
+        const std::string name     = js_describe (ctx, argv[0]);
+        const std::string polarity = state->negated ? "to not " : "to ";
+        std::string msg;
+        if (present && has_descriptor) {
+            msg = "Expected the own property descriptor for " + name + " " +
+            polarity + "match " + js_describe (ctx, argv[1]);
+            if (!state->negated) {
+                msg += ", got " + js_describe (ctx, actual_descriptor.get ());
+            }
+        } else {
+            msg = "Expected " + js_describe (ctx, state->actual) + " " +
+            polarity + "have an own property descriptor for " + name;
+        }
+        return throw_expect_failure (ctx, state, msg);
+    }
+
+    if (state->negated) {
+        return expect_chained (ctx, this_val);
+    }
+    return expect_on_property_value (ctx, state, actual_descriptor.get ());
 }
 
 // Terminal getters: assert on property access (Chai/Postman paren-less idiom).
@@ -1654,6 +1775,78 @@ JSValue expect_finite_getter (JSContext* ctx, JSValueConst this_val, int argc, J
     }
 
     return JS_DupValue (ctx, this_val);
+}
+
+// The verdict of a getter that asks one yes/no question of the target: the
+// failure names the target and the adjective, under `.not` as well.
+JSValue assert_target_is (JSContext* ctx,
+JSValueConst this_val,
+const ExpectState& state,
+bool holds,
+const char* adjective) {
+    if (state.negated == holds) {
+        const std::string msg = "Expected " + js_describe (ctx, state.actual) +
+        (state.negated ? " to not be " : " to be ") + adjective;
+        return throw_expect_failure (ctx, &state, msg);
+    }
+    return expect_chained (ctx, this_val);
+}
+
+/**
+ * `.arguments` / `.Arguments` - chai's `type(value) === 'Arguments'`, which is
+ * the `[object Arguments]` tag of a function's own `arguments` object.
+ */
+JSValue expect_arguments_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    bool failed           = false;
+    const std::string tag = js_class_tag (ctx, state->actual, &failed);
+    if (failed) {
+        return JS_EXCEPTION;
+    }
+    return assert_target_is (ctx, this_val, *state, tag == "[object Arguments]", "arguments");
+}
+
+// `.extensible`, `.sealed` and `.frozen` are what `Object.isExtensible`,
+// `Object.isSealed` and `Object.isFrozen` answer, a primitive included: the
+// language says a primitive is sealed and frozen and not extensible, and chai
+// takes its answer from the same calls.
+struct ObjectStateMatcher {
+    const char* name;
+    const char* query;
+};
+constexpr auto object_state_matchers = std::to_array<ObjectStateMatcher> ({
+{ "extensible", "isExtensible" },
+{ "sealed", "isSealed" },
+{ "frozen", "isFrozen" },
+});
+
+JSValue expect_object_state_getter (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)argc;
+    (void)argv;
+    const ObjectStateMatcher& matcher =
+    object_state_matchers.at (static_cast<size_t> (magic));
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+
+    JSValueConst target = state->actual;
+    const ScopedValue answer (ctx, call_object_static (ctx, matcher.query, 1, &target));
+    if (JS_IsException (answer.get ())) {
+        return JS_EXCEPTION;
+    }
+    return assert_target_is (
+    ctx, this_val, *state, JS_ToBool (ctx, answer.get ()) == 1, matcher.name);
 }
 
 // Callable matchers documented in pm-api-compatibility.md but previously absent.
@@ -2434,6 +2627,243 @@ JSValue expect_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     return expect_chained (ctx, this_val);
 }
 
+/**
+ * chai's `respondTo(method)`: the target has a method of that name. A function
+ * target is asked about its `prototype`'s methods - what its instances respond
+ * to - unless `.itself` came first, which asks about the function's own.
+ */
+JSValue expect_respond_to (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "respondTo() requires a method name");
+    }
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!JS_IsObject (state->actual)) {
+        return JS_ThrowTypeError (ctx,
+        "respondTo() requires the target to be an object or a function, got %s",
+        js_type_name (ctx, state->actual));
+    }
+
+    // chai reads `fn.prototype[method]`, which is a TypeError on a function with
+    // no prototype (an arrow function); answering "does not respond" would make
+    // `.not.respondTo` pass for it.
+    const bool through_prototype = JS_IsFunction (ctx, state->actual) && !state->itself;
+    const ScopedValue prototype (ctx,
+    through_prototype ? JS_GetPropertyStr (ctx, state->actual, "prototype") : JS_UNDEFINED);
+    JSValueConst holder = state->actual;
+    if (through_prototype) {
+        if (JS_IsException (prototype.get ())) {
+            return JS_EXCEPTION;
+        }
+        if (!JS_IsObject (prototype.get ())) {
+            return JS_ThrowTypeError (ctx,
+            "respondTo() cannot read the prototype of a function that has "
+            "none; "
+            "use .itself to ask about the function's own members");
+        }
+        holder = prototype.get ();
+    }
+
+    const ScopedValue method (
+    ctx, JS_GetPropertyStr (ctx, holder, js_to_string (ctx, argv[0]).c_str ()));
+    if (JS_IsException (method.get ())) {
+        return JS_EXCEPTION;
+    }
+    const bool responds = JS_IsFunction (ctx, method.get ());
+    const bool pass     = state->negated ? !responds : responds;
+    if (!pass) {
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not respond to " : " to respond to ") +
+        js_describe (ctx, argv[0]);
+        return throw_expect_failure (ctx, state, msg);
+    }
+    return expect_chained (ctx, this_val);
+}
+
+// `change`, `increase` and `decrease` differ in one verdict and one word, so
+// they are one function reached by magic, like the ordering matchers.
+struct DeltaMatcher {
+    const char* name;
+    DeltaBehavior behavior;
+};
+constexpr auto delta_matchers = std::to_array<DeltaMatcher> ({
+{ "change", DeltaBehavior::Change },
+{ "changes", DeltaBehavior::Change },
+{ "increase", DeltaBehavior::Increase },
+{ "increases", DeltaBehavior::Increase },
+{ "decrease", DeltaBehavior::Decrease },
+{ "decreases", DeltaBehavior::Decrease },
+});
+
+const char* delta_verb (DeltaBehavior behavior) {
+    switch (behavior) {
+    case DeltaBehavior::Change: return "change";
+    case DeltaBehavior::Increase: return "increase";
+    case DeltaBehavior::Decrease: return "decrease";
+    }
+    return "change";
+}
+
+// What a delta matcher measures: `subject()` when no property is named,
+// `subject[property]` when one is. The exception sentinel when the read threw.
+JSValue read_delta_subject (JSContext* ctx, JSValueConst subject, const std::string* property) {
+    if (property == nullptr) {
+        return JS_Call (ctx, subject, JS_UNDEFINED, 0, nullptr);
+    }
+    return JS_GetPropertyStr (ctx, subject, property->c_str ());
+}
+
+// Only a number measures: chai subtracts, which coerces a numeric string, and a
+// value that is not a number here is NaN, so `.by` on it fails the assertion
+// rather than passing.
+double delta_number (JSContext* ctx, JSValueConst value) {
+    double out = std::nan ("");
+    if (JS_IsNumber (value)) {
+        JS_ToFloat64 (ctx, &out, value);
+    }
+    return out;
+}
+
+bool delta_holds (const DeltaRecord& record, bool values_differ) {
+    switch (record.behavior) {
+    case DeltaBehavior::Change: return values_differ;
+    case DeltaBehavior::Increase: return record.after - record.initial > 0;
+    case DeltaBehavior::Decrease: return record.after - record.initial < 0;
+    }
+    return false;
+}
+
+/**
+ * chai's `change` / `increase` / `decrease`: call the target function and
+ * compare what a subject answers before and after. The subject is a function,
+ * or an object and the name of one of its properties. The measurement is kept
+ * on the chain for a `.by` that follows.
+ *
+ * The first call of the target is the only one: the subject is read, the target
+ * runs once and the subject is read again, so a `.by` re-reads nothing.
+ */
+JSValue expect_delta (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    const DeltaMatcher& matcher = delta_matchers.at (static_cast<size_t> (magic));
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx,
+        "%s() requires a function, or an object and a property name", matcher.name);
+    }
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!JS_IsFunction (ctx, state->actual)) {
+        return JS_ThrowTypeError (
+        ctx, "%s() requires the target to be a function", matcher.name);
+    }
+
+    // chai takes a falsy second argument to mean "no property".
+    const bool by_property = argc >= 2 && JS_ToBool (ctx, argv[1]) > 0;
+    const std::string property =
+    by_property ? js_to_string (ctx, argv[1]) : std::string{};
+    const std::string* property_name = by_property ? &property : nullptr;
+    if (by_property) {
+        const JSAtom atom = JS_NewAtom (ctx, property.c_str ());
+        const int has_prop =
+        JS_IsObject (argv[0]) ? JS_HasProperty (ctx, argv[0], atom) : 0;
+        JS_FreeAtom (ctx, atom);
+        if (has_prop < 0) {
+            return JS_EXCEPTION;
+        }
+        if (has_prop == 0) {
+            return JS_ThrowTypeError (ctx,
+            "%s() requires the subject to be an object with a '%s' property",
+            matcher.name, property.c_str ());
+        }
+    } else if (!JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "%s() with one argument requires a function, got %s",
+        matcher.name, js_type_name (ctx, argv[0]));
+    }
+
+    const ScopedValue before (ctx, read_delta_subject (ctx, argv[0], property_name));
+    if (JS_IsException (before.get ())) {
+        return JS_EXCEPTION;
+    }
+    if (matcher.behavior != DeltaBehavior::Change && !JS_IsNumber (before.get ())) {
+        return JS_ThrowTypeError (ctx, "%s() requires the subject to be a number, got %s",
+        matcher.name, js_type_name (ctx, before.get ()));
+    }
+    const ScopedValue ran (ctx, JS_Call (ctx, state->actual, JS_UNDEFINED, 0, nullptr));
+    if (JS_IsException (ran.get ())) {
+        return JS_EXCEPTION;
+    }
+    const ScopedValue after (ctx, read_delta_subject (ctx, argv[0], property_name));
+    if (JS_IsException (after.get ())) {
+        return JS_EXCEPTION;
+    }
+
+    DeltaRecord record;
+    record.behavior = matcher.behavior;
+    record.subject = by_property ? "." + property : js_describe (ctx, before.get ());
+    record.initial = delta_number (ctx, before.get ());
+    record.after   = delta_number (ctx, after.get ());
+    const bool values_differ = !js_strict_equal (ctx, before.get (), after.get ());
+    switch (matcher.behavior) {
+    case DeltaBehavior::Change:
+        record.real_delta = values_differ ? 1 : 0;
+        break;
+    case DeltaBehavior::Increase:
+        record.real_delta = record.after - record.initial;
+        break;
+    case DeltaBehavior::Decrease:
+        record.real_delta = record.initial - record.after;
+        break;
+    }
+
+    const bool holds          = delta_holds (record, values_differ);
+    const std::string verb    = delta_verb (record.behavior);
+    const std::string subject = record.subject;
+    state->delta              = std::move (record);
+    if (state->negated == holds) {
+        return throw_expect_failure (ctx, state,
+        "Expected " + subject + (state->negated ? " to not " : " to ") + verb);
+    }
+    return expect_chained (ctx, this_val);
+}
+
+/**
+ * chai's `by(delta)`: how much the subject of the `change` / `increase` /
+ * `decrease` before it moved. `change` counts the size of the move in either
+ * direction; the other two count the move in their own.
+ */
+JSValue expect_by (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1 || !JS_IsNumber (argv[0])) {
+        return JS_ThrowTypeError (ctx, "by() requires a number");
+    }
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (!state->delta) {
+        return JS_ThrowTypeError (
+        ctx, "by() must follow change, increase or decrease in the chain");
+    }
+
+    const DeltaRecord& record = *state->delta;
+    double wanted             = 0;
+    JS_ToFloat64 (ctx, &wanted, argv[0]);
+    wanted                = std::fabs (wanted);
+    const double measured = record.behavior == DeltaBehavior::Change ?
+    std::fabs (record.after - record.initial) :
+    record.real_delta;
+
+    const bool holds = measured == wanted;
+    if (state->negated == holds) {
+        const std::string msg = "Expected " + record.subject +
+        (state->negated ? " to not " : " to ") + delta_verb (record.behavior) +
+        " by " + js_describe (ctx, argv[0]);
+        return throw_expect_failure (ctx, state, msg);
+    }
+    return expect_chained (ctx, this_val);
+}
+
 // chai-postman's `jsonSchema(schema, options)`. `options` is ajv's and is not
 // read: the validator here is valijson (see `json_schema_failure`).
 JSValue expect_json_schema (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -2550,11 +2980,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     // flags a chain has set - `not` included - carry across exactly as they do
     // for `and`.
     //
-    // `all`, `any`, `own` and `ordered` look like prose and are not: each
-    // changes what a later matcher asserts, so they are flags below rather than
-    // passthroughs. `.itself` is deliberately absent: it qualifies only chai's
-    // `respondTo`, which Vayu does not have, so binding it would be a flag
-    // nothing reads.
+    // `all`, `any`, `own`, `ordered` and `itself` look like prose and are not:
+    // each changes what a later matcher asserts, so they are flags below rather
+    // than passthroughs.
     const char* passthrough_chainers[] = { "and", "also", "been", "but", "does",
         "has", "is", "of", "same", "still", "that", "which", "with" };
     for (const char* name : passthrough_chainers) {
@@ -2603,11 +3031,23 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
         { "true", expect_true }, { "false", expect_false },
         { "null", expect_null_getter }, { "undefined", expect_undefined_getter },
         { "ok", expect_ok_getter }, { "empty", expect_empty_getter },
-        { "NaN", expect_nan_getter }, { "finite", expect_finite_getter } };
+        { "NaN", expect_nan_getter }, { "finite", expect_finite_getter },
+        { "exists", expect_exist }, { "arguments", expect_arguments_getter },
+        { "Arguments", expect_arguments_getter } };
     for (const auto& t : terminals) {
         JSAtom atom = JS_NewAtom (ctx, t.name);
         JS_DefinePropertyGetSet (
         ctx, obj, atom, JS_NewCFunction (ctx, t.fn, t.name, 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    }
+
+    for (size_t row = 0; row < object_state_matchers.size (); row++) {
+        const char* name = object_state_matchers.at (row).name;
+        JSAtom atom      = JS_NewAtom (ctx, name);
+        JS_DefinePropertyGetSet (ctx, obj, atom,
+        JS_NewCFunctionMagic (ctx, expect_object_state_getter, name, 0,
+        JS_CFUNC_generic_magic, static_cast<int> (row)),
+        JS_UNDEFINED, 0);
         JS_FreeAtom (ctx, atom);
     }
 
@@ -2628,6 +3068,7 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_SetPropertyStr (ctx, obj, "throw", JS_NewCFunction (ctx, expect_throw, "throw", 1));
     JS_SetPropertyStr (
     ctx, obj, "throws", JS_NewCFunction (ctx, expect_throw, "throws", 1));
+    JS_SetPropertyStr (ctx, obj, "Throw", JS_NewCFunction (ctx, expect_throw, "Throw", 1));
     JS_SetPropertyStr (ctx, obj, "instanceOf",
     JS_NewCFunction (ctx, expect_instance_of, "instanceOf", 1));
     JS_SetPropertyStr (ctx, obj, "instanceof",
@@ -2660,6 +3101,22 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_NewCFunction (ctx, expect_own_property, "ownProperty", 2));
     JS_SetPropertyStr (ctx, obj, "haveOwnProperty",
     JS_NewCFunction (ctx, expect_own_property, "haveOwnProperty", 2));
+    JS_SetPropertyStr (ctx, obj, "ownPropertyDescriptor",
+    JS_NewCFunction (ctx, expect_own_property_descriptor, "ownPropertyDescriptor", 2));
+    JS_SetPropertyStr (ctx, obj, "haveOwnPropertyDescriptor",
+    JS_NewCFunction (ctx, expect_own_property_descriptor, "haveOwnPropertyDescriptor", 2));
+    JS_SetPropertyStr (ctx, obj, "respondTo",
+    JS_NewCFunction (ctx, expect_respond_to, "respondTo", 1));
+    JS_SetPropertyStr (ctx, obj, "respondsTo",
+    JS_NewCFunction (ctx, expect_respond_to, "respondsTo", 1));
+    int delta_magic = 0;
+    for (const auto& matcher : delta_matchers) {
+        JS_SetPropertyStr (ctx, obj, matcher.name,
+        JS_NewCFunctionMagic (ctx, expect_delta, matcher.name, 2,
+        JS_CFUNC_generic_magic, delta_magic));
+        delta_magic++;
+    }
+    JS_SetPropertyStr (ctx, obj, "by", JS_NewCFunction (ctx, expect_by, "by", 1));
     JS_SetPropertyStr (ctx, obj, "jsonSchema",
     JS_NewCFunction (ctx, expect_json_schema, "jsonSchema", 1));
 

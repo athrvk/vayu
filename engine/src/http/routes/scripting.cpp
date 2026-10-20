@@ -2335,6 +2335,9 @@ nlohmann::json get_script_completions () {
     "function(value) { return ${1:true}; }",
     "Assert the predicate returns a truthy value for the target (alias for "
     ".to.satisfy).");
+    push_matcher ("to.Throw",
+    "error?: ErrorConstructor | string | RegExp, message?: string | RegExp", "",
+    "Assert the function throws (alias for .to.throw).");
     push_matcher ("to.be.instanceof", "constructor: Function", "${1:Array}",
     "Assert the value is an instance of a constructor (alias for "
     ".to.be.instanceOf).");
@@ -2359,6 +2362,14 @@ nlohmann::json get_script_completions () {
     ".to.be.at.least). " +
     ordering_note);
     push_matcher ("to.be.lte", "n: number | Date", "${1:n}",
+    "Assert the number is less than or equal to n (alias for "
+    ".to.be.at.most). " +
+    ordering_note);
+    push_matcher ("to.be.greaterThanOrEqual", "n: number | Date", "${1:n}",
+    "Assert the number is greater than or equal to n (alias for "
+    ".to.be.at.least). " +
+    ordering_note);
+    push_matcher ("to.be.lessThanOrEqual", "n: number | Date", "${1:n}",
     "Assert the number is less than or equal to n (alias for "
     ".to.be.at.most). " +
     ordering_note);
@@ -2426,6 +2437,65 @@ nlohmann::json get_script_completions () {
     "Assert the object holds every path of the given object with an equal "
     "value, each key read as a dotted or indexed path.\n\nExample:\n"
     "pm.expect(json).to.nested.include({'data.items[0].id': 1});");
+    push_matcher ("to.have.ownPropertyDescriptor",
+    "name: string, descriptor?: PropertyDescriptor", "\"${1:name}\"",
+    "Assert the object has an own property of that name and, given a "
+    "descriptor, "
+    "that its descriptor deeply equals it. With the name alone the chain moves "
+    "on to the descriptor.\n\nExample:\n"
+    "pm.expect(json).to.have.ownPropertyDescriptor('id').that.has.property("
+    "'writable', true);");
+    push_matcher ("to.haveOwnPropertyDescriptor",
+    "name: string, descriptor?: PropertyDescriptor", "\"${1:name}\"",
+    "Assert the object has an own property descriptor (alias for "
+    ".to.have.ownPropertyDescriptor).");
+    push_matcher ("to.respondTo", "method: string", "\"${1:method}\"",
+    "Assert the object has a method of that name. A function is asked about "
+    "its prototype's methods - what its instances respond to - unless "
+    ".itself comes "
+    "first.\n\nExample:\npm.expect(client).to.respondTo('send');");
+    push_matcher ("to.respondsTo", "method: string", "\"${1:method}\"",
+    "Assert the object has a method of that name (alias for .to.respondTo).");
+    push_matcher ("to.itself.respondTo", "method: string", "\"${1:method}\"",
+    "Assert the function itself, not its prototype, has a method of that "
+    "name.\n\nExample:\npm.expect(Client).itself.to.respondTo('create');");
+
+    // `change`, `increase` and `decrease` call the target once and compare what
+    // a function - or an object's property - answers before and after; `by`
+    // then asks how far it moved.
+    const std::string delta_note =
+    "The target is called once. The subject is a function, or an object and "
+    "the name of one of its properties.";
+    push_matcher ("to.change", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function changes the subject. " +
+    delta_note + "\n\nExample:\npm.expect(function () { counter.n++; }).to.change(counter, 'n');");
+    push_matcher ("to.changes", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function changes the subject (alias for .to.change). " + delta_note);
+    push_matcher ("to.increase", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a greater number. " + delta_note +
+    "\n\nExample:\npm.expect(add).to.increase(counter, 'n').by(2);");
+    push_matcher ("to.increases", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a greater number (alias for "
+    ".to.increase). " +
+    delta_note);
+    push_matcher ("to.decrease", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a lesser number. " + delta_note +
+    "\n\nExample:\npm.expect(drain).to.decrease(counter, 'n').by(2);");
+    push_matcher ("to.decreases", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a lesser number (alias for "
+    ".to.decrease). " +
+    delta_note);
+    push_matcher ("and.by", "delta: number", "${1:delta}",
+    "After .change, .increase or .decrease: assert the subject moved by this "
+    "much. .change counts the size of the move in either direction; the other "
+    "two count the move in their own.\n\nExample:\n"
+    "pm.expect(add).to.increase(counter, 'n').and.by(2);");
     push_matcher ("to.have.jsonSchema", "schema: object, options?: object", "${1:schema}",
     "Assert the value satisfies a JSON Schema (draft-07). A failure names the "
     "first path that broke the schema. A keyword the draft-07 validator does "
@@ -2440,6 +2510,46 @@ nlohmann::json get_script_completions () {
     "Assert the value is a finite number. The type is checked, not coerced: a "
     "numeric string, NaN and the infinities are not finite." },
     { "sortText", "2_to_be_finite" }, { "filterText", ".to.be.finite" } });
+
+    completions.push_back ({ { "label", "to.exists" }, { "kind", KIND_FIELD },
+    { "insertText", "to.exists" }, { "detail", ".to.exists" },
+    { "documentation", "Assert the value is not null or undefined (alias for .to.exist)." },
+    { "sortText", "2_to_exists" }, { "filterText", ".to.exists" } });
+
+    completions.push_back ({ { "label", "to.be.arguments" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.arguments" }, { "detail", ".to.be.arguments" },
+    { "documentation",
+    "Assert the value is a function's own `arguments` object (also "
+    ".to.be.Arguments)." },
+    { "sortText", "2_to_be_arguments" }, { "filterText", ".to.be.arguments" } });
+
+    completions.push_back ({ { "label", "to.be.Arguments" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.Arguments" }, { "detail", ".to.be.Arguments" },
+    { "documentation", "Assert the value is a function's own `arguments` object (alias for .to.be.arguments)." },
+    { "sortText", "2_to_be_Arguments" }, { "filterText", ".to.be.Arguments" } });
+
+    // What `Object.isExtensible`, `Object.isSealed` and `Object.isFrozen` answer.
+    // A primitive is sealed and frozen and is not extensible, as in chai.
+    struct ObjectStateCompletion {
+        const char* name;
+        const char* question;
+    };
+    constexpr auto object_states = std::to_array<ObjectStateCompletion> ({
+    { "extensible", "can still have properties added (Object.isExtensible)" },
+    { "sealed", "is sealed (Object.isSealed)" },
+    { "frozen", "is frozen (Object.isFrozen)" },
+    });
+    for (const auto& state : object_states) {
+        const std::string name (state.name);
+        completions.push_back ({ { "label", "to.be." + name }, { "kind", KIND_FIELD },
+        { "insertText", "to.be." + name }, { "detail", ".to.be." + name },
+        { "documentation",
+        std::string ("Assert the object ") + state.question +
+        ". A primitive is sealed and frozen and is not extensible, as the "
+        "language answers it.\n\nExample:\npm.expect(config).to.be." +
+        name + ";" },
+        { "sortText", "2_to_be_" + name }, { "filterText", ".to.be." + name } });
+    }
 
     completions.push_back ({ { "label", "and" }, { "kind", KIND_FIELD },
     { "insertText", "and" }, { "detail", ".and" },

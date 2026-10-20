@@ -35,6 +35,7 @@ add_executable(vayu_tests
     script_engine_test.cpp
     script_expect_message_test.cpp
     script_response_assertions_test.cpp
+    script_chai_conformance_test.cpp
     script_assertion_error_test.cpp
     script_completions_test.cpp
     script_types_test.cpp
