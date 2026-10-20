@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535; insomnia-v4-interleaved and insomnia-v5-interleaved, issue #2573). Since #2535 a Postman draft states its document position as `order`; since #2573 an Insomnia draft states its rank by sort key (`insomnia-v5` was re-recorded for it: its `Users` folder carries `meta.sortKey`). Every payload numbers a parent's folders and requests in one space.",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535; insomnia-v4-interleaved, insomnia-v5-interleaved and jmeter-interleaved, issue #2573). Since #2535 a Postman draft states its document position as `order`; since #2573 an Insomnia draft states its rank by sort key (`insomnia-v5` was re-recorded for it: its `Users` folder carries `meta.sortKey`) and a JMeter draft its document position. Every payload numbers a parent's folders and requests in one space.",
   "cases": [
     {
       "name": "postman-v21",
@@ -3573,6 +3573,320 @@
         "environments": [],
         "specs": [],
         "clientCertificates": []
+      }
+    },
+    {
+      "name": "jmeter-interleaved",
+      "document": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<jmeterTestPlan version=\"1.2\" properties=\"5.0\" jmeter=\"5.6.3\">\n  <hashTree>\n    <TestPlan testname=\"Interleaved\" enabled=\"true\"/>\n    <hashTree>\n      <ThreadGroup testname=\"Users\" enabled=\"true\"/>\n      <hashTree>\n        <HTTPSamplerProxy testname=\"First\" enabled=\"true\">\n          <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n          <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n          <stringProp name=\"HTTPSampler.path\">/first</stringProp>\n          <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n        </HTTPSamplerProxy>\n        <hashTree/>\n        <TransactionController testname=\"Outer\" enabled=\"true\"/>\n        <hashTree>\n          <HTTPSamplerProxy testname=\"InOuterBefore\" enabled=\"true\">\n            <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n            <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n            <stringProp name=\"HTTPSampler.path\">/outer/before</stringProp>\n            <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n          </HTTPSamplerProxy>\n          <hashTree/>\n          <TransactionController testname=\"Inner\" enabled=\"true\"/>\n          <hashTree>\n            <HTTPSamplerProxy testname=\"InInner\" enabled=\"true\">\n              <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n              <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n              <stringProp name=\"HTTPSampler.path\">/outer/inner</stringProp>\n              <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n            </HTTPSamplerProxy>\n            <hashTree/>\n          </hashTree>\n          <HTTPSamplerProxy testname=\"InOuterAfter\" enabled=\"true\">\n            <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n            <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n            <stringProp name=\"HTTPSampler.path\">/outer/after</stringProp>\n            <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n          </HTTPSamplerProxy>\n          <hashTree/>\n        </hashTree>\n        <HTTPSamplerProxy testname=\"Last\" enabled=\"true\">\n          <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n          <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n          <stringProp name=\"HTTPSampler.path\">/last</stringProp>\n          <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n        </HTTPSamplerProxy>\n        <hashTree/>\n      </hashTree>\n    </hashTree>\n  </hashTree>\n</jmeterTestPlan>\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [
+                  {
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [],
+                    "description": "",
+                    "elements": [
+                      {
+                        "config": {
+                          "name": "Inner"
+                        },
+                        "enabled": true,
+                        "kind": "control.transaction"
+                      }
+                    ],
+                    "name": "Inner",
+                    "order": 1,
+                    "requests": [
+                      {
+                        "auth": {
+                          "mode": "inherit"
+                        },
+                        "body": {
+                          "mode": "none"
+                        },
+                        "description": "",
+                        "followRedirects": true,
+                        "headers": [],
+                        "method": "GET",
+                        "name": "InInner",
+                        "order": 0,
+                        "params": [],
+                        "url": "https://api.example.com/outer/inner"
+                      }
+                    ],
+                    "variables": {}
+                  }
+                ],
+                "description": "",
+                "elements": [
+                  {
+                    "config": {
+                      "name": "Outer"
+                    },
+                    "enabled": true,
+                    "kind": "control.transaction"
+                  }
+                ],
+                "name": "Outer",
+                "order": 1,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "followRedirects": true,
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InOuterBefore",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://api.example.com/outer/before"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "followRedirects": true,
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InOuterAfter",
+                    "order": 2,
+                    "params": [],
+                    "url": "https://api.example.com/outer/after"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "Imported JMeter Plan",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "followRedirects": true,
+                "headers": [],
+                "method": "GET",
+                "name": "First",
+                "order": 0,
+                "params": [],
+                "url": "https://api.example.com/first"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "followRedirects": true,
+                "headers": [],
+                "method": "GET",
+                "name": "Last",
+                "order": 2,
+                "params": [],
+                "url": "https://api.example.com/last"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "JMeter 5.6.3 Test Plan",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 5,
+          "skipped": [],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Imported JMeter Plan",
+            "parentTempId": null,
+            "tempId": "c1",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "elements": [
+              {
+                "config": {
+                  "name": "Outer"
+                },
+                "enabled": true,
+                "kind": "control.transaction"
+              }
+            ],
+            "name": "Outer",
+            "order": 1,
+            "parentTempId": "c1",
+            "tempId": "c2",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "elements": [
+              {
+                "config": {
+                  "name": "Inner"
+                },
+                "enabled": true,
+                "kind": "control.transaction"
+              }
+            ],
+            "name": "Inner",
+            "order": 1,
+            "parentTempId": "c2",
+            "tempId": "c3",
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "requests": [
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "First",
+            "order": 0,
+            "params": [],
+            "tempId": "r1",
+            "url": "https://api.example.com/first"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "Last",
+            "order": 2,
+            "params": [],
+            "tempId": "r2",
+            "url": "https://api.example.com/last"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InOuterBefore",
+            "order": 0,
+            "params": [],
+            "tempId": "r3",
+            "url": "https://api.example.com/outer/before"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InOuterAfter",
+            "order": 2,
+            "params": [],
+            "tempId": "r4",
+            "url": "https://api.example.com/outer/after"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c3",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InInner",
+            "order": 0,
+            "params": [],
+            "tempId": "r5",
+            "url": "https://api.example.com/outer/inner"
+          }
+        ],
+        "specs": []
       }
     },
     {
