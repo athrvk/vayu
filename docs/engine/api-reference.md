@@ -8672,9 +8672,9 @@ one number - the MCP tool's cap does.
 The search steers by the published metric tick - the same numbers `GET
 /runs/:id/live` streams - rather than sampling the collector itself, so the
 controller and the dashboard cannot disagree about a level. Windows in which
-no request was timed are not judged: their percentiles are the empty-window
-zeros and reading those as "answered instantly" would climb straight past the
-limit. A request that timed out is timed (see [Latency
+no request was timed (`latencySamples` `0`, percentiles `null` on the frame)
+are not judged: reading them as "answered instantly" would climb straight past
+the limit. A request that timed out is timed (see [Latency
 population](#latency-population)), so a window of nothing but timeouts has
 samples, is judged, and reports a p99 near the timeout - the level fails its
 latency limit, which is the right verdict.
@@ -8953,7 +8953,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
-       "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
+       "latencySamples":15,"latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
        "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
        "requestsSent":1500,"requestsExpected":0,
@@ -9101,7 +9101,8 @@ no frame.
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `0` for a window with no completion. The capacity search steers by these |
+| `latencySamples` | How many completions the tick's window held, the population of the three below (issue #2386). `0` says the window had no completion, which no percentile can say |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `null` when `latencySamples` is `0`, never a 0 ms reading (issue #2386; an engine before it wrote `0`). The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |

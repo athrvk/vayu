@@ -212,8 +212,11 @@ TEST_F (MetricsCollectorTest, PercentilesHandleSingleValue) {
 // Windowed (rolling) Percentile Tests
 // ============================================================================
 
+// The collector's contract: an empty window is zeros with count 0. The JSON
+// writers turn that count into null (GetCurrentStatsNullsAnEmptyWindow).
 TEST_F (MetricsCollectorTest, SampleWindowEmptyReturnsZeros) {
     auto window = collector->sample_window_percentiles ();
+    EXPECT_EQ (window.count, 0u);
     EXPECT_DOUBLE_EQ (window.p50, 0.0);
     EXPECT_DOUBLE_EQ (window.p95, 0.0);
     EXPECT_DOUBLE_EQ (window.p99, 0.0);
@@ -286,18 +289,52 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsPrefersWindowedPercentiles) {
 
     // Explicit windowed values (as the producer would pass each tick).
     MetricsCollector::Percentiles window;
-    window.p50 = 11.0;
-    window.p95 = 12.0;
-    window.p99 = 13.0;
+    window.count = 3;
+    window.p50   = 11.0;
+    window.p95   = 12.0;
+    window.p99   = 13.0;
 
     auto stats = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &window);
+    EXPECT_EQ (stats["latencySamples"].get<size_t> (), 3u);
     EXPECT_DOUBLE_EQ (stats["latencyP50Ms"].get<double> (), 11.0);
     EXPECT_DOUBLE_EQ (stats["latencyP95Ms"].get<double> (), 12.0);
     EXPECT_DOUBLE_EQ (stats["latencyP99Ms"].get<double> (), 13.0);
 
     // Without windowed values the fields fall back to the cumulative histogram.
     auto cumulative_stats = collector->get_current_stats (0, 1.0, 0);
+    EXPECT_EQ (cumulative_stats["latencySamples"].get<size_t> (), 100u);
     EXPECT_NEAR (cumulative_stats["latencyP99Ms"].get<double> (), 100.0, 1.0);
+}
+
+// #2386: a window with no completion has no latency, so the live frame says
+// null and `latencySamples` 0, never 0 ms; a populated window right after it
+// carries numbers and its own count. Mutation check: write the window's
+// zeros unconditionally in put_interval_percentiles and the nulls fail.
+TEST_F (MetricsCollectorTest, GetCurrentStatsNullsAnEmptyWindow) {
+    const auto empty = collector->sample_window_percentiles ();
+    const auto idle = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &empty);
+    EXPECT_EQ (idle.at ("latencySamples").get<size_t> (), 0u);
+    for (const auto* key : { "latencyP50Ms", "latencyP95Ms", "latencyP99Ms" }) {
+        ASSERT_TRUE (idle.contains (key)) << key;
+        EXPECT_TRUE (idle.at (key).is_null ()) << key << ": " << idle.dump ();
+    }
+
+    for (int i = 0; i < 4; ++i) {
+        collector->record_success (200, 40.0, 0.0);
+    }
+    const auto busy_window = collector->sample_window_percentiles ();
+    const auto busy = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &busy_window);
+    EXPECT_EQ (busy.at ("latencySamples").get<size_t> (), 4u);
+    for (const auto* key : { "latencyP50Ms", "latencyP95Ms", "latencyP99Ms" }) {
+        ASSERT_TRUE (busy.at (key).is_number ()) << key << ": " << busy.dump ();
+        EXPECT_NEAR (busy.at (key).get<double> (), 40.0, 0.04) << key;
+    }
+
+    // The next window is empty again: no carry-over from the busy one.
+    const auto drained = collector->sample_window_percentiles ();
+    const auto after = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &drained);
+    EXPECT_EQ (after.at ("latencySamples").get<size_t> (), 0u);
+    EXPECT_TRUE (after.at ("latencyP99Ms").is_null ()) << after.dump ();
 }
 
 TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
@@ -816,10 +853,13 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsIncludesLatencyPercentiles) {
     EXPECT_GE (stats["latencyP95Ms"].get<double> (), stats["latencyP50Ms"].get<double> ());
 }
 
-TEST_F (MetricsCollectorTest, GetCurrentStatsPercentilesZeroWhenNoSamples) {
+// The no-window fallback follows the same rule as the window (#2386).
+TEST_F (MetricsCollectorTest, GetCurrentStatsPercentilesNullWhenNoSamples) {
     nlohmann::json stats = collector->get_current_stats (0, 1.0, 0);
-    EXPECT_DOUBLE_EQ (stats["latencyP50Ms"].get<double> (), 0.0);
-    EXPECT_DOUBLE_EQ (stats["latencyP99Ms"].get<double> (), 0.0);
+    EXPECT_EQ (stats.at ("latencySamples").get<size_t> (), 0u);
+    EXPECT_TRUE (stats.at ("latencyP50Ms").is_null ()) << stats.dump ();
+    EXPECT_TRUE (stats.at ("latencyP95Ms").is_null ()) << stats.dump ();
+    EXPECT_TRUE (stats.at ("latencyP99Ms").is_null ()) << stats.dump ();
 }
 
 // ============================================================================

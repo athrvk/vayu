@@ -2527,26 +2527,6 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
 }
 
 /**
- * A gate frame's `second*` keys (#2385): the percentiles of every window since
- * the previous gate, which the stored row of the same tick also carries. Null
- * rather than 0 when nothing completed, so an idle second never reads as an
- * instant answer.
- */
-void put_second_percentiles (nlohmann::json& stats,
-const MetricsCollector::Percentiles& second) {
-    stats["secondSamples"] = second.count;
-    if (second.count == 0) {
-        stats["secondP50Ms"] = nullptr;
-        stats["secondP95Ms"] = nullptr;
-        stats["secondP99Ms"] = nullptr;
-        return;
-    }
-    stats["secondP50Ms"] = second.p50;
-    stats["secondP95Ms"] = second.p95;
-    stats["secondP99Ms"] = second.p99;
-}
-
-/**
  * One persisted metric tick: the 1 Hz row every chart is drawn from.
  *
  * Built here as one wide row rather than reassembled from ~18 EAV rows by every
@@ -2718,7 +2698,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         std::optional<MetricsCollector::Percentiles> second;
         if (closes_second) {
             second = mc.take_second_percentiles ();
-            put_second_percentiles (stats, *second);
+            put_interval_percentiles (stats, "second", *second);
         }
 
         // Instantaneous RPS: delta-based, updated every ≥100 ms.
