@@ -486,7 +486,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "responseHeaders", Anchor::Bare, "responseHeaders", "" },
 { "responseCookies", Anchor::Bare, "responseCookies", "" },
 { "responseTime", Anchor::Bare, "responseTime", "" },
-{ "postman.*", Anchor::Bare, "postman", "." },
 { "globals.*", Anchor::Bare, "globals", "." },
 { "environment.*", Anchor::Bare, "environment", "." },
 { "data", Anchor::Bare, "data", "[." },

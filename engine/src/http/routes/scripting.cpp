@@ -2015,6 +2015,71 @@ nlohmann::json get_script_completions () {
     "shares its ids." },
     { "sortText", "2_clearInterval" } });
 
+    // ========================================
+    // postman - Postman's pre-pm.* helper methods, as aliases (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "postman" }, { "kind", KIND_VARIABLE },
+    { "insertText", "postman" }, { "detail", "Postman's legacy helper object" },
+    { "documentation",
+    "Postman's pre-pm.* helper methods, kept so a script imported from Postman "
+    "runs. Each is an alias of the pm.* method Postman names as its "
+    "replacement, which is what to write in a new script." },
+    { "sortText", "2_postman" } });
+
+    // One row per alias: the method, its signature, and what it is an alias of.
+    struct LegacyCompletion {
+        const char* name;
+        const char* detail;
+        const char* documentation;
+    };
+    constexpr auto LEGACY_POSTMAN = std::to_array<LegacyCompletion> ({
+    { "setEnvironmentVariable", "postman.setEnvironmentVariable(name: string, value: any): void",
+    "An alias of pm.environment.set(name, value), except that a value with a "
+    "toString() is stored as the string it returns, as Postman's legacy call "
+    "does: a number set here reads back as a string. false, 0, null and "
+    "undefined are stored as they are." },
+    { "getEnvironmentVariable", "postman.getEnvironmentVariable(name: string): any | undefined",
+    "An alias of pm.environment.get(name)." },
+    { "clearEnvironmentVariable", "postman.clearEnvironmentVariable(name: string): void",
+    "An alias of pm.environment.unset(name)." },
+    { "clearEnvironmentVariables", "postman.clearEnvironmentVariables(): void",
+    "An alias of pm.environment.clear()." },
+    { "setGlobalVariable", "postman.setGlobalVariable(name: string, value: any): void",
+    "An alias of pm.globals.set(name, value), except that a value with a "
+    "toString() is stored as the string it returns, as Postman's legacy call "
+    "does: a number set here reads back as a string. false, 0, null and "
+    "undefined are stored as they are." },
+    { "getGlobalVariable", "postman.getGlobalVariable(name: string): any | undefined",
+    "An alias of pm.globals.get(name)." },
+    { "clearGlobalVariable", "postman.clearGlobalVariable(name: string): void",
+    "An alias of pm.globals.unset(name)." },
+    { "clearGlobalVariables", "postman.clearGlobalVariables(): void", "An alias of pm.globals.clear()." },
+    { "setNextRequest", "postman.setNextRequest(name: string | null): void",
+    "An alias of pm.execution.setNextRequest(name): only inside a collection "
+    "run, and it throws elsewhere in the same words." },
+    { "getResponseHeader", "postman.getResponseHeader(name: string): string | undefined",
+    "An alias of pm.response.headers.get(name): case-insensitive, undefined "
+    "for an absent header.\n\nA test script only, as in Postman: a "
+    "pre-request script has no response, and no getResponseHeader." },
+    { "getResponseCookie",
+    "postman.getResponseCookie(name: string): { name: string, key: string, "
+    "value: string, domain: string, path: string, secure: boolean, httpOnly: "
+    "boolean, hostOnly: boolean, session: boolean, expires: Date | null } | "
+    "undefined",
+    "The cookie pm.cookies.get(name) reads, as the whole cookie object "
+    "pm.cookies.all() lists rather than its value, as Postman's legacy call "
+    "returns it - read .value for the value. undefined when the jar holds none "
+    "of that name for this URL.\n\nA test script only, as in Postman: a "
+    "pre-request script has no response, and no getResponseCookie." },
+    });
+    for (const auto& method : LEGACY_POSTMAN) {
+        const std::string name = method.name;
+        completions.push_back ({ { "label", "postman." + name },
+        { "kind", KIND_FUNCTION }, { "insertText", "postman." + name + "(${1})" },
+        { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", method.detail },
+        { "documentation", method.documentation }, { "sortText", "2_postman_" + name } });
+    }
+
     completions.push_back ({ { "label", "Sign the outgoing request" }, { "kind", KIND_SNIPPET },
     { "insertText",
     "// Pre-request: sign what is actually about to be sent.\nconst timestamp "

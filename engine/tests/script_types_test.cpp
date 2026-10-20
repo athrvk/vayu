@@ -473,8 +473,8 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 // fails, which is the only honest way to hold this list to the sandbox.
 //
 // An absent root is found by the sentence every one of them carries, because
-// `postman` is declared as an object type and so is `pm`: the type alone does
-// not say which is which.
+// its type alone does not say so: `responseBody` is `void`, and a declared
+// function returns `void` too.
 TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #ifdef VAYU_HAS_QUICKJS
     const std::string dts = generate_script_typedefs ();
@@ -575,31 +575,44 @@ TEST (ScriptTypesTest, EveryPostmanLegacyGlobalIsAbsentAndNamesItsReplacement) {
         EXPECT_TRUE (contains (doc, legacy.replacement))
         << legacy.name << "'s hover does not name " << legacy.replacement;
     }
+}
 
-    constexpr auto methods = std::to_array<Legacy> ({
-    { "setEnvironmentVariable", "pm.environment.set(" },
-    { "getEnvironmentVariable", "pm.environment.get(" },
-    { "clearEnvironmentVariable", "pm.environment.unset(" },
-    { "clearEnvironmentVariables", "pm.environment.clear(" },
-    { "setGlobalVariable", "pm.globals.set(" },
-    { "getGlobalVariable", "pm.globals.get(" },
-    { "clearGlobalVariable", "pm.globals.unset(" },
-    { "clearGlobalVariables", "pm.globals.clear(" },
-    { "setNextRequest", "pm.execution.setNextRequest(" },
-    { "getResponseHeader", "pm.response.headers.get(" },
-    { "getResponseCookie", "pm.cookies.get(" },
+// The `postman` object runs (#2577): each method is an alias of the `pm.*`
+// member Postman names as its replacement, so it is declared as the method it
+// is, and its hover names what it aliases. Pinned here rather than read from
+// the table, so a method dropped from it, or the object declared absent
+// again, fails.
+TEST (ScriptTypesTest, ThePostmanObjectDeclaresTheAliasesItRuns) {
+    const std::string dts = generate_script_typedefs ();
+
+    struct Alias {
+        const char* signature;
+        const char* target;
+    };
+    constexpr auto methods = std::to_array<Alias> ({
+    { "setEnvironmentVariable(name: string, value: any): void;", "pm.environment.set(" },
+    { "getEnvironmentVariable(name: string): any | undefined;", "pm.environment.get(" },
+    { "clearEnvironmentVariable(name: string): void;", "pm.environment.unset(" },
+    { "clearEnvironmentVariables(): void;", "pm.environment.clear(" },
+    { "setGlobalVariable(name: string, value: any): void;", "pm.globals.set(" },
+    { "getGlobalVariable(name: string): any | undefined;", "pm.globals.get(" },
+    { "clearGlobalVariable(name: string): void;", "pm.globals.unset(" },
+    { "clearGlobalVariables(): void;", "pm.globals.clear(" },
+    { "setNextRequest(name: string | null): void;", "pm.execution.setNextRequest(" },
+    { "getResponseHeader(name: string): string | undefined;", "pm.response.headers.get(" },
+    { "getResponseCookie(name: string): {", "pm.cookies.get(" },
     });
     for (const auto& method : methods) {
-        // Typed `never` so that calling one is an error, and documented on the
-        // member itself so hover over the method names *its* replacement.
-        const std::string doc =
-        documentation_above (dts, std::string ("\t") + method.name + ": never;\n");
-        EXPECT_TRUE (contains (doc, method.replacement))
-        << "postman." << method.name << "'s hover does not name " << method.replacement;
+        const std::string declaration = std::string ("\n\t") + method.signature;
+        EXPECT_TRUE (contains (dts, declaration))
+        << "postman." << method.signature << " is not declared";
+        EXPECT_TRUE (contains (documentation_above (dts, declaration), method.target))
+        << "postman." << method.signature << "'s hover does not name " << method.target;
     }
-    EXPECT_TRUE (contains (dts, "declare const postman: {\n"))
-    << "the helper object is not an object holding its methods";
-    EXPECT_FALSE (contains (dts, "declare const postman: never"));
+
+    const std::string root = documentation_above (dts, "declare const postman: {\n");
+    EXPECT_FALSE (root.empty ()) << "the postman object is not declared";
+    EXPECT_FALSE (contains (root, "Not available in the Vayu script sandbox."));
 }
 
 // `never` is assignable to every type, so `JSON.parse(responseBody)` - the one

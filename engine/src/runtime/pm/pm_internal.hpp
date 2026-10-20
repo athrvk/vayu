@@ -425,6 +425,17 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
 void setup_pm_cookies (JSContext* ctx, JSValue pm);
 JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
+// Postman's `cookies.one(name)`: the cookie `pm.cookies.get(name)` reads, as
+// the whole object `pm.cookies.all()` lists, or undefined. Not a member of
+// `pm.cookies`; `postman.getResponseCookie` is its one caller (pm_legacy.cpp).
+JSValue js_jar_cookies_one (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+
+// The `postman` global (pm_legacy.cpp): Postman's pre-`pm.*` helper methods as
+// aliases of the `pm` members it names as their replacements (#2577). Installed
+// per execution, after `setup_pm_response`, because the two response readers
+// exist only where there is a response, as in Postman.
+void setup_postman_legacy (JSContext* ctx, JSValue global, JSValue pm);
+
 // `pm.request` and `pm.info` (pm_request_url.cpp), and the write-back that
 // applies a pre-request script's `pm.request` to the request about to be sent.
 void setup_pm_request (JSContext* ctx, JSValue pm);

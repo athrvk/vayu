@@ -18,6 +18,7 @@
 #include <tuple>
 #include <vector>
 
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/script_parts.hpp"
@@ -7625,4 +7626,218 @@ TEST_F (ScriptEngineTest, ThePooledContextDoesNotCarryEventsIntoTheNextRun) {
     ASSERT_TRUE (second_result.success) << second_result.error_message;
     ASSERT_EQ (second_result.tests.size (), 1u);
     EXPECT_TRUE (second_result.tests[0].passed) << second_result.tests[0].error_message;
+}
+
+// ============================================================================
+// The legacy `postman` object (#2577)
+// ============================================================================
+//
+// Each method is an alias of the `pm.*` member Postman names as its
+// replacement. The scripts are Postman's own legacy snippets, verbatim.
+
+TEST_F (ScriptEngineTest, LegacyShimSetEnvironmentVariableIsReadByPmEnvironment) {
+    auto result = engine.execute_test (R"JS(
+        postman.setEnvironmentVariable("variable_key", "variable_value");
+        pm.environment.set("pm_key", "pm_value");
+        pm.test("each spelling reads the other's write", function () {
+            pm.expect(pm.environment.get("variable_key")).to.equal("variable_value");
+            pm.expect(postman.getEnvironmentVariable("pm_key")).to.equal("pm_value");
+            pm.expect(postman.getEnvironmentVariable("api_key")).to.equal("secret123");
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (env["variable_key"].value, "variable_value");
+}
+
+TEST_F (ScriptEngineTest, LegacyShimClearsTheEnvironment) {
+    auto result = engine.execute_test (R"JS(
+        postman.clearEnvironmentVariable("api_key");
+    )JS",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_FALSE (env.contains ("api_key"));
+    EXPECT_TRUE (env.contains ("base_url"));
+
+    result = engine.execute_test (
+    "postman.clearEnvironmentVariables();", request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (env.empty ());
+}
+
+TEST_F (ScriptEngineTest, LegacyShimReachesTheGlobals) {
+    Environment globals;
+    globals["old"]    = Variable{ "1", false, true };
+    globals["kept"]   = Variable{ "2", false, true };
+    ScriptContext ctx = ScriptContext::for_test (request, response);
+    ctx.environment   = &env;
+    ctx.globals       = &globals;
+
+    auto result = engine.execute (R"JS(
+        postman.setGlobalVariable("variable_key", "variable_value");
+        postman.clearGlobalVariable("old");
+        pm.globals.set("pm_key", "pm_value");
+        pm.test("each spelling reads the other's write", function () {
+            pm.expect(pm.globals.get("variable_key")).to.equal("variable_value");
+            pm.expect(postman.getGlobalVariable("pm_key")).to.equal("pm_value");
+            pm.expect(pm.globals.has("old")).to.equal(false);
+        });
+    )JS",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (globals["variable_key"].value, "variable_value");
+    EXPECT_FALSE (env.contains ("variable_key"))
+    << "a global landed in the environment";
+
+    result = engine.execute ("postman.clearGlobalVariables();", ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (globals.empty ());
+}
+
+// Postman's legacy setters store `value.toString()` for a truthy value that has
+// one, where `pm.environment.set` keeps the value: a number set the legacy way
+// reads back as the string, and a falsy value passes through as it is.
+TEST_F (ScriptEngineTest, LegacyShimSettersStoreTheStringPostmanStores) {
+    auto result = engine.execute_test (R"JS(
+        postman.setEnvironmentVariable("count", 5);
+        postman.setEnvironmentVariable("object", { a: 1 });
+        postman.setEnvironmentVariable("list", [1, 2]);
+        postman.setEnvironmentVariable("off", false);
+        postman.setEnvironmentVariable("zero", 0);
+        postman.setGlobalVariable("count", 7);
+        pm.environment.set("pm_count", 5);
+        pm.test("stored as Postman's legacy call stores it", function () {
+            pm.expect(pm.environment.get("count")).to.equal("5");
+            pm.expect(pm.environment.get("object")).to.equal("[object Object]");
+            pm.expect(pm.environment.get("list")).to.equal("1,2");
+            pm.expect(pm.environment.get("off")).to.equal(false);
+            pm.expect(pm.environment.get("zero")).to.equal(0);
+            pm.expect(pm.environment.get("pm_count")).to.equal(5);
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (env["count"].value, "5");
+    EXPECT_EQ (env["object"].value, "[object Object]");
+}
+
+// The value's own `toString` is what Postman calls, so its throw is the
+// script's error rather than a silently stored "[object Object]".
+TEST_F (ScriptEngineTest, LegacyShimSetterReportsAThrowingToString) {
+    auto result = engine.execute_test (R"JS(
+        postman.setEnvironmentVariable("bad", { toString: function () { throw new Error("no text"); } });
+    )JS",
+    request, response, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("no text"), std::string::npos)
+    << result.error_message;
+    EXPECT_FALSE (env.contains ("bad"));
+}
+
+// The targets are read when `postman` is built, so a script that reassigns
+// `pm` does not redirect the legacy calls: postman-sandbox's legacy object
+// talks to the execution, not to the `pm` global.
+TEST_F (ScriptEngineTest, LegacyShimDoesNotFollowAReassignedPm) {
+    auto result = engine.execute_test (R"JS(
+        pm = undefined;
+        postman.setEnvironmentVariable("variable_key", "variable_value");
+    )JS",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["variable_key"].value, "variable_value");
+}
+
+TEST_F (ScriptEngineTest, LegacyShimSetNextRequestRecordsTheTarget) {
+    auto ctx = scenario_test (request, response, env);
+    auto result = engine.execute (R"JS(postman.setNextRequest("request_name");)JS", ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::Next);
+    EXPECT_EQ (result.control.target, "request_name");
+
+    result = engine.execute ("postman.setNextRequest(null);", ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::EndIteration);
+}
+
+// The alias keeps pm.execution's rule: outside a collection run there is no
+// next request, and the call says so rather than being quietly dropped.
+TEST_F (ScriptEngineTest, LegacyShimSetNextRequestIsRefusedInASingleSend) {
+    auto result = engine.execute_test (
+    R"JS(postman.setNextRequest("request_name");)JS", request, response, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (
+    result.error_message.find ("setNextRequest is not available here"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (result.control.kind, ScriptControl::Kind::None);
+}
+
+TEST_F (ScriptEngineTest, LegacyShimGetResponseHeaderReadsTheResponse) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("Content-Type is present", function () {
+            pm.expect(postman.getResponseHeader("Content-Type")).to.equal("application/json");
+            pm.expect(postman.getResponseHeader("x-request-id")).to.equal("abc123");
+            pm.expect(postman.getResponseHeader("X-Absent")).to.equal(undefined);
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Postman's `cookies.one(name)`: the whole cookie, so `.value` reads it.
+TEST_F (ScriptEngineTest, LegacyShimGetResponseCookieReadsTheCookie) {
+    vayu::http::JarCookie cookie;
+    cookie.name   = "session";
+    cookie.value  = "abc123";
+    cookie.domain = "api.example.com";
+    cookie.path   = "/";
+    const std::vector<std::string> lines{ vayu::http::format_cookie_line (cookie) };
+    ScriptContext ctx     = ScriptContext::for_test (request, response);
+    ctx.environment       = &env;
+    ctx.cookie_read_lines = &lines;
+
+    auto result = engine.execute (R"JS(
+        pm.test("the cookie, not just its value", function () {
+            const cookie = postman.getResponseCookie("session");
+            pm.expect(cookie.value).to.equal("abc123");
+            pm.expect(cookie.name).to.equal("session");
+            pm.expect(cookie.value).to.equal(pm.cookies.get("session"));
+            pm.expect(postman.getResponseCookie("absent")).to.equal(undefined);
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Postman binds the two response readers only where there is a response, so a
+// pre-request script has the other nine and not these.
+TEST_F (ScriptEngineTest, LegacyShimHasNoResponseReadersBeforeTheResponse) {
+    auto pre = engine.execute_prerequest (R"JS(
+        if (typeof postman.getResponseHeader !== "undefined") throw new Error("header reader");
+        if (typeof postman.getResponseCookie !== "undefined") throw new Error("cookie reader");
+        postman.setEnvironmentVariable("variable_key", "variable_value");
+    )JS",
+    request, env);
+    ASSERT_TRUE (pre.success) << pre.error_message;
+    EXPECT_EQ (env["variable_key"].value, "variable_value");
+
+    auto test = engine.execute_test (R"JS(
+        if (typeof postman.getResponseHeader !== "function") throw new Error("header reader");
+        if (typeof postman.getResponseCookie !== "function") throw new Error("cookie reader");
+    )JS",
+    request, response, env);
+    ASSERT_TRUE (test.success) << test.error_message;
 }

@@ -2100,6 +2100,60 @@ declare const pm: {
 };
 
 /**
+ * Postman's pre-pm.* helper methods, kept so a script imported from Postman runs. Each is an alias of the pm.* method Postman names as its replacement, which is what to write in a new script.
+ */
+declare const postman: {
+	/**
+	 * An alias of pm.environment.unset(name).
+	 */
+	clearEnvironmentVariable(name: string): void;
+	/**
+	 * An alias of pm.environment.clear().
+	 */
+	clearEnvironmentVariables(): void;
+	/**
+	 * An alias of pm.globals.unset(name).
+	 */
+	clearGlobalVariable(name: string): void;
+	/**
+	 * An alias of pm.globals.clear().
+	 */
+	clearGlobalVariables(): void;
+	/**
+	 * An alias of pm.environment.get(name).
+	 */
+	getEnvironmentVariable(name: string): any | undefined;
+	/**
+	 * An alias of pm.globals.get(name).
+	 */
+	getGlobalVariable(name: string): any | undefined;
+	/**
+	 * The cookie pm.cookies.get(name) reads, as the whole cookie object pm.cookies.all() lists rather than its value, as Postman's legacy call returns it - read .value for the value. undefined when the jar holds none of that name for this URL.
+	 * 
+	 * A test script only, as in Postman: a pre-request script has no response, and no getResponseCookie.
+	 */
+	getResponseCookie(name: string): { name: string, key: string, value: string, domain: string, path: string, secure: boolean, httpOnly: boolean, hostOnly: boolean, session: boolean, expires: Date | null } | undefined;
+	/**
+	 * An alias of pm.response.headers.get(name): case-insensitive, undefined for an absent header.
+	 * 
+	 * A test script only, as in Postman: a pre-request script has no response, and no getResponseHeader.
+	 */
+	getResponseHeader(name: string): string | undefined;
+	/**
+	 * An alias of pm.environment.set(name, value), except that a value with a toString() is stored as the string it returns, as Postman's legacy call does: a number set here reads back as a string. false, 0, null and undefined are stored as they are.
+	 */
+	setEnvironmentVariable(name: string, value: any): void;
+	/**
+	 * An alias of pm.globals.set(name, value), except that a value with a toString() is stored as the string it returns, as Postman's legacy call does: a number set here reads back as a string. false, 0, null and undefined are stored as they are.
+	 */
+	setGlobalVariable(name: string, value: any): void;
+	/**
+	 * An alias of pm.execution.setNextRequest(name): only inside a collection run, and it throws elsewhere in the same words.
+	 */
+	setNextRequest(name: string | null): void;
+};
+
+/**
  * Call callback every delay ms until clearInterval stops it. Returns the id clearInterval takes.
  * 
  * Runs before the script ends, on the same clock as setTimeout. An interval nothing clears runs until the script's deadline (scriptTimeout) stops it, which fails the script - clear it from its own callback once it is done.
@@ -2294,58 +2348,6 @@ declare const iteration: void;
  * Postman's pre-pm.* request object. Use pm.request - its url, method, headers and body.
  */
 declare const request: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* helper object. Every method it had has a pm.* replacement; hover the method.
- */
-declare const postman: {
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.set(name, value).
-	 */
-	setEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.get(name).
-	 */
-	getEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.unset(name).
-	 */
-	clearEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.clear().
-	 */
-	clearEnvironmentVariables: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.set(name, value).
-	 */
-	setGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.get(name).
-	 */
-	getGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.unset(name).
-	 */
-	clearGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.clear().
-	 */
-	clearGlobalVariables: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.execution.setNextRequest(name), in a collection run.
-	 */
-	setNextRequest: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.response.headers.get(name).
-	 */
-	getResponseHeader: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.cookies.get(name).
-	 */
-	getResponseCookie: never;
-};
 
 /**
  * Not available in the Vayu script sandbox.

@@ -996,6 +996,36 @@ TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
     << report;
 }
 
+// The `postman` object (#2577) both ways: every offered method is a function in
+// a test script, and every method the runtime binds is offered.
+TEST (ScriptCompletions, TheOfferedPostmanMethodsAreExactlyWhatTheRuntimeHas) {
+    const auto completions = get_script_completions ();
+    std::set<std::string> offered;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.starts_with ("postman.")) {
+            offered.insert (label.substr (std::string ("postman.").size ()));
+        }
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    const auto result = engine.execute_test (
+    "pm.environment.set('bound', Object.keys(postman).filter("
+    "k => typeof postman[k] === 'function').sort().join(','));",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+
+    const auto names = split_commas (env["bound"].value);
+    const std::set<std::string> bound (names.begin (), names.end ());
+
+    EXPECT_EQ (offered.size (), 11u)
+    << "the postman surface changed - update the docs";
+    EXPECT_EQ (offered, bound);
+}
+
 // The widening above trades one silent hole for a noisy false positive unless
 // both halves hold, so both are asserted rather than left to the suite being
 // green: the depth-3 accessors have to be *reached* (a walk that stops at two

@@ -820,7 +820,8 @@ class ScriptEngine::Impl {
     }
 
     /// A context with the standard intrinsics and the sandbox globals
-    /// (`console`, `btoa`/`atob`, the timers, `pm`) and nothing else.
+    /// (`console`, `btoa`/`atob`, the timers, `pm`) and nothing else; `execute`
+    /// binds `postman` once the execution's data is in place.
     JSContext* build_context (JSRuntime* rt) {
         JSContext* ctx = JS_NewContext (rt);
         if (!ctx) {
@@ -1154,7 +1155,8 @@ class ScriptEngine::Impl {
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with
-        // new data
+        // new data, then bind `postman` over them: its response readers exist
+        // only where there is a response.
         JSValue global = JS_GetGlobalObject (js_ctx);
         JSValue pm     = JS_GetPropertyStr (js_ctx, global, "pm");
         if (!JS_IsUndefined (pm)) {
@@ -1162,6 +1164,7 @@ class ScriptEngine::Impl {
             setup_pm_request (js_ctx, pm);
             setup_pm_info (js_ctx, pm);
             setup_pm_iteration_data (js_ctx, pm);
+            setup_postman_legacy (js_ctx, global, pm);
         }
         JS_FreeValue (js_ctx, pm);
         JS_FreeValue (js_ctx, global);

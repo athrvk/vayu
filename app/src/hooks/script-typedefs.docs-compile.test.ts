@@ -264,7 +264,6 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 		["pm.environment.set('i', iteration + 1);", 2365],
 		["tests['Status code is 200'] = responseCode.code === 200;", 2339],
 		["tests['ok'] = true;", 2322],
-		["postman.setEnvironmentVariable('token', 'x');", 2349],
 		["responseHeaders.get('Content-Type');", 2339],
 		["environment.baseUrl;", 2339],
 		["_.map([1], function (n) { return n; });", 2339],
@@ -292,6 +291,28 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 				].join("\n")
 			)
 		).toBe("");
+	});
+
+	/*
+	 * The legacy `postman` methods run, as aliases of `pm` (#2577), so a script
+	 * imported from Postman that calls them draws nothing - and a member the
+	 * cookie they return does not have is still an error.
+	 */
+	it("declares the postman methods as the aliases they are", () => {
+		expect(
+			errorsOf(
+				[
+					"postman.setEnvironmentVariable('token', 'x');",
+					"postman.setGlobalVariable('count', 1);",
+					"const token = postman.getEnvironmentVariable('token');",
+					"postman.clearEnvironmentVariables();",
+					"postman.setNextRequest(null);",
+					"postman.getResponseHeader('Content-Type').toLowerCase();",
+					"postman.getResponseCookie('session').value.length;",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("postman.getResponseCookie('session').size;")).toContain("TS2339");
 	});
 });
 

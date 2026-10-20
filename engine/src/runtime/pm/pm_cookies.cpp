@@ -363,8 +363,14 @@ const std::vector<vayu::http::JarCookie>& cookies) {
     return list;
 }
 
-JSValue js_jar_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)this_val;
+/// What a read of one named cookie answers with: its value, or the whole cookie
+/// as `all()` lists it.
+enum class NamedCookieForm : std::uint8_t { Value, Cookie };
+
+// `pm.cookies.get(name)`, and Postman's `cookies.one(name)` behind
+// `postman.getResponseCookie` - one lookup, so the two cannot pick different
+// cookies for a name the jar holds twice.
+JSValue read_named_jar_cookie (JSContext* ctx, int argc, JSValueConst* argv, NamedCookieForm form) {
     auto name = read_cookie_name_arg (ctx, "get", argc, argv);
     if (!name) {
         return JS_EXCEPTION;
@@ -375,7 +381,17 @@ JSValue js_jar_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSV
     }
     const auto* cookie = find_jar_cookie (*cookies, *name);
     // undefined for an absent cookie, exactly as pm.response.cookies.get does.
-    return cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED;
+    if (!cookie) {
+        return JS_UNDEFINED;
+    }
+    return form == NamedCookieForm::Value ?
+    JS_NewString (ctx, cookie->value.c_str ()) :
+    create_jar_cookie_object (ctx, *cookie);
+}
+
+JSValue js_jar_cookies_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    return read_named_jar_cookie (ctx, argc, argv, NamedCookieForm::Value);
 }
 
 JSValue js_jar_cookies_has (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -956,6 +972,11 @@ JSValue js_cookies_jar (JSContext* ctx, JSValueConst this_val, int argc, JSValue
 }
 
 } // namespace
+
+JSValue js_jar_cookies_one (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    return read_named_jar_cookie (ctx, argc, argv, NamedCookieForm::Cookie);
+}
 
 // pm.cookies - always bound, like pm.sendRequest, so a script that reaches for
 // it where there is no jar is told why instead of meeting "not a function".

@@ -144,8 +144,6 @@ TEST (ScriptApiScan, NamesTheLegacyGlobals) {
     EXPECT_EQ (names_in ("responseHeaders['Content-Type']"), Names{ "responseHeaders" });
     EXPECT_EQ (names_in ("var c = responseCookies;"), Names{ "responseCookies" });
     EXPECT_EQ (names_in ("if (responseTime > 100) {}"), Names{ "responseTime" });
-    EXPECT_EQ (names_in (R"(postman.setEnvironmentVariable("a", "b");)"),
-    Names{ "postman.*" });
     EXPECT_EQ (names_in (R"(globals.token = "x";)"), Names{ "globals.*" });
     EXPECT_EQ (names_in ("var n = environment.name;"), Names{ "environment.*" });
     EXPECT_EQ (names_in (R"(var n = data["name"];)"), Names{ "data" });
@@ -153,8 +151,8 @@ TEST (ScriptApiScan, NamesTheLegacyGlobals) {
 }
 
 TEST (ScriptApiScan, ALegacyNameNeedsItsFollowingCharacter) {
-    // `tests` alone, `postman` alone and `data` alone are plain variables.
-    EXPECT_EQ (names_in ("var tests = []; tests.push(1); postman; data;"), Names{});
+    // `tests` alone and `data` alone are plain variables.
+    EXPECT_EQ (names_in ("var tests = []; tests.push(1); data;"), Names{});
 }
 
 TEST (ScriptApiScan, APropertyOfSomethingElseIsNotALegacyGlobal) {
@@ -212,6 +210,18 @@ TEST (ScriptApiScan, NamesTheHostGlobalsASandboxLacks) {
 TEST (ScriptApiScan, TheTimersAreNotNamed) {
     EXPECT_EQ (names_in ("const t = setTimeout(f, 10); clearTimeout(t);"), Names{});
     EXPECT_EQ (names_in ("const i = setInterval(f, 10); clearInterval(i);"), Names{});
+}
+
+// The legacy `postman` methods alias `pm` (#2577), so a script that calls them
+// is not named.
+TEST (ScriptApiScan, TheLegacyPostmanMethodsAreNotNamed) {
+    EXPECT_EQ (names_in (R"(
+        postman.setEnvironmentVariable("token", "x");
+        postman.getGlobalVariable("g");
+        postman.setNextRequest(null);
+        postman.getResponseHeader("Content-Type");
+    )"),
+    Names{});
 }
 
 // The script body is an async function (#2577), so an `await` runs wherever
@@ -346,11 +356,10 @@ TEST (ScriptApiScan, ANameTheScriptDeclaresItselfIsNotTheGlobal) {
 }
 
 TEST (ScriptApiScan, ADeclarationElsewhereDoesNotHideADifferentName) {
-    // `data` is declared; `postman` and `tests` are not.
-    EXPECT_EQ (
-    names_in ("const data = 1; postman.clearEnvironmentVariable('a'); "
-              "tests['x'] = data;"),
-    (Names{ "tests[]", "postman.*" }));
+    // `data` is declared; `responseBody` and `tests` are not.
+    EXPECT_EQ (names_in ("const data = 1; JSON.parse(responseBody); "
+                         "tests['x'] = data;"),
+    (Names{ "tests[]", "responseBody" }));
     // A class declares its name, not what its methods read.
     EXPECT_EQ (names_in ("class Checker { run () { return responseBody; } }"),
     Names{ "responseBody" });
@@ -364,10 +373,10 @@ TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
         tests["b"] = true;
         tests["a"] = true;
         const c = require("x");
-        postman.setNextRequest(null);
+        var t = responseTime;
         Buffer.from(again);
     )"),
-    (Names{ "tests[]", "postman.*", "require()", "Buffer" }));
+    (Names{ "tests[]", "responseTime", "require()", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {

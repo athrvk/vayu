@@ -2694,8 +2694,8 @@ carry from one script to the next belongs in a variable scope
 
 ### What a script can compute
 
-The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
-four timer functions.
+The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
+four timer functions and Postman's legacy `postman` object.
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2709,6 +2709,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
+| `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 
 `encoding` is `'hex'` (the default), `'base64'`, `'base64url'` or `'bytes'`;
 `'bytes'` returns a `Uint8Array`, and any other value throws rather than
@@ -2727,7 +2728,7 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Postman's pre-`pm.*` globals (`responseBody`, `tests[...]`, `postman.*`, ...) and
+Postman's other pre-`pm.*` globals (`responseBody`, `tests[...]`, ...) and
 the libraries it bundles (`CryptoJS`, `_`, `moment`, ...) are absent too. The
 editor declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#postmans-pre-pm-globals-and-what-to-write-instead)
@@ -2812,6 +2813,45 @@ are empty is waiting on a promise nothing can settle any more, so its
 remaining lines never run, and the script ends with `The script did not
 finish: it was still awaiting a promise that never settled`. The wrapper adds
 no line, so a line number in a stack is the script's own.
+
+### The legacy `postman` object
+
+`postman` holds Postman's eleven pre-`pm.*` helper methods (#2577), bound in
+`engine/src/runtime/pm/pm_legacy.cpp`. Each is an alias of the `pm.*` method
+Postman names as its replacement (`LEGACY_GLOBS_ALTERNATIVES` in
+postman-sandbox), and passes on exactly the arguments Postman's
+`postman-legacy-interface.js` does:
+
+| `postman.` | Calls |
+| ---------- | ----- |
+| `setEnvironmentVariable(name, value)`, `getEnvironmentVariable(name)`, `clearEnvironmentVariable(name)`, `clearEnvironmentVariables()` | `pm.environment.set`, `get`, `unset`, `clear` |
+| `setGlobalVariable(name, value)`, `getGlobalVariable(name)`, `clearGlobalVariable(name)`, `clearGlobalVariables()` | `pm.globals.set`, `get`, `unset`, `clear` |
+| `setNextRequest(name)` | `pm.execution.setNextRequest` |
+| `getResponseHeader(name)` | `pm.response.headers.get` |
+| `getResponseCookie(name)` | the cookie `pm.cookies.get` reads, as the object `pm.cookies.all()` lists |
+
+```javascript
+postman.setEnvironmentVariable("count", 5);
+pm.test("the legacy setter stores a string", function () {
+    pm.expect(pm.environment.get("count")).to.equal("5");
+});
+```
+
+Three rules come from Postman's interface rather than from the `pm.*` method:
+
+- The two setters store `value.toString()` for a truthy value that has one, so
+  a number or an object reads back as its string; `false`, `0`, `""`, `null`
+  and `undefined` reach `set` as they are.
+- `getResponseHeader` and `getResponseCookie` are bound only when the execution
+  has a response, so a pre-request script's `postman` lacks them.
+- Each method's targets are read when `postman` is bound, so a script that
+  reassigns `pm` or one of its members does not redirect a legacy call.
+
+Every other behaviour, refusals included, is the `pm.*` method's:
+`postman.setNextRequest` outside a collection run throws the
+`pm.execution.setNextRequest is not available here` sentence, and
+`postman.getResponseCookie` without a jar throws `pm.cookies.get`'s. Postman's
+once-per-method deprecation warning is not written.
 
 ## What the editor offers, and where it comes from
 

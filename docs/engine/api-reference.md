@@ -3498,7 +3498,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `tests[]`,
-`responseBody`, `postman.*`, `require()`, `script.packages`, a bundled library
+`responseBody`, `require()`, `script.packages`, a bundled library
 such as `CryptoJS`, and the other rows of the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
@@ -10511,19 +10511,17 @@ The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
 Node (`fetch`, `require`, `URL`, `Buffer`, ...), and Postman's pre-`pm.*`
 globals and bundled libraries (`tests`, `responseBody`, `responseCode`,
-`postman.*`, `CryptoJS`, `_`, ...), whose hover names the replacement Postman
-itself gives (`responseBody` is `pm.response.text()`,
-`postman.setEnvironmentVariable` is `pm.environment.set()`).
+`CryptoJS`, `_`, ...), whose hover names the replacement Postman itself gives
+(`responseBody` is `pm.response.text()`, `responseCode` is `pm.response.code`).
+Postman's `postman` object is not among them: its methods run, as aliases of
+`pm` (#2577), and are declared from the completion table like `pm` itself.
 
 That is not padding: the app suppresses "Cannot find name" (2304), so a name that
 is merely undeclared draws nothing. A name typed `never` makes the call, member
 access or assignment that follows an error ("not callable", "property does not
 exist"). `never` is assignable to everything, so a bare read passes
 (`JSON.parse(responseBody)`); the three legacy names used only as bare values
-(`responseBody`, `responseTime`, `iteration`) are `void` instead. A dotted entry
-(`postman.setEnvironmentVariable`) is a member of the entry before the dot, which
-is then an object type holding it, so hover over the method names that method's
-replacement.
+(`responseBody`, `responseTime`, `iteration`) are `void` instead.
 
 Declaring a name does not reserve it: the app compiles each script as a module
 (`moduleDetection`), so a script's own `const data = ...` shadows the declared

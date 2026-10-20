@@ -216,7 +216,7 @@ describe("importNotices", () => {
 			const [notice] = scriptApis([
 				{
 					request: "A",
-					names: ["tests[]", "responseBody", "postman.*", "require()", "tv4"],
+					names: ["tests[]", "responseBody", "responseCode", "require()", "tv4"],
 				},
 				{ request: "B", names: ["moment"] },
 				{ request: "C", names: [] },
@@ -224,7 +224,7 @@ describe("importNotices", () => {
 				{ request: "E", names: [] },
 			]);
 			expect(notice.text).toBe(
-				"5 requests: script uses APIs Vayu does not run yet (tests[], responseBody, postman.*, require(), +2 more) - A, B, C, +2 more"
+				"5 requests: script uses APIs Vayu does not run yet (tests[], responseBody, responseCode, require(), +2 more) - A, B, C, +2 more"
 			);
 		});
 

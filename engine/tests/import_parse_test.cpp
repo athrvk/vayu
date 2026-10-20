@@ -2182,7 +2182,7 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
     "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
     "," +
     request_with_script ("Plain",
-    R"j(["const j = pm.response.json();","pm.test('ok', () => pm.expect(j.id).to.be.within(1, 5));"])j") +
+    R"j(["const j = pm.response.json();","pm.test('ok', () => pm.expect(j.id).to.be.within(1, 5));","postman.setEnvironmentVariable('id', j.id);"])j") +
     "," +
     request_with_script ("Mentions only",
     R"j(["// CryptoJS.MD5(x); tests[0]","const s = 'require(x) postman.x';"])j");
@@ -2214,15 +2214,15 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
 /// as before leaves no element and no name.
 TEST (PostmanImport, ReadsAStringValuedEventScriptAsItsText) {
     const ImportParse parsed = parse_postman_items (
-    R"j({"name":"Old","event":[{"listen":"prerequest","script":"postman.setNextRequest(null);"}],
+    R"j({"name":"Old","event":[{"listen":"prerequest","script":"var body = responseBody;"}],
          "request":{"method":"GET","url":"https://x.com"}})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& element =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("elements")[0];
     EXPECT_EQ (element.at ("kind"), "script.pre");
-    EXPECT_EQ (element.at ("config").at ("script"), "postman.setNextRequest(null);");
+    EXPECT_EQ (element.at ("config").at ("script"), "var body = responseBody;");
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
-    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["postman.*"]}])j"));
+    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["responseBody"]}])j"));
 }
 
 /// A non-empty `script.packages` is a use of Postman's package library, which
@@ -2253,8 +2253,8 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
         "item":[
         {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = data.name;"]}}],
          "item":[{"name":"R","event":[
-             {"listen":"prerequest","script":{"exec":["postman.clearGlobalVariable('a');"]}},
-             {"listen":"test","script":{"exec":["tests['a'] = true;","postman.x();"]}}],
+             {"listen":"prerequest","script":{"exec":["var t = responseTime;"]}},
+             {"listen":"test","script":{"exec":["tests['a'] = true;"]}}],
              "request":{"method":"GET","url":"https://x.com/r"}}]},
         {"name":"A","request":{"method":"GET","url":"https://x.com/a"}}
     ]})j",
@@ -2262,7 +2262,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
-        {"request":"R","names":["tests[]","postman.*"]},
+        {"request":"R","names":["tests[]","responseTime"]},
         {"request":"Reports","names":["data"]},
         {"request":"Signed API","names":["Buffer"]}
     ])j"));

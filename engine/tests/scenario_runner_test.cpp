@@ -1497,6 +1497,23 @@ TEST_F (ScenarioRunnerTest, SetNextRequestChangesTheExecutedSequence) {
     EXPECT_EQ (json::parse (rows[1].trace_data)["stepIndex"].get<size_t> (), 2u);
 }
 
+// Postman's legacy spelling is an alias of the same call (#2577), so it steers
+// the run the same way.
+TEST_F (ScenarioRunnerTest, LegacyPostmanSetNextRequestChangesTheExecutedSequence) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(postman.setNextRequest("Checkout");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Checkout");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe");
+}
+
 // A jump backwards is the point of the feature - a retry loop is one - and it
 // is also what the cycle bound below exists to survive.
 TEST_F (ScenarioRunnerTest, SetNextRequestCanSendTheIterationBackwards) {

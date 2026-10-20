@@ -686,6 +686,7 @@ if(QUICKJS_FOUND)
         src/runtime/pm/pm_cookies.cpp
         src/runtime/pm/pm_execution_metrics.cpp
         src/runtime/pm/pm_expect.cpp
+        src/runtime/pm/pm_legacy.cpp
         src/runtime/pm/pm_request_url.cpp
         src/runtime/pm/pm_response.cpp
         src/runtime/pm/pm_scopes.cpp
