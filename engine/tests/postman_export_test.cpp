@@ -812,8 +812,7 @@ TEST (PostmanExport, OAuth2GrantsAndSettings) {
 
 TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
     for (const ordered& extra :
-    { ordered{ { "audience", "a" } }, ordered{ { "resource", "r" } },
-    ordered{ { "autoFetchToken", false } }, ordered{ { "autoRefreshToken", false } },
+    { ordered{ { "autoFetchToken", false } }, ordered{ { "autoRefreshToken", false } },
     ordered{ { "queryParamName", "token" } }, ordered{ { "headerPrefix", "" } } }) {
         ordered config = { { "grantType", "client_credentials" } };
         config.update (extra);
@@ -824,12 +823,78 @@ TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
         EXPECT_EQ (losses (run (root)), (json{ { "oauth2_settings", 1 } }))
         << extra.dump ();
     }
+    // An audience and a resource are token request parameters to Postman
+    // (issue #2536), so neither is a loss.
     PostmanExportRequest plain = request ("r", "u");
-    plain.auth               = oauth2 ({ { "grantType", "client_credentials" },
-                  { "queryParamName", "access_token" }, { "autoFetchToken", true } });
+    plain.auth                 = oauth2 (
+    { { "grantType", "client_credentials" }, { "queryParamName", "access_token" },
+                    { "autoFetchToken", true }, { "audience", "a" }, { "resource", "r" } });
     PostmanExportFolder root = collection ();
     root.requests.push_back (plain);
     EXPECT_TRUE (run (root).notes.not_carried.empty ());
+}
+
+// The extra request parameter lists are Postman's (issue #2536): each row in
+// its own list with Postman's `send_as`, an authorization row on the URL, and
+// the config's audience and resource opening the token request's list, where
+// an import reads them from. A row Postman has no `send_as` for, or no key,
+// is left out.
+TEST (PostmanExport, OAuth2ParamListsArePostmansRequestParams) {
+    const ordered auth = auth_of (oauth2 ({ { "grantType", "client_credentials" },
+    { "audience", "https://api" }, { "resource", "urn:r" },
+    { "tokenParams",
+    ordered::array ({ { { "key", "org" }, { "value", "o" } },
+    { { "key", "tenant" }, { "value", "t" }, { "sendAs", "url" }, { "enabled", false } },
+    { { "key", "X-Trace" }, { "value", "1" }, { "sendAs", "header" } },
+    { { "key", "odd" }, { "value", "1" }, { "sendAs", "cookie" } }, { { "value", "keyless" } } }) },
+    { "authorizationParams", ordered::array ({ { { "key", "prompt" }, { "value", "login" } } }) },
+    { "refreshParams",
+    ordered::array ({ { { "key", "audience" }, { "value", "r-aud" } } }) } }));
+    // Member order is part of the shape, so the attributes are read as written.
+    const auto written = [&auth] (const char* key) {
+        for (const ordered& entry : auth.at ("oauth2")) {
+            if (entry.at ("key") == key) {
+                return entry.at ("value").dump ();
+            }
+        }
+        return std::string ();
+    };
+    EXPECT_EQ (written ("tokenRequestParams"),
+    R"([{"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"resource","value":"urn:r","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"org","value":"o","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"tenant","value":"t","enabled":false,"send_as":"request_url"},)"
+    R"({"key":"X-Trace","value":"1","enabled":true,"send_as":"request_header"}])");
+    EXPECT_EQ (written ("authRequestParams"),
+    R"([{"key":"prompt","value":"login","enabled":true,"send_as":"request_url"}])");
+    EXPECT_EQ (written ("refreshRequestParams"),
+    R"([{"key":"audience","value":"r-aud","enabled":true,"send_as":"request_body"}])");
+    EXPECT_EQ (auth["oauth2"].back ()["key"], "refreshRequestParams");
+    EXPECT_EQ (auth["oauth2"].back ()["type"], "any");
+
+    const json bare =
+    attributes (auth_of (oauth2 ({ { "grantType", "client_credentials" } })));
+    EXPECT_FALSE (bare.contains ("tokenRequestParams"));
+    EXPECT_FALSE (bare.contains ("authRequestParams"));
+    EXPECT_FALSE (bare.contains ("refreshRequestParams"));
+}
+
+// An import with no `tokenName` fills `credentialsId` from the promoted
+// audience, else resource; written back as a `tokenName`, it would come back
+// as one the user chose. Any other credentialsId is the user's and is kept.
+// Mutation-check: drop the `import_derived_credentials_id` comparison and the
+// first two expectations red.
+TEST (PostmanExport, ACredentialsIdAnImportDerivedIsNoTokenName) {
+    const auto token_name = [] (const ordered& config) {
+        const json written = attributes (auth_of (oauth2 (config)));
+        return written.contains ("tokenName") ? written.at ("tokenName") : json ();
+    };
+    EXPECT_TRUE (token_name ({ { "audience", "a" }, { "credentialsId", "a" } }).is_null ());
+    EXPECT_TRUE (token_name ({ { "resource", "r" }, { "credentialsId", "r" } }).is_null ());
+    EXPECT_EQ (
+    token_name ({ { "audience", "a" }, { "resource", "r" }, { "credentialsId", "r" } }), "r");
+    EXPECT_EQ (token_name ({ { "audience", "a" }, { "credentialsId", "work" } }), "work");
+    EXPECT_EQ (token_name ({ { "credentialsId", "work" } }), "work");
 }
 
 // ---------------------------------------------------------------------------

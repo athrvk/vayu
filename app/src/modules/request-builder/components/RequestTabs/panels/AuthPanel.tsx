@@ -90,6 +90,7 @@ function defaultsFor(mode: PickerMode): RequestAuth {
 
 export default function AuthPanel() {
 	const { request, updateField, resolveString } = useRequestBuilderContext();
+	const variables = useVariableSupport();
 	const auth = request.auth;
 
 	const handleModeChange = (mode: string) => {
@@ -151,6 +152,7 @@ export default function AuthPanel() {
 					noAuthDescription="No authentication will be sent with this request."
 					TextInput={VariableTextInput}
 					resolveString={resolveString}
+					variables={variables}
 					/*
 					 * Names the fields whose resolved values have to hold still
 					 * across this panel's unmount - Auth is not force-mounted, so

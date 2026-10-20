@@ -85,7 +85,9 @@ class OAuth2AuthorizeManager {
 };
 
 /**
- * Build the IdP authorization URL for a config (exposed for unit testing).
+ * Build the IdP authorization URL for a config (exposed for unit testing),
+ * with the config's `authorizationParams` rows (`oauth::extra_params`) after
+ * the parameters the engine writes.
  */
 std::string build_authorize_url (const nlohmann::json& config,
 const std::string& state,

@@ -25,6 +25,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <ranges>
+#include <set>
 #include <variant>
 
 namespace vayu::http {
@@ -97,6 +99,16 @@ bool pkce) {
     if (pkce) {
         params.emplace_back ("code_challenge", code_challenge);
         params.emplace_back ("code_challenge_method", "S256");
+    }
+    // A navigation has no body or headers, so every row rides the query
+    // whatever its `sendAs`. One named like a parameter written above is
+    // skipped: the engine's value wins and no name appears twice.
+    const std::set<std::string, std::less<>> written (
+    std::views::keys (params).begin (), std::views::keys (params).end ());
+    for (oauth::ExtraParam& row : oauth::extra_params (config, oauth::AUTHORIZATION_PARAMS)) {
+        if (!written.contains (row.key)) {
+            params.emplace_back (std::move (row.key), std::move (row.value));
+        }
     }
 
     url.push_back (url.find ('?') == std::string::npos ? '?' : '&');

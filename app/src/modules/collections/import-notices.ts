@@ -52,6 +52,11 @@ interface Copy {
 	many: string;
 }
 
+/*
+ * A phrase may hold `{names}`: the item's `names` (the parameter keys a count
+ * dropped, never their values) as " (a, b, c)", or nothing when it has none.
+ */
+
 /** How many request names a line spells out before "+N more". */
 const NAMES_SHOWN = 3;
 
@@ -189,8 +194,24 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 request sends its API key in a cookie - add it as a Cookie header",
 		many: "{n} requests send their API key in a cookie - add it as a Cookie header",
 	},
-	// A stale `state` is regenerated and a stashed token is fetched again by the grant.
-	oauth2_dropped_field: HIDDEN,
+	// Vayu generates a fresh `state` for every authorization attempt.
+	oauth2_state_regenerated: HIDDEN,
+	// The token Postman had fetched is not a setting to carry over: the grant
+	// fetches a new one the first time the request needs it.
+	oauth2_dropped_field: {
+		tier: "note",
+		named: "saved OAuth 2.0 token not imported - Vayu fetches a new one through the grant",
+		one: "1 saved OAuth 2.0 token not imported - Vayu fetches a new one through the grant",
+		many: "{n} saved OAuth 2.0 tokens not imported - Vayu fetches new ones through the grant",
+	},
+	// Sent by the engine itself (scope, client_id ...) or with no place to go; a
+	// provider that needs one (an audience, an acr_values) refuses the request.
+	oauth2_unmapped_param: {
+		tier: "action",
+		named: "OAuth 2.0 request parameter not imported{names} - Vayu sets some itself and cannot place the rest",
+		one: "1 OAuth 2.0 request parameter not imported{names} - Vayu sets some itself and cannot place the rest",
+		many: "{n} OAuth 2.0 request parameters not imported{names} - Vayu sets some itself and cannot place the rest",
+	},
 	url_without_raw: HIDDEN,
 	variable_metadata: HIDDEN,
 	disabled_body: {
@@ -278,6 +299,14 @@ function counted(copy: Copy, count: number): string {
 	return count === 1 ? copy.one : copy.many.replace("{n}", String(count));
 }
 
+/** " (a, b, c, +2 more)" for the keys an item names, "" for none. */
+function namesClause(names: readonly string[] | undefined): string {
+	if (!names || names.length === 0) return "";
+	const rest = names.length - NAMES_SHOWN;
+	const shown = names.slice(0, NAMES_SHOWN).join(", ");
+	return ` (${shown}${rest > 0 ? `, +${rest} more` : ""})`;
+}
+
 /**
  * A request name as a line quotes it. Spec summaries are often sentences
  * ("Uploads an image."), and a period before the colon reads as a typo.
@@ -302,7 +331,7 @@ function skippedNotice(item: SkippedItem): ImportNotice | null {
 		copy.named && item.requests && item.requests.length > 0
 			? named(copy.named, item.requests)
 			: counted(copy, item.count);
-	return { tier: copy.tier, text };
+	return { tier: copy.tier, text: text.replace("{names}", namesClause(item.names)) };
 }
 
 /**
