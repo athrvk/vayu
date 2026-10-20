@@ -747,9 +747,14 @@ on quit (it is more reliable than a signal on Windows, where `SIGTERM` does not
 behave as expected).
 
 The response is sent **before** shutdown begins, so the client always receives
-the `200`. About 100ms later, on a detached thread, the engine invokes its
-shutdown callback: the daemon's main loop exits, active runs are stopped, the
-lock file is released, logs are flushed, and the process exits.
+the `200`. The handler sets the body and then calls the shutdown callback
+inline, which only wakes the daemon's main loop; the teardown cannot overtake
+the response, because stopping the server joins the worker that is writing it.
+The daemon then stops the server, stops and joins active runs, refreshes the
+recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
+what is left of the app's 5 s window; on a timeout the previous backup stands,
+see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the
+database, releases the lock file, flushes the logs and exits.
 
 **Response:** `200`
 ```json
@@ -1613,7 +1618,7 @@ the null-vs-absent rule.
   "mockExampleId": null,             // Optional, the example id `mockResponseMode: "fixed"` targets
   "disableCookies": false,           // Optional, keep the cookie jar out of this request. Default false
   "disabledSystemHeaders": [],       // Optional, header names the engine does not add. Default []
-  "disableUrlEncoding": false,       // Optional, send path values and an api-key query as typed.
+  "disableUrlEncoding": false,       // Optional, send the URL as typed, with no percent-encoding.
                                       // Default false
   "postmanProtocolBehavior": null    // Optional, the imported Postman object - see below
 }
@@ -1703,12 +1708,15 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   user's and is always sent. Other names (`host`,
   `content-length`, `postman-token`, ...) are stored for the export and change
   nothing on the wire.
-- `disableUrlEncoding` writes a path variable's value and an api-key (or
-  OAuth 2.0 query-placed) credential into the URL as typed rather than
-  percent-encoded: a path value skips Postman's path encode set and a
-  credential skips its query rule ([Query encoding](#query-encoding))
-  entirely (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
-  `toNodeUrl (url, disableEncoding)` sends it.
+- `disableUrlEncoding` writes the URL as typed rather than percent-encoded:
+  a path variable's value skips Postman's path encode set, an api-key (or
+  OAuth 2.0 query-placed) credential and a substituted `{{variable}}` skip
+  their rules, and the literal text keeps its spaces and non-ASCII bytes
+  ([Query encoding](#query-encoding)), so `a"b` goes out as `a"b`, not
+  `a%22b`, as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
+  encoding on, a raw space is percent-encoded to `%20`; with the toggle on
+  it is refused, and the send fails with a message that names the space and
+  the toggle ([URL schemes](#url-schemes)).
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the
@@ -5642,7 +5650,7 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   "request": {                      // Optional: an inline unresolved request
     "method": "POST",
     "url": "https://{{host}}/users",
-    "headers": { "X-Token": "{{token}}" },
+    "headers": [{ "name": "X-Token", "value": "{{token}}" }],
     "body": { "mode": "json", "content": "{\"name\":\"{{name}}\"}" },
     "auth": { "mode": "inherit" },
     "elements": []
@@ -5694,8 +5702,9 @@ and is never re-resolved - see [POST /execute](#post-execute) and
   scenario plan's steps are composed with it internally, so a collection run
   needs no field at all.
 
-- **`requestId`** composes the stored request wholesale: URL, flattened enabled
-  headers (later duplicates win), body, auth (absent auth defaults to
+- **`requestId`** composes the stored request wholesale: URL, headers (every
+  enabled row with a key, in row order, as `{name, value}` lines - a repeated
+  name repeated, each in the spelling typed, issue #2466), body, auth (absent auth defaults to
   `inherit`), the resolved `elements` list (collection chain root→leaf, then
   the request's own, each stamped with its origin, disabled and blank
   `script.*` entries dropped the same way - see [Elements](elements.md)),
@@ -5717,9 +5726,25 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 
 #### Query encoding
 
-A stored URL's query is sent exactly as stored: nothing re-encodes it, and the
-send hands `url` to libcurl untouched. Where the engine itself writes a query
-pair into a URL, it uses Postman's rule (issue #1771,
+A stored URL is sent as stored with one exception: with `disableUrlEncoding`
+off, the bytes no HTTP request target may carry raw are percent-encoded
+outside the scheme and the authority (issue #2465,
+`core::encode_literal_at_url_component`): space, the C0 controls, DEL and
+every byte above `~` (each UTF-8 byte). So `GET http://h/a b?q=é` goes out as
+`GET /a%20b?q=%C3%A9`, where libcurl would refuse the space and send the `é`
+raw. Every other byte is sent as typed (`"`, `{`, `}`, `\`, `+`, `|` and an
+escape such as `%41`), so a URL that sent before sends the same bytes, and a
+non-ASCII host is still dialled by its punycode name. The rule is applied
+where every driver takes its URL (`wire_url`) and by composition, so
+`POST /compose` answers the URL that will be sent. With `disableUrlEncoding`
+on the URL goes out exactly as typed, and libcurl refuses a raw space: the
+send fails with status `0` and error code `INVALID_URL`, and a message that
+names the space and the toggle
+(`Cannot send this request: the URL contains a space or control character; percent-encode it, or turn Send URL without encoding off`),
+derived from scanning the URL and not from libcurl's wording.
+
+Where the engine itself writes a query pair into a URL, it uses Postman's
+rule (issue #1771,
 `core::encode_query_component` in `core/query_encoding.hpp`, pinned to the
 app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`),
 read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
@@ -5745,16 +5770,25 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   pass after the pre-request script). Postman substitutes into the URL string,
   parses it again and then encodes it, so a value's `&` and `=` split pairs as
   they would typed, a `?` it brings into the head opens the query, and a `#`
-  opens the fragment. In the query only `QUERY_ENCODE_SET` above is encoded,
-  alike in a key and a value; the `&`/`=` step of a row never applies.
+  opens the fragment. Each component then encodes the value by its own
+  Postman set (issue #2465): the query by `QUERY_ENCODE_SET` above, alike in
+  a key and a value (the `&`/`=` step of a row never applies); the path by
+  `PATH_ENCODE_SET` (see [Path variables](#path-variables)), so
+  `http://h/users/{{name}}` with `name = "John Doe"` sends
+  `/users/John%20Doe`; the fragment by `FRAGMENT_ENCODE_SET` (the C0
+  controls, DEL, every byte above `~`, space, `"`, `<`, `>` and backtick).
   `GET {{base}}/?q={{term}}` with `term = "a b#c"` sends `/?q=a%20b`, with
   `#c` as the fragment (which is not sent), and `?{{qs}}` with
   `qs = "a=1&b=2 c"` sends `?a=1&b=2%20c`. Where a value lands is read left
-  to right from the URL written so far, substituted values included: the
-  first `?` in the head opens the query, `#` opens the fragment. A layered
-  value is resolved whole and encoded once. The head and the fragment take a
-  value as it stands, so a `{{base}}` holding `https://x/p?k=a b` has only its
-  query part encoded, and `disableUrlEncoding` writes every value as typed.
+  to right from the URL written so far, substituted values included: in the
+  scheme and authority a `/` opens the path unless it follows a `:` or a `/`
+  (so `://` is not a path), the first `?` opens the query, `#` opens the
+  fragment. A layered value is resolved whole and encoded once. The scheme
+  and the authority take a value as it stands (Postman does not
+  percent-encode a host, and a non-ASCII one is dialled by its punycode
+  name), so a `{{base}}` holding `https://x/p?k=a b` has its query part
+  encoded and nothing else changed. `disableUrlEncoding` writes every value
+  as typed.
 - A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
   and is written by the row rule above
   ([scripting](scripting.md#writing)).
@@ -5764,6 +5798,15 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   left as separators, its path by the path set under
   [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
   ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+  A script and Send write the same request line for a space, a control
+  character, a non-ASCII byte and a value substituted into the path, query or
+  fragment, because the literal pass above encodes a subset of what
+  `encode_url_as_postman` does (issue #2465). They differ on purpose where
+  Send keeps a byte as typed so that a URL that sends today still does: a
+  script also writes `"`, `<`, `>`, a backtick and, in the query, `'` as `%XX`,
+  `{` and `}` in the path, turns a backslash before the query into `/` and
+  lowercases the host. `tests/url_encoding_test.cpp`
+  (`PostmanUrlEncodingAgreement`) pins both halves.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
@@ -5794,6 +5837,16 @@ status `0` with error code `INVALID_URL` and libcurl's own message
 and nothing is read. The libcurl the engine links carries every protocol curl
 builds by default, so these two options, set on every handle, are what restrict
 each transfer to `http` and `https`; the build does not.
+
+A URL libcurl cannot parse is also status `0` with error code `INVALID_URL`.
+When the URL the transfer was handed holds a space, a C0 control character or
+DEL, which is how one reaches libcurl once `disableUrlEncoding` is on (or a
+space sits in the host), the message says so instead of repeating libcurl's
+component wording (`URL rejected: Bad query`): `Cannot send this request: the
+URL contains a space or control character; percent-encode it, or turn Send URL
+without encoding off`. The last clause is left out when the toggle is already
+off, because it is no remedy. The scan is of the bytes, not of libcurl's text,
+and a malformed URL with none of them keeps libcurl's message.
 
 #### Non-ASCII hosts
 
@@ -5928,6 +5981,9 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 **Response:** `200` with the composed payload - the `POST /execute` body shape,
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
 unchanged. An auth that resolves to "send nothing" is an absent `auth` field.
+`headers` always comes back as the line array (issue #2466), whichever shape an
+inline request used, so a repeated header survives compose to execute; it is
+absent when there are no lines.
 
 **Errors** use the engine's single nested shape (see the top of this page),
 with specific codes:
@@ -5958,32 +6014,32 @@ with specific codes:
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
   column and the row (see [Scenario runs](#scenario-runs)).
 - `400` `{"error": {"code": "colliding_header_names", "message": "..."}}` - two
-  header names resolved to one, so one of the two headers would be gone. A
-  header map holds one value per name, so `{{tenant_header}}: acme` beside a
-  literal `X-Tenant: legacy` is not two headers once the variable answers
-  `X-Tenant` - it is one, and which one arrives is an ordering detail rather
-  than a rule. Names are compared **without case**, as `Headers` compares them,
-  so a `{{h}}` resolving to `authorization` refuses beside an `Authorization`
-  the caller typed. The message names both spellings as written and the name
-  they produced; nothing is repaired, for the reason a forged header is refused
-  rather than stripped.
+  header names written differently resolved to one, so the request would send
+  that header twice where its rows show two different names.
+  `{{tenant_header}}: acme` beside a literal `X-Tenant: legacy` is two
+  `X-Tenant` lines once the variable answers `X-Tenant`, and no row says so.
+  Names are compared **without case**, so a `{{h}}` resolving to
+  `authorization` refuses beside an `Authorization` the caller typed. The
+  message names both spellings as written and the name they produced; nothing
+  is repaired, for the reason a forged header is refused rather than stripped.
 
   Only a collision **resolution produced** is refused. Two names the caller
-  typed are two entries they can see, and the stored flattening's later-wins
-  rule (above) still decides those - the same distinction the bind-time refusal
+  *wrote* alike - `X-Dup` and `x-dup` typed on two rows, or one `{{h}}` typed
+  twice - are a repeated header they can see, and every one of those lines is
+  sent, in order (issue #2466) - the same distinction the bind-time refusal
   draws (see [Scenario runs](#scenario-runs)). The execute-time residual pass
-  refuses the same collision in the same words, since it rebuilds the same map:
+  refuses the same collision in the same words, since it resolves names the same way:
   a buffered send answers `statusCode: 0` with an `errorCode` of
   `INTERNAL_ERROR` carrying the message, exactly as the pre-send gate does,
   while a streaming send - which has not answered yet - is a `400` with this
   same code and fails its run row. A script's own `pm.sendRequest` refuses it
   as well, with the call named in front of the same wording, because it too
-  rebuilds a header map and a resolved name is a different key (issue #1067).
+  resolves header names (issue #1067).
 - `400` `{"error": {"code": "empty_header_name", "message": "..."}}` - a header
   name resolved to the empty string, so the line would go out under no name at
   all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
-  can see: the name is a map key, the key is empty, and what libcurl is handed
-  is the line `": acme"`. Nothing further down refuses it - the pre-send gate
+  can see: the name is empty, and what libcurl is handed is the line
+  `": acme"`. Nothing further down refuses it - the pre-send gate
   reads a header's text for the bytes that end a line early, and an absent name
   ends nothing - so composition is where it is caught. The message names the
   name as written, which is all there is to name; what it produced is nothing.
@@ -6052,9 +6108,9 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
 {
   "method": "POST",
   "url": "https://api.example.com/users",
-  "headers": {
-    "Content-Type": "application/json"
-  },
+  "headers": [                         // Optional, the lines to send, in order - see below
+    { "name": "Content-Type", "value": "application/json" }
+  ],
   "body": {
     "mode": "json",
     "content": "{\"name\":\"John\"}"
@@ -6089,6 +6145,19 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "bodyModeHeaders": ["Content-Type"]  // Optional, which `headers` the body mode wrote - see below
 }
 ```
+
+**`headers` is the request's header lines, in send order** (issue #2466): an
+array of `{"name", "value"}` objects, each sent as its own line in the order
+given and in its own spelling, so a name may repeat (`Link`, `Forwarded`, two
+`Accept` rows, `X-Dup` beside `x-dup`) and the authored order is the wire
+order. The older object form (`{"Accept": "application/json"}`) is still
+accepted and behaves as it always did: one line per key, so it cannot repeat a
+name. A line without a string `name` and a string `value`, or `headers` of any
+other type, is a `400`. `POST /runs` reads the same field the same way. What
+the engine adds (an auth header, the body-implied `Content-Type`, the
+[defaults](#default-request-headers)) is added only under a name no line
+already carries, compared without case; a typed `Authorization` sent twice is
+sent twice and auth adds none.
 
 **`timeout` is the whole-transfer deadline in milliseconds** (issue #1917), held
 to `1`-`86400000` and defaulting to the `defaultTimeout` setting when absent or
@@ -6131,9 +6200,9 @@ run's per-virtual-user session (the step neither sends nor updates it); a
 single-request load run never tracks cookies at all.
 
 **`bodyModeHeaders` names the headers the body mode wrote** (issue #1765): the
-`headers` keys whose row carried `"source": "body-mode"`. The flat `headers`
-object has no room for the marker, so `POST /compose` emits this list from a
-stored request's rows (only when it names something) and the app sends it
+header names whose last row carried `"source": "body-mode"`, compared without
+case. A `headers` line has no room for the marker, so `POST /compose` emits this
+list from a stored request's rows (only when it names something) and the app sends it
 beside an inline request's headers; inline `headers` replace the stored ones,
 so the stored list is dropped with them. A name in it that
 `disabledSystemHeaders` or `disabledDefaultHeaders` refuses is left off the
@@ -6456,6 +6525,9 @@ run-shaped way of stating the same field, not a second store.
     }
   ],
   "requestHeaders": { "accept": "*/*" },
+  "requestHeaderLines": [
+    { "name": "accept", "value": "*/*" }
+  ],
   "rawRequest": "GET /users?access_token=... HTTP/1.1\n...",
   "authQueryParam": "access_token",
   "body": { "id": 1, "name": "John" },
@@ -6700,8 +6772,19 @@ about what was composed to go out reads the same set the engine recorded; the
 Headers tab lists `rawRequest`'s header block instead, which is that set plus
 the transport's own lines.
 
+**`requestHeaderLines` is the same record unfolded** (issue #2466): one
+`{name, value}` entry per line the transfer appended, in wire order, a repeated
+name repeated and each in its own spelling - the request's own lines first, in
+the order the request gave them, then what the engine derived. Always present,
+an empty array when nothing was recorded. `requestHeaders` stays one value per
+name for the readers written against it: a repeated name's values are joined
+with `", "`, a `Cookie`'s with `"; "`, under the first line's spelling - and
+that folded form is what `pm.request.headers` shows, since the scripting API is
+single-valued.
+
 **The stored trace keeps this map too**, as `trace_data.request.sentHeaders`
-beside the composed `request.headers` (issue #664) - so a restored response
+beside the composed `request.headers` (issue #664), and the unfolded lines as
+`trace_data.request.sentHeaderLines` (issue #2466) - so a restored response
 pane's sent-headers disclosure shows the set the live one showed, derived
 `User-Agent` and body-implied `Content-Type` included, rather than the composed
 map's different answer. Both maps are stored because they answer different
@@ -6897,7 +6980,7 @@ Start a load test run (Vayu Mode).
 {
   "method": "GET",
   "url": "https://api.example.com/users",
-  "headers": {},
+  "headers": [],             // Optional, {name, value} lines in send order (or the older object) - see POST /execute
   "body": {
     "mode": "none",
     "content": ""
@@ -7116,7 +7199,10 @@ same `thresholdValidation` shape. A collection run's error rate and latency
 percentiles are drawn from the steps it actually sent (a step a script or an
 unbound data row skipped counts toward neither), and its assertion tally is
 the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
-reads for a load run.
+reads for a load run. Since a script error no longer ends the iteration
+(issue #2526), the steps after one are sent and counted too, so the same
+collection can report a larger denominator than it did before; `stopOnError:
+true` restores the old population.
 
 **`custom.<name>.<stat>`** (issue #1500) budgets a named `metric.record` /
 `pm.metrics` value - `<name>` the metric was recorded under, `<stat>` one of
@@ -7490,7 +7576,8 @@ inside the block rather than through `mode` / `duration` / `iterations`:
     "dataFileName": "users.csv",    // optional, only beside data: the file's display name, never a path
     "dataFileHash": "<sha256>"      // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
   },
-  "environmentId": "env_123"        // optional, and what {{variables}} resolve against
+  "environmentId": "env_123",       // optional, and what {{variables}} resolve against
+  "stopOnError": false              // optional, default false - see Outcomes under Scenario runs
 }
 ```
 
@@ -7816,11 +7903,12 @@ part's field name, filename and content type.
 
 **Two headers that bind to one name** error the same way. `X-{{data.h}}`
 resolving to `authorization` beside a literal `Authorization`, or two templated
-names resolving alike, would leave the request carrying one of the two - so the
-row is refused instead, naming the header as it is written, the name it
-produced and the row. Note this is deliberately *not* composition's duplicate
-rule, which is last-wins: a duplicate there is two headers the author typed and
-can see, while this one exists only for the rows that produce it.
+names resolving alike, would send that header twice where the request's rows
+name two different headers - so the row is refused instead, naming the header
+as it is written, the name it produced and the row. Two headers *written* alike
+are not this: they are a repeat the author typed and can see, and every row
+sends both (issue #2466); this refusal exists only for the rows that produce
+one.
 
 **A header name a row binds to nothing** errors the same way (issue #1095), and
 is reported ahead of a collision when a row does both - two names that bind to
@@ -7860,7 +7948,10 @@ this refuses would not have exercised the endpoint either.
 
 **Each step execution writes one `results` row** carrying the design-mode trace
 plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -
-for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
+for a run with `data` - `dataRowIndex`, the row that iteration bound. The step
+whose error ended its iteration short of the plan's end also carries
+`stepsNotRun`, defined under Outcomes below; it is absent, never `0`, on every
+other row. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -7889,8 +7980,39 @@ that passed everything else. The run's rollup is
 |---------|---------|-------------------------|
 | `passed` | The request completed and every assertion held. | Continues. |
 | `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
-| `errored` | The step did not complete: a transport failure, a timeout, or a script that threw. | **Ends the iteration.** The next iteration still runs. |
+| `errored`, script only | The exchange completed - a response arrived, or the send was skipped - and the one thing that went wrong is that the pre-request or test script threw (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
+| `errored`, anything else | The step did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind), or the runner refused the step's flow control (an unresolved or ambiguous `setNextRequest` target, the `maxStepsPerIteration` cap). | **Ends the iteration.** The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
+
+Either kind of `errored` is the same outcome on the row, in the summary's
+`errored` count and on the `step` frame, with the error in `results.error`; the
+table's split is only about what the iteration does next. A transport failure
+keeps ending the iteration even though Postman's runner carries on there: the
+steps after it nearly always read the response that never arrived. A step
+whose script errored while the iteration continues has its own flow control
+ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a
+script that then threw is an instruction from code that did not finish, so the
+iteration walks to the next plan position (see
+[scripting.md](scripting.md#flow-control-pmexecution)).
+
+**`stopOnError`** is a top-level boolean on `POST /runs`, default `false`,
+type-checked before the run row is created (`null` reads as the default, and a
+non-boolean is a `400` `invalid_run_config` naming the field). Set, every
+`errored` step ends its iteration, script-only ones included, which is
+Newman's `--bail` shape and what a collection run did before issue #2526. It
+is a collection-run (design-mode) key: a [scenario load
+run](#scenario-load-runs) does not read it. It rides the stored snapshot as
+sent and is echoed in the report's `scenario` section, so two runs that differ
+only in it never read as the same run.
+
+**`stepsNotRun`** counts the plan positions an error cost: when an `errored`
+step ends its iteration, the positions after it that the iteration had not
+already attempted. It rides the step row (and the `step` frame) that ended the
+iteration when it is above zero, and the report's `scenario.stepsNotRun` sums it over the run. An
+iteration that ends any other way adds nothing: `setNextRequest(null)` and a
+forward jump are a script's decision, not a loss, and a stop is the user's.
+`iterationsCompleted` keeps its meaning - an iteration an error ended still
+completed.
 
 A run whose steps failed still reaches `completed`: the outcome of the work is
 in the steps, and only the runner itself failing makes the run `failed`. A stop
@@ -7902,7 +8024,9 @@ runs a named request next instead of the one that follows, `setNextRequest(null)
 ends the iteration, and `pm.execution.skipRequest()` (pre-request scripts only)
 sends nothing and marks the step `skipped`. A target that names no step in the
 run, or one that two steps share, fails the step by name rather than guessing,
-and `maxStepsPerIteration` above is what stops a cycle. The full contract,
+and `maxStepsPerIteration` above is what stops a cycle. Both refusals end the
+iteration whatever `stopOnError` says, and a step whose script errored has its
+redirect ignored. The full contract,
 including everywhere the two methods throw, is in
 [scripting.md](scripting.md#flow-control-pmexecution).
 
@@ -8707,7 +8831,10 @@ the metrics stream above.
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
 `data`, on the same terms as on the stored row, so a step reads the same live
-and after a reload. `validation` is the step's schema verdict (issue #681) in
+and after a reload. `stepsNotRun` follows the same rule: present only on the
+step whose error ended its iteration short of the plan's end, with how many
+plan positions that cost (see Outcomes under [Scenario runs](#scenario-runs)),
+and absent rather than `0` everywhere else. `validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its
 stored trace carries, so a watched run and a read-back one agree. `tests` is how
@@ -8739,8 +8866,9 @@ data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
 `iterations` is how many passes the engine resolved - a data set's row count
 where the run named no explicit count of its own. `stepsExpected` is
 `stepsPerIteration * iterations`, an upper bound rather than a promise, on the
-same terms as the load path's `requestsExpected` above: an errored step ends
-its iteration, `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
+same terms as the load path's `requestsExpected` above: an errored step can
+end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
+`POST /runs/:id/stop` ends the run, `setNextRequest` can walk
 an iteration in fewer steps than the plan holds, and the
 `maxStepsPerIteration` cap can end one that walks in more. It rides the same
 monotonic id space as the `step` frames that follow - the same ring, so
@@ -9768,7 +9896,7 @@ and never needed to (that one reports an empty `refreshes` array).
 "scenario": {
   "iterations": 3, "iterationsCompleted": 3, "stepsExecuted": 6,
   "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
-  "stepsStored": 6, "stepsDropped": 0,
+  "stepsStored": 6, "stepsDropped": 0, "stepsNotRun": 0, "stopOnError": false,
   "transactions": [
     { "name": "checkout", "count": 3, "errors": 0,
       "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5, "p99": 33.0, "max": 55.4 } }
@@ -9780,6 +9908,16 @@ and never needed to (that one reports an empty `refreshes` array).
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
 non-passing step among the ones kept. `summary.totalRequests` is the number of
 step executions, not the number of rows that survived.
+
+`stepsNotRun` is how many plan positions errors cost the run - summed over
+every iteration an `errored` step ended, the positions after that step the
+iteration had not attempted (Outcomes under [Scenario runs](#scenario-runs)).
+`stepsExecuted` beside a non-zero `stepsNotRun` is a run that did less than its
+plan, not a complete one with an error in it. `stopOnError` is the run's own
+setting, echoed because the same counts describe a different run under it.
+Both are written by a collection run (design mode) only: a scenario load run's
+section carries neither, and a summary stored before issue #2526 carries
+neither either.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never

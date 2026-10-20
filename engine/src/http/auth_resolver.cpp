@@ -174,7 +174,7 @@ vayu::db::Database* db) {
     // resolve_oauth2), and this run is sending that one - swapping the token
     // under it would change nothing on the wire.
     const auto it = request.headers.find (plan.header_name);
-    if (it == request.headers.end () || it->second != plan.header_value) {
+    if (it == request.headers.end () || it->value != plan.header_value) {
         return std::nullopt;
     }
     return plan;

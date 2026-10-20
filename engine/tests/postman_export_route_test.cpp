@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -34,6 +35,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
+#include "wide_json.hpp"
 
 namespace vayu::http::routes {
 // Defined in postman_export.cpp and import.cpp; each returns
@@ -691,6 +693,29 @@ TEST_F (PostmanExportRouteTest, WritesNothing) {
     const auto after = db_->get_collection (id);
     ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+// A stored header row may carry members beyond `key`, `value` and `enabled`,
+// and the export reads the column back in its stored key order (#2497).
+// Mutation check: parse with `nlohmann::ordered_json::parse` in `column`
+// (`routes/postman_export.cpp`) and this runs for minutes and fails the budget.
+TEST_F (PostmanExportRouteTest, AStoredHeaderRowOfAHundredThousandMembersIsReadInLinearTime) {
+    const std::string id = import_text (postman_collection (
+    R"({"name":"Wide","request":{"method":"GET","url":"https://x.com"}})"));
+    ASSERT_FALSE (id.empty ());
+    auto row = request_named (*db_, id, "Wide");
+    ASSERT_HAS_VALUE (row);
+    json header = json::parse (vayu::tests::wide_object_json ());
+    header.update (json{ { "key", "X-Wide" }, { "value", "1" }, { "enabled", true } });
+    row->headers = json::array ({ header }).dump ();
+    db_->save_request (*row);
+
+    const auto started     = std::chrono::steady_clock::now ();
+    const std::string text = export_text (id);
+    const auto elapsed     = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_NE (text.find ("X-Wide"), std::string::npos);
 }
 
 TEST_F (PostmanExportRouteTest, ExportsTheNamedSubtreeOnly) {

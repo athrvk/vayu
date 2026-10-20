@@ -51,7 +51,7 @@ import { useSessionStore, useToastStore } from "@/stores";
 import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
 import { DetailSkeleton, ErrorState, SentBodyFileNote } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
-import { bodyModeHeaders, toFlatHeaders } from "@/modules/request-builder/utils/key-value";
+import { bodyModeHeaders, toHeaderRows } from "@/modules/request-builder/utils/key-value";
 import {
 	buildExecBody,
 	disabledDefaults,
@@ -221,7 +221,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 				// The copy's own headers and nothing else: what Vayu adds is the
 				// engine's since issue #1229, so a replay is not handed a header
 				// set the builder's Send would not produce.
-				const headersRecord = toFlatHeaders(request.headers);
+				const headerRows = toHeaderRows(request.headers);
 
 				// Shared with the builder's own send path - see execute-mapping.ts.
 				// Raw: the engine resolves {{variables}} and inherit auth at compose
@@ -259,7 +259,7 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						method: request.method,
 						url: request.url,
 						params: composePathParams(request.params),
-						headers: headersRecord,
+						headers: headerRows,
 						// Which of those the body mode wrote (issue #1765).
 						...bodyModeHeaders(request.headers),
 						body: execBody,

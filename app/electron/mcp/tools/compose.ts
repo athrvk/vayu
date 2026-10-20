@@ -41,6 +41,34 @@ import { selectEnvironment } from "./variable-blobs.js";
 import { REVEAL_SETTING_TOKEN, settingRemedy } from "../remedy.js";
 
 /**
+ * The `headers` an agent passed: the ordered `[{ name, value }]` lines, a
+ * repeated name sent once per line in order (issue #2466), or the single-valued
+ * `{ name: value }` map, one line per key. Both go to `POST /compose` as given;
+ * it answers lines either way.
+ *
+ * A line that is not an object with a string `name` is refused here by name
+ * rather than forwarded for the engine to refuse without saying which one.
+ */
+function readHeaderOverrides(
+	raw: unknown
+): Record<string, string> | Array<{ name: string; value: string }> | undefined {
+	if (Array.isArray(raw)) {
+		return raw.map((line, index) => {
+			if (!isRecord(line) || typeof line.name !== "string") {
+				throw new ToolArgError(
+					`headers[${index}] must be an object with a string "name" and a "value".`
+				);
+			}
+			return { name: line.name, value: String(line.value) };
+		});
+	}
+	if (!raw || typeof raw !== "object") return undefined;
+	return Object.fromEntries(
+		Object.entries(raw as Record<string, unknown>).map(([key, value]) => [key, String(value)])
+	);
+}
+
+/**
  * The request fields an agent stated directly, raw - and *only* the ones it
  * actually supplied, so this can be laid over a saved request by `POST
  * /compose` without a `method: "GET"` default clobbering its stored verb.
@@ -59,13 +87,8 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
 	if (method !== undefined) out.method = method.toUpperCase();
 	const url = str(args, "url");
 	if (url !== undefined) out.url = url;
-	if (args.headers && typeof args.headers === "object" && !Array.isArray(args.headers)) {
-		const headers: Record<string, string> = {};
-		for (const [key, value] of Object.entries(args.headers as Record<string, unknown>)) {
-			headers[key] = String(value);
-		}
-		out.headers = headers;
-	}
+	const headers = readHeaderOverrides(args.headers);
+	if (headers !== undefined) out.headers = headers;
 	// Before anything is composed: an inline body is never a file, because
 	// nothing here can stand for the person who has to choose it.
 	if (str(args, "bodyType") === "binary" || args.file !== undefined) {
@@ -743,10 +766,12 @@ export function describeLoadShape(shape: LoadShape): string {
 export const MAX_IN_FLIGHT_BOUND = 1_000_000;
 
 /**
- * The engine's guards on the two numeric recording knobs
+ * The engine's guards on the numeric recording knobs
  * (`validate_run_config`, `engine/src/http/routes/execution.cpp`), mirrored for
  * the reason {@link MAX_IN_FLIGHT_BOUND} is: the schema refuses an
- * out-of-range value by name instead of surfacing a `400`.
+ * out-of-range value by name instead of surfacing a `400`. The two response
+ * sample bounds are `response_sample_rate` (a period, so 1 and up) and
+ * `max_response_samples` (`run_config::MAX_RESPONSE_SAMPLES`; 0 keeps none).
  *
  * Deliberately *not* the load dialog's own ceilings - `LOAD_TEST_LIMITS`
  * narrows the slow threshold to a minute because that is a sensible thing to
@@ -756,6 +781,8 @@ export const MAX_IN_FLIGHT_BOUND = 1_000_000;
  */
 export const MAX_SUCCESS_SAMPLE_PERIOD = 100_000;
 export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
+export const MAX_RESPONSE_SAMPLE_PERIOD = 100_000;
+export const MAX_RESPONSE_SAMPLES_BOUND = 1_000_000;
 
 /**
  * The redirect ceiling `apply_request_fields` clamps a stored request to
@@ -774,18 +801,22 @@ export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
 export const MAX_REDIRECTS_BOUND = 100;
 
 /**
- * The recording knobs the app's load dialog sends, as `{tool argument: run
- * config key}`. Two spellings because the engine's are snake_case here and only
- * here - `success_sample_rate` is not a rate but a *period* (keep 1 in N), and
- * the app's own `StartLoadTestRequest` carries a comment saying so. The
- * argument is named for what the value means; the payload key stays the
- * engine's, so `get_run_report`'s echo of the config snapshot matches what a
- * run was started with.
+ * The recording knobs of a load run, as `{tool argument: run config key}`. Two
+ * spellings because the engine's are snake_case here and only here -
+ * `success_sample_rate` and `response_sample_rate` are not rates but *periods*
+ * (keep 1 in N), and the app's own `StartLoadTestRequest` carries a comment
+ * saying so. The argument is named for what the value means; the payload key
+ * stays the engine's, so `get_run_report`'s echo of the config snapshot matches
+ * what a run was started with. The load dialog sends the first three of these
+ * and neither response-sample key (#2447), so only an agent ever changes the
+ * samples `get_run_samples` reads.
  */
 const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]> = [
 	["successSamplePeriod", "success_sample_rate"],
 	["slowRequestThresholdMs", "slow_threshold_ms"],
 	["saveTimingBreakdown", "save_timing_breakdown"],
+	["responseSamplePeriod", "response_sample_rate"],
+	["maxResponseSamples", "max_response_samples"],
 ];
 
 /**
@@ -793,8 +824,8 @@ const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]
  *
  * Shared by both load paths because both read them: a scenario load run is
  * driven by the same `RunContext`, whose constructor is the one place
- * `success_sample_rate` / `save_timing_breakdown` / `slow_threshold_ms` are
- * read (`core/run_manager.cpp`), and `comment` is lifted into the run summary
+ * `success_sample_rate` / `save_timing_breakdown` / `slow_threshold_ms` and the
+ * two response-sample keys are read (`core/run_manager.cpp`), and `comment` is lifted into the run summary
  * and the report's `metadata.configuration` by `routes/runs.cpp` whichever
  * executor produced the run. Forwarding them on one path only would have been a
  * knob that silently did nothing on the other.

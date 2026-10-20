@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parentRow, rowAfterRemoving, treeRows } from "./tree-focus";
+import { parentIndex, parentRow, rowAfterRemoving, siblingIndices, treeRows } from "./tree-focus";
 
 interface Node {
 	id: string;
@@ -218,5 +218,28 @@ describe("rowAfterRemoving", () => {
 			"a",
 			"b",
 		]);
+	});
+});
+
+/**
+ * The same rule over levels alone: what the key handler reads when a windowed
+ * tree hands it its rows rather than its DOM. Levels of
+ * a, a1, a1x, a2, b, b1 - two roots, the first with a nested group.
+ */
+describe("parentIndex and siblingIndices", () => {
+	const levels = [1, 2, 3, 2, 1, 2];
+
+	it("finds the nearest shallower row above, -1 at the root or outside", () => {
+		expect(levels.map((_, index) => parentIndex(levels, index))).toEqual([-1, 0, 1, 0, -1, 4]);
+		expect(parentIndex(levels, -1)).toBe(-1);
+		expect(parentIndex(levels, levels.length)).toBe(-1);
+	});
+
+	it("lists a row's siblings, itself included, and nothing from another parent", () => {
+		expect(siblingIndices(levels, 1)).toEqual([1, 3]);
+		// b1 shares a level with a1 and a2 but not their parent.
+		expect(siblingIndices(levels, 5)).toEqual([5]);
+		expect(siblingIndices(levels, 0)).toEqual([0, 4]);
+		expect(siblingIndices(levels, 9)).toEqual([]);
 	});
 });

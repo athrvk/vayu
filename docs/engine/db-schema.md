@@ -59,7 +59,7 @@ window costs a slower start rather than a refusal. What happens next:
 |---------|---------------------------|------------------|
 | A newer `user_version` than this engine understands | Nothing - the constructor throws before the file is touched, and the daemon does not start | (the exception, naming both versions) |
 | Cannot be examined (locked, disk full, read-only, I/O error) | Nothing is touched, the daemon does not start, the reason is named | (the exception, naming the path, the SQLite code and message, and what to do) |
-| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy | Nothing |
+| Opens cleanly | Once the engine is listening, `<db>.bak` is replaced by a `VACUUM INTO` snapshot of it, validated by the same probe, flushed to disk and renamed into place - so the backup is only ever taken from a database that validated, and is never a partial copy. A clean shutdown after a session that wrote anything takes the same snapshot again (#2421), so the backup holds that session's work | Nothing |
 | Corrupt, `<db>.bak` passes the same validation | The corrupt file set is quarantined and the backup copied back over it | `restored_from_backup` |
 | Corrupt, `<db>.bak` is corrupt too | The backup is left untouched as evidence, the corrupt file set is quarantined, and a fresh empty database is created | `backup_also_corrupt` |
 | Corrupt, `<db>.bak` cannot be examined | Nothing is touched and the daemon does not start, naming the backup: whether it would restore is unknown | (the exception, naming the backup) |
@@ -71,14 +71,25 @@ newer-schema refusal takes. A snapshot the backup refresh cannot examine is disc
 that says so (`the snapshot could not be examined: ...`), and the previous `<db>.bak` stands, as it
 does for one that did not validate.
 
+The shutdown refresh (`Database::refresh_recovery_backup_on_shutdown`) runs after the run drain,
+while the engine still holds its lock. It is skipped when `sqlite3_total_changes64` on the shared
+connection has not moved since `init()` (a write through any other connection is not counted),
+checkpoints the WAL (`TRUNCATE`, a reader another process holds tolerated), and is bounded by the
+smaller of `SHUTDOWN_BACKUP_DEADLINE_MS` (2 s) and what is left of the app's 5 s shutdown window:
+the copy is interrupted at the deadline and one that finishes after it is discarded unvalidated.
+Validation, the flush and the rename that follow an in-time copy run to completion. Every way it
+stops leaves the previous `<db>.bak` and logs a `db` warning saying so.
+
 Starting fresh is deliberate - the alternative is a daemon that fails to start
 on every launch forever - but it is total: collections, requests, environments,
 saved examples, spec documents and run history are all gone, and the app comes
 up looking like a fresh install.
 
-> **`<db>.bak` is not a user backup.** It is rewritten on every clean start, so
-> it exists to give a corrupt file something to restore *from*, not to let
-> anyone go back to last week - and the row above where it is the only copy
+> **`<db>.bak` is not a user backup.** It is rewritten once the engine listens
+> and again at a clean shutdown, so it exists to give a corrupt file something
+> to restore *from*, not to let anyone go back to last week. Work written after
+> the last refresh (a session that ended in a crash or a power cut rather than
+> a clean shutdown) is not in it - and the row above where it is the only copy
 > left is the one that ends in an empty workspace. The snapshot a user owns is
 > `POST /workspace/backup` / `vayu-cli backup`, described in
 > [architecture.md](architecture.md#workspace-backups).
@@ -86,7 +97,8 @@ up looking like a fresh install.
 > **`<db>.pre-upgrade.bak` is different: it is written once.** A one-time
 > repair pass (below) takes it immediately before its first rewrite, and
 > nothing after that touches it again - unlike `<db>.bak`, which the same start
-> refreshes, once it listens, from a file the repair has already rewritten. It
+> refreshes, once it listens, from a file the repair has already rewritten, and
+> its clean shutdown refreshes again. It
 > is the one place the pre-repair rows survive the start that repaired them.
 
 ### The quarantine (issue #984)
@@ -729,8 +741,10 @@ ones mirror `vayu::Request` fields and ride every composed payload:
   and `postman-token` are stored and exported but change nothing on the wire.
 - `disable_url_encoding` writes a path variable's value (at composition and
   when a bind or the residual pass settles it) and an api-key or OAuth 2.0
-  query parameter as typed. libcurl's own URL handling is unchanged: a raw
-  space is still refused and dot-segments are still normalised.
+  query parameter as typed, and it turns off the percent-encoding of the
+  URL's literal text (`wire_url`): with encoding on a raw space is sent as
+  `%20`, with the toggle on it is refused, by a message that names the space
+  and the toggle. libcurl's dot-segment normalisation is unchanged.
 
 `postman_protocol_behavior` is nothing the engine sends: `POST /export/postman`
 starts from it and overwrites only the keys a typed column now disagrees with,
@@ -1398,7 +1412,8 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
     "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
-    "steps_stored": 6, "steps_dropped": 0
+    "steps_stored": 6, "steps_dropped": 0, "steps_not_run": 0,
+    "stop_on_error": false
   }
 }
 ```
@@ -1406,7 +1421,16 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
 `total_requests` is the number of **step executions**, and it is here precisely
 because the report would otherwise count the rows that survived
 `maxScenarioStoredSteps` and call that the run's size. `steps_dropped` is what
-that cap thinned - always successes, never a failure.
+that cap thinned - always successes, never a failure. `steps_not_run` is the
+plan positions errors cost (issue #2526): for every iteration an `errored` step
+ended, the positions after it the iteration had not attempted; an iteration
+that `setNextRequest(null)`, a jump or a stop ended adds nothing.
+`stop_on_error` is the run's `stopOnError` as it ran. The report serves both as
+`scenario.stepsNotRun` / `scenario.stopOnError`, and only when stored: a summary
+written before the issue, and a scenario load run's, carries neither. The step
+row that ended an iteration short of the plan's end carries the same
+per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
+row.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
@@ -1420,7 +1444,9 @@ with its credentials withheld. Composition has already written every
 - the value of every `headers` entry named in the shared secret set
   (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
   `X-Api-Key`, ...; `vayu::utils::is_secret_field_name`, case-insensitive) or
-  by the request's own `apikey` auth becomes `"<redacted>"`, the name kept;
+  by the request's own `apikey` auth becomes `"<redacted>"`, the name kept -
+  in either shape `headers` arrives in, an object's member or each
+  `{name, value}` line's `value` (issue #2466), and a repeated line every time;
 - every occurrence of a value of a variable marked `secret` - raw, strictly
   percent-encoded (RFC 3986), as composition writes a query value, JSON-escaped
   (a JSON body is stored as text, so `pa"ss\word` is `pa\"ss\\word` inside
@@ -1479,7 +1505,10 @@ snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count plus the file's name and content hash (`dataFileName`
 and `dataFileHash`, each absent when the run named no file; issue #2051), never
 its path. The writer is `vayu::core::build_scenario_manifest`
-(`core/scenario_plan.cpp`).
+(`core/scenario_plan.cpp`). Only the `scenario` block is replaced: the run's
+top-level options (`environmentId`, `failOnSchemaError`, `stopOnError`,
+`thresholds` and the rest) stay beside it as sent, which is what keeps two runs
+that differ only in one of them from reading as the same run.
 
 **`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
 run's snapshot also carries the run's resolved default-header decision at
@@ -1743,9 +1772,14 @@ on. None of those is written into the request row itself (issue #1229): they are
 so a stored request cannot carry a stale one. Both maps are stored because both are read, and they
 answer different questions - `sentHeaders` is what the response pane's sent-headers disclosure
 means, while `headers` is the request as *composed*, which is what a pre-request script saw and
-what `design-run-seed.ts` reseeds a request tab from. Values are **not redacted**, same contract
-as `rawRequest` beside it. The key is **absent** on a step that sent nothing and on every row
-written before #664, so a reader falls back to `headers`. The load-run writers store no sent
+what `design-run-seed.ts` reseeds a request tab from. Both are one value per name: a name the
+request carries on more than one line (issue #2466) is stored with its values joined by `", "`
+(a `Cookie`'s by `"; "`), under the first line's spelling. Beside them, **`sentHeaderLines`** is
+the sent record unfolded - one `{name, value}` entry per line in wire order, the live response's
+`requestHeaderLines` - written whenever `sentHeaders` is. Values are **not redacted**, same contract
+as `rawRequest` beside it. Both sent keys are **absent** on a step that sent nothing, `sentHeaders`
+on every row written before #664 and `sentHeaderLines` on every row written before #2466, so a
+reader falls back to `sentHeaders` and then to `headers`. The load-run writers store no sent
 record at all - the load driver passes `nullptr` for it, to keep an allocation off the hot path -
 so a sampled capture's replay reads the composed map either way.
 

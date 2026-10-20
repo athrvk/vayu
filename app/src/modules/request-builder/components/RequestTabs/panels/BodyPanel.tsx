@@ -74,7 +74,7 @@ import { useVariableSupport } from "../../../hooks/useVariableSupport";
 import type { BodyMode } from "../../../types";
 import type { KeyValueEntry, KeyValueItem } from "@/types";
 import { createEmptyKeyValue } from "@/components/shared/KeyValueEditor/key-value";
-import { toFlatHeaders } from "../../../utils/key-value";
+import { toHeaderRows } from "../../../utils/key-value";
 import { composePathParams, substitutePathVariables } from "../../../utils/path-variables";
 import { resolveUrlTemplate } from "../../../utils/query-encoding";
 import { containsVariableToken } from "@/constants/variables";
@@ -213,7 +213,7 @@ export default function BodyPanel() {
 		url: (request.url || "").trim(),
 		params: request.params,
 		resolvedUrl: resolvedGqlUrl,
-		headers: toFlatHeaders(request.headers),
+		headers: toHeaderRows(request.headers),
 		auth: { ...request.auth },
 		resolvedAuth,
 		collectionId: request.collectionId || undefined,

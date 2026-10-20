@@ -411,7 +411,7 @@ export function SchemaExplorer({ entry, schemaKey, onInsert, notice = null }: Sc
 						Nothing matches "{term}".
 					</p>
 				) : (
-					// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it
+					// eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it
 					<div
 						ref={treeRef}
 						role="tree"

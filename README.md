@@ -72,7 +72,6 @@ Vayu **matches `wrk` and edges past `vegeta`** - all three converge on the same 
 | **Load Test Throughput** | Tens of thousands RPS | Limited by JS runtime | High (Go routines) | Moderate (thread-heavy) | Built-in performance runner (fixed, ramp up, spike, peak); local runs capped by your hardware |
 | **Scripting** | QuickJS (`pm.*` syntax) | JavaScript (ES6) | JavaScript (ES6) | Groovy / BeanShell | JavaScript |
 | **UI** | Native desktop app | Native desktop app | CLI only | Java Swing (dated) | Native desktop app |
-| **UI Responsiveness** | High (sidecar arch) | Good | N/A | Laggy under load | Slows with large collections |
 | **Privacy / Offline** | 100% local, no account | 100% local | Local / cloud hybrid | 100% local | Cloud-heavy (optional local) |
 | **MCP / agent control** | Built in, local, drives the load engine | Official server, wraps the CLI | Official server (experimental) | No | Yes, via the cloud workspace |
 | **SSE streaming** | Live Events view, scriptable, load-tested | Connects, no event UI | Via extension | No | Client-side inspection |

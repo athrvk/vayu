@@ -95,6 +95,9 @@ describe("parseStepEvent", () => {
 		// read as a result rather than as silence. Half a tally is not a tally -
 		// the chip would render `NaN passed`.
 		{ field: "tests", value: { passed: 2, failed: 1 }, malformed: [{ passed: 2 }, "nope"] },
+		// The engine sends it only on the step whose error ended its iteration
+		// (issue #2526), so a 0 or a negative is no claim to render.
+		{ field: "stepsNotRun", value: 3, malformed: ["3", 0, -1] },
 	])(
 		"carries $field when present, and omits the key when absent or malformed",
 		({ field, value, malformed }) => {

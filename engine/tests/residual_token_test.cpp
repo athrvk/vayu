@@ -314,7 +314,7 @@ TEST (ResidualTokens, ARequestWithNoTokenIsUntouched) {
 // --- a resolved name landing on a name already there (#1051) -----------------
 //
 // The sibling of the composition-side block in `request_composer_test.cpp`:
-// this pass rebuilds the same map for the same reason, so it inherits the same
+// this pass resolves names for the same reason, so it inherits the same
 // collision and answers it with the same words. A script defining the name is
 // what makes it reachable here at all - composition refused what it could see,
 // and this is the name it could not.
@@ -360,8 +360,8 @@ TEST (ResidualTokens, ARefusedCollisionLeavesTheHeadersAlone) {
     EXPECT_EQ (request.headers, before.headers);
 }
 
-/// Case is what the map compares by, so a name that arrives in another casing
-/// is the same header - and erases it just as surely.
+/// Names compare without case, so a name that arrives in another casing is the
+/// same header - and repeats it just as surely.
 TEST (ResidualTokens, TheCollisionIsJudgedWithoutCase) {
     vayu::Request request;
     request.url                      = "https://api.example.com/x";
@@ -387,6 +387,24 @@ TEST (ResidualTokens, ANameResolvingToItsOwnHeaderIsNotACollision) {
     EXPECT_EQ (request.headers["X-Tenant"], "acme");
     EXPECT_EQ (request.headers["X-Other"], "kept");
     EXPECT_EQ (request.headers.count ("{{header_name}}"), 0u);
+}
+
+/// Two lines typed alike are a repeat the author wrote, not a collision this
+/// pass made (issue #2466): with the pass opened by a token elsewhere, both go
+/// out, in order, each in its own spelling. Mutation check: compare the
+/// produced names alone in `record_produced_name` and this is refused.
+TEST (ResidualTokens, ARepeatTheAuthorTypedIsKeptWhenThePassRuns) {
+    vayu::Request request;
+    request.url = "https://api.example.com/x";
+    request.headers.add ("X-Dup", "one");
+    request.headers.add ("{{header_name}}", "acme");
+    request.headers.add ("x-dup", "two");
+
+    auto scopes = environment_with ("header_name", "X-Tenant");
+    EXPECT_FALSE (resolve_residual_tokens (request, scopes));
+
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{ { "X-Dup", "one" }, { "X-Tenant", "acme" }, { "x-dup", "two" } }));
 }
 
 // --- a name that resolves to nothing (#1084) ---------------------------------

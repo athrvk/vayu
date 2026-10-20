@@ -25,6 +25,7 @@ import type {
 	EngineHealth,
 	VariableValue,
 	KeyValueEntry,
+	HeaderLine,
 	FormFieldEntry,
 	RequestBody,
 	RequestAuth,
@@ -399,8 +400,10 @@ export interface UpdateGlobalsRequest {
 export interface ExecuteRequestRequest {
 	method: string;
 	url: string;
-	// Engine execution endpoint expects flat headers (resolved, enabled-only)
-	headers?: Record<string, string>;
+	// Resolved, enabled-only. The ordered lines are what composition returns
+	// (a repeated name stays repeated, #2466); the record is the older
+	// single-valued form, one line per key.
+	headers?: HeaderLine[] | Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
 	/**
@@ -630,8 +633,9 @@ export type ComposedRequest = ExecuteRequestRequest & Record<string, unknown>;
 export interface StartLoadTestRequest {
 	method: string;
 	url: string;
-	// Engine load-test endpoint expects flat headers (resolved, enabled-only)
-	headers?: Record<string, string>;
+	// Resolved, enabled-only: ordered lines or the single-valued record, as the
+	// execute endpoint takes them.
+	headers?: HeaderLine[] | Record<string, string>;
 	body?: unknown;
 	auth?: Record<string, unknown>;
 
@@ -922,6 +926,19 @@ export interface StartScenarioRunRequest {
 	 * step on it.
 	 */
 	failOnSchemaError?: boolean;
+	/**
+	 * End a collection run's iteration at every `errored` step, a script error
+	 * included (issue #2526). Off, the engine's default, a step whose script threw
+	 * after its exchange completed is reported on its step and the iteration moves
+	 * on to the next request, as Postman and Newman do; a transport failure and the
+	 * runner's own refusals end the iteration either way.
+	 *
+	 * Top-level beside `failOnSchemaError`, and **omitted when off** on the same
+	 * terms: absent already means the default, and a snapshot that carries the key
+	 * only when it was on reads the same as one written before it existed.
+	 * Design-mode collection runs only - a scenario load run does not read it.
+	 */
+	stopOnError?: boolean;
 	/**
 	 * Overrides how the element pipeline runs across every step of a
 	 * **scenario load run** (`mode` present), without editing the collection

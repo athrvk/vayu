@@ -17,9 +17,10 @@
  * puts a "Get token" request ahead of the feature folders has to show it there:
  * the recursive run walks the same merged list
  * (`CollectionTree.run-order.conformance.test.tsx`), and a tree that lifted the
- * folders above it would be showing an order nothing executes. A tie on `order` across kinds is the one
- * place a kind still decides, and it ranks the folder first - the display every
- * pre-#2535 workspace, whose two kinds were each numbered from 0, already had.
+ * folders above it would be showing an order nothing executes. A tie on
+ * `order` across kinds is the one place a kind still decides, and it ranks the
+ * folder first - the display every pre-#2535 workspace, whose two kinds were
+ * each numbered from 0, already had.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -99,10 +100,14 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 });
 
-/** The treeitems directly inside acme's group, top to bottom. */
+/**
+ * Acme's children, top to bottom. The tree is one flat list (#2543) and acme is
+ * the only folder expanded, so its children are exactly the level-2 rows.
+ */
 function acmeChildren(): HTMLElement[] {
-	const group = document.getElementById("tree-group-acme")!;
-	return Array.from(group.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+	return Array.from(
+		document.querySelectorAll<HTMLElement>('[role="tree"] [role="treeitem"][aria-level="2"]')
+	);
 }
 
 describe("a folder's sub-folders and requests are one list", () => {

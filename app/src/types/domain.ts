@@ -1215,6 +1215,13 @@ export interface ScenarioStepEvent {
 	 */
 	dataRowIndex?: number;
 	/**
+	 * Plan positions the error that ended this step's iteration cost (issue
+	 * #2526). Present only on the step whose error ended the iteration short of
+	 * the plan's end, and only when above zero - absent, never `0`, everywhere
+	 * else - on the same terms as the stored row's.
+	 */
+	stepsNotRun?: number;
+	/**
 	 * The stored request this step ran (issue #831), the same id
 	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
 	 * step's request exists while the run streams, which is when a step that has
@@ -1439,6 +1446,14 @@ export interface RunResultTrace {
 		 */
 		sentHeaders?: Record<string, string>;
 		/**
+		 * `sentHeaders` as lines in wire order (issue #2466): a repeated name is
+		 * repeated lines, in the spelling the author typed. Written whenever the
+		 * transfer sent any; absent on rows stored before the key, which keep
+		 * the folded `sentHeaders` alone (`HttpResponse.requestHeaderLines` is
+		 * the live spelling).
+		 */
+		sentHeaderLines?: HeaderLine[];
+		/**
 		 * What a `binary` body sent: the file's name, size in bytes and
 		 * sha256, recorded at send time - never the bytes and never the path.
 		 * `unknown` because a stored row is whatever its engine wrote;
@@ -1591,6 +1606,13 @@ export interface RunResultTrace {
 	 * beside the `stepIndex` keys above, which is why it sits outside them.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * Plan positions the error that ended this step's iteration cost (issue
+	 * #2526), stored inside `trace_data` beside the identity above. Absent, never
+	 * `0`, on every step but the one that ended its iteration short of the plan's
+	 * end.
+	 */
+	stepsNotRun?: number;
 }
 
 /**
@@ -2081,10 +2103,10 @@ export interface ResponseTiming {
 }
 
 /**
- * One response header line as the server sent it (issue #2460): the name in
- * its received case, the value trimmed by the engine and nothing else. A
- * repeated header is repeated lines, which the folded `headers` map beside it
- * cannot hold.
+ * One header line, name and value, in the case it was written: a response line
+ * as the server sent it (issue #2460, the value trimmed by the engine and
+ * nothing else) or a request line as it goes out (issue #2466). A repeated
+ * header is repeated lines, which a folded `headers` map beside it cannot hold.
  */
 export interface HeaderLine {
 	name: string;
@@ -2128,6 +2150,16 @@ export interface HttpResponse {
 	 */
 	headerLines?: HeaderLine[];
 	requestHeaders?: Record<string, string>;
+	/**
+	 * The request's header lines as the transfer sent them, in wire order
+	 * (issue #2466) - `requestHeaders` above is the same headers folded (a
+	 * repeat joined with ", ", `Cookie` with "; "), which loses a repeated name
+	 * and the spelling typed. Absent from an engine that predates the key.
+	 *
+	 * `responseFromExecuteResult` passes it through `sentHeaderLines`
+	 * (`lib/header-lines.ts`), which reads an empty list as an absent one.
+	 */
+	requestHeaderLines?: HeaderLine[];
 	rawRequest?: string;
 	body: unknown;
 	bodyRaw: string;
@@ -2983,6 +3015,22 @@ export interface RunReport {
 		stepsStored: number;
 		stepsDropped: number;
 		/**
+		 * Plan positions errors cost a collection run (issue #2526): for every
+		 * iteration an `errored` step ended, the positions after it the iteration
+		 * had not attempted. A run that executed fewer steps than its plan holds
+		 * says so here, rather than reading as a complete run with an error in it.
+		 *
+		 * Collection runs only, and absent - not `0` - on a load report and on one
+		 * stored before the field existed, so absent says nothing either way.
+		 */
+		stepsNotRun?: number;
+		/**
+		 * The run's own `stopOnError`, echoed because the same counts describe a
+		 * different run under it (issue #2526). Absent on the same reports
+		 * `stepsNotRun` is.
+		 */
+		stopOnError?: boolean;
+		/**
 		 * Load-mode only (issue #357): what `concurrency` meant for this run.
 		 * A scenario load run's `concurrency` is its number of virtual users,
 		 * each walking the plan on its own with its own cookies.
@@ -3293,6 +3341,8 @@ export interface McpSafetyConfig {
 	 * request count and so cannot be bounded by `maxDurationSeconds`.
 	 */
 	maxIterations: number;
+	/** Hard ceiling on `maxResponseSamples`, the response bodies a load run keeps. */
+	maxResponseSamples: number;
 	/** When false (default), collection/environment write tools are disabled. */
 	allowWrites: boolean;
 	/**

@@ -16,7 +16,7 @@
  * how a generator ends up emitting a raw newline inside a `"`.
  */
 
-import { headerEncodingNotes, prepareRequest } from "./prepare";
+import { foldRepeatedHeaders, headerEncodingNotes, prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A Python string literal - see the file comment for why JSON's rule fits. */
@@ -46,7 +46,9 @@ export function generatePython(
 
 	const headers: Array<[string, string]> = [];
 	const isFormData = prepared.body?.kind === "form-data";
-	for (const [name, value] of prepared.headers) {
+	const folded = foldRepeatedHeaders(prepared.headers, "requests");
+	notes.push(...folded.notes);
+	for (const [name, value] of folded.headers) {
 		if (isFormData && name.toLowerCase() === "content-type") {
 			notes.push(
 				"Content-Type is left to requests, which adds the multipart boundary it generates."

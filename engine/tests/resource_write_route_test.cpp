@@ -50,6 +50,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -64,6 +65,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
+#include "wide_json.hpp"
 
 using nlohmann::json;
 
@@ -1677,6 +1679,24 @@ TEST_F (ResourceWriteRouteTest, DisabledSystemHeadersAreStoredLowercasedAndDedup
     const auto stored = db_->get_request (created["id"].get<std::string> ());
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->disabled_system_headers, R"(["user-agent","accept"])");
+}
+
+// The string spelling is a client's text, parsed to be checked and kept in
+// member order (#2497). Mutation check: parse with
+// `nlohmann::ordered_json::parse` in `apply_postman_protocol_behavior_field`
+// and this runs for tens of seconds and fails the budget.
+TEST_F (ResourceWriteRouteTest,
+APostmanProtocolBehaviorStringOfAHundredThousandMembersIsParsedInLinearTime) {
+    json body                       = protocol_request (make_collection ());
+    body["postmanProtocolBehavior"] = vayu::tests::wide_object_json ();
+
+    const auto started     = std::chrono::steady_clock::now ();
+    auto [status, created] = create_request_response (*db_, body);
+    const auto elapsed     = std::chrono::steady_clock::now () - started;
+
+    ASSERT_EQ (status, 200) << created.dump ().substr (0, 200);
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_EQ (created["postmanProtocolBehavior"], vayu::tests::wide_object_json ());
 }
 
 TEST_F (ResourceWriteRouteTest, AMalformedProtocolSettingIsA400NamingIt) {

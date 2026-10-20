@@ -40,8 +40,11 @@ json load_fixture () {
 }
 
 /// @p headers as sorted (name, value) pairs, the name spelled as the map holds it.
-HeaderPairs sorted_pairs (const vayu::Headers& headers) {
-    HeaderPairs pairs (headers.begin (), headers.end ());
+HeaderPairs sorted_pairs (const vayu::HeaderList& headers) {
+    HeaderPairs pairs;
+    for (const auto& [name, value] : headers) {
+        pairs.emplace_back (name, value);
+    }
     std::ranges::sort (pairs);
     return pairs;
 }

@@ -317,26 +317,23 @@ resolve_send_request_text (JSContext* ctx, std::string& text, const std::string&
 }
 
 /**
- * Every header of the call, name and value both resolved, into a map rebuilt
- * rather than edited in place - a resolved name is a different key.
+ * Every header of the call, name and value both resolved, into lines rebuilt
+ * rather than edited in place - a resolved name is a different name.
  *
  * The collision that rebuild can produce is `http/header_names.hpp`'s, refused
  * in its words rather than in words of this layer's own: composition and the
  * residual pass both answer a resolved name landing on a name the request
  * already carries by refusing the send, and a third answer invented here is how
- * the three would drift. Composition's "was this collision one resolution made"
- * test has nothing to do here: `Headers` compares without case, so two names
- * the script wrote itself are already one key by the time this reads them, and
- * every collision left is one resolution produced. That comparison is also why
- * the refusal has to be made here - `{{h}}` resolving to `authorization` lands
- * on an `Authorization` the script wrote, and the map cannot report the header
- * it drops.
+ * the three would drift. The options are read single-valued, so two names the
+ * script wrote itself are one line by the time this reads them, and every
+ * collision left is one resolution produced - `{{h}}` resolving to
+ * `authorization` beside an `Authorization` the script wrote.
  *
  * Nothing is written back until every name is in, so a refused call leaves the
  * request as the script wrote it rather than half rebuilt.
  */
-std::optional<std::string> resolve_send_request_headers (JSContext* ctx, Headers& headers) {
-    Headers resolved;
+std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderList& headers) {
+    HeaderList resolved;
     // Kept beside `resolved` so a refusal can name both spellings.
     vayu::http::HeaderNameOrigins produced;
     for (const auto& [name, value] : headers) {
@@ -355,17 +352,17 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, Headers
             // the same move the collision beside it already made.
             return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
         }
-        if (const auto [taken, was_free] = produced.emplace (resolved_name, name); !was_free) {
+        if (auto collision =
+            vayu::http::record_produced_name (produced, resolved_name, name)) {
             return "pm.sendRequest: " +
-            vayu::http::describe_header_name_collision (
-            vayu::http::HeaderNameCollision{ name, taken->second, taken->first });
+            vayu::http::describe_header_name_collision (*collision);
         }
         std::string resolved_value = value;
         if (auto reason = resolve_send_request_text (
             ctx, resolved_value, "header '" + name + "'")) {
             return reason;
         }
-        resolved[std::move (resolved_name)] = std::move (resolved_value);
+        resolved.add (std::move (resolved_name), std::move (resolved_value));
     }
     headers = std::move (resolved);
     return std::nullopt;
@@ -482,9 +479,13 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
     if (present (js_header.get ()) || present (js_headers.get ())) {
         JSValueConst chosen =
         present (js_header.get ()) ? js_header.get () : js_headers.get ();
-        if (auto reason = read_send_request_headers (ctx, chosen, out.headers)) {
+        // Single-valued, as `pm.request.headers` is: a repeated key is the
+        // last one, the rule this option has always had.
+        Headers headers;
+        if (auto reason = read_send_request_headers (ctx, chosen, headers)) {
             return reason;
         }
+        out.headers = HeaderList (headers);
     }
 
     ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, arg, "body"));
@@ -562,12 +563,10 @@ JSValue build_send_error (JSContext* ctx, ErrorCode code, const std::string& mes
  * pm.sendRequest(urlOrOptions, callback)
  *
  * Synchronous by construction, and callback-shaped rather than promise-shaped.
- * The sandbox has a Promise but nothing drains its job queue - no event loop,
- * no setTimeout - so an awaited value never resumes and the script reports a
- * timeout instead of a result. Postman's own signature is callback-based, and
- * a callback can be honoured honestly: block on the send, then invoke
- * callback(err, res) inline. The promise-returning overload Postman also
- * offers is deliberately absent; it could only never resolve.
+ * Postman's own signature is callback-based, and a callback can be honoured
+ * honestly: block on the send, then invoke callback(err, res) inline. The
+ * promise-returning overload Postman also offers is not implemented (#2527),
+ * so a call without a callback is refused rather than handed a promise.
  *
  * Four things are refused by throwing rather than by calling the callback,
  * because they are the script's mistakes and not the network's: the feature
@@ -600,7 +599,7 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!JS_IsFunction (ctx, argv[1])) {
         return JS_ThrowTypeError (ctx,
         "pm.sendRequest requires a callback function as its second argument - "
-        "it has no promise form, because this sandbox never resolves one");
+        "it has no promise form in this sandbox");
     }
 
     constexpr int limit = vayu::core::constants::script_engine::SEND_REQUEST_LIMIT;
@@ -623,6 +622,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // own (`disableBodyPruning` alone, `event.command.js`) and no parent, so
     // neither the enclosing request's `disableUrlEncoding` nor anything the
     // script passes turns this off.
+    //
+    // Send's `wire_url` encodes a subset of what a script's URL gets, so the
+    // whole-URL pass stays here (#2465).
     request.url = vayu::core::encode_url_as_postman (request.url);
     // The engine's own composition rather than a second copy of it: a header
     // the script set still wins, and an api key sent as a query parameter is

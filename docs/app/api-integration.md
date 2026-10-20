@@ -195,10 +195,17 @@ transport's alike, and a repeated name as separate rows. The renderer reads it
 off that block and carries it as `ResponseState.wireRequestHeaders`, set by
 `responseFromExecuteResult` and `responseFromRunResult` alike. It is a display
 of what went out: nothing in it is sent, stored on the request or visible to
-`pm.request.headers`. A restored row with no recorded frame shows `requestHeaders`
-instead, because the Raw tab's fallback frame is fabricated from the composed
-request, and so does a send that failed, whose frame the engine may have
-synthesized because nothing was sent.
+`pm.request.headers`. A restored row with no recorded frame lists
+`requestHeaderLines` instead, because the Raw tab's fallback frame is fabricated
+from the composed request, and so does a send that failed, whose frame the
+engine may have synthesized because nothing was sent. `requestHeaderLines` is
+the request's own lines as the transfer sent them (issue #2466): the answer's
+`requestHeaderLines`, or a stored trace's `request.sentHeaderLines`, in wire
+order, a repeated name repeated and each in the spelling typed.
+`requestHeaders` beside it is the same set folded to one value per name (a repeat
+joined with `", "`, `Cookie` with `"; "`) and is what the section falls back to
+only for an answer from before the lines existed. Both funnels set it, an empty
+list reading as absent in each.
 
 The *stored* counterpart is a different field (issue #1765):
 `disabledSystemHeaders`, Postman's per-request list, kept on the request as
@@ -875,6 +882,19 @@ into its stored snapshot - where `SampledSchemaValidation` reads it back to say
 so. It is never sent on a load payload, whose executor validates after the run
 has drained and cannot demote a step on it.
 
+`stopOnError` follows the same shape (issue #2526): top-level on the design-mode
+payload, from the dialog's **Stop the iteration on a script error** switch,
+**omitted when off** and never sent on a load payload, whose executor does not
+read it. Off, the engine's default, a step whose script threw after its
+exchange completed stays `errored` and the iteration walks on, as in Postman;
+on, every errored step ends its iteration. What an error that did end one cost
+comes back as `stepsNotRun`, which the renderer reads on three layers: the
+report's `scenario.stepsNotRun` (the run tab's header prints "N steps did not
+run" beside the iteration tally), and `stepsNotRun` on the `step` frame and on
+the stored row's trace (the step that ended its iteration prints "Ended this
+iteration: N steps did not run" in its expansion). Each is absent, never `0`,
+when nothing was lost, and a report from before the field has none.
+
 Adding a load `mode` beside the block makes it a **scenario load run** (issue
 #357): the same plan, driven by `concurrency` virtual users on the event loop.
 The *presence* of `mode` is the whole discriminator, so a design-mode payload
@@ -1359,12 +1379,20 @@ non-interactive OAuth 2.0 token can't be obtained, the response carries an
 `errorCode` of `AUTH_REQUIRED` (interactive sign-in needed) or `AUTH_FAILED`, and
 the request builder surfaces a toast pointing the user at the Auth tab.
 
+`headers` is an ordered array of `{ name, value }` lines (issue #2466): the
+Headers table's enabled rows with a key, in row order, a repeated name repeated
+and each row in the spelling typed (`toHeaderRows`), and `POST /compose` answers
+the same shape, so a repeat survives compose to execute. The older single-valued
+record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
+longer sends it: a record keeps one value per key and sends a different header
+from the one its table shows. The same holds for `POST /runs`.
+
 **Example Request:**
 ```typescript
 await apiService.executeRequest({
   method: "GET",
   url: "https://api.example.com/users",
-  headers: { "Authorization": "Bearer {{token}}" },
+  headers: [{ name: "Authorization", value: "Bearer {{token}}" }],
   elements: [
     {
       id: "el_1",
@@ -1438,22 +1466,31 @@ decoding it (`parseQueryParams`, issue #1771), and with the flag on joins a row
 the URL does not already carry back as typed rather than with Postman's query
 rule, so editing one row rebuilds exactly the query the others held. Turning
 the flag on or off writes only the flag: the URL and the rows stay as they
-are. The Sends line and the code snippets substitute path values
-raw, the Sends line writes a value a `{{variable}}` brings into the query raw
-(otherwise as URL text whose query part takes `QUERY_ENCODE_SET`, issue #1773,
-`resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`), and a
-query-located API key is
-appended raw, all matching what the engine sends. The Sends line draws that
+are. With the flag on, the Sends line and the code snippets substitute path
+values raw, the Sends line writes a value a `{{variable}}` brings into the URL,
+and the literal text around it, as typed, and a query-located API key is
+appended raw, all matching what the engine sends. With the flag off the Sends
+line encodes a
+value by the part of the URL it lands in (issues #1773 and #2465): the path
+by `PATH_ENCODE_SET`, the query by `QUERY_ENCODE_SET`, the fragment by
+`FRAGMENT_ENCODE_SET`, and the scheme and authority as typed. Literal text
+outside the scheme and authority has only what a request target cannot carry
+raw encoded (space, controls, DEL and non-ASCII bytes, so `/a b` is
+`/a%20b`) and every other byte as typed, as the engine's `wire_url` does
+(`resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`). A `:name`
+path value is already encoded by then and `%` is never encoded, so nothing is
+encoded twice. The Sends line draws that
 URL with every secret variable value and auth credential (each encoded
 spelling too) replaced by `••••`; the masking is at render, so what
 resolves and what is sent are unchanged (#1806). The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
 the Postman exporter only: `GET /requests` returns it as the stored JSON text,
 which the app keeps as a string and never parses, so an import and a Duplicate
-carry it byte for byte, and nothing sends it. The flat `headers` record every
-inline compose sends loses each row's `source`, so beside it goes
+carry it byte for byte, and nothing sends it. The ordered `headers` lines every
+inline compose sends (`toHeaderRows`: enabled rows with a key, in row order, a
+repeated name repeated, issue #2466) lose each row's `source`, so beside them goes
 `bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):
-the names whose row the body mode wrote, which a `content-type` opt-out removes
+the names whose last row the body mode wrote (names compared without case), which a `content-type` opt-out removes
 on the wire while a Content-Type the user typed is always sent. A History
 replay puts the run's recorded list back on its seeded rows.
 
@@ -1736,7 +1773,7 @@ await apiService.startLoadTest({
   request: {
     method: "POST",
     url: "https://api.example.com/data",
-    headers: { "Content-Type": "application/json" },
+    headers: [{ name: "Content-Type", value: "application/json" }],
     body: { mode: "json", content: '{"key": "value"}' }
   },
   followRedirects: true,

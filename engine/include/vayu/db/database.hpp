@@ -1004,6 +1004,32 @@ class Database {
      */
     void finish_recovery_backup_refresh (); // db_maintenance.cpp
 
+    /**
+     * @brief Refresh `<db>.bak` once more as the engine stops, so it holds this
+     *        session's work rather than only what the session started from.
+     *
+     * Called after every writer has stopped and @ref finish_recovery_backup_refresh
+     * has returned, and before the `Database` closes, so the engine's lock is
+     * still held. Skipped when the session wrote nothing after `init`, counted
+     * by `sqlite3_total_changes64` on the shared connection: a write through
+     * any other connection is not seen. Otherwise the WAL is checkpointed and
+     * the backup is replaced the way @ref refresh_recovery_backup replaces it.
+     *
+     * Bounded by the smaller of @p budget and
+     * `database::SHUTDOWN_BACKUP_DEADLINE_MS`: the copy is interrupted at the
+     * deadline, and a copy that finishes past it is discarded unvalidated.
+     * Validation, the flush and the rename that follow a copy in time are not
+     * interruptible and run to completion. Every failure leaves the previous
+     * backup standing; the caller logs the reason.
+     *
+     * @param budget what is left of the window the caller has for its
+     *        shutdown; zero or less refreshes nothing.
+     * @return why nothing was written, or nothing (also when the session
+     *         wrote nothing). Never throws.
+     */
+    std::expected<void, std::string> refresh_recovery_backup_on_shutdown (
+    std::chrono::milliseconds budget); // db_maintenance.cpp
+
     // Config Entries - Structured configuration with metadata; db_config.cpp
     void save_config_entry (const ConfigEntry& entry);
     /**
@@ -1090,6 +1116,20 @@ class Database {
      */
     static ProbeResult probe_database (const std::string& path,
     std::chrono::milliseconds busy_timeout); // db_maintenance.cpp
+
+    /**
+     * @brief The snapshot, validation and rename both recovery-backup refreshes
+     *        share; the guards that decide whether to take one are theirs.
+     *
+     * @param on_connection handed the snapshot's own connection before the
+     *        copy starts and `nullptr` before it closes (`vacuum_into`);
+     *        answering false refuses the copy.
+     * @param validate_by a copy that finishes after this is discarded rather
+     *        than validated.
+     */
+    std::expected<void, std::string> replace_recovery_backup (
+    const std::function<bool (sqlite3*)>& on_connection,
+    std::chrono::steady_clock::time_point validate_by); // db_maintenance.cpp
 
     /// The startup recovery record, read from the marker file in the
     /// constructor. See `recovery()`.

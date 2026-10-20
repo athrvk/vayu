@@ -806,8 +806,8 @@ TEST_F (SendRequestTest, AnUnknownMethodIsRejected) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
-// There is no promise form - the sandbox has a Promise but nothing drains its
-// job queue - so a missing callback has to say that rather than return one.
+// There is no promise form (#2527), so a missing callback has to say that
+// rather than return one.
 TEST_F (SendRequestTest, ACallbackIsRequired) {
     SendRequestServer server;
 
@@ -1135,6 +1135,12 @@ class SendRequestUrlTest : public SendRequestTest {
 TEST_F (SendRequestUrlTest, TheStringFormReachesTheWireAsPostmanSendsIt) {
     EXPECT_EQ (sent_target ("'" + server.url () + "/a b?q=c d&r=\"x\"'"),
     "/echo/a%20b?q=c%20d&r=%22x%22");
+}
+
+// The request line Send writes for the same text
+// (`PostmanQueryOnTheWire.ALiteralSpaceAndNonAsciiByteReachTheServerEncoded`).
+TEST_F (SendRequestUrlTest, ASpaceAndANonAsciiByteGoOutAsSendWritesThem) {
+    EXPECT_EQ (sent_target ("'" + server.url () + "/a b?q=é'"), "/echo/a%20b?q=%C3%A9");
 }
 
 TEST_F (SendRequestUrlTest, TheOptionsFormIsEncodedAlike) {

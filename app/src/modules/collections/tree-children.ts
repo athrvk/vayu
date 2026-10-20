@@ -48,24 +48,34 @@ export function childrenOf(
 	collections: readonly Collection[],
 	requestsOf: (collectionId: string) => readonly Request[]
 ): TreeChild[] {
-	const folders: TreeChild[] = collections
-		.filter((c) => (c.parentId ?? null) === parentId)
-		.map((collection) => ({
+	const folders = collections.filter((c) => (c.parentId ?? null) === parentId);
+	return mergeSiblings(folders, parentId === null ? [] : requestsOf(parentId));
+}
+
+/**
+ * One parent's sub-folders and requests as its sibling list, for a caller that
+ * already holds both: the merge `childrenOf` does, without its scan of every
+ * collection for the parent's folders. Neither input needs to be sorted.
+ */
+export function mergeSiblings(
+	folders: readonly Collection[],
+	requests: readonly Request[]
+): TreeChild[] {
+	const children: TreeChild[] = [
+		...folders.map((collection): TreeChild => ({
 			kind: "collection",
 			id: collection.id,
 			order: collection.order,
 			createdAt: collection.createdAt,
 			collection,
-		}));
-	const requests: TreeChild[] =
-		parentId === null
-			? []
-			: requestsOf(parentId).map((request) => ({
-					kind: "request",
-					id: request.id,
-					order: request.order,
-					createdAt: request.createdAt,
-					request,
-				}));
-	return [...folders, ...requests].sort(compareTreeOrder);
+		})),
+		...requests.map((request): TreeChild => ({
+			kind: "request",
+			id: request.id,
+			order: request.order,
+			createdAt: request.createdAt,
+			request,
+		})),
+	];
+	return children.sort(compareTreeOrder);
 }

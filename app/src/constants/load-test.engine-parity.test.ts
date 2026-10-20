@@ -36,6 +36,7 @@ import {
 	LOAD_TEST_LIMITS,
 	MAX_RESPONSE_SAMPLES,
 	RESPONSE_SAMPLE_PERIOD,
+	RESPONSE_SAMPLES_CEILING,
 } from "./load-test";
 
 /**
@@ -200,5 +201,20 @@ describe("load-test limits parity with the engine", () => {
 
 	it("states the engine's default response-sample cap", () => {
 		expect(MAX_RESPONSE_SAMPLES).toBe(engineConstant("DEFAULT_MAX_RESPONSE_SAMPLES"));
+	});
+
+	it("states the engine's largest max_response_samples, and the route enforces it", () => {
+		// The MCP "Max response samples" cap holds to this, so a number the
+		// engine would 400 can never be what a cap admits.
+		expect(RESPONSE_SAMPLES_CEILING).toBe(engineConstant("MAX_RESPONSE_SAMPLES"));
+		expect(executionCpp).toMatch(
+			/\{\s*"max_response_samples",\s*0,\s*limits::MAX_RESPONSE_SAMPLES\b/
+		);
+	});
+
+	it("bounds the response-sample period at the 100000 the MCP schema mirrors", () => {
+		// `MAX_RESPONSE_SAMPLE_PERIOD` in `electron/mcp/tools/compose.ts` is a
+		// literal; `tools.test.ts` ties it to this number.
+		expect(executionCpp).toMatch(/\{\s*"response_sample_rate",\s*1,\s*100000\b/);
 	});
 });

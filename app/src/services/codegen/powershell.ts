@@ -20,7 +20,7 @@
  * something else than the reader expects.
  */
 
-import { prepareRequest } from "./prepare";
+import { foldRepeatedHeaders, prepareRequest } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A literal PowerShell string. The one escape is a doubled single quote. */
@@ -46,7 +46,9 @@ export function generatePowerShell(
 
 	const headers: Array<{ name: string; expression: string }> = [];
 	const isFormData = prepared.body?.kind === "form-data";
-	for (const [name, value] of prepared.headers) {
+	const folded = foldRepeatedHeaders(prepared.headers, "Invoke-RestMethod");
+	notes.push(...folded.notes);
+	for (const [name, value] of folded.headers) {
 		if (isFormData && name.toLowerCase() === "content-type") {
 			notes.push(
 				"Content-Type is left to Invoke-RestMethod, which adds the multipart boundary it generates."

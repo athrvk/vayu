@@ -223,9 +223,8 @@ same exception `iterationCount` makes above.
 Three divergences from Postman, each for a reason the sandbox forces.
 
 **No promise form.** Postman offers both a callback and a promise-returning
-overload. Vayu ships only the callback, for the same reason `pm.crypto` is not
-`crypto.subtle`: nothing drains the job queue, so the promise could only never
-resolve. The callback is honoured **synchronously** - the send blocks and the
+overload. Vayu ships only the callback for now (#2527); a call without one
+throws. The callback is honoured **synchronously** - the send blocks and the
 callback runs inline, before `pm.sendRequest` returns - so the call shape a
 Postman user writes is unchanged and the semantics are honest.
 
@@ -326,11 +325,9 @@ is the same silent wrong request the body modes are refused to prevent.
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
 Postman exposes **Web Crypto** globally (`crypto.subtle`), whose every method
-returns a Promise. Vayu's sandbox has no event loop and no `setTimeout`, so
-nothing drains the job queue: an `await crypto.subtle.digest(...)` would never
-resume and the script would report a timeout rather than a result. Rather than
-wear a familiar name with unfamiliar behaviour, the surface is `pm.crypto` and
-it returns its result directly.
+returns a Promise and which covers far more algorithms than Vayu's sandbox
+implements. Rather than wear a familiar name with unfamiliar behaviour, the
+surface is `pm.crypto` and it returns its result directly.
 
 ```javascript
 pm.crypto.sha256('abc');                        // hex, 64 chars
@@ -382,14 +379,21 @@ done-style form - so `pm.test(a, fn).test(b, fn)` runs both, and `done()` /
 form is untouched: it passes unless it throws.
 
 **The one divergence is what "asynchronous" can mean here.** Postman waits for
-a `done()` that arrives later; this sandbox is synchronous and drains no job
-queue, so one left for later would never run at all - the same reason
-[`pm.crypto` is not `crypto.subtle`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous).
-A callback that declares `done` and returns without calling it therefore
-**fails, naming the reason** - where the same script used to fail with
-`undefined is not a function`, which said nothing about why. Calling `done()`
-twice throws rather than overwriting the first verdict, and the throw fails the
-test.
+a `done()` that arrives later; Vayu judges a done-style test when its callback
+returns, and a `done()` left for a `.then` or an `await` runs only after the
+row is written. A callback that declares `done` and returns without calling it
+therefore **fails, naming the reason** - where the same script used to fail
+with `undefined is not a function`, which said nothing about why. Calling
+`done()` twice throws rather than overwriting the first verdict, and the throw
+fails the test.
+
+**An `async` callback with no `done` is recorded as passed, as in Postman**
+(#2531): postman-sandbox does not await the promise either. A rejection inside
+it is not lost: the job queue is drained before the script ends, and a
+rejection nothing handles is a **script error** on the step, `Unhandled promise
+rejection in test "<name>": <reason>`, the way Postman reports it on the run.
+A rejected promise outside any test reads `Unhandled promise rejection:
+<reason>`, and one the script catches is no error.
 
 ### Assertion chains (`pm.expect`)
 
@@ -401,6 +405,9 @@ these:
 ```
 .to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
 .to.exist         .to.be.true       .to.be.false
+                  (.true / .false are strict, `=== true` / `=== false`: `1`, `'true'`
+                   and `{}` are not `.true`, `0`, `''` and `null` are not `.false`;
+                   `.ok` is the truthy check)
 .to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
 .to.be.NaN
 .to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
@@ -408,6 +415,8 @@ these:
 .to.be.closeTo(v, delta)            .to.be.oneOf([…])
 .to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor)
 .to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
+                  (name alone moves the chain's subject to the property's value;
+                   with v, or under .not, the subject stays the object)
 .to.have.length(n)                  .to.have.lengthOf(n)
 .to.have.keys(…) / .to.have.key(k)  .to.have.members([…])
 .to.include(v)    .to.contain(v)    .to.have.string(sub)
@@ -443,6 +452,17 @@ pm.expect(value).not.to.equal(1);                         // `not` before .to
 Terminal getters (`.to.be.true`, `.to.exist`) return the chain too, so a chain
 continues past one: `.to.be.true.and.equal(1)`.
 
+**`.property(name)` moves the subject to the property's value** (#2524), as in
+chai, so what follows asserts on the value: `expect({id: 1}).to.have.property('id')
+.that.is.a('number')` passes and `.that.is.a('string')` fails with
+`Expected type number to be string`. `.nested.property('a.b')` moves it to the
+value at the last path segment, the failure message and the `deep` / `nested`
+flags carry over, and the value is read once, so a getter runs once. Two forms
+keep the chain they were called on: `.property(name, value)`, which already
+compared the value, and `.not.have.property(name)`, which asserts absence and
+has no value to move to. A property that is missing fails the assertion before
+any retarget.
+
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and
 `expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
@@ -477,7 +497,7 @@ that runs more than once says which value it was about:
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// user 42: Expected value to be truthy
+// user 42: Expected false to be true
 ```
 
 Non-strings are coerced and `undefined` / `null` mean no message, both as in
@@ -795,13 +815,31 @@ Divergences from Postman:
 
 - **An unresolvable target fails the step**, naming it. A target no request in
   the run answers to by name or by id, and a name two of them share, are both
-  errors that end the iteration; Postman resolves an ambiguous name to whichever
-  it finds.
+  errors that end the iteration, whatever `stopOnError` says; Postman resolves
+  an ambiguous name to whichever it finds.
+- **A redirect from a script that then threw is ignored**: the step is
+  `errored` and the iteration walks to the next request in order. Postman's
+  order for that case is unverified, so Vayu takes the rule that never runs a
+  sequence the script did not finish deciding on.
 - **A cycle is bounded.** Two requests pointing at each other run forever in
   Postman's runner; here the iteration is cut off by `maxStepsPerIteration` and
   the failure names the steps that were looping.
 - **A skipped step is reported as `skipped`**, never as a pass, in the step list
   and in the run summary alike.
+
+Matching Postman since issue #2526: **a script error no longer ends the
+iteration.** A pre-request script that throws still sends its request, a test
+script that throws (a top-level `pm.response.to.have.status(200)` on a 500
+included) is reported on the step, and the run moves on to the next request -
+Postman's and Newman's default with `stopOnError` unset. The step is `errored`
+with the script's message, never `passed`. The run option `stopOnError: true`
+restores the old rule (Newman's `--bail` shape); the Run Collection dialog's
+**Stop the iteration on a script error** switch and `run_collection`'s
+`stopOnError` argument set it. One divergence stays: a
+request that got no response at all still ends the iteration, where Postman
+carries on, because the requests after it nearly always read the response that
+never arrived. A run whose iterations an error cut short says how many steps
+that cost as `stepsNotRun`.
 
 Details, including every case that throws, are in
 [scripting.md](../engine/scripting.md#flow-control-pmexecution).
@@ -891,7 +929,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   deliberately absent from the language chains above for that reason: each
   changes what the matcher after it asserts - `.any` quantifies `.keys`, and
   the other two change what `.property` looks at - so accepting one as a no-op
-  would assert something other than what the script wrote
+  would assert something other than what the script wrote. `.property(name)`
+  itself is supported, including the chai behaviour of moving the chain onto the
+  property's value (see [Assertion chains](#assertion-chains-pmexpect)); only
+  the `.own` form is missing
 
 ---
 

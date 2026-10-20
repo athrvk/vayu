@@ -471,6 +471,18 @@ describe("secret masking", () => {
 			expect(masked).toBe(true);
 		});
 
+		// Each spelling is one no other form produces: the path set encodes
+		// `{` `}` and the backtick but leaves `/` where encodeURIComponent writes
+		// `%2F`, and the fragment set encodes the backtick alone.
+		it.each([
+			["the path", "p{q}/r", "https://h/p%7Bq%7D/r/x", "https://h/<secret>/x"],
+			["the fragment", "p{q}`r", "https://h/p#p{q}%60r", "https://h/p#<secret>"],
+		])("masks a secret substituted into %s", (_name, secret, url, masked) => {
+			const { code } = generateCurl({ ...GET, url }, { secrets: [secret], mask: true });
+			expect(code).toContain(masked.replace("<secret>", SECRET_PLACEHOLDER));
+			expect(code).not.toMatch(/%7B|%60/);
+		});
+
 		it("masks the longer secret's encoded form whole", () => {
 			// "a%20b" is a prefix of "a%20bc": shortest-first would leave the "c".
 			const { code } = generateCurl(
@@ -1466,5 +1478,101 @@ describe("a header value fetch and requests cannot send as Vayu does", () => {
 			expect(generate(withHeader("नमस्ते")).notes).toEqual([]);
 			expect(generate(withHeader("café")).notes).toEqual([]);
 		}
+	});
+});
+
+/**
+ * A repeated header (issue #2466). Vayu sends every enabled row as its own
+ * line, in order, and `POST /compose` hands the generators those lines. curl and
+ * HTTPie can repeat a header and do; `fetch`, `requests` and `Invoke-RestMethod`
+ * hold one value per name, so they join the lines and say so.
+ */
+describe("repeated headers", () => {
+	const THREE: SnippetRequest = {
+		...GET,
+		headers: [
+			{ name: "X-Dup", value: "one" },
+			{ name: "x-dup", value: "two" },
+			{ name: "X-Dup", value: "three" },
+		],
+	};
+
+	it("curl writes one -H per line, in order, each in the spelling typed", () => {
+		// Mutation check: read the lines as a record and the repeat is one flag.
+		const { code } = generateCurl(THREE);
+		const flags = code.split("\n").filter((l) => l.includes("-H "));
+		expect(flags.map((l) => l.replace(/ \\$/, "").trim())).toEqual([
+			"-H 'X-Dup: one'",
+			"-H 'x-dup: two'",
+			"-H 'X-Dup: three'",
+		]);
+	});
+
+	it("HTTPie writes one Name:value word per line", () => {
+		const { code, notes } = generateHttpie(THREE);
+		expect(code).toContain("'X-Dup:one'");
+		expect(code).toContain("'x-dup:two'");
+		expect(code).toContain("'X-Dup:three'");
+		expect(notes).toEqual([]);
+	});
+
+	it("fetch joins them into the first row's entry and says Vayu sends separate lines", () => {
+		const { code, notes } = generateFetch(THREE);
+		expect(code).toContain('"X-Dup": "one, two, three"');
+		expect(code).not.toContain('"x-dup"');
+		expect(notes).toEqual([
+			'fetch holds one value per header name, so the 3 X-Dup lines are joined into one with ", "; Vayu sends them as separate lines.',
+		]);
+	});
+
+	it("requests joins them the same way", () => {
+		const { code, notes } = generatePython(THREE);
+		expect(code).toContain('"X-Dup": "one, two, three"');
+		expect(notes.join("\n")).toContain("requests holds one value per header name");
+	});
+
+	it("Invoke-RestMethod joins them the same way", () => {
+		const { code, notes } = generatePowerShell(THREE);
+		expect(code).toContain("'X-Dup' = 'one, two, three'");
+		expect(notes.join("\n")).toContain("Invoke-RestMethod holds one value per header name");
+	});
+
+	it("joins a repeated Cookie with a semicolon, as the engine's folded record does", () => {
+		const { code, notes } = generateFetch({
+			...GET,
+			headers: [
+				{ name: "Cookie", value: "a=1" },
+				{ name: "Cookie", value: "b=2" },
+			],
+		});
+		expect(code).toContain('"Cookie": "a=1; b=2"');
+		expect(notes[0]).toContain('"; "');
+	});
+
+	it("keeps every other header where it was, and notes nothing when no name repeats", () => {
+		const { code, notes } = generateFetch({
+			...GET,
+			headers: [
+				{ name: "Zeta", value: "z" },
+				{ name: "Alpha", value: "a" },
+			],
+		});
+		expect(code.indexOf('"Zeta"')).toBeLessThan(code.indexOf('"Alpha"'));
+		expect(notes).toEqual([]);
+	});
+
+	it("still reads the older record, in its key order", () => {
+		const { code } = generateCurl({ ...GET, headers: { Zeta: "z", Alpha: "a" } });
+		expect(code.indexOf("Zeta: z")).toBeLessThan(code.indexOf("Alpha: a"));
+	});
+
+	it("treats a typed Authorization line as the credential, whichever shape carried it", () => {
+		const { code } = generateCurl({
+			...GET,
+			headers: [{ name: "authorization", value: "Token typed" }],
+			auth: { mode: "bearer", token: "from-auth" },
+		});
+		expect(code).toContain("authorization: Token typed");
+		expect(code).not.toContain("from-auth");
 	});
 });

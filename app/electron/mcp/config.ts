@@ -48,6 +48,12 @@ export interface McpSafetyConfig {
 	 */
 	maxIterations: number;
 	/**
+	 * Hard ceiling on `maxResponseSamples` for a load run: how many full
+	 * response bodies the engine keeps in memory for `get_run_samples`. An
+	 * omitted `maxResponseSamples` is judged as the engine's default of 1000.
+	 */
+	maxResponseSamples: number;
+	/**
 	 * Gates every tool in the `write` category - the collection and saved-request
 	 * CRUD verbs, `update_environment` and `update_engine_config`. When false
 	 * (default), those tools refuse; the two deletes additionally require
@@ -95,6 +101,9 @@ export const DEFAULT_MCP_SAFETY_CONFIG: McpSafetyConfig = {
 	// agent sizes for itself passes, and one that mistook the field for
 	// "unlimited" does not.
 	maxIterations: 10000,
+	// Ten times the engine's own default of 1000 samples, for the same reason
+	// `maxIterations` is.
+	maxResponseSamples: 10000,
 	allowWrites: false,
 	allowNetworkSettings: false,
 	revealSecretsToAgents: false,
@@ -168,14 +177,16 @@ function isFiniteNumber(v: unknown): v is number {
 	return typeof v === "number" && Number.isFinite(v);
 }
 
-/** The four numeric caps, which share one range rule. */
-export type McpCapKey = "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
+/** The numeric caps, which share one range rule. */
+export type McpCapKey =
+	"maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations" | "maxResponseSamples";
 
 const MCP_CAP_KEYS: readonly McpCapKey[] = [
 	"maxRps",
 	"maxConcurrency",
 	"maxDurationSeconds",
 	"maxIterations",
+	"maxResponseSamples",
 ];
 
 /** The opt-in switches, each off by default and kept only when it is a boolean. */
@@ -212,6 +223,7 @@ export const MCP_CAP_CEILINGS = {
 	maxConcurrency: 10_000,
 	maxDurationSeconds: 86_400,
 	maxIterations: 100_000_000,
+	maxResponseSamples: 1_000_000,
 } as const satisfies Record<McpCapKey, number>;
 
 /**
@@ -271,6 +283,7 @@ export const SAFETY_ENV_VARS = {
 	maxConcurrency: "VAYU_MCP_MAX_CONCURRENCY",
 	maxDurationSeconds: "VAYU_MCP_MAX_DURATION_SECONDS",
 	maxIterations: "VAYU_MCP_MAX_ITERATIONS",
+	maxResponseSamples: "VAYU_MCP_MAX_RESPONSE_SAMPLES",
 	allowWrites: "VAYU_MCP_ALLOW_WRITES",
 	allowNetworkSettings: "VAYU_MCP_ALLOW_NETWORK_SETTINGS",
 	revealSecretsToAgents: "VAYU_MCP_REVEAL_SECRETS",
@@ -326,6 +339,8 @@ function readSafetyFromEnv(env: NodeJS.ProcessEnv): Partial<McpSafetyConfig> {
 	if (env.VAYU_MCP_MAX_DURATION_SECONDS)
 		cfg.maxDurationSeconds = Number(env.VAYU_MCP_MAX_DURATION_SECONDS);
 	if (env.VAYU_MCP_MAX_ITERATIONS) cfg.maxIterations = Number(env.VAYU_MCP_MAX_ITERATIONS);
+	if (env.VAYU_MCP_MAX_RESPONSE_SAMPLES)
+		cfg.maxResponseSamples = Number(env.VAYU_MCP_MAX_RESPONSE_SAMPLES);
 	// Only the exact string "true" opts in; anything else leaves the default off.
 	for (const key of MCP_SWITCH_KEYS) {
 		if (env[SAFETY_ENV_VARS[key]] === "true") cfg[key] = true;

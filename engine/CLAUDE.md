@@ -135,6 +135,23 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   alive for the whole transfer, cleared between transfers on a reused handle).
   Guard: `tests/bounds_primitives_test.cpp`. A subscript is not a token, so for
   the rest of the family the lint gate is the whole guard.
+- **Untrusted JSON text becomes an `ordered_json` through
+  `vayu::utils::parse_ordered_json`** (`utils/ordered_json.hpp`, #2497), never
+  `nlohmann::ordered_json::parse`: that parse places each member with a scan of
+  the members before it, so one object of 100,000 keys is minutes of one core
+  in a Debug build. Pass `ORDERED_JSON_UNBOUNDED` where the caller bounds depth
+  itself (`read_document` does, on the finished tree) and a depth where it
+  does not. Only text the engine wrote itself, at a size no client chose, may
+  keep `ordered_json::parse`; a stored row is not that (its members are a
+  client's), so `engine/src` has no such site today. A file that aliases the
+  type (`using json = nlohmann::ordered_json`) makes `json::parse` the same
+  call, so grep for the alias too. Guard: `tests/wide_json.hpp` builds the
+  input (`wide_object_json`, 100,000 keys) and holds `LINEAR_PARSE_BUDGET`;
+  each entry point (`jsonrpc_wire_body`, `parse_import`, `read_document`, the
+  element pipeline, `postmanProtocolBehavior`, an example's `savedFrom`, the
+  Postman export's stored columns) has a test that fails the budget on the
+  quadratic parse. The rest of a path can still be quadratic after the parse is
+  not (`ordered_map::operator[]` per member); the test measures the whole path.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as
@@ -188,7 +205,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   so the next start skips the scan, and write `<db>.pre-upgrade.bak`
   immediately before the first rewrite. `<db>.bak` is not that copy: the same
   start refreshes it, once it listens, from a file the repair has already
-  rewritten.
+  rewritten, and a clean shutdown refreshes it again
+  (`refresh_recovery_backup_on_shutdown`, #2421).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.53), which runs before `init ()` and therefore
@@ -963,7 +981,11 @@ The engine owns request composition (#226): `POST /compose`
 (`engine/src/http/request_composer.cpp`) resolves `{{variables}}` and `inherit`
 auth (collection-chain walk; `noauth` terminates, `none` steps over) and
 returns the execute-ready payload `POST /execute` / `POST /runs` accept
-unchanged. It also writes a request's `:name` path variables from its
+unchanged. Its `headers` are `{name, value}` lines in send order (#2466,
+`vayu::HeaderList` on `vayu::Request`): every enabled row, a repeated name
+repeated, the older object form still read; only a repeat a *resolved* name
+makes is refused (`http/header_names.hpp`), and the renderer's row flattening
+is pinned by `tests/fixtures/header-rows-conformance.json`. It also writes a request's `:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
 a value still holding a token after resolution is not joined into the URL but
@@ -974,7 +996,9 @@ of the segment rule and substitution is pinned by
 which is the only place a Params row reaches the wire. A query pair the engine
 writes (an api key or OAuth 2.0 token in the query, a Postman import's query
 join) goes through `core::encode_query_component` (`core/query_encoding.hpp`,
-#1771, Postman's query rule; a stored URL is never re-encoded), whose app copy
+#1771, Postman's query rule; a stored URL is never re-encoded, except that
+`wire_url` encodes its space, controls and non-ASCII bytes outside the
+authority unless `disableUrlEncoding`, #2465), whose app copy
 is pinned by `tests/fixtures/query-encoding-conformance.json`. A header an `auth` block
 would write (bearer, basic, an api key in a header) is skipped when the request already
 carries that name, matched case-insensitively (`apply_auth`, #2475); the snippet

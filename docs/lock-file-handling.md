@@ -197,7 +197,10 @@ declared before the `Database`, so on the way out the database's destructor -
 its close-time WAL checkpoint included - runs first and the lock goes last, on
 an early exit and a thrown startup error as much as on a graceful shutdown. A
 replacement that wins the lock therefore never meets its predecessor's
-connection at its own startup probe. If something else still holds the
+connection at its own startup probe. A graceful shutdown's final refresh of
+`<db>.bak` (issue #2421) runs before the database closes, so the lock is held
+through that copy too, and a replacement never starts against a backup still
+being written. If something else still holds the
 database when an engine starts (a `sqlite3` shell left in a transaction, a sync
 agent), the engine waits for it (10 s on each connection it opens), then exits 1 naming the database
 and leaves every file as it was, rather than treating the held file as corrupt

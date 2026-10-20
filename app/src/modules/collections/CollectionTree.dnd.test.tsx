@@ -227,6 +227,43 @@ describe("a drag that crosses the threshold", () => {
 	});
 });
 
+describe("a press that leaves the tree before it is a drag", () => {
+	it("is dropped, so coming back over the tree with no button down drags nothing", () => {
+		renderTree();
+		const source = requestRow("r1");
+		const from = yIn(rowIndex(source), 0.5);
+		fireEvent.pointerDown(source, { button: 0, pointerId: 1, clientX: 10, clientY: from });
+		// Out of the tree inside the threshold, and released where the tree never
+		// hears it: a press holds no capture until it becomes a drag.
+		fireEvent.pointerLeave(row('[role="tree"]'), { pointerId: 1 });
+
+		fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: yIn(3, 0.8) });
+
+		expect(source.getAttribute("class")).not.toMatch(/opacity-50/);
+		expect(document.querySelector("[data-drop-indicator]")).toBeNull();
+		fireEvent.pointerUp(source, { pointerId: 1, clientX: 10, clientY: yIn(3, 0.8) });
+		expect(reorderMutate).not.toHaveBeenCalled();
+	});
+});
+
+describe("a press on a control inside a row", () => {
+	it("belongs to the control: moving from the chevron drags nothing", () => {
+		renderTree();
+		const folder = collectionRow("c1");
+		const chevron = folder.querySelector<HTMLElement>("[data-tree-toggle]")!;
+		const from = yIn(rowIndex(folder), 0.5);
+
+		fireEvent.pointerDown(chevron, { button: 0, pointerId: 1, clientX: 10, clientY: from });
+		fireEvent.pointerMove(chevron, { pointerId: 1, clientX: 10, clientY: yIn(4, 0.5) });
+
+		expect(row('[role="tree"]').hasPointerCapture(1)).toBe(false);
+		expect(document.querySelector("[data-drop-indicator]")).toBeNull();
+		expect(document.querySelector("[data-drop-blocked]")).toBeNull();
+		fireEvent.pointerUp(chevron, { pointerId: 1, clientX: 10, clientY: yIn(4, 0.5) });
+		expect(reorderMutate).not.toHaveBeenCalled();
+	});
+});
+
 describe("a drop", () => {
 	it("sends one batch holding only the rows whose position changed", () => {
 		renderTree();
@@ -573,7 +610,7 @@ describe("the row's own ⋯ menu", () => {
 		// Radix renders the menu through a *portal*: a React child of the row
 		// whose DOM lives on `body`. React bubbles synthetic events through the
 		// component tree rather than the DOM tree, so a press on a menu item
-		// arrives at the row's own pointer handlers. Taking it captures the
+		// arrives at the tree's pointer handlers. Taking it captures the
 		// pointer, and the capture retargets the `pointerup` the item needed -
 		// every action in the menu stops working, which is not something a test
 		// that clicks the item directly can see.
@@ -590,11 +627,12 @@ describe("the row's own ⋯ menu", () => {
 		const item = await screen.findByText("Move to...");
 		fireEvent.pointerDown(item, { button: 0, pointerId: 9, clientX: 200, clientY: 200 });
 
-		expect(source.hasPointerCapture(9)).toBe(false);
-
-		// And no amount of movement over the open menu starts a drag.
+		// And no amount of movement over the open menu starts a drag, or takes
+		// the capture a drag would take on the tree.
 		fireEvent.pointerMove(item, { pointerId: 9, clientX: 200, clientY: 260 });
 		expect(document.querySelector("[data-drop-indicator]")).toBeNull();
+		expect(row('[role="tree"]').hasPointerCapture(9)).toBe(false);
+		expect(source.hasPointerCapture(9)).toBe(false);
 		fireEvent.pointerUp(item, { pointerId: 9, clientX: 200, clientY: 260 });
 		expect(reorderMutate).not.toHaveBeenCalled();
 	});

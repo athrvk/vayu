@@ -454,6 +454,12 @@ constexpr int64_t LIVE_SETTLE_TIMEOUT_MS = 60000;
 /// the use-after-free the drain exists to prevent. Matches the 5s the daemon
 /// waited before the drain was ordered.
 constexpr int64_t RUN_SHUTDOWN_GRACE_MS = 5000;
+/// How long the app's sidecar waits for the engine to exit, once it has asked
+/// it to stop, before it kills it: `ENGINE_GRACEFUL_EXIT_TIMEOUT_MS` in
+/// `app/electron/constants.ts`, which must not fall below this. The daemon
+/// budgets its optional shutdown work (the recovery backup's final refresh,
+/// #2421) against what is left of it.
+constexpr int64_t SHUTDOWN_WINDOW_MS = 5000;
 /// How far ahead of an OAuth 2.0 token's expiry a run refreshes it (config key
 /// `oauth2RefreshLeadMs`). Comfortably wider than the 45s skew
 /// `oauth::is_expired` already applies, so the new credential is published
@@ -537,6 +543,17 @@ constexpr bool ENABLE_CONSOLE = true;
  * where a sampled run stops looking finished.
  */
 constexpr int SEND_REQUEST_LIMIT = 10;
+/**
+ * @brief How many promise jobs one execution may run when it has no
+ *        wall-clock deadline (`scriptTimeout` 0).
+ *
+ * The queue a script leaves is drained inside its execution (#2531), and with
+ * a deadline the deadline bounds that drain. Without one, a runaway
+ * `while (true) await null;` would hold the thread forever, so the job count
+ * bounds it instead. Provisional until #2359 settles what `scriptTimeout` 0
+ * means; far above what a script awaiting a few sends queues.
+ */
+constexpr size_t MAX_PROMISE_JOBS_WITHOUT_TIMEOUT = 100000;
 } // namespace script_engine
 
 /**
@@ -1227,6 +1244,14 @@ constexpr int TRASH_RETENTION_DAYS = 30;
  * a few times the live file for a workspace of any ordinary size.
  */
 constexpr int MAX_BACKUPS_RETAINED = 5;
+/**
+ * The longest the shutdown refresh of `<db>.bak` may copy for (#2421), before
+ * it is interrupted and the previous backup stands. A copy measured 177 ms
+ * warm and 1.1 s cold on a 280 MB workspace; two seconds covers that inside
+ * `server::SHUTDOWN_WINDOW_MS` with the rest of the teardown still to run. The
+ * daemon passes what is left of that window and the smaller of the two wins.
+ */
+constexpr int64_t SHUTDOWN_BACKUP_DEADLINE_MS = 2000;
 /**
  * How recently a stored OpenAPI document must have arrived to be spared by the
  * orphan sweep, whatever else says nothing references it (issue #718).

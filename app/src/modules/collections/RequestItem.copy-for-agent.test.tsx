@@ -52,6 +52,11 @@ beforeEach(() => {
 	useToastStore.setState({ toasts: [] });
 });
 
+/**
+ * The row's own `⋯` menu. Right-click reaches the same list through the tree's
+ * one menu (`CollectionTree.copy-for-agent.test.tsx` drives that route), which a
+ * row rendered on its own does not have.
+ */
 function openMenu() {
 	const { container } = render(
 		withCollectionTreeContext(
@@ -59,7 +64,11 @@ function openMenu() {
 			{ allCollections: COLLECTIONS }
 		)
 	);
-	fireEvent.contextMenu(container.querySelector("[data-request-id]")!);
+	// Radix opens its dropdown on pointerdown, not click.
+	fireEvent.pointerDown(
+		container.querySelector("[data-tree-menu]")!,
+		new PointerEvent("pointerdown", { bubbles: true, button: 0 })
+	);
 }
 
 describe("Copy for agent on a request row", () => {

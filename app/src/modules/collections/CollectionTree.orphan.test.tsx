@@ -58,6 +58,12 @@ vi.mock("@/queries", () => ({
 	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+/**
+ * The top level, by the level each row announces: the tree renders every row as
+ * a sibling in one flat list (#2543), so nesting in the DOM says nothing.
+ */
+const ROOT_ROWS = '[role="tree"] [data-collection-id][aria-level="1"]';
+
 function renderTree() {
 	return render(
 		<QueryClientProvider client={new QueryClient()}>
@@ -76,7 +82,7 @@ describe("a collection whose parent is not loaded", () => {
 	it("renders at the top level instead of vanishing", () => {
 		const { container } = renderTree();
 
-		const rows = container.querySelectorAll('[role="tree"] > * > [data-collection-id]');
+		const rows = container.querySelectorAll(ROOT_ROWS);
 		expect([...rows].map((r) => r.getAttribute("data-collection-id"))).toEqual([
 			"root",
 			"stray",
@@ -95,8 +101,9 @@ describe("a collection whose parent is not loaded", () => {
 		// One row for `child`, and it is not a root: a filter that read "no parent
 		// row rendered *yet*" rather than "no parent loaded" would duplicate it.
 		expect(container.querySelectorAll('[data-collection-id="child"]')).toHaveLength(1);
-		expect(
-			container.querySelector('[role="tree"] > * > [data-collection-id="child"]')
-		).toBeNull();
+		expect(container.querySelector('[data-collection-id="child"]')).toHaveAttribute(
+			"aria-level",
+			"2"
+		);
 	});
 });

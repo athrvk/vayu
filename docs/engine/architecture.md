@@ -367,7 +367,10 @@ Manages the lifecycle of load test runs:
   a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
   could end up joining itself. The wait is bounded; the join is not, because abandoning a
   worker leaves it writing through references to a `Database` that `main` is about to
-  destroy. A run started while the drain is in progress is refused with a `503`.
+  destroy. A run started while the drain is in progress is refused with a `503`. The
+  recovery backup's shutdown refresh that follows is budgeted against what the drain leaves of
+  the app's 5 s window (`SHUTDOWN_WINDOW_MS`), so a long drain shortens or skips it rather than
+  pushing the engine into the app's kill.
 - **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
   its handle outlives it until another thread collects it.
 - **Per-run auxiliary threads**: a load run has a metrics thread
@@ -439,7 +442,7 @@ JavaScript execution engine for pre-request and test scripts:
   a pre-request script can sign the request it just rewrote. Backed by **libsodium**
   through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
   hand-maintains no hash, HMAC or alphabet table, and OpenSSL is still not linked.
-  Synchronous, because the sandbox has no event loop to settle a Promise on
+  Synchronous: Web Crypto covers algorithms the sandbox does not implement, so the surface is `pm.crypto`, not `crypto.subtle`.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem access; the one way out to the network is
@@ -646,8 +649,8 @@ A name nothing defines still goes out written as it stands, and the load path
 does not run this pass at all. What the pass can *refuse* is what resolving a
 header **name** can produce, both rules held in
 `engine/include/vayu/http/header_names.hpp`: a name landing on one the request
-already carries (#1051), where the map holds one value per name and the send
-would go out a header short; and a name landing on nothing at all (#1084),
+already carries (#1051), where the rows show two different names and the
+request would carry one header twice; and a name landing on nothing at all (#1084),
 where what would go out is a `": value"` line no name owns. Either is stopped
 rather than sent - in composition's words and under composition's refusal
 code, as a `statusCode: 0` response carrying the reason (a `400` on the
@@ -832,8 +835,17 @@ storing the row itself.
 A step's outcome is `passed`, `failed`, `skipped` or `errored`, counted
 separately everywhere - a skipped step counted as a pass is the false-pass class
 this project has already spent an issue eliminating. An `errored` step ends its
-iteration; the next iteration still runs, and the run still reaches
-`completed`. A stop is honoured **between steps**.
+iteration unless the only thing wrong was a script that threw after the exchange
+completed (issue #2526): that step keeps its `errored` row and the iteration
+walks on to the next plan position, as Postman's runner does, with the script's
+own redirect ignored. The cause is recorded on the `StepRecord` when the step is
+classified, so the loop reads it rather than re-deriving it. A transport
+failure, a data row that would not bind and the runner's own refusals (an
+unresolved or ambiguous target, the cycle cap) still end the iteration, and the
+run option `stopOnError: true` makes every `errored` step end it. Either way the
+next iteration still runs and the run still reaches `completed`; an iteration
+an error ended reports what it cost as `stepsNotRun`. A stop is honoured
+**between steps**.
 
 **Flow control is design-mode only.** A script returns an intent -
 `pm.execution.setNextRequest(name)`, `setNextRequest(null)`,
@@ -876,8 +888,11 @@ a lone request has no sequence for a jump, skip or transaction to act on, and
 no per-VU or shared pacing state for the kind to read.
 
 Two things were deliberately left open: whether a **stored scenario entity**
-ever lands (the seam exists; the demand does not), and **retry /
-continue-on-failure policy** beyond "an errored step ends its iteration".
+ever lands (the seam exists; the demand does not), and a **retry policy** for
+a step that errored. Continue-on-failure was the third until imported Postman
+collections supplied the demand (issue #2526): it now covers a script error
+only, because a step after a transport failure nearly always reads the response
+that never arrived.
 
 ### Load Test Mode
 
@@ -1142,7 +1157,9 @@ row exists - and the executor is the only thing that differs.
   logs a warning and does nothing.
 - **A step that got no response ends its iteration**, and the VU starts the
   next one. A VU stranded on a failing step would permanently shrink effective
-  concurrency for the rest of the run. A step that answered with an HTTP error
+  concurrency for the rest of the run. This path does not read `stopOnError`:
+  the key is the sequential runner's, and here only a missing response ends an
+  iteration - a script error, inline or deferred, never has. A step that answered with an HTTP error
   status is counted in that step's `errors` (as `httpErrors`, #2134) and the
   iteration carries on: a response arrived, so the next step has something to
   follow.
@@ -1266,8 +1283,11 @@ holds references to state `main` owns: HTTP server stopped **and its stream
 consumers drained** (`Server::stop()` calls `SseStreamManager::shutdown()`,
 which signals every stream and joins its worker) → run workers signalled and
 joined (each joins its own metrics and monitor threads and stops its event loop
-first) → `curl_global_cleanup` → `Database` / `RunManager` destroyed at scope
-exit. Nothing is detached.
+first) → the start-of-session recovery backup refresh interrupted and joined →
+the recovery backup refreshed once more, bounded by a deadline
+(`Database::refresh_recovery_backup_on_shutdown`, #2421) → `curl_global_cleanup`
+→ `Database` / `RunManager` destroyed at scope exit → the instance lock
+released. Nothing is detached.
 
 The stream drain belongs to `stop()` rather than to `~Server` because
 `curl_global_cleanup` runs *between* the two: a consumer joined only by the
@@ -1306,7 +1326,7 @@ Default configuration values (from `constants.hpp`):
 data/
 ├── db/
 │   ├── vayu.db          # SQLite database
-│   ├── vayu.db.bak      # Re-snapshotted after every clean start - crash recovery, not a user backup
+│   ├── vayu.db.bak      # Re-snapshotted once listening and at a clean shutdown - crash recovery, not a user backup
 │   ├── ca-bundle.pem    # The merged CA bundle written when custom certificates are configured
 │   └── backups/
 │       └── vayu-<stamp>.db  # On-demand snapshots (UTC, %Y%m%d-%H%M%S-mmm)
@@ -1334,9 +1354,9 @@ afterwards inherit, and there is no pass over existing files.
 
 `vayu.db` holds everything a person has built - collections, environments,
 stored credentials and run history - and until issue #987 there was no copy of
-it the user controlled. The `.bak` beside it is **not** one: it is rewritten on
-every clean start, so it exists to give a corrupt file something to restore
-from, not to let anyone go back to last week.
+it the user controlled. The `.bak` beside it is **not** one: it is rewritten
+once the engine listens and again at a clean shutdown, so it exists to give a
+corrupt file something to restore from, not to let anyone go back to last week.
 
 `POST /workspace/backup` (or `vayu-cli backup`) writes one snapshot into
 `db/backups/`. It runs SQLite's `VACUUM INTO`, which is why it is safe while
@@ -1366,9 +1386,10 @@ Restore by hand, with the engine stopped.
 
 **Putting a quarantined file back.** A start that judged `vayu.db` corrupt
 moved it to `vayu.db.corrupt-<ms>` before restoring `vayu.db.bak` or starting
-fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` is a
-session old at best, so when the quarantined file was healthy after all, it is
-the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
+fresh ([db-schema.md](db-schema.md#the-quarantine-issue-984)). The `.bak` holds
+the last clean shutdown at best, and less after a session that ended in a crash
+or one whose final refresh ran out of time, so when the quarantined file was
+healthy after all, it is the newer copy: with the engine stopped, copy `vayu.db.corrupt-<ms>` over
 `db/vayu.db`, and its `-wal` and `-shm`, when the set has them, over
 `db/vayu.db-wal` and `db/vayu.db-shm` (deleting those two if the set has none).
 Unlike a snapshot, the set's sidecars are part of it: its `-wal` holds the

@@ -277,6 +277,21 @@ export interface ResponseState {
 	 */
 	redirects?: RedirectHop[];
 	requestHeaders?: Record<string, string>;
+	/**
+	 * The request's own header lines as the transfer sent them - one entry per
+	 * line, in wire order, a repeated name repeated and in the spelling typed
+	 * (issue #2466). `requestHeaders` is the same set folded to one value per
+	 * name; the Headers tab lists these when it has no wire frame to read
+	 * (`wireRequestHeaders` below), so a failed send or a restored row with no
+	 * recorded frame still shows every row.
+	 *
+	 * Both funnels set it through `sentHeaderLines` (`responseFromExecuteResult`
+	 * from `/execute`'s `requestHeaderLines`, `responseFromRunResult` from
+	 * `trace.request.sentHeaderLines`), and an empty list becomes absent in
+	 * both. Absent means the answer predates the key: the tab shows
+	 * `requestHeaders` then, never lines derived from it.
+	 */
+	requestHeaderLines?: HeaderLine[];
 	rawRequest?: string;
 	/**
 	 * The request's header lines as they went out, in wire order, read off the

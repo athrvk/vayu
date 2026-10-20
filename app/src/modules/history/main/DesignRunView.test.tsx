@@ -449,6 +449,31 @@ describe("DesignRunView - sending it again", () => {
 		expect(composeRequest.mock.calls[0][0].request?.params).toEqual([]);
 	});
 
+	it("replays a repeated header as the lines the run recorded (#2466)", async () => {
+		// Mutation check: flatten the seeded rows to a record at the compose call
+		// and the three lines are one.
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		const recorded = designRun();
+		const lines = [
+			{ name: "X-Dup", value: "one" },
+			{ name: "x-dup", value: "two" },
+			{ name: "X-Dup", value: "three" },
+		];
+		Object.assign(recorded.configSnapshot as Record<string, unknown>, { headers: lines });
+
+		renderView(recorded);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(composeRequest).toHaveBeenCalled());
+
+		expect(composeRequest.mock.calls[0][0].request?.headers).toEqual(lines);
+	});
+
 	it("replays with the protocol switches the run recorded (#1765)", async () => {
 		// Composed inline, so an omitted switch would let the live request's
 		// stored value win - a replay that used the jar the run skipped.
@@ -648,7 +673,10 @@ describe("DesignRunView - saving back to the request", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
 		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
 
-		expect(executeRequest.mock.calls[0][0].headers.Authorization).toBe("Bearer SECRET");
+		expect(executeRequest.mock.calls[0][0].headers).toContainEqual({
+			name: "Authorization",
+			value: "Bearer SECRET",
+		});
 		expect(executeRequest.mock.calls[0][0].auth).toBeUndefined();
 	});
 });

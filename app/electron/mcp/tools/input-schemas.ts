@@ -81,6 +81,22 @@ export const ENGINE_DEFAULT_HEADERS_POINTER =
 	"The engine adds a `User-Agent`, an `Accept-Encoding` and, when switched on, a correlation id or `Expect: 100-continue` to a request that does not name them; a header you write under that name wins; run_request states the rule.";
 
 /**
+ * A request's `headers` argument, on the tools that send one (`run_request`,
+ * `start_load_run`, `get_graphql_schema`): the ordered `{name, value}` lines or
+ * the single-valued map, both read by `readRequestOverrides`. One fragment so
+ * the three say the same thing about repeats.
+ */
+export const requestHeadersInput = z
+	.union([
+		z.array(z.object({ name: z.string(), value: z.string() })),
+		z.record(z.string(), z.string()),
+	])
+	.optional()
+	.describe(
+		'Request headers: an array of `{name, value}` lines, or a string map. Each line is sent as its own header line in the order given and in the spelling written, so a header that repeats (`Link`, `Forwarded`, two `Cookie` or `Accept` lines) is repeated - pass `[{"name":"X-Dup","value":"one"},{"name":"X-Dup","value":"two"}]`. A map holds one value per name and cannot repeat one.'
+	);
+
+/**
  * The default headers one send refuses (issue #1337), as `disabledDefaultHeaders`.
  *
  * One fragment for the two tools that build a request payload: the field means
@@ -211,6 +227,19 @@ export const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`no load path looks at it. The schema verdict rides the report's \`schemaValidation\` ` +
 	`block either way. Remove it, or run the same collection in design mode with ` +
 	`run_collection, which is where the gate takes effect.`;
+
+/**
+ * Why `stopOnError` cannot ride a load run (issue #2526), refused for the reason
+ * `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the SDK strips an undeclared key before the
+ * handler runs, so `start_load_run` declares it to be able to say no. The flag
+ * is the design-mode runner's - a virtual user's walk has its own rule for a step
+ * with no response and never reads it.
+ */
+export const LOAD_RUN_STOP_ON_ERROR_REFUSAL =
+	`"stopOnError" does not apply to a load run: only the design-mode runner reads it, and a ` +
+	`virtual user's walk ends an iteration by its own rule. Nothing was started - the flag ` +
+	`would have been read as shaping this run while no load path looks at it. Remove it, or ` +
+	`run the same collection in design mode with run_collection, which is where it takes effect.`;
 
 /**
  * `elements.timers`'s two enum values (issue #1495), shared between

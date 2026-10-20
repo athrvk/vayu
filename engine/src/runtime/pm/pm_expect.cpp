@@ -722,40 +722,37 @@ JSValue expect_exist (JSContext* ctx, JSValueConst this_val, int argc, JSValueCo
     return expect_chained (ctx, this_val);
 }
 
-JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+/**
+ * @brief `.to.be.true` / `.to.be.false`: the boolean itself, not its truthiness.
+ *
+ * chai compares with `=== true` and `=== false`; `.ok` is the coercing matcher
+ * and keeps `JS_ToBool` (#2523).
+ */
+JSValue expect_boolean_literal (JSContext* ctx, JSValueConst this_val, bool expected) {
     auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
     if (!state) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    bool is_true = JS_ToBool (ctx, state->actual) == 1;
-    bool pass    = state->negated ? !is_true : is_true;
+    const bool is_literal = JS_IsBool (state->actual) &&
+    (JS_ToBool (ctx, state->actual) == 1) == expected;
+    const bool pass = state->negated ? !is_literal : is_literal;
 
     if (!pass) {
-        const char* msg = state->negated ? "Expected value to be falsy" :
-                                           "Expected value to be truthy";
+        const std::string msg = "Expected " + js_describe (ctx, state->actual) +
+        (state->negated ? " to not be " : " to be ") + (expected ? "true" : "false");
         return throw_expect_failure (ctx, state, msg);
     }
 
     return expect_chained (ctx, this_val);
 }
 
+JSValue expect_true (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    return expect_boolean_literal (ctx, this_val, true);
+}
+
 JSValue expect_false (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    auto* state = static_cast<ExpectState*> (JS_GetOpaque (this_val, expect_class_id));
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-
-    bool is_false = JS_ToBool (ctx, state->actual) == 0;
-    bool pass     = state->negated ? !is_false : is_false;
-
-    if (!pass) {
-        const char* msg = state->negated ? "Expected value to not be false" :
-                                           "Expected value to be false";
-        return throw_expect_failure (ctx, state, msg);
-    }
-
-    return expect_chained (ctx, this_val);
+    return expect_boolean_literal (ctx, this_val, false);
 }
 
 /**
@@ -1077,6 +1074,25 @@ std::vector<std::string> split_property_path (const std::string& path) {
     return segments;
 }
 
+JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message);
+
+// The expectation `.property(name)` returns: the same chain with the property's
+// value as its subject, so `.that.is.a("number")` and `.and.equal(1)` assert on
+// the value. The flags that describe how a matcher reads its subject (`deep`,
+// `nested`) and the failure message carry over; `not` does not, because a
+// retarget happens only on a passing positive assertion and the new subject has
+// not been negated by anything.
+JSValue expect_on_property_value (JSContext* ctx, const ExpectState* state, JSValueConst value) {
+    JSValue next = create_expectation (ctx, value, state->message);
+    if (JS_IsException (next)) {
+        return next;
+    }
+    auto* next_state = static_cast<ExpectState*> (JS_GetOpaque (next, expect_class_id));
+    next_state->deep   = state->deep;
+    next_state->nested = state->nested;
+    return next;
+}
+
 JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "property() requires a property name");
@@ -1126,27 +1142,31 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         }
     }
 
+    // The value form compares the value and the one-argument form hands it to
+    // the rest of the chain. `JS_HasProperty` above does not run the getter, so
+    // this is the first read of the value and the only one: a getter runs once.
+    // `.not.property(name)` asserts absence and has no value to read.
+    const bool value_form  = argc >= 2;
+    const bool retargets   = !value_form && !state->negated;
+    const bool reads_value = has_prop && (value_form || retargets);
+    ScopedValue property_value (ctx,
+    reads_value ? JS_GetPropertyStr (ctx, holder, segments.back ().c_str ()) : JS_UNDEFINED);
+    JS_FreeValue (ctx, holder);
+    if (JS_IsException (property_value.get ())) {
+        return JS_EXCEPTION;
+    }
+
     // A second argument also checks the value. Chai compares it strictly unless
     // the chain is `deep`, which is why this cannot stringify: two objects with
     // the same JSON are still different references.
-    if (has_prop && argc >= 2) {
-        // `JS_HasProperty` above does not run the getter, so this is the first
-        // read of the value - and the one the comparison is given.
-        ScopedValue actual_val (
-        ctx, JS_GetPropertyStr (ctx, holder, segments.back ().c_str ()));
-        if (JS_IsException (actual_val.get ())) {
-            JS_FreeValue (ctx, holder);
-            return JS_EXCEPTION;
-        }
+    if (has_prop && value_form) {
         const int same =
-        js_compare_for_chain (ctx, actual_val.get (), argv[1], state->deep);
+        js_compare_for_chain (ctx, property_value.get (), argv[1], state->deep);
         if (same < 0) {
-            JS_FreeValue (ctx, holder);
             return JS_EXCEPTION;
         }
         has_prop = (same == 1);
     }
-    JS_FreeValue (ctx, holder);
 
     bool pass = state->negated ? !has_prop : has_prop;
 
@@ -1154,13 +1174,16 @@ JSValue expect_have_property (JSContext* ctx, JSValueConst this_val, int argc, J
         std::string msg = state->negated ?
         "Expected object to not have property '" + prop_name + "'" :
         "Expected object to have property '" + prop_name + "'";
-        if (argc >= 2) {
+        if (value_form) {
             msg += " equal to " + js_describe (ctx, argv[1]);
         }
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return expect_chained (ctx, this_val);
+    if (!retargets) {
+        return expect_chained (ctx, this_val);
+    }
+    return expect_on_property_value (ctx, state, property_value.get ());
 }
 
 // Terminal getters: assert on property access (Chai/Postman paren-less idiom).
@@ -2005,10 +2028,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
 // The three fields a done-style test reports its outcome through. They live on
 // a plain JS object rather than on a C++ struct on `js_pm_test`'s frame,
 // because nothing stops a script from keeping `done` and calling it after
-// `pm.test` has returned - the sandbox has no job queue to *resume* such a
-// script, but the call itself still runs. Bound to a stack pointer that is a
-// use-after-free; bound to an object the collector owns it is a write nobody
-// reads.
+// `pm.test` has returned - from later in the script, or from a promise job the
+// drain runs after it. Bound to a stack pointer that is a use-after-free;
+// bound to an object the collector owns it is a write nobody reads.
 constexpr const char* DONE_CALLED  = "called";
 constexpr const char* DONE_FAILED  = "failed";
 constexpr const char* DONE_MESSAGE = "message";
@@ -2087,15 +2109,16 @@ void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result)
     JS_FreeValue (ctx, called);
 
     if (!was_called) {
-        // Postman genuinely waits here; this sandbox cannot. It is synchronous
-        // and drains no job queue, so a `done()` the callback left for later
-        // would never run and the test would be reported on a verdict nothing
-        // ever gave. Saying so is the honest outcome - and a loud one, where
+        // Postman genuinely waits here; this sandbox does not. The verdict is
+        // taken when the callback returns, and a `done()` left for later - in
+        // a `.then`, after an `await` - only runs once the job queue drains,
+        // after the row was written. Saying so is the honest outcome, where
         // the same script used to fail with "undefined is not a function".
         result.passed = false;
         result.error_message =
-        "done() was never called. The script sandbox is synchronous and has no "
-        "job queue, so a test cannot complete asynchronously - call done() "
+        "done() was never called before the callback returned. A done-style "
+        "test is judged when its callback returns, so a done() left for later "
+        "(in a .then, or after an await) is not waited for - call done() "
         "before the callback returns.";
         return;
     }
@@ -2167,7 +2190,14 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 
     JS_FreeValue (ctx, done);
     JS_FreeValue (ctx, state);
-    JS_FreeValue (ctx, ret);
+    // An async callback's row is recorded passed without awaiting it, as
+    // postman-sandbox does; what its promise later does is reported as a
+    // script error after the job queue drains (#2531).
+    if (JS_PromiseState (ctx, ret) != JS_PROMISE_NOT_A_PROMISE) {
+        data->async_tests.emplace_back (ret, test_name);
+    } else {
+        JS_FreeValue (ctx, ret);
+    }
     data->tests.push_back (std::move (result));
 
     // Postman returns `pm` to make the call chainable ("make it chainable",

@@ -31,4 +31,31 @@ describe("templatedRequest", () => {
 		expect(snippet.params).toBe(request.params);
 		expect(generateCurl(snippet).code).toContain("'{{host}}/users/42'");
 	});
+
+	it("carries every enabled header row in order, a repeat repeated (#2466)", () => {
+		// Mutation check: a record keyed by name makes the three rows one.
+		const request = {
+			method: "GET",
+			url: "{{host}}/x",
+			params: [],
+			headers: [
+				{ key: "X-Dup", value: "one", enabled: true },
+				{ key: "x-dup", value: "two", enabled: true },
+				{ key: "X-Off", value: "no", enabled: false },
+				{ key: "X-Dup", value: "{{three}}", enabled: true },
+			],
+			body: { mode: "none" },
+			auth: { mode: "none" },
+		} as unknown as Request;
+		const snippet = templatedRequest(request, []);
+		expect(snippet.headers).toEqual([
+			{ name: "X-Dup", value: "one" },
+			{ name: "x-dup", value: "two" },
+			{ name: "X-Dup", value: "{{three}}" },
+		]);
+		const flags = generateCurl(snippet)
+			.code.split("\n")
+			.filter((line) => line.includes("-H "));
+		expect(flags).toHaveLength(3);
+	});
 });

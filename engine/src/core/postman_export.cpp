@@ -31,6 +31,7 @@
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/ordered_json.hpp"
 #include "vayu/utils/parse.hpp"
 
 #include <curl/curl.h>
@@ -815,14 +816,16 @@ std::optional<json> postman_auth (const json& stored, AuthLevel level, Walk& wal
 
 /// `graphql`: Postman's variables are the text of its Variables pane.
 json graphql_body (const std::string& content) {
-    const json parsed = json::parse (content, nullptr, /*allow_exceptions=*/false);
+    const auto envelope =
+    vayu::utils::parse_ordered_json (content, vayu::utils::ORDERED_JSON_UNBOUNDED);
     json graphql;
-    if (!parsed.is_object ()) {
+    if (!envelope || !envelope->is_object ()) {
         graphql["query"]     = content;
         graphql["variables"] = "";
         return json{ { "mode", "graphql" }, { "graphql", std::move (graphql) } };
     }
-    graphql["query"] = text_of (parsed, "query");
+    const json& parsed = *envelope;
+    graphql["query"]   = text_of (parsed, "query");
     if (const auto variables = parsed.find ("variables");
     variables == parsed.end () || variables->is_null ()) {
         graphql["variables"] = "";

@@ -319,6 +319,7 @@ jobs:
               - 'engine/tests/fixtures/path-variable-conformance.json'
               - 'engine/tests/fixtures/query-encoding-conformance.json'
               - 'engine/tests/fixtures/auth-header-precedence.json'
+              - 'engine/tests/fixtures/header-rows-conformance.json'
               - 'engine/tests/fixtures/implied-content-type-conformance.json'
               - 'engine/tests/fixtures/import-conformance.json'
               - 'engine/tests/fixtures/element-kinds.json'

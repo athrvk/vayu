@@ -1765,8 +1765,9 @@ A folder's sub-collections and its requests are **one list in one `order`
 space** (#2535), so a request can sit between two folders. The kind is only a
 tiebreak, and only a merged list states it: `childrenOf`
 (`modules/collections/tree-children.ts`) builds a parent's children from the
-collections list and the parent's request list, and the render, the drag, the
-keyboard move and "Move to..." all read that one list
+collections list and the parent's request list, `flattenVisibleRows` lists each
+expanded folder's children through the same merge (`mergeSiblings`), and the
+drag, the keyboard move and "Move to..." all read that one list
 (`CollectionTree.sibling-order.test.tsx`). A recursive collection run executes
 the same sequence - a request where it sits, a sub-folder's whole subtree where
 the sub-folder sits - which is pinned across the render and the engine's plan by

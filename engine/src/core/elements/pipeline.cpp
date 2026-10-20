@@ -21,6 +21,7 @@
 #include "json_path.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::core {
 
@@ -302,7 +303,7 @@ const nlohmann::ordered_json* ensure_parsed_body (ElementContext& ctx) {
         if (ctx.response->body.size () <= ctx.max_body_bytes) {
             // The depth bound is for the kinds, which recurse over the tree
             // (#2361); the parse itself recurses nowhere.
-            ctx.parsed_body = detail::parse_ordered_json (
+            ctx.parsed_body = utils::parse_ordered_json (
             ctx.response->body, constants::elements::MAX_BODY_DEPTH);
         }
     }

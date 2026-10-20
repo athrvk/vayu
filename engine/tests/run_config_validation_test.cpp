@@ -509,6 +509,21 @@ TEST (RunConfigValidation, StreamMetricsMustBeABoolean) {
     EXPECT_FALSE (validate_run_config (ok).has_value ());
 }
 
+TEST (RunConfigValidation, StopOnErrorMustBeABooleanAndNullIsTheDefault) {
+    // Read by the scenario runner after the run row exists (issue #2526); a
+    // string there would be read as "off" and the run would ignore the
+    // caller's intent rather than refuse it.
+    auto config           = valid_config ();
+    config["stopOnError"] = "yes";
+    expect_rejected (config, "stopOnError");
+
+    auto ok           = valid_config ();
+    ok["stopOnError"] = true;
+    EXPECT_FALSE (validate_run_config (ok).has_value ());
+    ok["stopOnError"] = nullptr;
+    EXPECT_FALSE (validate_run_config (ok).has_value ());
+}
+
 // --- The collector's own guard, independent of the route ------------------
 
 TEST (MetricsCollectorSampleRateGuard, ZeroSampleRatesDoNotDivideByZero) {

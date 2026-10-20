@@ -73,13 +73,27 @@ pm.test('the token came back', function(done) {
 ```
 
 **`done()` must be called before the callback returns, and this is a
-divergence: Postman genuinely waits.** The sandbox is synchronous and drains no
-job queue (see [Limitations](#limitations)), so a `done()` left for later would
-never run at all. A callback that declares `done` and returns without calling
+divergence: Postman genuinely waits.** Vayu judges a done-style test when its
+callback returns; a `done()` left for later (in a `.then`, or after an
+`await`) runs only when the job queue drains after the script, once the row is
+already written. A callback that declares `done` and returns without calling
 it therefore **fails**, saying so - rather than being reported on a verdict
 nothing ever gave. Calling `done()` twice is refused for the same reason the
 first verdict is kept: the second call throws, and the throw fails the test
 naming what happened.
+
+**An `async` callback's test passes when it returns, as in Postman** (issue
+#2531). postman-sandbox records the row without awaiting the promise, and so
+does Vayu. What the promise does afterwards is still reported: the job queue is
+drained before the script's results are read, so the code after an `await`
+runs, and a rejection nothing handles is a **script error** on the step,
+`Unhandled promise rejection in test "<name>": <reason>`, with the reason
+written as a thrown error would be (an `AssertionError`'s message included). A
+test's promise still pending after the drain can never settle, and is reported
+as `A promise did not settle before the script ended (returned by test
+"<name>")`. The same applies outside a test: `(async () => { throw new
+Error("x"); })();` ends as `Unhandled promise rejection: Error: x`, while a
+rejection the script catches, before or after it settles, is no error.
 
 ### pm.expect()
 
@@ -97,7 +111,7 @@ item in a loop, the request that came from the MCP path rather than the app.
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// fails with: user 42: Expected value to be truthy
+// fails with: user 42: Expected false to be true
 ```
 
 The message is coerced like chai's, and `undefined` / `null` mean "no message",
@@ -181,12 +195,12 @@ pm.expect(value).to.deep.equal(expected);    // same as .eql
 pm.expect(value).to.be.oneOf([a, b]);
 pm.expect(value).to.be.closeTo(expected, delta);
 
-// Truthiness and existence (paren-less: accessing them asserts)
-pm.expect(value).to.be.true;
-pm.expect(value).to.be.false;
+// Booleans and existence (paren-less: accessing them asserts)
+pm.expect(value).to.be.true;                 // strict: the boolean true, not 1 or 'true'
+pm.expect(value).to.be.false;                // strict: the boolean false, not 0, '' or null
 pm.expect(value).to.be.null;
 pm.expect(value).to.be.undefined;
-pm.expect(value).to.be.ok;
+pm.expect(value).to.be.ok;                   // truthy (any value JavaScript reads as true)
 pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
 pm.expect(value).to.be.NaN;
@@ -211,6 +225,7 @@ pm.expect(value).to.have.length(n);          // alias .lengthOf
 pm.expect(value).to.have.property('key');
 pm.expect(value).to.have.property('key', expectedValue);
 pm.expect(value).to.have.nested.property('a.b[0].c');
+pm.expect(value).to.have.property('id').that.is.a('number'); // name alone: the subject is now the value
 pm.expect(value).to.have.keys('a', 'b');     // exactly these keys; alias .key
 pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
 
@@ -264,6 +279,14 @@ Notes on the edges:
   while the declarations nest them under `be` and `have` as the completion
   labels spell them, so `.that.be.a('string')` type-checks where chai's
   `.that.is.a('string')` does not - both run.
+- **`property(name)` moves the subject to the property's value** (#2524), as in
+  chai: `expect({id: 1}).to.have.property('id').that.is.a('number')` types the
+  value `1`, not the object, and `.and.equal(v)` compares the value. With
+  `nested` the value is the one at the last path segment, and `deep`, `nested`
+  and the failure message carry over to the new subject. The value is read
+  once, so a getter runs once. Two forms keep the chain they were called on:
+  `property(name, value)` (the value was already compared) and
+  `.not.have.property(name)` (absence has no value to move to).
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
   (`include.keys`) is not implemented; `all` is accepted and changes nothing,
   `any` is not.
@@ -937,6 +960,11 @@ Rules worth knowing before you rely on them:
 - **The object is authoritative, not a diff.** The header set left in
   `pm.request.headers` is the header set that is sent, which is what makes
   `delete` work.
+- **A repeated header reads folded and survives untouched** (issue #2466).
+  `pm.request.headers` holds one value per name, so two `X-Dup` rows read as
+  `'one, two'` (a `Cookie` joined with `'; '`). A name the script leaves at the
+  value it read keeps every line it had, in place and in its own spelling; a
+  name the script writes goes out as the one line it wrote.
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it. The one
@@ -1563,11 +1591,9 @@ and must be a function.
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
-**Synchronous, and callback-shaped for that reason.** The send blocks and the
-callback runs inline, before `pm.sendRequest` returns. There is no promise
-overload: `Promise` exists in the sandbox but nothing drains its job queue, so
-one could only never resolve - the same reason hashing is `pm.crypto` rather
-than `crypto.subtle`.
+**Synchronous, and callback-shaped.** The send blocks and the callback runs
+inline, before `pm.sendRequest` returns. There is no promise overload yet
+(#2527): a call without a callback throws rather than returning a promise.
 
 **Which failures throw and which reach the callback.** Transport failures are
 the network's answer, so they arrive as the callback's `err` - an `Error` with
@@ -1681,11 +1707,19 @@ encode its braces in the path. A non-ASCII host is dialled by its punycode
 name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
 path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
+Send writes the same request line for a space, a control character, a
+non-ASCII byte or a value substituted into the path, query or fragment, but it
+changes only those bytes: a typed `"`, `{` or a backslash in the path goes
+out as typed from Send and as `%22`, `%7B` or `/` from a script, as Postman
+does. The difference is deliberate and listed under
+[Query encoding](api-reference.md#query-encoding).
+
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
-names that resolve to one name would send the request a header short, so the
-call throws naming both spellings and the name they produced, and nothing goes
-out. Names are compared without case, the way the header map keys them. A name
+names written differently that resolve to one name would send that header twice
+where the script wrote two different ones, so the call throws naming both
+spellings and the name they produced, and nothing goes out. Names are compared
+without case. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the
 pre-send gate reads header text for the bytes that break a line, and what is
@@ -1928,6 +1962,18 @@ thing that knows what a sequence is, reads it once the step has finished. So
 and the jump happens afterwards. The last call in a script wins, across the
 pre-request and test scripts alike.
 
+**A script that errored loses its instruction.** When either of a step's
+scripts throws (or times out, or has its `pm.request` write-back refused), the
+step is `errored` and the iteration carries on at the **next plan position**:
+a `setNextRequest`, `setNextRequest(null)` or `skipRequest()` the script made
+before failing is ignored, because it came from code that did not finish. A
+skip the pre-request script asked for has still happened - nothing was sent -
+but where the iteration goes next is the plan's order, not the script's.
+`stopOnError: true` on the run ends the iteration at that step instead (see
+[api-reference.md](api-reference.md#scenario-runs), Outcomes). A step that
+errors this way runs no `step.between` element either, so a `timer.think` or
+a `control.loop` decision after it does not happen for that step.
+
 `setNextRequest` takes a request's **name** or its **id** - the one a script
 reads off `pm.info.requestId` - never its URL, and jumping backwards is allowed:
 that is how a retry loop is written. A target is resolved against the names
@@ -1958,7 +2004,9 @@ reports success for something that never happened.
 ### Where the step fails instead
 
 Two cases are the runner's to refuse, because only it can see the plan. Both end
-the iteration with the step marked `errored` and the reason in its row:
+the iteration with the step marked `errored` and the reason in its row, whatever
+the run's `stopOnError` says - unlike a script that threw, which the iteration
+continues past:
 
 - **A target no request in the run answers to**, by name or by id. The message
   names the target and says both were searched.
@@ -2435,9 +2483,10 @@ Globals it leaves behind (`globalThis.x = 1`, an implicit `x = 1`), a replaced
 `pm`, `pm.test` or `console.log`, and patches to `String.prototype`,
 `Array.prototype` or `Object.prototype` are gone before the next script on the
 thread starts, including one from another collection. Only the QuickJS runtime
-(memory limit, deadline, class registrations) is reused, and not even that
-when a script ends with a promise job still queued (a `.then` callback, the
-rest of an `async` function after an `await`): the job is discarded with the
+(memory limit, deadline, class registrations) is reused. A promise job the
+script queued (a `.then` callback, the rest of an `async` function after an
+`await`) runs before the script ends, inside its deadline; one still queued
+when the deadline or the job cap stops that drain is discarded with the
 runtime, never run, and the next script starts on a new one. State that should
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
@@ -2465,17 +2514,17 @@ silently falling back to hex.
 `URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
-other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and nothing
-asynchronous. There is no `fetch`, but there **is**
+other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host source
+of asynchronous work: `Promise` and `async`/`await` run, on a job queue drained
+before the script ends, but nothing (no timer, no I/O) settles a promise later.
+There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded rather than a Promise-returning stand-in.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
-is Promise-based. `Promise` exists here, but nothing drains the job queue (jobs
-still queued when a script ends are discarded unrun) - there
-is no event loop and no `setTimeout` - so an `await crypto.subtle.digest(...)`
-would never resume and the script would report a timeout rather than a result.
-Vayu therefore takes a name of its own and is honestly synchronous. `btoa` and
+is Promise-based and covers algorithms this sandbox does not implement, so a
+script written against that name would meet a different surface. Vayu
+therefore takes a name of its own and is honestly synchronous. `btoa` and
 `atob` keep their standard names because they are synchronous on the web too,
 and they keep the rest of their semantics with them: they operate on **binary
 strings**, one byte per code unit, so `btoa` throws on a code point above U+00FF
@@ -2546,6 +2595,14 @@ The **language** is current; what is missing is the **host environment**:
   threw; outside one it ends the script. A later assertion in the same script is
   still judged on its own, and a stack overflow inside such a function is a
   `RangeError` the script could have caught, so that still counts as a throw.
+  **The deadline covers the promise jobs too** (#2531): the queue a script
+  leaves is drained inside the same budget, checked between jobs as well as
+  inside one, so a runaway `while (true) await null;` stops with the same
+  `Script execution timed out after <n>ms`. With `scriptTimeout` at `0` there
+  is no deadline to bound the drain, so it stops after 100,000 jobs instead
+  (`MAX_PROMISE_JOBS_WITHOUT_TIMEOUT`) with its own message, `Script stopped
+  after running 100000 promise jobs: ...`. That cap is provisional until #2359
+  settles what `0` means. A job left queued by either stop is never run.
 
 ## Script Execution Context
 
@@ -2769,6 +2826,12 @@ try {
 ```
 
 Test failures don't stop script execution - all tests run and results are collected.
+
+In a collection run an uncaught error marks the step `errored`, with the message
+on its row, and the iteration moves on to the next request, as Postman's runner
+does; `stopOnError: true` on the run ends the iteration there instead. See
+[Flow control](#flow-control-pmexecution) for what happens to a redirect the
+script made before it threw.
 
 ## Best Practices
 

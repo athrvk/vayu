@@ -108,7 +108,7 @@ describe("duplicating a request", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.rows.onDuplicateRequest(source);
+			await result.current.handlers.onDuplicateRequest(source);
 		});
 
 		expect(createRequest).toHaveBeenCalledTimes(1);
@@ -128,7 +128,7 @@ describe("duplicating a request", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.rows.onDuplicateRequest(upload);
+			await result.current.handlers.onDuplicateRequest(upload);
 		});
 
 		expect(createRequest.mock.calls[0][0].body).toEqual({
@@ -145,7 +145,7 @@ describe("duplicating a request", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.rows.onDuplicateRequest(truncated);
+			await result.current.handlers.onDuplicateRequest(truncated);
 		});
 
 		expect(createRequest).not.toHaveBeenCalled();

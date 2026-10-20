@@ -21,7 +21,6 @@ the request in.
 | **API client + load test** | Both, one app | Load test only |
 | **Load test throughput** | Tens of thousands of req/s | Moderate (thread-heavy) |
 | **UI** | Native desktop app | Java Swing (dated) |
-| **UI responsiveness** | High (sidecar architecture) | Laggy under load |
 | **Memory usage** | Low (direct memory) | High (RAM-intensive) |
 | **Shareable run summary** | One-file HTML report with charts, a Markdown summary and JSON, from the Export menu\*\*\* | HTML dashboard report generated from a results file, written as a folder of pages and scripts |
 | **Protocol breadth** | HTTP, GraphQL, SSE | HTTP, JDBC, JMS, FTP, LDAP, SMTP and more |

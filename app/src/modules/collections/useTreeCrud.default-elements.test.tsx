@@ -75,8 +75,8 @@ describe("new-entity creation sends no seeded elements", () => {
 	it("a subfolder", async () => {
 		const { result } = renderCrud();
 
-		act(() => result.current.rows.onFolderNameChange("New Folder"));
-		await act(async () => result.current.rows.onCreateSubfolder("c-1"));
+		act(() => result.current.handlers.onFolderNameChange("New Folder"));
+		await act(async () => result.current.handlers.onCreateSubfolder("c-1"));
 
 		expect(createCollection).toHaveBeenCalledTimes(1);
 		const sent = createCollection.mock.calls[0][0];
@@ -87,7 +87,7 @@ describe("new-entity creation sends no seeded elements", () => {
 	it("a request added from a collection's row menu", async () => {
 		const { result } = renderCrud();
 
-		const addRequest = result.current.rows
+		const addRequest = result.current.handlers
 			.getCollectionActions(collections[0])
 			.find((a) => a.label === "Add request");
 		await act(async () => addRequest?.onSelect());

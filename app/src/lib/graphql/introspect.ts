@@ -30,7 +30,8 @@
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
-import type { ComposedRequest, ExecuteRequestRequest, KeyValueEntry } from "@/types";
+import { headerLinesOf } from "@/lib/header-lines";
+import type { ComposedRequest, ExecuteRequestRequest, HeaderLine, KeyValueEntry } from "@/types";
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
 
 /**
@@ -104,8 +105,12 @@ export interface IntrospectionTarget {
 	 * from these rather than from the stored request's.
 	 */
 	params?: readonly KeyValueEntry[];
-	/** Header rows as typed (enabled-only, flattened), `{{variables}}` intact. */
-	headers: Record<string, string>;
+	/**
+	 * Header rows as typed (enabled-only, in order, a repeat repeated),
+	 * `{{variables}}` intact - lines, or the older single-valued record; compose
+	 * reads either.
+	 */
+	headers: HeaderLine[] | Record<string, string>;
 	/** The request's auth block, `inherit` included. Absent means no auth. */
 	auth?: Record<string, unknown>;
 	/** Scopes the variable chain and the `inherit` walk. */
@@ -134,7 +139,12 @@ export function buildIntrospectionRequest(
 	const request: ExecuteRequestRequest = {
 		method: "POST",
 		url: composed.url,
-		headers: { ...composed.headers, "Content-Type": "application/json" },
+		headers: [
+			...headerLinesOf(composed.headers).filter(
+				(line) => line.name.toLowerCase() !== "content-type"
+			),
+			{ name: "Content-Type", value: "application/json" },
+		],
 		// The engine expects a structured body ({ mode, content }), not a raw
 		// string - content is the serialized JSON the server receives.
 		body: { mode: "json", content: JSON.stringify({ query: getIntrospectionQuery() }) },
