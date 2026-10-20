@@ -75,7 +75,7 @@ const MEMBER_RULES: Array<[string, RegExp]> = [
 		"the URL is an object that still reads as its string",
 		/It still behaves as the string it used to be/i,
 	],
-	["sendRequest is synchronous", /the send blocks and the callback runs inline/i],
+	["sendRequest is synchronous", /the send blocks, then the callback runs inline/i],
 	["sendRequest is bounded", /at most 10 requests/i],
 	["signing is synchronous and hex by default", /HMAC-SHA256, hex by default/i],
 	["pm.info says which hook is running", /which hook it is running in/i],

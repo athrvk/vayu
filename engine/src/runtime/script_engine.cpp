@@ -634,11 +634,17 @@ void TimerQueue::cancel (JSContext* ctx, int64_t id) {
 }
 
 ScriptTimer TimerQueue::take_next (JSContext* ctx) {
+    if (order_.empty ()) {
+        return {};
+    }
     const auto [slot, id] = *order_.begin ();
     order_.erase (order_.begin ());
     now_ms_ = slot.first;
 
-    auto found  = timers_.find (id);
+    auto found = timers_.find (id);
+    if (found == timers_.end ()) {
+        return {};
+    }
     Entry entry = std::move (found->second);
     timers_.erase (found);
     if (!entry.timer.interval_ms) {
@@ -1013,8 +1019,8 @@ class ScriptEngine::Impl {
             if (data.timers.empty ()) {
                 return std::nullopt;
             }
-            if (auto stop = async_budget_spent (state, steps_run)) {
-                return stop;
+            if (auto spent = async_budget_spent (state, steps_run)) {
+                return spent;
             }
             ++steps_run;
             fire_next_timer (js_ctx, data, result);
