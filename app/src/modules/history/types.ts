@@ -40,9 +40,10 @@ export interface TabProps {
 }
 
 /**
- * A failed paged fetch (the time series, or the server-vitals series), with the
- * action that retries it. `retry` is the owner's choice of what to re-run (the
- * first page, or the page that failed), so the charts section only offers it.
+ * A failed series fetch (the time series, or the paged server-vitals series),
+ * with the action that retries it. `retry` is the owner's choice of what to
+ * re-run (the whole read, or the page that failed), so the charts section only
+ * offers it.
  */
 export interface SeriesFailure {
 	message: string;
@@ -50,8 +51,8 @@ export interface SeriesFailure {
 }
 
 /**
- * PerformanceTab additionally receives the persisted per-tick time-series
- * (fetched once by LoadTestDetail) so it can render the latency percentile
+ * PerformanceTab additionally receives the persisted time-series, raw or
+ * downsampled (fetched once by LoadTestDetail), so it can render the latency percentile
  * chart / response-time-vs-concurrency scatter without a second query.
  */
 export interface PerformanceTabProps extends TabProps {
@@ -63,8 +64,8 @@ export interface PerformanceTabProps extends TabProps {
 	/** Set when fetching the server-vitals series failed; absent while it is healthy. */
 	monitorFailure?: SeriesFailure;
 	isLoadingSeries?: boolean;
-	isFetchingMore?: boolean;
-	progress?: { loaded: number; total: number };
+	/** Stored ticks folded into each point of `timeSeries`; absent when it is raw. */
+	ticksPerBucket?: number;
 }
 
 export interface LoadTestDetailProps {
@@ -92,6 +93,16 @@ export interface TimeSeriesResponse {
 		hasMore: boolean;
 		returned: number;
 	};
+	/**
+	 * Present only on a `maxPoints` request (#2547). `true` when the stored ticks
+	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
+	 * consecutive ticks: latency percentiles, concurrency and backpressure are the
+	 * bucket's max, `current_rps` its mean, everything else its last tick's
+	 * (`docs/engine/api-reference.md`, "Downsampling with `maxPoints`").
+	 */
+	bucketed?: boolean;
+	/** Ticks folded into each entry; `1` when the series already fit. */
+	ticksPerBucket?: number;
 }
 
 /**

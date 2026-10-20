@@ -75,6 +75,12 @@ export function monitorSeriesNames(samples: MonitorSample[]): string[] {
  * Both inputs are time-ordered by their producers; the samples are sorted
  * defensively because they arrive from two sources (live SSE frames and a
  * paginated history fetch).
+ *
+ * A downsampled history series (#2547) needs nothing different: a bucket's
+ * `timestamp` is its last tick's, so it takes the reading as of the bucket's
+ * end, as a tick does. Readings between two bucket ends are not drawn, which
+ * is the point-reading rule above at the bucket's width; the scrapes
+ * themselves are fetched whole and never downsampled.
  */
 export function joinMonitorToTimeline(
 	history: LoadTestMetrics[],

@@ -28,7 +28,14 @@
  *
  * Every rule counts ticks, so a tick has to mean one second in both views. A
  * stored series already does; the live dashboard passes its buffer through
- * {@link wholeSecondTicks} first, which keeps only the gate frames (#2589).
+ * {@link wholeSecondTicks} first, which keeps only the gate frames (#2589). The
+ * one exception is a run long enough that History reads it downsampled
+ * (#2547): a tick is then a bucket, p99 its worst second, the counters its
+ * last, `current_rps` its mean, and every count below counts buckets.
+ * `LoadTestDetail` states what that keeps and what it loses. The burst rule's
+ * delta stays a share of the completions between two ticks, so it needs no
+ * restating; a burst is diluted by the rest of its bucket rather than drawn
+ * taller.
  *
  * ## One-shot, or incremental over a live buffer
  *

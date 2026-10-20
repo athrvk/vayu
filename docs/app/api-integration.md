@@ -1294,9 +1294,13 @@ export const API_ENDPOINTS = {
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
-  // Time-series metrics (JSON, paginated) - used to hydrate history
-  STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
-    `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
+  // Time-series metrics (JSON, paginated) - used to hydrate history. With
+  // maxPoints the whole series in one response, downsampled when the run has
+  // more ticks than that (#2547); the History charts ask for 2000.
+  STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0, maxPoints?: number) =>
+    maxPoints === undefined
+      ? `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`
+      : `/runs/${runId}/metrics?maxPoints=${maxPoints}`,
 
   // Server vitals scraped during the run (JSON, paginated, same envelope).
   // Fetched by the history view only when the report says the run recorded some.
