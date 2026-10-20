@@ -229,6 +229,19 @@ export const LOAD_RUN_SCHEMA_GATE_REFUSAL =
 	`run_collection, which is where the gate takes effect.`;
 
 /**
+ * Why `stopOnError` cannot ride a load run (issue #2526), refused for the reason
+ * `LOAD_RUN_SCHEMA_GATE_REFUSAL` is: the SDK strips an undeclared key before the
+ * handler runs, so `start_load_run` declares it to be able to say no. The flag
+ * is the design-mode runner's - a virtual user's walk has its own rule for a step
+ * with no response and never reads it.
+ */
+export const LOAD_RUN_STOP_ON_ERROR_REFUSAL =
+	`"stopOnError" does not apply to a load run: only the design-mode runner reads it, and a ` +
+	`virtual user's walk ends an iteration by its own rule. Nothing was started - the flag ` +
+	`would have been read as shaping this run while no load path looks at it. Remove it, or ` +
+	`run the same collection in design mode with run_collection, which is where it takes effect.`;
+
+/**
  * `elements.timers`'s two enum values (issue #1495), shared between
  * `run_collection` and `start_load_run` because it takes effect on every run
  * shape both tools can start: `execute_scenario_run` (the design-mode runner

@@ -41,6 +41,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/json.hpp"
 
 namespace vayu::http::routes {
 // Both declared in execution.cpp.
@@ -110,6 +111,31 @@ TEST (ScenarioSnapshot, ReplacesTheSentBlockWithTheManifest) {
     // never reaches the run store - build_scenario_manifest's contract, kept.
     EXPECT_NE (stored["scenario"]["steps"][0]["url"].get<std::string> ().find ("{{apiKey}}"),
     std::string::npos);
+}
+
+// A collection run's top-level options ride the stored snapshot beside the
+// manifest, through both rewrites a scenario snapshot takes - which is what
+// keeps two runs differing only in `stopOnError` (issue #2526) or
+// `failOnSchemaError` from reading as the same run.
+TEST (ScenarioSnapshot, KeepsTheRunsTopLevelOptionsBesideTheManifest) {
+    const json manifest{ { "source", "collection" }, { "collectionId", "col_1" } };
+    const auto stored_with = [&manifest] (bool stop_on_error) {
+        const json body{ { "scenario",
+                         { { "source", "collection" }, { "collectionId", "col_1" } } },
+            { "stopOnError", stop_on_error }, { "failOnSchemaError", true } };
+        return json::parse (scenario_snapshot (
+        vayu::json::sanitize_config_snapshot (body.dump (), 1024, {}), manifest));
+    };
+
+    const auto stopping   = stored_with (true);
+    const auto continuing = stored_with (false);
+    ASSERT_TRUE (stopping.contains ("stopOnError")) << stopping.dump ();
+    ASSERT_TRUE (continuing.contains ("stopOnError")) << continuing.dump ();
+    ASSERT_TRUE (stopping.contains ("failOnSchemaError")) << stopping.dump ();
+    EXPECT_EQ (stopping["stopOnError"], true);
+    EXPECT_EQ (continuing["stopOnError"], false);
+    EXPECT_EQ (stopping["failOnSchemaError"], true);
+    EXPECT_NE (stopping, continuing);
 }
 
 // A snapshot that is not JSON is passed through by sanitize_config_snapshot,

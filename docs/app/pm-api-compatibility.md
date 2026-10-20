@@ -815,13 +815,31 @@ Divergences from Postman:
 
 - **An unresolvable target fails the step**, naming it. A target no request in
   the run answers to by name or by id, and a name two of them share, are both
-  errors that end the iteration; Postman resolves an ambiguous name to whichever
-  it finds.
+  errors that end the iteration, whatever `stopOnError` says; Postman resolves
+  an ambiguous name to whichever it finds.
+- **A redirect from a script that then threw is ignored**: the step is
+  `errored` and the iteration walks to the next request in order. Postman's
+  order for that case is unverified, so Vayu takes the rule that never runs a
+  sequence the script did not finish deciding on.
 - **A cycle is bounded.** Two requests pointing at each other run forever in
   Postman's runner; here the iteration is cut off by `maxStepsPerIteration` and
   the failure names the steps that were looping.
 - **A skipped step is reported as `skipped`**, never as a pass, in the step list
   and in the run summary alike.
+
+Matching Postman since issue #2526: **a script error no longer ends the
+iteration.** A pre-request script that throws still sends its request, a test
+script that throws (a top-level `pm.response.to.have.status(200)` on a 500
+included) is reported on the step, and the run moves on to the next request -
+Postman's and Newman's default with `stopOnError` unset. The step is `errored`
+with the script's message, never `passed`. The run option `stopOnError: true`
+restores the old rule (Newman's `--bail` shape); the Run Collection dialog's
+**Stop the iteration on a script error** switch and `run_collection`'s
+`stopOnError` argument set it. One divergence stays: a
+request that got no response at all still ends the iteration, where Postman
+carries on, because the requests after it nearly always read the response that
+never arrived. A run whose iterations an error cut short says how many steps
+that cost as `stepsNotRun`.
 
 Details, including every case that throws, are in
 [scripting.md](../engine/scripting.md#flow-control-pmexecution).

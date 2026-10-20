@@ -62,6 +62,7 @@ import {
 	ENGINE_DEFAULT_HEADERS_POINTER,
 	environmentIdInput,
 	LOAD_RUN_SCHEMA_GATE_REFUSAL,
+	LOAD_RUN_STOP_ON_ERROR_REFUSAL,
 	requestHeadersInput,
 	scenarioDataInput,
 	dataFileNameInput,
@@ -442,6 +443,14 @@ export const LOAD_TOOLS: McpTool[] = [
 				.describe(
 					"Not available on a load run, and refused rather than ignored: the load executor validates sampled responses once the run has drained and never demotes a step, so this gate would decide nothing. Use run_collection to run the same collection in design mode with the contract as a gate. The schema verdict is reported either way, in the report's schemaValidation block."
 				),
+			// Declared to be refused, for the reason `failOnSchemaError` is
+			// (issue #2526).
+			stopOnError: z
+				.boolean()
+				.optional()
+				.describe(
+					"Not available on a load run, and refused rather than ignored: only the design-mode runner reads it, and a virtual user's walk ends an iteration by its own rule. Use run_collection to run the same collection in design mode with stopOnError."
+				),
 			confirmed: confirmedInput("actually start the run"),
 		},
 		handler: async (args, ctx, signal) => {
@@ -450,6 +459,9 @@ export const LOAD_TOOLS: McpTool[] = [
 			// run would swallow it exactly as a scenario one would.
 			if (args.failOnSchemaError !== undefined) {
 				return errorResult(LOAD_RUN_SCHEMA_GATE_REFUSAL);
+			}
+			if (args.stopOnError !== undefined) {
+				return errorResult(LOAD_RUN_STOP_ON_ERROR_REFUSAL);
 			}
 
 			// A scenario replaces the single target wholesale - there is nothing to

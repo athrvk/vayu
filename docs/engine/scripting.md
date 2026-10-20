@@ -1962,6 +1962,18 @@ thing that knows what a sequence is, reads it once the step has finished. So
 and the jump happens afterwards. The last call in a script wins, across the
 pre-request and test scripts alike.
 
+**A script that errored loses its instruction.** When either of a step's
+scripts throws (or times out, or has its `pm.request` write-back refused), the
+step is `errored` and the iteration carries on at the **next plan position**:
+a `setNextRequest`, `setNextRequest(null)` or `skipRequest()` the script made
+before failing is ignored, because it came from code that did not finish. A
+skip the pre-request script asked for has still happened - nothing was sent -
+but where the iteration goes next is the plan's order, not the script's.
+`stopOnError: true` on the run ends the iteration at that step instead (see
+[api-reference.md](api-reference.md#scenario-runs), Outcomes). A step that
+errors this way runs no `step.between` element either, so a `timer.think` or
+a `control.loop` decision after it does not happen for that step.
+
 `setNextRequest` takes a request's **name** or its **id** - the one a script
 reads off `pm.info.requestId` - never its URL, and jumping backwards is allowed:
 that is how a retry loop is written. A target is resolved against the names
@@ -1992,7 +2004,9 @@ reports success for something that never happened.
 ### Where the step fails instead
 
 Two cases are the runner's to refuse, because only it can see the plan. Both end
-the iteration with the step marked `errored` and the reason in its row:
+the iteration with the step marked `errored` and the reason in its row, whatever
+the run's `stopOnError` says - unlike a script that threw, which the iteration
+continues past:
 
 - **A target no request in the run answers to**, by name or by id. The message
   names the target and says both were searched.
@@ -2812,6 +2826,12 @@ try {
 ```
 
 Test failures don't stop script execution - all tests run and results are collected.
+
+In a collection run an uncaught error marks the step `errored`, with the message
+on its row, and the iteration moves on to the next request, as Postman's runner
+does; `stopOnError: true` on the run ends the iteration there instead. See
+[Flow control](#flow-control-pmexecution) for what happens to a redirect the
+script made before it threw.
 
 ## Best Practices
 

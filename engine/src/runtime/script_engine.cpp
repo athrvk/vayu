@@ -964,8 +964,8 @@ class ScriptEngine::Impl {
         result.tests          = std::move (ctx_data.tests);
         result.console_output = std::move (ctx_data.console_output);
         // Carried even when the script threw afterwards: the caller decides
-        // what an instruction from a script that then failed is worth, and the
-        // scenario runner ends the iteration on an errored step regardless.
+        // what an instruction from a script that then failed is worth. The
+        // scenario runner ignores it for an errored step (issue #2526).
         result.control = std::move (ctx_data.control);
 
         // Check if any tests failed

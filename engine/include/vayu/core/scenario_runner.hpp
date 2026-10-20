@@ -53,7 +53,9 @@ namespace vayu::core {
  *
  * `Failed` is an assertion that did not hold - the request itself completed, so
  * the iteration continues. `Errored` is the step not completing at all (a
- * transport failure, a timeout, a script that threw), and ends its iteration.
+ * transport failure, a timeout, a script that threw). Whether it ends the
+ * iteration is `StepRecord::errored_by_script` plus the run's `stopOnError`,
+ * not the outcome alone (issue #2526).
  */
 enum class StepOutcome : std::uint8_t { Passed, Failed, Skipped, Errored };
 
@@ -100,6 +102,20 @@ struct StepRecord {
     double latency_ms = 0.0;
     /// Transport error, script error or failed-assertion summary; "" on a pass.
     std::string error;
+    /**
+     * `Errored` by a pre-request or test script alone: the exchange completed
+     * (a response arrived, or the send was skipped) and nothing else went
+     * wrong. Set where the step is classified, so the iteration loop reads the
+     * cause rather than re-deriving it from `error`'s wording; such a step does
+     * not end its iteration unless the run asked for `stopOnError` (#2526).
+     */
+    bool errored_by_script = false;
+    /**
+     * On the step whose error ended its iteration: the plan positions after it
+     * that the iteration had not attempted. 0 on every other step, which the
+     * trace and the frame write as an absent key.
+     */
+    size_t steps_not_run = 0;
     /**
      * What this step's response amounted to against the contract (issue #681).
      *
@@ -271,7 +287,8 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
  * paint an indeterminate bar.
  *
  * `stepsExpected` is an upper bound rather than a promise, on the same terms
- * as the load path's `requestsExpected`: an errored step ends its iteration,
+ * as the load path's `requestsExpected`: an errored step can end its iteration
+ * (any one under `stopOnError`, otherwise one that did not complete),
  * `POST /runs/:id/stop` ends the run, `setNextRequest` can walk an iteration
  * in fewer steps than the plan holds, and the `maxStepsPerIteration` cap can
  * end one that walks in more. Extracted for testing.
@@ -294,6 +311,17 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
 [[nodiscard]] bool read_fail_on_schema_error (const nlohmann::json& config);
 
 /**
+ * @brief Read `stopOnError` off a `POST /runs` payload (issue #2526).
+ *
+ * Default false, Postman's and Newman's default: a step whose script threw
+ * after its exchange completed stays `errored` and the iteration walks on.
+ * True ends the iteration at every errored step. Design-mode only; the load
+ * path never reads it. Type-checked by `validate_run_config` like
+ * `failOnSchemaError`.
+ */
+[[nodiscard]] bool read_stop_on_error (const nlohmann::json& config);
+
+/**
  * @brief The `results.error` sentence a schema failure produces, for a run that
  *        asked schema failures to fail their step.
  *
@@ -314,7 +342,10 @@ struct ScenarioSummaryInputs {
     size_t errored              = 0;
     size_t steps_stored         = 0;
     size_t steps_dropped        = 0;
-    double duration_s           = 0.0;
+    /// Summed over the run: every iteration an errored step ended adds what
+    /// that cost (`StepRecord::steps_not_run`), and no other end adds anything.
+    size_t steps_not_run = 0;
+    double duration_s    = 0.0;
     /**
      * The run's contract coverage (issue #629), already in the report's shape.
      *
@@ -346,6 +377,9 @@ struct ScenarioSummaryInputs {
     /// depending on it: with the flag off, `failed` steps and schema failures
     /// are disjoint facts about the run rather than one.
     bool fail_on_schema_error = false;
+    /// Whether this run ended its iteration at every errored step, recorded
+    /// beside the counts for the same reason as `fail_on_schema_error`.
+    bool stop_on_error = false;
     /// `script.setup` / `script.teardown` outcomes (#1499), `{}` for a
     /// collection that declares neither - the report then omits the section
     /// entirely rather than showing an empty one.
@@ -402,8 +436,8 @@ const ScenarioSummaryInputs& inputs);
  * @brief The run worker: every step of every iteration, in plan order.
  *
  * Runs on its own thread, spawned by `RunManager::start_scenario_run`. It
- * reaches a terminal status on every path - a step that errors ends its
- * iteration and the next one still runs; a stop is honoured *between steps*
+ * reaches a terminal status on every path - a step whose error ends its
+ * iteration leaves the next one to run; a stop is honoured *between steps*
  * rather than after the whole iteration; an exception fails the run rather than
  * leaving it `running` forever.
  *

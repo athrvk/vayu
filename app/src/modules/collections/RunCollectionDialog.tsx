@@ -57,6 +57,12 @@
  * because it decides what "failed" means for *this* run's report, which is
  * where the report records it.
  *
+ * **Stop the iteration on a script error** is the sixth (issue #2526), the
+ * renderer's writer of the engine's `stopOnError`, on the same terms as the
+ * switch above: top-level, design-mode only, omitted when off. Off is the
+ * engine's default and Postman's: a step whose script threw is reported on its
+ * step and the iteration walks on.
+ *
  * Only the three closed-loop modes exist for a scenario (`SCENARIO_LOAD_MODES`),
  * so the load profile is the request dialog's own `ProfilePicker` and
  * `ProfileFields` narrowed to them. `constant_rps` is a `400` engine-side - an
@@ -230,6 +236,11 @@ export default function RunCollectionDialog({
 	 * would make every undocumented field look like a broken test.
 	 */
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
+	/**
+	 * Whether a script error ends its iteration (issue #2526). Off by default,
+	 * the engine's own: the iteration carries on past a step whose script threw.
+	 */
+	const [stopOnError, setStopOnError] = useState(false);
 	const [profile, setProfile] = useState<ScenarioLoadProfile>(SCENARIO_PROFILE_DEFAULTS);
 	const ceilings = useClientSettingsStore((s) => s.loadTestCeilings);
 	const limits = useMemo(() => resolveLoadTestLimits(ceilings), [ceilings]);
@@ -462,6 +473,9 @@ export default function RunCollectionDialog({
 				// run has drained), so a load payload carrying it would promise
 				// a gate nothing applies.
 				...(!loadTest && failOnSchemaError ? { failOnSchemaError: true } : {}),
+				// Same two rules as the key above: omitted when off, and never on a
+				// load run, whose executor does not read it.
+				...(!loadTest && stopOnError ? { stopOnError: true } : {}),
 				// Top-level like `elements` and `failOnSchemaError` above, and on
 				// the same "absent already says what the user asked for" rule:
 				// `buildThresholds` returns `undefined` with nothing declared,
@@ -796,6 +810,26 @@ export default function RunCollectionDialog({
 								id="run-collection-fail-on-schema"
 								checked={failOnSchemaError}
 								onCheckedChange={setFailOnSchemaError}
+							/>
+						</div>
+					)}
+
+					{/* Hidden for a load run for the same reason: the scenario load
+					    executor never reads `stopOnError`. */}
+					{!loadTest && (
+						<div className="flex items-center justify-between gap-4">
+							<Label htmlFor="run-collection-stop-on-error" className="leading-snug">
+								Stop the iteration on a script error
+								<span className="block text-xs font-normal text-muted-foreground">
+									Off by default: a script error is reported on its step and the
+									iteration moves on to the next request, as in Postman. A failed
+									connection still ends the iteration either way.
+								</span>
+							</Label>
+							<Switch
+								id="run-collection-stop-on-error"
+								checked={stopOnError}
+								onCheckedChange={setStopOnError}
 							/>
 						</div>
 					)}

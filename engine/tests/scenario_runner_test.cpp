@@ -336,6 +336,12 @@ class ScenarioRunnerTest : public ::testing::Test {
         iterations, "", json (), /*fail_on_schema_error=*/false, thresholds);
     }
 
+    /// As `start`, with `stopOnError: true` on the run's config (issue #2526).
+    std::string start_stopping_on_error (size_t iterations) {
+        return start_scenario (iterations, "", json (),
+        /*fail_on_schema_error=*/false, json (), /*stop_on_error=*/true);
+    }
+
     /// As `start`, with a `data` block. Pass no @p iterations to leave the key
     /// off the payload entirely, which is how "the row count is the default"
     /// is exercised rather than assumed.
@@ -349,7 +355,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     const std::string& environment_id,
     const json& data,
     bool fail_on_schema_error = false,
-    const json& thresholds    = json ()) {
+    const json& thresholds    = json (),
+    bool stop_on_error        = false) {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
         if (iterations) {
             scenario["iterations"] = *iterations;
@@ -387,6 +394,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         }
         if (!thresholds.is_null ()) {
             config["thresholds"] = thresholds;
+        }
+        if (stop_on_error) {
+            config["stopOnError"] = true;
         }
 
         const std::string run_id = "run_scenario_1";
@@ -758,6 +768,238 @@ TEST_F (ScenarioRunnerTest, AFailedAssertionIsNotAnErrorAndTheIterationContinues
     auto scenario = summary_of (run_id)["scenario"];
     EXPECT_EQ (scenario["failed"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// ============================================================================
+// Issue #2526: a script error is a red row, not the end of the iteration.
+// ============================================================================
+
+// Postman's default (`stopOnError` unset): a pre-request script that throws
+// still sends its request, and the run moves on to the next one. The step is
+// still `errored` - the verdict stays honest - but it costs no later step.
+// Mutation check: make `errored_step_ends_iteration` return true for every
+// errored step and this fails on the request count.
+TEST_F (ScenarioRunnerTest, AScriptErrorDoesNotEndTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login", R"(throw new Error('x');)");
+    seed_request ("req_c", 2, "/observe");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u) << "a step after the script error never ran";
+    EXPECT_EQ (seen[1].path, "/login")
+    << "the errored step's request was not sent";
+    EXPECT_EQ (seen[2].path, "/observe");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+    const auto errored = json::parse (rows[1].trace_data);
+    EXPECT_EQ (errored["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[1].error.find ("Pre-request script failed"), std::string::npos)
+    << rows[1].error;
+    EXPECT_NE (rows[1].error.find ('x'), std::string::npos) << rows[1].error;
+    EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
+    for (const auto& row : rows) {
+        EXPECT_FALSE (json::parse (row.trace_data).contains ("stepsNotRun"))
+        << "nothing was lost, so no row may claim it was";
+    }
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 3u);
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 2u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 0u);
+    EXPECT_FALSE (scenario["stop_on_error"].get<bool> ());
+}
+
+// The same rule for the test script: the response arrived, so the next step
+// has what it needs, and only the script's verdict is lost.
+TEST_F (ScenarioRunnerTest, ATestScriptErrorDoesNotEndTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login", "", R"(throw new Error('x');)");
+    seed_request ("req_c", 2, "/observe");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    ASSERT_EQ (server_->requests ().size (), 3u);
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_NE (rows[1].error.find ("Test script failed"), std::string::npos)
+    << rows[1].error;
+    EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
+    EXPECT_EQ (summary_of (run_id)["scenario"]["steps_not_run"].get<size_t> (), 0u);
+}
+
+// The commonest Postman shape that throws: an assertion written at the top
+// level rather than inside `pm.test`, on a response it does not describe.
+TEST_F (ScenarioRunnerTest, ATopLevelFailingStatusAssertionDoesNotEndTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login", "", R"(pm.response.to.have.status(500);)");
+    seed_request ("req_c", 2, "/observe");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    ASSERT_EQ (server_->requests ().size (), 3u);
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
+}
+
+// `stopOnError: true` restores the rule a collection run had before #2526, and
+// the step that ended the iteration says what that cost.
+// Mutation check: drop the `read_stop_on_error` read (leave `stop_on_error`
+// false) and this fails on the request count.
+TEST_F (ScenarioRunnerTest, StopOnErrorEndsTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login", R"(throw new Error('x');)");
+    seed_request ("req_c", 2, "/observe");
+
+    const auto run_id = start_stopping_on_error (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    // The errored step's own request still went out - a pre-request error
+    // never stopped the send - but nothing after it did.
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].path, "/login");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_FALSE (json::parse (rows[0].trace_data).contains ("stepsNotRun"));
+    const auto ended = json::parse (rows[1].trace_data);
+    EXPECT_EQ (ended["outcome"].get<std::string> (), "errored");
+    ASSERT_TRUE (ended.contains ("stepsNotRun")) << ended.dump ();
+    EXPECT_EQ (ended["stepsNotRun"].get<size_t> (), 1u);
+
+    // The live frame says the same as the stored row.
+    auto frames = step_frames (context_for (run_id));
+    ASSERT_EQ (frames.size (), 2u);
+    EXPECT_EQ (frames[0].find ("stepsNotRun"), std::string::npos) << frames[0];
+    EXPECT_NE (frames[1].find (R"("stepsNotRun":1)"), std::string::npos) << frames[1];
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 1u);
+    EXPECT_TRUE (scenario["stop_on_error"].get<bool> ());
+    EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 1u);
+}
+
+// The unchanged half: a step that got no response leaves the steps after it
+// standing on state that never arrived, so it still ends its iteration with
+// `stopOnError` unset.
+TEST_F (ScenarioRunnerTest, ATransportErrorStillEndsTheIteration) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    // Nothing listens on port 1; the send fails to connect rather than hanging.
+    seed_request ("req_dead", 1, "", "", "", "http://127.0.0.1:1/never");
+    seed_request ("req_c", 2, "/login");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/ok");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 4u);
+    const auto ended = json::parse (rows[1].trace_data);
+    EXPECT_EQ (ended["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (ended.value ("stepsNotRun", size_t{ 0 }), 1u) << ended.dump ();
+
+    // One position lost per iteration, summed.
+    EXPECT_EQ (summary_of (run_id)["scenario"]["steps_not_run"].get<size_t> (), 2u);
+}
+
+// `stepsNotRun` counts what an error cost, not every early end: a stop form and
+// a forward jump are a script's decision.
+TEST_F (ScenarioRunnerTest, StepsNotRunCountsOnlyAnErrorEnd) {
+    seed_collection ("col_1");
+    // Iteration 0 jumps over step 2; iteration 1 stops after step 1.
+    seed_request ("req_a", 0, "/ok", "", R"(
+        if (pm.info.iteration === 0) {
+            pm.execution.setNextRequest("Last");
+        } else {
+            pm.execution.setNextRequest(null);
+        }
+    )");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Last");
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe");
+    EXPECT_EQ (seen[2].path, "/ok");
+
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 0u);
+    EXPECT_EQ (scenario["errored"].get<size_t> (), 0u);
+}
+
+// A position a forward jump passed over before the error is the script's
+// decision too: only the positions after the step that errored are counted.
+// Mutation check: count every unattempted position instead and this reads 2.
+TEST_F (ScenarioRunnerTest, AnErrorAfterAForwardJumpCountsOnlyThePositionsAfterIt) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(pm.execution.setNextRequest("Dead");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_dead", 2, "", "", "", "http://127.0.0.1:1/never", "Dead");
+    seed_request ("req_d", 3, "/observe");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    EXPECT_EQ (json::parse (rows[1].trace_data).value ("stepsNotRun", size_t{ 0 }), 1u);
+    EXPECT_EQ (summary_of (run_id)["scenario"]["steps_not_run"].get<size_t> (), 1u);
+}
+
+// A redirect from a script that then threw came from code that did not finish,
+// so the iteration walks to the next plan position instead - for a jump and for
+// the stop form alike.
+TEST_F (ScenarioRunnerTest, AnErroredStepsSetNextRequestIsIgnored) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(
+        pm.execution.setNextRequest("Last");
+        throw new Error('after the jump');
+    )");
+    seed_request ("req_b", 1, "/login", "", R"(
+        pm.execution.setNextRequest(null);
+        throw new Error('after the stop');
+    )");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Last");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/login")
+    << "the errored step's jump was honoured";
+    EXPECT_EQ (seen[2].path, "/observe")
+    << "the errored step's stop was honoured";
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 3u);
+    EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "errored");
+    EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
 }
 
 // ============================================================================
@@ -1272,11 +1514,14 @@ TEST_F (ScenarioRunnerTest, SkipRequestInATestScriptFailsTheStepRatherThanPreten
     const auto run_id = start (/*iterations=*/1);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
-    // The request had already gone out; what fails is the script.
-    EXPECT_EQ (server_->requests ().size (), 1u);
+    // The request had already gone out; what fails is the script. A script
+    // error no longer ends the iteration (issue #2526), so step 2 still runs.
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].path, "/login");
 
     auto rows = db_->get_results (run_id);
-    ASSERT_EQ (rows.size (), 1u);
+    ASSERT_EQ (rows.size (), 2u);
     EXPECT_EQ (json::parse (rows[0].trace_data)["outcome"].get<std::string> (), "errored");
     EXPECT_NE (rows[0].error.find ("pre-request"), std::string::npos) << rows[0].error;
 
@@ -1545,6 +1790,8 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     inputs.errored              = 1;
     inputs.steps_stored         = 5;
     inputs.steps_dropped        = 6;
+    inputs.steps_not_run        = 7;
+    inputs.stop_on_error        = true;
     inputs.duration_s           = 2.0;
 
     auto summary = vayu::core::build_scenario_summary_payload (inputs);
@@ -1562,6 +1809,8 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["steps_stored"].get<size_t> (), 5u);
     EXPECT_EQ (scenario["steps_dropped"].get<size_t> (), 6u);
+    EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 7u);
+    EXPECT_TRUE (scenario["stop_on_error"].get<bool> ());
 }
 
 // Contract coverage rides the summary as its own top-level section, not as part
@@ -2045,6 +2294,16 @@ TEST (ScenarioSchemaGate, DefaultsToOffAndOnlyABooleanTrueTurnsItOn) {
     EXPECT_FALSE (read_fail_on_schema_error (json::object ()));
     EXPECT_FALSE (read_fail_on_schema_error (json{ { "failOnSchemaError", false } }));
     EXPECT_TRUE (read_fail_on_schema_error (json{ { "failOnSchemaError", true } }));
+}
+
+// `validate_run_config` refuses a non-boolean before the run row exists, so the
+// reader only ever sees a boolean, null or nothing - and only `true` turns it on.
+TEST (ScenarioStopOnError, DefaultsToOffAndOnlyABooleanTrueTurnsItOn) {
+    using vayu::core::read_stop_on_error;
+    EXPECT_FALSE (read_stop_on_error (json::object ()));
+    EXPECT_FALSE (read_stop_on_error (json{ { "stopOnError", nullptr } }));
+    EXPECT_FALSE (read_stop_on_error (json{ { "stopOnError", false } }));
+    EXPECT_TRUE (read_stop_on_error (json{ { "stopOnError", true } }));
 }
 
 TEST (ScenarioSummaryPayload, SchemaVerdictsAreTheirOwnSectionAndAbsentWhenNothingWasJudged) {

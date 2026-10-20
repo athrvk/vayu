@@ -307,6 +307,11 @@ struct ReportExtras {
     // first, so a non-zero count here means successes are missing from
     // `results[]`, never a failure.
     size_t steps_dropped = 0;
+    // Design-mode scenario runs only, and only from a summary written since
+    // issue #2526: absent stays absent rather than reading as "nothing was
+    // lost" about a run nothing counted, or as a setting an older run never had.
+    std::optional<size_t> steps_not_run;
+    std::optional<bool> stop_on_error;
     // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
     // for this run; `iterations_abandoned` is how many an errored step ended
     // before the plan's last step, which is what explains a breakdown that
@@ -596,6 +601,10 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         read_number (scenario, "errored", extras.steps_errored);
         read_number (scenario, "steps_stored", extras.steps_stored);
         read_number (scenario, "steps_dropped", extras.steps_dropped);
+        if (scenario.contains ("steps_not_run") && scenario["steps_not_run"].is_number ()) {
+            extras.steps_not_run = scenario["steps_not_run"].get<size_t> ();
+        }
+        read_optional_bool (scenario, "stop_on_error", extras.stop_on_error);
         // Load-mode only: the design-mode runner writes neither, and a load run
         // stores no per-step `results` rows at all - the breakdown *is* how a
         // scenario load run says what each step did.
@@ -1333,6 +1342,44 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
 }
 
 /**
+ * What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is the
+ * honest reading of `results[]`: a run whose store filled reports fewer rows
+ * than steps, with every non-passing step among them.
+ */
+nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
+    nlohmann::json section = { { "iterations", extras.iterations },
+        { "iterationsCompleted", extras.iterations_completed },
+        { "stepsExecuted", extras.steps_executed }, { "passed", extras.steps_passed },
+        { "failed", extras.steps_failed }, { "skipped", extras.steps_skipped },
+        { "errored", extras.steps_errored }, { "stepsStored", extras.steps_stored },
+        { "stepsDropped", extras.steps_dropped } };
+    if (extras.steps_not_run) {
+        section["stepsNotRun"] = *extras.steps_not_run;
+    }
+    if (extras.stop_on_error) {
+        section["stopOnError"] = *extras.stop_on_error;
+    }
+    // Added only when the run actually has them, so a design-mode run's
+    // section keeps the exact shape the app already renders.
+    if (extras.virtual_users > 0) {
+        section["virtualUsers"]        = extras.virtual_users;
+        section["iterationsAbandoned"] = extras.iterations_abandoned;
+    }
+    if (!extras.step_breakdown.empty ()) {
+        section["steps"] = extras.step_breakdown;
+    }
+    // A sibling of `steps` rather than a member of it - a
+    // `control.transaction` spans a folder, not one step (issue #1515).
+    // Omitted, never `[]`, for a run with no transaction that closed - the
+    // same "absent, not zeros" rule `coverage` and `customMetrics` already
+    // follow.
+    if (!extras.transactions.empty ()) {
+        section["transactions"] = extras.transactions;
+    }
+    return section;
+}
+
+/**
  * The sections a run only has if it did the thing they describe: a sequence, a
  * monitored target, tests, a capacity search, a bound contract, thresholds, a
  * credential that was renewed under it.
@@ -1347,33 +1394,8 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
         json_report["warnings"] = extras.warnings;
     }
 
-    // What the sequence did, step by step. `stepsStored` vs `stepsExecuted` is
-    // the honest reading of `results[]` below: a run whose store filled reports
-    // fewer rows than steps, with every non-passing step among them.
     if (extras.has_scenario) {
-        json_report["scenario"] = { { "iterations", extras.iterations },
-            { "iterationsCompleted", extras.iterations_completed },
-            { "stepsExecuted", extras.steps_executed }, { "passed", extras.steps_passed },
-            { "failed", extras.steps_failed }, { "skipped", extras.steps_skipped },
-            { "errored", extras.steps_errored }, { "stepsStored", extras.steps_stored },
-            { "stepsDropped", extras.steps_dropped } };
-        // Added only when the run actually has them, so a design-mode run's
-        // section keeps the exact shape the app already renders.
-        if (extras.virtual_users > 0) {
-            json_report["scenario"]["virtualUsers"] = extras.virtual_users;
-            json_report["scenario"]["iterationsAbandoned"] = extras.iterations_abandoned;
-        }
-        if (!extras.step_breakdown.empty ()) {
-            json_report["scenario"]["steps"] = extras.step_breakdown;
-        }
-        // A sibling of `steps` rather than a member of it - a
-        // `control.transaction` spans a folder, not one step (issue #1515).
-        // Omitted, never `[]`, for a run with no transaction that closed -
-        // the same "absent, not zeros" rule `coverage` and `customMetrics`
-        // already follow.
-        if (!extras.transactions.empty ()) {
-            json_report["scenario"]["transactions"] = extras.transactions;
-        }
+        json_report["scenario"] = build_scenario_report_section (extras);
     }
 
     // Server vitals beside the run's own numbers. Passed through as stored:
