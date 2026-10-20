@@ -422,7 +422,7 @@ const std::string& root_id) {
         folders.push_back ({ current.path, found->description,
         stored_json (found->variables, nlohmann::json::object ()),
         stored_json (found->auth, nlohmann::json::object ()),
-        exported_elements (found->elements) });
+        exported_elements (found->elements), found->order });
     }
     return folders;
 }

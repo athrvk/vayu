@@ -32,6 +32,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "sibling_listing.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
@@ -536,6 +537,46 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
     const std::string copy = import_text (text);
     ASSERT_FALSE (copy.empty ());
     EXPECT_EQ (snapshot (*db_, copy), before) << text;
+}
+
+// A parent's sub-folders and requests share one `order` space (#2535), and a
+// skeleton states both halves of it: `x-vayu-request.order` and each
+// `x-vayu-collection.folders` entry's `order`. Mutation check: stop writing the
+// folder's `order` and the re-import lists the folders first.
+TEST_F (SpecExportRouteTest, KeepsARequestBetweenFoldersAcrossARoundTrip) {
+    const auto folder = [&] (const char* name, const std::string& parent, int order) {
+        return create_collection (
+        json{ { "name", name }, { "parentId", parent }, { "order", order } });
+    };
+    const auto request = [&] (const char* name, const std::string& parent, int order) {
+        auto [status, created] = routes::create_request_response (*db_,
+        json{ { "collectionId", parent }, { "name", name }, { "method", "GET" },
+        { "url", std::string ("{{baseUrl}}/") + name }, { "order", order } });
+        EXPECT_EQ (status, 200) << created.dump ();
+    };
+    request ("login", root_, 0);
+    const std::string users = folder ("Users", root_, 1);
+    request ("health", root_, 2);
+    folder ("Orders", root_, 3);
+    request ("list", users, 0);
+    folder ("Admin", users, 1);
+    request ("count", users, 2);
+
+    using vayu::tests::listed_children;
+    const std::vector<std::string> root_listing{ "request:login",
+        "folder:Users", "request:health", "folder:Orders" };
+    const std::vector<std::string> users_listing{ "request:list",
+        "folder:Admin", "request:count" };
+    ASSERT_EQ (listed_children (*db_, root_), root_listing);
+    ASSERT_EQ (listed_children (*db_, users), users_listing);
+
+    const std::string text = export_collection ()["text"].get<std::string> ();
+    const std::string copy = import_text (text);
+    ASSERT_FALSE (copy.empty ());
+    EXPECT_EQ (listed_children (*db_, copy), root_listing) << text;
+    EXPECT_EQ (
+    listed_children (*db_, vayu::tests::child_folder_id (*db_, copy, "Users")), users_listing)
+    << text;
 }
 
 TEST_F (SpecExportRouteTest, LeavesOutEverySecretAndCountsIt) {

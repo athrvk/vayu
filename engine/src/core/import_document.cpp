@@ -31,6 +31,7 @@
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -53,6 +54,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1729,6 +1731,10 @@ json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oaut
 json pm_folder (const json* node, PostmanCounts& counts) {
     json children = json::array ();
     json requests = json::array ();
+    // Postman runs a folder's items in document order, a sub-folder where it
+    // sits (#2535). Each child keeps its place as its draft's `order`, so the
+    // two lists below flatten back into one sibling list.
+    int position = 0;
     if (const json* items = prop (node, "item"); items != nullptr && items->is_array ()) {
         for (const json& child : *items) {
             // A `null` or scalar entry - hand-edited or script-filtered JSON,
@@ -1744,8 +1750,10 @@ json pm_folder (const json* node, PostmanCounts& counts) {
             nested != nullptr && nested->is_array ()) {
                 counts.folders += 1;
                 children.push_back (pm_folder (entry, counts));
+                children.back ()["order"] = position++;
             } else if (truthy (prop (entry, "request"))) {
                 requests.push_back (pm_request_named (entry, counts));
+                requests.back ()["order"] = position++;
             }
         }
     }
@@ -3490,13 +3498,19 @@ json vayu_folder_of (const std::optional<json>& object, ImportTally& tally) {
     return folder;
 }
 
+/// The integer `order` @p object states, if any: a position among a parent's
+/// sub-folders and requests together (#2535), on a draft or on the
+/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote.
+std::optional<int> stated_order (const json& object) {
+    const json* order = prop (&object, "order");
+    return order != nullptr && order->is_number_integer () ?
+    std::make_optional (order->get<int> ()) :
+    std::nullopt;
+}
+
 /// The request's position among its folder's, from `x-vayu-request.order`.
 int vayu_order_of (const std::optional<json>& object) {
-    if (!object) {
-        return 0;
-    }
-    const auto order = object->find ("order");
-    return order != object->end () && order->is_number_integer () ? order->get<int> () : 0;
+    return object ? stated_order (*object).value_or (0) : 0;
 }
 
 /**
@@ -3552,6 +3566,10 @@ class VayuFolderTree {
             }
             json& node = ensure (*path);
             read_folder (folder, node);
+            if (const std::optional<int> order = stated_order (folder)) {
+                node["order"]         = *order;
+                states_sibling_order_ = true;
+            }
         }
     }
 
@@ -3661,16 +3679,26 @@ class VayuFolderTree {
         }
     }
 
-    static json sorted (std::vector<std::pair<int, json>>& list) {
+    /**
+     * @p list in its stated order. Each request keeps that order as its
+     * draft's `order` only when the document states its folders' too: a
+     * document written before #2535 numbered folders and requests in two
+     * spaces, and its requests then keep following the folders.
+     */
+    json sorted (std::vector<std::pair<int, json>>& list) const {
         std::stable_sort (list.begin (), list.end (),
         [] (const auto& a, const auto& b) { return a.first < b.first; });
         json out = json::array ();
         for (auto& [order, request] : list) {
+            if (states_sibling_order_) {
+                request["order"] = order;
+            }
             out.push_back (std::move (request));
         }
         return out;
     }
 
+    bool states_sibling_order_ = false;
     ImportTally& tally_;
     std::vector<std::string> order_;
     std::map<std::string, json> nodes_;
@@ -4114,9 +4142,59 @@ int order) {
     return item;
 }
 
+/// Where each of a draft's sub-folders and requests sits in its one sibling
+/// list, as dense positions `0..k-1` (#2535).
+struct SiblingPositions {
+    std::vector<int> folders;
+    std::vector<int> requests;
+};
+
 /**
- * Depth-first, parents before their requests before their children - the tree
- * order the preview shows.
+ * A draft's own `order` places it - a Postman item's document position, an
+ * `x-vayu-*` stored order - and a draft stating none keeps the listing every
+ * other importer produces, its folders first and its requests after them.
+ * Ties fall to `sibling_order.hpp`'s rule, a folder before a request, then
+ * list position. `orchestrator.ts`'s `siblingPositions` is the app's copy,
+ * pinned to this one by `import-conformance.json`'s payloads.
+ */
+SiblingPositions sibling_positions (const json& folders, const json& requests) {
+    struct Entry {
+        int order                  = 0;
+        vayu::db::SiblingKind kind = vayu::db::SiblingKind::Folder;
+        size_t index               = 0;
+    };
+    const auto stated = [] (const json& draft, size_t fallback) {
+        return stated_order (draft).value_or (static_cast<int> (fallback));
+    };
+    std::vector<Entry> entries;
+    entries.reserve (folders.size () + requests.size ());
+    for (size_t at = 0; at < folders.size (); ++at) {
+        entries.push_back ({ stated (folders[at], at), vayu::db::SiblingKind::Folder, at });
+    }
+    for (size_t at = 0; at < requests.size (); ++at) {
+        entries.push_back ({ stated (requests[at], folders.size () + at),
+        vayu::db::SiblingKind::Request, at });
+    }
+    std::sort (entries.begin (), entries.end (), [] (const Entry& a, const Entry& b) {
+        return std::tie (a.order, a.kind, a.index) <
+        std::tie (b.order, b.kind, b.index);
+    });
+    SiblingPositions positions{ std::vector<int> (folders.size ()),
+        std::vector<int> (requests.size ()) };
+    for (size_t at = 0; at < entries.size (); ++at) {
+        const Entry& entry     = entries[at];
+        auto& slots            = entry.kind == vayu::db::SiblingKind::Folder ?
+                   positions.folders :
+                   positions.requests;
+        slots.at (entry.index) = static_cast<int> (at);
+    }
+    return positions;
+}
+
+/**
+ * Depth-first, parents before their requests before their children - the
+ * temp-id order `assign-ids.ts` mints in. Where each child lands among its
+ * siblings is its `order`, from `sibling_positions`.
  *
  * A root states no `order`: it is joining a list that already has occupants, and
  * the engine's create path appends after the stored roots. Sending the payload
@@ -4167,15 +4245,16 @@ json& specs) {
     }
     collections.push_back (std::move (collection));
 
-    const json& own = draft.at ("requests");
+    const json& own                  = draft.at ("requests");
+    const json& children             = draft.at ("children");
+    const SiblingPositions positions = sibling_positions (children, own);
     for (size_t at = 0; at < own.size (); ++at) {
         requests.push_back (apply_request (own[at],
-        "r" + std::to_string (++ids.request), temp_id, static_cast<int> (at)));
+        "r" + std::to_string (++ids.request), temp_id, positions.requests[at]));
     }
-    const json& children = draft.at ("children");
     for (size_t at = 0; at < children.size (); ++at) {
-        const int child_order = static_cast<int> (at);
-        flatten (children[at], &temp_id, &child_order, ids, collections, requests, specs);
+        flatten (children[at], &temp_id, &positions.folders[at], ids,
+        collections, requests, specs);
     }
 }
 

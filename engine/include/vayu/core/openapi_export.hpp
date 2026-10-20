@@ -273,6 +273,10 @@ struct ExportFolder {
     nlohmann::json variables = nlohmann::json::object ();
     nlohmann::json auth      = nlohmann::json::object ();
     nlohmann::json elements  = nlohmann::json::array ();
+    /// The folder's stored `order`, in the space it shares with its parent's
+    /// requests (#2535) - so a re-import puts a request back between two
+    /// folders where the sidebar had it.
+    int order = 0;
 };
 
 /** What a skeleton names the API after. */

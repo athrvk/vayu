@@ -84,9 +84,16 @@ struct PostmanExportRequest {
     bool has_spec_operation        = false;
     std::string mock_response_mode = "first";
     std::vector<PostmanExportExample> examples;
+    /// Where the request sits among its parent's sub-folders and requests,
+    /// one space for both (#2535); see `PostmanExportFolder::order`.
+    int order = 0;
 };
 
-/// A collection or folder with everything beneath it, in sidebar order.
+/**
+ * A collection or folder with everything beneath it, in sidebar order: its
+ * sub-folders and its requests are one sibling list, sorted by each one's
+ * @ref order and, on a tie, a folder first (`vayu/db/sibling_order.hpp`).
+ */
 struct PostmanExportFolder {
     std::string name;
     std::string description;
@@ -98,6 +105,9 @@ struct PostmanExportFolder {
     bool spec_bound = false;
     std::vector<PostmanExportFolder> folders;
     std::vector<PostmanExportRequest> requests;
+    /// Where the folder sits among its parent's sub-folders and requests. The
+    /// route writes each row's position in its merged sibling list.
+    int order = 0;
 };
 
 /// One kind of stored thing the document does not carry.

@@ -14,17 +14,19 @@
  * The assembly is `core/postman_export.hpp`; this route owns the reads. The
  * whole subtree is exported, with no stop at a collection bound to another
  * OpenAPI document: a Postman collection has no contract to keep apart, and a
- * folder left out would be a folder silently missing. Folders and requests
- * are read in their stored `order`, the order the sidebar draws, and examples
- * through `get_request_examples`, which leaves out the tombstones a deleted
- * imported example keeps (#722). Nothing is written.
+ * folder left out would be a folder silently missing. A collection's folders
+ * and requests are read as one list in sibling order (`db/sibling_order.hpp`),
+ * the order the sidebar draws, and examples through `get_request_examples`,
+ * which leaves out the tombstones a deleted imported example keeps (#722).
+ * Nothing is written.
  */
 
 #include "vayu/core/postman_export.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
 
-#include <algorithm>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -118,18 +120,25 @@ std::unordered_set<std::string>& visiting) {
     folder.elements    = column (collection.elements, ordered::array ());
     folder.data_schema = column (collection.data_schema, ordered::object ());
     folder.spec_bound  = !bound_spec_id (collection.openapi).empty ();
-    if (const auto found = children.find (collection.id); found != children.end ()) {
-        for (const vayu::db::Collection* child : found->second) {
-            if (!visiting.contains (child->id)) {
-                folder.folders.push_back (read_folder (db, *child, children, visiting));
-            }
+    const auto found   = children.find (collection.id);
+    const std::vector<const vayu::db::Collection*> no_folders;
+    const auto& folders = found == children.end () ? no_folders : found->second;
+    const auto rows     = db.get_requests_in_collection (collection.id);
+    // Each child is handed its position in the one merged sibling list, which
+    // is how the exporter interleaves them as the sidebar does (#2535).
+    const auto slots = vayu::db::merge_siblings (folders, rows);
+    for (std::size_t at = 0; at < slots.size (); ++at) {
+        const vayu::db::SiblingSlot& slot = slots[at];
+        if (slot.kind == vayu::db::SiblingKind::Request) {
+            folder.requests.push_back (read_request (db, rows.at (slot.index)));
+            folder.requests.back ().order = static_cast<int> (at);
+            continue;
         }
-    }
-    auto rows = db.get_requests_in_collection (collection.id);
-    std::stable_sort (rows.begin (), rows.end (),
-    [] (const auto& a, const auto& b) { return a.order < b.order; });
-    for (const auto& row : rows) {
-        folder.requests.push_back (read_request (db, row));
+        const vayu::db::Collection& child = *folders.at (slot.index);
+        if (!visiting.contains (child.id)) {
+            folder.folders.push_back (read_folder (db, child, children, visiting));
+            folder.folders.back ().order = static_cast<int> (at);
+        }
     }
     return folder;
 }
@@ -176,8 +185,8 @@ export_postman_response (vayu::db::Database& db, const nlohmann::json& json) {
         return { 404, error_body (404, "Collection not found") };
     }
 
-    // `get_collections` answers in stored `order`, so each parent's list is
-    // already its sidebar order.
+    // One read of the collection table, grouped by parent; `read_folder`
+    // merges each group with that parent's requests.
     const auto collections = db.get_collections ();
     Children children;
     for (const auto& collection : collections) {

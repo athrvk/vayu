@@ -472,6 +472,8 @@ export interface RequestDraft {
 	 */
 	mockResponseMode?: MockResponseMode;
 	mockExampleIndex?: number;
+	/** See {@link CollectionDraft.order}. */
+	order?: number;
 }
 
 /**
@@ -509,6 +511,15 @@ export interface CollectionDraft {
 	dataSchema?: CollectionDataSchema;
 	children: CollectionDraft[];
 	requests: RequestDraft[];
+	/**
+	 * Where this draft sits among its parent's sub-folders and requests, which
+	 * share one list (issue #2535), when the source states it: a Postman item's
+	 * document position, or the stored order a Vayu-written OpenAPI document
+	 * carries. Absent on a root and on every draft of a source that states no
+	 * order, which lists its folders first and its requests after them
+	 * (`draftSiblings`).
+	 */
+	order?: number;
 	/**
 	 * The spec this collection was imported from, on the root only (issue #637).
 	 * A tag sub-collection is part of the same document, not a document of its

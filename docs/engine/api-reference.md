@@ -2944,8 +2944,10 @@ the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
 `verifySSL`, `stream`), every saved example with its headers, and the mock mode
 with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
-folder (`path`, `description`, `variables`, `auth`, `elements`, empty folders
-included), and the `requests` no operation can hold - a URL with no path, or a
+folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
+folders included; `order` shares its parent's space with the requests'
+`x-vayu-request.order`, #2535, so a request between two folders imports
+there), and the `requests` no operation can hold - a URL with no path, or a
 second request on a method and path another already claimed - counted as
 `requestsOnlyInExtension` (and under `requestsWithoutPath` /
 `duplicateOperations`, which say why). Another tool ignores both keys; Vayu's
@@ -3535,7 +3537,8 @@ members produced: the request's name, method, URL, rows, body, auth, settings
 and saved examples, and the collection's variables, auth, data contract and
 whole folder tree. With `x-vayu-collection` present the document states its own
 tree, so folders nest as it says, each request is filed under its
-`x-vayu-request.folder` in its stored order, a request with none stays on the
+`x-vayu-request.folder`, folders and requests take their stored order (below),
+a request with none stays on the
 root (no folder named after its path, and no `folderStrategy`), and the
 `requests` no operation could hold are created too. A document is a file anyone
 can edit, so none of it is trusted: every piece is checked against what the
@@ -3543,6 +3546,20 @@ write routes accept before it replaces anything, and a piece that fails is
 dropped, counted as `vayu_extension_invalid`, and leaves the standard reading in
 place - never a refused import. Neither key is read on the sync/diff path, for
 the reason `x-vayu-elements` is not.
+
+**A folder or request draft may state `order`**, its position among its
+parent's sub-folders and requests, which share one [order space](#ordering)
+(#2535). A Postman parse states it on every one: the item's position in its
+parent's `item[]`, so the collection keeps the order Postman runs it in. A
+Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
+each folder's `x-vayu-collection.folders[].order`; one written before folders
+carried an `order` states none, and its requests then follow its folders as
+they did. No other format states one. The flattening into
+[`POST /import/apply`](#post-importapply) (`POST /import`, and the app's apply
+of a previewed parse) numbers each parent's children `0..k-1` in one sequence:
+by stated `order`, a draft stating none placed as though its parent listed its
+folders first and its requests after them, and a folder first on a tie. The
+preview tree lists them in the same order.
 
 **Errors:**
 - `400` `Invalid 'content': must be the document's text`, and
@@ -3711,8 +3728,10 @@ accepted a client-supplied `id` - which they no longer do (see
   that state no `order` take them first, in payload order, and then its
   requests, so a request with no `order` lands after its folder's
   sub-collections rather than tied with the first of them. The roots hold
-  collections only. The app's importer states every order below the roots and
-  deliberately omits it on its **root** collections, so an import into a
+  collections only. The app's importer states every order below the roots, one
+  sequence per parent in the order the parse placed the drafts (see
+  [`POST /import/parse`](#post-importparse)), and deliberately omits it on its
+  **root** collections, so an import into a
   non-empty workspace lands after the roots already there instead of colliding
   with their `0, 1, 2...`.
 - A request may carry **`examples`**, an array of
@@ -3812,7 +3831,10 @@ document, written the way Postman's own "Export > Collection v2.1" writes one
 (`core/postman_export.hpp`). It is the inverse of the Postman importer: a
 collection imported from a Postman export and exported again gives back the
 same document, `_postman_id` aside, and exporting, importing and exporting
-again is byte-identical.
+again is byte-identical. Each `item[]` lists a collection's sub-folders and
+requests in its one [sibling order](#ordering) (#2535), so a request that sits
+before or between folders is written there, which is where Postman runs it;
+the Postman importer reads that order back.
 
 **Reads only.** Nothing is stored. The whole subtree is exported, with no stop
 at a collection bound to another OpenAPI document.

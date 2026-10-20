@@ -163,7 +163,8 @@ TEST (PostmanExport, FileNameFollowsPostmansConvention) {
 // Folders and ordering
 // ---------------------------------------------------------------------------
 
-TEST (PostmanExport, FoldersComeBeforeRequestsInStoredOrder) {
+// Every child here states `order` 0, so the tie rule decides: a folder first.
+TEST (PostmanExport, FoldersCarryTheirSubtreeAndWinATieWithARequest) {
     PostmanExportFolder root = collection ();
     root.requests.push_back (request ("r1", "u"));
     root.requests.push_back (request ("r2", "u"));
@@ -195,6 +196,40 @@ TEST (PostmanExport, FoldersComeBeforeRequestsInStoredOrder) {
     EXPECT_EQ (items[1]["item"][0]["item"][0]["name"], "deep");
     EXPECT_EQ (outcome.notes.folders_exported, 3);
     EXPECT_EQ (outcome.notes.requests_exported, 3);
+}
+
+// A parent's sub-folders and requests are one list (#2535): a request listed
+// before or between folders is written there, which is where Postman runs it.
+// Mutation check: write `postman_items` folders-first again and this reds.
+TEST (PostmanExport, RequestsAndFoldersAreWrittenInSiblingOrder) {
+    PostmanExportFolder root = collection ();
+    const auto add_request = [] (PostmanExportFolder& parent, const char* name, int order) {
+        parent.requests.push_back (request (name, "u"));
+        parent.requests.back ().order = order;
+    };
+    add_request (root, "log in", 0);
+    add_request (root, "log out", 3);
+    PostmanExportFolder users = collection ("users");
+    users.order               = 1;
+    add_request (users, "list", 1);
+    PostmanExportFolder nested = collection ("nested");
+    nested.order               = 0;
+    users.folders.push_back (nested);
+    root.folders.push_back (users);
+    PostmanExportFolder orders = collection ("orders");
+    orders.order               = 2;
+    root.folders.push_back (orders);
+
+    const ordered doc   = ordered::parse (run (root).text);
+    const ordered& item = doc.at ("item");
+    ASSERT_EQ (item.size (), 4U);
+    EXPECT_EQ (item[0]["name"], "log in");
+    EXPECT_EQ (item[1]["name"], "users");
+    EXPECT_EQ (item[2]["name"], "orders");
+    EXPECT_EQ (item[3]["name"], "log out");
+    ASSERT_EQ (item[1]["item"].size (), 2U);
+    EXPECT_EQ (item[1]["item"][0]["name"], "nested");
+    EXPECT_EQ (item[1]["item"][1]["name"], "list");
 }
 
 // ---------------------------------------------------------------------------
