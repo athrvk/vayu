@@ -4201,7 +4201,7 @@ breaking change bumps the integer and is noted here):
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
-| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics)); absent for `series: "none"` |
+| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics): the three percentiles are absent from a second with no completion, issue #2386, and the HTML charts skip that point rather than drawing 0 ms); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
@@ -8829,9 +8829,12 @@ history view can rebuild the percentiles-over-time chart, the
 response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
 stats from stored data. The live tick that wrote a row carries the same three
 figures as `secondP50Ms` / `secondP95Ms` / `secondP99Ms`. A row stores no
-sample count, and a second with no completion stores `0`. Rows an engine
-older than issue #2385 stored hold the last 100 ms window of their second
-instead.
+sample count, and a second with no completion has **none of the three keys**
+(issue #2386), the frame's `secondSamples` `0` and `null` percentiles: absent
+rather than `null` because the [run export](#post-exportrun-report) types
+them as numbers. Rows an engine older than issue #2386 stored hold `0` for
+such a second, and rows older than issue #2385 hold the last 100 ms window of
+their second instead.
 
 **Response:**
 ```json

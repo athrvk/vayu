@@ -463,6 +463,40 @@ TEST (RunExportHtmlTest, TheFiveSecondSpikeIsTheTopOfTheP99LineAfterThinning) {
     EXPECT_NE (html.find ("p99: min 240 ms, max 5,000 ms, peak at 5 s"), std::string::npos);
 }
 
+// #2386: a second with no completion is stored without percentiles, so the
+// latency lines skip it instead of dropping to 0 ms, while the series that
+// do have a value that second still draw it. Mutation check: read a missing
+// key as 0 in `tick_points` and the p99 line gains a third point at 0.
+TEST (RunExportHtmlTest, ASecondWithNoPercentilesIsSkippedNotDrawnAtZero) {
+    ordered_json empty_second = tick (2, 0, 5, { { "200", 10 } });
+    for (const char* key : { "latency_p50_ms", "latency_p95_ms", "latency_p99_ms" }) {
+        empty_second.erase (key);
+    }
+    const std::string html =
+    render_run_export_html (with_ticks ("healthy-passed",
+    { tick (1, 10, 5, { { "200", 10 } }), empty_second, tick (3, 10, 5, { { "200", 20 } }) }));
+
+    std::string_view latency;
+    std::string_view throughput;
+    for (const std::string_view panel : panels_in (html)) {
+        if (panel.find (">Latency (ms)</text>") != std::string_view::npos) {
+            latency = panel;
+        }
+        if (panel.find (">Throughput (req/s)</text>") != std::string_view::npos) {
+            throughput = panel;
+        }
+    }
+    ASSERT_FALSE (latency.empty ());
+    ASSERT_FALSE (throughput.empty ());
+    EXPECT_EQ (drawn_values (throughput, "rps").size (), 3U);
+    for (const char* style : { "p50", "p95", "p99" }) {
+        const std::vector<double> values = drawn_values (latency, style);
+        ASSERT_EQ (values.size (), 2U) << style;
+        EXPECT_GT (*std::ranges::min_element (values), 80.0) << style;
+    }
+    EXPECT_NE (html.find ("p99: min 240 ms"), std::string::npos);
+}
+
 // --- axes and classes -----------------------------------------------------------------------------------------
 
 TEST (RunExportHtmlTest, EveryCountAndLatencyAxisStartsAtZero) {

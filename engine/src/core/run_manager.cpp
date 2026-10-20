@@ -2338,9 +2338,12 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     payload["bytes_sent"]          = sample.bytes_sent;
     payload["bytes_received"]      = sample.bytes_received;
     payload["status_codes"]        = codes;
-    payload["latency_p50_ms"]      = sample.latency_p50_ms;
-    payload["latency_p95_ms"]      = sample.latency_p95_ms;
-    payload["latency_p99_ms"]      = sample.latency_p99_ms;
+    // Absent rather than null: the export schema types these as numbers.
+    if (sample.latency_samples > 0) {
+        payload["latency_p50_ms"] = sample.latency_p50_ms;
+        payload["latency_p95_ms"] = sample.latency_p95_ms;
+        payload["latency_p99_ms"] = sample.latency_p99_ms;
+    }
     if (sample.custom_metrics.has_value ()) {
         payload["custom_metrics"] = build_custom_metrics_payload (*sample.custom_metrics);
     }
@@ -2627,10 +2630,11 @@ int64_t& first_tick_steady_ms) {
         // response-time-vs-concurrency scatter and the breakpoint /
         // saturation derivations read these. The gate frame of this tick
         // carries the same figures as `second*`.
-        sample.latency_p50_ms = second.p50;
-        sample.latency_p95_ms = second.p95;
-        sample.latency_p99_ms = second.p99;
-        sample.custom_metrics = mc.custom_metric_summaries ();
+        sample.latency_samples = second.count;
+        sample.latency_p50_ms  = second.p50;
+        sample.latency_p95_ms  = second.p95;
+        sample.latency_p99_ms  = second.p99;
+        sample.custom_metrics  = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
         build_metric_tick_payload (sample).dump () });
