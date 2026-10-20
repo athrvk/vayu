@@ -16,8 +16,8 @@
  * alert count and the class assertions both fail.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { NoticeList } from "./NoticeList";
 import type { ImportNotice } from "./import-notices";
 
@@ -59,5 +59,56 @@ describe("NoticeList", () => {
 	it("renders a span host when asked, for use inside a label", () => {
 		const { container } = render(<NoticeList notices={notices} as="span" />);
 		expect(container.firstElementChild?.tagName).toBe("SPAN");
+	});
+
+	describe("a notice with a link", () => {
+		const linked: ImportNotice[] = [
+			{
+				tier: "action",
+				text: "Sign in: script uses APIs Vayu does not run yet",
+				link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
+			},
+			...notices,
+		];
+
+		afterEach(() => vi.unstubAllGlobals());
+
+		it("opens its keyed docs link from a button inside the line", () => {
+			const openAppLink = vi.fn();
+			vi.stubGlobal("electronAPI", { openAppLink });
+			render(<NoticeList notices={linked} />);
+
+			const button = screen.getByRole("button", { name: "See what Vayu supports" });
+			expect(button.closest('[role="status"]')).not.toBeNull();
+			expect(screen.getAllByRole("button")).toHaveLength(1);
+			fireEvent.click(button);
+			expect(openAppLink).toHaveBeenCalledExactlyOnceWith("pmApiCompatibility");
+		});
+
+		it("keeps the line's text and warning colour beside the link", () => {
+			render(<NoticeList notices={linked} />);
+			const line = screen.getByRole("button").closest("span.flex");
+			expect(line?.textContent).toContain("Sign in: script uses APIs Vayu does not run yet");
+			expect(line?.className).toContain("text-warning-text");
+		});
+
+		// A batch ledger row is a <label> around its checkbox: the link must not
+		// toggle the file in or out of the import.
+		it("does not toggle the checkbox of a ledger row that hosts it", () => {
+			vi.stubGlobal("electronAPI", { openAppLink: vi.fn() });
+			render(
+				<label>
+					<input type="checkbox" defaultChecked aria-label="Row" />
+					<NoticeList notices={linked} as="span" />
+				</label>
+			);
+			fireEvent.click(screen.getByRole("button", { name: "See what Vayu supports" }));
+			expect(screen.getByRole("checkbox", { name: "Row" })).toBeChecked();
+		});
+
+		it("does not throw where there is no bridge to open it", () => {
+			render(<NoticeList notices={linked} />);
+			expect(() => fireEvent.click(screen.getByRole("button"))).not.toThrow();
+		});
 	});
 });

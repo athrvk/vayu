@@ -15,12 +15,19 @@
  * `src/types/electron.d.ts`, neither of which can import from here.
  */
 
-import { DOCS_URL, ISSUES_URL, MCP_DOCS_URL, SCRIPTING_DOCS_URL } from "./constants.js";
+import {
+	DOCS_URL,
+	ISSUES_URL,
+	MCP_DOCS_URL,
+	PM_API_COMPATIBILITY_DOCS_URL,
+	SCRIPTING_DOCS_URL,
+} from "./constants.js";
 
 export const APP_LINKS = {
 	docs: DOCS_URL,
 	scripting: SCRIPTING_DOCS_URL,
 	mcp: MCP_DOCS_URL,
+	pmApiCompatibility: PM_API_COMPATIBILITY_DOCS_URL,
 	issues: ISSUES_URL,
 } as const;
 

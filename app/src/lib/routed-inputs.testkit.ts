@@ -87,6 +87,15 @@ export const DOC_READING_GUARDS = {
 		reader: "app/src/modules/request-builder/components/RequestTabs/panels/script-rules.test.ts",
 		paths: ["docs/engine/scripting.md", "docs/app/pm-api-compatibility.md"],
 	},
+	/*
+	 * The anchor an app link carries (#2576): `pmApiCompatibility` opens the
+	 * "Not (yet) supported" section, and a heading renamed on the page alone
+	 * would send the link to the top of it.
+	 */
+	appLinkAnchors: {
+		reader: "app/electron/app-links.test.ts",
+		paths: ["docs/app/pm-api-compatibility.md"],
+	},
 	designSystem: {
 		reader: "app/src/design-system-doc.test.ts",
 		paths: ["docs/design-system.md"],

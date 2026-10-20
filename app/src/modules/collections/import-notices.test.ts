@@ -190,6 +190,7 @@ describe("importNotices", () => {
 				{
 					tier: "action",
 					text: "Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)",
+					link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
 				},
 			]);
 		});
@@ -204,6 +205,7 @@ describe("importNotices", () => {
 				{
 					tier: "action",
 					text: "2 requests: script uses APIs Vayu does not run yet (tests[], CryptoJS) - Sign in, List users",
+					link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
 				},
 			]);
 		});
@@ -233,6 +235,22 @@ describe("importNotices", () => {
 		it("says nothing when the member is absent or empty", () => {
 			expect(importNotices(meta())).toEqual([]);
 			expect(scriptApis([])).toEqual([]);
+		});
+
+		it("is the only notice that carries a link", () => {
+			const notices = importNotices(
+				meta({
+					skipped: [
+						{ kind: "unmapped_body", count: 1 },
+						{ kind: "proxy_config", count: 1 },
+					],
+					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]"] }],
+				})
+			);
+			expect(notices).toHaveLength(3);
+			expect(notices.filter((n) => n.link).map((n) => n.link?.key)).toEqual([
+				"pmApiCompatibility",
+			]);
 		});
 
 		it("sits among the other actions, ahead of the notes", () => {

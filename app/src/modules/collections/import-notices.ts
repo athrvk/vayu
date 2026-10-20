@@ -39,9 +39,14 @@ import { parentFolder } from "@/lib/file-path";
 
 export type NoticeTier = "action" | "note";
 
+/** A key `window.electronAPI.openAppLink` accepts; the main process owns the URL behind it. */
+export type AppLinkKey = Parameters<NonNullable<Window["electronAPI"]>["openAppLink"]>[0];
+
 export interface ImportNotice {
 	tier: NoticeTier;
 	text: string;
+	/** Where the user reads more, opened in the system browser through the keyed channel. */
+	link?: { label: string; key: AppLinkKey };
 }
 
 interface Copy {
@@ -348,6 +353,7 @@ function unsupportedScriptApiNotice(
 			phrase,
 			entries.map((entry) => entry.request)
 		),
+		link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
 	};
 }
 

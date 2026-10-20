@@ -321,6 +321,8 @@ export const SITE_URL = "https://athrvk.github.io/vayu/";
 export const DOCS_URL = SITE_URL;
 export const SCRIPTING_DOCS_URL = `${SITE_URL}engine/scripting/`;
 export const MCP_DOCS_URL = `${SITE_URL}engine/mcp/`;
+/** The "Not (yet) supported" section: which `pm.*` APIs a Postman script cannot use. */
+export const PM_API_COMPATIBILITY_DOCS_URL = `${SITE_URL}app/pm-api-compatibility/#not-yet-supported`;
 export const ISSUES_URL = `https://github.com/${REPO}/issues`;
 
 // Auto-updater
