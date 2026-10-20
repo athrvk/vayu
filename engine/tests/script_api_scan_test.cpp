@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <utility>
@@ -82,6 +83,27 @@ TEST (ScriptApiStrip, BlanksARegularExpressionButNotADivision) {
     "ok = /     /.test(s); tail");
     EXPECT_EQ (strip_comments_and_literals ("a = b / c; d = 'x' / 2; tail"),
     "a = b / c; d = ' ' / 2; tail");
+}
+
+TEST (ScriptApiStrip, AKeywordThatTakesAnOperandIsFollowedByARegularExpression) {
+    EXPECT_EQ (strip_comments_and_literals ("return /\"/.test(x); tail"),
+    "return / /.test(x); tail");
+    for (const char* word : { "return", "typeof", "case", "in", "of", "delete",
+         "void", "throw", "new", "else", "do" }) {
+        const std::string source = std::string (word) + " /'/.test(x); tail";
+        EXPECT_EQ (strip_comments_and_literals (source), std::string (word) + " / /.test(x); tail")
+        << word;
+    }
+}
+
+TEST (ScriptApiStrip, ASlashAfterAnyOtherWordOrAPropertyIsADivision) {
+    EXPECT_EQ (
+    strip_comments_and_literals ("r = inside / 2 + o.new / 3; s = \"_\";"),
+    "r = inside / 2 + o.new / 3; s = \" \";");
+    EXPECT_EQ (strip_comments_and_literals ("r = a.delete / 2; s = '_';"),
+    "r = a.delete / 2; s = ' ';");
+    EXPECT_EQ (strip_comments_and_literals ("r = index / 2 / 3; s = '_';"),
+    "r = index / 2 / 3; s = ' ';");
 }
 
 TEST (ScriptApiStrip, ASlashInsideACharacterClassDoesNotEndTheRegularExpression) {
@@ -182,7 +204,50 @@ TEST (ScriptApiScan, NamesTheHostGlobalsASandboxLacks) {
     EXPECT_EQ (names_in ("setTimeout(f, 10);"), Names{ "setTimeout" });
     EXPECT_EQ (names_in ("setInterval(f, 10);"), Names{ "setInterval" });
     EXPECT_EQ (names_in ("Buffer.from(s).toString('hex');"), Names{ "Buffer" });
-    EXPECT_EQ (names_in ("const r = await fetchIt();"), Names{ "await" });
+    EXPECT_EQ (names_in ("const r = await fetchIt();"), Names{ "top-level await" });
+    EXPECT_EQ (names_in ("return /\"/.test(x); setTimeout(f);"), Names{ "setTimeout" });
+    EXPECT_EQ (names_in ("n = total / 2; setTimeout(f); s = \"x\";"), Names{ "setTimeout" });
+}
+
+TEST (ScriptApiScan, AwaitInsideAnAsyncFunctionIsNotNamed) {
+    // Promises and async functions run (docs/engine/scripting.md); only an
+    // `await` outside every async function is a syntax error.
+    const std::vector<std::string> scripts = {
+        "(async () => { const r = await Promise.resolve(1); })();",
+        "async function f() { await x; }",
+        "const f = async function () { if (a) { await x; } };",
+        "const f = async (a, b) => { for (const v of a) { await v; } };",
+        "const o = { async m() { if (a) { await x; } } };",
+        "class C { async m() { await x; } }",
+        "async function* g() { for await (const v of s) {} }",
+        "async function f() { return `${await x}`; }",
+        "async function f() { const s = \"}\"; await x; }",
+        "pm.test('t', async () => { await pm.sendRequest(r); });",
+    };
+    for (const std::string& script : scripts) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+}
+
+TEST (ScriptApiScan, ATopLevelAwaitIsNamedWhereverItSits) {
+    const std::vector<std::string> scripts = {
+        "await x;",
+        "try { await x; } catch (e) {}",
+        "if (a) { await x; }",
+        "pm.test('t', () => { await x; });",
+        "function f() { await x; }",
+        "async function f() { await a; } await b;",
+        "async function f() {} { await x; }",
+        "const f = async x => x; { await y; }",
+        "const f = async x => x\nif (a) { await y; }",
+        "var async = require('async'); async.each(a, f); { await x; }",
+        "async(f); { await x; }",
+        "for await (const v of s) {}",
+    };
+    for (const std::string& script : scripts) {
+        const Names found = names_in (script);
+        EXPECT_NE (std::ranges::find (found, "top-level await"), found.end ()) << script;
+    }
 }
 
 TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
@@ -284,7 +349,7 @@ TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
         postman.setNextRequest(null);
         await again();
     )"),
-    (Names{ "tests[]", "postman.*", "require()", "await" }));
+    (Names{ "tests[]", "postman.*", "require()", "top-level await" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
@@ -295,7 +360,7 @@ TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
     uses.note_packages ();
     uses.scan ("tests['a'] = true;");
     EXPECT_FALSE (uses.empty ());
-    EXPECT_EQ (uses.names (), (Names{ "tests[]", "script.packages", "await" }));
+    EXPECT_EQ (uses.names (), (Names{ "tests[]", "script.packages", "top-level await" }));
 }
 
 TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {
@@ -307,6 +372,25 @@ TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {
     EXPECT_EQ (names_in (""), Names{});
 }
 
+/// The names @p script uses, failing the test when reading it takes longer than
+/// the linear-parse budget.
+Names names_within_budget (const std::string& script) {
+    const auto start  = std::chrono::steady_clock::now ();
+    const Names found = names_in (script);
+    EXPECT_LT (std::chrono::steady_clock::now () - start, vayu::tests::LINEAR_PARSE_BUDGET)
+    << script.size () << " bytes";
+    return found;
+}
+
+std::string repeated (const std::string& unit, int times) {
+    std::string out;
+    out.reserve (unit.size () * static_cast<std::size_t> (times));
+    for (int i = 0; i < times; ++i) {
+        out += unit;
+    }
+    return out;
+}
+
 TEST (ScriptApiScan, ReadsALargeScriptWithinTheParseBudget) {
     // A scan that looks every name up against every declaration, or every
     // parameter list against every token, is quadratic in this.
@@ -314,10 +398,47 @@ TEST (ScriptApiScan, ReadsALargeScriptWithinTheParseBudget) {
     for (int i = 0; i < 20000; ++i) {
         script += "function f" + std::to_string (i) + "(a, b) { return a.b.c(b) + data.x; }\n";
     }
-    const auto start  = std::chrono::steady_clock::now ();
-    const Names found = names_in (script);
-    EXPECT_LT (std::chrono::steady_clock::now () - start, vayu::tests::LINEAR_PARSE_BUDGET);
-    EXPECT_EQ (found, Names{ "data" });
+    EXPECT_EQ (names_within_budget (script), Names{ "data" });
+}
+
+TEST (ScriptApiScan, ClosersWithNoOpenerCostNothingPerArrow) {
+    // Each `=>` once looked back over every earlier byte for the bracket that
+    // opens its parameter list.
+    EXPECT_EQ (names_within_budget (repeated ("a)=>", 250000) + " data.x"), Names{ "data" });
+}
+
+TEST (ScriptApiScan, AnUnclosedPatternCostsNothingPerBindingKeyword) {
+    // Each `var [` once looked ahead to the end of the script for its `]`.
+    EXPECT_EQ (names_within_budget (repeated ("var [", 200000) + "; data.x"),
+    Names{ "data" });
+}
+
+TEST (ScriptApiScan, NestedPatternsDeclareEachNameOnce) {
+    // Each of these closed patterns holds every name inside the ones within
+    // it, which is quadratic when each pair is walked on its own.
+    const std::string script =
+    repeated ("var [", 200000) + "data" + repeated ("]", 200000) + "; data.x";
+    EXPECT_EQ (names_within_budget (script), Names{});
+}
+
+TEST (ScriptApiScan, ManyDeclaredNamesAreLookedUpWithoutScanningThemAll) {
+    // A minified script: a hundred and fifty thousand parameters, then the
+    // global the script declares itself, used a hundred thousand times.
+    std::string script = "function f(p0";
+    for (int i = 1; i < 150000; ++i) {
+        script += ",p" + std::to_string (i);
+    }
+    script += "){}var _=0;" + repeated ("_.x;", 100000);
+    EXPECT_EQ (names_within_budget (script), Names{});
+    EXPECT_EQ (names_within_budget (repeated ("_.x;", 100000)), Names{ "_" });
+}
+
+TEST (ScriptApiScan, PairsBracketsOfMixedKindsAsTheScanAlwaysDid) {
+    EXPECT_EQ (names_in ("const [a, data] = x; (data) => data.id;"), Names{});
+    EXPECT_EQ (names_in ("const { a: [b, data] } = x; data.id;"), Names{});
+    EXPECT_EQ (names_in ("function f(a, data] { } data.x"), Names{});
+    EXPECT_EQ (names_in ("var [ data.x"), Names{ "data" });
+    EXPECT_EQ (names_in ("data) => 1; data.x"), Names{ "data" });
 }
 
 } // namespace

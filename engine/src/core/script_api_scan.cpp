@@ -10,7 +10,11 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace vayu::core {
 
@@ -22,10 +26,38 @@ namespace {
 
 constexpr std::string_view WHITESPACE = " \t\r\n";
 
+bool is_identifier_char (char c) {
+    // A byte of a multi-byte character is part of an identifier: a name in
+    // another script is not any name this table lists, and not a separator.
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+    c == '_' || c == '$' || static_cast<unsigned char> (c) >= 0x80;
+}
+
+/// The index one past the identifier that starts at @p at.
+std::size_t identifier_end (std::string_view code, std::size_t at) {
+    while (at < code.size () && is_identifier_char (code[at])) {
+        ++at;
+    }
+    return at;
+}
+
+/// The index where the identifier ending at @p last begins.
+std::size_t identifier_begin (std::string_view code, std::size_t last) {
+    while (last > 0 && is_identifier_char (code[last - 1])) {
+        --last;
+    }
+    return last;
+}
+
 /// The characters after which a `/` begins a regular expression rather than
 /// dividing: everything that cannot end an operand. `)` and `]` end one, so
 /// they are absent.
 constexpr std::string_view REGEX_PRECEDERS = "(,=:[!&|?{};+-*%<>~^";
+
+/// The words after which a `/` also begins a regular expression: each takes an
+/// operand, so `return /"/.test(x)` is not a division. Any other word ends one.
+constexpr auto REGEX_KEYWORDS = std::to_array<std::string_view> ({ "return",
+"typeof", "case", "in", "of", "delete", "void", "throw", "new", "else", "do" });
 
 /// One pass over a script; see `strip_comments_and_literals`.
 class Stripper {
@@ -45,9 +77,12 @@ class Stripper {
     std::string_view src_;
     std::string code_;
     std::size_t at_ = 0;
-    /// The last character that was neither whitespace nor inside a literal;
-    /// what decides whether a `/` opens a regular expression.
-    char last_ = '\0';
+    /// The last character that was neither whitespace nor inside a literal,
+    /// and where it stands; what decides whether a `/` opens a regular
+    /// expression. The position is only read when the character is part of a
+    /// word, to find the word.
+    char last_           = '\0';
+    std::size_t last_at_ = 0;
     /// One entry per open `${` of a template literal: the braces opened inside
     /// it and not yet closed, so the `}` that ends the expression is found.
     std::vector<int> braces_;
@@ -81,7 +116,8 @@ class Stripper {
         default: break;
         }
         if (WHITESPACE.find (c) == std::string_view::npos) {
-            last_ = c;
+            last_    = c;
+            last_at_ = at_;
         }
         ++at_;
     }
@@ -102,12 +138,28 @@ class Stripper {
         } else if (next == '*') {
             const std::size_t close = src_.find ("*/", at_ + 2);
             comment (close == std::string_view::npos ? src_.size () : close + 2);
-        } else if (last_ == '\0' || REGEX_PRECEDERS.find (last_) != std::string_view::npos) {
+        } else if (last_ == '\0' || REGEX_PRECEDERS.find (last_) != std::string_view::npos ||
+        follows_regex_keyword ()) {
             regex ();
         } else {
             last_ = '/';
             ++at_;
         }
+    }
+
+    /// Whether the word that ends at `last_at_` is one of REGEX_KEYWORDS. A
+    /// property of that name (`list.delete / 2`) is not the keyword.
+    [[nodiscard]] bool follows_regex_keyword () const {
+        if (!is_identifier_char (last_)) {
+            return false;
+        }
+        const std::size_t begin = identifier_begin (src_, last_at_);
+        const std::size_t before = src_.substr (0, begin).find_last_not_of (WHITESPACE);
+        if (before != std::string_view::npos && src_[before] == '.') {
+            return false;
+        }
+        return std::ranges::contains (
+        REGEX_KEYWORDS, src_.substr (begin, last_at_ + 1 - begin));
     }
 
     void comment (std::size_t end) {
@@ -196,30 +248,9 @@ struct Token {
     /// are one dotted path (`pm . variables`).
     bool chained = false;
     bool number  = false;
+    /// Inside the braces of an async function's body (see `AsyncFrames`).
+    bool in_async = false;
 };
-
-bool is_identifier_char (char c) {
-    // A byte of a multi-byte character is part of an identifier: a name in
-    // another script is not any name this table lists, and not a separator.
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-    c == '_' || c == '$' || static_cast<unsigned char> (c) >= 0x80;
-}
-
-/// The index one past the identifier that starts at @p at.
-std::size_t identifier_end (std::string_view code, std::size_t at) {
-    while (at < code.size () && is_identifier_char (code[at])) {
-        ++at;
-    }
-    return at;
-}
-
-/// The index where the identifier ending at @p last begins.
-std::size_t identifier_begin (std::string_view code, std::size_t last) {
-    while (last > 0 && is_identifier_char (code[last - 1])) {
-        --last;
-    }
-    return last;
-}
 
 bool starts_number (char c) {
     return c >= '0' && c <= '9';
@@ -247,11 +278,84 @@ bool joined_by_dot (std::string_view code, const Token& previous, std::size_t be
     std::ranges::count (gap, '.') == 1;
 }
 
+/**
+ * The brace frames of the code view, so a token can be asked whether it stands
+ * inside an async function. An `async` that introduces a function sets a
+ * pending flag, and the next `{` opens an async frame; any other `{` opens a
+ * plain one, and `}` closes the innermost. An `await` is a syntax error only
+ * outside every async frame, so a plain frame inside an async one still counts
+ * as async.
+ *
+ * An arrow function with an expression body (`async x => await y`) has no
+ * brace, so its `await` reads as top level and may be named when it need not
+ * be: the notice errs toward naming too much, and the flag is dropped at the
+ * `=>` so the next block is not taken for the arrow's body.
+ */
+class AsyncFrames {
+    public:
+    [[nodiscard]] bool inside () const {
+        return async_open_ > 0;
+    }
+
+    void expect_body () {
+        pending_ = true;
+    }
+
+    /// Reads the non-identifier character at @p at.
+    void punctuation (std::string_view code, std::size_t at) {
+        switch (code[at]) {
+        case '{': open (); break;
+        case '}': close (); break;
+        case ';': pending_ = false; break;
+        case '=':
+            if (at + 1 < code.size () && code[at + 1] == '>' &&
+            next_significant (code, at + 2) != '{') {
+                pending_ = false;
+            }
+            break;
+        default: break;
+        }
+    }
+
+    private:
+    std::vector<bool> frames_;
+    int async_open_ = 0;
+    bool pending_   = false;
+
+    void open () {
+        frames_.push_back (pending_);
+        if (pending_) {
+            ++async_open_;
+        }
+        pending_ = false;
+    }
+
+    void close () {
+        if (frames_.empty ()) {
+            return;
+        }
+        if (frames_.back ()) {
+            --async_open_;
+        }
+        frames_.pop_back ();
+    }
+};
+
+/// Whether an `async` ending at @p end introduces a function or method:
+/// `async function`, `async (`, `async x =>`, `async *gen`, `async [key]`.
+/// `async = ...` and `async.each` are the npm package's name.
+bool starts_async_function (std::string_view code, std::size_t end) {
+    const char next = next_significant (code, end);
+    return next == '(' || next == '[' || next == '*' || is_identifier_char (next);
+}
+
 std::vector<Token> tokenize (std::string_view code) {
     std::vector<Token> tokens;
+    AsyncFrames frames;
     std::size_t at = 0;
     while (at < code.size ()) {
         if (!is_identifier_char (code[at])) {
+            frames.punctuation (code, at);
             ++at;
             continue;
         }
@@ -263,6 +367,11 @@ std::vector<Token> tokenize (std::string_view code) {
         token.member  = follows_property_dot (code, token.begin);
         token.chained = token.member && !tokens.empty () &&
         joined_by_dot (code, tokens.back (), token.begin);
+        token.in_async = frames.inside ();
+        if (!token.member && code.substr (token.begin, token.end - token.begin) == "async" &&
+        starts_async_function (code, token.end)) {
+            frames.expect_body ();
+        }
         tokens.push_back (token);
     }
     return tokens;
@@ -276,37 +385,25 @@ std::string_view word_of (std::string_view code, const Token& token) {
 // Names the script declares
 // ---------------------------------------------------------------------------
 
-/// The index of the bracket closing the one at @p open, or `npos` when the
-/// script never closes it.
-std::size_t matching_close (std::string_view code, std::size_t open) {
-    int depth = 0;
-    for (std::size_t i = open; i < code.size (); ++i) {
+/// For each bracket of @p code, the index of the bracket it pairs with, and
+/// `npos` for every other byte and for a bracket the script never pairs. The
+/// kinds are not told apart: any closer closes the innermost open bracket, so
+/// a script with mismatched brackets still pairs most of what it holds. One pass
+/// for every question the scan asks of a bracket, rather than a scan from each.
+std::vector<std::size_t> pair_brackets (std::string_view code) {
+    std::vector<std::size_t> partner (code.size (), std::string_view::npos);
+    std::vector<std::size_t> open;
+    for (std::size_t i = 0; i < code.size (); ++i) {
         if (std::string_view ("([{").find (code[i]) != std::string_view::npos) {
-            ++depth;
-        } else if (std::string_view (")]}").find (code[i]) != std::string_view::npos) {
-            --depth;
-        }
-        if (depth == 0) {
-            return i;
-        }
-    }
-    return std::string_view::npos;
-}
-
-/// The index of the bracket opening the one at @p close, or `npos`.
-std::size_t matching_open (std::string_view code, std::size_t close) {
-    int depth = 0;
-    for (std::size_t i = close + 1; i-- > 0;) {
-        if (std::string_view (")]}").find (code[i]) != std::string_view::npos) {
-            ++depth;
-        } else if (std::string_view ("([{").find (code[i]) != std::string_view::npos) {
-            --depth;
-        }
-        if (depth == 0) {
-            return i;
+            open.push_back (i);
+        } else if (std::string_view (")]}").find (code[i]) != std::string_view::npos &&
+        !open.empty ()) {
+            partner[i]            = open.back ();
+            partner[open.back ()] = i;
+            open.pop_back ();
         }
     }
-    return std::string_view::npos;
+    return partner;
 }
 
 /// A keyword that introduces a name, and the brackets that may follow it
@@ -338,7 +435,7 @@ constexpr auto BINDING_KEYWORDS = std::to_array<BindingKeyword> ({
 class Declarations {
     public:
     Declarations (std::string_view code, const std::vector<Token>& tokens)
-    : code_ (code), tokens_ (tokens) {
+    : code_ (code), tokens_ (tokens), partner_ (pair_brackets (code)) {
         for (const Token& token : tokens_) {
             if (token.member) {
                 continue;
@@ -350,27 +447,46 @@ class Declarations {
             }
         }
         declare_arrow_parameters ();
+        declare_spans ();
     }
 
     [[nodiscard]] bool contains (std::string_view name) const {
-        return std::ranges::contains (names_, name);
+        return names_.contains (name);
     }
 
     private:
     std::string_view code_;
     const std::vector<Token>& tokens_;
-    std::vector<std::string_view> names_;
+    std::vector<std::size_t> partner_;
+    /// The (open, close) of every bracket pair whose identifiers are all
+    /// declared. Read by `declare_spans`, so pairs nested in one another (a
+    /// minified script's, or `var [var [var [...`) are not each walked again.
+    std::vector<std::pair<std::size_t, std::size_t>> spans_;
+    /// Views into @c code_.
+    std::unordered_set<std::string_view> names_;
 
-    /// Every identifier between the brackets at @p open and @p close.
     void declare_within (std::size_t open, std::size_t close) {
         if (open == std::string_view::npos || close == std::string_view::npos) {
             return;
         }
-        auto token = std::ranges::lower_bound (tokens_, open + 1, {}, &Token::begin);
-        for (; token != tokens_.end () && token->end <= close; ++token) {
-            if (!token->number) {
-                names_.push_back (word_of (code_, *token));
+        spans_.emplace_back (open, close);
+    }
+
+    /// Declares every identifier between the brackets of each recorded pair,
+    /// walking each token once however the pairs nest or overlap.
+    void declare_spans () {
+        std::ranges::sort (spans_);
+        auto token            = tokens_.begin ();
+        std::size_t walked_to = 0;
+        for (const auto& [open, close] : spans_) {
+            const std::size_t from = std::max (open + 1, walked_to);
+            token = std::ranges::lower_bound (token, tokens_.end (), from, {}, &Token::begin);
+            for (; token != tokens_.end () && token->end <= close; ++token) {
+                if (!token->number) {
+                    names_.insert (word_of (code_, *token));
+                }
             }
+            walked_to = std::max (walked_to, close + 1);
         }
     }
 
@@ -383,12 +499,12 @@ class Declarations {
         }
         if (is_identifier_char (code_[at])) {
             const std::size_t end = identifier_end (code_, at);
-            names_.push_back (code_.substr (at, end - at));
+            names_.insert (code_.substr (at, end - at));
             at = code_.find_first_not_of (WHITESPACE, end);
         }
         if (at != std::string_view::npos &&
         openers.find (code_[at]) != std::string_view::npos) {
-            declare_within (at, matching_close (code_, at));
+            declare_within (at, partner_.at (at));
         }
     }
 
@@ -401,10 +517,10 @@ class Declarations {
                 continue;
             }
             if (code_[last] == ')') {
-                declare_within (matching_open (code_, last), last);
+                declare_within (partner_.at (last), last);
             } else if (is_identifier_char (code_[last])) {
                 const std::size_t begin = identifier_begin (code_, last);
-                names_.push_back (code_.substr (begin, last + 1 - begin));
+                names_.insert (code_.substr (begin, last + 1 - begin));
             }
         }
     }
@@ -422,6 +538,9 @@ enum class Anchor : std::uint8_t {
     Member,
     /// Either (`jsonSchema` is a chai chain member and a Postman global).
     Any,
+    /// A name in scope that is not inside an async function: `await` there is
+    /// a syntax error, and inside one it is the language.
+    OutsideAsync,
     /// Not found by the token pass; `UnsupportedScriptApis` sets it directly.
     Elsewhere,
 };
@@ -471,7 +590,7 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "setTimeout", Anchor::Bare, "setTimeout", "" },
 { "setInterval", Anchor::Bare, "setInterval", "" },
 { "Buffer", Anchor::Bare, "Buffer", "" },
-{ "await", Anchor::Bare, "await", "" },
+{ "top-level await", Anchor::OutsideAsync, "await", "" },
 // `pm.*` members Vayu does not have.
 { "pm.visualizer", Anchor::Bare, "pm.visualizer", "" },
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
@@ -536,6 +655,7 @@ bool anchored_at (Anchor anchor, const Token& token) {
     case Anchor::Bare: return !token.member;
     case Anchor::Member: return token.member;
     case Anchor::Any: return true;
+    case Anchor::OutsideAsync: return !token.member && !token.in_async;
     case Anchor::Elsewhere: break;
     }
     return false;

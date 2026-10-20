@@ -952,8 +952,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
   The sandbox has no module system and none of those libraries; `pm.crypto` covers
   SHA-256 and HMAC-SHA256 and nothing else of `CryptoJS`
-- `setTimeout`, `setInterval`, `Buffer` and a top-level `await` - the sandbox is
-  synchronous and is not Node
+- `setTimeout`, `setInterval`, `Buffer` and a top-level `await` - the sandbox
+  is not Node, and a script body is not an async function. `await` inside an
+  `async` function runs (see
+  [what a script can compute](../engine/scripting.md#what-a-script-can-compute));
+  the import notice names only the top-level one
 - Chai matchers outside the list above: `.include.keys` (the subset form),
   `.any.keys`, `.change`/`.increase`/`.decrease`, `.own.property`, `.respondTo`,
   the property-style `.finite` / `.sealed` / `.frozen` / `.extensible`, and the

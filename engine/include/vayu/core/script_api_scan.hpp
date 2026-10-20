@@ -45,9 +45,10 @@ namespace vayu::core {
  *        The quotes stay, and so does code inside a template's `${ }`.
  *
  * Not a JavaScript parser. A `/` is a regular expression only after a
- * character that cannot end an operand, and an unterminated string or regular
- * expression ends at its line, so a stray quote costs one line of scanning and
- * never the rest of the script.
+ * character that cannot end an operand or a keyword that takes one (`return`,
+ * `typeof`, `case`, ...), and an unterminated string or regular expression
+ * ends at its line, so a stray quote costs one line of scanning and never the
+ * rest of the script.
  */
 [[nodiscard]] std::string strip_comments_and_literals (std::string_view source);
 

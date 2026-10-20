@@ -134,9 +134,10 @@ of, and each request, folder or collection that uses any is named in
 `responseCookies`, `responseTime`, `postman.*`, `globals.*`, `environment.*`,
 `data`), `require(...)` and `pm.require`, a non-empty `script.packages`, the
 libraries Postman bundles (`CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
-`moment`, `Backbone`), `setTimeout`, `setInterval`, `Buffer`, `await`,
-`pm.visualizer`, `pm.variables.set`, `pm.test.skip`, and the chai spellings
-`pm.expect` refuses (`.within()`, `.include.keys`, `jsonSchema`, and the rest of
+`moment`, `Backbone`), `setTimeout`, `setInterval`, `Buffer`, a top-level
+`await` (named `top-level await`; `await` inside an `async` function runs, and
+an `async` arrow function with an expression body is still named), `pm.visualizer`,
+`pm.variables.set`, `pm.test.skip`, and the chai spellings `pm.expect` refuses (`.within()`, `.include.keys`, `jsonSchema`, and the rest of
 the table). A row is retired in the commit that makes Vayu run the API.
 
 The scan reads tokens, not text: comments, string and template-literal text and
@@ -148,7 +149,10 @@ parameter named `data`) is not reading the global. It is a notice, so it errs
 toward naming too much - an object with a property bare-called `tests[...]` is
 named - and never toward missing a listed name. A disabled event runs nothing
 and names nothing; with `importScripts` off nothing is read. The scripts are
-imported either way: this never blocks or alters the import. The import preview shows it as one amber line naming the requests and the APIs (`Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)`), and the import-scripts toggle is untouched.
+imported either way: this never blocks or alters the import. The import
+preview shows it as one amber line naming the requests and the APIs (`Sign in:
+script uses APIs Vayu does not run yet (tests[], CryptoJS)`), and the
+import-scripts toggle is untouched.
 
 ### Saved responses
 
