@@ -85,13 +85,14 @@ function renderTree() {
 /** The store holds a Set; `[...]` keeps the assertions readable. */
 const expanded = () => [...useCollectionsStore.getState().expandedCollectionIds];
 
-// jsdom implements no scrolling. The reveal effect calls this once a row
-// exists, which these tests are the first to actually reach.
-const scrollIntoView = vi.fn();
+// jsdom implements no scrolling. The reveal scrolls the drawer body through
+// this once the row is in the tree's list, which these tests are the first to
+// actually reach.
+const { scrollWithin } = vi.hoisted(() => ({ scrollWithin: vi.fn() }));
+vi.mock("@/lib/scroll-within", () => ({ scrollWithin }));
 
 beforeEach(() => {
-	scrollIntoView.mockClear();
-	Element.prototype.scrollIntoView = scrollIntoView;
+	scrollWithin.mockClear();
 	// Everything collapsed: the state in which the bug is visible at all.
 	useCollectionsStore.setState({ expandedCollectionIds: new Set<string>() });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
@@ -223,14 +224,14 @@ describe("collapsing a collection on the selected tab's ancestor path", () => {
 			activeTabId: "t1",
 		});
 		const { container } = renderTree();
-		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
 
 		// `root` holds no part of the selection's row; collapsing it re-renders
 		// the tree, and an unguarded scroll effect would yank the view back to a
 		// row the user just navigated away from.
 		collapse(container, "root");
 
-		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
 	});
 
 	it("scrolls again once the selection actually changes", () => {
@@ -239,11 +240,11 @@ describe("collapsing a collection on the selected tab's ancestor path", () => {
 			activeTabId: "t1",
 		});
 		renderTree();
-		expect(scrollIntoView).toHaveBeenCalledTimes(1);
+		expect(scrollWithin).toHaveBeenCalledTimes(1);
 
 		selectTab({ id: "t2", type: "collection", entityId: "child" });
 
-		expect(scrollIntoView).toHaveBeenCalledTimes(2);
+		expect(scrollWithin).toHaveBeenCalledTimes(2);
 	});
 
 	it("re-reveals when the selection moves to a different entity", () => {

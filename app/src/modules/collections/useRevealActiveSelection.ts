@@ -7,7 +7,9 @@
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { focusTreeRow } from "./tree-focus";
+import { entityRowKey, folderRowKey, requestRowKey } from "./tree-rows";
 import { walkAncestors } from "./tree-utils";
+import type { TreeRowWindow } from "./CollectionTreeRows";
 import type { TreeEntity } from "./drop-position";
 import type { Collection, Request } from "@/types";
 
@@ -40,11 +42,17 @@ export interface RevealActiveSelection {
  *
  * Two effects, not one, and they cannot share a ref: the scroll can only run a
  * render *after* the reveal, once the expanded ancestors have put the row in
- * the DOM. Each records the selection it last acted on so it fires once per
+ * the list. Each records the selection it last acted on so it fires once per
  * selection rather than once per render.
+ *
+ * Both scrolls go through the tree's window (`rowWindow`), never the row
+ * element: a row in a long list may not be mounted until the drawer has been
+ * scrolled to it (#2543), and the window scrolls the drawer body alone, where
+ * `scrollIntoView` would move every scrollable ancestor too (#1612).
  */
 export function useRevealActiveSelection(
 	treeRef: RefObject<HTMLDivElement | null>,
+	rowWindow: RefObject<TreeRowWindow | null>,
 	{
 		selectedCollectionId,
 		selectedRequestId,
@@ -56,7 +64,8 @@ export function useRevealActiveSelection(
 ): RevealActiveSelection {
 	const revealedSelectionRef = useRef<string | null>(null);
 	const scrolledSelectionRef = useRef<string | null>(null);
-	const movedRowRef = useRef<{ attribute: string; id: string } | null>(null);
+	/** The key of the row a move put somewhere, until it has been revealed. */
+	const movedRowRef = useRef<string | null>(null);
 
 	/*
 	 * Reveal whatever the active tab points at: expand its ancestor folders so
@@ -129,14 +138,10 @@ export function useRevealActiveSelection(
 	useEffect(() => {
 		const id = selectedCollectionId ?? selectedRequestId;
 		if (!id || scrolledSelectionRef.current === id) return;
-		const attr = selectedCollectionId ? "data-collection-id" : "data-request-id";
-		const row = treeRef.current?.querySelector(`[${attr}="${CSS.escape(id)}"]`);
-		if (row) {
-			row.scrollIntoView({ block: "nearest" });
-			scrolledSelectionRef.current = id;
-		}
+		const key = selectedCollectionId ? folderRowKey(id) : requestRowKey(id);
+		if (rowWindow.current?.revealRow(key)) scrolledSelectionRef.current = id;
 	}, [
-		treeRef,
+		rowWindow,
 		selectedRequestId,
 		selectedCollectionId,
 		expandedCollectionIds,
@@ -149,10 +154,7 @@ export function useRevealActiveSelection(
 			if (ownerId) {
 				expandCollections(walkAncestors(ownerId, collections).map((c) => c.id));
 			}
-			movedRowRef.current = {
-				attribute: entity.kind === "collection" ? "data-collection-id" : "data-request-id",
-				id: entity.id,
-			};
+			movedRowRef.current = entityRowKey(entity);
 		},
 		[collections, expandCollections]
 	);
@@ -161,23 +163,19 @@ export function useRevealActiveSelection(
 	 * The other half of `revealEntity`, and it runs after *every* render on
 	 * purpose: the row it is waiting for may not exist yet (a move into a
 	 * collapsed folder renders it only once the expand lands), and there is no
-	 * dependency that names "the moved row is now in the DOM". Clearing a ref
+	 * dependency that names "the moved row is now in the list". Clearing a ref
 	 * rather than state keeps this out of the render loop it observes.
 	 */
 	useEffect(() => {
 		const pending = movedRowRef.current;
-		if (!pending) return;
 		const tree = treeRef.current;
-		const row = tree?.querySelector<HTMLElement>(
-			`[${pending.attribute}="${CSS.escape(pending.id)}"]`
-		);
-		if (!tree || !row) return;
-		movedRowRef.current = null;
-		row.scrollIntoView({ block: "nearest" });
+		if (!pending || !tree) return;
 		// The roving tabindex has to follow: the moved row is where the user is
 		// working, and leaving the tab stop on the row it displaced means the
 		// next Alt+Arrow moves something else (see useRovingTreeFocus).
-		focusTreeRow(tree, row);
+		if (rowWindow.current?.revealRow(pending, (row) => focusTreeRow(tree, row))) {
+			movedRowRef.current = null;
+		}
 	});
 
 	return { revealEntity };

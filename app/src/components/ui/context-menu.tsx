@@ -30,7 +30,9 @@ import { cn } from "@/lib/utils";
 
 const ContextMenu = ContextMenuPrimitive.Root;
 
-const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+function ContextMenuTrigger(props: React.ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
+	return <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />;
+}
 
 function ContextMenuContent({
 	className,

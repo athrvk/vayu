@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useRef, useCallback, useEffect, useMemo } from "react";
+import { useRef, useCallback, useEffect, useMemo, useState } from "react";
 import { Folder, Plus, FolderPlus, Loader2, Download } from "lucide-react";
 import { useTabsStore, useImportModalStore, useSessionStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
@@ -23,7 +23,10 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import CollectionItem from "./CollectionItem";
+import CollectionTreeRows, { type TreeRowWindow } from "./CollectionTreeRows";
+import { CollectionTreeContextMenu } from "./CollectionTreeContextMenu";
+import { flattenVisibleRows, folderIdOfRowKey, navigableRows, rowEntity } from "./tree-rows";
+import { focusTreeRow, type TreeRowModel } from "./tree-focus";
 import ExportSpecDialog from "./ExportSpecDialog";
 import ExportPostmanDialog from "./ExportPostmanDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
@@ -33,13 +36,10 @@ import { useDeleteRefocus } from "./useDeleteRefocus";
 import { useTreeCrud } from "./useTreeCrud";
 import { useTreeDnd } from "./useTreeDnd";
 import { MoveToDialog } from "./MoveToDialog";
-import {
-	CollectionTreeContext,
-	type CollectionTreeContextValue,
-} from "./context/CollectionTreeContext";
+import type { CollectionTreeHandlers, CollectionTreeState } from "./context/CollectionTreeContext";
+import { CollectionTreeProviders } from "./context/CollectionTreeProviders";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { Request } from "@/types";
-import { compareTreeOrder } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
@@ -49,7 +49,11 @@ export default function CollectionTree() {
 	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
 	const expandCollections = useCollectionsStore((s) => s.expandCollections);
 	const treeRef = useRef<HTMLDivElement>(null);
-	const treeFocus = useRovingTreeFocus(treeRef);
+	// The `role="tree"` element as state, not a ref: the window measures from it,
+	// and a ref on a parent is not set yet when its children's effects run.
+	const [treeList, setTreeList] = useState<HTMLDivElement | null>(null);
+	// The one way to act on a row that may be scrolled away (#2543).
+	const rowWindowRef = useRef<TreeRowWindow>(null);
 
 	// Get selected collection and request IDs from active tab
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
@@ -79,22 +83,7 @@ export default function CollectionTree() {
 		[requestsByCollection]
 	);
 
-	/*
-	 * Roots are the collections with no parent *and* the ones whose parent is not
-	 * loaded. An orphan used to match neither the roots filter nor any parent's
-	 * children, so it rendered nowhere at all - which is precisely the shape a bad
-	 * or half-applied reparent leaves behind, and the user saw a collection
-	 * silently disappear rather than a tree that looked wrong. Degrading visibly
-	 * is the point: the row is reachable, so it can be moved or deleted.
-	 */
-	const rootCollections = useMemo(() => {
-		const loadedIds = new Set(collections.map((c) => c.id));
-		return collections
-			.filter((c) => !c.parentId || !loadedIds.has(c.parentId))
-			.sort(compareTreeOrder);
-	}, [collections]);
-
-	const { revealEntity } = useRevealActiveSelection(treeRef, {
+	const { revealEntity } = useRevealActiveSelection(treeRef, rowWindowRef, {
 		selectedCollectionId,
 		selectedRequestId,
 		collections,
@@ -103,11 +92,54 @@ export default function CollectionTree() {
 		expandCollections,
 	});
 
-	const { panel, rows } = useTreeCrud({
+	const { panel, handlers, rowState, folderDraft } = useTreeCrud({
 		collections,
 		requestsByCollection,
 		getRequestsByCollection,
 	});
+
+	const creatingSubfolder = rowState.creatingSubfolder;
+	const rows = useMemo(
+		() =>
+			flattenVisibleRows({
+				collections,
+				getRequestsByCollection,
+				expandedCollectionIds,
+				creatingSubfolder,
+			}),
+		[collections, getRequestsByCollection, expandedCollectionIds, creatingSubfolder]
+	);
+
+	/*
+	 * The keys walk every visible row, not the mounted ones: the window holds
+	 * only what is in view, and End or a typeahead has to reach past it.
+	 */
+	const navigationModel = useMemo<TreeRowModel>(
+		() => ({
+			rows: navigableRows(rows, expandedCollectionIds),
+			keyOf: (element) => rowWindowRef.current?.keyOf(element) ?? null,
+			focusRow: (key) => {
+				rowWindowRef.current?.revealRow(key, (row) => focusTreeRow(treeRef.current, row));
+			},
+			expand: (keys) => expandCollections(keys.flatMap((key) => folderIdOfRowKey(key) ?? [])),
+		}),
+		[rows, expandedCollectionIds, expandCollections]
+	);
+	const treeFocus = useRovingTreeFocus(treeRef, navigationModel);
+
+	// The row an event came from, from the rows model: what the tree's one
+	// right-click menu and its drag handlers act on, in place of a handler per row.
+	const rowAt = useCallback(
+		(element: Element) => rowWindowRef.current?.rowOf(element) ?? null,
+		[]
+	);
+	const entityAt = useCallback(
+		(element: Element) => {
+			const row = rowAt(element);
+			return row ? rowEntity(row) : null;
+		},
+		[rowAt]
+	);
 
 	/*
 	 * The toolbar's "+" asks the same question every other "New request" entry
@@ -194,39 +226,44 @@ export default function CollectionTree() {
 	 */
 	const isRowBusy = useCallback(
 		(entityId: string) =>
-			entityId === rows.renamingId ||
-			entityId === rows.renamingRequestId ||
-			entityId === rows.deletingCollectionId ||
-			entityId === rows.deletingRequestId,
-		[rows.renamingId, rows.renamingRequestId, rows.deletingCollectionId, rows.deletingRequestId]
+			entityId === rowState.renamingId ||
+			entityId === rowState.renamingRequestId ||
+			entityId === rowState.deletingCollectionId ||
+			entityId === rowState.deletingRequestId,
+		[rowState]
 	);
 
-	const { dnd, announcement, moveTarget, closeMoveDialog, moveToOwner } = useTreeDnd({
-		collections,
-		getRequestsByCollection,
-		treeRef,
-		isRowBusy,
-		revealEntity,
-	});
+	const { dnd, treeHandlers, announcement, moveTarget, closeMoveDialog, moveToOwner } =
+		useTreeDnd({
+			collections,
+			getRequestsByCollection,
+			treeRef,
+			entityAt,
+			isRowBusy,
+			revealEntity,
+		});
 
-	const treeContext = useMemo<CollectionTreeContextValue>(
+	const rowHandlers = useMemo<CollectionTreeHandlers>(
+		() => ({ ...handlers, dnd }),
+		[handlers, dnd]
+	);
+
+	const treeState = useMemo<CollectionTreeState>(
 		() => ({
+			...rowState,
 			allCollections: collections,
 			expandedCollectionIds,
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
-			dnd,
-			...rows,
 		}),
 		[
+			rowState,
 			collections,
 			expandedCollectionIds,
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
-			dnd,
-			rows,
 		]
 	);
 
@@ -394,33 +431,40 @@ export default function CollectionTree() {
 						/>
 					)}
 
-				{/* Root-level collections (no parent loaded) - sorted by order, scrollable.
-			    role="tree" + roving tabindex: the whole tree is one tab stop and
-			    arrow keys move between rows (see useRovingTreeFocus).
-			    Everything a row needs beyond its own entity comes from the
-			    context - see CollectionTreeContext for why it is not props. */}
-				{!isLoadingCollections && rootCollections.length > 0 && (
+				{/* Every visible row, one flat list in `flattenVisibleRows` order.
+				    role="tree" + roving tabindex: the whole tree is one tab stop and
+				    arrow keys move between rows (see useRovingTreeFocus).
+				    Everything a row needs beyond its own entity comes from the
+				    contexts - see CollectionTreeContext for why it is not props. */}
+				{!isLoadingCollections && rows.length > 0 && (
 					<div className="flex-1 min-h-0">
-						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
-						<div
-							role="tree"
-							aria-label="Collections"
-							onKeyDown={treeFocus.onKeyDown}
-							onFocus={treeFocus.onFocus}
-							className="space-y-0.5"
+						<CollectionTreeProviders
+							handlers={rowHandlers}
+							state={treeState}
+							folderDraft={folderDraft}
 						>
-							<CollectionTreeContext.Provider value={treeContext}>
-								{rootCollections.map((collection, index) => (
-									<CollectionItem
-										key={collection.id}
-										collection={collection}
-										depth={0}
-										posInSet={index + 1}
-										setSize={rootCollections.length}
+							{/* One right-click menu and one set of drag handlers for
+							    every row, each resolving its row from the event
+							    (#2543): nothing per row but the row. */}
+							<CollectionTreeContextMenu rowAt={rowAt}>
+								{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
+								<div
+									ref={setTreeList}
+									role="tree"
+									aria-label="Collections"
+									onKeyDown={treeFocus.onKeyDown}
+									onFocus={treeFocus.onFocus}
+									{...treeHandlers}
+									className="select-none"
+								>
+									<CollectionTreeRows
+										rows={rows}
+										list={treeList}
+										windowRef={rowWindowRef}
 									/>
-								))}
-							</CollectionTreeContext.Provider>
-						</div>
+								</div>
+							</CollectionTreeContextMenu>
+						</CollectionTreeProviders>
 					</div>
 				)}
 
@@ -434,8 +478,8 @@ export default function CollectionTree() {
 				 * markup). Keyboard move announcements are the first thing that will
 				 * write here; until then the region exists and says nothing.
 				 *
-				 * Outside `role="tree"`: a tree's children are treeitems and groups,
-				 * and this is neither.
+				 * Outside `role="tree"`: a tree's children are treeitems, and this is
+				 * not one.
 				 */}
 				<div
 					role="status"

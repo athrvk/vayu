@@ -1761,7 +1761,7 @@ engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
 
 That rule orders **one block**. A folder's sub-collections and its requests are
 two separately ordered blocks, so their `order` values can collide, and where the
-blocks sit relative to each other is the render's rule: `CollectionItem` puts
+blocks sit relative to each other is the render's rule: `flattenVisibleRows` puts
 every subfolder above every request, at every depth
 (`CollectionTree.folders-first.test.tsx`). A recursive collection run has to
 execute in that same sequence - each subfolder's whole subtree, then the folder's

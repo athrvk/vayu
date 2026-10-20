@@ -11,11 +11,11 @@
 /**
  * One level shows one left edge.
  *
- * Rows derive their indent from their depth; everything else inside a folder's
- * `role="group"` used to carry a fixed `px-*`, so a nested folder's "Empty
- * folder" line sat at the tree's left edge - left of its own parent's label and
- * left of the sibling request rows below it (#1372). The new-subfolder form had
- * the same defect one step further left.
+ * Rows derive their indent from their depth; everything else under a folder
+ * used to carry a fixed `px-*`, so a nested folder's "Empty folder" line sat
+ * at the tree's left edge - left of its own parent's label and left of the
+ * sibling request rows below it (#1372). The new-subfolder form had the same
+ * defect one step further left.
  *
  * The guard is an equality rather than a number: the placeholder and the form
  * are compared against the `paddingLeft` a `RequestItem` actually renders at
@@ -30,8 +30,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import CollectionItem from "./CollectionItem";
+import CollectionTreeRows from "./CollectionTreeRows";
 import RequestItem from "./RequestItem";
-import { withCollectionTreeContext } from "@/test/collection-tree-context";
+import { flattenVisibleRows } from "./tree-rows";
+import {
+	withCollectionTreeContext,
+	type CollectionTreeTestValue,
+} from "@/test/collection-tree-context";
 import { INDENT_STEP } from "@/constants/layout";
 import type { Collection, Request } from "@/types";
 
@@ -78,17 +83,47 @@ const REQUEST: Request = {
 	updatedAt: "2026-01-01T00:00:00Z",
 };
 
+/**
+ * `COLLECTION` at `depth`, under a chain of expanded ancestors, as the tree
+ * lists it: the folder row is followed by the rows that stand in for its
+ * children, which are rows of their own rather than markup inside the folder's.
+ */
+function renderFolderRows(depth: number, overrides: Partial<CollectionTreeTestValue> = {}) {
+	const ancestors = Array.from({ length: depth }, (_, level) => ({
+		...COLLECTION,
+		id: `ancestor_${level}`,
+		name: `Ancestor ${level}`,
+		parentId: level === 0 ? undefined : `ancestor_${level - 1}`,
+	}));
+	const folder = { ...COLLECTION, parentId: depth === 0 ? undefined : `ancestor_${depth - 1}` };
+	const collections = [...ancestors, folder];
+	const expandedCollectionIds = new Set(collections.map((c) => c.id));
+	const getRequestsByCollection = overrides.getRequestsByCollection ?? (() => []);
+	const creatingSubfolder = overrides.creatingSubfolder ?? null;
+	const rows = flattenVisibleRows({
+		collections,
+		getRequestsByCollection,
+		expandedCollectionIds,
+		creatingSubfolder,
+	});
+	const view = render(
+		withCollectionTreeContext(<CollectionTreeRows rows={rows} />, {
+			allCollections: collections,
+			expandedCollectionIds,
+			getRequestsByCollection,
+			creatingSubfolder,
+		})
+	);
+	const row = view.container.querySelector<HTMLElement>(
+		`[data-collection-id="${COLLECTION.id}"]`
+	)!;
+	expect(row).toHaveAttribute("aria-level", String(depth + 1));
+	return { ...view, row };
+}
+
 /** The expanded, empty folder at `depth`, with nothing being created. */
 function renderEmptyFolder(depth: number) {
-	return render(
-		withCollectionTreeContext(
-			<CollectionItem collection={COLLECTION} depth={depth} posInSet={1} setSize={1} />,
-			{
-				allCollections: [COLLECTION],
-				expandedCollectionIds: new Set([COLLECTION.id]),
-			}
-		)
-	);
+	return renderFolderRows(depth);
 }
 
 /** What a child row of that folder actually indents to. */
@@ -122,16 +157,7 @@ describe.each([0, 2])("a folder at depth %i", (depth) => {
 	});
 
 	it("starts the new-subfolder form at that same edge", () => {
-		render(
-			withCollectionTreeContext(
-				<CollectionItem collection={COLLECTION} depth={depth} posInSet={1} setSize={1} />,
-				{
-					allCollections: [COLLECTION],
-					expandedCollectionIds: new Set([COLLECTION.id]),
-					creatingSubfolder: COLLECTION.id,
-				}
-			)
-		);
+		renderFolderRows(depth, { creatingSubfolder: COLLECTION.id });
 
 		const form = screen.getByPlaceholderText("Collection name").closest("div") as HTMLElement;
 		expect(form.style.paddingLeft).toBe(expected);
@@ -161,10 +187,9 @@ describe("a folder's rename field", () => {
 });
 
 describe("an empty folder's row", () => {
-	it("describes itself as empty, since its group holds no treeitem to find", () => {
-		const { container } = renderEmptyFolder(1);
+	it("describes itself as empty, since nothing under it is a treeitem to find", () => {
+		const { row } = renderEmptyFolder(1);
 
-		const row = container.querySelector('[role="treeitem"]') as HTMLElement;
 		const describedBy = row.getAttribute("aria-describedby");
 		expect(describedBy).toBeTruthy();
 		expect(document.getElementById(describedBy as string)?.textContent).toBe(
@@ -173,18 +198,11 @@ describe("an empty folder's row", () => {
 	});
 
 	it("drops the description once the folder has a row to announce", () => {
-		const { container } = render(
-			withCollectionTreeContext(
-				<CollectionItem collection={COLLECTION} depth={1} posInSet={1} setSize={1} />,
-				{
-					allCollections: [COLLECTION],
-					expandedCollectionIds: new Set([COLLECTION.id]),
-					getRequestsByCollection: () => [REQUEST],
-				}
-			)
-		);
+		const { row } = renderFolderRows(1, {
+			getRequestsByCollection: (id) => (id === COLLECTION.id ? [REQUEST] : []),
+		});
 
-		const row = container.querySelector('[role="treeitem"]') as HTMLElement;
+		expect(screen.getByText(REQUEST.name)).toBeInTheDocument();
 		expect(row.getAttribute("aria-describedby")).toBeNull();
 		expect(screen.queryByText("Empty collection")).not.toBeInTheDocument();
 	});

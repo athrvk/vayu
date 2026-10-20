@@ -103,25 +103,36 @@ export function RowContextMenu({ label, actions, disabled, children }: RowContex
 			>
 				{children}
 			</ContextMenuTrigger>
-			{/* `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the action
-			    labels, a text measure, and `min-w-40` rides `--spacing` - at the
-			    Default density it resolved under the primitive's own fixed
-			    `min-w-[8rem]` default (context-menu.tsx), overriding a deliberately
-			    density-independent floor with a smaller, density-scaled one. */}
-			<ContextMenuContent aria-label={label} className="min-w-[10rem]">
-				{rowActionRows(actions).map(({ action, separatorBefore }) => (
-					<Fragment key={action.label}>
-						{separatorBefore && <ContextMenuSeparator />}
-						<ContextMenuItem
-							disabled={action.disabled}
-							onSelect={action.onSelect}
-							className={rowActionItemClass(action)}
-						>
-							<RowActionBody action={action} />
-						</ContextMenuItem>
-					</Fragment>
-				))}
-			</ContextMenuContent>
+			<RowContextMenuContent label={label} actions={actions} />
 		</ContextMenu>
+	);
+}
+
+/**
+ * The menu's items, for a `ContextMenu` whose trigger is not one row: the
+ * collection tree opens one menu for every row and resolves the row from the
+ * click (#2543). One drawing of the list, so the two cannot drift.
+ */
+export function RowContextMenuContent({ label, actions }: { label: string; actions: RowAction[] }) {
+	return (
+		// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the action
+		// labels, a text measure, and `min-w-40` rides `--spacing` - at the
+		// Default density it resolved under the primitive's own fixed
+		// `min-w-[8rem]` default (context-menu.tsx), overriding a deliberately
+		// density-independent floor with a smaller, density-scaled one.
+		<ContextMenuContent aria-label={label} className="min-w-[10rem]">
+			{rowActionRows(actions).map(({ action, separatorBefore }) => (
+				<Fragment key={action.label}>
+					{separatorBefore && <ContextMenuSeparator />}
+					<ContextMenuItem
+						disabled={action.disabled}
+						onSelect={action.onSelect}
+						className={rowActionItemClass(action)}
+					>
+						<RowActionBody action={action} />
+					</ContextMenuItem>
+				</Fragment>
+			))}
+		</ContextMenuContent>
 	);
 }

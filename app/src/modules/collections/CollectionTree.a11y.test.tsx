@@ -12,9 +12,9 @@
  * What the collection tree exposes to a keyboard and to assistive tech.
  *
  * Three separate holes lived here. Every row was a bare `role="treeitem"` with
- * no level, position or set size, and a folder's children are rendered as a
- * *sibling* of its row rather than inside it - so the accessibility tree was a
- * flat list with no hierarchy to speak of at all. The Delete key was wired in
+ * no level, position or set size, and a folder's children are rendered beside
+ * its row rather than inside it - so the accessibility tree was a flat list with
+ * no hierarchy to speak of at all. The Delete key was wired in
  * `useRovingTreeFocus` and preventDefault'ed, but only `RequestItem` rendered
  * the `data-tree-delete` control it clicks, so on a folder the key was swallowed
  * in silence. And closing a rename field with Enter or Escape unmounted the
@@ -157,24 +157,53 @@ describe("the tree's shape as assistive tech sees it", () => {
 		expect(requestRow("r-ping")).toHaveAttribute("aria-setsize", "2");
 	});
 
-	it("owns its children's group, which the DOM alone does not say", () => {
+	it("lists the visible rows flat, in order, with the hierarchy in their levels", () => {
 		renderTree();
 
-		const owns = collectionRow("acme").getAttribute("aria-owns");
-		expect(owns).toBeTruthy();
-		const group = document.getElementById(owns!);
-		// The group is a *sibling* of the row it belongs to, so without aria-owns
-		// nothing connects the two and every row reads at the same depth.
-		expect(group).toHaveAttribute("role", "group");
-		expect(group!.contains(collectionRow("billing"))).toBe(true);
-		expect(group!.contains(requestRow("r-ping"))).toBe(true);
+		// One flat list (#2543): no row nests another, so the levels above are the
+		// whole of the hierarchy - and nothing claims a group that is not there.
+		const rows = Array.from(
+			document.querySelectorAll<HTMLElement>('[role="tree"] [role="treeitem"]')
+		);
+		expect(
+			rows.map((row) => [
+				row.getAttribute("data-collection-id") ?? row.getAttribute("data-request-id"),
+				row.getAttribute("aria-level"),
+			])
+		).toEqual([
+			["acme", "1"],
+			["billing", "2"],
+			["r-ping", "2"],
+			["beta", "1"],
+		]);
+		expect(document.querySelector('[role="group"]')).toBeNull();
+		expect(document.querySelector("[aria-owns]")).toBeNull();
 	});
 
-	it("drops the ownership claim when the folder is collapsed", () => {
+	it("states expansion on every folder row, and renders nothing under a collapsed one", () => {
 		renderTree();
-		// Beta has no children rendered - claiming to own a group that is not in
-		// the DOM is a broken reference, not an empty one.
-		expect(collectionRow("beta")).not.toHaveAttribute("aria-owns");
+
+		expect(collectionRow("acme")).toHaveAttribute("aria-expanded", "true");
+		// Billing and Beta are collapsed: neither has a row under it, so Beta,
+		// the last root, is the last row.
+		expect(collectionRow("billing")).toHaveAttribute("aria-expanded", "false");
+		expect(collectionRow("beta")).toHaveAttribute("aria-expanded", "false");
+		const rows = document.querySelectorAll('[role="treeitem"]');
+		expect(rows[rows.length - 1]).toBe(collectionRow("beta"));
+	});
+
+	it("describes an expanded, empty folder through its row", () => {
+		useCollectionsStore.setState({ expandedCollectionIds: new Set(["acme", "beta"]) });
+		renderTree();
+
+		// The placeholder is not a treeitem, so a screen reader walking the tree
+		// never reaches it; the row names it, and it is said on focus instead.
+		const describedBy = collectionRow("beta").getAttribute("aria-describedby");
+		expect(describedBy).toBeTruthy();
+		const placeholder = document.getElementById(describedBy!);
+		expect(placeholder).toHaveTextContent("Empty collection");
+		expect(placeholder).not.toHaveAttribute("role");
+		expect(collectionRow("acme")).not.toHaveAttribute("aria-describedby");
 	});
 
 	it("ships a live region that is present and empty", () => {
@@ -211,6 +240,22 @@ describe("ArrowLeft leaves the group", () => {
 		fireEvent.keyDown(collectionRow("billing"), { key: "ArrowLeft" });
 
 		expect(document.activeElement).toBe(collectionRow("acme"));
+	});
+});
+
+describe("* expands the focused row's sibling folders", () => {
+	// The tree hands the key handler its rows rather than its DOM (#2543), so
+	// the expansion goes through the store by id rather than through a click on
+	// a toggle that might not be mounted.
+	it("opens every collapsed sibling and leaves other levels alone", () => {
+		renderTree();
+
+		collectionRow("acme").focus();
+		fireEvent.keyDown(collectionRow("acme"), { key: "*" });
+
+		const expanded = useCollectionsStore.getState().expandedCollectionIds;
+		expect([...expanded].sort()).toEqual(["acme", "beta"]);
+		expect(collectionRow("beta")).toHaveAttribute("aria-expanded", "true");
 	});
 });
 

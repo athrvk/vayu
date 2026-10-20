@@ -16,7 +16,7 @@
  */
 
 import { DropIndicator } from "@/components/shared";
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 
 /**
@@ -28,8 +28,8 @@ import type { TreeEntity } from "./drop-position";
  * otherwise be pixel-identical.
  *
  * A `span` positioned inside the row, not a node between rows: the roving-focus
- * walk and the group nesting are derived from the DOM, so an indicator element
- * that sat between treeitems would change the tree's shape mid-drag.
+ * walk reads the row order from the DOM, so an indicator element that sat
+ * between treeitems would change the tree's shape mid-drag.
  */
 export function RowDropIndicator({
 	edge,
@@ -48,7 +48,7 @@ export function RowDropIndicator({
  * attribute, so no handler has to be threaded through a row's prop list.
  */
 export function RowMoveControls({ entity }: { entity: TreeEntity }) {
-	const { dnd } = useCollectionTreeContext();
+	const { dnd } = useCollectionTreeHandlers();
 	if (!dnd) return null;
 	return (
 		<>

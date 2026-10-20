@@ -9,23 +9,31 @@
  */
 
 /**
- * The tree rows read everything shared from `CollectionTreeContext`, so a row
- * rendered without a provider has no handlers at all. React's own failure for
- * that is a `TypeError` deep inside the row ("onCollectionClick is not a
- * function", and only once something is clicked) or, worse, a row that renders
- * and silently does nothing. The context throws instead, naming what is
+ * The tree rows read everything shared from the collection tree contexts, so a
+ * row rendered without the providers has no handlers at all. React's own
+ * failure for that is a `TypeError` deep inside the row ("onCollectionClick is
+ * not a function", and only once something is clicked) or, worse, a row that
+ * renders and silently does nothing. Each context throws instead, naming what is
  * missing, so the mistake is caught at the first render.
  *
  * The `dnd` slot is asserted here for the same reason it exists: phase 3 (#367)
  * mounts the drag machinery into it, and a slot nothing reads is a slot that
  * can quietly disappear before it is used.
+ *
+ * The split itself (#2543) is asserted as well: each field lives in the context
+ * whose change rate suits it, because a field moved into the wrong one is a
+ * per-keystroke render of the whole tree that no behavioural test would notice.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "@testing-library/react";
 import CollectionItem from "./CollectionItem";
 import RequestItem from "./RequestItem";
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import {
+	useCollectionTreeFolderDraft,
+	useCollectionTreeHandlers,
+	useCollectionTreeState,
+} from "./context/CollectionTreeContext";
 import { withCollectionTreeContext } from "@/test/collection-tree-context";
 import type { Collection, Request } from "@/types";
 
@@ -78,7 +86,7 @@ afterEach(() => {
  */
 function expectThrowsWithoutProvider(renderRow: () => void) {
 	vi.spyOn(console, "error").mockImplementation(() => {});
-	expect(renderRow).toThrow(/must be rendered inside CollectionTreeContext.Provider/);
+	expect(renderRow).toThrow(/must be rendered inside CollectionTreeProviders/);
 }
 
 describe("collection tree rows require the provider", () => {
@@ -95,11 +103,11 @@ describe("collection tree rows require the provider", () => {
 	});
 });
 
-describe("the context carries the phase-3 dnd slot", () => {
-	it("exposes `dnd`, empty until the drag hook mounts into it", () => {
-		let seen: ReturnType<typeof useCollectionTreeContext> | null = null;
+describe("the handlers context carries the dnd slot", () => {
+	it("exposes `dnd` on the handlers, empty until the drag hook mounts into it", () => {
+		let seen: ReturnType<typeof useCollectionTreeHandlers> | null = null;
 		function Probe() {
-			seen = useCollectionTreeContext();
+			seen = useCollectionTreeHandlers();
 			return null;
 		}
 
@@ -110,5 +118,31 @@ describe("the context carries the phase-3 dnd slot", () => {
 		expect(seen).not.toBeNull();
 		expect("dnd" in seen!).toBe(true);
 		expect(seen!.dnd).toBeNull();
+	});
+});
+
+describe("each field lives in the context whose change rate suits it", () => {
+	it("keeps functions, tree data and the draft name in three separate contexts", () => {
+		let handlers: ReturnType<typeof useCollectionTreeHandlers> | null = null;
+		let state: ReturnType<typeof useCollectionTreeState> | null = null;
+		let draft: ReturnType<typeof useCollectionTreeFolderDraft> | null = null;
+		function Probe() {
+			handlers = useCollectionTreeHandlers();
+			state = useCollectionTreeState();
+			draft = useCollectionTreeFolderDraft();
+			return null;
+		}
+
+		render(withCollectionTreeContext(<Probe />, { newFolderName: "Typing" }));
+
+		// The draft name changes per keystroke and so is in neither of the others.
+		expect(draft).toEqual({ newFolderName: "Typing" });
+		expect("newFolderName" in state!).toBe(false);
+		expect("newFolderName" in handlers!).toBe(false);
+		// Handlers hold functions only (and the dnd slot); data is in the state.
+		expect("onFolderNameChange" in handlers!).toBe(true);
+		expect("allCollections" in state!).toBe(true);
+		expect("allCollections" in handlers!).toBe(false);
+		expect("onFolderNameChange" in state!).toBe(false);
 	});
 });

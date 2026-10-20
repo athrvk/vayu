@@ -29,9 +29,14 @@ import {
 import { restoreNotice } from "@/modules/trash";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
 import { useCopy } from "@/hooks/useCopy";
+import { useStableCallback } from "@/hooks/useStableCallback";
 import { collectionReference } from "@/lib/agent-reference";
 import { withoutBodyFileTrust } from "@/lib/file-trust";
-import type { CollectionTreeCrudSlice } from "./context/CollectionTreeContext";
+import type {
+	CollectionTreeCrudHandlers,
+	CollectionTreeCrudState,
+	CollectionTreeFolderDraft,
+} from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
 import type { Collection, Request } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
@@ -97,8 +102,12 @@ export interface DeleteConfirmTarget {
 
 export interface TreeCrud {
 	panel: TreeCrudPanel;
-	/** The slice every row reads, shaped for the tree context. */
-	rows: CollectionTreeCrudSlice;
+	/** What every row calls, shaped for the tree's handlers context. */
+	handlers: CollectionTreeCrudHandlers;
+	/** What every row reads, shaped for the tree's state context. */
+	rowState: CollectionTreeCrudState;
+	/** The new-folder field's text, shaped for its own context. */
+	folderDraft: CollectionTreeFolderDraft;
 }
 
 /**
@@ -106,6 +115,14 @@ export interface TreeCrud {
  * form state each one drives. Lifted out of `CollectionTree` so that component
  * is layout: eleven `useState` atoms and their handlers were ~360 of its lines,
  * and the rows only ever saw the result.
+ *
+ * **The handlers the rows call keep one identity** (#2543). Most of them close
+ * over a mutation object (new on every render) or the loaded collections, so a
+ * `useCallback` over them changed on every keystroke in the new-folder field and
+ * took every row in the tree with it. They go through `useStableCallback`
+ * instead: they run from events, after the render that holds the current values.
+ * `getCollectionActions` is the exception - a row calls it while rendering - and
+ * stays a `useCallback` that changes exactly when the collections it names do.
  */
 export function useTreeCrud({
 	collections,
@@ -229,57 +246,45 @@ export function useTreeCrud({
 		setNewFolderName(DEFAULT_FOLDER_NAME);
 	}, []);
 
-	const handleCreateSubfolder = useCallback(
-		async (parentId: string) => {
-			if (!newFolderName.trim() || createCollectionMutation.isPending) return;
+	const handleCreateSubfolder = useStableCallback(async (parentId: string) => {
+		if (!newFolderName.trim() || createCollectionMutation.isPending) return;
 
-			expandCollection(parentId);
+		expandCollection(parentId);
 
-			try {
-				await createCollectionMutation.mutateAsync({
-					name: newFolderName.trim(),
-					parentId: parentId,
-				});
-			} catch (error) {
-				reportFailure(error, "Couldn't create the collection");
-				return;
-			}
-			handleCancelSubfolder();
-		},
-		[
-			newFolderName,
-			createCollectionMutation,
-			expandCollection,
-			reportFailure,
-			handleCancelSubfolder,
-		]
-	);
+		try {
+			await createCollectionMutation.mutateAsync({
+				name: newFolderName.trim(),
+				parentId: parentId,
+			});
+		} catch (error) {
+			reportFailure(error, "Couldn't create the collection");
+			return;
+		}
+		handleCancelSubfolder();
+	});
 
-	const handleCreateRequest = useCallback(
-		async (collectionId: string) => {
-			if (createRequestMutation.isPending) return;
+	const handleCreateRequest = useStableCallback(async (collectionId: string) => {
+		if (createRequestMutation.isPending) return;
 
-			expandCollection(collectionId);
+		expandCollection(collectionId);
 
-			let request: Request | undefined;
-			try {
-				request = await createRequestMutation.mutateAsync({
-					collectionId: collectionId,
-					name: DEFAULT_REQUEST_NAME,
-					method: "GET",
-					url: "",
-				});
-			} catch (error) {
-				reportFailure(error, "Couldn't create the request");
-				return;
-			}
+		let request: Request | undefined;
+		try {
+			request = await createRequestMutation.mutateAsync({
+				collectionId: collectionId,
+				name: DEFAULT_REQUEST_NAME,
+				method: "GET",
+				url: "",
+			});
+		} catch (error) {
+			reportFailure(error, "Couldn't create the request");
+			return;
+		}
 
-			if (request) {
-				navigateToRequest(collectionId, request.id);
-			}
-		},
-		[createRequestMutation, expandCollection, navigateToRequest, reportFailure]
-	);
+		if (request) {
+			navigateToRequest(collectionId, request.id);
+		}
+	});
 
 	const handleRenameCollection = useCallback((collection: Collection) => {
 		setRenamingId(collection.id);
@@ -289,37 +294,34 @@ export function useTreeCrud({
 		setRenamingId(null);
 	}, []);
 
-	const handleRenameSubmit = useCallback(
-		async (collectionId: string, name: string) => {
-			// The name arrives trimmed and non-empty from the row's
-			// `useInlineRename`; this path still refuses a rename to the name the
-			// collection already has, which is a PUT with nothing in it.
-			const trimmedValue = name.trim();
-			const original = collections.find((c) => c.id === collectionId);
-			if (!trimmedValue || original?.name === trimmedValue) {
-				setRenamingId(null);
-				return;
-			}
+	const handleRenameSubmit = useStableCallback(async (collectionId: string, name: string) => {
+		// The name arrives trimmed and non-empty from the row's
+		// `useInlineRename`; this path still refuses a rename to the name the
+		// collection already has, which is a PUT with nothing in it.
+		const trimmedValue = name.trim();
+		const original = collections.find((c) => c.id === collectionId);
+		if (!trimmedValue || original?.name === trimmedValue) {
+			setRenamingId(null);
+			return;
+		}
 
-			startSaving();
-			try {
-				await updateCollectionMutation.mutateAsync({
-					id: collectionId,
-					name: trimmedValue,
-				});
-				completeSaveThenIdle();
-			} catch (error) {
-				const fallback = "Couldn't rename the collection";
-				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-			} finally {
-				// The field stays mounted until the PUT settles so a failure is reported
-				// over the typed name. Functional: a rename started on another row
-				// meanwhile keeps its field.
-				setRenamingId((current) => (current === collectionId ? null : current));
-			}
-		},
-		[collections, startSaving, updateCollectionMutation, completeSaveThenIdle, failSave]
-	);
+		startSaving();
+		try {
+			await updateCollectionMutation.mutateAsync({
+				id: collectionId,
+				name: trimmedValue,
+			});
+			completeSaveThenIdle();
+		} catch (error) {
+			const fallback = "Couldn't rename the collection";
+			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+		} finally {
+			// The field stays mounted until the PUT settles so a failure is reported
+			// over the typed name. Functional: a rename started on another row
+			// meanwhile keeps its field.
+			setRenamingId((current) => (current === collectionId ? null : current));
+		}
+	});
 
 	const handleStartRequestRename = useCallback((request: Request) => {
 		setRenamingRequestId(request.id);
@@ -329,45 +331,42 @@ export function useTreeCrud({
 		setRenamingRequestId(null);
 	}, []);
 
-	const handleRequestRenameSubmit = useCallback(
-		async (requestId: string, name: string) => {
-			const trimmedValue = name.trim();
+	const handleRequestRenameSubmit = useStableCallback(async (requestId: string, name: string) => {
+		const trimmedValue = name.trim();
 
-			// Find the original request to check if name actually changed
-			// Search through all collections to find the request
-			let originalRequest: Request | undefined;
-			for (const requests of requestsByCollection.values()) {
-				const found = requests.find((r) => r.id === requestId);
-				if (found) {
-					originalRequest = found;
-					break;
-				}
+		// Find the original request to check if name actually changed
+		// Search through all collections to find the request
+		let originalRequest: Request | undefined;
+		for (const requests of requestsByCollection.values()) {
+			const found = requests.find((r) => r.id === requestId);
+			if (found) {
+				originalRequest = found;
+				break;
 			}
+		}
 
-			// Empty name, or a name that did not change: nothing to save.
-			if (!trimmedValue || originalRequest?.name === trimmedValue) {
-				setRenamingRequestId(null);
-				return;
-			}
+		// Empty name, or a name that did not change: nothing to save.
+		if (!trimmedValue || originalRequest?.name === trimmedValue) {
+			setRenamingRequestId(null);
+			return;
+		}
 
-			startSaving();
-			try {
-				await updateRequestMutation.mutateAsync({
-					id: requestId,
-					name: trimmedValue,
-				});
-				completeSaveThenIdle();
-			} catch (error) {
-				const fallback = "Couldn't rename the request";
-				failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-			} finally {
-				// Same as the collection path: held until the PUT settles, and a rename
-				// started on another row meanwhile keeps its field.
-				setRenamingRequestId((current) => (current === requestId ? null : current));
-			}
-		},
-		[requestsByCollection, startSaving, updateRequestMutation, completeSaveThenIdle, failSave]
-	);
+		startSaving();
+		try {
+			await updateRequestMutation.mutateAsync({
+				id: requestId,
+				name: trimmedValue,
+			});
+			completeSaveThenIdle();
+		} catch (error) {
+			const fallback = "Couldn't rename the request";
+			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+		} finally {
+			// Same as the collection path: held until the PUT settles, and a rename
+			// started on another row meanwhile keeps its field.
+			setRenamingRequestId((current) => (current === requestId ? null : current));
+		}
+	});
 
 	/**
 	 * Duplicate a request, the whole record. Collections deliberately have no
@@ -377,71 +376,65 @@ export function useTreeCrud({
 	 * which read as a working clone and was not one, so it was removed rather
 	 * than left misleading.
 	 */
-	const handleDuplicateRequest = useCallback(
-		async (request: Request) => {
-			if (createRequestMutation.isPending) return;
-			// The list row this came from substituted a default for a column over
-			// the engine's field cap (issue #1485) - spreading it below would copy
-			// the substitution, not the request, with no sign anything was lost.
-			if (request.truncatedFields?.length) {
-				showToast({
-					message: `Can't duplicate "${request.name}": its ${request.truncatedFields.join(", ")} is too large to copy. Open it to fix or reduce it first.`,
-					variant: "error",
-				});
-				return;
-			}
-			try {
-				// Spread the source record rather than a hand-written field list
-				// (#1519): a named list drops every field added after it was
-				// written, which is how the previous version silently reset
-				// verifySSL, httpVersion and specOperation on every copy. `id`,
-				// `createdAt` and `updatedAt` are the only fields a copy must not
-				// carry; `order` is kept deliberately - it lands the copy directly
-				// *after* the source, the tie falling to `createdAt` (see
-				// `compareTreeOrder`, pinned to the engine's SQL).
-				const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
-				const copy = await createRequestMutation.mutateAsync({
-					...rest,
-					// The derived flag is stripped from a body the row has; a row
-					// without one copies none rather than throwing here.
-					...(rest.body ? { body: withoutBodyFileTrust(rest.body) } : {}),
-					name: `${request.name} (Copy)`,
-				});
-				openTab({ type: "request", entityId: copy.id });
-			} catch (error) {
-				reportFailure(error, "Couldn't duplicate the request");
-			}
-		},
-		[createRequestMutation, openTab, reportFailure, showToast]
-	);
+	const handleDuplicateRequest = useStableCallback(async (request: Request) => {
+		if (createRequestMutation.isPending) return;
+		// The list row this came from substituted a default for a column over
+		// the engine's field cap (issue #1485) - spreading it below would copy
+		// the substitution, not the request, with no sign anything was lost.
+		if (request.truncatedFields?.length) {
+			showToast({
+				message: `Can't duplicate "${request.name}": its ${request.truncatedFields.join(", ")} is too large to copy. Open it to fix or reduce it first.`,
+				variant: "error",
+			});
+			return;
+		}
+		try {
+			// Spread the source record rather than a hand-written field list
+			// (#1519): a named list drops every field added after it was
+			// written, which is how the previous version silently reset
+			// verifySSL, httpVersion and specOperation on every copy. `id`,
+			// `createdAt` and `updatedAt` are the only fields a copy must not
+			// carry; `order` is kept deliberately - it lands the copy directly
+			// *after* the source, the tie falling to `createdAt` (see
+			// `compareTreeOrder`, pinned to the engine's SQL).
+			const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = request;
+			const copy = await createRequestMutation.mutateAsync({
+				...rest,
+				// The derived flag is stripped from a body the row has; a row
+				// without one copies none rather than throwing here.
+				...(rest.body ? { body: withoutBodyFileTrust(rest.body) } : {}),
+				name: `${request.name} (Copy)`,
+			});
+			openTab({ type: "request", entityId: copy.id });
+		} catch (error) {
+			reportFailure(error, "Couldn't duplicate the request");
+		}
+	});
 
 	// Named, so the ⋯ menu's Delete and the row's hidden `data-tree-delete`
 	// control (the Delete key's target) open the very same dialog rather than
 	// being two copies of one object literal that can drift apart.
-	const handleCollectionDeleteClick = useCallback(
-		(id: string, name: string) => {
-			// Same walk `handleDeleteCollection` runs before the mutation - the
-			// affected set here is only used to filter the running mocks list,
-			// never to close tabs or touch the mutation itself.
-			const affected = collectDescendantEntityIds(id, collections, (cid) =>
-				getRequestsByCollection(cid).map((r) => r.id)
-			);
-			const runningMocks = mockServers
-				.filter((mock) => affected.has(mock.collectionId))
-				.map((mock) => ({
-					mockId: mock.mockId,
-					collectionName: mock.collectionName,
-					port: mock.port,
-				}));
-			setDeleteConfirm({
-				type: "collection",
-				id,
-				name,
-				runningMocks: runningMocks.length > 0 ? runningMocks : undefined,
-			});
-		},
-		[collections, getRequestsByCollection, mockServers]
-	);
+	const handleCollectionDeleteClick = useStableCallback((id: string, name: string) => {
+		// Same walk `handleDeleteCollection` runs before the mutation - the
+		// affected set here is only used to filter the running mocks list,
+		// never to close tabs or touch the mutation itself.
+		const affected = collectDescendantEntityIds(id, collections, (cid) =>
+			getRequestsByCollection(cid).map((r) => r.id)
+		);
+		const runningMocks = mockServers
+			.filter((mock) => affected.has(mock.collectionId))
+			.map((mock) => ({
+				mockId: mock.mockId,
+				collectionName: mock.collectionName,
+				port: mock.port,
+			}));
+		setDeleteConfirm({
+			type: "collection",
+			id,
+			name,
+			runningMocks: runningMocks.length > 0 ? runningMocks : undefined,
+		});
+	});
 
 	const handleRequestDeleteClick = useCallback((requestId: string, requestName: string) => {
 		setDeleteConfirm({ type: "request", id: requestId, name: requestName });
@@ -834,15 +827,8 @@ export function useTreeCrud({
 		]
 	);
 
-	const rows = useMemo<CollectionTreeCrudSlice>(
+	const handlers = useMemo<CollectionTreeCrudHandlers>(
 		() => ({
-			renamingId,
-			renamingRequestId,
-			deletingCollectionId,
-			deletingRequestId,
-			creatingSubfolder,
-			newFolderName,
-			isCreatingSubfolder: isCreatingCollection,
 			onCollectionClick: handleCollectionClick,
 			onCollectionToggle: handleCollectionToggle,
 			onRequestClick: handleRequestClick,
@@ -861,13 +847,6 @@ export function useTreeCrud({
 			onCancelSubfolder: handleCancelSubfolder,
 		}),
 		[
-			renamingId,
-			renamingRequestId,
-			deletingCollectionId,
-			deletingRequestId,
-			creatingSubfolder,
-			newFolderName,
-			isCreatingCollection,
 			handleCollectionClick,
 			handleCollectionToggle,
 			handleRequestClick,
@@ -886,5 +865,29 @@ export function useTreeCrud({
 		]
 	);
 
-	return { panel, rows };
+	const rowState = useMemo<CollectionTreeCrudState>(
+		() => ({
+			renamingId,
+			renamingRequestId,
+			deletingCollectionId,
+			deletingRequestId,
+			creatingSubfolder,
+			isCreatingSubfolder: isCreatingCollection,
+		}),
+		[
+			renamingId,
+			renamingRequestId,
+			deletingCollectionId,
+			deletingRequestId,
+			creatingSubfolder,
+			isCreatingCollection,
+		]
+	);
+
+	const folderDraft = useMemo<CollectionTreeFolderDraft>(
+		() => ({ newFolderName }),
+		[newFolderName]
+	);
+
+	return { panel, handlers, rowState, folderDraft };
 }

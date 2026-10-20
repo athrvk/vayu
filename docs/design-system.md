@@ -2117,8 +2117,11 @@ dropdown and the right-click menu explain a gate the same way. See
 #1360): one list, two menus. `row-actions.ts` holds the one rule about the
 list's shape - the first destructive action gets a separator above it -
 and `RowActionBody` holds what an item draws, so the `⋯` dropdown and the
-context menu cannot describe a row's actions differently. Collection rows,
-request rows, environment rows and history rows all take it.
+context menu cannot describe a row's actions differently. Environment rows and
+history rows take it. The collection tree takes one menu for all its rows
+instead (`CollectionTreeContextMenu`, #2543): the tree is the trigger, the row
+comes from the click, and the items are drawn by the same
+`RowContextMenuContent`.
 
 **A row that names an entity offers "Copy for agent" (issue #2047).** It is the
 standard copy item: `Copy` glyph, the label "Copy for agent", and the reference
@@ -2213,15 +2216,17 @@ header band, body below it.
 - **Non-row content inside a level takes a child row's left edge.** A
   placeholder, an inline form, a loading skeleton and an inline error all stand
   in for the rows that are not there, so they start where those rows would:
-  `childInsetPx(depth)` in the collections tree, the named `GROUP_CHILD_INSET`
-  in the two-level variables tree, and `rowInsetPx(0)` - a root row's own inset,
-  there being no parent row to be a child of - in the GraphQL schema explorer,
-  whose search results are one flat level. Each carrying its own
-  `px-*` is how one expanded folder came to show up to five different left
-  edges, with "Empty collection" left of its own parent's label (#1372). An empty
-  level also has to _say_ so: its group holds no `treeitem`, so the folder row
-  carries `aria-describedby` pointing at the placeholder rather than the
-  placeholder taking a role inside a group that owns rows.
+  in the collections tree they are rows of their own at the children's depth
+  (`flattenVisibleRows`), so `rowInsetPx(depth)` places them; the named
+  `GROUP_CHILD_INSET` in the two-level variables tree; and `rowInsetPx(0)` - a
+  root row's own inset, there being no parent row to be a child of - in the
+  GraphQL schema explorer, whose search results are one flat level. Each
+  carrying its own `px-*` is how one expanded folder came to show up to five
+  different left edges, with "Empty collection" left of its own parent's label
+  (#1372). An empty
+  level also has to _say_ so: nothing under the folder is a `treeitem`, so the
+  folder row carries `aria-describedby` pointing at the placeholder rather than
+  the placeholder taking a role in a tree whose children are rows.
 - **A group heading is a label, not a placeholder - and it follows the rule
   anyway.** The schema explorer's `Query` / `Mutation` / `Types` eyebrows were
   the one case #1372 left open, because an uppercase label over a flat group
@@ -2383,17 +2388,42 @@ The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is
 one tab stop**. Previously every row and every control in it was a stop - a
 workspace with 2 collections and 4 requests cost 17 presses to tab past.
 
-- Container: `role="tree"`. Rows: `role="treeitem"`, `aria-expanded` on
-  collections, `aria-selected` for the open entity.
+- Container: `role="tree"`, holding every visible row as **one flat list** in
+  the order `flattenVisibleRows` (`tree-rows.ts`) gives it (#2543): no row
+  renders another, and there is no `role="group"`. Rows: `role="treeitem"`,
+  `aria-expanded` on collections, `aria-selected` for the open entity. The new
+  folder form and the "Empty collection" line are rows of the list too, but not
+  treeitems.
+- **The pitch is per row.** Every row is `h-8` and its wrapper carries the gap
+  above it: `mt-0.5` between rows, `mt-1` above the first row inside an expanded
+  folder (`rowSpacingAbove`) - the spacing the nested groups' `space-y-0.5` and
+  `mt-1` drew, said from depth alone. The wrapper also carries the row's height
+  (`h-8`, `h-10` for the new-folder form, `rowHeightUnits`), so where every row
+  sits is arithmetic over spacing units rather than a measurement.
+- **Only the rows in view are in the DOM** (#2543). The drawer body mounts the
+  rows it can show plus an overscan, and one `aria-hidden` spacer of the same
+  units stands in for each run it skips, so the scrollbar is the whole list's.
+  The treeitems in the DOM are therefore not the tree's rows: `aria-posinset`,
+  `aria-setsize` and `aria-level` come from the full list and stay true of an
+  unmounted neighbour. The rows that something holds stay mounted wherever the
+  drawer is scrolled - the tab stop and the rows focus can be handed to from it,
+  the new-folder form, the row being dragged. A list under 100 rows, or one in
+  an environment with no layout, mounts everything.
 - Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
+- **The keys walk the rows, not the DOM.** `CollectionTree` hands the hook its
+  visible rows as a `TreeRowModel`, so End, Home, the arrows, a typeahead and
+  `*` reach rows that are scrolled away; moving focus scrolls the drawer to the
+  row first, mounts it, and only then focuses it. The variables sidebar and the
+  schema explorer pass no model and are walked through their mounted rows.
 - Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
   then moves to the parent, Enter/Space opens, **F2** renames, **Delete /
   Backspace** deletes, **Shift+F10 / Menu / Shift+Enter** opens row actions,
   **typeahead** jumps to the next row whose name starts with what you type,
   **`*`** expands every folder at the focused row's level.
 - **Right-click is the pointer equivalent of Shift+F10 / Menu / Shift+Enter**
-  (issue #1360): it opens the same row-actions list through `RowContextMenu`
-  and focuses the row on the way past, so Escape returns focus there rather
+  (issue #1360): it opens the same row-actions list - through the tree's one
+  `CollectionTreeContextMenu` in the collection tree, `RowContextMenu` on the
+  variables sidebar's rows - and focuses the row on the way past, so Escape returns focus there rather
   than dropping it to `<body>` - the tree still has to hold its one tab stop
   after the menu closes, whichever way it opened.
 - **The second binding on those two is what a Mac keyboard can reach.** The key
@@ -2466,24 +2496,35 @@ before, so every click affordance survives - and the completed drag swallows the
 one click the browser fires after it, or the row it was just dropped on would
 open. Never a timer: `RequestItem.test.tsx` pins that opening is synchronous.
 
-**A row's pointer handlers must ignore what its own menu sends them.** The ⋯
-menu is a React child of the row and a *portal* in the DOM, and React bubbles
-synthetic events through the component tree - so a press on "Delete" arrives at
-the row's `onPointerDown`. Taking it captures the pointer on the row, the
-capture retargets the `pointerup` the menu item was waiting for, and every
-action in every row menu stops working while looking perfectly normal.
-`closest("[data-tree-menu]")` does not catch it (portalled content is not inside
-its trigger); a DOM containment check - `currentTarget.contains(target)` - does,
-and is the guard on every pointer handler a row spreads.
+**The drag's pointer handlers must ignore what a row's menu sends them.** They
+sit on the `role="tree"` element, one set for every row (#2543), and a press
+resolves its row from the rows model. The ⋯ menu is a React child of the row and
+a *portal* in the DOM, and React bubbles synthetic events through the component
+tree - so a press on "Delete" arrives at the tree's `onPointerDown`. Taking it
+would capture the pointer, the capture retargets the `pointerup` the menu item
+was waiting for, and every action in every row menu stops working while looking
+perfectly normal. `closest("[data-tree-menu]")` does not catch it (portalled
+content is not inside its trigger); a DOM containment check -
+`currentTarget.contains(target)` - does, and is the guard on every one of those
+handlers.
+
+**The capture is the tree's, and it is taken when the press becomes a drag.**
+On the tree rather than the row, so a source row the drawer has scrolled out of
+the window cannot take the gesture with it; at the threshold rather than the
+press, because a captured press clicks the capturing element and a click on a
+row has to land on the row's own controls. A press carried out of the tree
+before it is a drag is dropped, since its release would land where the tree
+never hears it.
 
 **Drop indicators are classes on rows that already exist.** A line between two
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
 that row's own depth - the depth is the only thing separating "after this
 collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: every row in
-document order *is* the tree's row list, so an indicator node between rows would
-join it and change the tree's shape mid-drag - a row with no level, sitting
-between a folder and its children. A row that cannot take
+reuses the selected-row ring. Nothing new gets `role="treeitem"`: an indicator
+node between rows would join the tree's rows and change its shape mid-drag - a
+row with no level, sitting between a folder and its children. The row being
+dragged stays mounted however far the drawer auto-scrolls from it, so the source
+keeps its place and its dimmed state for the whole gesture. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 
@@ -2517,6 +2558,10 @@ actually removes the row moves focus to the **next row in the deleted row's own
 set**, or to the **parent** when that row was the last in it: chosen while the
 row is still on screen, since afterwards the DOM cannot say what followed it.
 Focus moves through `focusTreeRow`, so the tree's one tab stop travels with it.
+In the windowed collection tree the successor, the parent and the row before
+are kept mounted beside the row holding the tab stop, and for a commit after it
+leaves, so the answer read from the mounted rows is the one the whole list
+gives (`rowsAroundFocus`).
 
 **A tree that runs out of rows still has to name somewhere.** The rules above
 answer for every row but one: a root falls back to the root before it, so it
@@ -2550,18 +2595,24 @@ the variables sidebar, which grew its Delete key in #1217, after the rule was
 written - reach it through the one `useDeleteRefocus`, which each tells only
 which attribute identifies its rows and where its last resort is (#1279).
 
-**Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
-states plainly - `[role="treeitem"]` in document order is exactly the rows a
-user can see, since collapsed subtrees are not rendered. Parentage it does not:
-a row's children are a **sibling** of that row inside a shared wrapper, not
-nested within it, so `closest()` finds nothing and a walk up the ancestors takes
-whichever treeitem an ancestor holds first - a group's own first row, which is a
+**Order comes from the rows; hierarchy comes from `aria-level`.** In the
+variables sidebar and the schema explorer the DOM states order plainly -
+`[role="treeitem"]` in document order is exactly the rows a user can see, since
+collapsed subtrees are not rendered. The collection tree mounts only a window of
+its rows, so its order comes from the list `flattenVisibleRows` builds, handed
+to the hook as a `TreeRowModel`, and its levels with it. Parentage the DOM does
+not state in any of them: a row's children are rendered **beside** it, never
+nested within it - in the
+collection tree every row is a sibling in one flat list - so `closest()` finds
+nothing. When the children sat in a shared wrapper, a walk up the ancestors took
+whichever treeitem an ancestor held first - a group's own first row, which is a
 preceding *sibling* of every row after it. Under that walk Left moved to the top
 of a list instead of out of it, and self-corrected on the next press, so it read
 as hesitation rather than as breakage (#1237). One function answers the question
-now - `parentRow` in `tree-focus.ts`, the nearest row above with a smaller
-level - and both the Left key and the delete refocus read it, so there is one
-description of this tree's shape rather than two that can drift.
+now - `parentIndex` in `tree-focus.ts`, the nearest row above with a smaller
+level, which `parentRow` applies to a list of mounted rows - and both the Left
+key and the delete refocus read it, so there is one description of this tree's
+shape rather than two that can drift.
 
 **A consumer of the hook therefore has to announce `aria-level` on every row**,
 and all three do. It is not only for assistive tech: a tree that omits it is a
@@ -2570,14 +2621,14 @@ schema explorer is why the level and not the shape is the source - it renders
 every row, at every depth, as a direct child of the tree, so no DOM rule can
 answer for it at all.
 
-**That same shape is why the hierarchy has to be stated, not inferred.** A
-sibling group is not a child group, so the accessibility tree read as a flat
-list of rows. Every row carries `aria-level` (1-based), `aria-posinset` and
-`aria-setsize`; the children wrapper is `role="group"` and the folder row claims
-it with `aria-owns`, which buys the ownership without moving the DOM the
-roving-focus order and the hit-area rules depend on. Folders and requests inside
-one group are **one** set - the requests continue the folders' numbering, or two
-adjacent rows both announce "1 of 1".
+**That same shape is why the hierarchy has to be stated, not inferred.** Rows
+that are siblings in the DOM read as a flat list of rows. Every row carries
+`aria-level` (1-based), `aria-posinset` and `aria-setsize`, and in the
+collection tree those three are the whole of the hierarchy: a flat list holds no
+`role="group"` to own a folder's children, so there is none, and no `aria-owns`
+tying one to its folder (both went with the nesting, #2543). Folders and
+requests under one parent are **one** set - the requests continue the folders'
+numbering, or two adjacent rows both announce "1 of 1".
 
 `CollectionTree` also renders one polite live region (`data-tree-live`). It
 shipped empty, ahead of anything that wrote to it, on purpose: a live region
