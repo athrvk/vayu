@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -82,48 +83,58 @@ const vayu::ScriptResult& post) {
  * ran". The message is what separates the two: a thrown script, a timeout and a
  * refused `pm.request` write-back all carry one, and a failed expectation
  * carries none. Reading `success` alone would report every failed assertion as
- * a step that never ran, and end the iteration on it.
+ * a step that never ran.
  */
 bool script_errored (const vayu::ScriptResult& result) {
     return !result.success && !result.error_message.empty ();
 }
 
 /**
- * Decide what one exchange amounts to.
+ * Decide what one exchange amounts to, onto @p record's outcome, error and
+ * `errored_by_script`.
  *
  * The order is deliberate: a step that did not complete is `Errored` whatever
  * its scripts reported, and a script that threw is `Errored` rather than
  * `Failed`, because "the assertion did not hold" and "the assertion never ran"
  * are different facts and only the first one means the run learned something.
+ * The same order is what makes `errored_by_script` mean "the exchange
+ * completed": the transport check runs first.
  */
-StepOutcome classify_step (const vayu::http::routes::ExchangeOutcome& exchange,
-std::string& error) {
+void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRecord& record) {
     if (exchange.response.has_error ()) {
-        error = exchange.response.error_message;
-        return StepOutcome::Errored;
+        record.outcome = StepOutcome::Errored;
+        record.error   = exchange.response.error_message;
+        return;
     }
     if (script_errored (exchange.pre_script_result)) {
-        error = "Pre-request script failed - " + exchange.pre_script_result.error_message;
-        return StepOutcome::Errored;
+        record.outcome = StepOutcome::Errored;
+        record.error =
+        "Pre-request script failed - " + exchange.pre_script_result.error_message;
+        record.errored_by_script = true;
+        return;
     }
     // After the script check and before everything that reads a response: a
     // script that asked to skip and then threw did both, and the throw is the
     // fact worth reporting. A skip itself is not a failure and carries no
     // error - but it is never a pass either (issue #180).
     if (!exchange.sent) {
-        return StepOutcome::Skipped;
+        record.outcome = StepOutcome::Skipped;
+        return;
     }
     if (script_errored (exchange.post_script_result)) {
-        error = "Test script failed - " + exchange.post_script_result.error_message;
-        return StepOutcome::Errored;
+        record.outcome = StepOutcome::Errored;
+        record.error = "Test script failed - " + exchange.post_script_result.error_message;
+        record.errored_by_script = true;
+        return;
     }
     if (auto failed = describe_failed_tests (
         exchange.pre_script_result, exchange.post_script_result);
     !failed.empty ()) {
-        error = failed;
-        return StepOutcome::Failed;
+        record.outcome = StepOutcome::Failed;
+        record.error   = failed;
+        return;
     }
-    return StepOutcome::Passed;
+    record.outcome = StepOutcome::Passed;
 }
 
 /**
@@ -246,6 +257,11 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     // `0` that reads as "row 1 of a data file" in the step list.
     if (record.data_row_index) {
         trace["dataRowIndex"] = *record.data_row_index;
+    }
+    // Absent, not `0`, on every row but the one an error ended its iteration
+    // at, so a row of a run where nothing was lost reads as it always has.
+    if (record.steps_not_run > 0) {
+        trace["stepsNotRun"] = record.steps_not_run;
     }
     // The *same object* the SSE frame carries, on the node design mode already
     // writes (`execution.cpp`'s `record_design_result`) - so the step list, the
@@ -420,6 +436,9 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (record.data_row_index) {
         data["dataRowIndex"] = *record.data_row_index;
     }
+    if (record.steps_not_run > 0) {
+        data["stepsNotRun"] = record.steps_not_run;
+    }
     // On the frame as well as on the stored row, so a run being watched shows
     // its verdicts as they happen rather than only once the report is written.
     // Same terms as `dataRowIndex`: absent here is absent there.
@@ -459,6 +478,11 @@ bool read_fail_on_schema_error (const nlohmann::json& config) {
     return field != config.end () && field->is_boolean () && field->get<bool> ();
 }
 
+bool read_stop_on_error (const nlohmann::json& config) {
+    auto field = config.find ("stopOnError");
+    return field != config.end () && field->is_boolean () && field->get<bool> ();
+}
+
 std::string describe_schema_failure (const ValidationVerdict& verdict) {
     const size_t total = verdict.failures_total > 0 ? verdict.failures_total :
                                                       verdict.failures.size ();
@@ -490,7 +514,10 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         { "steps_executed", inputs.steps_executed }, { "passed", inputs.passed },
         { "failed", inputs.failed }, { "skipped", inputs.skipped },
         { "errored", inputs.errored }, { "steps_stored", inputs.steps_stored },
-        { "steps_dropped", inputs.steps_dropped } };
+        { "steps_dropped", inputs.steps_dropped }, { "steps_not_run", inputs.steps_not_run },
+        // Stored beside the counts it qualifies, as `failOnSchemaError` is
+        // beside its tally: "1 errored, 0 not run" is a different run with it.
+        { "stop_on_error", inputs.stop_on_error } };
     // `control.transaction`'s own percentiles (issue #1515) - absent for a
     // run that declared none, matching `coverage`'s own absent-when-inactive
     // rule above.
@@ -564,6 +591,7 @@ struct StepContext {
     size_t iteration            = 0;
     size_t iteration_count      = 0;
     bool fail_on_schema_error   = false;
+    bool stop_on_error          = false;
     size_t max_trace_body_bytes = 0;
     /// `maxDesignResponseBodyBytes`, read once for the run (issue #1157).
     size_t max_response_bytes = 0;
@@ -713,7 +741,7 @@ ScenarioSummaryInputs& summary) {
         record.outcome = StepOutcome::Errored;
         record.error   = data_bind_error;
     } else {
-        record.outcome = classify_step (exchange, record.error);
+        classify_step (exchange, record);
     }
     record.status_code = exchange.response.status_code;
     record.status_text = exchange.response.status_text;
@@ -759,12 +787,14 @@ ScenarioSummaryInputs& summary) {
 }
 
 /**
- * Where this iteration goes next, decided before the row is written: an
- * instruction that cannot be honoured is this step's error, and the record has
- * to say so.
+ * Where this iteration goes after a step that did not error, decided before
+ * the row is written: an instruction that cannot be honoured is this step's
+ * error, and the record has to say so while the row and the SSE event are
+ * still ahead of us. An errored step's own instruction is never read here
+ * (issue #2526): it came from a script that did not finish.
  *
- * @return the position the iteration continues at; @p end_iteration says whether
- *         it continues at all.
+ * @return the position the iteration continues at; @p end_iteration is set
+ *         when it does not continue at all.
  */
 size_t decide_next_step (const vayu::http::routes::ExchangeOutcome& exchange,
 const ScenarioStepIndex& step_index,
@@ -774,61 +804,73 @@ size_t steps_this_iteration,
 size_t max_steps_per_iteration,
 StepRecord& record,
 bool& end_iteration) {
-    // Where this iteration goes next, decided before the row is
-    // written: an instruction that cannot be honoured is this
-    // step's failure, so it has to reach `record.outcome` while the
-    // row and the SSE event are still ahead of us.
     size_t next_position = position + 1;
-    if (!end_iteration) {
-        // The test script ran later, so its instruction wins over
-        // the pre-request script's - "last call wins", across the
-        // two scripts as within one. A skip comes only from the
-        // pre-request script; the binding throws in a test script.
-        const auto& control = exchange.post_script_result.control.kind !=
-        vayu::ScriptControl::Kind::None ?
-        exchange.post_script_result.control :
-        exchange.pre_script_result.control;
+    // The test script ran later, so its instruction wins over the
+    // pre-request script's - "last call wins", across the two scripts as
+    // within one. A skip comes only from the pre-request script; the binding
+    // throws in a test script.
+    const auto& control =
+    exchange.post_script_result.control.kind != vayu::ScriptControl::Kind::None ?
+    exchange.post_script_result.control :
+    exchange.pre_script_result.control;
 
-        switch (control.kind) {
-        case vayu::ScriptControl::Kind::None:
-        case vayu::ScriptControl::Kind::Skip:
-            // A skip has already happened - the exchange sent
-            // nothing - and skipping one step is not a reason to
-            // stop walking the plan.
-            break;
-        case vayu::ScriptControl::Kind::EndIteration:
+    switch (control.kind) {
+    case vayu::ScriptControl::Kind::None:
+    case vayu::ScriptControl::Kind::Skip:
+        // A skip has already happened - the exchange sent nothing - and
+        // skipping one step is not a reason to stop walking the plan.
+        break;
+    case vayu::ScriptControl::Kind::EndIteration: end_iteration = true; break;
+    case vayu::ScriptControl::Kind::Next:
+        if (steps_this_iteration >= max_steps_per_iteration) {
+            record.outcome = StepOutcome::Errored;
+            record.error   = "Iteration exceeded maxStepsPerIteration (" +
+            std::to_string (max_steps_per_iteration) +
+            ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
             end_iteration = true;
             break;
-        case vayu::ScriptControl::Kind::Next:
-            if (steps_this_iteration >= max_steps_per_iteration) {
-                record.outcome = StepOutcome::Errored;
-                record.error   = "Iteration exceeded maxStepsPerIteration (" +
-                std::to_string (max_steps_per_iteration) +
-                ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
-                end_iteration = true;
-            } else {
-                // Three answers, not two: a target may also *be* the stop
-                // form - `setNextRequest("null")`, which Postman's runner
-                // reads as the real `null` this switch's other arm handles.
-                switch (auto next = resolve_next_step (step_index, control.target);
-                next.kind) {
-                case NextStepResolution::Kind::Unresolved:
-                    record.outcome = StepOutcome::Errored;
-                    record.error   = next.error;
-                    end_iteration  = true;
-                    break;
-                case NextStepResolution::Kind::EndIteration:
-                    end_iteration = true;
-                    break;
-                case NextStepResolution::Kind::Step:
-                    next_position = next.index;
-                    break;
-                }
-            }
-            break;
         }
+        // Three answers, not two: a target may also *be* the stop form -
+        // `setNextRequest("null")`, which Postman's runner reads as the real
+        // `null` this switch's other arm handles.
+        switch (auto next = resolve_next_step (step_index, control.target); next.kind) {
+        case NextStepResolution::Kind::Unresolved:
+            record.outcome = StepOutcome::Errored;
+            record.error   = next.error;
+            end_iteration  = true;
+            break;
+        case NextStepResolution::Kind::EndIteration:
+            end_iteration = true;
+            break;
+        case NextStepResolution::Kind::Step: next_position = next.index; break;
+        }
+        break;
     }
     return next_position;
+}
+
+/**
+ * Whether an errored step ends its iteration (issue #2526). A script that threw
+ * after the exchange completed does not, unless the run asked for
+ * `stopOnError`: the request was sent and answered, so the steps after it have
+ * what they need, which is Postman's default. Everything else that errors - a
+ * transport failure, a row that would not bind - leaves later steps standing on
+ * a response that never arrived.
+ */
+bool errored_step_ends_iteration (const StepRecord& record, bool stop_on_error) {
+    return stop_on_error || !record.errored_by_script;
+}
+
+/**
+ * The plan positions after @p position that this iteration has not attempted:
+ * what an error at @p position cost it. A position an earlier backward jump
+ * already ran is not a loss, and one before @p position that a forward jump
+ * passed over was the script's decision.
+ */
+size_t count_steps_not_run (const std::vector<bool>& attempted, size_t position) {
+    const auto after =
+    std::next (attempted.begin (), static_cast<std::ptrdiff_t> (position + 1));
+    return static_cast<size_t> (std::count (after, attempted.end (), false));
 }
 
 /**
@@ -997,8 +1039,11 @@ StepRecord& record) {
  * A script may send it backwards, forwards or out early, so the position is a
  * variable and the loop is bounded by the per-iteration budget rather than by
  * the plan's length.
+ *
+ * @return the plan positions an errored step's end of the iteration cost it
+ *         (`count_steps_not_run`); 0 for an iteration that ended any other way.
  */
-void run_iteration (vayu::runtime::ScriptEngine& script_engine,
+size_t run_iteration (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::CookieJar* cookie_jar,
 const std::string& cookie_scope,
 vayu::http::routes::ScriptVariableScopes& scopes,
@@ -1013,6 +1058,7 @@ TransactionHistograms& transactions) {
     size_t position             = 0;
     size_t steps_this_iteration = 0;
     std::deque<std::string> recent_steps;
+    std::vector<bool> attempted (plan.steps.size (), false);
 
     while (position < plan.steps.size ()) {
         // Checked per step, not per iteration: a 50-step iteration
@@ -1029,6 +1075,7 @@ TransactionHistograms& transactions) {
         cookie_jar, cookie_scope, scopes, step_ctx, step, exchange);
 
         ++steps_this_iteration;
+        attempted[position] = true;
         recent_steps.push_back (step.name);
         if (recent_steps.size () > CYCLE_TRAIL_LENGTH) {
             recent_steps.pop_front ();
@@ -1059,30 +1106,35 @@ TransactionHistograms& transactions) {
             run_step_between (base, step, exchange, record);
         }
 
-        bool end_iteration = record.outcome == StepOutcome::Errored;
-        const size_t next_position =
-        decide_next_step (exchange, step_index, recent_steps, position,
-        steps_this_iteration, max_steps_per_iteration, record, end_iteration);
+        bool end_iteration   = false;
+        size_t next_position = position + 1;
+        if (record.outcome == StepOutcome::Errored) {
+            end_iteration = errored_step_ends_iteration (record, base.stop_on_error);
+        } else {
+            next_position = decide_next_step (exchange, step_index, recent_steps, position,
+            steps_this_iteration, max_steps_per_iteration, record, end_iteration);
+        }
+        // Read after `decide_next_step`, which can itself error the step.
+        const bool ended_by_error = end_iteration && record.outcome == StepOutcome::Errored;
+        if (ended_by_error) {
+            record.steps_not_run = count_steps_not_run (attempted, position);
+        }
 
         store_step_record (step_ctx, step, exchange, record, coverage, summary, store);
 
-        if (record.outcome == StepOutcome::Errored) {
-            // The iteration is over - a step that did not complete
-            // leaves the ones after it standing on state that never
-            // arrived. The run continues with the next iteration;
-            // continue-on-failure is deliberately not invented ahead of
-            // demand (design doc, "Deliberately left open").
+        if (ended_by_error) {
             vayu::utils::log_warning ("run",
             "Scenario run: iteration " + std::to_string (base.iteration) +
             " ended at step '" + record.step_name + "' - " + record.error,
             { { "runId", base.context->run_id } });
-            break;
+            return record.steps_not_run;
         }
         if (end_iteration) {
             break;
         }
         position = next_position;
     }
+    return 0;
 }
 
 /**
@@ -1201,6 +1253,8 @@ RunManager& manager) {
     // value re-read per step could not change but could be got wrong twice.
     const bool fail_on_schema_error = read_fail_on_schema_error (context->config);
     summary.fail_on_schema_error = fail_on_schema_error;
+    const bool stop_on_error     = read_stop_on_error (context->config);
+    summary.stop_on_error        = stop_on_error;
 
     // Run-scoped, like every other read-once property above: a collection run
     // is one run, and steps that left the machine by different routes because
@@ -1347,12 +1401,12 @@ RunManager& manager) {
             // above rather than by the plan's length.
             const StepContext step_ctx{ context, execution, schema_index,
                 transport, default_headers, cookie_scope, data_rows,
-                data_row_index, iteration, asked.iterations,
-                fail_on_schema_error, max_trace_body_bytes, max_response_bytes,
+                data_row_index, iteration, asked.iterations, fail_on_schema_error,
+                stop_on_error, max_trace_body_bytes, max_response_bytes,
                 max_element_body_bytes, element_spans, controller_state };
-            run_iteration (script_engine, cookie_jar, cookie_scope, scopes,
-            step_ctx, plan, step_index, max_steps_per_iteration, coverage,
-            summary, store, transactions);
+            summary.steps_not_run += run_iteration (script_engine, cookie_jar,
+            cookie_scope, scopes, step_ctx, plan, step_index,
+            max_steps_per_iteration, coverage, summary, store, transactions);
 
             if (!context->should_stop) {
                 ++summary.iterations_completed;

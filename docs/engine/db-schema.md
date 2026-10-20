@@ -1362,7 +1362,8 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
     "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
-    "steps_stored": 6, "steps_dropped": 0
+    "steps_stored": 6, "steps_dropped": 0, "steps_not_run": 0,
+    "stop_on_error": false
   }
 }
 ```
@@ -1370,7 +1371,16 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
 `total_requests` is the number of **step executions**, and it is here precisely
 because the report would otherwise count the rows that survived
 `maxScenarioStoredSteps` and call that the run's size. `steps_dropped` is what
-that cap thinned - always successes, never a failure.
+that cap thinned - always successes, never a failure. `steps_not_run` is the
+plan positions errors cost (issue #2526): for every iteration an `errored` step
+ended, the positions after it the iteration had not attempted; an iteration
+that `setNextRequest(null)`, a jump or a stop ended adds nothing.
+`stop_on_error` is the run's `stopOnError` as it ran. The report serves both as
+`scenario.stepsNotRun` / `scenario.stopOnError`, and only when stored: a summary
+written before the issue, and a scenario load run's, carries neither. The step
+row that ended an iteration short of the plan's end carries the same
+per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
+row.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
@@ -1443,7 +1453,10 @@ snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count plus the file's name and content hash (`dataFileName`
 and `dataFileHash`, each absent when the run named no file; issue #2051), never
 its path. The writer is `vayu::core::build_scenario_manifest`
-(`core/scenario_plan.cpp`).
+(`core/scenario_plan.cpp`). Only the `scenario` block is replaced: the run's
+top-level options (`environmentId`, `failOnSchemaError`, `stopOnError`,
+`thresholds` and the rest) stay beside it as sent, which is what keeps two runs
+that differ only in one of them from reading as the same run.
 
 **`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
 run's snapshot also carries the run's resolved default-header decision at
