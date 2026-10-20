@@ -351,6 +351,23 @@ const std::vector<std::string>& ids) {
     return removed;
 }
 
+RunHistoryCleared Database::clear_runs () {
+    std::vector<std::string> ids;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        ids = impl_->storage.select (&Run::id);
+    }
+
+    RunHistoryCleared cleared;
+    cleared.deleted_ids = remove_unexempt_runs (ids);
+    RunFilter pinned;
+    pinned.baseline     = true;
+    cleared.kept_pinned = count_runs (pinned);
+    vayu::utils::log_info ("db", "Cleared run history",
+    { { "count", cleared.deleted_ids.size () }, { "keptPinned", cleared.kept_pinned } });
+    return cleared;
+}
+
 size_t Database::reconcile_orphaned_runs () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 

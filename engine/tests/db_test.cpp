@@ -1412,6 +1412,70 @@ TEST_F (DatabaseTest, PruneRunsConfiguredReadsTheDesignCapFromItsOwnKey) {
 }
 
 // ============================================================================
+// Clear run history (clear_runs, #2429)
+// ============================================================================
+
+// The clear keeps what retention keeps: a pin is a promise, and a run still in
+// flight has a writer the delete would race. Everything else goes, every kind.
+TEST_F (DatabaseTest, ClearRunsKeepsPinnedAndInFlightRunsAndCascadesTheRest) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (db, "load", 1000);
+    seed_run_with_children (
+    db, "scenario", 2000, vayu::RunStatus::Failed, vayu::RunType::Scenario);
+    seed_run_with_children (db, "send", 3000, vayu::RunStatus::Stopped, vayu::RunType::Design);
+    seed_run_with_children (
+    db, "pinned_send", 4000, vayu::RunStatus::Completed, vayu::RunType::Design);
+    seed_run_with_children (db, "running", 5000, vayu::RunStatus::Running);
+    seed_run_with_children (db, "pending", 6000, vayu::RunStatus::Pending);
+    ASSERT_HAS_VALUE (db.set_run_baseline ("pinned_send", true));
+
+    const auto cleared = db.clear_runs ();
+
+    EXPECT_EQ (
+    std::set<std::string> (cleared.deleted_ids.begin (), cleared.deleted_ids.end ()),
+    (std::set<std::string>{ "load", "scenario", "send" }));
+    EXPECT_EQ (cleared.kept_pinned, 1);
+    EXPECT_EQ (run_ids (db), (std::set<std::string>{ "pinned_send", "running", "pending" }))
+    << "the clear deleted a pinned or in-flight run";
+    EXPECT_EQ (db.count_metric_ticks ("load"), 0);
+    EXPECT_TRUE (db.get_results ("send").empty ());
+    EXPECT_EQ (db.get_results ("pinned_send").size (), 1u);
+    EXPECT_EQ (db.count_metric_ticks ("running"), 1);
+}
+
+// Past one delete batch: every batch commits and every id is reported once.
+TEST_F (DatabaseTest, ClearRunsDeletesAcrossBatches) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    constexpr int RUNS = 250; // two full batches of 100 and a partial one
+    for (int i = 1; i <= RUNS; ++i) {
+        seed_run_with_children (db, "run_" + std::to_string (i), i);
+    }
+
+    const auto cleared = db.clear_runs ();
+
+    EXPECT_EQ (cleared.deleted_ids.size (), static_cast<size_t> (RUNS));
+    EXPECT_EQ (
+    std::set<std::string> (cleared.deleted_ids.begin (), cleared.deleted_ids.end ())
+    .size (),
+    static_cast<size_t> (RUNS));
+    EXPECT_TRUE (db.get_all_runs ().empty ());
+}
+
+TEST_F (DatabaseTest, ClearRunsOnAnEmptyHistoryDeletesNothing) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    const auto cleared = db.clear_runs ();
+
+    EXPECT_TRUE (cleared.deleted_ids.empty ());
+    EXPECT_EQ (cleared.kept_pinned, 0);
+}
+
+// ============================================================================
 // OpenAPI document reclamation (sweep_orphaned_spec_documents, issue #718)
 // ============================================================================
 

@@ -10411,6 +10411,39 @@ field, so ignoring it would answer `200` to a request that changed nothing.
 
 **`404`** when no run has that id.
 
+### DELETE /runs
+
+Clear run history: delete every run - design, load and scenario alike - except
+the ones retention never deletes either (issue #2429):
+
+- a run **pinned as a baseline** (see
+  [PUT /runs/:runId/baseline](#put-runsrunidbaseline)) is kept - the pin is a
+  promise to keep the run, and a bulk clear does not break it. Unpin first, or
+  name the run in [DELETE /runs/:runId](#delete-runsrunid), to remove one;
+- a run whose stored status is still **`running` or `pending`** is kept and
+  left running. Stop it, then clear again.
+
+Each run goes with its metrics, results and captured bodies, through the same
+cascade and the same batched pass as retention: batches of 100, each in its own
+transaction, and each row re-read under that batch's lock, so a run pinned or
+started while the clear is under way is spared. A deleted run is gone for good;
+runs have no trash. The call takes no body and no query parameters.
+
+**Response `200`:**
+```json
+{
+  "deleted": 2,
+  "keptPinned": 1,
+  "deletedIds": ["run_1712345678901", "run_1712345678902"]
+}
+```
+
+`deleted` is the length of `deletedIds`, the runs this call removed, so a
+client can close whatever was showing one. `keptPinned` counts the pinned
+baselines stored once the clear finished; a run kept for being in flight is in
+neither number. An empty history answers `{"deleted": 0, "keptPinned": 0,
+"deletedIds": []}`.
+
 ### DELETE /runs/:runId
 
 Delete a run and all associated metrics/results.

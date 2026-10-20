@@ -58,6 +58,8 @@ const std::string& run_id,
 const std::string& body);
 // Defined in runs.cpp; the GET /runs filters off the query string.
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
+// Defined in runs.cpp; DELETE /runs, returns {http_status, json_body}.
+std::pair<int, nlohmann::json> clear_runs_response (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace {
@@ -2615,6 +2617,47 @@ TEST_F (RunsRouteTest, SingleRunPayloadCarriesTheBaselineFlag) {
     auto run = db_->get_run ("run_a");
     ASSERT_HAS_VALUE (run);
     EXPECT_TRUE (vayu::json::serialize (*run)["baseline"].get<bool> ());
+}
+
+// ============================================================================
+// DELETE /runs (clear_runs_response, #2429)
+// ============================================================================
+
+// "Clear run history" keeps pinned baselines and runs still in flight, and
+// says what it did: how many went, which ones, and how many pins it kept.
+TEST_F (RunsRouteTest, ClearRunsKeepsPinnedAndInFlightRunsAndReportsWhatWent) {
+    seed ({ .id = "load_done", .start_time = 100 });
+    seed ({ .id = "send_done", .type = vayu::RunType::Design, .start_time = 200 });
+    seed ({ .id = "pinned_load", .start_time = 300 });
+    seed ({ .id = "pinned_send", .type = vayu::RunType::Design, .start_time = 400 });
+    seed ({ .id = "running", .status = vayu::RunStatus::Running, .start_time = 500 });
+    seed ({ .id = "pending", .status = vayu::RunStatus::Pending, .start_time = 600 });
+    ASSERT_HAS_VALUE (db_->set_run_baseline ("pinned_load", true));
+    ASSERT_HAS_VALUE (db_->set_run_baseline ("pinned_send", true));
+
+    auto [status, body] = vayu::http::routes::clear_runs_response (*db_);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["deleted"].get<int64_t> (), 2);
+    EXPECT_EQ (body["keptPinned"].get<int64_t> (), 2);
+    ASSERT_TRUE (body["deletedIds"].is_array ());
+    auto deleted_ids = body["deletedIds"].get<std::vector<std::string>> ();
+    std::ranges::sort (deleted_ids);
+    EXPECT_EQ (deleted_ids, (std::vector<std::string>{ "load_done", "send_done" }));
+
+    for (const char* kept : { "pinned_load", "pinned_send", "running", "pending" }) {
+        EXPECT_TRUE (db_->get_run (kept).has_value ()) << "the clear deleted " << kept;
+    }
+    EXPECT_FALSE (db_->get_run ("load_done").has_value ());
+    EXPECT_FALSE (db_->get_run ("send_done").has_value ());
+}
+
+TEST_F (RunsRouteTest, ClearRunsOnAnEmptyHistoryAnswersZero) {
+    auto [status, body] = vayu::http::routes::clear_runs_response (*db_);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body,
+    (json{ { "deleted", 0 }, { "keptPinned", 0 }, { "deletedIds", json::array () } }));
 }
 
 // ============================================================================

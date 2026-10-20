@@ -169,6 +169,14 @@ struct TrashOutcome {
     bool reparented = false;
 };
 
+/// What `Database::clear_runs` removed and what it left (#2429).
+struct RunHistoryCleared {
+    /// Every run the clear deleted, so a client can close what showed them.
+    std::vector<std::string> deleted_ids;
+    /// Pinned baselines still stored once the clear finished.
+    int64_t kept_pinned = 0;
+};
+
 /// Why a restore did not happen. `NotFound` is a 404 - nothing in the trash
 /// carries that id; `OwnerGone` is a 409 - a request whose collection is itself
 /// deleted or missing, which has no root to come back to.
@@ -773,6 +781,17 @@ class Database {
     void prune_runs_configured ();
 
     /**
+     * @brief Delete every run retention would ever delete, now (#2429).
+     *
+     * What "Clear run history" asks for: every run except a pinned baseline
+     * and one still `running`/`pending`. Every stored id is a candidate and
+     * the exemption is decided per row inside `remove_unexempt_runs`' batch
+     * lock, so a run pinned or started while the clear is under way is
+     * spared. A run deleted here is gone for good; there is no runs trash.
+     */
+    RunHistoryCleared clear_runs ();
+
+    /**
      * @brief Mark runs left `running`/`pending` by a previous process as failed.
      *
      * A crash or a kill abandons in-flight runs with no terminal status write,
@@ -1158,7 +1177,7 @@ class Database {
     /**
      * @brief Cascade-delete @p ids in batches, sparing what retention exempts.
      *
-     * The deleting half of `prune_runs`: the mutex is taken
+     * The deleting half of `prune_runs` and `clear_runs`: the mutex is taken
      * per batch of 100 and released between them, and each row is re-read
      * under its batch's lock, so a run pinned, back in flight or already gone
      * since the caller chose it is skipped (#1906). Answers the ids deleted.

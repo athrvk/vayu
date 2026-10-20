@@ -1568,7 +1568,9 @@ their `monitor_samples` + their `results`), batched inside transactions that rel
 backlog cannot stall `/health`, SSE, or the runs poll. Because victims are chosen under an
 earlier acquisition, each batch re-reads its rows under its own lock and spares one that has
 since been pinned, gone back in flight or been deleted (issue #1906); that batch loop is
-`remove_unexempt_runs`. The cascade itself lives in one function
+`remove_unexempt_runs`. "Clear run history" ([`DELETE /runs`](api-reference.md#delete-runs),
+`Database::clear_runs`, issue #2429) is its second caller: every stored id is a candidate, and the
+same per-row exemption under the batch lock keeps baselines and in-flight runs. The cascade itself lives in one function
 (`remove_run_cascade_locked`), which both `delete_run` and `remove_unexempt_runs` call, so a new
 child table is wired into every delete at once. `prune_runs_configured()` reads the three
 knobs (config, `data_retention`, defaults 200 / 100 / 30) and runs at **startup** (`Database::init`) and
