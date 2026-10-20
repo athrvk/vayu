@@ -323,9 +323,21 @@ std::optional<Difference> compression_difference (const json& base, const json& 
     return Difference{ "compression", show (b), show (t) };
 }
 
+std::optional<Difference> expect_continue_difference (const json& base, const json& target) {
+    const bool b = flag_at (base, { "metadata", "configuration", "expectContinue" });
+    const bool t = flag_at (target, { "metadata", "configuration", "expectContinue" });
+    if (b == t) {
+        return std::nullopt;
+    }
+    const auto show = [] (bool allowed) {
+        return std::string (allowed ? "allowed" : "not allowed");
+    };
+    return Difference{ "expect_continue", show (b), show (t) };
+}
+
 /// In `compareReports`' `comparability` order. A collection's load run is
 /// `load` too, so it compares with a single request's without a `run_type`.
-constexpr std::array<Rule, 10> DIFFERENCE_RULES = { {
+constexpr std::array<Rule, 11> DIFFERENCE_RULES = { {
 [] (const json& b, const json& t) {
     return differ ("run_type", run_type (b), run_type (t), run_type_label);
 },
@@ -349,6 +361,7 @@ duration_difference,
 data_file_difference,
 request_difference,
 compression_difference,
+expect_continue_difference,
 } };
 
 ordered differences (const json& base, const json& target) {

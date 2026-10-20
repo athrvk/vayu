@@ -306,6 +306,18 @@ TEST (RunExportMarkdownTest, TheComparisonIsOmittedWithoutOneAndReadsDirectionWi
     << text;
 }
 
+TEST (RunExportMarkdownTest, AnExpectContinueDifferenceReadsWithItsLabel) {
+    auto document = read_document ("vs-baseline-regressed");
+    document["comparison"]["differences"].push_back ({ { "field", "expect_continue" },
+    { "base", "not allowed" }, { "target", "allowed" } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("- Expect: 100-continue: not allowed in the base "
+                          "run, allowed in this one"),
+    std::string::npos)
+    << text;
+    EXPECT_EQ (text.find ("expect_continue"), std::string::npos) << text;
+}
+
 TEST (RunExportMarkdownTest, AMissingSectionReadsAsADashNotAnError) {
     const std::string text = render_run_export_markdown (ordered_json::object ());
     EXPECT_FALSE (text.empty ());

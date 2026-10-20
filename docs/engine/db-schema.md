@@ -1513,7 +1513,8 @@ that differ only in one of them from reading as the same run.
 **`config_snapshot`'s `defaultHeaders`** (issue #1488) - a load or collection
 run's snapshot also carries the run's resolved default-header decision at
 start: `{"userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding":
-true}`. This is a deliberate, narrow exception to
+true, "expectContinue": false}` (`expectContinue`, #2516, is
+`DefaultHeaderPolicy::expect_continue`). This is a deliberate, narrow exception to
 [Default request headers](api-reference.md#default-request-headers)'s "nothing
 here is stored" rule - that rule is about not writing an applied default back
 into a *saved request*, the way the renderer used to freeze `X-Request-ID`

@@ -728,7 +728,9 @@ const vayu::core::LoadDataSet& data) {
  * since it can itself change across an engine upgrade; `requestId` and
  * `acceptEncoding` collapse to booleans, because a comparison needs to know
  * whether each was negotiated, not the exact header name or the
- * content-encoding list libcurl advertised.
+ * content-encoding list libcurl advertised. `expectContinue` (issue #2516) is
+ * the policy's own boolean: whether libcurl was allowed to add `Expect:
+ * 100-continue` above 1 MiB, which changes what a large-body run measures.
  *
  * A snapshot that is not JSON (which `sanitize_config_snapshot` passes
  * through verbatim) is left alone, matching `scenario_snapshot` and
@@ -752,6 +754,7 @@ const vayu::http::DefaultHeaderPolicy& header_policy) {
         { "userAgent", header_policy.user_agent },
         { "requestId", !header_policy.correlation_header.empty () },
         { "acceptEncoding", !header_policy.accept_encoding.empty () },
+        { "expectContinue", header_policy.expect_continue },
     };
     return parsed.dump ();
 }

@@ -807,6 +807,7 @@ std::to_array<std::pair<std::string_view, std::string_view>> ({
 { "data_file", "Data file" },
 { "request", "Request" },
 { "compression", "Compression" },
+{ "expect_continue", "Expect: 100-continue" },
 });
 
 ReportText difference_line (const ordered& difference) {

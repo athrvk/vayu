@@ -41,9 +41,10 @@ function num(obj: unknown, ...path: string[]): number | null {
 
 /**
  * Like {@link num}, but for a flag whose absence is itself meaningful
- * (issue #1488): a report from before `metadata.configuration.acceptEncoding`
- * existed carries no such key, and reads as `false` here - which is what
- * every such run actually sent, not an unknown value defaulted away.
+ * (issues #1488, #2516): a report from before
+ * `metadata.configuration.acceptEncoding` or `expectContinue` existed carries
+ * no such key, and reads as `false` here - which is what every such run
+ * actually sent, not an unknown value defaulted away.
  */
 function bool(obj: unknown, ...path: string[]): boolean {
 	let cur: unknown = obj;
@@ -148,14 +149,14 @@ export interface RunComparison {
 	/**
 	 * Every way the two runs differ in what they measured, in a fixed order
 	 * (`run_type`, `mode`, `concurrency`, `target_rps`, `duration`, `status`,
-	 * `http_version`, `data_file`, `request`, `compression`). Empty for a
-	 * like-for-like pair. When both reports carry `metadata.runType`, a
-	 * `mode`, `concurrency` or `target_rps` only one of them recorded is a
-	 * difference, its missing side `not recorded`; otherwise a field a report
-	 * does not carry is unknown, not a difference, except a data file, where
-	 * none against one is a real difference. Read this before the deltas: a
-	 * short stopped run against a long one always looks like a throughput and
-	 * tail-latency regression.
+	 * `http_version`, `data_file`, `request`, `compression`, `expect_continue`).
+	 * Empty for a like-for-like pair. When both reports carry
+	 * `metadata.runType`, a `mode`, `concurrency` or `target_rps` only one of
+	 * them recorded is a difference, its missing side `not recorded`; otherwise
+	 * a field a report does not carry is unknown, not a difference, except a
+	 * data file, where none against one is a real difference. Read this before
+	 * the deltas: a short stopped run against a long one always looks like a
+	 * throughput and tail-latency regression.
 	 */
 	comparability: ComparabilityWarning[];
 }
@@ -366,6 +367,20 @@ function compressionWarning(base: Report, target: Report): ComparabilityWarning 
 	};
 }
 
+function expectContinueWarning(base: Report, target: Report): ComparabilityWarning | null {
+	const b = bool(base, ...CONFIG, "expectContinue");
+	const t = bool(target, ...CONFIG, "expectContinue");
+	if (b === t) return null;
+	const show = (allowed: boolean): string => (allowed ? "allowed" : "not allowed");
+	return {
+		code: "expect_continue",
+		message:
+			"Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+		base: show(b),
+		target: show(t),
+	};
+}
+
 /** In the order `RunComparison.comparability` documents; the conformance test pins it. */
 const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarning | null)[] = [
 	// A collection's load run is `load` too, so it compares with a single
@@ -412,6 +427,7 @@ const COMPARABILITY_RULES: ((base: Report, target: Report) => ComparabilityWarni
 	dataFileWarning,
 	requestWarning,
 	compressionWarning,
+	expectContinueWarning,
 ];
 
 /** Compare two engine run reports and return a structured delta. */

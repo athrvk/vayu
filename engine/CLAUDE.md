@@ -825,7 +825,9 @@ logged as a warning: it means a client skipped composition.
   scopes) is on or the request types a non-blank `Expect`. Add a default
   there, never in a driver. A
   load or collection run's `config_snapshot` records the resolved decision
-  too (#1488), for a later run's report to compare against - never re-applied
+  too (#1488, plus `expectContinue`, #2516, so a run that let libcurl wait on
+  a 100-continue does not compare as identical to one that did not), for a
+  later run's report to compare against - never re-applied
   to a send, the one deliberate exception to "none of it is stored".
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
