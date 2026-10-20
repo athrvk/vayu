@@ -1967,6 +1967,51 @@ nlohmann::json get_script_completions () {
     "input that is not valid base64." },
     { "sortText", "2_atob" } });
 
+    // ========================================
+    // Timers - run to completion before the script ends (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "setTimeout" }, { "kind", KIND_FUNCTION },
+    { "insertText", "setTimeout(() => {\n\t${1:// later}\n}, ${2:0});" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "setTimeout(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number" },
+    { "documentation",
+    "Call callback after the script body, in due order with the other timers; "
+    "extra arguments are passed to it. Returns the id clearTimeout takes.\n\n"
+    "Every timer runs before the script ends, within its deadline - the "
+    "request is not sent, and the test script's results are not reported, "
+    "until they have. The delay orders the callbacks and is not waited out: "
+    "nothing sleeps, and Date.now() does not move. To delay a request, add a "
+    "Think time element (timer.think) instead." },
+    { "sortText", "2_setTimeout" } });
+
+    completions.push_back ({ { "label", "setInterval" }, { "kind", KIND_FUNCTION },
+    { "insertText", "const ${1:timer} = setInterval(() => {\n\t${2:// each time}\n}, ${3:100});" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "setInterval(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number" },
+    { "documentation",
+    "Call callback every delay ms until clearInterval stops it. Returns the "
+    "id clearInterval takes.\n\nRuns before the script ends, on the same "
+    "clock as setTimeout. An interval nothing clears runs until the script's "
+    "deadline (scriptTimeout) stops it, which fails the script - clear it "
+    "from its own callback once it is done." },
+    { "sortText", "2_setInterval" } });
+
+    completions.push_back ({ { "label", "clearTimeout" }, { "kind", KIND_FUNCTION },
+    { "insertText", "clearTimeout(${1:id})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "clearTimeout(id?: number): void" },
+    { "documentation",
+    "Cancel a timer setTimeout or setInterval queued. An id that is not "
+    "queued, or none at all, is no error." },
+    { "sortText", "2_clearTimeout" } });
+
+    completions.push_back ({ { "label", "clearInterval" }, { "kind", KIND_FUNCTION },
+    { "insertText", "clearInterval(${1:id})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "clearInterval(id?: number): void" },
+    { "documentation",
+    "Stop an interval setInterval queued; the same as clearTimeout, which "
+    "shares its ids." },
+    { "sortText", "2_clearInterval" } });
+
     completions.push_back ({ { "label", "Sign the outgoing request" }, { "kind", KIND_SNIPPET },
     { "insertText",
     "// Pre-request: sign what is actually about to be sent.\nconst timestamp "

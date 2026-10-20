@@ -630,6 +630,16 @@ declare function atob(encoded: string): string;
  */
 declare function btoa(data: string): string;
 
+/**
+ * Stop an interval setInterval queued; the same as clearTimeout, which shares its ids.
+ */
+declare function clearInterval(id?: number): void;
+
+/**
+ * Cancel a timer setTimeout or setInterval queued. An id that is not queued, or none at all, is no error.
+ */
+declare function clearTimeout(id?: number): void;
+
 declare const console: {
 	/**
 	 * Log an error message to the console.
@@ -2090,32 +2100,18 @@ declare const pm: {
 };
 
 /**
- * Not available in the Vayu script sandbox.
- *
- * The sandbox is synchronous - a script runs to completion before the request is sent, so there is no later to defer to.
+ * Call callback every delay ms until clearInterval stops it. Returns the id clearInterval takes.
+ * 
+ * Runs before the script ends, on the same clock as setTimeout. An interval nothing clears runs until the script's deadline (scriptTimeout) stops it, which fails the script - clear it from its own callback once it is done.
  */
-declare const setTimeout: never;
+declare function setInterval(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number;
 
 /**
- * Not available in the Vayu script sandbox.
- *
- * The sandbox is synchronous and a script has a wall-clock deadline (scriptTimeout).
+ * Call callback after the script body, in due order with the other timers; extra arguments are passed to it. Returns the id clearTimeout takes.
+ * 
+ * Every timer runs before the script ends, within its deadline - the request is not sent, and the test script's results are not reported, until they have. The delay orders the callbacks and is not waited out: nothing sleeps, and Date.now() does not move. To delay a request, add a Think time element (timer.think) instead.
  */
-declare const setInterval: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * There is no setTimeout to cancel.
- */
-declare const clearTimeout: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * There is no setInterval to cancel.
- */
-declare const clearInterval: never;
+declare function setTimeout(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number;
 
 /**
  * Not available in the Vayu script sandbox.

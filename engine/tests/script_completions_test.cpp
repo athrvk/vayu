@@ -666,6 +666,39 @@ TEST (ScriptCompletions, EveryOfferedCryptoMemberIsCallableInTheRuntime) {
     << "the signing surface changed - update this test and the docs it backs";
 }
 
+// The timers (#2577): every one offered is a function the runtime binds, and a
+// timer it queues runs before the script ends.
+TEST (ScriptCompletions, EveryOfferedTimerIsBoundAndRunsBeforeTheScriptEnds) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label != "setTimeout" && label != "setInterval" &&
+        label != "clearTimeout" && label != "clearInterval") {
+            continue;
+        }
+        offered++;
+        const auto result = engine.execute_test (
+        "if (typeof " + label + " !== 'function') throw new Error('not bound');",
+        request, response, env);
+        EXPECT_TRUE (result.success) << label << ": " << result.error_message;
+    }
+    EXPECT_EQ (offered, 4)
+    << "the timer surface changed - update this test and the docs";
+
+    const auto result = engine.execute_test (
+    "setTimeout(() => pm.test('ran', () => {}), 10);", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
 // A different drift from the ones above: the member exists, the spelling of the
 // key does not. Response header names are lower-cased by the HTTP client and
 // indexing `pm.response.headers` is a plain property read, so an offered

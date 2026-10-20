@@ -23,10 +23,11 @@ import { useLoadedMonaco } from "@/lib/monaco-loader";
 import { useScriptTypeDefinitionsQuery } from "@/queries";
 
 /**
- * The sandbox is QuickJS plus `pm`, `console` and the two base64 globals - no
- * DOM, no Node. So the lib list is deliberately `es2022` alone: including `dom`
- * would have the editor offer `fetch`, `setTimeout` and `URL`, none of which
- * exist at runtime, and the script would fail only once it ran.
+ * The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
+ * timers - no DOM, no Node. So the lib list is deliberately `es2022` alone:
+ * including `dom` would have the editor offer `fetch` and `URL`, neither of which
+ * exists at runtime, and the script would fail only once it ran. The timers are
+ * declared by the engine's own file, with the sandbox's semantics.
  *
  * ES2022 rather than ES2020 because the runtime is quickjs-ng, where
  * `Object.hasOwn` and `Array.prototype.at` work - targeting ES2020 would mark
@@ -59,7 +60,7 @@ export const SCRIPT_LIB = ["es2022"];
  * What suppressing 2304 costs is every undeclared name drawing nothing. The
  * engine keeps the names a script is likeliest to reach for by declaring them
  * as `never` or `void` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`,
- * `setTimeout`, Postman's `responseBody` and `CryptoJS`), so using one is a
+ * `require`, Postman's `responseBody` and `CryptoJS`), so using one is a
  * type error with the replacement on hover.
  *
  * Narrow this list rather than widening it: every code here is a real mistake

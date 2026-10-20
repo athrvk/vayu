@@ -585,8 +585,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "moment", Anchor::Bare, "moment", "" },
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
-{ "setTimeout", Anchor::Bare, "setTimeout", "" },
-{ "setInterval", Anchor::Bare, "setInterval", "" },
 { "Buffer", Anchor::Bare, "Buffer", "" },
 { "top-level await", Anchor::OutsideAsync, "await", "" },
 // `pm.*` members Vayu does not have.

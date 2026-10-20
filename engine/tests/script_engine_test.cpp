@@ -4172,11 +4172,11 @@ TEST_F (ScriptEngineTest, StandardBuiltinsAreAvailableToScripts) {
     << "a built-in the docs rely on disappeared";
 }
 
-TEST_F (ScriptEngineTest, NoUrlParserOrAsyncSurfaceIsExposed) {
+TEST_F (ScriptEngineTest, NoUrlParserFetchOrModuleLoaderIsExposed) {
     auto result = engine.execute_prerequest (R"JS(
         var present = [];
         var absent = ['crypto', 'TextEncoder', 'URL', 'URLSearchParams',
-                      'require', 'fetch', 'setTimeout'];
+                      'require', 'fetch'];
         for (var i = 0; i < absent.length; i++) {
             if (typeof globalThis[absent[i]] !== 'undefined') present.push(absent[i]);
         }
@@ -6305,6 +6305,232 @@ TEST_F (ScriptEngineTest, AThrowStaysTheErrorAndItsQueuedJobsStillRun) {
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "Error: the script's own");
     EXPECT_EQ (env["ran"].value, "1");
+}
+
+// ============================================================================
+// Timers: run to completion before the script ends (#2577)
+// ============================================================================
+
+// Due order, ties to the first queued, a missing delay as Node's 1ms, and the
+// promise jobs a callback queues before the next timer. The last timer is due
+// a minute in, under the default five-second deadline: a queue that slept
+// would time out instead of reporting the order.
+TEST_F (ScriptEngineTest, TimersFireInDueOrderBeforeTheScriptEnds) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        const order = [];
+        setTimeout(() => order.push("b"), 20);
+        setTimeout(() => {
+            order.push("a");
+            Promise.resolve().then(() => order.push("a-job"));
+        }, 10);
+        setTimeout((x, y) => order.push(x + y), 20, "c", "d");
+        setTimeout(() => order.push("no delay"));
+        Promise.resolve().then(() => order.push("job"));
+        setTimeout(() => pm.environment.set("order", order.join(",")), 60000);
+    )JS",
+        ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["order"].value, "job,no delay,a,a-job,b,cd");
+}
+
+TEST_F (ScriptEngineTest, ClearTimeoutCancelsATimer) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        const cancelled = setTimeout(() => pm.environment.set("cancelled", "1"), 10);
+        clearTimeout(cancelled);
+        const later = setTimeout(() => pm.environment.set("later", "1"), 20);
+        setTimeout(() => clearTimeout(later), 10);
+        clearTimeout(123456);
+        clearTimeout();
+        clearTimeout("not an id");
+        setTimeout(() => pm.environment.set("kept", "1"), 30);
+    )JS",
+        ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.count ("cancelled"), 0U);
+    EXPECT_EQ (env.count ("later"), 0U);
+    EXPECT_EQ (env["kept"].value, "1");
+}
+
+// The interval ticks at 10, 20 and 30 on the virtual clock, so the timeout due
+// at 25 lands between the second and third tick; clearing it from its own
+// callback stops it.
+TEST_F (ScriptEngineTest, SetIntervalRepeatsUntilClearIntervalStopsIt) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        const order = [];
+        let ticks = 0;
+        const interval = setInterval((tag) => {
+            ticks++;
+            order.push(tag + ticks);
+            if (ticks === 3) clearInterval(interval);
+        }, 10, "tick");
+        setTimeout(() => order.push("t25"), 25);
+        setTimeout(() => pm.environment.set("order", order.join(",")), 1000);
+    )JS",
+        ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["order"].value, "tick1,tick2,t25,tick3");
+}
+
+TEST_F (ScriptEngineTest, ATimerCanRecordATest) {
+    auto result = engine.execute_test (R"JS(
+        setTimeout(() => {
+            pm.test("from a timer", () => pm.expect(pm.response.code).to.equal(200));
+        }, 10);
+        setTimeout(() => {
+            pm.test("fails from a timer", () => pm.expect(pm.response.code).to.equal(500));
+        }, 20);
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    ASSERT_EQ (result.tests.size (), 2U);
+    EXPECT_EQ (result.tests[0].name, "from a timer");
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (result.tests[1].name, "fails from a timer");
+    EXPECT_FALSE (result.tests[1].passed);
+}
+
+// A promise only a timer settles is settled by the drain, rather than reported
+// as one that never settled.
+TEST_F (ScriptEngineTest, AnAwaitedTimerSettlesItsPromise) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("waits on a timer", async () => {
+            const value = await new Promise((resolve) => setTimeout(resolve, 5, 42));
+            pm.expect(value).to.equal(42);
+        });
+    )JS",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1U);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+// A callback's throw is the script's error, and the queue drains on, as a throw
+// in the script body already does.
+TEST_F (ScriptEngineTest, ATimerThatThrowsIsTheErrorAndTheQueueDrainsOn) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        setTimeout(() => { throw new Error("from the timer"); }, 10);
+        setTimeout(() => pm.environment.set("after", "1"), 20);
+    )JS",
+        ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Error: from the timer");
+    EXPECT_EQ (env["after"].value, "1");
+}
+
+TEST_F (ScriptEngineTest, ATimerNeedsAFunction) {
+    auto result = engine.execute_test (
+    "setTimeout('pm.test(\"x\", () => {})', 0);", request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "TypeError: setTimeout requires a function as its first argument");
+    EXPECT_TRUE (result.tests.empty ());
+}
+
+// The queue lives outside the QuickJS heap, so its own cap is what bounds it.
+TEST_F (ScriptEngineTest, PendingTimersAreCapped) {
+    auto result = engine.execute_test (R"JS(
+        for (let i = 0; i <= 10000; i++) setTimeout(() => {}, 1);
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "RangeError: setTimeout: 10000 timers are already pending, the most one "
+    "script may hold");
+}
+
+// An interval nothing clears is stopped by the deadline, or by the cap with no
+// deadline, and reported. Its queue is freed with the execution, so the
+// runtime goes back to the pool; a promise job left behind would discard it.
+TEST_F (ScriptEngineTest, ARunawayIntervalStopsWithAScriptError) {
+    ScriptConfig bounded_cfg;
+    bounded_cfg.timeout_ms = 100;
+    ScriptEngine bounded (bounded_cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("setInterval(() => {}, 0);", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 100ms");
+    EXPECT_EQ (bounded.idle_runtime_count (), 1U);
+
+    ScriptConfig unbounded_cfg;
+    unbounded_cfg.timeout_ms = 0;
+    ScriptEngine unbounded (unbounded_cfg);
+    result = unbounded.execute ("setInterval(() => {}, 0);", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("Script stopped after running 100000 "
+                                          "promise jobs and timer callbacks"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (unbounded.idle_runtime_count (), 1U);
+}
+
+// A timer still queued when the deadline stops the script never runs, in this
+// execution or the next one on the same pooled runtime.
+TEST_F (ScriptEngineTest, ATimerLeftAtTheDeadlineNeverRuns) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 100;
+    ScriptEngine bounded (cfg);
+
+    auto first        = ScriptContext::for_test (request, response);
+    first.environment = &env;
+    auto first_result = bounded.execute (R"JS(
+        setTimeout(() => pm.environment.set("late", "1"), 10);
+        for (;;) {}
+    )JS",
+    first);
+    EXPECT_FALSE (first_result.success);
+    EXPECT_EQ (first_result.error_message, "Script execution timed out after 100ms");
+    EXPECT_EQ (bounded.idle_runtime_count (), 1U);
+
+    auto second        = ScriptContext::for_test (request, response);
+    second.environment = &env;
+    auto second_result = bounded.execute ("pm.environment.set('next', '1');", second);
+    ASSERT_TRUE (second_result.success) << second_result.error_message;
+
+    EXPECT_EQ (env.count ("late"), 0U);
+    EXPECT_EQ (env.count ("next"), 1U);
+}
+
+// A queued timer pins its context as a promise job does (#1823), so a queue
+// left at the deadline and never freed would keep every dead context, each
+// holding the half of the memory limit its callback reads; the next script's
+// own allocation then fails. The 5ms deadline only leaves the timer queued.
+TEST_F (ScriptEngineTest, TimersLeftAtTheDeadlineDoNotExhaustThePooledRuntime) {
+    ScriptConfig cfg;
+    cfg.memory_limit = size_t{ 8 } * 1024 * 1024;
+    cfg.timeout_ms   = 5;
+    ScriptEngine pooled (cfg);
+
+    constexpr int executions = 50;
+    for (int i = 0; i < executions; ++i) {
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = pooled.execute (R"JS(
+            const headroom = new ArrayBuffer(4 * 1024 * 1024);
+            setTimeout(() => headroom.byteLength, 10);
+            for (;;) {}
+        )JS",
+        ctx);
+        ASSERT_EQ (result.error_message, "Script execution timed out after 5ms")
+        << "execution " << i;
+    }
+    EXPECT_EQ (pooled.idle_runtime_count (), 1U);
 }
 
 // What a context that declares neither reports (#353): a bare `for_test` shape,

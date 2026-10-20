@@ -566,16 +566,27 @@ constexpr bool ENABLE_CONSOLE = true;
  */
 constexpr int SEND_REQUEST_LIMIT = 10;
 /**
- * @brief How many promise jobs one execution may run when it has no
- *        wall-clock deadline (`scriptTimeout` 0).
+ * @brief How many promise jobs and timer callbacks, together, one execution
+ *        may run when it has no wall-clock deadline (`scriptTimeout` 0).
  *
- * The queue a script leaves is drained inside its execution (#2531), and with
- * a deadline the deadline bounds that drain. Without one, a runaway
- * `while (true) await null;` would hold the thread forever, so the job count
- * bounds it instead. Provisional until #2359 settles what `scriptTimeout` 0
- * means; far above what a script awaiting a few sends queues.
+ * The queues a script leaves are drained inside its execution (#2531, #2577),
+ * and with a deadline the deadline bounds that drain. Without one, a runaway
+ * `while (true) await null;` or a `setInterval` nothing clears would hold the
+ * thread forever, so the count bounds it instead. Provisional until #2359
+ * settles what `scriptTimeout` 0 means; far above what a script awaiting a few
+ * sends queues.
  */
-constexpr size_t MAX_PROMISE_JOBS_WITHOUT_TIMEOUT = 100000;
+constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
+/**
+ * @brief How many `setTimeout` / `setInterval` registrations one execution may
+ *        hold at once (#2577).
+ *
+ * The queue lives outside the QuickJS heap, so the script's memory limit does
+ * not bound it: a loop that only queues timers would grow the engine process
+ * until the deadline, or without end under `scriptTimeout` 0. A script that
+ * waits on a few sends holds a handful.
+ */
+constexpr size_t MAX_PENDING_TIMERS = 10000;
 } // namespace script_engine
 
 /**

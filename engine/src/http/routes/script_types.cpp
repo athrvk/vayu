@@ -128,7 +128,7 @@ bool is_language_chain (const std::string& name) {
  *
  * `script_types_test.cpp` executes `typeof <name>` in the real script engine
  * for every root, so the list cannot drift from the sandbox: giving the
- * runtime a `setTimeout` fails the test that says it has none.
+ * runtime a `fetch` fails the test that says it has none.
  */
 struct AbsentGlobal {
     const char* name;
@@ -136,14 +136,6 @@ struct AbsentGlobal {
     const char* type = "never";
 };
 constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
-{ "setTimeout",
-"The sandbox is synchronous - a script runs to completion "
-"before the request is sent, so there is no later to defer to." },
-{ "setInterval",
-"The sandbox is synchronous and a script has a wall-clock "
-"deadline (scriptTimeout)." },
-{ "clearTimeout", "There is no setTimeout to cancel." },
-{ "clearInterval", "There is no setInterval to cancel." },
 { "fetch",
 "No fetch in the sandbox. Use pm.sendRequest(request, callback), "
 "which is synchronous and allowed only when the run's "

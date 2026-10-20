@@ -41,6 +41,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
+| Timers              | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` - globals, run before the script ends without waiting, see below |
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
@@ -384,6 +385,30 @@ bytes verifies nowhere.
 Not provided: `crypto`/`crypto.subtle` under those names, `TextEncoder`, MD5,
 SHA-1, and any asymmetric algorithm. The engine-side detail is in
 [scripting.md](../engine/scripting.md#what-a-script-can-compute).
+
+### Timers run before the script ends, and do not wait
+
+`setTimeout`, `setInterval`, `clearTimeout` and `clearInterval` are globals, as
+in Postman, and every timer a script queues runs before the script ends: the
+request is not sent, and a test script's results are not read, until the
+queue is empty (#2577). A callback runs in due order, with the promise jobs it
+queues run before the next one, and can call `pm.test`.
+
+```javascript
+setTimeout(function () {
+    pm.test("checked from a timer", function () {
+        pm.expect(pm.response.code).to.equal(200);
+    });
+}, 100);
+```
+
+**The one divergence: the delay is not waited out.** The queue runs on a
+virtual clock, so `setTimeout(fn, 5000)` runs `fn` as soon as the work queued
+ahead of it has, where Postman would wait five seconds of the script's
+deadline. A `setTimeout` written to delay a request does not; add a Think time
+element (`timer.think`) for that. An interval nothing clears runs until the
+script's deadline stops it, which fails the script. The rules are in
+[scripting.md](../engine/scripting.md#timers-settimeout-and-setinterval).
 
 ### `pm.test` runs in either script, and every result says which
 
@@ -830,9 +855,10 @@ pm.test('the stream said done', function () {
 ```
 
 **Buffered, not live, and that is structural rather than a limitation of this
-release.** The sandbox is synchronous with no event loop - `setTimeout` and
-friends are declared absent for exactly that reason - so there is no "later" for
-a per-event callback to run in. A script sees the retained list, once.
+release.** The post-request script runs once the stream has ended, and runs to
+completion - its timers and promise jobs included - before anything is
+reported, so there is no "later" in which a per-event callback could run while
+the stream is still arriving. A script sees the retained list, once.
 
 `pm.response.totalEvents` and `pm.response.eventsTruncated` come with it. The
 list is bounded by the engine's `sseMaxStoredEvents`, so a script that means to
@@ -1104,11 +1130,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
   The sandbox has no module system and none of those libraries; `pm.crypto` covers
   SHA-256 and HMAC-SHA256 and nothing else of `CryptoJS`
-- `setTimeout`, `setInterval`, `Buffer` and a top-level `await` - the sandbox
-  is not Node, and a script body is not an async function. `await` inside an
-  `async` function runs (see
+- `Buffer` and a top-level `await` - the sandbox is not Node, and a script
+  body is not an async function. `await` inside an `async` function runs (see
   [what a script can compute](../engine/scripting.md#what-a-script-can-compute));
-  the import notice names only the top-level one
+  the import notice names only the top-level one. The timers run, without
+  waiting (see [above](#timers-run-before-the-script-ends-and-do-not-wait))
 - Chai and chai-postman members outside the list in
   [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
   (`chai`, `lodash`, `moment`, …) and chai-postman's own `postmanRequest`,
@@ -1355,8 +1381,9 @@ completion table**, so the surface stays declared once. `useScriptTypeDefinition
 `addExtraLib`.
 
 It also configures the worker to match the sandbox: `lib: ["es2022"]` with **no `dom`**,
-because the runtime has no `fetch`, `setTimeout` or `URL` and the editor must not offer
-them; and `target: ESNext`, because ES2020 would flag `Object.hasOwn` and
+because the runtime has no `fetch` or `URL` and the editor must not offer them (the
+timers it does have are declared by the engine's file, with the sandbox's own
+documentation); and `target: ESNext`, because ES2020 would flag `Object.hasOwn` and
 `Array.prototype.at`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
 
 **Semantic diagnostics are on**, which is what makes `pm.response.staus` squiggle with a
@@ -1400,7 +1427,7 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 **declares the names a script is likeliest to reach for that the sandbox lacks**
 (`ABSENT_GLOBALS` in `script_types.cpp`), and the editor underlines a use:
 
-- the host globals of a browser or Node: `setTimeout`, `fetch`, `require`, `URL`, ...
+- the host globals of a browser or Node: `fetch`, `require`, `URL`, `Buffer`, ...
 - Postman's pre-`pm.*` globals: `tests`, `responseBody`, `responseCode`,
   `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
   `data`, `iteration`, `request` and `postman.*`

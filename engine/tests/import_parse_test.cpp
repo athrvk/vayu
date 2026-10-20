@@ -2193,7 +2193,7 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
         {"request":"Legacy tests","names":["tests[]","responseCode"]},
         {"request":"Library","names":["CryptoJS"]},
         {"request":"Module","names":["require()"]},
-        {"request":"Host","names":["setTimeout","Buffer"]},
+        {"request":"Host","names":["Buffer"]},
         {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]}
     ])j"));
     // A notice, not a drop: the scripts still import verbatim.
@@ -2248,7 +2248,7 @@ TEST (PostmanImport, ScriptPackagesAreNamed) {
 TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     const ImportParse parsed = parse_import (
     R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
-        "event":[{"listen":"prerequest","script":{"exec":["setInterval(f, 1);"]}}],
+        "event":[{"listen":"prerequest","script":{"exec":["Buffer.from(f);"]}}],
         "item":[
         {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = data.name;"]}}],
          "item":[{"name":"R","event":[
@@ -2263,7 +2263,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     nlohmann::ordered_json::parse (R"j([
         {"request":"R","names":["tests[]","postman.*"]},
         {"request":"Reports","names":["data"]},
-        {"request":"Signed API","names":["setInterval"]}
+        {"request":"Signed API","names":["Buffer"]}
     ])j"));
 }
 

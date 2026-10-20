@@ -543,10 +543,12 @@ Each entry is `{ event, id, data }`:
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
 
-**Buffered, never live.** The sandbox is synchronous and has no event loop (see
-[Limitations](#limitations)), so a per-event callback is not a feature
-that was left out - it is one the runtime cannot have. The script runs when the
-stream is over, against what was retained.
+**Buffered, never live.** The script runs once the stream is over, and runs to
+completion - its timers and promise jobs included, see
+[Timers](#timers-settimeout-and-setinterval) - before anything is reported, so a
+per-event callback is not a feature that was left out: there is no moment while
+the stream arrives for one to run in. The script runs against what was
+retained.
 
 **Check the markers before asserting over the whole stream.** The stored list is
 bounded by `sseMaxStoredEvents`, and a script that counted a prefix would report
@@ -2676,13 +2678,16 @@ thread starts, including one from another collection. Only the QuickJS runtime
 script queued (a `.then` callback, the rest of an `async` function after an
 `await`) runs before the script ends, inside its deadline; one still queued
 when the deadline or the job cap stops that drain is discarded with the
-runtime, never run, and the next script starts on a new one. State that should
+runtime, never run, and the next script starts on a new one. A
+[timer](#timers-settimeout-and-setinterval) still queued then is dropped unrun
+too; the queue is the engine's to free, so it costs the runtime nothing. State that should
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
 ### What a script can compute
 
-The sandbox is QuickJS plus `pm`, `console`, and the two base64 globals.
+The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
+four timer functions.
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2694,18 +2699,20 @@ and the rest of the ES2020 built-ins, plus:
 | `pm.sendRequest(urlOrOptions, callback)` | Send an auxiliary request, synchronously - see [above](#sending-a-request-from-a-script-pmsendrequest) |
 | `btoa(binaryString)` | base64-encode one byte per code unit |
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
+| `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
+| `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
 
 `encoding` is `'hex'` (the default), `'base64'`, `'base64url'` or `'bytes'`;
 `'bytes'` returns a `Uint8Array`, and any other value throws rather than
 silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
-`URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
+`URLSearchParams`, `require`, `fetch`. The practical
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
-other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host source
-of asynchronous work: `Promise` and `async`/`await` run, on a job queue drained
-before the script ends, but nothing (no timer, no I/O) settles a promise later.
+other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host I/O:
+`Promise`, `async`/`await` and the timers run, on queues drained before the
+script ends, but nothing settles a promise after it has.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded rather than a Promise-returning stand-in.
@@ -2728,6 +2735,47 @@ rather than silently UTF-8 encoding it.
 Both halves of this list are pinned by tests in
 `engine/tests/script_engine_test.cpp`, so if a global is ever added or removed
 this section is what needs rewriting.
+
+### Timers (`setTimeout` and `setInterval`)
+
+`setTimeout(fn, delay, ...args)` and `setInterval(fn, delay, ...args)` queue
+`fn`, return an id, and `clearTimeout(id)` / `clearInterval(id)` cancel it (the
+two share their ids, so either cancels either). Every timer runs **before the
+script ends**: the request is not sent, and a test script's results are not
+read, until the queue is empty (#2577). That is Postman's rule too - its
+sandbox waits for every timer before it reports.
+
+```javascript
+setTimeout(function (label) {
+    pm.test(label, function () {
+        pm.expect(pm.response.code).to.equal(200);
+    });
+}, 100, "status, checked from a timer");
+```
+
+**The delay orders the callbacks; it is not waited out.** The queue runs on a
+virtual clock: firing a timer moves the clock to its due time, so callbacks run
+in due order (a tie to the one queued first) and the promise jobs each callback
+queues run before the next timer, as on an event loop. Nothing sleeps:
+`setTimeout(fn, 60000)` runs `fn` as soon as the work ahead of it has, and
+`Date.now()` does not move. A delay that is not a number from 1 to 2147483647
+counts as 1, Node's rule. **A `setTimeout` written as a sleep therefore does not
+delay the request** - in Postman it would, inside the script's deadline; in
+Vayu that is a [Think time element](./elements.md) (`timer.think`), which
+waits without holding a script open.
+
+What runs in a timer is a script like any other. `pm.test` inside one records a
+test, a promise a timer resolves settles before the script ends, and a callback
+that throws is the script's error while the rest of the queue still runs - the
+rule a throw in the script body follows. `fn` must be a function: a string is
+refused with a `TypeError` rather than evaluated. One script may hold at most
+10,000 pending timers (`MAX_PENDING_TIMERS`); the queue lives outside the
+script's memory limit, so this is what bounds it.
+
+**An interval nothing clears ends the script with an error.** Clear it from its
+own callback when it is done. Otherwise it runs until the deadline stops it,
+`Script execution timed out after <n>ms`, or, with `scriptTimeout` at `0`, until
+the cap on asynchronous work in [Limitations](#limitations) does.
 
 ## What the editor offers, and where it comes from
 
@@ -2762,9 +2810,10 @@ The **language** is current; what is missing is the **host environment**:
   section used to say the opposite, listing `?.` and `??` as "ES2021+" and
   unavailable - wrong on both counts, so any workaround written around that
   claim can go. What limits a script is the global list above, not the syntax.
-- **No host globals**: no `setTimeout`, `fetch`, `URL`, `TextEncoder`,
+- **No host globals**: no `fetch`, `URL`, `TextEncoder`,
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
-  the ones that have a replacement.
+  the ones that have a replacement. The timers are there, and run before the
+  script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
@@ -2790,14 +2839,16 @@ The **language** is current; what is missing is the **host environment**:
   threw; outside one it ends the script. A later assertion in the same script is
   still judged on its own, and a stack overflow inside such a function is a
   `RangeError` the script could have caught, so that still counts as a throw.
-  **The deadline covers the promise jobs too** (#2531): the queue a script
-  leaves is drained inside the same budget, checked between jobs as well as
-  inside one, so a runaway `while (true) await null;` stops with the same
+  **The deadline covers the promise jobs and the timers too** (#2531,
+  #2577): the queues a script leaves are drained inside the same budget,
+  checked between jobs and timer callbacks as well as inside one, so a runaway
+  `while (true) await null;` or an uncleared `setInterval` stops with the same
   `Script execution timed out after <n>ms`. With `scriptTimeout` at `0` there
-  is no deadline to bound the drain, so it stops after 100,000 jobs instead
-  (`MAX_PROMISE_JOBS_WITHOUT_TIMEOUT`) with its own message, `Script stopped
-  after running 100000 promise jobs: ...`. That cap is provisional until #2359
-  settles what `0` means. A job left queued by either stop is never run.
+  is no deadline to bound the drain, so it stops after 100,000 jobs and timer
+  callbacks together (`MAX_ASYNC_JOBS_WITHOUT_TIMEOUT`) with its own message,
+  `Script stopped after running 100000 promise jobs and timer callbacks: ...`.
+  That cap is provisional until #2359 settles what `0` means. A job or timer
+  left queued by either stop is never run.
 
 ## Script Execution Context
 

@@ -203,12 +203,16 @@ TEST (ScriptApiScan, ACodeExpressionInATemplateIsStillUse) {
 }
 
 TEST (ScriptApiScan, NamesTheHostGlobalsASandboxLacks) {
-    EXPECT_EQ (names_in ("setTimeout(f, 10);"), Names{ "setTimeout" });
-    EXPECT_EQ (names_in ("setInterval(f, 10);"), Names{ "setInterval" });
     EXPECT_EQ (names_in ("Buffer.from(s).toString('hex');"), Names{ "Buffer" });
     EXPECT_EQ (names_in ("const r = await fetchIt();"), Names{ "top-level await" });
-    EXPECT_EQ (names_in ("return /\"/.test(x); setTimeout(f);"), Names{ "setTimeout" });
-    EXPECT_EQ (names_in ("n = total / 2; setTimeout(f); s = \"x\";"), Names{ "setTimeout" });
+    EXPECT_EQ (names_in ("return /\"/.test(x); Buffer.from(f);"), Names{ "Buffer" });
+    EXPECT_EQ (names_in ("n = total / 2; Buffer.from(f); s = \"x\";"), Names{ "Buffer" });
+}
+
+// The timers run (#2577), so a script that uses them is not named.
+TEST (ScriptApiScan, TheTimersAreNotNamed) {
+    EXPECT_EQ (names_in ("const t = setTimeout(f, 10); clearTimeout(t);"), Names{});
+    EXPECT_EQ (names_in ("const i = setInterval(f, 10); clearInterval(i);"), Names{});
 }
 
 TEST (ScriptApiScan, AwaitInsideAnAsyncFunctionIsNotNamed) {
@@ -405,8 +409,8 @@ TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {
     EXPECT_EQ (names_in ("tests['a' = ((( {{{ `${ 'x"), Names{ "tests[]" });
     std::string binary = "\xff\xfe";
     binary.push_back ('\0');
-    binary += " setTimeout";
-    EXPECT_EQ (names_in (binary), Names{ "setTimeout" });
+    binary += " Buffer";
+    EXPECT_EQ (names_in (binary), Names{ "Buffer" });
     EXPECT_EQ (names_in (""), Names{});
 }
 

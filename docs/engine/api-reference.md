@@ -6414,9 +6414,9 @@ did. The pre-request script runs before the transfer starts, exactly as on a
 buffered send, so its `pm.request` edits reach the wire. The post-request script
 runs **once, after the stream has terminated**, and reads the bounded stored
 list as `pm.response.events` with `pm.response.totalEvents` and
-`pm.response.eventsTruncated` beside it - the sandbox is synchronous with no
-event loop, so a live per-event callback is not a feature that was skipped but
-one the runtime cannot have. See
+`pm.response.eventsTruncated` beside it - a script runs to completion, its
+timers included, before anything is reported, so a live per-event callback is
+not a feature that was skipped but one the runtime cannot have. See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output
@@ -10509,7 +10509,7 @@ so a client may cache on `version`.
 
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
-Node (`setTimeout`, `fetch`, `require`, `URL`, ...), and Postman's pre-`pm.*`
+Node (`fetch`, `require`, `URL`, `Buffer`, ...), and Postman's pre-`pm.*`
 globals and bundled libraries (`tests`, `responseBody`, `responseCode`,
 `postman.*`, `CryptoJS`, `_`, ...), whose hover names the replacement Postman
 itself gives (`responseBody` is `pm.response.text()`,

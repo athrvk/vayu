@@ -134,8 +134,8 @@ of, and each request, folder or collection that uses any is named in
 `responseCookies`, `responseTime`, `postman.*`, `globals.*`, `environment.*`,
 `data`), `require(...)` and `pm.require`, a non-empty `script.packages`, the
 libraries Postman bundles (`CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
-`moment`, `Backbone`), `setTimeout`, `setInterval`, `Buffer`, a top-level
-`await` (named `top-level await`; `await` inside an `async` function runs, and
+`moment`, `Backbone`), `Buffer`, a top-level `await` (named
+`top-level await`; `await` inside an `async` function runs, and
 an `async` arrow function with an expression body is still named), `pm.visualizer`,
 `pm.variables.set`, `pm.test.skip`, and the one chai family `pm.expect` still refuses,
 chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrResponse`

@@ -461,7 +461,7 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
     EXPECT_TRUE (contains (dts, "add(...args: any[])"));
 }
 
-// The declarations name the globals the sandbox lacks (`setTimeout`, `fetch`,
+// The declarations name the globals the sandbox lacks (`fetch`, `require`,
 // Postman's `responseBody`, ...) so that using one is an error the editor can
 // explain, rather than the silence the app's suppression of "Cannot find name"
 // would otherwise leave.
@@ -469,7 +469,7 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 // A hand-written list of what a runtime does *not* have is exactly the kind
 // that rots silently - nothing fails when the runtime gains one. So rather than
 // trusting it, this runs `typeof <name>` in the real script engine for every
-// entry. Give QuickJS a `setTimeout` and the test that claims it has none
+// entry. Give QuickJS a `fetch` and the test that claims it has none
 // fails, which is the only honest way to hold this list to the sandbox.
 //
 // An absent root is found by the sentence every one of them carries, because
@@ -509,7 +509,7 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
         checked++;
     }
 
-    EXPECT_GT (checked, 35u)
+    EXPECT_GT (checked, 30u)
     << "too few absent globals were probed - the scan found nothing";
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
