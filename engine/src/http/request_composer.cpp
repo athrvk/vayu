@@ -749,6 +749,9 @@ const std::optional<IterationIdentity>& identity) {
             // above the scopes, because that is where Postman puts a data
             // variable, and silent when the row does not carry the name -
             // which is an ordinary variable, not a mistake about a column.
+            if (const auto local = row.local.find (name); local != row.local.end ()) {
+                return local->second;
+            }
             if (const auto cell = row.columns.find (name); cell != row.columns.end ()) {
                 return cell->second;
             }

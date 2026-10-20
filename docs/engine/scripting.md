@@ -1474,12 +1474,14 @@ rule, and why ancestors are read-only, is in
 
 ## Variables (`pm.variables`)
 
-`pm.variables` reads a name without naming its scope, resolving **the bound
-data row first (if one is bound), then environment, then collection, then
-global**, and stopping at the first tier that has it. That is the same order
-`{{baseUrl}}` is resolved in before the request is sent (see
-[Variable Resolution](../app/variable-resolution.md)), so a script and a URL in
-the same request cannot read one name two different ways.
+`pm.variables` reads a name without naming its scope, resolving **the local
+scope first, then the bound data row (if one is bound), then environment, then
+collection, then global**, and stopping at the first tier that has it. Below
+the local scope that is the same order `{{baseUrl}}` is resolved in before the
+request is sent (see [Variable Resolution](../app/variable-resolution.md)), so
+a script and a URL in the same request cannot read one name two different
+ways. The local scope is what `pm.variables.set` writes; it is described
+[below](#the-local-scope-pmvariablesset).
 
 **While a data row is bound, its bare column names answer first** (issue
 #1007) - above environment, collection and globals. Postman binds a dataset's
@@ -1507,24 +1509,53 @@ still answers `undefined` regardless of what row is bound (see below).
 ```javascript
 const baseUrl = pm.variables.get('baseUrl'); // wherever it is defined
 if (pm.variables.has('debug')) { /* ... */ }
-console.log(pm.variables.toObject()); // the bound row, then all three scopes, merged
+console.log(pm.variables.toObject()); // every tier, merged, the local scope winning
 ```
 
-It has `get`, `has` and `toObject` - and no `unset` or `clear`, because it owns
-no scope to remove a name from (the row is read-only too - see
-[`pm.iterationData`](#data-rows-pmiterationdata) below).
+### The local scope (`pm.variables.set`)
 
-**`pm.variables.set()` throws.** In Postman it writes to a *local* scope that
-lives for one request and is never stored; Vayu has no such scope. Writing to
-the environment instead would persist a value the script author expects to
-vanish, and quietly dropping the call would lose a write they believe happened,
-so it fails loudly and names the three scopes that do exist:
+`pm.variables.set(name, value)` writes Postman's *local* scope (issue #2564):
+the strongest tier of all, above a bound data row, and never stored anywhere.
+It is for a value a script computes for this run and nothing after it - a
+signature, a nonce, a counter - which no named scope can hold without the
+value reaching disk at the run's end.
 
+```javascript
+pm.variables.set('nonce', Date.now());
+pm.variables.get('nonce'); // the number as set
+// a header written {{nonce}} goes out carrying its text
 ```
-TypeError: pm.variables.set is not supported: Vayu has no local variable scope.
-Use pm.environment.set(), pm.collectionVariables.set() or pm.globals.set() to
-choose where the value is stored.
-```
+
+- **Every read sees it first.** `get`, `has`, `toObject`, `replaceIn` and
+  `pm.sendRequest` read it above the row and the named scopes, and so does the
+  pass that resolves what composition left after the pre-request script, so a
+  `{{nonce}}` header goes out with the value. A name composition or the
+  data-row bind already answered before the script ran keeps that answer
+  (both run first, [decision D1](../app/variable-resolution.md)).
+  `{{data.column}}` is the row's own spelling and never reads the local scope.
+- **The writes are the scoped ones.** `set` keeps the value's type for the
+  run and stores its string form for `{{name}}`, exactly as
+  [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does;
+  `unset(name)` removes one local name, so the tiers below it answer again;
+  `clear()` empties the local scope. None of the three touches the
+  environment, the collections or the globals.
+- **Nothing stores it.** The run's variable write-back never reads it, the
+  Variables panel and the variable popover never show it, and a run's stored
+  snapshot does not carry it.
+
+How long it lives is the run that owns it:
+
+| Where the script runs | The local scope lives for |
+|---|---|
+| A single Send or `POST /execute` (buffered or streaming) | that send: the pre-request script, the send and the test script |
+| A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
+| A scenario load run | one virtual user's iteration: each user holds its own, cleared at its iteration boundary with the user's other writes, and starting from what `script.setup` left |
+| A single-request load run with `requestElements` | one submission, starting from what `script.setup` left |
+| A load run's deferred `tests` replay | the replay pass, shared by every replayed sample the way the replay's other writes are |
+
+Under load, a name `script.setup` set locally comes back at the user's next
+step if a step unsets it, because each step starts again from the run's base
+scopes; the named scopes behave the same way under load.
 
 **`pm.variables.replaceIn(template)`** - Postman's `{{name}}` interpolation of
 an arbitrary string - runs the same resolver `POST /compose` uses
@@ -1725,8 +1756,8 @@ setting on and off gives `pm.sendRequest` the same answer.
 **`{{variables}}` resolve as the call is made** (#1001). The URL, each header
 name and value, a raw body, a form body's field names and values and each
 credential of an `auth` block are resolved
-once, against the three scopes and the bound data row exactly as
-`pm.variables.replaceIn` reads them - so a value this same script set two lines
+once, against the local scope, the bound data row and the three named scopes
+exactly as `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
 token-refresh script work. It is not a second pass over the composed request:
 that payload was resolved before the script ran and nothing here revisits it.

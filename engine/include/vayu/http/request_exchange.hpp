@@ -82,6 +82,15 @@ struct ScriptVariableScopes {
     vayu::Environment globals;
     vayu::Environment collection;
     std::vector<vayu::Environment> collection_ancestors;
+    /**
+     * The run-local scope `pm.variables.set` writes (#2564): read above every
+     * other tier, a bound data row included, and never stored -
+     * `persist_script_variables` does not read it and the baseline has no
+     * entry for it. It lives exactly as long as this object, so its lifetime
+     * is whoever owns the scopes: one send, one collection run, or (through
+     * @ref ScopeOverlay) one load-run virtual user's iteration.
+     */
+    vayu::Environment local;
     ScriptVariableBaseline baseline;
 };
 
@@ -240,11 +249,12 @@ const std::string& script_type);
 const vayu::runtime::ScriptConfig& config);
 
 /**
- * Point @p ctx's four variable scopes at @p scopes, and nothing else.
+ * Point @p ctx's variable scopes at @p scopes, the run-local one included,
+ * and nothing else.
  *
  * The leaf collection scope is handed over writable while its ancestors are
  * read-only (issue #234); that rule is the reason this is a function rather
- * than four assignments at each call site.
+ * than five assignments at each call site.
  *
  * Separate from `bind_script_scopes` because a **deferred** replay - a load
  * run's `tests` script, a scenario load run's per-step script - has scopes to
@@ -296,10 +306,15 @@ std::vector<vayu::http::CookieWrite>* writes);
  *
  * `apply_onto` layers the overlay onto an already-flattened base map (built
  * once per run by @ref flatten_variable_scopes, never per submission) in the
- * same precedence `values_from_scopes` gives the run's own scopes -
+ * same precedence `values_from_scopes` gives the run's own scopes - local over
  * environment over the collection chain over globals - so a name this VU wrote
  * reads back exactly as `pm.variables.get` would report it, and a name it
  * never touched still falls through to the run's shared value.
+ *
+ * The run-local scope (#2564) rides here too, which is what makes it per-VU:
+ * it starts each iteration as the base scopes' own `local` (what a
+ * `script.setup` left, shared by every VU as the setup's environment writes
+ * are) and is cleared with the rest at the iteration boundary.
  */
 class ScopeOverlay {
     public:
@@ -311,7 +326,7 @@ class ScopeOverlay {
     /**
      * After an inline `script.pre` / `script.post` ran against a
      * `materialize`d copy, replace this VU's overlay wholesale with what the
-     * script left the three writable scopes as.
+     * script left the four writable scopes as.
      *
      * A whole-scope replace rather than a diff, and still correct: the copy
      * the script mutated already started as the run's base scopes with this
@@ -323,7 +338,8 @@ class ScopeOverlay {
     void replace_from (const ScriptVariableScopes& scopes);
 
     [[nodiscard]] bool empty () const {
-        return environment_.empty () && collection_.empty () && globals_.empty ();
+        return environment_.empty () && collection_.empty () &&
+        globals_.empty () && local_.empty ();
     }
 
     /// A new iteration is a new user, not the same one logging in twice - the
@@ -338,8 +354,8 @@ class ScopeOverlay {
     /**
      * A full `ScriptVariableScopes` an inline script can run against: @p
      * base's read-only ancestor chain verbatim, and its environment /
-     * collection / globals with this VU's overlay layered on top - the one
-     * place this issue pays a real copy, and only for a step whose
+     * collection / globals / local with this VU's overlay layered on top -
+     * the one place this issue pays a real copy, and only for a step whose
      * `script.*` element actually opted into running inline.
      */
     [[nodiscard]] ScriptVariableScopes materialize (const ScriptVariableScopes& base) const;
@@ -348,12 +364,14 @@ class ScopeOverlay {
     vayu::Environment environment_;
     vayu::Environment collection_;
     vayu::Environment globals_;
+    vayu::Environment local_;
 };
 
 /**
  * The scopes as one map, with composition's precedence - environment over the
- * collection chain over globals - so a name resolves in a script exactly as
- * `pm.variables.get` answers it.
+ * collection chain over globals - and the run-local scope above all three
+ * (#2564), so a name resolves in a script exactly as `pm.variables.get`
+ * answers it.
  *
  * Exposed for a load run (issue #1495): computed once per run from the base
  * scopes (never per submission - the ancestor chain walk this performs is not

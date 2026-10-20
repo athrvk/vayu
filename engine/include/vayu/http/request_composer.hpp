@@ -410,6 +410,10 @@ DynamicResolution dynamic             = DynamicResolution::Generate);
 struct DataRowColumns {
     /// Column name (no `data.` prefix) -> the text it substitutes.
     VariableValues columns;
+    /// The script's run-local scope (#2564), the one tier Postman puts above
+    /// the row: a bare name it holds answers from here first. A
+    /// `{{data.column}}` never reads it.
+    VariableValues local;
 };
 
 /**

@@ -960,7 +960,11 @@ A script reads a scope by name (`pm.environment.get`,
 at the first scope that has the name enabled - this page's priority order, read
 from the top down. While a row is bound, `pm.variables.get` (and `.has` and
 `.toObject`) checks that row's bare column names **first**, above all three
-scopes - the same D18 tier the ladder above adds, reached from a script. See
+scopes - the same D18 tier the ladder above adds, reached from a script. Above
+even the row sits the script-only local scope `pm.variables.set` writes (issue
+#2564): never stored, so nothing on this page's ladder or in the Variables panel
+shows it, but every script read and the residual pass after the pre-request
+script answer from it first. See
 [scripting.md](../engine/scripting.md#variables-pmvariables) and
 [pm API compatibility](./pm-api-compatibility.md) for the details.
 

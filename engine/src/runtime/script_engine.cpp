@@ -908,6 +908,8 @@ class ScriptEngine::Impl {
         ctx_data.max_response_bytes  = ctx.max_response_bytes;
         ctx_data.in_scenario         = ctx.in_scenario;
         ctx_data.record_metric       = ctx.record_metric;
+        // See ScriptContext::local for why an unbound one is not left null.
+        ctx_data.local = ctx.local != nullptr ? ctx.local : &ctx_data.script_local;
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with

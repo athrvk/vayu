@@ -482,6 +482,7 @@ void bind_variable_scopes (vayu::runtime::ScriptContext& ctx, ScriptVariableScop
     ctx.globals             = &scopes.globals;
     ctx.collectionVariables = &scopes.collection;
     ctx.collectionAncestors = &scopes.collection_ancestors;
+    ctx.local               = &scopes.local;
 }
 
 void bind_script_scopes (vayu::runtime::ScriptContext& ctx,
@@ -616,12 +617,20 @@ const vayu::http::VariableValues& vars) {
 }
 
 /// The scopes as one map, with composition's precedence - environment over the
-/// collection chain over globals - so a name resolves in the request exactly as
-/// `pm.variables.get` answers it in the script that just ran.
+/// collection chain over globals - and the run-local scope over all of them, so
+/// a name resolves in the request exactly as `pm.variables.get` answers it in
+/// the script that just ran.
 vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scopes) {
     std::vector<vayu::Environment> chain = scopes.collection_ancestors; // root first
     chain.push_back (scopes.collection); // leaf last
-    return vayu::http::build_variable_values (scopes.globals, chain, scopes.environment);
+    auto values =
+    vayu::http::build_variable_values (scopes.globals, chain, scopes.environment);
+    for (const auto& [name, variable] : scopes.local) {
+        if (variable.enabled) {
+            values[name] = variable.value;
+        }
+    }
+    return values;
 }
 
 } // namespace
@@ -732,16 +741,18 @@ void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes) {
     environment_ = scopes.environment;
     collection_  = scopes.collection;
     globals_     = scopes.globals;
+    local_       = scopes.local;
 }
 
 void ScopeOverlay::clear () {
     environment_.clear ();
     collection_.clear ();
     globals_.clear ();
+    local_.clear ();
 }
 
 void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars) const {
-    // Lowest precedence first, so environment - highest, matching
+    // Lowest precedence first, so local - highest, matching
     // `values_from_scopes`'s own order - is applied last and wins.
     for (const auto& [name, variable] : globals_) {
         vars[name] = variable.value;
@@ -752,6 +763,9 @@ void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars) const {
     for (const auto& [name, variable] : environment_) {
         vars[name] = variable.value;
     }
+    for (const auto& [name, variable] : local_) {
+        vars[name] = variable.value;
+    }
 }
 
 ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base) const {
@@ -760,6 +774,7 @@ ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base
     scopes.environment = base.environment;
     scopes.collection  = base.collection;
     scopes.globals     = base.globals;
+    scopes.local       = base.local;
     for (const auto& [name, variable] : environment_) {
         scopes.environment[name] = variable;
     }
@@ -768,6 +783,9 @@ ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base
     }
     for (const auto& [name, variable] : globals_) {
         scopes.globals[name] = variable;
+    }
+    for (const auto& [name, variable] : local_) {
+        scopes.local[name] = variable;
     }
     return scopes;
 }

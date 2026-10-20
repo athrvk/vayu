@@ -105,10 +105,11 @@ const SCOPE_BY_ACCESSOR: Record<string, ScriptVariableScope> = {
 /**
  * Methods whose *first* argument is a variable name.
  *
- * `pm.variables` is the odd one: it is the merged read, so it has no `unset`,
- * and its `set` throws by design (the merged view has no scope to write to).
- * Offering a name inside a call that always throws would teach the wrong thing,
- * so those spellings are simply absent here.
+ * `pm.variables` is the odd one: its reads are the merged view, but its `set`
+ * and `unset` write the run-local scope (#2564), which is never stored, so no
+ * stored name belongs to it. Offering the merged list there would present
+ * other scopes' names as if they were local, so those spellings are simply
+ * absent here.
  */
 const NAME_METHODS: Record<string, readonly string[]> = {
 	environment: ["get", "set", "has", "unset"],

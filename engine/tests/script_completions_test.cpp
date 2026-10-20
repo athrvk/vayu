@@ -348,9 +348,7 @@ TEST (ScriptCompletions, TheOfferedVariableScopeMethodsAreExactlyWhatTheRuntimeH
         const size_t comma     = names.find (',', start);
         const std::string name = names.substr (
         start, comma == std::string::npos ? std::string::npos : comma - start);
-        // pm.variables.set exists only to throw and name the three real scopes;
-        // offering it in the editor would be suggesting a call that cannot work.
-        if (!name.empty () && name != "pm.variables.set") {
+        if (!name.empty ()) {
             EXPECT_NE (find_by_label (completions, name), nullptr)
             << name << " is in the runtime but not in the completion list";
         }
@@ -686,11 +684,9 @@ struct FullyBoundContext {
 // endpoint serves.
 bool is_deliberately_uncompletable (const std::string& name) {
     return
-    // Bound only to throw, naming the three real scopes - offering it would be
-    // suggesting a call that cannot work.
-    name == "pm.variables.set" ||
     // Bound only to throw: the rows are a run input, not a scope, so a write
-    // has nowhere to land (#356). Same reasoning as pm.variables.set.
+    // has nowhere to land (#356) - offering one would be suggesting a call
+    // that cannot work.
     name == "pm.iterationData.set" || name == "pm.iterationData.unset" ||
     name == "pm.iterationData.clear" ||
     // The assertion chain root and everything hanging off it. It is offered as

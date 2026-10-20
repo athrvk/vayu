@@ -116,6 +116,16 @@ struct ScriptContext {
     const std::vector<Environment>* collectionAncestors = nullptr;
 
     /**
+     * @brief The run-local scope `pm.variables.set` writes (#2564).
+     *
+     * `ScriptVariableScopes::local`, bound by `bind_variable_scopes`, so it
+     * outlives one script exactly as long as the run that owns it. Null gives
+     * the script a scope of its own that ends with it, rather than a set that
+     * reports success and lands nowhere.
+     */
+    Environment* local = nullptr;
+
+    /**
      * @brief Where the script's `pm.request` edits land, or null to discard them.
      *
      * Set only for pre-request scripts, and only through

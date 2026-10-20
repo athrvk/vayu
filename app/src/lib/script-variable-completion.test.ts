@@ -75,7 +75,7 @@ describe("scriptVariableCompletionContext", () => {
 	it("offers nothing for the row's argument-less and refusing members", () => {
 		// `toObject()` takes no argument, and `set`/`unset` throw on a read-only
 		// row - a name offered inside a call that always throws teaches the wrong
-		// thing, which is the same rule `pm.variables.set` follows.
+		// thing.
 		expect(scriptVariableCompletionContext('pm.iterationData.toObject("')).toBeNull();
 		expect(scriptVariableCompletionContext('pm.iterationData.set("')).toBeNull();
 	});
@@ -97,7 +97,7 @@ describe("scriptVariableCompletionContext", () => {
 		expect(scriptVariableCompletionContext('pm.environment.set("token", "')).toBeNull();
 	});
 
-	it("skips pm.variables.set and unset, which the merged view does not support", () => {
+	it("skips pm.variables.set and unset, whose local scope holds no stored name", () => {
 		expect(scriptVariableCompletionContext('pm.variables.set("')).toBeNull();
 		expect(scriptVariableCompletionContext('pm.variables.unset("')).toBeNull();
 	});

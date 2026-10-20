@@ -34,7 +34,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
 | Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
-| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - read-only, a bound row's bare column names first, see below |
+| Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
@@ -101,12 +101,18 @@ the current iteration's `username` cell rather than a same-named environment var
 Postman's own precedence for a dataset's columns. `get` and `toObject` hand back the
 row's value **typed**, exactly as `pm.iterationData.get` does (a number column reads as a
 number); a column the row does not carry falls through to the three scopes as an ordinary
-name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before. It
-is read-only: **`pm.variables.set()` throws**,
-because Postman writes it to a per-request *local* scope that Vayu does not have, and both
-alternatives (persisting to the environment, or dropping the write) would misrepresent
-what happened. The error names the three scoped setters. See
-[scripting.md](../engine/scripting.md#variables-pmvariables).
+name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before.
+
+**`pm.variables.set(name, value)` writes Postman's *local* scope** (issue #2564), the one
+tier above the row: every read above answers from it first, `replaceIn` and
+`pm.sendRequest` substitute it, and a `{{name}}` composition could not answer goes out
+carrying it, so a pre-request `pm.variables.set("sig", …)` reaches a `{{sig}}` header. It
+keeps the value's type as the scoped setters do. `unset(name)` and `clear()` remove local
+names only. The local scope is never stored and never shown in the Variables panel; it
+lives for one send (pre-request script through test script), for the whole of a
+collection run, and for one virtual user's iteration in a load run. See
+[scripting.md](../engine/scripting.md#the-local-scope-pmvariablesset) for every run
+shape.
 
 ### `{{templates}}` in scripts (`pm.variables.replaceIn`)
 
@@ -920,9 +926,6 @@ Details are in
 
 These Postman APIs are **not** implemented - scripts that rely on them will fail:
 
-- `pm.variables.set(...)` - throws; Vayu has no local scope to write to, so name
-  one of the three scoped setters instead. The read half (`get`/`has`/`toObject`)
-  is supported - see above
 - `replaceIn(...)` on the **scoped** accessors (`pm.environment.replaceIn`,
   `pm.globals.replaceIn`, `pm.collectionVariables.replaceIn`) - only the merged
   `pm.variables.replaceIn(template)` exists (see below), and it answers with

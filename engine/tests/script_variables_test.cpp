@@ -2,8 +2,9 @@
  * @file tests/script_variables_test.cpp
  * @brief Tests for the stored-variables round trip, the design-run persist of
  *        the three variable scopes (issues #135 and #1878), the typed value a
- *        script set within a run (#2529), and the collection chain those
- *        scopes are loaded from (issue #234).
+ *        script set within a run (#2529), the run-local scope that is never
+ *        persisted (#2564), and the collection chain those scopes are loaded
+ *        from (issue #234).
  *
  * A variables blob is written by the app and rewritten by the engine after
  * every design run, so the two halves of `parse_variables`/`serialize_variables`
@@ -338,6 +339,72 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheTypedValueToTheNextStep) 
 }
 
 // ---------------------------------------------------------------------------
+// The run-local scope behind pm.variables.set (#2564)
+// ---------------------------------------------------------------------------
+
+// `unset` and `clear` reach the local scope alone: unsetting a local that
+// shadowed an environment variable uncovers it, and clearing leaves every
+// named scope as it was.
+TEST_F (ScriptVariablesTest, LocalUnsetAndClearTouchOnlyTheLocalScope) {
+    scopes_.environment["x"] = vayu::Variable{ "from-env", false, true };
+
+    run (R"JS(
+        pm.variables.set('x', 'local');
+        pm.variables.set('a', 1);
+        pm.variables.set('b', 2);
+    )JS");
+    run (R"JS(
+        pm.expect(pm.variables.get('x')).to.equal('local');
+        pm.variables.unset('x');
+        pm.expect(pm.variables.get('x')).to.equal('from-env');
+        pm.variables.unset('never-set');
+        pm.variables.clear();
+        pm.expect(pm.variables.has('a')).to.equal(false);
+        pm.expect(pm.variables.get('b')).to.equal(undefined);
+        pm.expect(pm.variables.get('x')).to.equal('from-env');
+    )JS");
+
+    EXPECT_TRUE (scopes_.local.empty ());
+    ASSERT_EQ (scopes_.environment.count ("x"), 1U);
+    EXPECT_EQ (scopes_.environment.at ("x").value, "from-env");
+}
+
+// A load VU's local scope rides its `ScopeOverlay` from one step's script to
+// the next, typed, and above the environment on the residual pass's map. A
+// new iteration clears it, back to what the base scopes hold - here a
+// `script.setup`'s local. Mutation check: drop `local` from
+// `ScopeOverlay::materialize` and the second step reads `undefined`.
+TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) {
+    vayu::http::routes::ScopeOverlay overlay;
+    ScriptVariableScopes base;
+    base.environment["n"] = vayu::Variable{ "from-env", false, true };
+    base.local["setup"]   = vayu::Variable{ "from-setup", false, true };
+
+    scopes_ = overlay.materialize (base);
+    run ("pm.variables.set('n', 0);");
+    overlay.replace_from (scopes_);
+
+    scopes_ = overlay.materialize (base);
+    run (R"JS(
+        pm.expect(pm.variables.get('setup')).to.equal('from-setup');
+        pm.variables.set('n', pm.variables.get('n') + 1);
+    )JS");
+    overlay.replace_from (scopes_);
+
+    auto vars = vayu::http::routes::flatten_variable_scopes (base);
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["n"], "1");
+    EXPECT_FALSE (base.local.contains ("n")) << "a VU's write reached the base";
+
+    overlay.clear ();
+    scopes_ = overlay.materialize (base);
+    run (R"JS(
+        pm.expect(pm.variables.get('n')).to.equal('from-env');
+        pm.expect(pm.variables.get('setup')).to.equal('from-setup');
+    )JS");
+}
+
+// ---------------------------------------------------------------------------
 // persist_script_variables
 // ---------------------------------------------------------------------------
 
@@ -553,6 +620,54 @@ TEST_F (PersistScriptVariablesTest, ATypedSetKeepsAFlagAnotherClientChanged) {
     EXPECT_EQ (stored["token"]["value"], "1,2");
     EXPECT_EQ (stored["token"]["enabled"], false) << stored.dump ();
     EXPECT_EQ (stored["token"]["type"], "json");
+}
+
+// `pm.variables.set` writes the run-local scope (#2564): read first, above a
+// bound data row and every named scope, carried to the run's next script, and
+// never stored. Mutation check: drop `local` from `bind_variable_scopes` and
+// the second script reads the row again.
+TEST_F (PersistScriptVariablesTest, LocalSetIsReadFirstAndNeverPersisted) {
+    auto environment = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (environment);
+    const std::string blob = R"({"x":{"value":"from-env","enabled":true}})";
+    environment->variables = blob;
+    db_->save_environment (*environment);
+
+    auto scopes              = load ();
+    const nlohmann::json row = { { "x", "from-row" } };
+    const auto run_with_row  = [&scopes, &row] (const std::string& source) {
+        vayu::runtime::ScriptContext ctx;
+        vayu::http::routes::bind_variable_scopes (ctx, scopes);
+        ctx.iteration_data = &row;
+        vayu::runtime::ScriptEngine engine;
+        const auto result = engine.execute (source, ctx);
+        EXPECT_TRUE (result.success) << result.error_message;
+    };
+
+    run_with_row (R"JS(
+        pm.expect(pm.variables.get('x')).to.equal('from-row');
+        pm.variables.set('x', 1);
+        pm.expect(pm.variables.get('x')).to.equal(1);
+    )JS");
+    run_with_row (R"JS(
+        pm.expect(pm.variables.get('x')).to.equal(1);
+        pm.expect(pm.variables.has('x')).to.equal(true);
+        pm.expect(pm.variables.toObject().x).to.equal(1);
+        pm.expect(pm.variables.replaceIn('{{x}}|{{data.x}}')).to.equal('1|from-row');
+        pm.expect(pm.iterationData.get('x')).to.equal('from-row');
+        pm.expect(pm.environment.get('x')).to.equal('from-env');
+    )JS");
+
+    ASSERT_EQ (scopes.local.count ("x"), 1U);
+    EXPECT_EQ (scopes.local.at ("x").value, "1");
+    EXPECT_EQ (scopes.environment.at ("x").value, "from-env");
+
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_EQ (stored_environment_variables (), blob);
+    EXPECT_EQ (stored_globals_variables (), APP_BLOB);
+    EXPECT_EQ (stored_collection_variables (), APP_BLOB);
+    EXPECT_EQ (stored_collection_updated_at (), 1);
 }
 
 // A run with no environment and no request must not touch the scopes it has no
