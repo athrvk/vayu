@@ -1502,7 +1502,8 @@ layer, so one user's value never reaches another).
 What the variable *stores* is the value's string form, and that is all
 `{{name}}`, `pm.variables.replaceIn`, the wire and the persisted row ever see:
 `1`, `true`, `1,2,3`, `[object Object]`, `null`, and `""` for `undefined` -
-Postman's own substitution, so a `{{count}}` header goes out as `1`. A name the
+Postman's own substitution, so a `{{count}}` header goes out as `1` (a declared
+`json` row is the one exception, below). A name the
 run only loaded reads from that stored text, cast by its declared type. The
 typed value is never written anywhere, and it is not an edit: setting the
 number `5` on a row that holds `"5"` leaves the row unwritten.
@@ -1512,8 +1513,10 @@ Two limits:
 - **A declared type wins.** A row whose `type` is `number`, `boolean` or
   `json` casts its stored text by that type, whatever was set. Vayu's default
   `"string"` doubles as Postman's `any`, so a row of that type answers what was
-  set. (On a `json` row, `set` still stores the object's string form, so an
-  object set there reads back as that text, not as an object.)
+  set. On a `json` row, `set` of an object or an array stores its JSON text
+  (`JSON.stringify(value)`, #2568), so it reads back as the object and
+  `{{name}}` substitutes the document; a string set there stays as given. A
+  value JSON cannot write (a function, a cycle) still stores its string form.
 - **An object travels as JSON.** Each read is a fresh copy, as
   `JSON.parse(JSON.stringify(value))` would make it: a `Date` reads back as its
   ISO string and a nested `NaN` as `null`. A number on its own keeps every
@@ -1527,7 +1530,7 @@ Two limits:
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value)` | `undefined` | stores the value's string form (`undefined` as `""`); keeps `secret` / `type` / creation time; turns `enabled` on |
+| `set(name, value)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time; turns `enabled` on |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |

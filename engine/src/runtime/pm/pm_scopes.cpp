@@ -312,10 +312,34 @@ ScriptValue script_value_of (JSContext* ctx, JSValueConst value) {
     return carried;
 }
 
-// The stored text is Postman's `Variable#toString`: JavaScript's string
-// conversion, except that `undefined` is "" rather than "undefined". So
-// `{{name}}`, the wire and storage read what Postman's would, and the value
-// itself rides beside the text for the run's own reads (#2529).
+bool is_declared_json (const Environment& map, const std::string& key) {
+    auto it = map.find (key);
+    return it != map.end () && it->second.type == "json";
+}
+
+// The text a set stores. It is Postman's `Variable#toString`: JavaScript's
+// string conversion, except that `undefined` is "" rather than "undefined". So
+// `{{name}}`, the wire and storage read what Postman's would.
+//
+// A row declared `json` stores an object or an array as its JSON text instead:
+// the string conversion is "[object Object]", which the row's own read cannot
+// parse back, and `{{name}}` should substitute the document (#2568). Only the
+// declared type decides this, so a default-type row keeps Postman's text.
+std::string stored_text (JSContext* ctx,
+const Environment& map,
+const std::string& key,
+JSValueConst value,
+const ScriptValue& carried) {
+    if (JS_IsUndefined (value)) {
+        return {};
+    }
+    if (carried.kind == ScriptValue::Kind::Json && is_declared_json (map, key)) {
+        return carried.json;
+    }
+    return js_to_string (ctx, value);
+}
+
+// The value itself rides beside the text for the run's own reads (#2529).
 JSValue
 js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -328,12 +352,11 @@ js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_UNDEFINED;
     }
 
-    std::string key = js_to_string (ctx, argv[0]);
-    std::string text =
-    JS_IsUndefined (argv[1]) ? std::string{} : js_to_string (ctx, argv[1]);
+    std::string key     = js_to_string (ctx, argv[0]);
+    ScriptValue carried = script_value_of (ctx, argv[1]);
+    std::string text    = stored_text (ctx, *variables, key, argv[1], carried);
 
-    set_variable_preserving (
-    *variables, key, std::move (text), script_value_of (ctx, argv[1]));
+    set_variable_preserving (*variables, key, std::move (text), std::move (carried));
 
     return JS_UNDEFINED;
 }
