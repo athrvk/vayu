@@ -1152,8 +1152,11 @@ TEST_F (SendRequestTest, AnAuxiliaryRequestCannotOutliveTheScriptBudget) {
 
     vayu::ScriptResult result;
     const int64_t took = elapsed_ms ([&] {
+        // 800ms: enough for the request to leave on a sanitizer build, where
+        // starting the runtime ate most of a 400ms budget before the send, and
+        // still well under the SLOW_MS / 2 bound below.
         result = run ("pm.sendRequest('" + server.url ("/slow") + "', function () {});",
-        /*timeout_ms=*/400);
+        /*timeout_ms=*/800);
     });
 
     EXPECT_LT (took, SLOW_MS / 2) << "the request outlived the script budget - "

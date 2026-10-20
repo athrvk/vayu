@@ -462,9 +462,12 @@ TEST_F (LoadStrategyTest, FastEndpointHoldsMeanInFlight) {
               << " throughput=" << throughput << " mean_inflight=" << mean_inflight
               << " peak=" << context->peak_in_flight.load () << "\n";
 
-    // A fixed-poll refill collapses mean toward single digits; cv-wake holds it
-    // near N. Generous lower bound for CI jitter (do NOT delete this assertion).
-    EXPECT_GE (mean_inflight, 0.5 * static_cast<double> (N))
+    // A fixed-poll refill collapses the mean to about N * latency / 50ms, under
+    // 2 against a loopback server; cv-wake holds it near N. The bound sits
+    // between the two: a loaded Windows runner's wake latency has measured
+    // 8.0-9.4 here, so 0.5 * N failed healthy runs (do NOT delete this
+    // assertion).
+    EXPECT_GE (mean_inflight, 0.25 * static_cast<double> (N))
     << "mean in-flight collapsed (" << mean_inflight << "); cv-wake not refilling";
 }
 

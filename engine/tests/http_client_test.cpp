@@ -305,11 +305,17 @@ TEST_F (HttpClientTest, ReportsNegotiatedHttpVersion) {
 // "HTTP/1.1" - this is the property from HttpVersionFromCurl in
 // http_version_test.cpp actually exercised end-to-end through a real failed
 // transfer, not just the lookup table in isolation.
+// How long a send to the refused port 1 may take. Windows retries a refused
+// SYN before it reports the refusal, about two seconds on an idle machine, so
+// a 2s budget turned "refused" into "timed out" on a loaded runner. A healthy
+// refusal still returns in milliseconds on Linux and macOS.
+constexpr int REFUSAL_TIMEOUT_MS = 15000;
+
 TEST_F (HttpClientTest, UnnegotiatedConnectionReportsEmptyHttpVersion) {
     Request request;
-    request.method = HttpMethod::GET;
-    request.url = "http://127.0.0.1:1/"; // port 1: connection refused, fast fail
-    request.timeout_ms = 2000;
+    request.method     = HttpMethod::GET;
+    request.url        = "http://127.0.0.1:1/"; // port 1: connection refused
+    request.timeout_ms = REFUSAL_TIMEOUT_MS;
 
     auto result = client_->send (request);
 
@@ -335,7 +341,7 @@ TEST_F (HttpClientTest, UnreachableHostsRawRequestNamesWhatWasAskedFor) {
     Request request;
     request.method       = HttpMethod::GET;
     request.url          = "http://127.0.0.1:1/"; // port 1: connection refused
-    request.timeout_ms   = 2000;
+    request.timeout_ms   = REFUSAL_TIMEOUT_MS;
     request.http_version = HttpVersion::Http2;
 
     auto result = client_->send (request);
@@ -546,7 +552,7 @@ TEST_F (HttpClientTest, ARefusedConnectionIsStillConnectionFailed) {
     Request request;
     request.method     = HttpMethod::GET;
     request.url        = "http://127.0.0.1:1/";
-    request.timeout_ms = 2000;
+    request.timeout_ms = REFUSAL_TIMEOUT_MS;
 
     auto result = client_->send (request);
 

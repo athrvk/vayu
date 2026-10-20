@@ -452,8 +452,11 @@ TEST_F (NativeStoreVerificationTest, APublicCertificateVerifiesWithNothingPasted
     // so the two are separated rather than folded into "it did not work":
     // skipping on an SslError would hide precisely the narrowing #851 could
     // cause, and failing on a closed network would red every offline build.
-    if (response.error_code == ErrorCode::ConnectionFailed ||
-    response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
+    // Every other transport failure is the public host's or the network's,
+    // so it skips too; and any HTTP status, a 403 or 503 from a CDN that
+    // throttles a shared runner's address included, arrived over a verified
+    // handshake.
+    if (response.error_code != ErrorCode::None && response.error_code != ErrorCode::SslError) {
         GTEST_SKIP ()
         << "no route to " << PUBLIC_HTTPS_URL << " ("
         << to_string (response.error_code) << ": " << response.error_message
@@ -466,9 +469,8 @@ TEST_F (NativeStoreVerificationTest, APublicCertificateVerifiesWithNothingPasted
        "`customCaCertificates`, "
        "so this build's default trust store is not the platform's: "
     << response.error_message;
-    EXPECT_EQ (response.error_code, ErrorCode::None)
-    << to_string (response.error_code) << ": " << response.error_message;
-    EXPECT_EQ (response.status_code, 200);
+    EXPECT_GT (response.status_code, 0)
+    << "no answer came back over the handshake";
 }
 
 TEST_F (NativeStoreVerificationTest, APasteExtendsThatStoreRatherThanReplacingIt) {
@@ -489,8 +491,8 @@ TEST_F (NativeStoreVerificationTest, APasteExtendsThatStoreRatherThanReplacingIt
 
     const Response response = send_through (policy, PUBLIC_HTTPS_URL);
 
-    if (response.error_code == ErrorCode::ConnectionFailed ||
-    response.error_code == ErrorCode::DnsError || response.error_code == ErrorCode::Timeout) {
+    // The same separation as above: only a refused handshake is this test's.
+    if (response.error_code != ErrorCode::None && response.error_code != ErrorCode::SslError) {
         GTEST_SKIP () << "no route to " << PUBLIC_HTTPS_URL << " ("
                       << to_string (response.error_code) << ": "
                       << response.error_message << ")";
@@ -500,7 +502,8 @@ TEST_F (NativeStoreVerificationTest, APasteExtendsThatStoreRatherThanReplacingIt
     << "pasting one CA cost this machine every anchor it already had - the "
        "additive rule is broken on this platform: "
     << response.error_message;
-    EXPECT_EQ (response.status_code, 200);
+    EXPECT_GT (response.status_code, 0)
+    << "no answer came back over the handshake";
 }
 
 } // namespace
