@@ -14,7 +14,7 @@
  */
 
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
-import { Callout, ErrorState } from "@/components/shared";
+import { Callout, DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL, isClosedLoopMode } from "@/constants/load-test-modes";
@@ -100,11 +100,8 @@ function SeriesCharts({
 	if (isLoading && data.length === 0) {
 		return (
 			<Card>
-				<CardContent className="flex items-center justify-center py-12">
-					<div className="flex flex-col items-center gap-2 text-muted-foreground">
-						<Loader2 className="h-8 w-8 animate-spin" />
-						<p>Loading time-series data…</p>
-					</div>
+				<CardContent>
+					<DetailSkeleton label="Loading time-series data" className="p-0" />
 				</CardContent>
 			</Card>
 		);
@@ -128,9 +125,10 @@ function SeriesCharts({
 		return (
 			<Card>
 				<CardContent className="flex items-center justify-center py-8">
-					<p className="text-muted-foreground">
-						Insufficient data points for charts (need at least 2 seconds of data)
-					</p>
+					<EmptyState
+						title="Not enough data for charts yet"
+						description="Charts need at least 2 seconds of data."
+					/>
 				</CardContent>
 			</Card>
 		);

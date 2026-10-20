@@ -128,7 +128,7 @@ describe("a run whose time-series fetch failed", () => {
 
 		expect(screen.getByText(ERROR_TITLE)).toBeTruthy();
 		expect(screen.getByText("Failed to fetch")).toBeTruthy();
-		expect(screen.queryByText(/Insufficient data points/)).toBeNull();
+		expect(screen.queryByText(/Not enough data for charts yet/)).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 		expect(series.refetch).toHaveBeenCalledTimes(1);
