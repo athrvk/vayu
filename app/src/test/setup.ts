@@ -10,6 +10,10 @@ const hasDom = typeof window !== "undefined";
 
 if (hasDom) {
 	await import("@testing-library/jest-dom/vitest");
+	// The 1s default failed healthy waits on a loaded CI runner; see timeouts.ts.
+	const { configure } = await import("@testing-library/react");
+	const { ASYNC_UTIL_TIMEOUT_MS } = await import("./timeouts");
+	configure({ asyncUtilTimeout: ASYNC_UTIL_TIMEOUT_MS });
 }
 
 /**

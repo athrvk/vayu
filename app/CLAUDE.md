@@ -128,16 +128,26 @@ test renders, or reaches `document` / `window` / `localStorage` (zustand
 
 Forgetting it fails loudly (`document is not defined`), never silently.
 
-**A render-heavy test asserts a wall clock it never wrote.** `vitest.config.ts`
-sets no `testTimeout`, so every case gets the default 5s. A case that builds
-thousands of rows and renders them spends most of that budget idle and crosses
-it under machine or CI-shard load, failing over the environment rather than
-the code (#846, #1280). Ask what the fixture size is _for_ before reaching for
-a timeout: a property such as "past the grid's first window" needs a fixture
-one step past that window, not hundreds of rows. Only where a case genuinely
-needs the large fixture, give it an explicit `it(name, { timeout: N }, fn)`
-with the measured cost and the multiplier in a comment. Never raise the global
-default: it slows every genuinely hung test's failure to the new bound.
+**A test's budget is a hang detector, sized for the slowest CI leg.**
+`src/test/timeouts.ts` holds the suite's budgets (60s a case and hook, 15s
+for `waitFor` / `findBy*`); `vitest.config.ts` and `src/test/setup.ts` read
+them. vitest's 5s and Testing Library's 1s defaults, and the hand-sized
+10-20s overrides that followed (#846, #1280, #1219), were each a measurement
+on one machine times a guess. A full parallel run on four cores measured cases
+at 6x their idle figure, and Windows runs the suite 3-4x slower again, so
+every one of those budgets failed healthy runs and cost a CI re-run. A case
+names no budget of its own: `timeouts.guard.test.ts` refuses a numeric
+`timeout:` in a test file, and a case that runs a whole build uses
+`BUILD_TEST_TIMEOUT_MS`.
+
+**Render cost is held down by fixture size, not by the clock.** Ask what the
+fixture size is _for_. A property such as "past the grid's first window" needs
+a fixture one step past that window, not hundreds of rows. A case that loops
+over a fixture table renders one case per `it.each` row and unmounts what it
+rendered, never all of them inside one test. A case that waits out the app's
+real retry backoff sets `retry: false` on the client it drives
+(`scenario-run-service.test.ts`). A slow test is a cost every run pays even
+when it passes.
 
 **A source scan cannot see a class that arrives in a variable.** A guard that
 greps for `<Badge className="bg-…">` misses a background bound from

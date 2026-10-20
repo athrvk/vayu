@@ -153,44 +153,35 @@ beforeEach(() => {
 });
 
 describe("typing in the new-folder field", () => {
-	// Measured 1.8s on the cloud box (the mount, the menu and ten keystrokes),
-	// 15s is roughly 8x for a loaded CI shard. The 300-row fixture is the point
-	// of the case - see the file comment - so it is not shrunk to fit 5s.
-	it(
-		"renders no row but the editing one, however many rows are mounted",
-		{ timeout: 15_000 },
-		async () => {
-			renderTree();
-			// The fixture really holds what the case claims to measure.
-			expect(document.querySelectorAll("[data-request-id]")).toHaveLength(REQUEST_COUNT);
-			const mountedRows = treeRows().length;
-			expect(mountedRows).toBe(REQUEST_COUNT + collections.length);
+	// The 300-row fixture is the point of the case - see the file comment.
+	it("renders no row but the editing one, however many rows are mounted", async () => {
+		renderTree();
+		// The fixture really holds what the case claims to measure.
+		expect(document.querySelectorAll("[data-request-id]")).toHaveLength(REQUEST_COUNT);
+		const mountedRows = treeRows().length;
+		expect(mountedRows).toBe(REQUEST_COUNT + collections.length);
 
-			rowRenders.clear();
-			const field = await openNewFolderForm();
-			// Opening the form is a state change every row may see once: the folder
-			// whose form it is, and the rows beside it.
-			for (const id of renderedIds()) {
-				expect(rowRenders.get(id), `row ${id} after opening the form`).toBeLessThanOrEqual(
-					1
-				);
-			}
-
-			rowRenders.clear();
-			for (let keystroke = 1; keystroke <= 10; keystroke++) {
-				fireEvent.change(field, { target: { value: "n".repeat(keystroke) } });
-			}
-
-			expect(field).toHaveValue("nnnnnnnnnn");
-			// The form re-renders for each keystroke; the rows, none of them.
-			expect(renderedIds()).toEqual([]);
+		rowRenders.clear();
+		const field = await openNewFolderForm();
+		// Opening the form is a state change every row may see once: the folder
+		// whose form it is, and the rows beside it.
+		for (const id of renderedIds()) {
+			expect(rowRenders.get(id), `row ${id} after opening the form`).toBeLessThanOrEqual(1);
 		}
-	);
+
+		rowRenders.clear();
+		for (let keystroke = 1; keystroke <= 10; keystroke++) {
+			fireEvent.change(field, { target: { value: "n".repeat(keystroke) } });
+		}
+
+		expect(field).toHaveValue("nnnnnnnnnn");
+		// The form re-renders for each keystroke; the rows, none of them.
+		expect(renderedIds()).toEqual([]);
+	});
 });
 
 describe("a drag crossing rows", () => {
-	// Measured 1.1s: the same 300-row mount, 13x headroom at 15s.
-	it("renders only the rows the indicator left and arrived on", { timeout: 15_000 }, () => {
+	it("renders only the rows the indicator left and arrived on", () => {
 		renderTree();
 		expect(document.querySelectorAll("[data-request-id]")).toHaveLength(REQUEST_COUNT);
 		const rows = layout();

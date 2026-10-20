@@ -119,7 +119,7 @@ describe("a transport failure is not a deletion", () => {
 		});
 
 		// A non-404 retries a bounded number of times before settling.
-		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		await waitFor(() => expect(result.current.isError).toBe(true));
 		// The bug fix: a 5xx must stay a transport failure, so callers like
 		// DesignRunView do not replay an orphan's recorded headers by mistake.
 		expect(isRequestNotFound(result.current.error)).toBe(false);
@@ -132,7 +132,7 @@ describe("a transport failure is not a deletion", () => {
 			wrapper: wrapper(client),
 		});
 
-		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(isRequestNotFound(result.current.error)).toBe(false);
 	});
 });
@@ -168,9 +168,7 @@ describe("a restored tab racing an engine that is still starting", () => {
 			{ wrapper: wrapper(makeClient()) }
 		);
 
-		await waitFor(() => expect(result.current.data).toMatchObject({ id: "req_2" }), {
-			timeout: 3000,
-		});
+		await waitFor(() => expect(result.current.data).toMatchObject({ id: "req_2" }));
 		expect(getRequest).toHaveBeenCalledTimes(refusals + 1);
 		expect(statuses).not.toContain("error");
 	});
@@ -181,7 +179,7 @@ describe("a restored tab racing an engine that is still starting", () => {
 			wrapper: wrapper(makeClient()),
 		});
 
-		await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 2000 });
+		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(getRequest).toHaveBeenCalledTimes(QUERY_CACHE.REQUEST_LOOKUP_RETRY + 1);
 	});
 });
