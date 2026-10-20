@@ -979,7 +979,9 @@ TEST (LoadClock, StoredRowsCarryTheWholeSecondsPercentiles) {
 // percentile key; the seconds around the stall store real figures. The stall
 // opens about 0.5 s in and lasts STALL_WINDOW_MS (3 s); a gate closes a second
 // every 1.0-1.1 s, so at least one whole stored second lies inside it even at
-// 1.5 s a gate. Mutation checks: write the percentile keys unconditionally in
+// 1.5 s a gate. The run is 9 s so a stored row still follows the stall when
+// the first request is up to 4 s late: the stall closes at (10th request) +
+// 3 s, and the last stored row sits near 8 s. Mutation checks: write the percentile keys unconditionally in
 // `build_metric_tick_payload` and the empty-second assertions fail; restore
 // the zeros in `put_interval_percentiles` and the frames' nulls fail.
 TEST (LoadClock, AStalledSecondStoresNoPercentiles) {
@@ -993,7 +995,7 @@ TEST (LoadClock, AStalledSecondStoresNoPercentiles) {
 
         const nlohmann::json config{ { "method", "GET" },
             { "url", server.stall_window_url () }, { "mode", "constant_rps" },
-            { "duration", "5s" }, { "targetRps", 20.0 }, { "timeout", 10000 },
+            { "duration", "9s" }, { "targetRps", 20.0 }, { "timeout", 10000 },
             { "workers", 1 } };
         const std::string run_id = "run_load_stall";
         create_load_run (db, run_id, config);
