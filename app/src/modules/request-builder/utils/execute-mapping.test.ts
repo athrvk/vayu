@@ -138,6 +138,38 @@ describe("responseFromExecuteResult, on a JSON body", () => {
 		expect(mapped.bodyRaw).toBe(text);
 	});
 
+	it("builds the same pane whether or not the engine parsed the body (#2544)", () => {
+		// `apiService.executeRequest` asks for `includeParsedBody: false`, so the
+		// live answer carries `body: null` where it used to carry the parse. The
+		// pane is built from `bodyRaw`, so Pretty and Raw must not move.
+		const parsed = responseFromExecuteResult(
+			result({ body: ENGINE_PARSE, bodyRaw: RECEIVED, bodySize: RECEIVED.length })
+		);
+		const declined = responseFromExecuteResult(
+			result({ body: null, bodyRaw: RECEIVED, bodySize: RECEIVED.length })
+		);
+
+		expect(declined.body).toBe(parsed.body);
+		expect(declined.bodyRaw).toBe(parsed.bodyRaw);
+		expect(declined.bodyRaw).toBe(RECEIVED);
+	});
+
+	it("builds the same large pane from a declined body as from a parsed one", () => {
+		const big = { pad: "x".repeat(LARGE_BODY_BYTES + 1024) };
+		const raw = JSON.stringify(big);
+
+		const parsed = responseFromExecuteResult(
+			result({ body: big, bodyRaw: raw, bodySize: raw.length })
+		);
+		const declined = responseFromExecuteResult(
+			result({ body: null, bodyRaw: raw, bodySize: raw.length })
+		);
+
+		expect(declined.body).toBe(raw);
+		expect(declined.body).toBe(parsed.body);
+		expect(declined.bodyRaw).toBe(parsed.bodyRaw);
+	});
+
 	it("rebuilds a missing bodyRaw compactly, and the pane indents that", () => {
 		// Guard for a producer that sends no `bodyRaw`: the original bytes are
 		// gone, so the reconstruction must not claim formatting nobody sent.

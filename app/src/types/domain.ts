@@ -2137,6 +2137,13 @@ export interface HttpResponse {
 	 */
 	requestHeaderLines?: HeaderLine[];
 	rawRequest?: string;
+	/**
+	 * The engine's JSON parse of `bodyRaw`, or `null` when it has none to give:
+	 * the request declined it (`includeParsedBody: false`, which the renderer
+	 * always sends), the body is not JSON, is base64, or is past 4 MiB. Nothing
+	 * in the renderer reads it but the guard in `responseFromExecuteResult`; the
+	 * pane is built from `bodyRaw`.
+	 */
 	body: unknown;
 	bodyRaw: string;
 	/**

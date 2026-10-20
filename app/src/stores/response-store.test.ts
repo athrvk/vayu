@@ -19,11 +19,20 @@
  * end and "a re-sent request is not the next victim" fails; forget the `lru`
  * half of `clearResponse` or `clearAll` and "the recency list and the map hold
  * the same keys" fails, because a cleared id would keep occupying a slot.
+ *
+ * The byte budget (#2544): drop the `bytes > RESPONSE_CACHE_MAX_BYTES` half of
+ * the loop condition in `withResponse` and "bounds the bytes" fails (thirty
+ * 40 MB responses hit the count cap of 24 first); drop the `lru.length > 1`
+ * guard and "keeps the response just written" fails; replace the
+ * `bodyRaw !== body` test in `estimateResponseBytes` with `bodyRaw !== undefined`
+ * and "counts an equal body and bodyRaw once" fails.
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	RESPONSE_CACHE_MAX_BYTES,
 	RESPONSE_CACHE_MAX_ENTRIES,
+	estimateResponseBytes,
 	useResponseStore,
 	type StoredResponse,
 } from "./response-store";
@@ -106,6 +115,101 @@ describe("bounds the session", () => {
 		expect(useResponseStore.getState().responses.size).toBe(1);
 		expect(useResponseStore.getState().getResponse("req_0")?.body).toBe("second");
 		expect(retained()).toEqual(["req_0"]);
+	});
+});
+
+/** `chars` characters of `fill`: a body whose estimated size is `2 * chars` bytes. */
+function text(chars: number, fill = "x"): string {
+	return fill.repeat(chars);
+}
+
+describe("estimateResponseBytes", () => {
+	it("counts a string at two bytes per UTF-16 code unit", () => {
+		expect(estimateResponseBytes(aResponse(text(1000)))).toBe(2000);
+	});
+
+	it("counts body and bodyRaw separately when they differ", () => {
+		const response = { ...aResponse(text(1000)), bodyRaw: text(400, "y") };
+
+		expect(estimateResponseBytes(response)).toBe(2000 + 800);
+	});
+
+	it("counts an equal body and bodyRaw once", () => {
+		// Equal by value, not the same object: the dedupe is on the text, which is
+		// what the large-body path produces (`paneBody` returns the raw string).
+		const response = { ...aResponse(text(1000)), bodyRaw: text(1000) };
+
+		expect(estimateResponseBytes(response)).toBe(2000);
+	});
+
+	it("counts an equal-length but different bodyRaw in full", () => {
+		const response = { ...aResponse(text(1000)), bodyRaw: text(1000, "y") };
+
+		expect(estimateResponseBytes(response)).toBe(4000);
+	});
+
+	it("adds a binary body's bytes at their length", () => {
+		const response = { ...aResponse(""), rawBytes: { data: new Uint8Array(5000) } };
+
+		expect(estimateResponseBytes(response)).toBe(5000);
+	});
+});
+
+describe("bounds the bytes", () => {
+	/** Retained responses' estimated size, summed the way the store does. */
+	function retainedBytes(): number {
+		let total = 0;
+		for (const stored of useResponseStore.getState().responses.values()) {
+			total += estimateResponseBytes(stored);
+		}
+		return total;
+	}
+
+	it("stays under the budget through thirty ~20 MB responses", () => {
+		// A pretty body and a different raw one, 10M characters each: about 20 MB
+		// of text, 40 MB by the estimate. Thirty of them are 1.2 GB; the count cap
+		// of 24 alone would keep 960 MB.
+		for (let i = 0; i < 30; i++) {
+			useResponseStore.getState().setResponse(`big_${i}`, {
+				...aResponse(text(10_000_000)),
+				bodyRaw: text(10_000_000, "y"),
+			});
+			expect(retainedBytes()).toBeLessThanOrEqual(RESPONSE_CACHE_MAX_BYTES);
+		}
+
+		const kept = retained();
+		expect(kept.length).toBeGreaterThan(1);
+		expect(kept.length).toBeLessThan(RESPONSE_CACHE_MAX_ENTRIES);
+		// Evicted oldest first: what is left is the tail of the sends.
+		expect(kept).toEqual(
+			Array.from({ length: kept.length }, (_, i) => `big_${30 - kept.length + i}`)
+		);
+	});
+
+	it("keeps the response just written even when it alone is over the budget", () => {
+		useResponseStore.getState().setResponse("small", aResponse());
+		const huge = {
+			...aResponse(""),
+			rawBytes: { data: new Uint8Array(RESPONSE_CACHE_MAX_BYTES + 1) },
+		};
+
+		useResponseStore.getState().setResponse("huge", huge);
+
+		expect(useResponseStore.getState().getResponse("huge")).not.toBeNull();
+		expect(useResponseStore.getState().getResponse("small")).toBeNull();
+		expect(retained()).toEqual(["huge"]);
+	});
+
+	it("evicts that oversized response as soon as something newer is written", () => {
+		const huge = {
+			...aResponse(""),
+			rawBytes: { data: new Uint8Array(RESPONSE_CACHE_MAX_BYTES + 1) },
+		};
+		useResponseStore.getState().setResponse("huge", huge);
+
+		useResponseStore.getState().setResponse("next", aResponse());
+
+		expect(retained()).toEqual(["next"]);
 	});
 });
 

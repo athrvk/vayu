@@ -534,6 +534,18 @@ export interface ExecuteRequestRequest {
 	 * because the payload is the wire's shape.
 	 */
 	origin?: RunOrigin;
+	/**
+	 * Whether the answer's `body` carries a parsed copy of a JSON response
+	 * (issue #2544). The engine's default is `true`; `false` answers `body: null`
+	 * and skips building the tree, which for a large body is a copy of the whole
+	 * response held on the daemon's heap. `bodyRaw` is unaffected.
+	 *
+	 * `apiService.executeRequest` sends `false` on every execute: the pane is
+	 * built from `bodyRaw` (`paneBody`) and nothing in the renderer reads `body`.
+	 * The MCP server leaves it unset, because its `run_request` result exposes the
+	 * parsed `body` to the agent.
+	 */
+	includeParsedBody?: boolean;
 }
 
 export type ExecuteRequestResponse = SanityResult;
