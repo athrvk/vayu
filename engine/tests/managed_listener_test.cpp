@@ -17,6 +17,7 @@
 #include <thread>
 
 #include "vayu/http/managed_listener.hpp"
+#include "wait_until.hpp"
 
 using vayu::http::ManagedListener;
 
@@ -155,10 +156,11 @@ TEST (ManagedListener, StopJoinsAHandlerThatIsStillRunning) {
         client.Get ("/slow");
     });
 
-    for (int i = 0; i < 500 && !handler_entered.load (); ++i) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (1));
-    }
-    ASSERT_TRUE (handler_entered.load ()) << "the handler never ran";
+    // A deadline, not 500 one-millisecond naps: a sleep is at least 1ms and on
+    // Windows about 15.6ms, so the count was a wall-clock budget in disguise.
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return handler_entered.load (); }))
+    << "the handler never ran";
 
     listener.stop ();
     // The join is the whole point: after stop() returns, no handler is still

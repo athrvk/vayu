@@ -51,6 +51,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::core::Registry;
@@ -600,9 +601,13 @@ class ElementsTimersRunnerTest : public ::testing::Test {
             auto run = db_->get_run (run_id);
             if (run && run->status != vayu::RunStatus::Pending &&
             run->status != vayu::RunStatus::Running) {
-                // Give the worker's last acts (retain, closed) a moment, on
-                // the same rule scenario_runner_test.cpp's own helper states.
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+                // The worker writes the status before its last acts (closed,
+                // then retain_run, which takes it out of the active map); wait
+                // for those rather than a fixed moment, so an assertion on
+                // them cannot race it.
+                (void)vayu::tests::wait_until (
+                [&] () { return manager_.get_run (run_id) == nullptr; },
+                std::chrono::seconds (5));
                 return run->status;
             }
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
@@ -631,17 +636,20 @@ TEST_F (ElementsTimersRunnerTest, GaussianTimerThinkWaitsApproximatelyItsMean) {
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::steady_clock::now () - started);
-    // A window, not a one-sided floor: a gaussian draw around a 100ms mean
-    // with a 1ms deviation is essentially always in [90, 110]ms, so 50ms was
-    // no floor at all - it passed on a run that never waited a tenth of the
-    // configured mean. The 800ms ceiling stays generous against CI jitter
-    // and the two GETs' own transfer time while still catching a wait that
-    // is off by an order of magnitude.
+    // A gaussian draw around a 100ms mean with a 1ms deviation is essentially
+    // always in [90, 110]ms. The draw is read off the element's own recorded
+    // outcome, which no runner's speed moves; the wall clock only proves the
+    // run really waited, a floor a slow runner cannot fail. (A wall-clock
+    // ceiling stood here and measured the runner as much as the wait.)
     EXPECT_GE (elapsed.count (), 90)
     << "the think time did not hold up the run for close to its configured "
        "mean";
-    EXPECT_LT (elapsed.count (), 800)
-    << "the think time held up the run far longer than its configured mean";
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    const auto trace0 = json::parse (rows[0].trace_data);
+    const auto waited = trace0["elements"][0]["waitedMs"].get<int64_t> ();
+    EXPECT_GE (waited, 90) << "the draw fell far below its configured mean";
+    EXPECT_LE (waited, 110) << "the draw fell far above its configured mean";
 }
 
 // `timer.pacing` on a single request holds a steady cadence across

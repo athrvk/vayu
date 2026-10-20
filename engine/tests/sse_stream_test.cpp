@@ -41,6 +41,7 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -544,12 +545,9 @@ TEST (SseConsumer, RecordsTheInitialResponseHeaders) {
     StreamServer server;
     auto spec = spec_for (server.url ("/silent"), brisk_limits ());
     SseStreamContext context ("run_test", brisk_limits ());
-    std::thread stopper ([&context] () {
-        std::this_thread::sleep_for (std::chrono::milliseconds (150));
-        context.should_stop.store (true);
-    });
+    // The idle timeout ends the silent stream, so no stop races the headers:
+    // a stop after a fixed delay landed before them on a slow runner.
     const auto response = vayu::http::consume_sse_stream (spec, context);
-    stopper.join ();
 
     EXPECT_EQ (response.status_code, 200);
     EXPECT_EQ (response.headers.at ("x-fixture"), "silent");
@@ -699,9 +697,8 @@ TEST (SseStreamManagerTest, StopRequestEndsALiveStreamAndIsRefusedForAnUnknownRu
     auto context = manager.start (spec_for (server.url ("/endless"), brisk_limits ()));
     ASSERT_NE (context, nullptr);
 
-    while (context->total_events () < 1) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (5));
-    }
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return context->total_events () >= 1; }));
     EXPECT_TRUE (manager.request_stop ("run_test"));
     EXPECT_FALSE (manager.request_stop ("run_missing"));
 
@@ -725,9 +722,8 @@ TEST (SseStreamManagerTest, TearsDownWithAStreamStillRunning) {
         auto context =
         manager.start (spec_for (server.url ("/endless"), brisk_limits ()));
         ASSERT_NE (context, nullptr);
-        while (context->total_events () < 1) {
-            std::this_thread::sleep_for (std::chrono::milliseconds (5));
-        }
+        ASSERT_TRUE (
+        vayu::tests::wait_until ([&] () { return context->total_events () >= 1; }));
     }
     SUCCEED ();
 }
@@ -749,9 +745,8 @@ TEST (SseStreamManagerTest, ShutdownJoinsEveryWorkerAndIsTerminalAndIdempotent) 
                        const SseStreamContext&) { completed.store (true); };
     auto context = manager.start (std::move (spec));
     ASSERT_NE (context, nullptr);
-    while (context->total_events () < 1) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (5));
-    }
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return context->total_events () >= 1; }));
 
     manager.shutdown ();
     EXPECT_TRUE (completed.load ()) << "shutdown returned while the worker was "
@@ -1535,9 +1530,12 @@ std::string busy_script (int ms) {
 }
 
 // A loopback send's own cost is milliseconds; a figure this far over it means
-// the wire or a script leaked in, which is what the cases below separate.
+// the wire or a script leaked in, which is what the cases below separate. The
+// slow script is long enough that half of it clears a sanitizer build's own
+// cost (compose, a DB write, a QuickJS start) with room to spare: at 400ms the
+// bound was 200ms, close enough to a loaded runner's honest figure to flake.
 constexpr double LOOPBACK_ENGINE_CEILING_MS = 1000.0;
-constexpr int SLOW_SCRIPT_MS                = 400;
+constexpr int SLOW_SCRIPT_MS                = 1200;
 
 TEST_F (StreamExecuteTest, ABufferedSendReportsItsEngineCostInTheTimingNode) {
     serve (1);

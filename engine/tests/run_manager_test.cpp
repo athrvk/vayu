@@ -18,6 +18,7 @@
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/platform/platform.hpp"
+#include "wait_until.hpp"
 
 using namespace vayu::core;
 
@@ -436,12 +437,20 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
 
     // Let a few ticks land, then request a stop - as POST /runs/:id/stop does.
-    std::this_thread::sleep_for (std::chrono::milliseconds (300));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return ctx->published_count.load () >= 3; }))
+    << "the metrics thread never ticked";
     size_t ticks_at_stop = ctx->published_count.load ();
     ctx->should_stop     = true;
 
     // The worker is still draining: the stream must stay open and keep ticking.
-    std::this_thread::sleep_for (std::chrono::milliseconds (400));
+    // Three ticks: a thread that exits on should_stop still publishes the tick
+    // it was in and its final settled one on the way out, so it never gets
+    // here. Mutation check: loop on `is_running && !should_stop` in
+    // collect_metrics and this fails.
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&] () { return ctx->published_count.load () >= ticks_at_stop + 3; }))
+    << "ticks stopped at the stop request instead of covering the drain";
     EXPECT_FALSE (ctx->closed.load ())
     << "closed was signalled on should_stop, before the drain finished";
     EXPECT_GT (ctx->published_count.load (), ticks_at_stop)
@@ -486,7 +495,10 @@ TEST (CollectMetrics, SizesTheReplayRingFromTheConfiguredWindow) {
     ctx->is_running = true;
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
-    std::this_thread::sleep_for (std::chrono::milliseconds (150));
+    // The ring is sized before tick 0 is published.
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&] () { return ctx->published_count.load () > 0; }))
+    << "the metrics thread never published tick 0";
 
     EXPECT_EQ (ctx->max_live_ticks.load (), 1000u)
     << "the ring kept its default instead of the configured window / cadence";
@@ -511,14 +523,25 @@ TEST (CollectMetrics, ReportsZeroActiveBeforeTheLoopIsPublished) {
     vayu::db::Database db (db_path);
     db.init ();
 
+    // A run row, so the 1 Hz branch's write lands and says it ran.
+    vayu::db::Run run;
+    run.id              = "unpublished_run";
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Running;
+    run.start_time      = 1;
+    run.config_snapshot = "{}";
+    db.create_run (run);
+
     nlohmann::json cfg;
-    auto ctx = std::make_shared<RunContext> ("unpublished_run", cfg);
+    auto ctx = std::make_shared<RunContext> (run.id, cfg);
     // Deliberately never set event_loop - this is the window where the runner
     // thread is still in its config reads (or failed before building a loop).
     ctx->is_running = true;
 
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
-    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&] () { return !db.get_metric_ticks_since (run.id, 0).empty (); }))
+    << "the 1 Hz branch never persisted a tick; nothing is proven";
     ctx->is_running = false;
     metrics.join ();
 
@@ -570,9 +593,10 @@ TEST (CollectMetrics, TheStoredTickAndTheLiveFrameCountHttpErrors) {
     }
     ctx->is_running = true;
 
-    // Held past one second so the DB-gated branch persists at least one tick.
+    // Held until the DB-gated branch persists a tick.
     std::thread metrics ([&] () { collect_metrics (ctx, &db); });
-    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    EXPECT_TRUE (vayu::tests::wait_until (
+    [&] () { return !db.get_metric_ticks_since (run.id, 0).empty (); }));
     ctx->is_running = false;
     metrics.join ();
 
@@ -769,9 +793,14 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
         EXPECT_EQ (expected, 100u);
         ASSERT_GT (sent, 0u);
         EXPECT_GE (sending, DURATION_S);
-        EXPECT_LT (sending, DURATION_S + 0.15)
+        // A window that swallowed the drain reads DURATION_S + 0.5 or more;
+        // a healthy one overruns the deadline by scheduling alone, which has
+        // measured 0.16s on a loaded macOS runner. Both bounds sit between the
+        // healthy reading and the broken one, and an overrun shortens the
+        // drain by as much as it lengthens the window.
+        EXPECT_LT (sending, DURATION_S + 0.35)
         << "the window ran past the deadline";
-        EXPECT_GT (test_duration - sending, 0.4) << "no drain was measured";
+        EXPECT_GT (test_duration - sending, 0.2) << "no drain was measured";
         EXPECT_DOUBLE_EQ (summary.at ("send_rate").get<double> (),
         static_cast<double> (sent) / sending);
 
@@ -799,11 +828,12 @@ TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
 
     EXPECT_EQ (mgr.retained_count (), 1u);
 
-    // Sweep cadence is ttl/2, floored at 500ms. With ttl=1000 → 500ms cadence,
-    // so after ~750ms the sweeper has had at least one tick.
+    // Sweep cadence is ttl/2, floored at 500ms. Nothing but the sweeper
+    // evicts here, so waiting for the count to fall proves it ticked.
     mgr.start_sweeper (1000);
-    std::this_thread::sleep_for (std::chrono::milliseconds (750));
-    EXPECT_EQ (mgr.retained_count (), 0u);
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&mgr] () { return mgr.retained_count () == 0u; }))
+    << "the sweeper never evicted the expired run";
 
     mgr.stop_sweeper (); // also exercised by destructor
 }
@@ -813,14 +843,15 @@ TEST (RunManagerRetention, BackgroundSweeperEvictsWithoutExternalTriggers) {
 TEST (RunManagerRetention, BackgroundSweeperRereadsTtlProviderEachTick) {
     RunManager mgr;
     std::atomic<int> calls{ 0 };
-    // ttl=1000 → 500ms cadence; over ~1300ms expect at least two invocations.
+    // ttl=1000 → 500ms cadence; a provider read once at start stops at one.
     mgr.start_sweeper ([&calls] () -> int64_t {
         calls.fetch_add (1);
         return 1000;
     });
-    std::this_thread::sleep_for (std::chrono::milliseconds (1300));
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&calls] () { return calls.load () >= 2; }))
+    << "the TTL provider was read " << calls.load () << " time(s)";
     mgr.stop_sweeper ();
-    EXPECT_GE (calls.load (), 2);
 }
 
 TEST (RunManagerRetention, SweepEvictsExpiredOnly) {

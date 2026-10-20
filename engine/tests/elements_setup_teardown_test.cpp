@@ -44,6 +44,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 
@@ -388,7 +389,13 @@ class ScriptLifecycleTest : public ::testing::Test {
             auto run = db_->get_run (run_id);
             if (run && run->status != vayu::RunStatus::Pending &&
             run->status != vayu::RunStatus::Running) {
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+                // The worker writes the status before its last acts (closed,
+                // then retain_run, which takes it out of the active map); wait
+                // for those rather than a fixed moment, so an assertion on
+                // them cannot race it.
+                (void)vayu::tests::wait_until (
+                [&] () { return manager_.get_run (run_id) == nullptr; },
+                std::chrono::seconds (5));
                 return run->status;
             }
             std::this_thread::sleep_for (std::chrono::milliseconds (10));

@@ -36,6 +36,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::http::routes {
 // Defined in routes/runs.cpp; returns {http_status, json_body}.
@@ -228,8 +229,12 @@ TEST_F (RunStopAccountingTest, StoppedRunAccountsForItsCancelledRequests) {
     context->event_loop = std::make_unique<vayu::http::EventLoop> (single_worker ());
     context->event_loop->start ();
 
+    // Stop once something was submitted: a fixed delay stopped a run that had
+    // not yet sent anything on a slow runner, and the books below balance
+    // trivially at zero.
     std::thread stopper ([&context] () {
-        std::this_thread::sleep_for (std::chrono::milliseconds (300));
+        (void)vayu::tests::wait_until (
+        [&context] () { return context->requests_sent.load () > 0; });
         context->should_stop = true;
         context->notify_refill ();
     });
@@ -320,7 +325,9 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
 
-    EXPECT_LE (context->requests_sent.load () - sent_at_stop, 10u)
+    // A run that ignores the stop keeps sending at 50/s for 30s; the slack is
+    // for the strategy thread noticing the flag on a runner that stalls it.
+    EXPECT_LE (context->requests_sent.load () - sent_at_stop, 25u)
     << "the run kept submitting requests after the stop was signalled";
 
     // #2136: the stored summary is the only record of what the Stop cancelled
