@@ -5,17 +5,18 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import RequestItem from "./RequestItem";
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/CollectionTreeContext";
+import NewFolderForm from "./NewFolderForm";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import { countSubtreeRequests } from "./tree-utils";
 import type { Collection } from "@/types";
 import { compareTreeOrder } from "@/types";
-import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
+import { IconSwap, Input } from "@/components/ui";
 import {
 	RowActionsMenu,
 	RowContextMenu,
@@ -23,15 +24,17 @@ import {
 	DrawerSectionCount,
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
-import { isCommitEnter } from "@/lib/keyboard";
 import { useInlineRename } from "@/hooks/useInlineRename";
 import { childInsetPx, rowInsetPx } from "@/constants/layout";
 
 /**
  * What differs per row. Everything shared - the expanded set, the selection,
- * the rename and delete state, every handler - comes from
- * `CollectionTreeContext`, because this component renders itself and each prop
- * would otherwise have to be re-threaded at every depth.
+ * the rename and delete state, every handler - comes from the collection tree
+ * contexts, because this component renders itself and each prop would
+ * otherwise have to be re-threaded at every depth.
+ *
+ * Every prop is a primitive or an object from the query cache, so the `memo`
+ * below skips a row whose entity did not change (#2543).
  */
 export interface CollectionItemProps {
 	collection: Collection;
@@ -47,12 +50,7 @@ export interface CollectionItemProps {
 	setSize: number;
 }
 
-export default function CollectionItem({
-	collection,
-	depth,
-	posInSet,
-	setSize,
-}: CollectionItemProps) {
+function CollectionItemRow({ collection, depth, posInSet, setSize }: CollectionItemProps) {
 	const {
 		allCollections,
 		expandedCollectionIds,
@@ -60,9 +58,9 @@ export default function CollectionItem({
 		renamingId,
 		deletingCollectionId,
 		creatingSubfolder,
-		newFolderName,
-		isCreatingSubfolder,
 		getRequestsByCollection,
+	} = useCollectionTreeState();
+	const {
 		getCollectionActions,
 		onCollectionClick,
 		onCollectionToggle,
@@ -70,10 +68,7 @@ export default function CollectionItem({
 		onRenameCancel,
 		onStartRename,
 		onCollectionDeleteClick,
-		onFolderNameChange,
-		onCreateSubfolder,
-		onCancelSubfolder,
-	} = useCollectionTreeContext();
+	} = useCollectionTreeHandlers();
 
 	const isExpanded = expandedCollectionIds.has(collection.id);
 	const isSelected = selectedCollectionId === collection.id;
@@ -95,9 +90,10 @@ export default function CollectionItem({
 		[collection.id, collection.name, collection.parentId]
 	);
 	const dnd = useRowDnd(entity);
-	const childCollections = allCollections
-		.filter((c) => c.parentId === collection.id)
-		.sort(compareTreeOrder);
+	const childCollections = useMemo(
+		() => allCollections.filter((c) => c.parentId === collection.id).sort(compareTreeOrder),
+		[allCollections, collection.id]
+	);
 	// Folders and requests are one set of treeitems inside one group, so the
 	// requests continue the folders' numbering rather than restarting it.
 	const childSetSize = childCollections.length + requests.length;
@@ -408,44 +404,7 @@ export default function CollectionItem({
 				<div id={childrenId} role="group" className="mt-1 space-y-0.5">
 					{/* Subfolder Creation Form */}
 					{creatingSubfolder === collection.id && (
-						<div
-							className="flex gap-2 py-1 pr-2"
-							style={{ paddingLeft: childIndentPx }}
-						>
-							<Input
-								size="sm"
-								type="text"
-								value={newFolderName}
-								onChange={(e) => onFolderNameChange(e.target.value)}
-								onKeyDown={(e) => {
-									// `isCommitEnter`, not a bare Enter (#939, #935): an
-									// IME commits its composition buffer with an
-									// ordinary Enter keydown, and mod+Enter is the
-									// Send chord, not this field's create.
-									if (isCommitEnter(e)) onCreateSubfolder(collection.id);
-									if (e.key === "Escape") onCancelSubfolder();
-								}}
-								placeholder="Collection name"
-								className="flex-1 text-sm"
-								disabled={isCreatingSubfolder}
-								autoFocus
-							/>
-							<Button
-								size="sm"
-								onClick={() => onCreateSubfolder(collection.id)}
-								disabled={isCreatingSubfolder}
-							>
-								{isCreatingSubfolder && (
-									<Loader2 className="size-icon-sm animate-spin mr-1" />
-								)}
-								Add
-							</Button>
-							<DialogCancelButton
-								size="sm"
-								onClick={onCancelSubfolder}
-								disabled={isCreatingSubfolder}
-							/>
-						</div>
+						<NewFolderForm parentId={collection.id} indentPx={childIndentPx} />
 					)}
 
 					{/* Child Collections (Subfolders) - Recursive.
@@ -486,3 +445,10 @@ export default function CollectionItem({
 		</div>
 	);
 }
+
+/**
+ * The row, memoised. The recursion above renders this binding rather than
+ * `CollectionItemRow`, or the nested rows would skip the `memo`.
+ */
+const CollectionItem = memo(CollectionItemRow);
+export default CollectionItem;

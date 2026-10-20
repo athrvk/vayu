@@ -20,12 +20,24 @@ export { default as CollectionItem } from "./CollectionItem";
 export type { CollectionItemProps } from "./CollectionItem";
 export { default as RequestItem } from "./RequestItem";
 export type { RequestItemProps } from "./RequestItem";
-export { CollectionTreeContext, useCollectionTreeContext } from "./context/CollectionTreeContext";
+export {
+	CollectionTreeFolderDraftContext,
+	CollectionTreeHandlersContext,
+	CollectionTreeStateContext,
+	useCollectionTreeFolderDraft,
+	useCollectionTreeHandlers,
+	useCollectionTreeState,
+} from "./context/CollectionTreeContext";
+export { CollectionTreeProviders } from "./context/CollectionTreeProviders";
 export type {
-	CollectionTreeContextValue,
-	CollectionTreeCrudSlice,
+	CollectionTreeCrudHandlers,
+	CollectionTreeCrudState,
 	CollectionTreeDnd,
+	CollectionTreeDragState,
 	CollectionTreeDropTarget,
+	CollectionTreeFolderDraft,
+	CollectionTreeHandlers,
+	CollectionTreeState,
 } from "./context/CollectionTreeContext";
 export { useRevealActiveSelection } from "./useRevealActiveSelection";
 export { useTreeCrud } from "./useTreeCrud";

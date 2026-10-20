@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createStore, useStore } from "zustand";
 import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
 import { useToastStore, useSaveStore } from "@/stores";
@@ -46,9 +47,14 @@ import {
 	type DragGesture,
 } from "@/lib/drag/drag-gesture";
 import { resolveDrop, zoneAt, type DropDestination, type TreeEntity } from "./drop-position";
-import type { CollectionTreeDnd, CollectionTreeDropTarget } from "./context/CollectionTreeContext";
+import type {
+	CollectionTreeDnd,
+	CollectionTreeDragState,
+	CollectionTreeDropTarget,
+} from "./context/CollectionTreeContext";
 import type { RowAction } from "@/components/shared";
 import { TIMING } from "@/config/timing";
+import { useStableCallback } from "@/hooks/useStableCallback";
 
 /** Alt+Arrow directions, in tree terms rather than screen terms. */
 export type TreeMoveDirection = "up" | "down" | "in" | "out";
@@ -142,15 +148,38 @@ export function useTreeDnd({
 	collections,
 	getRequestsByCollection,
 	treeRef,
-	isRowBusy,
-	revealEntity,
+	isRowBusy: isRowBusyNow,
+	revealEntity: revealEntityNow,
 }: TreeDndOptions): TreeDnd {
-	const reorder = useReorderMutation();
+	// `mutate` alone: the mutation object is new on every render, and everything
+	// below that depends on it would be too.
+	const { mutate: reorderMutate } = useReorderMutation();
 	const expandCollection = useCollectionsStore((s) => s.expandCollection);
 	const expandedCollectionIds = useCollectionsStore((s) => s.expandedCollectionIds);
 
-	const [dragging, setDragging] = useState<TreeEntity | null>(null);
-	const [dropTarget, setDropTarget] = useState<CollectionTreeDropTarget | null>(null);
+	/*
+	 * The row callbacks that close over per-render values (the rename / delete
+	 * state, the loaded collections, the expanded set) are read through the latest
+	 * render rather than listed as dependencies. Each is only called from a
+	 * pointer or key event, and listing them made every drag handler - and with
+	 * it the context value every row subscribes to - a new function whenever one
+	 * of them changed (#2543).
+	 */
+	const isRowBusy = useStableCallback(isRowBusyNow);
+	const revealEntity = useStableCallback(revealEntityNow);
+	const isExpanded = useStableCallback((id: string) => expandedCollectionIds.has(id));
+
+	/*
+	 * The drag indicator's state is a store, not React state: `dropTarget`
+	 * changes on every row the pointer crosses, and as state in this hook it was
+	 * a new context value, which rebuilt every mounted row to move a 2px line.
+	 * Rows subscribe to the one fact each draws (`useRowDnd`); this hook, which
+	 * hosts the whole tree, subscribes only to whether a drag is live.
+	 */
+	const [dragState] = useState(() =>
+		createStore<CollectionTreeDragState>(() => ({ dragging: null, dropTarget: null }))
+	);
+	const isDragging = useStore(dragState, (state) => state.dragging !== null);
 	const [announcement, setAnnouncement] = useState("");
 	const [moveTarget, setMoveTarget] = useState<TreeEntity | null>(null);
 
@@ -158,8 +187,8 @@ export function useTreeDnd({
 	 * The gesture, the pressed row and the resolved destination are refs, not
 	 * state: they change on every `pointermove`, and a render per move would
 	 * rebuild every row in the tree to move a 2px line. What renders - the
-	 * dragged row and the indicator - is state, and only changes when the
-	 * indicator actually moves.
+	 * dragged row and the indicator - lives in `dragState`, and only changes when
+	 * the indicator actually moves.
 	 */
 	const gestureRef = useRef<DragGesture>(IDLE_GESTURE);
 	const pressedRef = useRef<{ entity: TreeEntity; pointerId: number; el: HTMLElement } | null>(
@@ -296,7 +325,7 @@ export function useTreeDnd({
 			}
 
 			if (isEmptyPlan(plan)) return null;
-			reorder.mutate(plan);
+			reorderMutate(plan);
 
 			const landedAt = Math.min(to.index, Math.max(blockSize - 1, 0));
 			setAnnouncement(
@@ -305,7 +334,7 @@ export function useTreeDnd({
 			revealEntity(moved);
 			return { from, moved };
 		},
-		[nameOf, placementOf, reorder, requestSiblings, revealEntity]
+		[nameOf, placementOf, reorderMutate, requestSiblings, revealEntity]
 	);
 
 	/**
@@ -433,7 +462,7 @@ export function useTreeDnd({
 	const armSpring = useCallback(
 		(target: TreeEntity | null) => {
 			const id = target?.kind === "collection" ? target.id : null;
-			if (!id || expandedCollectionIds.has(id)) {
+			if (!id || isExpanded(id)) {
 				clearSpring();
 				return;
 			}
@@ -450,7 +479,7 @@ export function useTreeDnd({
 				}, TIMING.TREE_SPRING_LOAD_MS),
 			};
 		},
-		[clearSpring, expandCollection, expandedCollectionIds]
+		[clearSpring, expandCollection, isExpanded]
 	);
 
 	/* ── The drag itself ──────────────────────────────────────────────────── */
@@ -464,9 +493,8 @@ export function useTreeDnd({
 		}
 		pressedRef.current = null;
 		destinationRef.current = null;
-		setDragging(null);
-		setDropTarget(null);
-	}, [clearSpring, stopAutoScroll]);
+		dragState.setState({ dragging: null, dropTarget: null });
+	}, [clearSpring, dragState, stopAutoScroll]);
 
 	const hasUnsavedEdits = useCallback((entity: TreeEntity): boolean => {
 		if (entity.kind !== "request") return false;
@@ -519,7 +547,7 @@ export function useTreeDnd({
 			const next = moveGesture(gestureRef.current, { x: e.clientX, y: e.clientY });
 			if (next !== gestureRef.current) {
 				gestureRef.current = next;
-				if (next.phase === "dragging") setDragging(pressed.entity);
+				if (next.phase === "dragging") dragState.setState({ dragging: pressed.entity });
 			}
 			if (gestureRef.current.phase !== "dragging") return;
 
@@ -554,15 +582,16 @@ export function useTreeDnd({
 
 			destinationRef.current = destination;
 			const indicator = destination ? indicatorFor(pressed.entity, destination) : null;
-			setDropTarget((current) =>
-				current?.id === indicator?.id && current?.position === indicator?.position
+			dragState.setState((current) =>
+				current.dropTarget?.id === indicator?.id &&
+				current.dropTarget?.position === indicator?.position
 					? current
-					: indicator
+					: { dropTarget: indicator }
 			);
 			armSpring(springTarget);
 			updateAutoScroll(e.clientY);
 		},
-		[armSpring, indicatorFor, isRowBusy, updateAutoScroll]
+		[armSpring, dragState, indicatorFor, isRowBusy, updateAutoScroll]
 	);
 
 	const onPointerUp = useCallback(
@@ -612,7 +641,7 @@ export function useTreeDnd({
 	// Escape cancels mid-drag. On `window` rather than the row: the row is not
 	// focused during a drag, so a keydown never reaches it.
 	useEffect(() => {
-		if (!dragging) return;
+		if (!isDragging) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
 			e.preventDefault();
@@ -621,7 +650,7 @@ export function useTreeDnd({
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [dragging, endDrag]);
+	}, [isDragging, endDrag]);
 
 	// A drag interrupted by an unmount leaves a 700ms timer and a scroll frame
 	// behind; both hold a callback into a tree that no longer exists.
@@ -792,48 +821,37 @@ export function useTreeDnd({
 		[applyPlacement, expandCollection, requestSiblings]
 	);
 
-	const dnd = useMemo<CollectionTreeDnd>(
-		() => ({
-			draggingId: dragging?.id ?? null,
-			dropTarget,
-			rowHandlers: (entity: TreeEntity) => ({
-				onPointerDown: (e: React.PointerEvent<HTMLElement>) => onPointerDown(e, entity),
-				onPointerMove,
-				onPointerUp,
-				onPointerCancel,
-				onClickCapture,
-			}),
-			isDropBlocked: (entity: TreeEntity) => {
-				if (!dragging) return false;
-				if (entity.id === dragging.id) return true;
-				if (
-					dragging.kind === "collection" &&
-					isDescendant(entity.id, dragging.id, dataRef.current.collections)
-				) {
-					return true;
-				}
-				// No band of this row names a destination the dragged row could
-				// take - a folder over a request row, or a request over a root
-				// folder's edges. Asked of the same resolver the drop uses, so what
-				// is greyed and what is refused cannot disagree.
-				return (["before", "inside", "after"] as const).every(
-					(zone) => resolveDrop({ dragged: dragging, target: entity, zone }) === null
-				);
-			},
-			moveByKeyboard,
-			moveActions,
-		}),
-		[
-			dragging,
-			dropTarget,
-			moveActions,
-			moveByKeyboard,
-			onClickCapture,
-			onPointerCancel,
-			onPointerDown,
+	const rowHandlers = useCallback(
+		(entity: TreeEntity) => ({
+			onPointerDown: (e: React.PointerEvent<HTMLElement>) => onPointerDown(e, entity),
 			onPointerMove,
 			onPointerUp,
-		]
+			onPointerCancel,
+			onClickCapture,
+		}),
+		[onClickCapture, onPointerCancel, onPointerDown, onPointerMove, onPointerUp]
+	);
+
+	const isDropBlocked = useCallback((dragged: TreeEntity, entity: TreeEntity) => {
+		if (entity.id === dragged.id) return true;
+		if (
+			dragged.kind === "collection" &&
+			isDescendant(entity.id, dragged.id, dataRef.current.collections)
+		) {
+			return true;
+		}
+		// No band of this row names a destination the dragged row could
+		// take - a folder over a request row, or a request over a root
+		// folder's edges. Asked of the same resolver the drop uses, so what
+		// is greyed and what is refused cannot disagree.
+		return (["before", "inside", "after"] as const).every(
+			(zone) => resolveDrop({ dragged, target: entity, zone }) === null
+		);
+	}, []);
+
+	const dnd = useMemo<CollectionTreeDnd>(
+		() => ({ dragState, rowHandlers, isDropBlocked, moveByKeyboard, moveActions }),
+		[dragState, rowHandlers, isDropBlocked, moveByKeyboard, moveActions]
 	);
 
 	const closeMoveDialog = useCallback(() => setMoveTarget(null), []);

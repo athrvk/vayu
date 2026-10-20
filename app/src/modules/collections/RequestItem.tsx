@@ -5,9 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Loader2, Trash2, Edit2, Copy, CopyPlus } from "lucide-react";
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
@@ -29,8 +29,12 @@ import { rowInsetPx } from "@/constants/layout";
 
 /**
  * What differs per row. The selection, the rename and delete state and every
- * handler come from `CollectionTreeContext` - the same source `CollectionItem`
- * reads, so a row's behaviour cannot drift from its parent folder's.
+ * handler come from the collection tree contexts - the same source
+ * `CollectionItem` reads, so a row's behaviour cannot drift from its parent
+ * folder's.
+ *
+ * Every prop is a primitive or an object from the query cache, so the `memo`
+ * below skips a row whose request did not change (#2543).
  */
 export interface RequestItemProps {
 	request: Request;
@@ -47,25 +51,17 @@ export interface RequestItemProps {
 	setSize: number;
 }
 
-export default function RequestItem({
-	request,
-	collectionId,
-	depth = 1,
-	posInSet,
-	setSize,
-}: RequestItemProps) {
+function RequestItemRow({ request, collectionId, depth = 1, posInSet, setSize }: RequestItemProps) {
+	const { allCollections, selectedRequestId, deletingRequestId, renamingRequestId } =
+		useCollectionTreeState();
 	const {
-		allCollections,
-		selectedRequestId,
-		deletingRequestId,
-		renamingRequestId,
 		onRequestClick,
 		onRequestRenameSubmit,
 		onRequestRenameCancel,
 		onStartRequestRename,
 		onRequestDeleteClick,
 		onDuplicateRequest,
-	} = useCollectionTreeContext();
+	} = useCollectionTreeHandlers();
 
 	const { copy } = useCopy();
 	const isSelected = selectedRequestId === request.id;
@@ -290,3 +286,6 @@ export default function RequestItem({
 		</RowContextMenu>
 	);
 }
+
+const RequestItem = memo(RequestItemRow);
+export default RequestItem;

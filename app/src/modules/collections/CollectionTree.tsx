@@ -33,10 +33,8 @@ import { useDeleteRefocus } from "./useDeleteRefocus";
 import { useTreeCrud } from "./useTreeCrud";
 import { useTreeDnd } from "./useTreeDnd";
 import { MoveToDialog } from "./MoveToDialog";
-import {
-	CollectionTreeContext,
-	type CollectionTreeContextValue,
-} from "./context/CollectionTreeContext";
+import type { CollectionTreeHandlers, CollectionTreeState } from "./context/CollectionTreeContext";
+import { CollectionTreeProviders } from "./context/CollectionTreeProviders";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { Request } from "@/types";
 import { compareTreeOrder } from "@/types";
@@ -103,7 +101,7 @@ export default function CollectionTree() {
 		expandCollections,
 	});
 
-	const { panel, rows } = useTreeCrud({
+	const { panel, handlers, rowState, folderDraft } = useTreeCrud({
 		collections,
 		requestsByCollection,
 		getRequestsByCollection,
@@ -194,11 +192,11 @@ export default function CollectionTree() {
 	 */
 	const isRowBusy = useCallback(
 		(entityId: string) =>
-			entityId === rows.renamingId ||
-			entityId === rows.renamingRequestId ||
-			entityId === rows.deletingCollectionId ||
-			entityId === rows.deletingRequestId,
-		[rows.renamingId, rows.renamingRequestId, rows.deletingCollectionId, rows.deletingRequestId]
+			entityId === rowState.renamingId ||
+			entityId === rowState.renamingRequestId ||
+			entityId === rowState.deletingCollectionId ||
+			entityId === rowState.deletingRequestId,
+		[rowState]
 	);
 
 	const { dnd, announcement, moveTarget, closeMoveDialog, moveToOwner } = useTreeDnd({
@@ -209,24 +207,27 @@ export default function CollectionTree() {
 		revealEntity,
 	});
 
-	const treeContext = useMemo<CollectionTreeContextValue>(
+	const treeHandlers = useMemo<CollectionTreeHandlers>(
+		() => ({ ...handlers, dnd }),
+		[handlers, dnd]
+	);
+
+	const treeState = useMemo<CollectionTreeState>(
 		() => ({
+			...rowState,
 			allCollections: collections,
 			expandedCollectionIds,
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
-			dnd,
-			...rows,
 		}),
 		[
+			rowState,
 			collections,
 			expandedCollectionIds,
 			selectedCollectionId,
 			selectedRequestId,
 			getRequestsByCollection,
-			dnd,
-			rows,
 		]
 	);
 
@@ -398,7 +399,7 @@ export default function CollectionTree() {
 			    role="tree" + roving tabindex: the whole tree is one tab stop and
 			    arrow keys move between rows (see useRovingTreeFocus).
 			    Everything a row needs beyond its own entity comes from the
-			    context - see CollectionTreeContext for why it is not props. */}
+			    contexts - see CollectionTreeContext for why it is not props. */}
 				{!isLoadingCollections && rootCollections.length > 0 && (
 					<div className="flex-1 min-h-0">
 						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
@@ -409,7 +410,11 @@ export default function CollectionTree() {
 							onFocus={treeFocus.onFocus}
 							className="space-y-0.5"
 						>
-							<CollectionTreeContext.Provider value={treeContext}>
+							<CollectionTreeProviders
+								handlers={treeHandlers}
+								state={treeState}
+								folderDraft={folderDraft}
+							>
 								{rootCollections.map((collection, index) => (
 									<CollectionItem
 										key={collection.id}
@@ -419,7 +424,7 @@ export default function CollectionTree() {
 										setSize={rootCollections.length}
 									/>
 								))}
-							</CollectionTreeContext.Provider>
+							</CollectionTreeProviders>
 						</div>
 					</div>
 				)}

@@ -19,8 +19,13 @@
  * `null`), which is what a test rendering one row in isolation gets.
  */
 
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
-import type { CollectionTreeRowHandlers } from "./context/CollectionTreeContext";
+import { useMemo } from "react";
+import { createStore, useStore } from "zustand";
+import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
+import type {
+	CollectionTreeDragState,
+	CollectionTreeRowHandlers,
+} from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 import type { RowAction } from "@/components/shared";
 
@@ -39,8 +44,31 @@ export interface RowDnd {
 	moveActions: RowAction[];
 }
 
+/** What a row without drag machinery subscribes to: a drag that never starts. */
+const IDLE_DRAG_STATE = createStore<CollectionTreeDragState>(() => ({
+	dragging: null,
+	dropTarget: null,
+}));
+
+/**
+ * A row's drag wiring, subscribed per fact (#2543). The drop target changes on
+ * every row the pointer crosses, so it is read through a selector that answers
+ * only for this row: a crossing re-renders the row the line left and the row it
+ * arrived on, not the tree. `dragging` changes twice per drag, so every row
+ * reading it is fine.
+ */
 export function useRowDnd(entity: TreeEntity): RowDnd {
-	const { dnd } = useCollectionTreeContext();
+	const { dnd } = useCollectionTreeHandlers();
+	const dragState = dnd?.dragState ?? IDLE_DRAG_STATE;
+	const dragging = useStore(dragState, (state) => state.dragging);
+	const target = useStore(dragState, (state) =>
+		state.dropTarget?.id === entity.id ? state.dropTarget.position : null
+	);
+	const isBlocked = useMemo(
+		() => (dnd && dragging ? dnd.isDropBlocked(dragging, entity) : false),
+		[dnd, dragging, entity]
+	);
+
 	if (!dnd) {
 		return {
 			handlers: {},
@@ -51,11 +79,10 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 			moveActions: [],
 		};
 	}
-	const target = dnd.dropTarget?.id === entity.id ? dnd.dropTarget.position : null;
 	return {
 		handlers: dnd.rowHandlers(entity),
-		isDragging: dnd.draggingId === entity.id,
-		isBlocked: dnd.isDropBlocked(entity),
+		isDragging: dragging?.id === entity.id,
+		isBlocked,
 		dropEdge: target === "inside" ? null : target,
 		isDropInto: target === "inside",
 		moveActions: dnd.moveActions(entity),

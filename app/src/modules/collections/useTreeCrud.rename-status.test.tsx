@@ -99,7 +99,7 @@ describe("collection tree rename and the shared save status", () => {
 			const { result } = renderCrud();
 
 			await act(async () => {
-				await result.current.rows[submit](id, name);
+				await result.current.handlers[submit](id, name);
 			});
 
 			expect(update).toHaveBeenCalledWith({ id, name });
@@ -111,7 +111,7 @@ describe("collection tree rename and the shared save status", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.rows.onRenameSubmit("c-1", "Acme Corp");
+			await result.current.handlers.onRenameSubmit("c-1", "Acme Corp");
 		});
 
 		expect(useSaveStore.getState().status).toBe("saved");
@@ -123,7 +123,7 @@ describe("collection tree rename and the shared save status", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.rows.onRequestRenameSubmit("r-1", "List accounts");
+			await result.current.handlers.onRequestRenameSubmit("r-1", "List accounts");
 		});
 
 		expect(useSaveStore.getState().status).toBe("error");

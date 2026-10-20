@@ -16,7 +16,7 @@
  */
 
 import { DropIndicator } from "@/components/shared";
-import { useCollectionTreeContext } from "./context/CollectionTreeContext";
+import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 
 /**
@@ -48,7 +48,7 @@ export function RowDropIndicator({
  * attribute, so no handler has to be threaded through a row's prop list.
  */
 export function RowMoveControls({ entity }: { entity: TreeEntity }) {
-	const { dnd } = useCollectionTreeContext();
+	const { dnd } = useCollectionTreeHandlers();
 	if (!dnd) return null;
 	return (
 		<>
