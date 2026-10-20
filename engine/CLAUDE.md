@@ -152,6 +152,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   Postman export's stored columns) has a test that fails the budget on the
   quadratic parse. The rest of a path can still be quadratic after the parse is
   not (`ordered_map::operator[]` per member); the test measures the whole path.
+  Copying members out of an object whose keys are already distinct goes through
+  `vayu::utils::append_unique_member` (#2552), and a test reads its export back
+  with `parse_ordered_json`, never `ordered_json::parse`.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as
