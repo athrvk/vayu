@@ -830,17 +830,20 @@ const restatedGates = new WeakMap<LoadTestMetrics, LoadTestMetrics>();
 /**
  * A gate with `current_rps` restated as the completions since the previous
  * gate over the time between them, the figure a stored tick holds. Its own is
- * the last ~100 ms delta, which a run's first gate keeps for want of a
- * previous one. The final gate can close less than a second, which is why the
+ * the last ~100 ms delta. A run's first gate has no previous one and counts
+ * from the start, as its stored row does. The final gate can close less than a second, which is why the
  * divisor is the interval and not 1.
  */
 function restateGate(gate: LoadTestMetrics, previous: LoadTestMetrics | null): LoadTestMetrics {
 	const cached = restatedGates.get(gate);
 	if (cached) return cached;
-	const interval = previous ? gate.elapsed_seconds - previous.elapsed_seconds : 0;
+	const interval = gate.elapsed_seconds - (previous?.elapsed_seconds ?? 0);
 	let restated = gate;
-	if (previous && interval > 0) {
-		const completed = Math.max(0, gate.requests_completed - previous.requests_completed);
+	if (interval > 0) {
+		const completed = Math.max(
+			0,
+			gate.requests_completed - (previous?.requests_completed ?? 0)
+		);
 		restated = { ...gate, current_rps: completed / interval };
 	}
 	restatedGates.set(gate, restated);

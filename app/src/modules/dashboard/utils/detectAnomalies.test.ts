@@ -913,6 +913,16 @@ describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", 
 		expect(detectAnomalies(series)).toEqual([]);
 	});
 
+	it("restates the first gate over the time since the run started", () => {
+		// No gate precedes it, and its stored row is completions over the
+		// elapsed time, not the 100 ms figure the frame carries.
+		const stored = recorded(healthyRun(5));
+		const first = { ...gateFrame(stored[0], 40), elapsed_seconds: 1, requests_completed: 600 };
+
+		const [restated] = wholeSecondTicks([first]);
+		expect(restated.current_rps).toBeCloseTo(600, 6);
+	});
+
 	it("passes a stored series through as it is", () => {
 		const stored = healthyRun(20);
 		const series = wholeSecondTicks(stored);
