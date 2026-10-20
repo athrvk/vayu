@@ -163,6 +163,8 @@ export const API_ENDPOINTS = {
 	START_LOAD_TEST: `/runs`,
 
 	// Runs
+	// GET lists, DELETE clears the history (pinned baselines and runs in flight
+	// stay - #2429); `RUN_BY_ID` deletes the one run it names, pinned or not.
 	RUNS: `/runs`,
 	// Paginated, filtered list. Passing any param opts into the `{data,
 	// pagination}` envelope; a bare `/runs` (no params) still returns the

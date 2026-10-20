@@ -2045,8 +2045,11 @@ click; refetching either removes it or proves it real.
 
 **Deleting a run closes its tabs.** Both delete flows - `HistoryList`'s row
 delete and Settings' *Clear run history* - call
-`closeTabsForEntities(ids, "run")` for the runs the engine actually accepted (a
-409'd run keeps its tab, because the run is still there). Tabs are persisted, so
+`closeTabsForEntities(ids, "run")` for the runs the engine actually removed. For
+the row delete that is the run it named, unless the call was refused (a 409'd run
+keeps its tab, because the run is still there); for *Clear run history* it is the
+`deletedIds` that `DELETE /runs` answers with, so a pinned baseline or a run still
+in flight keeps its tab (#2429). Tabs are persisted, so
 a run tab left open after its run is gone is not merely stale: it rehydrates
 into a pane that can never load on every restart.
 
