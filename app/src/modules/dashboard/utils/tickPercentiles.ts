@@ -13,9 +13,10 @@
  * only the last ~100 ms window - a tenth of the second, which plotted beside a
  * stored series is a different quantity under the same name. Every reader that
  * wants a per-second figure (the percentile chart, the response-time scatter,
- * the breakpoint) goes through {@link secondPercentiles}, and the hero card's
- * run-so-far figures through {@link cumulativePercentiles}, so no chart or
- * threshold re-derives the distinction inline.
+ * the breakpoint, the anomaly detector's p99) goes through
+ * {@link secondPercentiles}, and the hero card's run-so-far figures through
+ * {@link cumulativePercentiles}, so no chart or threshold re-derives the
+ * distinction inline.
  */
 
 import type { LoadTestMetrics } from "@/types";
