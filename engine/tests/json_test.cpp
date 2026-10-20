@@ -430,6 +430,63 @@ TEST (BodyEncoding, ACappedBodyWithABadByteBeforeTheCutIsBase64) {
     EXPECT_EQ (response_body_bytes (serialize (capped)), capped.body);
 }
 
+// ============================================================================
+// `body` is the parsed copy, skipped on request or past a size (issue #2544).
+// Mutation check: make `parsed_body` in json.cpp ignore `include_parsed_body`,
+// or drop its size comparison, and the matching `body` assertion below fails;
+// turn `>` into `>=` and the at-the-threshold case fails.
+// ============================================================================
+
+namespace {
+
+/// A JSON document of exactly @p bytes: one string member padded out.
+std::string json_of_size (size_t bytes) {
+    const std::string open  = "{\"s\":\"";
+    const std::string close = "\"}";
+    return open + std::string (bytes - open.size () - close.size (), 'a') + close;
+}
+
+} // namespace
+
+TEST (ParsedBody, ByDefaultBodyIsTheParse) {
+    const auto json = serialize (response_with_body (R"({"id":1})"));
+
+    EXPECT_EQ (json["body"]["id"], 1);
+    EXPECT_EQ (json["bodyRaw"], R"({"id":1})");
+}
+
+TEST (ParsedBody, DeclinedBodyIsNullAndBodyRawIsUnchanged) {
+    const auto response = response_with_body (R"({"id":1})");
+    const auto parsed   = serialize (response);
+    const auto declined = serialize (response, /*include_parsed_body=*/false);
+
+    ASSERT_TRUE (declined.contains ("body"));
+    EXPECT_TRUE (declined["body"].is_null ());
+    EXPECT_EQ (declined["bodyRaw"], parsed["bodyRaw"]);
+    EXPECT_EQ (declined["bodyEncoding"], "utf8");
+    EXPECT_EQ (declined["bodySize"], parsed["bodySize"]);
+}
+
+TEST (ParsedBody, ABodyAtTheThresholdIsStillParsed) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES);
+    const auto json = serialize (response_with_body (text));
+
+    EXPECT_TRUE (json["body"].is_object ());
+    EXPECT_EQ (json["bodyRaw"].get_ref<const std::string&> ().size (), text.size ());
+}
+
+TEST (ParsedBody, ABodyPastTheThresholdIsNullWhateverTheCallerAsked) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES + 1);
+    const auto json = serialize (response_with_body (text), /*include_parsed_body=*/true);
+
+    ASSERT_TRUE (json.contains ("body"));
+    EXPECT_TRUE (json["body"].is_null ());
+    EXPECT_EQ (json["bodyRaw"], text);
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+}
+
 TEST (BodyEncoding, AnAnswerWithNoEncodingReadsAsUtf8) {
     EXPECT_EQ (response_body_bytes (Json{ { "bodyRaw", "plain" } }), "plain");
 }

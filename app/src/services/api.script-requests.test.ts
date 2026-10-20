@@ -103,6 +103,39 @@ describe("the renderer opts its own executions into pm.sendRequest", () => {
 });
 
 /**
+ * The renderer declines the engine's parsed copy of the body (issue #2544).
+ * The pane is built from `bodyRaw`, so the tree the engine builds for `body` is
+ * a second in-memory copy of every JSON response that nothing reads. Asserted on
+ * the payload for the reason this file always is: nothing about a Send changes
+ * shape when the field stops being sent, only the daemon's memory.
+ *
+ * Mutation check: drop `includeParsedBody: false` from `executeRequest` and
+ * both cases fail.
+ */
+describe("the renderer declines the parsed body on execute", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		post.mockResolvedValue({} as never);
+	});
+
+	it("sends includeParsedBody false without the caller passing it", async () => {
+		await apiService.executeRequest({ method: "GET", url: "https://example.com" });
+
+		expect(post.mock.calls[0][1]).toMatchObject({ includeParsedBody: false });
+	});
+
+	it("over whatever the payload claimed", async () => {
+		await apiService.executeRequest({
+			method: "GET",
+			url: "https://example.com",
+			includeParsedBody: true,
+		});
+
+		expect(post.mock.calls[0][1]).toMatchObject({ includeParsedBody: false });
+	});
+});
+
+/**
  * Every run the renderer starts says so (issue #1817). An unstamped run reads
  * as `other` in History, so the four calls are asserted one by one: a fifth
  * path that forgot the field would look exactly like a script's run.

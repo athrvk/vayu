@@ -23,6 +23,12 @@
  * is open (that store imports *this* one, and the cycle is the wrong shape), so
  * the cap is set to twice `MAX_OPEN_TABS` instead, and `response-store.test.ts`
  * holds the two constants together.
+ *
+ * A count says nothing about size, and one 20 MB response is a body plus its raw
+ * copy (and, for a binary one, its bytes): 24 of them is a gigabyte the renderer
+ * keeps for the sake of tabs the user is not looking at. `RESPONSE_CACHE_MAX_BYTES`
+ * bounds that second axis the same way, so whichever limit is hit first evicts
+ * (#2544).
  */
 
 import { create } from "zustand";
@@ -44,6 +50,10 @@ export interface StoredResponse {
 	requestHeaders?: Record<string, string>;
 	rawRequest?: string;
 	body: string;
+	/** Named only so `estimateResponseBytes` can read it; see the note above. */
+	bodyRaw?: string;
+	/** Named only so `estimateResponseBytes` can read it; see the note above. */
+	rawBytes?: { data: Uint8Array };
 	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
@@ -72,6 +82,34 @@ export interface StoredResponse {
  * truncated at `maxTraceBodyBytes`.
  */
 export const RESPONSE_CACHE_MAX_ENTRIES = 24;
+
+/**
+ * How many bytes of response bodies the map retains, as measured by
+ * `estimateResponseBytes`. Eviction runs until the map is under it, except that
+ * the response just written is never the victim: a single response larger than
+ * the budget is kept, alone, because it is the one on screen.
+ */
+export const RESPONSE_CACHE_MAX_BYTES = 256 * 1024 * 1024;
+
+/**
+ * What a stored response's payload costs, as a documented estimate and not a
+ * measurement: a JS string is counted at two bytes per UTF-16 code unit, which
+ * is exact for a string V8 holds as two-byte and an upper bound for one it
+ * holds as Latin-1 (one byte per unit), so the budget errs toward evicting
+ * early. Binary bytes count at their `byteLength`. Headers, timing and the
+ * other small fields are not counted.
+ *
+ * `body` and `bodyRaw` are the same text for anything past the pane's formatting
+ * threshold (`paneBody` hands the raw string back), so an equal pair is counted
+ * once rather than twice.
+ */
+export function estimateResponseBytes(response: StoredResponse): number {
+	const { body, bodyRaw, rawBytes } = response;
+	let bytes = body.length * 2;
+	if (bodyRaw !== undefined && bodyRaw !== body) bytes += bodyRaw.length * 2;
+	if (rawBytes) bytes += rawBytes.data.byteLength;
+	return bytes;
+}
 
 interface ResponseStoreState {
 	// Map of requestId -> response
@@ -113,12 +151,19 @@ function withResponse(
 	// least likely to want evicting.
 	const lru = [...state.lru.filter((id) => id !== requestId), requestId];
 
-	// The write that pushed the map over the cap is the request on screen, so
-	// the victim is always some other request: taking from the front cannot
-	// take what was just stored.
-	while (lru.length > RESPONSE_CACHE_MAX_ENTRIES) {
+	// The write is the response on screen, and it is last in `lru`, so stopping
+	// at one entry is what keeps it: the victim is always some other request,
+	// even when this one alone is over the byte budget.
+	let bytes = 0;
+	for (const stored of responses.values()) bytes += estimateResponseBytes(stored);
+	while (
+		lru.length > 1 &&
+		(lru.length > RESPONSE_CACHE_MAX_ENTRIES || bytes > RESPONSE_CACHE_MAX_BYTES)
+	) {
 		const victim = lru.shift();
 		if (victim === undefined) break;
+		const evicted = responses.get(victim);
+		if (evicted) bytes -= estimateResponseBytes(evicted);
 		responses.delete(victim);
 	}
 

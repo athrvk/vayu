@@ -865,7 +865,7 @@ In-memory storage of responses per request ID, persisted across view/tab switche
 }
 ```
 
-**StoredResponse:** Includes status, headers, body, execution time, script results, and console logs.
+**StoredResponse:** Includes status, headers, body, `bodyRaw`, a binary body's `rawBytes`, execution time, script results, and console logs.
 
 **Key Methods:**
 ```typescript
@@ -881,7 +881,7 @@ reset read the store back, so a finished stream's stored result would return on
 the next switch and suppress the Events tab's live placeholder, which is only
 built when there is no stored response.
 
-**Eviction by count:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
+**Eviction by count and by bytes:** `RESPONSE_CACHE_MAX_ENTRIES` (24) bounds the map (#1156).
 Those two delete seams were once the only ones, so the map grew with every
 distinct request a session sent - each entry a body plus its raw copy - until
 the app quit. What the map holds is the 24 most recently *sent* requests, not
@@ -898,6 +898,20 @@ request back to the recent end, so the entry just stored is never the one
 evicted. Past the cap nothing is lost, only unabridged: the request re-opens
 against the backend's stored run, whose body the engine truncated at
 `maxTraceBodyBytes`.
+
+`RESPONSE_CACHE_MAX_BYTES` (256 MiB) is the second limit (#2544), because a count
+says nothing about size: 24 responses of 20 MB each is a gigabyte held for tabs
+nobody is looking at. `setResponse` sums `estimateResponseBytes` over the map and
+evicts least-recently-written first until both limits hold, so whichever is hit
+first decides. The estimate is a documented upper bound, not a measurement: a
+string counts two bytes per UTF-16 code unit (V8 stores Latin-1 text in one, so
+this errs toward evicting early), a binary body counts its `byteLength`, and
+`body` and `bodyRaw` count once when they are equal - past the pane's formatting
+threshold `paneBody` hands the raw string back as `body`. Headers and the small
+fields are not counted. The response just written is never evicted, even when it
+alone exceeds the budget: it is the one on screen, and the next write evicts it.
+So "the 24 most recently sent" is the ceiling, and a session that sends large
+bodies holds fewer.
 
 **Non-persisted** (responses are reloadable from backend).
 
@@ -2981,7 +2995,7 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 4. Request is transformed (frontend → backend format) and sent via HTTP
 5. Response is stored in `useResponseStore()` keyed by request ID
 6. Response viewer component reads the response and displays it
-7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns - for the 24 most recently sent requests, past which the store's LRU bound has dropped the entry and the backend's stored run answers instead
+7. On **request tab switch**, the response persists in `response-store` and is displayed if the user returns - for the most recently sent requests (at most 24, fewer when their bodies are large - see the byte budget), past which the store's LRU bound has dropped the entry and the backend's stored run answers instead
 8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run

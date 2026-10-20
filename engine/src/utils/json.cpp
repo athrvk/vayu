@@ -1358,7 +1358,23 @@ Json serialize_redirects (const std::vector<RedirectHop>& hops) {
     return out;
 }
 
-Json serialize (const Response& response) {
+namespace {
+
+/// `serialize`'s `body` for a text body: its parse, or `null` when the caller
+/// declined one, the text is past `MAX_PARSED_RESPONSE_BODY_BYTES` (#2544), or
+/// it is not JSON. The size is checked first so a large body is never parsed.
+Json parsed_body (const std::string& text, bool include_parsed_body) {
+    if (!include_parsed_body ||
+    text.size () > vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES) {
+        return nullptr;
+    }
+    auto parsed = try_parse_body (text);
+    return parsed ? std::move (*parsed) : Json (nullptr);
+}
+
+} // namespace
+
+Json serialize (const Response& response, bool include_parsed_body) {
     Json json;
 
     json["status"]      = response.status_code;
@@ -1399,8 +1415,7 @@ Json serialize (const Response& response) {
     // a reader never has to guess which spelling `bodyRaw` is in.
     if (const auto text = response_body_text (response)) {
         std::string raw (*text);
-        auto parsed          = try_parse_body (raw);
-        json["body"]         = parsed ? std::move (*parsed) : Json (nullptr);
+        json["body"]         = parsed_body (raw, include_parsed_body);
         json["bodyRaw"]      = std::move (raw);
         json["bodyEncoding"] = BODY_ENCODING_UTF8;
     } else {

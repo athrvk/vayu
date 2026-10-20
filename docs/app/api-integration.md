@@ -867,6 +867,15 @@ type is `RunOrigin` (`types/domain.ts`); `listRuns` takes the kind as
 [engine/api-reference.md](../engine/api-reference.md) for what the engine
 validates.
 
+**`executeRequest` also stamps `includeParsedBody: false`** (#2544), at the same
+choke point and after the same spread. The pane is built from `bodyRaw`, so the
+engine's parsed copy of a JSON body is a second tree that the daemon builds,
+serializes and holds on its heap and the renderer then parses and never reads;
+declining it answers `body: null`. The MCP server does not send it - its
+`run_request` result exposes the parsed `body` to the agent, so it keeps the
+engine's default (`electron/mcp/tools.test.ts` asserts the payload). The
+streaming send answers `202` with no body, so the flag is not part of it.
+
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it
 previewed, and the engine binds one row per request the run sends. Omitted when
@@ -1500,7 +1509,7 @@ replay puts the run's recorded list back on its seeded rows.
   status: 200,
   statusText: "OK",
   headers: { "content-type": "application/json" },
-  body: { users: [...] },
+  body: null,  // { users: [...] } when the request leaves includeParsedBody unset; the app sends false
   bodyRaw: '{"users":[...]}',
   bodyEncoding: "utf8",
   httpVersion: "HTTP/1.1",
@@ -1648,7 +1657,10 @@ give the wrong instruction to half the cases.
 
 The pane reads the **received text** (`bodyRaw`), never the engine's parsed
 `body`, which is key-sorted, keeps only the last of a repeated key and has
-rounded any integer past 2^53 (issue #2459). `responseFromExecuteResult`
+rounded any integer past 2^53 (issue #2459). The app does not even ask for it
+now: `executeRequest` sends `includeParsedBody: false`, so the answer's `body`
+is `null` (#2544; the engine leaves it `null` past 4 MiB whatever is asked).
+`responseFromExecuteResult`
 builds `ResponseState.body` - the string Pretty reads - by indenting `bodyRaw`
 with `lib/json-format.ts`, a single pass that copies every token through
 without parsing a value, so member order, duplicate keys and number spellings

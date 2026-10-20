@@ -5783,6 +5783,30 @@ describe("dispatchTool", () => {
 		expect(payload).not.toHaveProperty("allowScriptRequests");
 	});
 
+	test("run_request keeps the engine's parsed body: it never sends includeParsedBody (issue #2544)", async () => {
+		// The renderer declines the parsed copy because its pane reads `bodyRaw`;
+		// this tool's result exposes `body`, so the engine's default (true) is the
+		// behaviour it needs. An agent cannot decline it either: the field is not
+		// in the schema, so zod strips it.
+		const tool = TOOLS.find((t) => t.name === "run_request");
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
+			url: "https://api.example.com/users",
+			includeParsedBody: false,
+		});
+		expect(args).not.toHaveProperty("includeParsedBody");
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).not.toHaveProperty("includeParsedBody");
+	});
+
 	test("start_load_run does not offer a pre-request script", () => {
 		// POST /runs never runs one - only the deferred `tests` script - so
 		// offering the field would promise a hook that silently does nothing.
