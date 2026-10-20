@@ -9,7 +9,11 @@
 
 import { create } from "zustand";
 import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
-import { notCrossed, type Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
+import {
+	breakpointAt,
+	notCrossed,
+	type Breakpoint,
+} from "@/modules/dashboard/utils/computeBreakpoint";
 import { useClientSettingsStore } from "./client-settings-store";
 import {
 	DEFAULT_LIVE_WINDOW,
@@ -266,18 +270,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 					: notCrossed(sloMs);
 			for (const m of batch) {
 				if (m.current_concurrency > peak) peak = m.current_concurrency;
-				if (!bp.crossed) {
-					const p99 = m.latency_p99_ms ?? 0;
-					if (p99 > sloMs) {
-						bp = {
-							crossed: true,
-							concurrency: m.current_concurrency,
-							timeSeconds: m.elapsed_seconds,
-							p99Ms: p99,
-							sloMs,
-						};
-					}
-				}
+				if (!bp.crossed) bp = breakpointAt(m, sloMs) ?? bp;
 			}
 
 			return {

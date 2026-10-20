@@ -53,7 +53,7 @@ export default function PerformanceTab({
 	// this tab marks them, and neither derives anything the other must match.
 	const hostSleeps = useHostSleeps(runId);
 	const sloMs = useClientSettingsStore((s) => s.sloThresholdMs);
-	// Windowed per-tick percentiles now persist for completed runs (W1), so the
+	// Stored ticks carry each second's merged percentiles (#2385), so the
 	// history percentile chart / scatter can render the same views as the live
 	// dashboard. Mirror MetricsView's split: ramp_up → response-time-vs-concurrency
 	// scatter (capacity elbow), other modes → percentiles-over-time.

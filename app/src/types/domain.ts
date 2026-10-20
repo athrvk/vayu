@@ -2352,9 +2352,38 @@ export interface LoadTestMetrics {
 	no_response?: number;
 	current_rps: number;
 	current_concurrency: number;
+	/**
+	 * Latency percentiles of the tick. A stored tick's are its whole second's,
+	 * merged (issue #2385). A live frame's are only the last ~100 ms window, so
+	 * a chart or a threshold must read them through `utils/tickPercentiles.ts`
+	 * (`secondPercentiles`, `cumulativePercentiles`) and never off these keys.
+	 */
 	latency_p50_ms: number;
 	latency_p95_ms: number;
 	latency_p99_ms: number;
+	/**
+	 * Set by `mapSseMetrics` on every frame that came off the live stream and
+	 * absent on a stored tick. It is what tells a live frame with no
+	 * `second_samples` (not a gate frame) from a stored tick, whose
+	 * `latency_p*_ms` are already per second.
+	 */
+	live?: true;
+	/**
+	 * Completions behind the `second_p*_ms` figures. Present only on a gate frame
+	 * (about one live frame a second, plus the final frame); 0 for an idle second.
+	 */
+	second_samples?: number;
+	/** The gate frame's whole-second percentiles; `null` when `second_samples` is 0. */
+	second_p50_ms?: number | null;
+	second_p95_ms?: number | null;
+	second_p99_ms?: number | null;
+	/**
+	 * The run's percentiles so far, on every live frame - the span `avg_latency_ms`
+	 * covers. `null` until a completion has been sampled; absent on a stored tick.
+	 */
+	cumulative_p50_ms?: number | null;
+	cumulative_p95_ms?: number | null;
+	cumulative_p99_ms?: number | null;
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;

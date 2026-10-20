@@ -933,7 +933,9 @@ struct RunContext {
      * NOT call `MetricsCollector::sample_window_percentiles()` for them: that
      * call is documented single-reader and *resets* the window on read, and the
      * metrics thread already consumes it once per tick in `emit_live_tick`. A
-     * second consumer would silently halve both readers' sample counts.
+     * second consumer would silently halve both readers' sample counts, and
+     * would take its share out of the stored per-second rows too, which
+     * `take_second_percentiles()` merges from the same windows.
      *
      * So the producer publishes what it already computed, and the strategy
      * copies it out. One writer (the metrics thread), cheap reads, and the
@@ -1071,7 +1073,9 @@ struct MetricTickSample {
     size_t bytes_sent          = 0;
     size_t bytes_received      = 0;
     std::map<int, size_t> status_codes; // Cumulative; code 0 = transport errors
-    // Windowed (rolling) percentiles for this tick, not cumulative.
+    // The second since the previous row, every 100 ms window merged
+    // (MetricsCollector::take_second_percentiles, #2385); neither the last
+    // window alone nor the run so far.
     double latency_p50_ms = 0.0;
     double latency_p95_ms = 0.0;
     double latency_p99_ms = 0.0;

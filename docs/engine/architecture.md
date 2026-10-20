@@ -399,6 +399,13 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   concurrency - silently, since the run still reports percentiles, just computed from fewer
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
+- **One reader merges the windows**: each window the metrics thread samples is added, before the
+  recorder recycles it, into two more histograms only that thread touches, so they take plain
+  calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz
+  gate for the stored row and the gate frame's `second*` keys (issue #2385): percentiles cannot
+  be merged after the fact, so a row built from the last 100 ms window held a tenth of its
+  second. The other is the run so far, behind the live `cumulativeP*Ms`; reading the cumulative
+  histogram itself mid-run would be a plain read racing the workers' atomic writes.
 - **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
   fed by every successful completion and read once after the drain, behind the report's
   `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
@@ -919,7 +926,8 @@ that never arrived.
 7. Strategy submits requests via SPSC queue → event loop
    ↓
 8. Metrics collector aggregates results in-memory; metrics thread
-   writes per-tick snapshots into the retained tick topic + DB
+   writes per-tick snapshots into the retained tick topic, and at
+   the 1 Hz gate one DB row holding that second's merged percentiles
    ↓
 9. Client streams ticks via SSE (/runs/:runId/live), replayed
    from the oldest retained tick then tailed to the `complete` event,
@@ -1119,12 +1127,13 @@ must **not** call `MetricsCollector::sample_window_percentiles()`: that call is
 single-reader and *resets* the rolling window on read, and the metrics thread
 already consumes it once per tick in `emit_live_tick`. A second consumer would
 silently halve both readers' sample counts, and neither the live chart nor the
-search would look wrong. So the metrics thread publishes what it already
+search would look wrong; the stored rows, which `take_second_percentiles()`
+merges from the same windows, would lose the same share. So the metrics thread publishes what it already
 computed - `RunContext::publish_live_tick()`, one writer - and the strategy
 copies it out through `latest_live_tick()`. The controller therefore steers by
 exactly the numbers the dashboard is drawing. A guard in
-`capacity_controller_test.cpp` pins the single production caller, because the
-wrong version still runs; it just measures less.
+`capacity_controller_test.cpp` pins the single production caller of both
+calls, because the wrong version still runs; it just measures less.
 
 The tick carries a `latency_samples` count for the same reason: an idle window's
 percentiles are zeros, and averaging those in with real ones would read "nothing

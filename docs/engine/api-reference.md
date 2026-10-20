@@ -4201,7 +4201,7 @@ breaking change bumps the integer and is noted here):
 | `verdict` | `{state, stoppedEarly, reason}`, derived below |
 | `config` | As in rule 2 |
 | `report` | `summary`, `latency`, `statusCodes`, `errors`, and when the run has them `rateControl`, `timingBreakdown`, `stream`, `slowRequests`, `sampling`, `warnings`, `scenario` (step and transaction aggregates), `monitor`, `testValidation`, `capacity`, `coverage`, `schemaValidation` (counts), `lifecycle` (outcomes), `elements`, `thresholdValidation`, `customMetrics` - each as [`GET /runs/:runId/report`](#get-runsrunidreport) documents it, less what the rules above leave out |
-| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`; absent for `series: "none"` |
+| `timeSeries` | One entry per tick: `elapsed_seconds`, `requests_completed`, `requests_failed`, `current_rps`, `current_concurrency`, `throughput`, `error_rate`, `status_codes`, `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (the tick's own second, [as stored](#get-runsrunidmetrics)); absent for `series: "none"` |
 | `comparison` | `null` without `baseRunId`; otherwise `{baseRunId, baseReference, differences, deltas, statusCodes}`, below |
 | `notCarried` | `[{code, message}]`, one entry per kind of thing this run held that the document left out, in the order `traces_and_samples`, `request_values`, `message_text`, `credential_refreshes` |
 
@@ -8775,7 +8775,9 @@ where the duration is the time until it gave up (a timeout is about its
 timeout; a reset, a DNS or TLS failure and a body over the byte cap count
 the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `max`), the live tick's windowed `latencyP50Ms` / `latencyP95Ms` /
-`latencyP99Ms`, `avgLatencyMs` and `avgQueueWaitMs`, the exports, and the
+`latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
+the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
+exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
 with the percentiles and the max. It is not divided by `totalRequests`.
@@ -8811,11 +8813,18 @@ Paginated **historical time-series** (JSON) for a run's charts. The response is
 - `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
 - `offset` - skip N records (default 0, negative floored to 0).
 
-Per-tick rows carry the **windowed** latency percentiles (`latency_p50_ms` /
-`latency_p95_ms` / `latency_p99_ms`, snake_case) alongside
-rps/throughput/concurrency/status codes, so the history view can rebuild the
-percentiles-over-time chart, the response-time-vs-concurrency scatter, and the
-capacity-breakpoint / saturation stats from stored data.
+Per-tick rows carry the latency percentiles of **their second**
+(`latency_p50_ms` / `latency_p95_ms` / `latency_p99_ms`, snake_case): every
+100 ms window since the previous row merged as one histogram before the
+percentile is read (issue #2385), so a stall anywhere in the second is in its
+row. They sit alongside rps/throughput/concurrency/status codes, so the
+history view can rebuild the percentiles-over-time chart, the
+response-time-vs-concurrency scatter, and the capacity-breakpoint / saturation
+stats from stored data. The live tick that wrote a row carries the same three
+figures as `secondP50Ms` / `secondP95Ms` / `secondP99Ms`. A row stores no
+sample count, and a second with no completion stores `0`. Rows an engine
+older than issue #2385 stored hold the last 100 ms window of their second
+instead.
 
 **Response:**
 ```json
@@ -8938,6 +8947,7 @@ data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
        "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
+       "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
        "requestsSent":1500,"requestsExpected":0,
        "status2xx":1495,"status3xx":0,"status4xx":3,"status5xx":2,
@@ -9068,7 +9078,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (all keys emitted by `MetricsCollector::get_current_stats()`):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the `second*` keys, which the metrics thread adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -9084,7 +9094,9 @@ no frame.
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
-| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - a rolling per-tick window sampled from a phaser-based `hdr_interval_recorder`, so the chart tracks recent load instead of flattening toward the all-time distribution (the final report still uses the cumulative histogram) |
+| `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `0` for a window with no completion. The capacity search steers by these |
+| `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
+| `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA) |
 | `status2xx`–`status5xx` | Per-class counts |

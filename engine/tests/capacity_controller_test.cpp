@@ -27,6 +27,10 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "optional_assert.hpp"
 #include "vayu/core/capacity_controller.hpp"
@@ -278,6 +282,9 @@ TEST (CapacityControllerTest, AnUnusableSloFallsBackToTheDefault) {
  * rolling window on read, so a second production caller silently halves both
  * readers' sample counts - the live chart and the capacity search would each
  * see about half the run's completions and neither would look wrong.
+ * `take_second_percentiles()` (#2385) is the same kind of call: it resets the
+ * second the stored row is built from, so a second taker would leave the row
+ * holding a fragment of its second.
  *
  * That is why the strategy steers by `RunContext::latest_live_tick()` rather
  * than sampling the collector itself, and it is a property no behavioural test
@@ -290,35 +297,38 @@ TEST (CapacityControllerTest, TheWindowedPercentilesHaveExactlyOneProductionCall
     std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src";
     ASSERT_TRUE (std::filesystem::exists (root));
 
-    size_t files_scanned = 0;
-    size_t total_bytes   = 0;
-    std::vector<std::string> callers;
+    size_t total_bytes = 0;
+    std::vector<std::pair<std::string, std::string>> sources;
     for (const auto& entry : std::filesystem::recursive_directory_iterator (root)) {
         if (!entry.is_regular_file () || entry.path ().extension () != ".cpp") {
+            continue;
+        }
+        // The definitions are not call sites.
+        if (entry.path ().filename () == "metrics_collector.cpp") {
             continue;
         }
         std::ifstream file (entry.path ());
         std::stringstream buffer;
         buffer << file.rdbuf ();
-        const std::string source = buffer.str ();
-        ++files_scanned;
-        total_bytes += source.size ();
-
-        // The definition itself is not a call site.
-        if (entry.path ().filename () == "metrics_collector.cpp") {
-            continue;
-        }
-        if (source.find ("sample_window_percentiles (") != std::string::npos) {
-            callers.push_back (entry.path ().filename ().string ());
-        }
+        total_bytes += buffer.str ().size ();
+        sources.emplace_back (entry.path ().filename ().string (), buffer.str ());
     }
 
-    ASSERT_GT (files_scanned, 10u) << "the scan found no sources to read";
+    ASSERT_GT (sources.size (), 10u) << "the scan found no sources to read";
     ASSERT_GT (total_bytes, 1000u) << "the scan read empty files";
-    ASSERT_EQ (callers.size (), 1u)
-    << "expected only run_manager.cpp's metrics thread to sample the rolling "
-       "window; the capacity strategy must read RunContext::latest_live_tick()";
-    EXPECT_EQ (callers.front (), "run_manager.cpp");
+    for (const std::string_view call :
+    { "sample_window_percentiles (", "take_second_percentiles (" }) {
+        std::vector<std::string> callers;
+        for (const auto& [name, source] : sources) {
+            if (source.find (call) != std::string::npos) {
+                callers.push_back (name);
+            }
+        }
+        ASSERT_EQ (callers.size (), 1u)
+        << "expected only run_manager.cpp's metrics thread to call " << call
+        << "; the capacity strategy must read RunContext::latest_live_tick()";
+        EXPECT_EQ (callers.front (), "run_manager.cpp") << call;
+    }
 }
 
 } // namespace

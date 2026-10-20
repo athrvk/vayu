@@ -92,6 +92,68 @@ describe("rebucket", () => {
 	});
 });
 
+describe("rebucket with merge: max", () => {
+	it("keeps the worst sample per column in a bucket, not the last", () => {
+		// Five per-second p99s into one 5 s bucket, the tail second first.
+		const times = [3, 4, 5, 6, 7];
+		const p50 = [10, 11, 12, 13, 14];
+		const p99 = [900, 40, 41, 42, 43];
+		const { times: outT, cols } = rebucket(times, [p50, p99], 5, "max");
+		expect(outT).toEqual([5]);
+		expect(cols[0]).toEqual([14]);
+		expect(cols[1]).toEqual([900]);
+	});
+
+	it("is last-wins unless asked, so other charts keep their behaviour", () => {
+		const { cols } = rebucket([3, 4, 5, 6, 7], [[900, 40, 41, 42, 43]], 5);
+		expect(cols[0]).toEqual([43]);
+	});
+
+	it("never averages: a bucket of two seconds shows one of them", () => {
+		const { cols } = rebucket([1, 2], [[100, 300]], 2, "max");
+		expect(cols[0]).toEqual([300]);
+	});
+});
+
+describe("buildConcurrencyScatter on a live series (issue #2385)", () => {
+	it("plots the gate frames' second p99 and drops the frames between", () => {
+		const live = (partial: Partial<LoadTestMetrics>) => tick({ live: true, ...partial });
+		const history = [
+			live({ elapsed_seconds: 0.5, current_concurrency: 5, latency_p99_ms: 777 }),
+			live({
+				elapsed_seconds: 1,
+				current_concurrency: 10,
+				latency_p99_ms: 1,
+				second_samples: 100,
+				second_p50_ms: 5,
+				second_p95_ms: 8,
+				second_p99_ms: 90,
+			}),
+			live({ elapsed_seconds: 1.5, current_concurrency: 11, latency_p99_ms: 777 }),
+			live({
+				elapsed_seconds: 2,
+				current_concurrency: 20,
+				second_samples: 0,
+				second_p50_ms: null,
+				second_p95_ms: null,
+				second_p99_ms: null,
+			}),
+			live({
+				elapsed_seconds: 3,
+				current_concurrency: 30,
+				second_samples: 100,
+				second_p50_ms: 9,
+				second_p95_ms: 30,
+				second_p99_ms: 250,
+			}),
+		];
+		const { concurrency, p99, times } = buildConcurrencyScatter(history);
+		expect(concurrency).toEqual([10, 30]);
+		expect(p99).toEqual([90, 250]);
+		expect(times).toEqual([1, 3]);
+	});
+});
+
 describe("buildConcurrencyScatter", () => {
 	it("plots one point per bucket, not one per tick", () => {
 		// A minute of the engine's 10Hz tick: 600 ticks over 0..59.9s, which

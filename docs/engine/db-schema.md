@@ -1669,9 +1669,13 @@ built and any `script.setup` has run (issue #2395). A tick written while setup i
 stores both as `0`. Ticks an engine older than that issue stored divided by the time since the
 run was registered, so a run with a slow setup understated both in its early rows.
 
-Latency percentiles in a tick are the **windowed** (rolling) values sampled from the
-`hdr_interval_recorder` for that interval - the whole-run cumulative ones live in
-[`runs.summary`](#runs), never here.
+Latency percentiles in a tick (`latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms`) cover the
+**row's second**: every 100 ms window the `hdr_interval_recorder` handed back since the previous
+row, merged as histograms before the percentile is read (issue #2385). The row stores no sample
+count; a second with no completion stores `0`. The whole-run cumulative percentiles live in
+[`runs.summary`](#runs), never here. The partial second between the last row and the end of the
+run is stored nowhere: it reaches only the final live frame. Rows an engine older than that issue
+stored hold the **last 100 ms window** of their second instead, about a tenth of its completions.
 
 ---
 

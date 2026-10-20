@@ -157,6 +157,9 @@ class TickCache<T> {
 /** One number read off a tick, with the same `?? 0` the from-scratch pass used. */
 type Reader = (m: LoadTestMetrics) => number;
 
+// The tick's own `latency_p99_ms`, not `secondPercentiles`: this rule counts
+// ticks (a 15-tick baseline, 2 ticks to open), so it cannot skip the live
+// frames between gates the way the charts and the breakpoint do (#2385).
 const readP99: Reader = (m) => m.latency_p99_ms ?? 0;
 const readRps: Reader = (m) => m.current_rps ?? 0;
 const readConcurrency: Reader = (m) => m.current_concurrency ?? 0;

@@ -16,6 +16,7 @@ import {
 	latestThroughputMbps,
 	spansMultipleBuckets,
 } from "./metricsTransforms";
+import { hasSecondPercentiles } from "./tickPercentiles";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -197,6 +198,80 @@ describe("buildPercentileChartData", () => {
 	});
 });
 
+describe("buildPercentileChartData on a live series (issue #2385)", () => {
+	/** A gate frame: carries the second's percentiles beside its window's. */
+	const gate = (elapsed: number, second: number | null, samples = 500) =>
+		tick({
+			live: true,
+			elapsed_seconds: elapsed,
+			latency_p50_ms: 1,
+			latency_p95_ms: 1,
+			latency_p99_ms: 1,
+			second_samples: second === null ? 0 : samples,
+			second_p50_ms: second === null ? null : second / 4,
+			second_p95_ms: second === null ? null : second / 2,
+			second_p99_ms: second,
+		});
+	/** A frame between gates: only a ~100 ms window, whatever it reads. */
+	const between = (elapsed: number) =>
+		tick({
+			live: true,
+			elapsed_seconds: elapsed,
+			latency_p50_ms: 777,
+			latency_p95_ms: 777,
+			latency_p99_ms: 777,
+		});
+
+	it("plots one point per gate frame and nothing for the frames between", () => {
+		const data = buildPercentileChartData([
+			between(0.9),
+			gate(1, 40),
+			between(1.1),
+			between(1.5),
+			gate(2, 60),
+			between(2.4),
+		]);
+		expect(data).toHaveLength(2);
+		expect(data.map((d) => d.p99)).toEqual([40, 60]);
+		expect(data.some((d) => d.p99 === 777)).toBe(false);
+	});
+
+	it("draws the second's figures, not the window's on the same frame", () => {
+		const data = buildPercentileChartData([gate(1, 40), gate(2, 60)]);
+		expect(data[0]).toMatchObject({ time: 1, p50: 10, p95: 20, p99: 40 });
+	});
+
+	it("leaves a gap for an idle second", () => {
+		const data = buildPercentileChartData([gate(1, 40), gate(2, null), gate(3, 50)]);
+		expect(data.map((d) => d.time)).toEqual([1, 3]);
+	});
+
+	it("keeps the worst of two ticks sharing a bucket, not the last", () => {
+		// The final frame closes a partial second beside the last gate.
+		const data = buildPercentileChartData([gate(3, 900), gate(3.1, 20, 3)]);
+		expect(data).toHaveLength(1);
+		expect(data[0].p99).toBe(900);
+	});
+
+	it("is counted by the same predicate that gates the card", () => {
+		const live = [between(0.5), between(1), gate(1.5, 40), between(2)];
+		expect(spansMultipleBuckets(live, hasSecondPercentiles)).toBe(false);
+		expect(buildPercentileChartData(live)).toHaveLength(1);
+
+		const more = [...live, gate(2.5, 50)];
+		expect(spansMultipleBuckets(more, hasSecondPercentiles)).toBe(true);
+		expect(buildPercentileChartData(more)).toHaveLength(2);
+	});
+
+	it("still reads a stored tick, mixed with live ones, from latency_p*_ms", () => {
+		const data = buildPercentileChartData([
+			tick({ elapsed_seconds: 1, latency_p99_ms: 33 }),
+			between(1.5),
+		]);
+		expect(data.map((d) => d.p99)).toEqual([33]);
+	});
+});
+
 describe("buildStatusOverTime", () => {
 	it("classifies and diffs cumulative status maps into per-interval counts", () => {
 		const out = buildStatusOverTime([
@@ -347,21 +422,33 @@ describe("hasPercentileSignal", () => {
 		expect(hasPercentileSignal([])).toBe(false);
 	});
 
-	it("agrees with the built series wherever a bucket's last tick carries the signal", () => {
+	it("ignores the window of a live frame that holds no second (issue #2385)", () => {
+		const window = tick({ elapsed_seconds: 1, live: true, latency_p99_ms: 50 });
+		expect(hasPercentileSignal([window])).toBe(false);
+		const gate = tick({
+			elapsed_seconds: 1,
+			live: true,
+			second_samples: 10,
+			second_p50_ms: 1,
+			second_p95_ms: 2,
+			second_p99_ms: 50,
+		});
+		expect(hasPercentileSignal([window, gate])).toBe(true);
+	});
+
+	it("agrees with the built series exactly, since a bucket keeps its worst tick", () => {
 		const rng = seeded(4242);
 		let sawTrue = 0;
+		let sawFalse = 0;
 		for (let run = 0; run < 200; run++) {
 			const history = randomHistory(rng);
 			const built = buildPercentileChartData(history).some((p) => p.p99 > 0);
-			if (built) {
-				// Documented direction: the predicate reads every tick, so it is
-				// true wherever the built series is, and may be true when a
-				// bucket's final tick alone reported nothing.
-				expect(hasPercentileSignal(history)).toBe(true);
-				sawTrue++;
-			}
+			expect(hasPercentileSignal(history)).toBe(built);
+			if (built) sawTrue++;
+			else sawFalse++;
 		}
 		expect(sawTrue).toBeGreaterThan(20);
+		expect(sawFalse).toBeGreaterThan(0);
 	});
 });
 

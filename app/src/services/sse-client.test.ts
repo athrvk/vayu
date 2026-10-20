@@ -37,6 +37,54 @@ describe("mapSseMetrics", () => {
 		expect(m.status_codes).toBeUndefined();
 	});
 
+	it("marks a frame as live and leaves the second and cumulative percentiles absent (issue #2385)", () => {
+		const m = mapSseMetrics({ timestamp: 1, latencyP99Ms: 12 });
+		expect(m.live).toBe(true);
+		expect(m.latency_p99_ms).toBe(12);
+		// An absent key is "not a gate frame", never a measured 0 ms.
+		expect(m.second_samples).toBeUndefined();
+		expect(m.second_p50_ms).toBeUndefined();
+		expect(m.second_p95_ms).toBeUndefined();
+		expect(m.second_p99_ms).toBeUndefined();
+		expect(m.cumulative_p50_ms).toBeUndefined();
+		expect(m.cumulative_p95_ms).toBeUndefined();
+		expect(m.cumulative_p99_ms).toBeUndefined();
+	});
+
+	it("maps a gate frame's second_* and the cumulative percentiles (issue #2385)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			secondSamples: 840,
+			secondP50Ms: 10,
+			secondP95Ms: 20,
+			secondP99Ms: 300,
+			cumulativeP50Ms: 11,
+			cumulativeP95Ms: 22,
+			cumulativeP99Ms: 330,
+		});
+		expect(m.second_samples).toBe(840);
+		expect([m.second_p50_ms, m.second_p95_ms, m.second_p99_ms]).toEqual([10, 20, 300]);
+		expect([m.cumulative_p50_ms, m.cumulative_p95_ms, m.cumulative_p99_ms]).toEqual([
+			11, 22, 330,
+		]);
+	});
+
+	it("keeps a null second and a null cumulative as null, not 0 (issue #2385)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			secondSamples: 0,
+			secondP50Ms: null,
+			secondP95Ms: null,
+			secondP99Ms: null,
+			cumulativeP50Ms: null,
+			cumulativeP95Ms: null,
+			cumulativeP99Ms: null,
+		});
+		expect(m.second_samples).toBe(0);
+		expect(m.second_p99_ms).toBeNull();
+		expect(m.cumulative_p99_ms).toBeNull();
+	});
+
 	it("maps the error count and its HTTP errors / No response split (issue #2124)", () => {
 		const m = mapSseMetrics({
 			timestamp: 1,

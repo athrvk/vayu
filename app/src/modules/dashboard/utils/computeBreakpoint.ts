@@ -6,6 +6,7 @@
  */
 
 import type { LoadTestMetrics } from "@/types";
+import { secondPercentiles } from "./tickPercentiles";
 
 /** Default SLO threshold (ms) at which p99 is considered to have degraded. */
 export const DEFAULT_SLO_MS = 200;
@@ -39,6 +40,24 @@ export function notCrossed(sloMs: number | null): Breakpoint {
 }
 
 /**
+ * The crossed breakpoint `m` sets, or null when it does not cross `thresholdMs`.
+ * Judged on the tick's whole-second p99 ({@link secondPercentiles}), so a live
+ * frame between gates - a ~100 ms window - never latches a breakpoint a stored
+ * run of the same load would not.
+ */
+export function breakpointAt(m: LoadTestMetrics, thresholdMs: number): Breakpoint | null {
+	const p99 = secondPercentiles(m)?.p99 ?? 0;
+	if (p99 <= thresholdMs) return null;
+	return {
+		crossed: true,
+		concurrency: m.current_concurrency,
+		timeSeconds: m.elapsed_seconds,
+		p99Ms: p99,
+		sloMs: thresholdMs,
+	};
+}
+
+/**
  * Scan per-tick history for the first tick whose p99 exceeds `thresholdMs`.
  * History is assumed time-ordered (as it arrives over SSE).
  */
@@ -47,16 +66,8 @@ export function computeBreakpoint(
 	thresholdMs: number = DEFAULT_SLO_MS
 ): Breakpoint {
 	for (const m of history) {
-		const p99 = m.latency_p99_ms ?? 0;
-		if (p99 > thresholdMs) {
-			return {
-				crossed: true,
-				concurrency: m.current_concurrency,
-				timeSeconds: m.elapsed_seconds,
-				p99Ms: p99,
-				sloMs: thresholdMs,
-			};
-		}
+		const crossed = breakpointAt(m, thresholdMs);
+		if (crossed) return crossed;
 	}
 	return notCrossed(thresholdMs);
 }

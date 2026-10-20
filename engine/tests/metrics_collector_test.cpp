@@ -334,6 +334,75 @@ TEST_F (MetricsCollectorTest, SampleWindowSafeUnderConcurrentWriters) {
     EXPECT_EQ (collector->total_requests (), static_cast<size_t> (kThreads * kPerThread));
 }
 
+// #2385: the stored 1 Hz row is the whole second, not the last 100 ms window.
+// Ten windows, the stall in the middle one: the last window alone reads 10 ms.
+// Mutation-check: drop the `add_window` into the second's histogram in
+// sample_window_percentiles and the count and p99 below fail.
+TEST_F (MetricsCollectorTest, TakeSecondPercentilesMergesEveryWindowSinceTheLastTake) {
+    constexpr int WINDOWS          = 10;
+    constexpr int STALL_WINDOW     = 4;
+    constexpr int SAMPLES_A_WINDOW = 100;
+    for (int window = 0; window < WINDOWS; ++window) {
+        const double latency_ms = window == STALL_WINDOW ? 110.0 : 10.0;
+        for (int i = 0; i < SAMPLES_A_WINDOW; ++i) {
+            collector->record_success (200, latency_ms, 0.0);
+        }
+        (void)collector->sample_window_percentiles ();
+    }
+
+    const auto second = collector->take_second_percentiles ();
+    EXPECT_EQ (second.count, static_cast<size_t> (WINDOWS * SAMPLES_A_WINDOW));
+    // HdrHistogram at 3 significant figures holds a value to 0.1%.
+    EXPECT_NEAR (second.p99, 110.0, 0.11);
+    EXPECT_NEAR (second.p50, 10.0, 0.01);
+
+    const auto next = collector->take_second_percentiles ();
+    EXPECT_EQ (next.count, 0u) << "the take did not reset the second";
+    EXPECT_DOUBLE_EQ (next.p99, 0.0);
+}
+
+// A completion still in the unsampled window is not in the second yet: the
+// take reads only what the producer has sampled.
+TEST_F (MetricsCollectorTest, TakeSecondPercentilesCountsOnlySampledWindows) {
+    collector->record_success (200, 10.0, 0.0);
+    (void)collector->sample_window_percentiles ();
+    collector->record_success (200, 500.0, 0.0);
+
+    const auto second = collector->take_second_percentiles ();
+    EXPECT_EQ (second.count, 1u);
+    EXPECT_NEAR (second.p99, 10.0, 0.01);
+
+    (void)collector->sample_window_percentiles ();
+    EXPECT_EQ (collector->take_second_percentiles ().count, 1u);
+}
+
+// The live tick's cumulative percentiles cover every sampled window, so they
+// span what avgLatencyMs spans; a take does not reset them. Null, not 0,
+// before anything was sampled.
+TEST_F (MetricsCollectorTest, CumulativeTickPercentilesSpanEverySampledWindow) {
+    const auto before = collector->get_current_stats (0, 1.0, 0);
+    EXPECT_TRUE (before.at ("cumulativeP50Ms").is_null ());
+    EXPECT_TRUE (before.at ("cumulativeP95Ms").is_null ());
+    EXPECT_TRUE (before.at ("cumulativeP99Ms").is_null ());
+
+    for (int i = 0; i < 90; ++i) {
+        collector->record_success (200, 10.0, 0.0);
+    }
+    (void)collector->sample_window_percentiles ();
+    (void)collector->take_second_percentiles ();
+    for (int i = 0; i < 10; ++i) {
+        collector->record_success (200, 200.0, 0.0);
+    }
+    const auto window = collector->sample_window_percentiles ();
+
+    const auto stats = collector->get_current_stats (0, 1.0, 0, 0, nullptr, &window);
+    EXPECT_NEAR (stats.at ("cumulativeP50Ms").get<double> (), 10.0, 0.01);
+    EXPECT_NEAR (stats.at ("cumulativeP95Ms").get<double> (), 200.0, 0.2);
+    EXPECT_NEAR (stats.at ("cumulativeP99Ms").get<double> (), 200.0, 0.2);
+    // The window keys are still the last window alone.
+    EXPECT_NEAR (stats.at ("latencyP50Ms").get<double> (), 200.0, 0.2);
+}
+
 // ============================================================================
 // Status Code Distribution Tests
 // ============================================================================

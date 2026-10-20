@@ -14,6 +14,7 @@
 
 import type { LoadTestMetrics } from "@/types";
 import { DEFAULT_CHART_BUCKET_SECONDS } from "@/constants/client-settings";
+import { hasSecondPercentiles, secondPercentiles } from "../../../utils/tickPercentiles";
 
 /** Bucket several fields at once; returns a shared time axis + one column each. */
 export function bucketColumns(
@@ -40,25 +41,34 @@ export function bucketColumns(
 	return { times, cols };
 }
 
+/** Which sample a bucket keeps when several ticks land in it. */
+export type BucketMerge = "last" | "max";
+
 /**
- * Re-bucket already-aligned `[times] + cols` to the given width (last sample in
- * a bucket wins, matching {@link bucketColumns}). Used by charts whose series are
- * built by per-tick transforms (latency/percentiles) so every shared-cursor chart
- * lines up at the same granularity.
+ * Re-bucket already-aligned `[times] + cols` to the given width. Used by charts
+ * whose series are built by per-tick transforms (latency/percentiles) so every
+ * shared-cursor chart lines up at the same granularity.
+ *
+ * `merge` says what a bucket keeps: the last sample, matching
+ * {@link bucketColumns}, or the largest per column. A percentile series takes
+ * `"max"`: a 5 s bucket holding five per-second p99s shows the worst second,
+ * where "last" would hide a stall in the first four and an average of
+ * percentiles is not a percentile of anything.
  */
 export function rebucket(
 	times: number[],
 	cols: number[][],
-	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS
+	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS,
+	merge: BucketMerge = "last"
 ): { times: number[]; cols: number[][] } {
 	const bucket = bucketSeconds > 0 ? bucketSeconds : DEFAULT_CHART_BUCKET_SECONDS;
 	const bucketTime = (elapsed: number) => Math.round(elapsed / bucket) * bucket;
 	const map = new Map<number, number[]>();
 	for (let i = 0; i < times.length; i++) {
-		map.set(
-			bucketTime(times[i]),
-			cols.map((c) => c[i])
-		);
+		const t = bucketTime(times[i]);
+		const row = cols.map((c) => c[i]);
+		const prev = map.get(t);
+		map.set(t, merge === "max" && prev ? row.map((v, k) => Math.max(prev[k], v)) : row);
 	}
 	const outTimes = Array.from(map.keys()).sort((a, b) => a - b);
 	const outCols: number[][] = cols.map(() => []);
@@ -72,7 +82,8 @@ export function rebucket(
 export const pickThroughput = (m: LoadTestMetrics): number => m.throughput ?? m.current_rps ?? 0;
 export const pickSendRate = (m: LoadTestMetrics): number => m.send_rate ?? 0;
 export const pickConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
-export const pickLatencyP99 = (m: LoadTestMetrics): number => m.latency_p99_ms ?? 0;
+/** The tick's whole-second p99, 0 where it holds none (the scatter drops those ticks first). */
+export const pickLatencyP99 = (m: LoadTestMetrics): number => secondPercentiles(m)?.p99 ?? 0;
 export const pickErrorRate = (m: LoadTestMetrics): number =>
 	m.requests_completed > 0 ? ((m.requests_failed || 0) / m.requests_completed) * 100 : 0;
 
@@ -86,6 +97,10 @@ export const pickErrorRate = (m: LoadTestMetrics): number =>
  * every flush, and a full-run window up to the store's 50,000-tick cap. Its
  * per-flush cost is now the bucket count, like everything else on this canvas.
  *
+ * Only ticks that hold a whole second's p99 are plotted ({@link secondPercentiles}):
+ * a live frame between gates carries a ~100 ms window, which would put a
+ * different quantity on the same axis as the stored run's dots.
+ *
  * Last sample in a bucket wins (that is {@link bucketColumns}), which keeps the
  * elbow: the point a ramp step settles at is the one that survives, where an
  * average over the bucket would round the knee off. `times` carries each
@@ -97,7 +112,7 @@ export function buildConcurrencyScatter(
 	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS
 ): { concurrency: number[]; p99: number[]; times: number[] } {
 	const { times, cols } = bucketColumns(
-		history,
+		history.filter(hasSecondPercentiles),
 		[pickConcurrency, pickLatencyP99],
 		bucketSeconds
 	);

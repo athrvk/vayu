@@ -95,6 +95,22 @@ consumes it.
   `iterations`) show three stats: their p99 is in the hero row's
   `LatencyPercentilesCard`, beside p95, and `ramp_up` / `capacity` keep p99 in
   the stats row as p99 at peak.
+- **A tick's percentiles mean different things by where it came from** (#2385),
+  and `utils/tickPercentiles.ts` is the one place that says which. A stored
+  tick's `latency_p*_ms` are its whole second's. A live frame's are only the
+  last ~100 ms window, so the per-second readers use `secondPercentiles`: a
+  gate frame (about one a second, the final one included) contributes its
+  `second_p*_ms`, an idle second and every frame between gates contribute
+  nothing, and a stored tick contributes its own. The percentile chart, the
+  response-time scatter and the breakpoint (`breakpointAt`, shared by the store
+  and `computeBreakpoint`) all read it; at a chart interval wider than a second
+  the percentile chart keeps the worst second per bucket (`rebucket(..., "max")`),
+  never an average. `mapSseMetrics` marks a live frame (`live`) because that
+  flag is what tells a frame between gates from a stored tick. The hero card
+  reads `cumulativePercentiles` instead, the run so far, which is the span its
+  mean covers. The anomaly detector still reads each tick's own
+  `latency_p99_ms`: its rules count ticks, so it cannot skip the frames between
+  gates.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 

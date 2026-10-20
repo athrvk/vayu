@@ -103,7 +103,8 @@ export function LatencyPercentilesChart({
 		const { times, cols } = rebucket(
 			d.map((p) => p.time),
 			[d.map((p) => p.p50), d.map((p) => p.p95), d.map((p) => p.p99)],
-			bucketSeconds
+			bucketSeconds,
+			"max"
 		);
 		const aligned: uPlot.AlignedData = [times, ...cols];
 		const { p50, p95, p99 } = PERCENTILE_LEGEND;

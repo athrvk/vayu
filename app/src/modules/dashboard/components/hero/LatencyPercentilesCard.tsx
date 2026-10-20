@@ -13,8 +13,10 @@ import { HeroCardShell } from "./HeroCardShell";
 /**
  * Tail latency beside throughput for the modes whose stats row has no p99 of
  * its own (constant_rps, constant_concurrency, iterations): the first screen
- * answers "how fast, and how slow at the tail" without a scroll. Values are the
- * live tick's percentiles, or the final report's once the run completes.
+ * answers "how fast, and how slow at the tail" without a scroll. Values cover
+ * the run so far - the live tick's cumulative percentiles, or the final
+ * report's once the run completes - so the mean and median beside the tail
+ * describe the same population (issue #2385), not the last 100 ms.
  */
 export function LatencyPercentilesCard({
 	p95,
