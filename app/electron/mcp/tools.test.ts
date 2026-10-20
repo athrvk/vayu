@@ -3878,9 +3878,10 @@ describe("run_collection", () => {
 	});
 
 	/**
-	 * The engine emits each sub-collection's whole subtree before the folder's
-	 * own requests (`collect_requests`, the sidebar's order). The pre-flight walk
-	 * has to agree, or its "first bad step" names a step the run reaches later.
+	 * The pre-flight walk has to visit steps in `collect_requests`' order, or its
+	 * "first bad step" names a step the run reaches later. Every row here sits at
+	 * 0, so the kind rank puts each folder's subtree ahead of its parent's own
+	 * request; the interleaved shapes are `sibling-order.conformance.test.ts`'s.
 	 */
 	test("walks sub-collections in the engine's order when recursive", async () => {
 		const requestsByCollection: Record<string, Array<{ id: string; name: string }>> = {

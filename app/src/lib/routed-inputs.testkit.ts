@@ -278,13 +278,17 @@ export const ENGINE_READING_GUARDS = {
 		paths: ["engine/tests/fixtures/recursive-run-order-conformance.json"],
 	},
 	/*
-	 * The same fixture, read by the MCP server's copy of the sibling order
-	 * (#2535): `move_item` plans over it, and the main process cannot import
-	 * the renderer's comparator.
+	 * The same two fixtures, read by the MCP server's copy of the sibling order
+	 * (#2535): `move_item` plans over it and the scenario pre-flight walks with
+	 * it, and the main process cannot import the renderer's comparator.
 	 */
 	mcpTreeOrder: {
 		reader: "app/electron/mcp/sibling-order.conformance.test.ts",
 		paths: ["engine/tests/fixtures/tree-order-conformance.json"],
+	},
+	mcpRecursiveRunOrder: {
+		reader: "app/electron/mcp/sibling-order.conformance.test.ts",
+		paths: ["engine/tests/fixtures/recursive-run-order-conformance.json"],
 	},
 	variableResolution: {
 		reader: "app/src/lib/variable-resolution.conformance.test.ts",
