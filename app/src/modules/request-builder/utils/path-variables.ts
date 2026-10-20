@@ -53,6 +53,26 @@ export function tokenEnd(text: string, at: number): number {
 }
 
 /**
+ * `text` with `map` applied to each stretch between `{{...}}` tokens (a
+ * token-free text is one stretch) and every token kept verbatim: the
+ * encoders' shared way of leaving a variable name alone.
+ */
+export function mapOutsideTokens(text: string, map: (plain: string) => string): string {
+	let out = "";
+	let plain = 0;
+	for (let at = 0; at < text.length;) {
+		const end = tokenEnd(text, at);
+		if (end === -1) {
+			at++;
+			continue;
+		}
+		out += map(text.slice(plain, at)) + text.slice(at, end);
+		plain = at = end;
+	}
+	return out + map(text.slice(plain));
+}
+
+/**
  * `text` with every `{{...}}` token's characters replaced by `_`, the same
  * length, so offsets into it are offsets into `text` and a separator inside a
  * token is no longer one. Shared with the query split in `url.ts`.
@@ -273,18 +293,7 @@ function percentEncodePath(text: string): string {
  * `%7B%7B`.
  */
 export function encodePathVariableValue(value: string): string {
-	let out = "";
-	let plain = 0;
-	for (let at = 0; at < value.length;) {
-		const end = tokenEnd(value, at);
-		if (end === -1) {
-			at++;
-			continue;
-		}
-		out += percentEncodePath(value.slice(plain, at)) + value.slice(at, end);
-		plain = at = end;
-	}
-	return out + percentEncodePath(value.slice(plain));
+	return mapOutsideTokens(value, percentEncodePath);
 }
 
 /**

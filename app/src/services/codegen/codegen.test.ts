@@ -1360,6 +1360,29 @@ describe("path variables", () => {
 	});
 });
 
+// Issue #2465: Send writes the URL as Postman does, so a snippet carries that
+// line and not the one typed.
+describe("the URL is the line Vayu sends", () => {
+	const typed: SnippetRequest = {
+		...GET,
+		url: "HTTPS://API.Example.com\\a b/{{id}}?q=x y&p='#f g",
+	};
+
+	for (const target of CODE_TARGETS) {
+		it(`${target.label} writes the typed URL as Send does, keeping the {{token}}`, () => {
+			const { code } = target.generate(typed);
+			expect(code).toContain("HTTPS://api.example.com/a%20b/{{id}}?q=x%20y&p=%27#f%20g");
+			expect(code).not.toContain("API.Example.com");
+		});
+
+		it(`${target.label} writes the typed URL as typed under disableUrlEncoding`, () => {
+			const { code } = target.generate({ ...typed, disableUrlEncoding: true });
+			expect(code).toContain("API.Example.com");
+			expect(code).not.toContain("%20");
+		});
+	}
+});
+
 /**
  * A `binary` body: the whole body is one file, named by path. Every target
  * has a form for it, and every one of them sends a Content-Type, because the
