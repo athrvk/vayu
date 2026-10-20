@@ -642,6 +642,9 @@ Notes:
   deleted only once its worker settles; a worker that does not settle in time is
   a **409 with the run intact**, surfaced as "not deleted, retry once it reports
   a terminal status" rather than as a generic engine error.
+  The call names the run, so a run pinned as a baseline is deleted too - unlike
+  the app's *Clear run history* (`DELETE /runs`), which keeps pins (#2429); the
+  tool description says so.
 - **The stored-series reads are bounded on this side of the boundary.**
   `get_run_samples`, `get_run_timeseries` and `get_run_monitor` default to 25 /
   100 / 100 rows against engine defaults of 50 / 5000 / 5000: those defaults are
