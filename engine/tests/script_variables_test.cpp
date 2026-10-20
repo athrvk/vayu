@@ -293,6 +293,65 @@ TEST_F (ScriptVariablesTest, ADeclaredNumberTypeStillCasts) {
     EXPECT_EQ (scopes_.environment.at ("count").type, "number");
 }
 
+// A row declared `json` stores an object or an array as its JSON text, so the
+// row's own read parses it back and `{{name}}` substitutes the document (#2568).
+// Mutation check: store `js_to_string` on every row and the stored text is
+// "[object Object]", so the read answers that string.
+TEST_F (ScriptVariablesTest, ADeclaredJsonRowKeepsAnObjectOrArrayAsJsonText) {
+    scopes_.environment["o"] = vayu::Variable{ "{}", false, true, "json" };
+    scopes_.environment["a"] = vayu::Variable{ "[]", false, true, "json" };
+
+    run (R"JS(
+        pm.environment.set('o', { a: 1, b: [true, null] });
+        pm.environment.set('a', [1, { x: 'y' }]);
+    )JS");
+
+    EXPECT_EQ (scopes_.environment.at ("o").value, R"({"a":1,"b":[true,null]})");
+    EXPECT_EQ (scopes_.environment.at ("a").value, R"([1,{"x":"y"}])");
+    EXPECT_EQ (scopes_.environment.at ("o").type, "json");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('o')).to.eql({ a: 1, b: [true, null] });
+        pm.expect(pm.environment.get('a')).to.eql([1, { x: 'y' }]);
+        pm.expect(pm.environment.toObject().o.a).to.equal(1);
+        pm.expect(pm.variables.replaceIn('{{o}}')).to.equal('{"a":1,"b":[true,null]}');
+    )JS");
+
+    vayu::Request request;
+    request.url                 = "https://api.example.com/items";
+    request.headers["X-Filter"] = "{{o}}";
+    EXPECT_FALSE (vayu::http::routes::resolve_residual_tokens (request, scopes_));
+    EXPECT_EQ (request.headers["X-Filter"], R"({"a":1,"b":[true,null]})");
+}
+
+// Only the declared type changes the stored text: a string stays as given on a
+// json row, a value JSON cannot write falls back to the string conversion, and
+// a default-type row keeps Postman's text.
+TEST_F (ScriptVariablesTest, OnlyADeclaredJsonRowChangesTheStoredText) {
+    scopes_.environment["j"]     = vayu::Variable{ "{}", false, true, "json" };
+    scopes_.environment["plain"] = vayu::Variable{ "x", false, true, "string" };
+
+    run (R"JS(
+        pm.environment.set('j', '{"keep":"as given"}');
+        pm.environment.set('plain', { a: 1 });
+        pm.environment.set('fresh', { a: 1 });
+    )JS");
+    EXPECT_EQ (scopes_.environment.at ("j").value, R"({"keep":"as given"})");
+    EXPECT_EQ (scopes_.environment.at ("plain").value, "[object Object]");
+    EXPECT_EQ (scopes_.environment.at ("fresh").value, "[object Object]");
+
+    run (R"JS(
+        var cycle = {};
+        cycle.self = cycle;
+        pm.environment.set('j', cycle);
+    )JS");
+    EXPECT_EQ (scopes_.environment.at ("j").value, "[object Object]");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('plain')).to.eql({ a: 1 });
+    )JS");
+}
+
 // A string carries nothing, so a later string set retires an earlier typed
 // value rather than leaving it to answer.
 TEST_F (ScriptVariablesTest, AStringSetReplacesAnEarlierTypedValue) {
@@ -550,7 +609,7 @@ TEST_F (PersistScriptVariablesTest, ATypedSetKeepsAFlagAnotherClientChanged) {
     persist_script_variables (*db_, scopes);
 
     auto stored = json::parse (stored_environment_variables ());
-    EXPECT_EQ (stored["token"]["value"], "1,2");
+    EXPECT_EQ (stored["token"]["value"], "[1,2]"); // the row is declared json (#2568)
     EXPECT_EQ (stored["token"]["enabled"], false) << stored.dump ();
     EXPECT_EQ (stored["token"]["type"], "json");
 }
