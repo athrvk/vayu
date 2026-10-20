@@ -301,7 +301,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
-| `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
@@ -787,11 +787,17 @@ Notes:
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
   (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong
-  is a folder that visibly reshuffles. The batch states the destination block's
-  whole arrangement rather than leaning on the engine's `normalize` pass, because
-  normalization runs *before* the moves and would leave a row moved to the end of
-  a block it is already in tied with the sibling it displaced; only the rows whose
-  stored `order` actually changes get an entry. A collection may move to the top
+  is a folder that visibly reshuffles. The siblings are the destination's
+  sub-collections **and** its requests, one `order` space (#2535,
+  [Ordering](api-reference.md#ordering)): the tool reads both lists and merges
+  them with the sibling comparator (`tools/sibling-order.ts`, pinned to the
+  engine's and the renderer's by `tree-order-conformance.json`), so `last` lands
+  past every child of either kind and `first` ahead of them all. The batch states
+  that list's whole arrangement, each row under its own `type`, rather than
+  leaning on the engine's `normalize` pass, because normalization runs *before*
+  the moves and would leave a row moved to the end of a list it is already in
+  tied with the sibling it displaced; only the rows whose stored `order` actually
+  changes get an entry. A collection may move to the top
   level (`parentId: null`) and a request always belongs to a collection. Moving a
   collection into itself or into its own subtree is refused here, walking the
   same tree the app's "Move to..." dialog walks, so the answer names the problem -
@@ -2392,7 +2398,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
-| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
+| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays the tree-order fixture through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
