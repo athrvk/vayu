@@ -207,7 +207,7 @@ function asciiHost(host: string): string | null {
 }
 
 /** `toNodeUrl`'s host: lowercased, then punycoded; `hostPort` may end in a `:port`. */
-function encodeHost(hostPort: string): string {
+export function encodeHost(hostPort: string): string {
 	const lowered = mapOutsideTokens(hostPort, lowerAscii);
 	if (lowered.startsWith("[")) return lowered;
 	const colon = maskTokens(lowered).indexOf(":");

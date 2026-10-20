@@ -32,6 +32,7 @@ import {
 	type SnippetRequest,
 } from "./index";
 import { parseCommand } from "@/services/curl/parseCurl";
+import { encodeHost, encodeUrlAsPostman } from "@/modules/request-builder/utils/query-encoding";
 
 const GET: SnippetRequest = { method: "get", url: "https://api.example.com/v1/users" };
 
@@ -451,6 +452,28 @@ describe("auth is applied, because the engine applies it at send time", () => {
 });
 
 describe("secret masking", () => {
+	describe("a secret in the URL host (#2591)", () => {
+		for (const secret of ["ACME", "bücher"]) {
+			it(`masks ${secret} in every target once the host is lowercased and punycoded`, () => {
+				const url = encodeUrlAsPostman(`https://${secret}.api.example/v1`);
+				expect(url).not.toContain(secret);
+				const scanned = CODE_TARGETS.map((target) => {
+					const { code } = generateSnippet(
+						target.id,
+						{ ...GET, url },
+						{ secrets: [secret], mask: true }
+					);
+					return code;
+				});
+				expect(scanned.length).toBeGreaterThan(0);
+				for (const code of scanned) {
+					expect(code).toContain(SECRET_PLACEHOLDER);
+					expect(code).not.toContain(encodeHost(secret));
+				}
+			});
+		}
+	});
+
 	const request: SnippetRequest = {
 		method: "POST",
 		url: "https://api.example.com/v1/users?token=s3cret",

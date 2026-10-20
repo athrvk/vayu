@@ -29,6 +29,7 @@ import {
 import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
 import {
 	encodeAtUrlComponent,
+	encodeHost,
 	encodeQueryComponent,
 	resolveUrlTemplate,
 } from "@/modules/request-builder/utils/query-encoding";
@@ -119,7 +120,10 @@ function asString(value: unknown): string {
  * set, which leaves `&` and `=` raw), as a query row's value
  * (`encodeQueryComponent`) and as `encodeURIComponent` writes it. The raw
  * value alone would miss `a b&c` sitting there as `a%20b&c`, and a path
- * writes `{` and a backtick where a query leaves them.
+ * writes `{` and a backtick where a query leaves them. In the host the composed
+ * URL lowercases and punycodes, so a secret there is matched in that form too
+ * (#2591); a secret that is only part of a label is rewritten with the whole
+ * label by punycode and is not matched.
  */
 function secretForms(secret: string): string[] {
 	return [
@@ -130,6 +134,7 @@ function secretForms(secret: string): string[] {
 		encodeAtUrlComponent(secret, "fragment").written,
 		encodeQueryComponent(secret, "value"),
 		encodeURIComponent(secret),
+		encodeHost(secret),
 	];
 }
 
