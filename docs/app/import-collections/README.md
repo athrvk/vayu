@@ -251,8 +251,9 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
   collections** - carrying `parentTempId` (`null` for a root) and, below a root,
   an `order`: a parent's child collections and requests share one sequence
   (issue [#2535](https://github.com/athrvk/vayu/issues/2535)), placed by each
-  draft's own `order` where the parse stated one (a Postman item's document
-  position, a Vayu-written document's stored order) and otherwise folders first,
+  draft's own `order` where the parse stated one (a Postman item's or a JMeter
+  element's document position, a Vayu-written document's stored order) and
+  otherwise folders first,
   then requests (`draft-siblings.ts`, the engine's `sibling_positions` the other
   copy). Each request carries `collectionTempId` and `bodyType = body.mode` (the
   engine never derives this).

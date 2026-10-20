@@ -4167,9 +4167,10 @@ struct SiblingPositions {
 };
 
 /**
- * A draft's own `order` places it - a Postman item's document position, an
- * `x-vayu-*` stored order - and a draft stating none keeps the listing every
- * other importer produces, its folders first and its requests after them.
+ * A draft's own `order` places it - a Postman item's or a JMeter element's
+ * document position, an `x-vayu-*` stored order - and a draft stating none keeps
+ * the listing the other importers produce, its folders first and its requests
+ * after them.
  * Ties fall to `sibling_order.hpp`'s rule, a folder before a request, then
  * list position. `draft-siblings.ts`'s `siblingPositions` is the app's copy,
  * pinned to this one by `import-conformance.json`'s payloads.

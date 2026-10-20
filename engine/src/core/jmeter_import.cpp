@@ -144,11 +144,28 @@ struct Ctx {
 /// helper, and a `.jmx` folder's own rules - one elements array per folder,
 /// no tag/path naming rule - differ enough that sharing it would fold two
 /// unrelated "how does a folder get named" questions into one type).
+///
+/// A sibling is stamped with its `order` as it is added: samplers and
+/// controllers count in one sequence, the document's own, so the two lists
+/// flatten back into the plan's tree order (#2573). The counter belongs to the
+/// collection being built, not to the sink: a `ThreadGroup` hands its parent's
+/// sink on, and its members continue the parent's numbering.
 struct Sink {
     json& requests;
     json& children;
     json& elements;
     json& variables;
+    int& next_order;
+
+    void add_request (json request) {
+        request["order"] = next_order++;
+        requests.push_back (std::move (request));
+    }
+
+    void add_folder (json folder) {
+        folder["order"] = next_order++;
+        children.push_back (std::move (folder));
+    }
 };
 
 /// One `{kind, config}` pair, validated before it is offered to a sink -
@@ -846,16 +863,18 @@ Sink parent) {
         // extract enough from - never silently, per issue #1443.
         ctx.tally.add (std::string (tag) + "_unrecognised");
     }
+    int next_order = 0;
     if (own_tree) {
         walk_hash_tree (own_tree,
-        Sink{ folder["requests"], folder["children"], folder["elements"], folder["variables"] },
+        Sink{ folder["requests"], folder["children"], folder["elements"],
+        folder["variables"], next_order },
         ctx);
     }
     if (folder["elements"].empty ()) {
         folder.erase ("elements");
     }
     ++ctx.folder_count;
-    parent.children.push_back (std::move (folder));
+    parent.add_folder (std::move (folder));
 }
 
 /// `TestPlan` and `ThreadGroup` both flatten straight into the enclosing
@@ -899,7 +918,7 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
         return;
     }
     if (tag == "HTTPSamplerProxy") {
-        sink.requests.push_back (build_http_sampler (ctx, el, own_tree));
+        sink.add_request (build_http_sampler (ctx, el, own_tree));
         ++ctx.request_count;
         return;
     }
@@ -981,8 +1000,9 @@ parse_jmeter (const std::string& text, const ImportOptions& options, ImportTally
         { "children", json::array () }, { "requests", json::array () } };
     json elements = json::array ();
     Ctx ctx{ options, tally };
+    int next_order = 0;
     Sink root_sink{ collection["requests"], collection["children"], elements,
-        collection["variables"] };
+        collection["variables"], next_order };
     walk_hash_tree (top_tree, root_sink, ctx);
     if (!elements.empty ()) {
         collection["elements"] = std::move (elements);

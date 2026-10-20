@@ -304,8 +304,7 @@ nlohmann::ordered_json bare_request (const std::string& name) {
 }
 
 // A parent's folders and requests share one `order` space (#2535). A draft
-// that states no `order` - every importer but Postman's and a Vayu-written
-// OpenAPI document - keeps the display it always had, its folders first and
+// that states no `order` keeps the display it always had, its folders first and
 // its requests after them, and a draft that states one is placed by it.
 TEST (ImportApplyPayload, NumbersFoldersAndRequestsInOneSpace) {
     nlohmann::ordered_json root = bare_draft ("root");
@@ -2943,6 +2942,74 @@ TEST_F (ImportParseRoute, APostmanCollectionOfFoldersOnlyIsUnchanged) {
     auto [status, body] = vayu::http::routes::import_response (
     *db_, json{ { "content", R"({"info":{"name":"F","schema":"v2.1.0"},"item":[
         {"name":"B","item":[]},{"name":"A","item":[]}]})" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    EXPECT_EQ (vayu::tests::listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:B", "folder:A" }));
+    for (const char* temp : { "c2", "c3" }) {
+        const auto row = db_->get_collection (body.at ("idMap").at (temp));
+        ASSERT_HAS_VALUE (row) << temp;
+        EXPECT_EQ (row->order, temp == std::string ("c2") ? 0 : 1);
+    }
+}
+
+/// A plan whose samplers sit before, between and after controllers, three
+/// levels deep, with a disabled sampler and a second ThreadGroup in the way.
+const char* INTERLEAVED_JMETER_PLAN = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan jmeter="5.6.3"><hashTree>
+  <TestPlan testname="P"/><hashTree>
+    <ThreadGroup testname="G1"/><hashTree>
+      <HTTPSamplerProxy testname="A"><stringProp name="HTTPSampler.path">/a</stringProp></HTTPSamplerProxy><hashTree/>
+      <LoopController testname="Loop"/><hashTree>
+        <HTTPSamplerProxy testname="X"><stringProp name="HTTPSampler.path">/x</stringProp></HTTPSamplerProxy><hashTree/>
+        <TransactionController testname="Inner"/><hashTree>
+          <HTTPSamplerProxy testname="Y"><stringProp name="HTTPSampler.path">/y</stringProp></HTTPSamplerProxy><hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy testname="Z"><stringProp name="HTTPSampler.path">/z</stringProp></HTTPSamplerProxy><hashTree/>
+      </hashTree>
+      <HTTPSamplerProxy testname="Off" enabled="false"><stringProp name="HTTPSampler.path">/off</stringProp></HTTPSamplerProxy><hashTree/>
+      <HTTPSamplerProxy testname="B"><stringProp name="HTTPSampler.path">/b</stringProp></HTTPSamplerProxy><hashTree/>
+    </hashTree>
+    <ThreadGroup testname="G2"/><hashTree>
+      <HTTPSamplerProxy testname="C"><stringProp name="HTTPSampler.path">/c</stringProp></HTTPSamplerProxy><hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+
+// A JMeter plan runs its elements in tree order, a controller where it sits
+// (#2573); the import keeps that order, so the sidebar lists it and a
+// recursive run visits it the same way. Mutation check: stop stamping `order`
+// in jmeter_import.cpp's `Sink` and this reds.
+TEST_F (ImportParseRoute, AJmeterPlanKeepsItsTreeOrder) {
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", INTERLEAVED_JMETER_PLAN } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+
+    using vayu::tests::listed_children;
+    EXPECT_EQ (listed_children (*db_, root),
+    (std::vector<std::string>{ "request:A", "folder:Loop", "request:B", "request:C" }));
+    const std::string loop = vayu::tests::child_folder_id (*db_, root, "Loop");
+    EXPECT_EQ (listed_children (*db_, loop),
+    (std::vector<std::string>{ "request:X", "folder:Inner", "request:Z" }));
+
+    std::vector<std::string> run;
+    for (const auto& request : db_->get_requests_in_subtree (root)) {
+        run.push_back (request.name);
+    }
+    EXPECT_EQ (run, (std::vector<std::string>{ "A", "X", "Y", "Z", "B", "C" }));
+}
+
+// A plan of controllers only lists them as the document does, numbered from 0
+// as before #2573.
+TEST_F (ImportParseRoute, AJmeterPlanOfControllersOnlyIsUnchanged) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"(<?xml version="1.0"?><jmeterTestPlan jmeter="5.6.3"><hashTree>
+        <TestPlan testname="P"/><hashTree>
+          <LoopController testname="B"/><hashTree/>
+          <IfController testname="A"/><hashTree/>
+        </hashTree></hashTree></jmeterTestPlan>)" } });
     ASSERT_EQ (status, 200) << body.dump ();
     const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
     EXPECT_EQ (vayu::tests::listed_children (*db_, root),
