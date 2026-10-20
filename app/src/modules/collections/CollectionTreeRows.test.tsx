@@ -9,11 +9,10 @@
  */
 
 /**
- * What the flat list took over from the nesting it replaced (#2543): the gap
- * above each row, and the dimming of everything inside a folder being deleted.
- * Both used to fall out of a folder's wrapper holding its children; with every
- * row a sibling, the list has to say them per row, and nothing else would
- * notice if it stopped.
+ * The flat list's per-row wrapper (#2543): the gap above each row, and the
+ * dimming of everything inside a folder being deleted. With every row a
+ * sibling the list has to say them per row, and nothing else would notice if
+ * it stopped.
  *
  * jsdom has no layout, so the pitch is read as the classes each row's wrapper
  * carries rather than as a measured offset.

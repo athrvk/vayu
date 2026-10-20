@@ -103,7 +103,7 @@ describe("collection tree rows require the provider", () => {
 	});
 });
 
-describe("the contexts carry the phase-3 dnd slot", () => {
+describe("the handlers context carries the dnd slot", () => {
 	it("exposes `dnd` on the handlers, empty until the drag hook mounts into it", () => {
 		let seen: ReturnType<typeof useCollectionTreeHandlers> | null = null;
 		function Probe() {

@@ -201,9 +201,8 @@ interface CollectionTreeRowsProps {
  * The tree's rows, one flat list in the order `flattenVisibleRows` gives them,
  * mounted only where the drawer can show them (`useTreeWindow`).
  *
- * Each row sits in a wrapper that owns what used to come from nesting - the gap
- * above it, and the dimming of everything inside a folder being deleted - and,
- * since the window, its height. Memoised so a keystroke in the new-folder
+ * Each row sits in a wrapper that owns the gap above it, its height, and the
+ * dimming of everything inside a folder being deleted. Memoised so a keystroke in the new-folder
  * field, which re-renders the tree, does not walk the list: `rows` changes only
  * when what is visible does.
  */

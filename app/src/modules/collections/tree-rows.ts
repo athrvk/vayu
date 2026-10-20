@@ -155,7 +155,7 @@ export function emptyPlaceholderId(collectionId: string): string {
  * leaves behind, and the user saw a collection silently disappear. Listed at the
  * root it is reachable, so it can be moved or deleted.
  */
-export function treeRoots(collections: readonly Collection[]): Collection[] {
+function treeRoots(collections: readonly Collection[]): Collection[] {
 	const loadedIds = new Set(collections.map((c) => c.id));
 	return collections
 		.filter((c) => !c.parentId || !loadedIds.has(c.parentId))
