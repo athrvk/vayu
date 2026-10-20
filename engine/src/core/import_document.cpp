@@ -2014,6 +2014,7 @@ std::string auth_mode_of (const json& draft) {
 /// `resolve_inherited_auth`: `noauth` ends the walk (nothing is sent, so the
 /// empty mode), `none` or absent is transparent, anything else wins. Walking
 /// the chain nearest-first and passing the answer down are the same thing.
+/// The composer takes a DB chain of `Collection` rows, which a draft is not.
 std::string folder_mode_passed_down (const json& folder, const std::string& inherited) {
     const std::string mode = auth_mode_of (folder);
     if (mode == "noauth") {
