@@ -385,7 +385,8 @@ struct FileGrant {
  * the part declares about itself; empty means "let libcurl derive it" (the
  * basename, and `application/octet-stream`). A file part whose `src` is empty,
  * unreadable or untrusted is refused before the transfer starts - see
- * `vayu::http::unsendable_file_ref`.
+ * `vayu::http::unsendable_file_ref`. A text part may carry `content_type` too,
+ * sent as that part's own Content-Type (#2539).
  */
 struct FormField {
     FormField () = default;
@@ -711,7 +712,12 @@ enum class ErrorCode : std::uint8_t {
     /// bytes that are not that encoding, or an encoding this build has no
     /// decoder for (issue #2462). Appended for the same reason `ProxyError`
     /// was.
-    BadContentEncoding
+    BadContentEncoding,
+    /// A request header's name is not an RFC 9110 token once trimmed (issue
+    /// #2467). Raised by the payload reader, so it is a refusal a route answers
+    /// as `invalid_header_name` and never reaches a stored trace. Appended for
+    /// the same reason `ProxyError` was.
+    InvalidHeaderName
 };
 
 /**
@@ -736,6 +742,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::Cancelled: return "CANCELLED";
     case ErrorCode::TooManyRedirects: return "TOO_MANY_REDIRECTS";
     case ErrorCode::BadContentEncoding: return "BAD_CONTENT_ENCODING";
+    case ErrorCode::InvalidHeaderName: return "INVALID_HEADER_NAME";
     }
     return "UNKNOWN";
 }
@@ -1268,12 +1275,48 @@ struct ScriptResult {
 // ============================================================================
 
 /**
+ * @brief The JavaScript value a script last `set` on a variable, kept for the
+ *        rest of the run so its own reads answer that value (#2529).
+ *
+ * `Variable::value` stays the text form, which is all that substitution, the
+ * wire and storage read. Plain data rather than a JSValue: a script context
+ * is rebuilt for every script (#1782), and the value has to reach the next
+ * one.
+ *
+ * Run-local by construction: `serialize_variables` never writes it, and every
+ * carry compares equal to every other, so `Variable::operator==`, and through
+ * it the persist delta (`apply_scope_delta`), sees only the stored fields.
+ *
+ * A string carries nothing, because the text already is the value. A nested
+ * value travels as its JSON text, so it reads back as
+ * `JSON.parse(JSON.stringify(value))` would; what JSON cannot write (a
+ * function, a BigInt, a cycle) carries nothing and reads as text.
+ */
+struct ScriptValue {
+    enum class Kind : std::uint8_t {
+        None,      ///< nothing carried: a read casts the text by declared type
+        Undefined, ///< `set(name, undefined)`; the text is ""
+        Number,    ///< any number, NaN, the infinities and -0 included
+        Json,      ///< null, a boolean, an object or an array, as JSON text
+    };
+    Kind kind     = Kind::None;
+    double number = 0;
+    std::string json;
+
+    bool operator== (const ScriptValue& /*other*/) const {
+        return true;
+    }
+};
+
+/**
  * @brief Variable value with metadata.
  *
  * `value` is always stored as a string on disk. `type` is a UI/script hint
  * (per data-model PRD §5.2) declaring the conversion applied when scripts
  * read this variable via pm.*.get(...). One of:
  *   "string" (default), "number", "boolean", "json".
+ * On a "string" row a value a script set this run reads back as that value
+ * (`script_value`); the other three keep casting the text.
  *
  * `created_at` (ms epoch) is the app's row-ordering key - the variables editor
  * lists a scope oldest-first. The engine does not display it, but it must
@@ -1282,8 +1325,9 @@ struct ScriptResult {
  * app sorts as older than everything; the engine never invents a value for an
  * existing variable, only for one a script creates.
  *
- * Every field here is serialized by `vayu::json::serialize_variables`; adding
- * one without adding it there silently drops it on the next design run.
+ * Every field here except `script_value` is serialized by
+ * `vayu::json::serialize_variables`; adding one without adding it there
+ * silently drops it on the next design run.
  */
 struct Variable {
     std::string value;
@@ -1303,6 +1347,10 @@ struct Variable {
     // same trailing-field reason as `created_at`.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string description{};
+    // What a script last set here, never stored; see `ScriptValue`. `{}` for
+    // the same trailing-field reason as `created_at`.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    ScriptValue script_value{};
 
     bool operator== (const Variable&) const = default;
 };

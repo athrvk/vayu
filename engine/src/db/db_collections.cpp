@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -61,8 +62,10 @@ std::vector<Collection> Database::get_collections () {
     // examples import already do. A finer timestamp was rejected: it still ties
     // under a fast enough writer, and it would make row identity depend on
     // clock resolution across three platforms. See the Ordering section of
-    // docs/engine/api-reference.md. The renderer's comparator applies the
-    // identical rule, pinned by tests/fixtures/tree-order-conformance.json.
+    // docs/engine/api-reference.md. This is the within-kind half of the
+    // sibling order in vayu/db/sibling_order.hpp, which ranks a sub-folder
+    // and a request against each other (#2535); the renderer's comparator
+    // applies the same rule, pinned by tests/fixtures/tree-order-conformance.json.
     //
     // Deleted rows are excluded here rather than at each caller (issue #988):
     // this is what the sidebar, the MCP tools, every export and every plan
@@ -80,6 +83,30 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
     if (cols.empty ())
         return std::nullopt;
     return cols.front ();
+}
+
+int Database::next_sibling_order (const std::optional<std::string>& parent_id,
+const std::string& excluded_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    int highest      = -1;
+    const auto raise = [&highest] (const std::unique_ptr<int>& found) {
+        if (found) {
+            highest = std::max (highest, *found);
+        }
+    };
+    if (!parent_id) {
+        raise (impl_->storage.max (&Collection::order,
+        where (c (&Collection::id) != excluded_id &&
+        is_null (&Collection::parent_id) && is_null (&Collection::deleted_at))));
+        return highest + 1;
+    }
+    raise (impl_->storage.max (&Collection::order,
+    where (c (&Collection::id) != excluded_id &&
+    c (&Collection::parent_id) == *parent_id && is_null (&Collection::deleted_at))));
+    raise (impl_->storage.max (&Request::order,
+    where (c (&Request::id) != excluded_id &&
+    c (&Request::collection_id) == *parent_id && is_null (&Request::deleted_at))));
+    return highest + 1;
 }
 
 bool Database::collection_is_trashed (const std::string& id) {

@@ -131,16 +131,28 @@ export interface SkippedItem {
 		 */
 		| "unsupported_auth"
 		/**
-		 * A Postman `oauth2` block carrying `state` (Vayu always generates and
-		 * validates its own CSRF state per authorization attempt rather than
-		 * storing one, so an imported value would be stale by the time an
-		 * authorization runs) or a pre-fetched `accessToken` sitting alongside
+		 * A Postman `oauth2` block's pre-fetched `accessToken` sitting alongside
 		 * an explicit grant config, which the general oauth2 shape has no field
-		 * to seed with (issue #1460). `tokenName` is not counted here - it is
-		 * stored as `credentialsId`, the existing field a saved token's cache
-		 * key already reads.
+		 * to seed with (issue #1460): the grant fetches a new one. `tokenName`
+		 * is not counted here - it is stored as `credentialsId`, the existing
+		 * field a saved token's cache key already reads.
 		 */
 		| "oauth2_dropped_field"
+		/**
+		 * A Postman `oauth2` block carrying `state`. Vayu always generates and
+		 * validates its own CSRF state per authorization attempt rather than
+		 * storing one, so an imported value would be stale by the time an
+		 * authorization runs; nothing sent changes (issue #2536).
+		 */
+		| "oauth2_state_regenerated"
+		/**
+		 * A Postman `oauth2` extra request parameter row (`tokenRequestParams`,
+		 * `authRequestParams`, `refreshRequestParams`) that was not carried: no
+		 * key, a `send_as` Vayu has no target for, or a key the engine writes
+		 * itself (issue #2536). The item's `names` holds the keys, never the
+		 * values, which can be credentials.
+		 */
+		| "oauth2_unmapped_param"
 		/**
 		 * An OpenAPI operation's `security` offering more than one alternative
 		 * requirement (an OR) - Vayu sends one mode per request and cannot pick
@@ -286,6 +298,12 @@ export interface SkippedItem {
 	 * than only counting them, so the user knows which request to finish.
 	 */
 	requests?: string[];
+	/**
+	 * What the count dropped, by name (a parameter's key, never its value), in
+	 * the order the walk met them - absent when the kind records none. Only
+	 * `oauth2_unmapped_param` does today.
+	 */
+	names?: string[];
 }
 
 /**
@@ -472,6 +490,8 @@ export interface RequestDraft {
 	 */
 	mockResponseMode?: MockResponseMode;
 	mockExampleIndex?: number;
+	/** See {@link CollectionDraft.order}. */
+	order?: number;
 }
 
 /**
@@ -509,6 +529,15 @@ export interface CollectionDraft {
 	dataSchema?: CollectionDataSchema;
 	children: CollectionDraft[];
 	requests: RequestDraft[];
+	/**
+	 * Where this draft sits among its parent's sub-folders and requests, which
+	 * share one list (issue #2535), when the source states it: a Postman item's
+	 * or a JMeter element's document position, an Insomnia item's rank by sort
+	 * key, or the stored order a Vayu-written OpenAPI document carries. Absent
+	 * on a root and on every draft of a source that states no order, which
+	 * lists its folders first and its requests after them (`draftSiblings`).
+	 */
+	order?: number;
 	/**
 	 * The spec this collection was imported from, on the root only (issue #637).
 	 * A tag sub-collection is part of the same document, not a document of its

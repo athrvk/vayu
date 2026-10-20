@@ -402,6 +402,44 @@ TEST_F (SpecSyncRouteTest, CreatedRequestsAppendAfterTheCollectionsExistingOnes)
     EXPECT_EQ (rows[2].order, 2);
 }
 
+// A collection's sub-folders and requests share one `order` space (#2535): a
+// folder and a request the sync creates in one parent take consecutive slots
+// after every stored sibling of either kind, the folder first. Mutation check:
+// keep one slot space per kind in `SyncPlan` and the created request lands on
+// the created folder's slot.
+TEST_F (SpecSyncRouteTest, CreatedFoldersAndRequestsShareTheirParentsSlots) {
+    const std::string stored_folder =
+    create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
+    const std::string stored_request = create_request (root_);
+    const auto stored                = db_->get_request (stored_request);
+    ASSERT_HAS_VALUE (stored);
+    ASSERT_EQ (stored->order, 1)
+    << "the stored request appends after the stored folder";
+
+    auto [status, response] = routes::spec_sync_response (*db_,
+    body (json{ { "collections",
+                json::array ({ json{ { "tempId", "t_col" }, { "name", "owners" } } }) },
+    { "create",
+    json::array ({ json{ { "tempId", "in_root" }, { "collectionId", root_ }, { "name", "a" },
+                   { "method", "GET" }, { "url", "https://example.test/a" } },
+    json{ { "tempId", "in_folder" }, { "collectionTempId", "t_col" }, { "name", "b" },
+    { "method", "GET" }, { "url", "https://example.test/b" } } }) } }));
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto folder = db_->get_collection (response["idMap"]["t_col"]);
+    ASSERT_HAS_VALUE (folder);
+    EXPECT_EQ (folder->order, 2);
+    const auto in_root = db_->get_request (response["idMap"]["in_root"]);
+    ASSERT_HAS_VALUE (in_root);
+    EXPECT_EQ (in_root->order, 3);
+    const auto in_folder = db_->get_request (response["idMap"]["in_folder"]);
+    ASSERT_HAS_VALUE (in_folder);
+    EXPECT_EQ (in_folder->order, 0);
+    const auto untouched = db_->get_collection (stored_folder);
+    ASSERT_HAS_VALUE (untouched);
+    EXPECT_EQ (untouched->order, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Atomicity
 // ---------------------------------------------------------------------------

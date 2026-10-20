@@ -147,14 +147,26 @@ describe("the tree's shape as assistive tech sees it", () => {
 		expect(collectionRow("beta")).toHaveAttribute("aria-setsize", "2");
 
 		// Inside Acme: one folder and one request are one set of two, and the
-		// request is second. Numbering the requests separately would announce two
-		// different "1 of 1" rows sitting next to each other.
+		// request is second (the folder wins the tie on order 0). Numbering the
+		// requests separately would announce two different "1 of 1" rows sitting
+		// next to each other.
 		expect(collectionRow("billing")).toHaveAttribute("aria-level", "2");
 		expect(collectionRow("billing")).toHaveAttribute("aria-posinset", "1");
 		expect(collectionRow("billing")).toHaveAttribute("aria-setsize", "2");
 		expect(requestRow("r-ping")).toHaveAttribute("aria-level", "2");
 		expect(requestRow("r-ping")).toHaveAttribute("aria-posinset", "2");
 		expect(requestRow("r-ping")).toHaveAttribute("aria-setsize", "2");
+	});
+
+	it("numbers a group over its merged sibling list, a request above a folder included", () => {
+		// The request now orders ahead of the folder (#2535): it renders first
+		// and its position says so, rather than continuing a folder block.
+		collections = TREE.map((c) => (c.id === "billing" ? { ...c, order: 1 } : c));
+		renderTree();
+
+		expect(requestRow("r-ping")).toHaveAttribute("aria-posinset", "1");
+		expect(collectionRow("billing")).toHaveAttribute("aria-posinset", "2");
+		expect(collectionRow("billing")).toHaveAttribute("aria-setsize", "2");
 	});
 
 	it("lists the visible rows flat, in order, with the hierarchy in their levels", () => {

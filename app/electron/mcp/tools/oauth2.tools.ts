@@ -78,7 +78,7 @@ export const OAUTH2_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Ask whether a token is cached for a cache key, and whether it has expired - the read behind 'is this flow failing because the token went stale?'. The cache key is the `cacheKey` fetch_oauth2_token returned; the engine derives it from the token URL, client id, credentials id and (for password grants) the username, so configs differing only in scope share one entry. An absent entry is an answer (`found: false`), not an error. The access token is never returned, only the shape of the entry - see fetch_oauth2_token.",
+			"Ask whether a token is cached for a cache key, and whether it has expired - the read behind 'is this flow failing because the token went stale?'. The cache key is the `cacheKey` fetch_oauth2_token returned; the engine derives it from the token URL, client id, credentials id, (for password grants) the username and the config's extra request parameter rows, so configs differing only in scope share one entry. An absent entry is an answer (`found: false`), not an error. The access token is never returned, only the shape of the entry - see fetch_oauth2_token.",
 		annotations: {
 			title: "OAuth 2.0 token status",
 			readOnlyHint: true,

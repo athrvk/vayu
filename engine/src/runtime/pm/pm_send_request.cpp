@@ -19,10 +19,12 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "vayu/core/url_encoding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -86,10 +88,131 @@ read_send_request_headers (JSContext* ctx, JSValueConst value, Headers& out) {
     ctx, value, "pm.sendRequest headers", /*suggest_delete=*/false, out);
 }
 
-// pm.sendRequest's body: a raw string, or Postman's { mode: 'raw', raw }.
+// A form row's key or value: a string, or the number or boolean a script
+// interpolated into one.
+std::optional<std::string>
+read_form_text (JSContext* ctx, JSValueConst value, const std::string& what, std::string& out) {
+    if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
+        return what + " must be a string, got " + std::string (js_type_name (ctx, value));
+    }
+    out = js_to_string (ctx, value);
+    return std::nullopt;
+}
+
+// One `{ key, value, disabled?, contentType? }` row of a form body's array
+// form. A file part (`type: 'file'`, carrying a `src` and no value) is refused
+// by name: the sandbox has no grant to read a file from disk with, and sending
+// the part without its file is the silent wrong request.
+std::optional<std::string>
+read_form_entry (JSContext* ctx, JSValueConst entry, const std::string& where, FormField& out) {
+    if (!JS_IsObject (entry) || JS_IsArray (entry) || JS_IsFunction (ctx, entry)) {
+        return where + " entries must be { key, value } objects, got " +
+        std::string (js_type_name (ctx, entry));
+    }
+    ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry, "key"));
+    if (!JS_IsString (key.get ())) {
+        return where + " entries need a string 'key', got " +
+        std::string (js_type_name (ctx, key.get ()));
+    }
+    out.key = js_to_string (ctx, key.get ());
+
+    ScopedValue type (ctx, JS_GetPropertyStr (ctx, entry, "type"));
+    if (JS_IsString (type.get ()) && js_to_string (ctx, type.get ()) == "file") {
+        return where + " '" + out.key +
+        "' is a file part - pm.sendRequest sends text parts only, and a file "
+        "part cannot be sent from a script";
+    }
+    ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry, "value"));
+    if (auto reason = read_form_text (
+        ctx, value.get (), where + " '" + out.key + "' value", out.value)) {
+        return reason;
+    }
+
+    ScopedValue content_type (ctx, JS_GetPropertyStr (ctx, entry, "contentType"));
+    if (JS_IsString (content_type.get ())) {
+        out.content_type = js_to_string (ctx, content_type.get ());
+    }
+    ScopedValue disabled (ctx, JS_GetPropertyStr (ctx, entry, "disabled"));
+    out.enabled = JS_ToBool (ctx, disabled.get ()) <= 0;
+    return std::nullopt;
+}
+
+// A form body's rows, in either shape Postman accepts: an array of
+// `{ key, value, disabled? }` as an exported collection carries it, or a plain
+// `{ name: value }` object as a script hand-writes it. Both, for the reason the
+// header option reads both - a row silently vanishing is a request sent short.
+// A disabled row is validated and then left out, which is what disabled means
+// on the wire (`enabled_fields`).
+std::optional<std::string> read_form_fields (JSContext* ctx,
+JSValueConst list,
+const std::string& where,
+std::vector<FormField>& out) {
+    if (JS_IsArray (list)) {
+        int64_t length = 0;
+        if (JS_GetLength (ctx, list, &length) < 0) {
+            return where + " could not be enumerated";
+        }
+        for (int64_t i = 0; i < length; i++) {
+            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, list, i));
+            FormField field;
+            if (auto reason = read_form_entry (ctx, entry.get (), where, field)) {
+                return reason;
+            }
+            if (field.enabled) {
+                out.push_back (std::move (field));
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::vector<std::string> names;
+    if (!JS_IsObject (list) || JS_IsFunction (ctx, list) ||
+    !js_own_enumerable_keys (ctx, list, names)) {
+        return where + " must be an array of { key, value } entries or an object, got " +
+        std::string (js_type_name (ctx, list));
+    }
+    for (const auto& name : names) {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, list, name.c_str ()));
+        FormField field;
+        field.key = name;
+        if (auto reason = read_form_text (
+            ctx, value.get (), where + " '" + name + "' value", field.value)) {
+            return reason;
+        }
+        out.push_back (std::move (field));
+    }
+    return std::nullopt;
+}
+
+// `{ mode: 'urlencoded', urlencoded: [...] }` or the `formdata` pair. The rows
+// become the body's fields and the send path's own encoders do the rest
+// (`encode_urlencoded`, libcurl's multipart), with the Content-Type they imply
+// unless the script's headers name one. Serialising here instead would copy the
+// encoders and miss the multipart boundary.
+std::optional<std::string>
+read_form_body (JSContext* ctx, JSValueConst value, BodyMode mode, Body& out) {
+    const char* member = mode == BodyMode::Form ? "urlencoded" : "formdata";
+    const std::string where = std::string ("pm.sendRequest options.body.") + member;
+
+    ScopedValue list (ctx, JS_GetPropertyStr (ctx, value, member));
+    if (JS_IsUndefined (list.get ()) || JS_IsNull (list.get ())) {
+        return where + " is missing - options.body.mode '" + member + "' reads its rows from there";
+    }
+    if (auto reason = read_form_fields (ctx, list.get (), where, out.fields)) {
+        return reason;
+    }
+    out.mode = mode;
+    return std::nullopt;
+}
+
+// pm.sendRequest's body: a raw string, or Postman's `{ mode, <mode>: ... }` for
+// the modes `raw`, `urlencoded` and `formdata`.
 //
-// Read as a Text body, which the send path sends as `text/plain` unless the
-// script's headers name a Content-Type (issue #2464); a named one always wins.
+// A raw body is read as Text, which the send path sends as `text/plain` unless
+// the script's headers name a Content-Type (issue #2464); a named one always
+// wins. Every other Postman mode (`file`, `graphql`) is refused by name rather
+// than sent as an empty body: a request that goes out without the payload the
+// script wrote is worse than one that does not go out.
 std::optional<std::string>
 read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     if (JS_IsUndefined (value) || JS_IsNull (value)) {
@@ -102,18 +225,22 @@ read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     }
     if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
         return "pm.sendRequest options.body must be a string or "
-               "{ mode: 'raw', raw: '...' }, got " +
+               "{ mode: 'raw' | 'urlencoded' | 'formdata', ... }, got " +
         std::string (js_type_name (ctx, value));
     }
 
     ScopedValue mode (ctx, JS_GetPropertyStr (ctx, value, "mode"));
     const std::string mode_text =
     JS_IsString (mode.get ()) ? js_to_string (ctx, mode.get ()) : "";
-    // Postman's formdata / urlencoded / file modes are refused by name rather
-    // than sent as an empty body: a request that goes out without the payload
-    // the script wrote is worse than one that does not go out.
+    if (mode_text == "urlencoded") {
+        return read_form_body (ctx, value, BodyMode::Form, out);
+    }
+    if (mode_text == "formdata") {
+        return read_form_body (ctx, value, BodyMode::FormData, out);
+    }
     if (mode_text != "raw") {
-        return "pm.sendRequest supports only options.body.mode 'raw' (got " +
+        return "pm.sendRequest supports options.body.mode 'raw', 'urlencoded' "
+               "and 'formdata' (got " +
         (mode_text.empty () ? std::string ("none") : "\"" + mode_text + "\"") +
         "). Serialise the body yourself and set the Content-Type header.";
     }
@@ -342,6 +469,8 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
             ctx, resolved_name, "header name '" + name + "'")) {
             return reason;
         }
+        resolved_name =
+        std::string (vayu::http::trim_optional_whitespace (resolved_name));
         if (resolved_name.empty ()) {
             // A name written empty is refused as the headers are read; one
             // *resolved* empty reaches nothing that would notice - the pre-send
@@ -352,8 +481,12 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
             // the same move the collision beside it already made.
             return "pm.sendRequest: " + vayu::http::describe_empty_header_name (name);
         }
-        if (auto collision =
-            vayu::http::record_produced_name (produced, resolved_name, name)) {
+        if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
+            return "pm.sendRequest: " + *invalid;
+        }
+        // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.
+        if (auto collision = vayu::http::record_produced_name (produced, resolved_name,
+            std::string (vayu::http::trim_optional_whitespace (name)))) {
             return "pm.sendRequest: " +
             vayu::http::describe_header_name_collision (*collision);
         }
@@ -368,9 +501,27 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
     return std::nullopt;
 }
 
+// A form body's rows, name and value both resolved, as a header's are.
+std::optional<std::string>
+resolve_send_request_fields (JSContext* ctx, std::vector<FormField>& fields) {
+    for (auto& field : fields) {
+        const std::string written = field.key;
+        if (auto reason = resolve_send_request_text (
+            ctx, field.key, "form field name '" + written + "'")) {
+            return reason;
+        }
+        if (auto reason = resolve_send_request_text (
+            ctx, field.value, "form field '" + written + "'")) {
+            return reason;
+        }
+    }
+    return std::nullopt;
+}
+
 // Every string pm.sendRequest was handed, resolved once against the scopes the
-// script can see: the URL, each header name and value, a raw body, and each
-// credential of an auth block. Postman resolves these, and until #1001 Vayu
+// script can see: the URL, each header name and value, a raw body, a form
+// body's field names and values, and each credential of an auth block. Postman
+// resolves these, and until #1001 Vayu
 // sent them as written - so `pm.sendRequest("{{baseUrl}}/token", cb)` was a
 // wrong request sent silently rather than a refusal. Resolving here rather than
 // at parse time is what gives it Postman's mid-script visibility: a value the
@@ -389,6 +540,11 @@ interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& au
     }
     if (request.body.mode == BodyMode::Text) {
         if (auto reason = resolve_send_request_text (ctx, request.body.content, "options.body")) {
+            return reason;
+        }
+    }
+    if (vayu::http::is_form_mode (request.body.mode)) {
+        if (auto reason = resolve_send_request_fields (ctx, request.body.fields)) {
             return reason;
         }
     }

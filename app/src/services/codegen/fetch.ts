@@ -16,7 +16,12 @@
  * syntax error.
  */
 
-import { foldRepeatedHeaders, headerEncodingNotes, prepareRequest } from "./prepare";
+import {
+	foldRepeatedHeaders,
+	headerEncodingNotes,
+	prepareRequest,
+	untypedTextPartNote,
+} from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A JS string literal for this value. `JSON.stringify` *is* the escape rule. */
@@ -94,6 +99,8 @@ export function generateFetch(
 		for (const [key, value] of prepared.body.fields) {
 			lines.push(`body.append(${jsString(key)}, ${jsString(value)});`);
 		}
+		const untyped = untypedTextPartNote(prepared.body, "FormData");
+		if (untyped) notes.push(untyped);
 		if (prepared.body.kind === "form-data") {
 			for (const file of prepared.body.files) {
 				// A path is not something `fetch` can open - the browser has no

@@ -18,6 +18,7 @@ import type {
 } from "@/types";
 import type { CollectionDraft, ImportOptions, ImportResult } from "./types";
 import { requestFieldsFromDraft } from "./request-payload";
+import { siblingPositions } from "./draft-siblings";
 
 /** The subset of the API the orchestrator needs. Injected so it is easy to fake in tests. */
 export interface ImportApi {
@@ -142,8 +143,9 @@ export class ImportOrchestrator {
 }
 
 /**
- * Depth-first, parents before their requests before their children - the tree
- * order the preview shows.
+ * Depth-first, parents before their requests before their children - the
+ * temp-id order `assignTempIds` mints in. Where each child lands among its
+ * siblings is its `order`, from `siblingPositions` (issue #2535).
  *
  * `order` is `undefined` for a root, which leaves the slot to the engine's
  * append path (see `run`). Spread rather than assigned, for the same reason the
@@ -188,6 +190,7 @@ function flatten(
 		...(specTempId ? { openapi: { specTempId } } : {}),
 	});
 
+	const positions = siblingPositions(c);
 	for (let i = 0; i < c.requests.length; i++) {
 		const r = c.requests[i];
 		requests.push({
@@ -196,12 +199,12 @@ function flatten(
 			// Every field that comes from the draft, shared with the OpenAPI sync
 			// so a field added for one write path cannot go missing on the other.
 			...requestFieldsFromDraft(r),
-			order: i,
+			order: positions.requests[i],
 		});
 	}
 
 	for (let i = 0; i < c.children.length; i++) {
-		flatten(c.children[i], tempId, i, collections, requests, specs);
+		flatten(c.children[i], tempId, positions.folders[i], collections, requests, specs);
 	}
 }
 

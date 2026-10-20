@@ -1372,9 +1372,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.environment.get" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.environment.get(\"${1:variable}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.environment.get(name: string): string | undefined" },
+    { "detail", "pm.environment.get(name: string): any | undefined" },
     { "documentation",
-    "Get an environment variable value by name.\n\nExample:\nconst token = "
+    "Get an environment variable value by name - what a script set this run "
+    "(on a row of the default type), or else the stored text cast by its "
+    "declared type.\n\nExample:\nconst token = "
     "pm.environment.get('auth_token');" },
     { "sortText", "1_pm_environment_get" } });
 
@@ -1383,7 +1385,8 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.environment.set(name: string, value: any): void" },
     { "documentation",
-    "Set an environment variable. The value will be "
+    "Set an environment variable. Later reads in this run answer the value "
+    "as set; its string form is what {{name}} substitutes and what is "
     "persisted.\n\nExample:\npm.environment.set('auth_token', "
     "response.token);" },
     { "sortText", "1_pm_environment_set" } });
@@ -1398,9 +1401,11 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "pm.globals.get" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.globals.get(\"${1:variable}\")" }, { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.globals.get(name: string): string | undefined" },
+    { "detail", "pm.globals.get(name: string): any | undefined" },
     { "documentation",
-    "Get a global variable value by name.\n\nExample:\nconst apiKey = "
+    "Get a global variable value by name - what a script set this run (on a "
+    "row of the default type), or else the stored text cast by its declared "
+    "type.\n\nExample:\nconst apiKey = "
     "pm.globals.get('api_key');" },
     { "sortText", "1_pm_globals_get" } });
 
@@ -1408,7 +1413,10 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.globals.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.globals.set(name: string, value: any): void" },
-    { "documentation", "Set a global variable. The value will be persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
+    { "documentation",
+    "Set a global variable. Later reads in this run answer the value as set; "
+    "its string form is what {{name}} substitutes and what is "
+    "persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
     { "sortText", "1_pm_globals_set" } });
 
     // ========================================
@@ -1423,12 +1431,13 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.collectionVariables.get" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.collectionVariables.get(\"${1:variable}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.collectionVariables.get(name: string): string | undefined" },
+    { "detail", "pm.collectionVariables.get(name: string): any | undefined" },
     { "documentation",
     "Get a collection variable value by name. Reads the whole collection chain "
     "- the nearest enabled definition wins, so a parent collection's variable "
-    "resolves here too.\n\nExample:\nconst baseUrl = "
-    "pm.collectionVariables.get('base_url');" },
+    "resolves here too. A value a script set this run reads back as it was "
+    "set; a stored one is cast by its declared type.\n\nExample:\nconst "
+    "baseUrl = pm.collectionVariables.get('base_url');" },
     { "sortText", "1_pm_collectionVariables_get" } });
 
     completions.push_back ({ { "label", "pm.collectionVariables.set" }, { "kind", KIND_FUNCTION },
@@ -1438,7 +1447,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Set a collection variable on the request's own collection - it shadows a "
     "parent collection's variable of the same name rather than changing it. "
-    "The value will be "
+    "Later reads in this run answer the value as set; its string form is "
+    "what {{name}} substitutes and what is "
     "persisted.\n\nExample:\npm.collectionVariables.set('base_url', "
     "'https://api.example.com');" },
     { "sortText", "1_pm_collectionVariables_set" } });
@@ -1497,10 +1507,10 @@ nlohmann::json get_script_completions () {
         { "kind", KIND_FUNCTION }, { "insertText", accessor + ".toObject()" },
         { "detail", accessor + ".toObject(): Record<string, any>" },
         { "documentation",
-        std::format ("A plain object of every enabled {}, each value cast "
-                     "by its declared "
-                     "type.\n\nExample:\nconsole.log({}.toObject());",
-        noun, accessor) },
+        std::format ("A plain object of every enabled {}, each value read "
+                     "as {}.get() would answer it.\n\nExample:\n"
+                     "console.log({}.toObject());",
+        noun, accessor, accessor) },
         { "sortText", sort + "toObject" } });
     }
 
@@ -1565,7 +1575,10 @@ nlohmann::json get_script_completions () {
     { "detail",
     "pm.sendRequest(urlOrOptions: string | { url: string; method?: string; "
     "header?: object; headers?: object; body?: string | { mode: 'raw'; raw: "
-    "string }; auth?: { type: string; basic?: object; bearer?: object; "
+    "string } | { mode: 'urlencoded'; urlencoded: object | { key: string; "
+    "value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: "
+    "object | { key: string; value: string; disabled?: boolean; contentType?: "
+    "string }[] }; auth?: { type: string; basic?: object; bearer?: object; "
     "apikey?: "
     "object }; timeout?: "
     "number }, callback: (err: Error | null, res: any) => void): void" },
@@ -1580,8 +1593,8 @@ nlohmann::json get_script_completions () {
     "pm.response - the number is code), responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
     "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
-    "it, in header names and values, in a raw body and in auth credentials "
-    "resolve as the "
+    "it, in header names and values, in a body's text or form fields and in "
+    "auth credentials resolve as the "
     "call is made - so a value this script set two lines earlier is visible. "
     "Two header names that resolve to one name are refused rather than sent a "
     "header short, and a name resolving to nothing is refused too.\n\nauth "
@@ -1589,7 +1602,13 @@ nlohmann::json get_script_completions () {
     "params } shape in either spelling, and composes basic, bearer and apikey. "
     "Any other type - oauth2 included - is refused by name rather than "
     "dropped, "
-    "and an Authorization header the script set itself wins.\n\nBounded on "
+    "and an Authorization header the script set itself wins.\n\nbody takes a "
+    "string, or Postman's { mode, <mode>: ... } for raw, urlencoded and "
+    "formdata. A form body's rows are an array of { key, value, disabled? } or "
+    "a plain object, and go out with the Content-Type the mode implies unless "
+    "a header names one; a disabled row is skipped. A file part, and the file "
+    "and graphql modes, are refused by name rather than sent without their "
+    "payload.\n\nBounded on "
     "purpose: the request's timeout is capped "
     "at whatever is left of the script's own time budget, and one script may "
     "issue at most 10 requests. Both throw when exceeded. The response body is "

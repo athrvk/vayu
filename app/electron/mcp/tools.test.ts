@@ -2773,11 +2773,30 @@ describe("document CRUD parity", () => {
 	});
 
 	describe("move_item", () => {
-		/** Two collections at the root, one nested, and a request list per collection. */
+		/**
+		 * Two collections at the root and three under `col_1`. A parent's
+		 * sub-collections and requests share one `order` space (#2535), so the
+		 * request lists below interleave with these folders' slots.
+		 */
 		const TREE = [
-			{ id: "col_1", name: "API", parentId: "", order: 0 },
-			{ id: "col_2", name: "Internal", parentId: "", order: 1 },
-			{ id: "col_1a", name: "v1", parentId: "col_1", order: 0 },
+			{ id: "col_1", name: "API", parentId: "", order: 0, createdAt: 1_700_000_000_000 },
+			{ id: "col_2", name: "Internal", parentId: "", order: 1, createdAt: 1_700_000_001_000 },
+			{ id: "col_1a", name: "v1", parentId: "col_1", order: 0, createdAt: 1_700_000_002_000 },
+			{ id: "col_1b", name: "v2", parentId: "col_1", order: 2, createdAt: 1_700_000_003_000 },
+			{
+				id: "col_2a",
+				name: "Admin",
+				parentId: "col_2",
+				order: 0,
+				createdAt: 1_700_000_004_000,
+			},
+			{
+				id: "col_2b",
+				name: "Ops",
+				parentId: "col_2",
+				order: 1,
+				createdAt: 1_700_000_005_000,
+			},
 		];
 
 		function moveClient(requests: Record<string, unknown[]> = {}) {
@@ -2789,44 +2808,89 @@ describe("document CRUD parity", () => {
 			});
 		}
 
-		test("a request lands after the collection's current requests", async () => {
-			const client = moveClient({
-				col_2: [
-					{ id: "r1", order: 0 },
-					{ id: "r2", order: 1 },
-				],
-			});
+		const at = (id: string, order: number, createdAt = 1_700_000_100_000) => ({
+			id,
+			order,
+			createdAt,
+		});
+
+		test("a request moved into a folder-only collection lands past its folders, not between them", async () => {
+			// `col_2` holds folders at 0 and 1 and no requests. Counting requests
+			// alone would answer slot 0, which sorts between the two folders.
+			const client = moveClient();
 			const res = await dispatchTool(
 				"move_item",
 				{ type: "request", id: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(res.isError).toBeFalsy();
-			// A dense destination needs no sibling rewritten - only the row that
-			// moved, carrying its new owner.
 			expect(callArgs(client.reorder)[0]).toEqual({
 				moves: [{ type: "request", id: "req_1", order: 2, collectionId: "col_2" }],
 			});
 		});
 
-		test("position 'first' shifts exactly the siblings whose slot changes", async () => {
-			const client = moveClient({
-				col_2: [
-					{ id: "r1", order: 0 },
-					{ id: "r2", order: 2 },
-				],
-			});
+		test("a request lands after the folders and requests of an interleaved parent", async () => {
+			// `col_1`: v1 at 0, r_mid at 1, v2 at 2 - already dense, so only the
+			// moved row is written.
+			const client = moveClient({ col_1: [at("r_mid", 1)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2", position: "first" },
+				{ type: "request", id: "req_1", collectionId: "col_1" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "request", id: "req_1", order: 3, collectionId: "col_1" }],
+			});
+		});
+
+		test("a folder moved into a parent lands after its last request", async () => {
+			// `col_2` gains a request at 2, past both its folders; a folder moved in
+			// last belongs at 3. Counting folders alone would answer 2, which ties
+			// the request and sorts ahead of it on the kind rank.
+			const client = moveClient({ col_2: [at("r_tail", 2)] });
+			await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_1a", parentId: "col_2" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [{ type: "collection", id: "col_1a", order: 3, parentId: "col_2" }],
+			});
+			expect(client.listRequests).toHaveBeenCalledWith("col_2", undefined);
+		});
+
+		test("position 'first' shifts the siblings of both kinds, each under its own type", async () => {
+			const client = moveClient({ col_1: [at("r_mid", 1)] });
+			await dispatchTool(
+				"move_item",
+				{ type: "request", id: "req_1", collectionId: "col_1", position: "first" },
 				ctxWith(client, { allowWrites: true })
 			);
 			expect(callArgs(client.reorder)[0]).toEqual({
 				moves: [
-					{ type: "request", id: "req_1", order: 0, collectionId: "col_2" },
-					{ type: "request", id: "r1", order: 1 },
-					// r2 already sits at 2, which is where it belongs after the
-					// insert - a batch that rewrote it would be writing nothing.
+					{ type: "request", id: "req_1", order: 0, collectionId: "col_1" },
+					{ type: "collection", id: "col_1a", order: 1 },
+					{ type: "request", id: "r_mid", order: 2 },
+					{ type: "collection", id: "col_1b", order: 3 },
+				],
+			});
+		});
+
+		test("position 'first' leaves a sibling alone when its slot is already right", async () => {
+			const client = moveClient({ col_1: [at("r_mid", 2)] });
+			await dispatchTool(
+				"move_item",
+				{ type: "collection", id: "col_2a", parentId: "col_1", position: "first" },
+				ctxWith(client, { allowWrites: true })
+			);
+			// v1 0 -> 1. v2 already sits at 2, its slot after the insert, so it is
+			// not written; r_mid ties it at 2, sorts after it on the kind rank, and
+			// goes to 3.
+			expect(callArgs(client.reorder)[0]).toEqual({
+				moves: [
+					{ type: "collection", id: "col_2a", order: 0, parentId: "col_1" },
+					{ type: "collection", id: "col_1a", order: 1 },
+					{ type: "request", id: "r_mid", order: 3 },
 				],
 			});
 		});
@@ -2834,43 +2898,41 @@ describe("document CRUD parity", () => {
 		test("repositioning inside the same collection does not leave the row tied", async () => {
 			// The bug this shape exists to prevent: state the whole arrangement,
 			// and the moved row cannot land level with the sibling it displaced.
-			const client = moveClient({
-				col_2: [
-					{ id: "r1", order: 0 },
-					{ id: "req_1", order: 1 },
-					{ id: "r2", order: 2 },
-				],
-			});
+			const client = moveClient({ col_1: [at("req_1", 1), at("r2", 3)] });
 			await dispatchTool(
 				"move_item",
-				{ type: "request", id: "req_1", collectionId: "col_2" },
+				{ type: "request", id: "req_1", collectionId: "col_1" },
 				ctxWith(client, { allowWrites: true })
 			);
 			const batch = callArgs(client.reorder)[0] as { moves: Array<Record<string, unknown>> };
+			// Left without it: v1 0, v2 2, r2 3 -> v2 to 1 and r2 to 2, req_1 last.
 			expect(batch.moves).toEqual([
-				{ type: "request", id: "req_1", order: 2, collectionId: "col_2" },
-				{ type: "request", id: "r2", order: 1 },
+				{ type: "request", id: "req_1", order: 3, collectionId: "col_1" },
+				{ type: "collection", id: "col_1b", order: 1 },
+				{ type: "request", id: "r2", order: 2 },
 			]);
 			const orders = batch.moves.map((m) => m.order);
 			expect(new Set(orders).size).toBe(orders.length);
 		});
 
-		test("a legacy collection whose rows all sit at 0 gets real positions", async () => {
+		test("rows tied across kinds get distinct positions, the folder first", async () => {
+			// Admin and both requests at 0, as rows that predate explicit orders read.
 			const client = moveClient({
-				col_2: [
-					{ id: "r1", order: 0 },
-					{ id: "r2", order: 0 },
-				],
+				col_2: [at("r1", 0, 1_700_000_200_000), at("r2", 0, 1_700_000_100_000)],
 			});
 			await dispatchTool(
 				"move_item",
 				{ type: "request", id: "req_1", collectionId: "col_2" },
 				ctxWith(client, { allowWrites: true })
 			);
+			// The tie at 0 ranks Admin first and the requests by createdAt (r2, r1),
+			// which pushes Ops from 1 to 3.
 			expect(callArgs(client.reorder)[0]).toEqual({
 				moves: [
-					{ type: "request", id: "req_1", order: 2, collectionId: "col_2" },
+					{ type: "request", id: "req_1", order: 4, collectionId: "col_2" },
 					{ type: "request", id: "r2", order: 1 },
+					{ type: "request", id: "r1", order: 2 },
+					{ type: "collection", id: "col_2b", order: 3 },
 				],
 			});
 		});
@@ -2885,6 +2947,8 @@ describe("document CRUD parity", () => {
 			expect(callArgs(client.reorder)[0]).toEqual({
 				moves: [{ type: "collection", id: "col_1a", order: 2, parentId: null }],
 			});
+			// The top level holds collections only; there is no request list to read.
+			expect(client.listRequests).not.toHaveBeenCalled();
 		});
 
 		test("a collection cannot move into itself or its own subtree", async () => {
@@ -3814,9 +3878,10 @@ describe("run_collection", () => {
 	});
 
 	/**
-	 * The engine emits each sub-collection's whole subtree before the folder's
-	 * own requests (`collect_requests`, the sidebar's order). The pre-flight walk
-	 * has to agree, or its "first bad step" names a step the run reaches later.
+	 * The pre-flight walk has to visit steps in `collect_requests`' order, or its
+	 * "first bad step" names a step the run reaches later. Every row here sits at
+	 * 0, so the kind rank puts each folder's subtree ahead of its parent's own
+	 * request; the interleaved shapes are `sibling-order.conformance.test.ts`'s.
 	 */
 	test("walks sub-collections in the engine's order when recursive", async () => {
 		const requestsByCollection: Record<string, Array<{ id: string; name: string }>> = {
@@ -5716,6 +5781,30 @@ describe("dispatchTool", () => {
 		expect(res.isError).toBeFalsy();
 		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload).not.toHaveProperty("allowScriptRequests");
+	});
+
+	test("run_request keeps the engine's parsed body: it never sends includeParsedBody (issue #2544)", async () => {
+		// The renderer declines the parsed copy because its pane reads `bodyRaw`;
+		// this tool's result exposes `body`, so the engine's default (true) is the
+		// behaviour it needs. An agent cannot decline it either: the field is not
+		// in the schema, so zod strips it.
+		const tool = TOOLS.find((t) => t.name === "run_request");
+		const args = z.object(tool!.inputSchema as Record<string, z.ZodType>).parse({
+			url: "https://api.example.com/users",
+			includeParsedBody: false,
+		});
+		expect(args).not.toHaveProperty("includeParsedBody");
+
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"run_request",
+			args,
+			ctxWith(client, { allowlist: ["api.example.com"] })
+		);
+
+		expect(res.isError).toBeFalsy();
+		const payload = (client.executeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).not.toHaveProperty("includeParsedBody");
 	});
 
 	test("start_load_run does not offer a pre-request script", () => {
@@ -12407,6 +12496,164 @@ describe("secret withholding", () => {
 		expect(res.isError).toBe(true);
 		expect(firstText(res)).toContain("postman.bearer.tokenWithheld");
 		expect(client.createCollection).not.toHaveBeenCalled();
+	});
+
+	// An OAuth 2.0 config's extra request parameter lists (#2536): redacted per
+	// row, so the key, `enabled` and `sendAs` stay and only a credential's value
+	// goes. A row can be sent as a header, so the header names count too.
+	const CONFIG_PARAM_REQUEST = {
+		id: "req_cfg",
+		name: "OAuth 2.0 with extra parameters",
+		auth: {
+			mode: "oauth2",
+			config: {
+				grantType: "authorization_code",
+				clientId: "app",
+				authorizationParams: [
+					{ key: "api_key", value: "cfg-q-raw", enabled: true },
+					{ key: "prompt", value: "login", enabled: true },
+				],
+				tokenParams: [
+					{ key: "client_secret", value: "cfg-body-raw", enabled: true, sendAs: "body" },
+					{
+						key: "Authorization",
+						value: "cfg-hdr-raw",
+						enabled: false,
+						sendAs: "header",
+					},
+					{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+				],
+				refreshParams: [
+					{ key: "refresh_token", value: "{{rt}}", enabled: true },
+					{ key: "assertion", value: "cfg-assert-raw", enabled: true },
+				],
+			},
+		},
+	};
+
+	test("list_requests withholds a credential-named extra parameter's value, row by row", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+		});
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of ["cfg-q-raw", "cfg-body-raw", "cfg-hdr-raw", "cfg-assert-raw"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.config).toEqual({
+			grantType: "authorization_code",
+			clientId: "app",
+			authorizationParams: [
+				{ key: "api_key", enabled: true, valueWithheld: true },
+				{ key: "prompt", value: "login", enabled: true },
+			],
+			tokenParams: [
+				{ key: "client_secret", enabled: true, sendAs: "body", valueWithheld: true },
+				{ key: "Authorization", enabled: false, sendAs: "header", valueWithheld: true },
+				{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+			],
+			refreshParams: [
+				{ key: "refresh_token", value: "{{rt}}", enabled: true },
+				{ key: "assertion", enabled: true, valueWithheld: true },
+			],
+		});
+	});
+
+	test("list_requests returns the extra parameter rows whole with reveal on", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([CONFIG_PARAM_REQUEST]),
+		});
+		const { body } = await read("list_requests", client, REVEAL, { collectionId: "c1" });
+		expect(body).toEqual([CONFIG_PARAM_REQUEST]);
+	});
+
+	test("an auth argument whose extra parameter row was read withheld is refused", async () => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{
+				requestId: "req_cfg",
+				auth: {
+					mode: "oauth2",
+					config: {
+						tokenParams: [{ key: "client_secret", enabled: true, valueWithheld: true }],
+					},
+				},
+			},
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain("config.tokenParams[client_secret].valueWithheld");
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
+	// A row the engine's export would blank whole - no key, or a member no row
+	// has - is withheld here too, not passed through because its key names no
+	// credential. Mutation check: withhold only a credential-named row's
+	// `value` and the secrets below reach the agent.
+	test("list_requests withholds an extra parameter row with no key, or a member no row has", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{
+					id: "req_odd",
+					auth: {
+						mode: "oauth2",
+						config: {
+							tokenParams: [
+								{ value: "odd-keyless-raw" },
+								{ keyy: "client_secret", value: "odd-misspelt-raw" },
+								{ key: "audience", value: "api", note: "odd-note-raw" },
+							],
+							refreshParams: "refresh_token=odd-list-raw",
+						},
+					},
+				},
+			]),
+		});
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of [
+			"odd-keyless-raw",
+			"odd-misspelt-raw",
+			"odd-note-raw",
+			"odd-list-raw",
+		]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.config).toEqual({
+			tokenParams: [
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ key: "audience", value: "api", noteWithheld: true },
+			],
+			refreshParamsWithheld: true,
+		});
+	});
+
+	test.each([
+		[
+			"a keyless row",
+			{ tokenParams: [{ valueWithheld: true }] },
+			"config.tokenParams[0].valueWithheld",
+		],
+		[
+			"a row's other member",
+			{ tokenParams: [{ key: "audience", value: "api", noteWithheld: true }] },
+			"config.tokenParams[audience].noteWithheld",
+		],
+		["a whole list", { refreshParamsWithheld: true }, "config.refreshParamsWithheld"],
+	])("an auth argument carrying %s read withheld is refused", async (_, config, marker) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_cfg", auth: { mode: "oauth2", config } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(marker);
+		expect(client.updateRequest).not.toHaveBeenCalled();
 	});
 
 	// A header typed straight into the Headers tab is no variable: its name is

@@ -138,6 +138,38 @@ describe("responseFromExecuteResult, on a JSON body", () => {
 		expect(mapped.bodyRaw).toBe(text);
 	});
 
+	it("builds the same pane whether or not the engine parsed the body (#2544)", () => {
+		// `apiService.executeRequest` asks for `includeParsedBody: false`, so the
+		// live answer carries `body: null` where it used to carry the parse. The
+		// pane is built from `bodyRaw`, so Pretty and Raw must not move.
+		const parsed = responseFromExecuteResult(
+			result({ body: ENGINE_PARSE, bodyRaw: RECEIVED, bodySize: RECEIVED.length })
+		);
+		const declined = responseFromExecuteResult(
+			result({ body: null, bodyRaw: RECEIVED, bodySize: RECEIVED.length })
+		);
+
+		expect(declined.body).toBe(parsed.body);
+		expect(declined.bodyRaw).toBe(parsed.bodyRaw);
+		expect(declined.bodyRaw).toBe(RECEIVED);
+	});
+
+	it("builds the same large pane from a declined body as from a parsed one", () => {
+		const big = { pad: "x".repeat(LARGE_BODY_BYTES + 1024) };
+		const raw = JSON.stringify(big);
+
+		const parsed = responseFromExecuteResult(
+			result({ body: big, bodyRaw: raw, bodySize: raw.length })
+		);
+		const declined = responseFromExecuteResult(
+			result({ body: null, bodyRaw: raw, bodySize: raw.length })
+		);
+
+		expect(declined.body).toBe(raw);
+		expect(declined.body).toBe(parsed.body);
+		expect(declined.bodyRaw).toBe(parsed.bodyRaw);
+	});
+
 	it("rebuilds a missing bodyRaw compactly, and the pane indents that", () => {
 		// Guard for a producer that sends no `bodyRaw`: the original bytes are
 		// gone, so the reconstruction must not claim formatting nobody sent.
@@ -351,6 +383,29 @@ describe("buildExecBody form modes", () => {
 		]);
 	});
 
+	it("sends a text part's own type, resolved, and no file members", () => {
+		const request = stateWith({
+			bodyMode: "form-data",
+			formData: [
+				{
+					id: "typed-row",
+					key: "payload",
+					value: '{"a":1}',
+					enabled: true,
+					contentType: "application/{{sub}}",
+				},
+				{ id: "empty-row", key: "plain", value: "x", enabled: true, contentType: "" },
+			],
+		});
+
+		const body = buildExecBody(request, (s) => s.split("{{sub}}").join("json"));
+
+		expect(body?.fields).toEqual([
+			{ key: "payload", value: '{"a":1}', enabled: true, contentType: "application/json" },
+			{ key: "plain", value: "x", enabled: true },
+		]);
+	});
+
 	it("resolves variables inside field keys and values", () => {
 		const request = stateWith({
 			bodyMode: "x-www-form-urlencoded",
@@ -459,6 +514,26 @@ describe("the file trust flag never leaves the editor", () => {
 			const [part] = write(formState(given)).fields ?? [];
 			// Non-vacuous: the part under test is the file part, path and all.
 			expect(part).toMatchObject({ type: "file", src: "/tmp/a.png" });
+			expect(part).not.toHaveProperty("unresolved");
+		});
+
+		it("keeps a text part's type while dropping its flag", () => {
+			const state: RequestState = {
+				...createDefaultRequestState(),
+				bodyMode: "form-data",
+				formData: [
+					{
+						id: "text-row",
+						key: "payload",
+						value: "{}",
+						enabled: true,
+						contentType: "application/json",
+						unresolved: true,
+					},
+				],
+			};
+			const [part] = write(state).fields ?? [];
+			expect(part).toMatchObject({ key: "payload", contentType: "application/json" });
 			expect(part).not.toHaveProperty("unresolved");
 		});
 

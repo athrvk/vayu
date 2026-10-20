@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119).",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535; insomnia-v4-interleaved, insomnia-v5-interleaved and jmeter-interleaved, issue #2573). Since #2535 a Postman draft states its document position as `order`; since #2573 an Insomnia draft states its rank by sort key (`insomnia-v5` was re-recorded for it: its `Users` folder carries `meta.sortKey`) and a JMeter draft its document position. Every payload numbers a parent's folders and requests in one space.",
   "cases": [
     {
       "name": "postman-v21",
@@ -71,9 +71,11 @@
                     },
                     "auth": {
                       "mode": "inherit"
-                    }
+                    },
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 0
               }
             ],
             "requests": [
@@ -90,7 +92,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 1
               }
             ],
             "elements": [
@@ -183,7 +186,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -296,9 +299,11 @@
                     },
                     "auth": {
                       "mode": "inherit"
-                    }
+                    },
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 0
               }
             ],
             "requests": [
@@ -315,7 +320,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 1
               }
             ]
           }
@@ -392,7 +398,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -472,7 +478,8 @@
                 "auth": {
                   "mode": "bearer",
                   "token": "LEGACY"
-                }
+                },
+                "order": 0
               }
             ]
           }
@@ -801,9 +808,11 @@
                         "contentType": "application/xml",
                         "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
                       }
-                    ]
+                    ],
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 2
               }
             ],
             "requests": [
@@ -827,7 +836,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 0
               },
               {
                 "name": "Upload",
@@ -901,7 +911,8 @@
                     }
                   }
                 ],
-                "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}"
+                "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}",
+                "order": 1
               }
             ]
           }
@@ -963,7 +974,7 @@
             "parentTempId": "c1",
             "name": "Folder",
             "description": "",
-            "order": 0,
+            "order": 2,
             "variables": {},
             "auth": {
               "mode": "noauth"
@@ -1184,7 +1195,8 @@
                   }
                 ],
                 "postmanProtocolBehavior": "{\"disableUrlEncoding\":true,\"disableCookies\":true,\"disabledSystemHeaders\":{\"User-Agent\":true,\"connection\":false,\"accept\":true},\"tlsDisabledProtocols\":[\"TLSv1\"]}",
-                "url": "https://api.example.com/users/:id?q=a|b"
+                "url": "https://api.example.com/users/:id?q=a|b",
+                "order": 0
               },
               {
                 "auth": {
@@ -1209,7 +1221,8 @@
                   }
                 ],
                 "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
-                "url": "https://api.example.com/plain?q=a|b"
+                "url": "https://api.example.com/plain?q=a|b",
+                "order": 1
               }
             ],
             "variables": {}
@@ -1318,6 +1331,420 @@
             "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
             "tempId": "r2",
             "url": "https://api.example.com/plain?q=a|b"
+          }
+        ],
+        "specs": []
+      }
+    },
+    {
+      "name": "postman-interleaved",
+      "document": "{\n\t\"info\": {\n\t\t\"name\": \"Interleaved\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n\t},\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Log in\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"https://api.example.com/login\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Who am I\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\"url\": \"https://api.example.com/me\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"name\": \"This is a folder\",\n\t\t\t\"item\": [\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"First\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/one\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Second\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/two\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Third\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/three\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Nested\",\n\t\t\t\t\t\"item\": [\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Users\",\n\t\t\t\t\t\t\t\"item\": [\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\"name\": \"List users\",\n\t\t\t\t\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\t\t\t\t\"url\": \"https://api.example.com/users\"\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t]\n\t\t\t\t\t\t},\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Between\",\n\t\t\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\t\t\"url\": \"https://api.example.com/between\"\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Orders\",\n\t\t\t\t\t\t\t\"item\": []\n\t\t\t\t\t\t}\n\t\t\t\t\t]\n\t\t\t\t}\n\t\t\t]\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Log out\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"https://api.example.com/logout\"\n\t\t\t}\n\t\t}\n\t]\n}\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [
+                  {
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [
+                      {
+                        "auth": {
+                          "mode": "none"
+                        },
+                        "children": [],
+                        "description": "",
+                        "name": "Users",
+                        "order": 0,
+                        "requests": [
+                          {
+                            "auth": {
+                              "mode": "inherit"
+                            },
+                            "body": {
+                              "mode": "none"
+                            },
+                            "description": "",
+                            "headers": [],
+                            "method": "GET",
+                            "name": "List users",
+                            "order": 0,
+                            "params": [],
+                            "url": "https://api.example.com/users"
+                          }
+                        ],
+                        "variables": {}
+                      },
+                      {
+                        "auth": {
+                          "mode": "none"
+                        },
+                        "children": [],
+                        "description": "",
+                        "name": "Orders",
+                        "order": 2,
+                        "requests": [],
+                        "variables": {}
+                      }
+                    ],
+                    "description": "",
+                    "name": "Nested",
+                    "order": 3,
+                    "requests": [
+                      {
+                        "auth": {
+                          "mode": "inherit"
+                        },
+                        "body": {
+                          "mode": "none"
+                        },
+                        "description": "",
+                        "headers": [],
+                        "method": "GET",
+                        "name": "Between",
+                        "order": 1,
+                        "params": [],
+                        "url": "https://api.example.com/between"
+                      }
+                    ],
+                    "variables": {}
+                  }
+                ],
+                "description": "",
+                "name": "This is a folder",
+                "order": 2,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "First",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://api.example.com/one"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "Second",
+                    "order": 1,
+                    "params": [],
+                    "url": "https://api.example.com/two"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "Third",
+                    "order": 2,
+                    "params": [],
+                    "url": "https://api.example.com/three"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "Interleaved",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "POST",
+                "name": "Log in",
+                "order": 0,
+                "params": [],
+                "url": "https://api.example.com/login"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Who am I",
+                "order": 1,
+                "params": [],
+                "url": "https://api.example.com/me"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "POST",
+                "name": "Log out",
+                "order": 3,
+                "params": [],
+                "url": "https://api.example.com/logout"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 4,
+          "format": "Postman Collection v2.1",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 8,
+          "skipped": [],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Interleaved",
+            "parentTempId": null,
+            "tempId": "c1",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "This is a folder",
+            "order": 2,
+            "parentTempId": "c1",
+            "tempId": "c2",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Nested",
+            "order": 3,
+            "parentTempId": "c2",
+            "tempId": "c3",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Users",
+            "order": 0,
+            "parentTempId": "c3",
+            "tempId": "c4",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Orders",
+            "order": 2,
+            "parentTempId": "c3",
+            "tempId": "c5",
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "requests": [
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "POST",
+            "name": "Log in",
+            "order": 0,
+            "params": [],
+            "tempId": "r1",
+            "url": "https://api.example.com/login"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Who am I",
+            "order": 1,
+            "params": [],
+            "tempId": "r2",
+            "url": "https://api.example.com/me"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "POST",
+            "name": "Log out",
+            "order": 3,
+            "params": [],
+            "tempId": "r3",
+            "url": "https://api.example.com/logout"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "First",
+            "order": 0,
+            "params": [],
+            "tempId": "r4",
+            "url": "https://api.example.com/one"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Second",
+            "order": 1,
+            "params": [],
+            "tempId": "r5",
+            "url": "https://api.example.com/two"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Third",
+            "order": 2,
+            "params": [],
+            "tempId": "r6",
+            "url": "https://api.example.com/three"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c3",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Between",
+            "order": 1,
+            "params": [],
+            "tempId": "r7",
+            "url": "https://api.example.com/between"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c4",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "List users",
+            "order": 0,
+            "params": [],
+            "tempId": "r8",
+            "url": "https://api.example.com/users"
           }
         ],
         "specs": []
@@ -1479,7 +1906,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -1680,7 +2107,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -1939,7 +2366,7 @@
               "in": "header"
             },
             "followRedirects": false,
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -2095,9 +2522,11 @@
                         "auth": {
                           "mode": "inherit"
                         },
-                        "followRedirects": false
+                        "followRedirects": false,
+                        "order": 0
                       }
-                    ]
+                    ],
+                    "order": 1
                   }
                 ],
                 "requests": [
@@ -2137,7 +2566,8 @@
                         }
                       }
                     ],
-                    "followRedirects": true
+                    "followRedirects": true,
+                    "order": 0
                   }
                 ]
               }
@@ -2346,7 +2776,7 @@
             "parentTempId": "c2",
             "name": "Admin",
             "description": "",
-            "order": 0,
+            "order": 1,
             "variables": {},
             "auth": {
               "mode": "none"
@@ -2371,7 +2801,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -2397,7 +2827,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 1
+            "order": 2
           },
           {
             "tempId": "r3",
@@ -2423,7 +2853,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 2
+            "order": 3
           },
           {
             "tempId": "r4",
@@ -2453,7 +2883,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 3
+            "order": 4
           },
           {
             "tempId": "r5",
@@ -2487,7 +2917,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 4
+            "order": 5
           },
           {
             "tempId": "r6",
@@ -2659,6 +3089,804 @@
         ],
         "specs": [],
         "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v4-interleaved",
+      "document": "{\"_type\":\"export\",\"__export_format\":4,\"resources\":[\n  {\"_id\":\"wrk_1\",\"_type\":\"workspace\",\"name\":\"W\"},\n  {\"_id\":\"fld_c\",\"_type\":\"request_group\",\"parentId\":\"wrk_1\",\"name\":\"C\",\"metaSortKey\":5},\n  {\"_id\":\"req_mid\",\"_type\":\"request\",\"parentId\":\"wrk_1\",\"name\":\"Mid\",\"method\":\"GET\",\"url\":\"https://x.test/mid\",\"metaSortKey\":-20},\n  {\"_id\":\"fld_a\",\"_type\":\"request_group\",\"parentId\":\"wrk_1\",\"name\":\"A\",\"metaSortKey\":-1000.5},\n  {\"_id\":\"greq_1\",\"_type\":\"grpc_request\",\"parentId\":\"wrk_1\",\"name\":\"G\"},\n  {\"_id\":\"req_tie\",\"_type\":\"request\",\"parentId\":\"wrk_1\",\"name\":\"Tie\",\"method\":\"GET\",\"url\":\"https://x.test/tie\",\"metaSortKey\":-20},\n  {\"_id\":\"req_in_c\",\"_type\":\"request\",\"parentId\":\"fld_c\",\"name\":\"InC\",\"method\":\"GET\",\"url\":\"https://x.test/c\",\"metaSortKey\":1},\n  {\"_id\":\"req_in_a\",\"_type\":\"request\",\"parentId\":\"fld_a\",\"name\":\"InA\",\"method\":\"GET\",\"url\":\"https://x.test/a\",\"metaSortKey\":1}\n]}",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "A",
+                "order": 0,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InA",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/a"
+                  }
+                ],
+                "variables": {}
+              },
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "C",
+                "order": 3,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InC",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/c"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "W",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Mid",
+                "order": 1,
+                "params": [],
+                "url": "https://x.test/mid"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Tie",
+                "order": 2,
+                "params": [],
+                "url": "https://x.test/tie"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "Insomnia Export v4",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 4,
+          "skipped": [
+            {
+              "count": 1,
+              "kind": "grpc",
+              "requests": [
+                "G"
+              ]
+            }
+          ],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "W",
+            "description": "",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "A",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c1",
+            "name": "C",
+            "description": "",
+            "order": 3,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Mid",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/mid",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 1
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c1",
+            "name": "Tie",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/tie",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 2
+          },
+          {
+            "tempId": "r3",
+            "collectionTempId": "c2",
+            "name": "InA",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/a",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          },
+          {
+            "tempId": "r4",
+            "collectionTempId": "c3",
+            "name": "InC",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/c",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          }
+        ],
+        "environments": [],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v5-interleaved",
+      "document": "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n  - name: C\n    meta: { id: fld_c, sortKey: 5 }\n    children:\n      - name: InC\n        url: https://x.test/c\n        method: GET\n        meta: { id: req_in_c, sortKey: 1 }\n  - name: Mid\n    url: https://x.test/mid\n    method: GET\n    meta: { id: req_mid, sortKey: -20 }\n  - name: A\n    meta: { id: fld_a, sortKey: -1000.5 }\n    children:\n      - name: InA\n        url: https://x.test/a\n        method: GET\n        meta: { id: req_in_a, sortKey: 1 }\n  - name: G\n    url: grpcb.in:9000\n    protoFileId: pf_1\n    meta: { id: greq_1 }\n  - name: Tie\n    url: https://x.test/tie\n    method: GET\n    meta: { id: req_tie, sortKey: -20 }\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "A",
+                "order": 0,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InA",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/a"
+                  }
+                ],
+                "variables": {}
+              },
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "C",
+                "order": 3,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InC",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/c"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "W",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Mid",
+                "order": 1,
+                "params": [],
+                "url": "https://x.test/mid"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Tie",
+                "order": 2,
+                "params": [],
+                "url": "https://x.test/tie"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "Insomnia Export v5",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 4,
+          "skipped": [
+            {
+              "count": 1,
+              "kind": "grpc",
+              "requests": [
+                "G"
+              ]
+            }
+          ],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "W",
+            "description": "",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "A",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c1",
+            "name": "C",
+            "description": "",
+            "order": 3,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Mid",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/mid",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 1
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c1",
+            "name": "Tie",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/tie",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 2
+          },
+          {
+            "tempId": "r3",
+            "collectionTempId": "c2",
+            "name": "InA",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/a",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          },
+          {
+            "tempId": "r4",
+            "collectionTempId": "c3",
+            "name": "InC",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/c",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          }
+        ],
+        "environments": [],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "jmeter-interleaved",
+      "document": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<jmeterTestPlan version=\"1.2\" properties=\"5.0\" jmeter=\"5.6.3\">\n  <hashTree>\n    <TestPlan testname=\"Interleaved\" enabled=\"true\"/>\n    <hashTree>\n      <ThreadGroup testname=\"Users\" enabled=\"true\"/>\n      <hashTree>\n        <HTTPSamplerProxy testname=\"First\" enabled=\"true\">\n          <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n          <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n          <stringProp name=\"HTTPSampler.path\">/first</stringProp>\n          <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n        </HTTPSamplerProxy>\n        <hashTree/>\n        <TransactionController testname=\"Outer\" enabled=\"true\"/>\n        <hashTree>\n          <HTTPSamplerProxy testname=\"InOuterBefore\" enabled=\"true\">\n            <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n            <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n            <stringProp name=\"HTTPSampler.path\">/outer/before</stringProp>\n            <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n          </HTTPSamplerProxy>\n          <hashTree/>\n          <TransactionController testname=\"Inner\" enabled=\"true\"/>\n          <hashTree>\n            <HTTPSamplerProxy testname=\"InInner\" enabled=\"true\">\n              <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n              <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n              <stringProp name=\"HTTPSampler.path\">/outer/inner</stringProp>\n              <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n            </HTTPSamplerProxy>\n            <hashTree/>\n          </hashTree>\n          <HTTPSamplerProxy testname=\"InOuterAfter\" enabled=\"true\">\n            <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n            <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n            <stringProp name=\"HTTPSampler.path\">/outer/after</stringProp>\n            <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n          </HTTPSamplerProxy>\n          <hashTree/>\n        </hashTree>\n        <HTTPSamplerProxy testname=\"Last\" enabled=\"true\">\n          <stringProp name=\"HTTPSampler.domain\">api.example.com</stringProp>\n          <stringProp name=\"HTTPSampler.protocol\">https</stringProp>\n          <stringProp name=\"HTTPSampler.path\">/last</stringProp>\n          <stringProp name=\"HTTPSampler.method\">GET</stringProp>\n        </HTTPSamplerProxy>\n        <hashTree/>\n      </hashTree>\n    </hashTree>\n  </hashTree>\n</jmeterTestPlan>\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [
+                  {
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [],
+                    "description": "",
+                    "elements": [
+                      {
+                        "config": {
+                          "name": "Inner"
+                        },
+                        "enabled": true,
+                        "kind": "control.transaction"
+                      }
+                    ],
+                    "name": "Inner",
+                    "order": 1,
+                    "requests": [
+                      {
+                        "auth": {
+                          "mode": "inherit"
+                        },
+                        "body": {
+                          "mode": "none"
+                        },
+                        "description": "",
+                        "followRedirects": true,
+                        "headers": [],
+                        "method": "GET",
+                        "name": "InInner",
+                        "order": 0,
+                        "params": [],
+                        "url": "https://api.example.com/outer/inner"
+                      }
+                    ],
+                    "variables": {}
+                  }
+                ],
+                "description": "",
+                "elements": [
+                  {
+                    "config": {
+                      "name": "Outer"
+                    },
+                    "enabled": true,
+                    "kind": "control.transaction"
+                  }
+                ],
+                "name": "Outer",
+                "order": 1,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "followRedirects": true,
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InOuterBefore",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://api.example.com/outer/before"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "followRedirects": true,
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InOuterAfter",
+                    "order": 2,
+                    "params": [],
+                    "url": "https://api.example.com/outer/after"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "Imported JMeter Plan",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "followRedirects": true,
+                "headers": [],
+                "method": "GET",
+                "name": "First",
+                "order": 0,
+                "params": [],
+                "url": "https://api.example.com/first"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "followRedirects": true,
+                "headers": [],
+                "method": "GET",
+                "name": "Last",
+                "order": 2,
+                "params": [],
+                "url": "https://api.example.com/last"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "JMeter 5.6.3 Test Plan",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 5,
+          "skipped": [],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Imported JMeter Plan",
+            "parentTempId": null,
+            "tempId": "c1",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "elements": [
+              {
+                "config": {
+                  "name": "Outer"
+                },
+                "enabled": true,
+                "kind": "control.transaction"
+              }
+            ],
+            "name": "Outer",
+            "order": 1,
+            "parentTempId": "c1",
+            "tempId": "c2",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "elements": [
+              {
+                "config": {
+                  "name": "Inner"
+                },
+                "enabled": true,
+                "kind": "control.transaction"
+              }
+            ],
+            "name": "Inner",
+            "order": 1,
+            "parentTempId": "c2",
+            "tempId": "c3",
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "requests": [
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "First",
+            "order": 0,
+            "params": [],
+            "tempId": "r1",
+            "url": "https://api.example.com/first"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "Last",
+            "order": 2,
+            "params": [],
+            "tempId": "r2",
+            "url": "https://api.example.com/last"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InOuterBefore",
+            "order": 0,
+            "params": [],
+            "tempId": "r3",
+            "url": "https://api.example.com/outer/before"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InOuterAfter",
+            "order": 2,
+            "params": [],
+            "tempId": "r4",
+            "url": "https://api.example.com/outer/after"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c3",
+            "description": "",
+            "followRedirects": true,
+            "headers": [],
+            "method": "GET",
+            "name": "InInner",
+            "order": 0,
+            "params": [],
+            "tempId": "r5",
+            "url": "https://api.example.com/outer/inner"
+          }
+        ],
+        "specs": []
       }
     },
     {
@@ -4131,7 +5359,7 @@
               "mode": "inherit"
             },
             "mockResponseMode": "random",
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -4194,7 +5422,7 @@
             },
             "mockResponseMode": "fixed",
             "mockExampleIndex": 1,
-            "order": 0
+            "order": 1
           }
         ],
         "environments": [],

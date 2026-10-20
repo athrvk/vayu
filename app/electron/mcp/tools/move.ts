@@ -11,6 +11,9 @@
  *        siblings.
  */
 
+import { collectionParent, type CollectionRow } from "./cascade.js";
+import { mergeSiblings, type OrderedRow, type SiblingKind } from "./sibling-order.js";
+
 /**
  * Where a moved row lands among its new siblings.
  *
@@ -26,33 +29,36 @@ export const MOVE_POSITIONS = ["first", "last"] as const;
 /**
  * The reorder batch that lands `movedId` at either end of its destination.
  *
- * `siblings` is the destination block **as the engine lists it** - already
- * sorted by `order`, then `createdAt`, then `id` - with the moved row itself
- * removed, so the arrangement this produces is simply that array with the row
- * put on one end. Every position in the block is then stated outright rather
- * than left to the engine's `normalize` pass, because the two would have to
- * agree about a block the moved row is still inside while it runs: normalizing
- * `[A, B, C]` and then writing `A` at `2` puts it level with `C`, and the tie
- * goes to whichever row was created first. Stating the whole arrangement cannot
- * tie.
+ * `siblings` is the destination parent's children **of both kinds**, in
+ * sibling order (`mergeSiblings`), with the moved row itself removed: a
+ * collection's sub-collections and its requests share one `order` space
+ * (#2535), so the end of a parent is past every child it has, and an end
+ * computed over one kind lands the row among the other's slots. The
+ * arrangement this produces is that list with the row put on one end. Every
+ * position in it is then stated outright rather than left to the engine's
+ * `normalize` pass, because the two would have to agree about a list the moved
+ * row is still inside while it runs: normalizing `[A, B, C]` and then writing
+ * `A` at `2` puts it level with `C`, and the tie goes to the rank and creation
+ * time rather than to the move. Stating the whole arrangement cannot tie.
  *
- * Only rows whose stored `order` actually changes get an entry - the rule
- * `reorder-math.ts` follows for a drag, and what keeps a move inside a large
- * collection from rewriting every row in it. The moved row is always written:
- * it is the one carrying the destination owner, which is the move.
+ * Only rows whose stored `order` actually changes get an entry, each under its
+ * own `type` - the rule `reorder-math.ts` follows for a drag, and what keeps a
+ * move inside a large collection from rewriting every row in it. The moved row
+ * is always written: it is the one carrying the destination owner, which is the
+ * move.
  *
- * The scope it *left* keeps a gap where it was (the rows after it are not
+ * The parent it *left* keeps a gap where it was (the rows after it are not
  * renumbered). That is invisible - display order reads the column's relative
  * values, never its density - and closing it would double the batch for
  * nothing.
  */
 export function moveBatch(params: {
-	type: "collection" | "request";
+	type: SiblingKind;
 	movedId: string;
 	position: "first" | "last";
 	/** The destination's own key: `parentId` (null = the top level) or `collectionId`. */
 	owner: Record<string, unknown>;
-	siblings: readonly OrderedSibling[];
+	siblings: ReadonlyArray<OrderedRow & { kind: SiblingKind }>;
 }): Record<string, unknown> {
 	const { type, movedId, position, owner, siblings } = params;
 	const offset = position === "first" ? 1 : 0;
@@ -66,26 +72,30 @@ export function moveBatch(params: {
 	];
 	siblings.forEach((row, index) => {
 		if (row.order === index + offset) return;
-		moves.push({ type, id: row.id, order: index + offset });
+		moves.push({ type: row.kind, id: row.id, order: index + offset });
 	});
 	return { moves };
 }
 
-/** A destination row, narrowed to what a move has to know about it. */
-interface OrderedSibling {
-	id: string;
-	order?: number;
-}
-
 /**
- * The rows of a `GET /requests?collectionId=` answer, in the order it lists
- * them - which is the order the tree displays, since the engine sorts every
- * list read by the same three keys the renderer's comparator uses.
+ * Every child of `parentId` except the row being moved, in sibling order.
+ *
+ * `collections` is the whole `GET /collections` list and `requests` the
+ * `GET /requests?collectionId=` answer for `parentId` (the top level holds
+ * collections only, so pass none for `null`). The moved row is matched by kind
+ * as well as id, so a move within its own parent never drops a sibling of the
+ * other kind.
  */
-export function readOrderedSiblings(value: unknown): OrderedSibling[] {
-	if (!Array.isArray(value)) return [];
-	return value.filter(
-		(row): row is OrderedSibling =>
-			!!row && typeof row === "object" && typeof (row as OrderedSibling).id === "string"
+export function destinationSiblings(params: {
+	type: SiblingKind;
+	movedId: string;
+	parentId: string | null;
+	collections: readonly CollectionRow[];
+	requests: readonly OrderedRow[];
+}): Array<OrderedRow & { kind: SiblingKind }> {
+	const { type, movedId, parentId, collections, requests } = params;
+	const folders = collections.filter((row) => collectionParent(row) === parentId);
+	return mergeSiblings(folders, requests).filter(
+		(row) => !(row.kind === type && row.id === movedId)
 	);
 }

@@ -20,7 +20,7 @@
  * something else than the reader expects.
  */
 
-import { foldRepeatedHeaders, prepareRequest } from "./prepare";
+import { foldRepeatedHeaders, prepareRequest, untypedTextPartNote } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A literal PowerShell string. The one escape is a doubled single quote. */
@@ -100,6 +100,8 @@ export function generatePowerShell(
 		for (const [key, value] of prepared.body.fields) {
 			lines.push(`    ${powerShellQuote(key)} = ${powerShellQuote(value)}`);
 		}
+		const untyped = untypedTextPartNote(prepared.body, "Invoke-RestMethod -Form");
+		if (untyped) notes.push(untyped);
 		if (prepared.body.kind === "form-data") {
 			for (const file of prepared.body.files) {
 				// `-Form` uploads a FileInfo as a file part; `Get-Item` is how the

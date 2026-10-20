@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "echo_server.hpp"
+#include "vayu/core/import_document.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -308,6 +309,51 @@ TEST_F (SentHeadersWireTest, AnAuthorizationTypedTwiceIsSentTwiceAndAuthAddsNone
     (Lines{ { "Authorization", "Bearer first" }, { "authorization", "Bearer second" } }));
 }
 
+// Issue #2467: a name pasted with a trailing blank would go out as
+// `Authorization : Bearer x`, a space before the colon that a strict server
+// refuses and a lenient one reads as another name. The name is settled where the
+// payload is read, so the line that reaches the wire is the trimmed one; the
+// bearer token is trimmed by the auth block the same way. Mutation check: drop
+// the trim in `stored_header_name` (`utils/json.cpp`) or in the bearer branch of
+// `apply_auth`.
+TEST_F (SentHeadersWireTest, APaddedHeaderNameAndTokenReachTheWireTrimmed) {
+    auto parsed = vayu::json::deserialize_request (
+    nlohmann::json{ { "method", "GET" }, { "url", server_->url () },
+    { "headers", nlohmann::json::parse (R"([{"name":"X-Padded ","value":"kept"}])") } });
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+    Request request = std::move (parsed).value ();
+    ASSERT_TRUE (apply_auth (request, Auth{ BearerAuth{ " tok " } }, nullptr).ok);
+
+    auto result = client_->send (request);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "X-Padded" }),
+    (Lines{ { "X-Padded", "kept" } }));
+    EXPECT_EQ (server_->header ("Authorization"), "Bearer tok");
+}
+
+// The padded and the plain spelling of one name each arrive as the same
+// `Authorization` line, in neither case with a space before the colon (a strict
+// server would answer that `400`, which this server's parser does too).
+// Mutation check: drop the trim in `stored_header_name` (`utils/json.cpp`) and
+// the padded send fails.
+TEST_F (SentHeadersWireTest, APaddedAndAPlainAuthorizationBothArriveAsAuthorizationLines) {
+    for (const std::string name : { "Authorization ", "Authorization" }) {
+        auto parsed = vayu::json::deserialize_request (
+        nlohmann::json{ { "method", "GET" }, { "url", server_->url () },
+        { "headers",
+        nlohmann::json::array ({ { { "name", name }, { "value", "Bearer x" } } }) } });
+        ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+
+        auto result = client_->send (parsed.value ());
+        ASSERT_TRUE (result.is_ok ()) << "'" << name << "': " << result.error ().message;
+
+        EXPECT_EQ (lines_named (server_->header_lines (), { "Authorization" }),
+        (Lines{ { "Authorization", "Bearer x" } }))
+        << "'" << name << "'";
+    }
+}
+
 TEST_F (SentHeadersWireTest, TheLoadDriverSendsEveryLineInOrder) {
     EventLoop loop;
     loop.start ();
@@ -416,6 +462,74 @@ TEST_F (SentHeadersWireTest, ARefusedContentTypeTheBodyModeWroteStaysOffTheWire)
 
     ASSERT_TRUE (send (false));
     EXPECT_EQ (server_->header ("Content-Type"), "application/json");
+}
+
+/**
+ * A Postman request through the importer and the app's Send (issue #2539): the
+ * draft's enabled header rows travel as a flat map, as the renderer composes
+ * them, and the body as imported.
+ */
+Request imported_postman_request (const std::string& url, const std::string& request_json) {
+    const auto parsed = vayu::core::parse_import (
+    R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"R","request":)" +
+    request_json + "}]}",
+    {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return Request{};
+    }
+    const auto& draft = parsed.result.at ("collections")[0].at ("requests")[0];
+    nlohmann::json headers = nlohmann::json::object ();
+    for (const auto& row : draft.at ("headers")) {
+        if (row.at ("enabled").get<bool> ()) {
+            headers[row.at ("key").get<std::string> ()] =
+            row.at ("value").get<std::string> ();
+        }
+    }
+    const nlohmann::json payload{ { "method", "POST" }, { "url", url },
+        { "headers", headers },
+        { "body", nlohmann::json::parse (draft.at ("body").dump ()) } };
+    auto request = vayu::json::deserialize_request (payload);
+    if (!request.is_ok ()) {
+        ADD_FAILURE () << request.error ().message;
+        return Request{};
+    }
+    Request out    = std::move (request).value ();
+    out.timeout_ms = 5000;
+    return out;
+}
+
+// What Postman sends for a raw body is what an import of it sends (#2539): the
+// language's own type where the sniff would have said JSON, text/plain for a
+// language with no type, and a part's own type on a multipart text part.
+// Mutation check: revert the importer fix and the html request goes out as
+// application/json; drop the `contentType` copy in `formdata_fields` and the
+// part reaches the server untyped.
+TEST_F (SentHeadersWireTest, AnImportedRawBodyAndFormDataTextPartGoOutAsPostmanSendsThem) {
+    const auto content_type_of_raw = [&] (const std::string& language) {
+        const Request request = imported_postman_request (server_->url (),
+        R"({"method":"POST","url":"x","body":{"mode":"raw","raw":"{\"a\":1}","options":{"raw":{"language":")" +
+        language + R"("}}}})");
+        EXPECT_TRUE (client_->send (request).is_ok ()) << language;
+        EXPECT_EQ (server_->body (), R"({"a":1})") << language;
+        return server_->content_type ();
+    };
+    EXPECT_EQ (content_type_of_raw ("html"), "text/html");
+    EXPECT_EQ (content_type_of_raw ("javascript"), "application/javascript");
+    EXPECT_EQ (content_type_of_raw ("yaml"), "text/plain");
+
+    const Request multipart = imported_postman_request (server_->url (),
+    R"({"method":"POST","url":"x","body":{"mode":"formdata","formdata":[
+        {"key":"meta","value":"{}","type":"text","contentType":"application/json"},
+        {"key":"plain","value":"v","type":"text"}]}})");
+    ASSERT_TRUE (client_->send (multipart).is_ok ());
+    EXPECT_TRUE (
+    server_->content_type ().starts_with ("multipart/form-data; boundary="));
+    const auto parts = server_->parts ();
+    ASSERT_EQ (parts.size (), 2U);
+    EXPECT_EQ (parts.at ("meta").content_type, "application/json");
+    EXPECT_EQ (parts.at ("meta").filename, "");
+    EXPECT_EQ (parts.at ("plain").content_type, "");
 }
 
 // ---------------------------------------------------------------------------

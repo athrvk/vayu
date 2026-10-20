@@ -18,18 +18,28 @@
 import type { HeaderLine, KeyValueEntry, KeyValueItem } from "@/types";
 
 /**
+ * A key without the spaces and tabs around it, which is all the engine trims
+ * (`trim_optional_whitespace`). Not `String.prototype.trim`: that also strips
+ * newlines and Unicode spaces, which the engine refuses as a bad name instead,
+ * so the two would answer differently for the same row.
+ */
+const headerName = (key: string): string => key.replace(/^[ \t]+|[ \t]+$/g, "");
+
+/**
  * A row that reaches the wire: not switched off (a stored row with no flag is
- * on, as the engine reads it) and naming a header.
+ * on, as the engine reads it) and naming a header once its padding is trimmed.
  */
 const isSentRow = (item: { key: string; enabled?: boolean }): boolean =>
-	item.enabled !== false && item.key.trim() !== "";
+	item.enabled !== false && headerName(item.key) !== "";
 
 /**
  * The Headers table as the engine takes it: every enabled row with a non-empty
- * key, in row order, a repeated name repeated, each in the spelling it was
- * typed (issue #2466). The engine's `stored_header_rows` is the other copy and
- * `engine/tests/fixtures/header-rows-conformance.json` holds the two to one
- * answer (`header-rows.conformance.test.ts`).
+ * key, in row order, a repeated name repeated, each in the case it was typed
+ * but without the spaces and tabs around it (issues #2466, #2467). A key of
+ * other whitespace (a newline) is a name, and the engine refuses it by name
+ * rather than the table dropping it quietly. The engine's `stored_header_rows`
+ * is the other copy and `engine/tests/fixtures/header-rows-conformance.json`
+ * holds the two to one answer (`header-rows.conformance.test.ts`).
  *
  * Never a record: a record keeps one value per key, so `X-Dup` twice, or
  * `Accept` beside `accept`, would send one line, and which one would depend on
@@ -38,7 +48,8 @@ const isSentRow = (item: { key: string; enabled?: boolean }): boolean =>
  */
 export const toHeaderRows = (
 	items: ReadonlyArray<Pick<KeyValueEntry, "key" | "value"> & { enabled?: boolean }>
-): HeaderLine[] => items.filter(isSentRow).map((item) => ({ name: item.key, value: item.value }));
+): HeaderLine[] =>
+	items.filter(isSentRow).map((item) => ({ name: headerName(item.key), value: item.value }));
 
 /**
  * The names among {@link toHeaderRows}' lines whose last row the body mode wrote
@@ -54,15 +65,16 @@ export const toHeaderRows = (
  *
  * Names are matched without case, as the engine's `stored_header_rows` does: a
  * typed `content-type` after the body mode's `Content-Type` is the last row for
- * that name, and the name is listed as the first row spelled it.
+ * that name, and the name is listed as the first row spelled it, trimmed.
  */
 export const bodyModeHeaders = (items: KeyValueItem[]): { bodyModeHeaders?: string[] } => {
 	const marked = new Map<string, { name: string; isBodyMode: boolean }>();
 	items.forEach((item) => {
 		if (isSentRow(item)) {
-			const folded = item.key.toLowerCase();
+			const name = headerName(item.key);
+			const folded = name.toLowerCase();
 			marked.set(folded, {
-				name: marked.get(folded)?.name ?? item.key,
+				name: marked.get(folded)?.name ?? name,
 				isBodyMode: item.source === "body-mode",
 			});
 		}

@@ -183,11 +183,14 @@ void blank_rows_where (Json& rows, int& omitted, NamesCredential names_credentia
     }
 }
 
+bool is_string_member (const Json& node, const char* key) {
+    const auto found = node.find (key);
+    return found != node.end () && found->is_string ();
+}
+
 /// An OAuth 2.0 block's extra request parameters (`tokenRequestParams`, ...).
 void redact_param_rows (Json& rows, int& omitted) {
-    blank_rows_where (rows, omitted, [] (std::string_view name) {
-        return one_of (SECRET_AUTH_KEYS, name) || one_of (SECRET_PARAM_KEYS, name);
-    });
+    blank_rows_where (rows, omitted, names_param_credential);
 }
 
 /// Blanks every string under @p value: a member the allowlist did not name has
@@ -260,6 +263,49 @@ void redact_postman_detail (Json& detail, AttributeRule rule, int& omitted) {
     }
 }
 
+/// Whether @p name is an `OAuth2Config` list of extra request parameter rows
+/// (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536).
+bool is_config_param_list (std::string_view name) {
+    return std::any_of (postman::OAUTH2_PARAM_LISTS.begin (),
+    postman::OAUTH2_PARAM_LISTS.end (),
+    [name] (const postman::OAuth2ParamList& list) { return list.vayu == name; });
+}
+
+/// The members of a stored extra parameter row that say how it is sent.
+constexpr auto PARAM_ROW_SHAPE_KEYS =
+std::to_array<std::string_view> ({ "key", "enabled", "sendAs" });
+
+/**
+ * A stored config's extra parameter list, redacted per row: its key,
+ * `enabled` and `sendAs` stay, its value is blanked when the key names a
+ * credential, and anything else - a row with no non-empty string key, a
+ * member no row has, a list that is not one - is treated as a credential, as
+ * an unlisted bag member is.
+ */
+void redact_config_param_rows (Json& rows, int& omitted) {
+    if (!rows.is_array ()) {
+        blank_unlisted_value (rows, omitted);
+        return;
+    }
+    for (Json& row : rows) {
+        if (!is_string_member (row, "key") ||
+        row.at ("key").get_ref<const std::string&> ().empty ()) {
+            blank_unlisted_value (row, omitted);
+            continue;
+        }
+        const bool credential =
+        names_param_credential (row.at ("key").get_ref<const std::string&> ());
+        for (auto member = row.begin (); member != row.end (); ++member) {
+            const bool secret = member.key () == "value" ?
+            credential :
+            !one_of (PARAM_ROW_SHAPE_KEYS, member.key ());
+            if (secret) {
+                blank_unlisted_value (member.value (), omitted);
+            }
+        }
+    }
+}
+
 /// A stored `config` bag with every member the allowlist does not name
 /// blanked. A bag that is not an object holds nothing the list can vouch for,
 /// so it is treated as one credential.
@@ -269,7 +315,9 @@ void redact_config_bag (Json& bag, int& omitted) {
         return;
     }
     for (auto member = bag.begin (); member != bag.end (); ++member) {
-        if (!one_of (NON_SECRET_CONFIG_KEYS, member.key ())) {
+        if (is_config_param_list (member.key ())) {
+            redact_config_param_rows (member.value (), omitted);
+        } else if (!one_of (NON_SECRET_CONFIG_KEYS, member.key ())) {
             blank_unlisted_value (member.value (), omitted);
         }
     }
@@ -290,11 +338,6 @@ void redact_level (Json& node, int& omitted) {
             blank_secret (member.value (), omitted);
         }
     }
-}
-
-bool is_string_member (const Json& node, const char* key) {
-    const auto found = node.find (key);
-    return found != node.end () && found->is_string ();
 }
 
 /// One row as the write routes accept it, plus @p extra optional string keys.
@@ -513,6 +556,11 @@ int& omitted) {
     blank_rows_where (rows, omitted, [&extra_param_names] (std::string_view name) {
         return is_secret_param_name (name, extra_param_names);
     });
+}
+
+bool names_param_credential (std::string_view name) {
+    return one_of (SECRET_AUTH_KEYS, name) ||
+    one_of (SECRET_PARAM_KEYS, name) || is_secret_param_name (name, {});
 }
 
 void blank_cookie_values (Json& cookies, int& omitted) {

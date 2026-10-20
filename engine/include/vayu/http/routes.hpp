@@ -16,6 +16,7 @@
 #include <expected>
 #include <format>
 #include <functional>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -878,6 +879,29 @@ const nlohmann::json& json,
 bool is_create);
 
 /**
+ * Consecutive `order`s for the rows a batch writer (`POST /import/apply`,
+ * `POST /specs/sync`) creates without stating one. The single-row default,
+ * `Database::next_sibling_order`, reads rows that are stored, and none of a
+ * batch's own are yet, so every sibling would land on one number. Each parent
+ * starts at that append point and counts up across both kinds (#2535): rows
+ * taken in the order the batch builds them, folders before requests.
+ */
+class SiblingSlots {
+    public:
+    /// The next slot under @p parent (`std::nullopt` for the roots).
+    int take (vayu::db::Database& db, const std::optional<std::string>& parent) {
+        auto slot = next_.find (parent);
+        if (slot == next_.end ()) {
+            slot = next_.emplace (parent, db.next_sibling_order (parent)).first;
+        }
+        return slot->second++;
+    }
+
+    private:
+    std::map<std::optional<std::string>, int> next_;
+};
+
+/**
  * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what
  * `spec_documents.hash` stores and what a run's snapshot is stamped with.
  * Defined in specs.cpp.
@@ -1141,7 +1165,8 @@ const std::optional<std::string>& request_id);
 
 /**
  * The outcome of reading one of `POST /execute`'s boolean opt-outs:
- * `transient` (issue #382) or `persistVariables` (#1904).
+ * `transient` (issue #382), `persistVariables` (#1904) or `includeParsedBody`
+ * (#2544).
  *
  * `value` is what the payload asked for, or the flag's default when it is
  * absent or `null`; `ok == false` means the field was present with a
@@ -1168,6 +1193,13 @@ ExecuteFlag read_transient_flag (const nlohmann::json& json);
  * globals (#1904); the MCP server sends it while write access is off.
  */
 ExecuteFlag read_persist_variables_flag (const nlohmann::json& json);
+
+/**
+ * Read the `includeParsedBody` flag off a `POST /execute` payload (default
+ * `true`). `false` answers `body: null` and skips the parse that builds it
+ * (issue #2544); `bodyRaw`, the stored trace and the scripts are unchanged.
+ */
+ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json);
 
 /**
  * The outcome of reading a payload's `stream` flag and its caps (issue #573;

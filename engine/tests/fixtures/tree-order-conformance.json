@@ -1,72 +1,72 @@
 {
-	"description": "The one sidebar/scenario ordering rule, read by both suites. Rows sort by `order` ascending, ties by `createdAt` ascending, remaining ties by `id` ascending under byte-wise (SQLite BINARY) comparison. Engine side: engine/tests/tree_order_test.cpp inserts each case's rows into the collections and the requests table and reads them back through Database::get_collections / get_requests_in_collection, so the SQL ORDER BY is what is being asserted. Renderer side: app/src/types/tree-order.conformance.test.ts sorts the same rows with compareTreeOrder. A rule that changes on one side and not the other fails here or in ctest, never in a user's sidebar. The first seven cases are the pre-drag ordering contract (#360); the rest are shapes drag-and-drop actually produces (#364/#426), each derived from app/src/modules/collections/reorder-math.ts and the renumber in engine/src/http/routes/reorder.cpp rather than invented - a drop leaves the block dense with distinct orders, so what these pin is that the two former tiebreaks stop mattering on exactly the rows a drag rewrote. A case holds one block: subfolders and requests are separately ordered, so the `order` column never interleaves them.",
+	"description": "The one sidebar/scenario sibling-order rule, read by both suites. A collection's sub-folders and requests are one list (#2535): rows sort by `order` ascending, ties by kind (a `folder` before a `request`), then by `createdAt` ascending, remaining ties by `id` ascending under byte-wise (SQLite BINARY) comparison. Within one kind that is the `order, createdAt, id` rule of #360 unchanged. Engine side: engine/tests/tree_order_test.cpp inserts every case's rows under one parent, a `folder` row into the collections table and a `request` row into the requests table, and reads them back through Database::get_collections / get_requests_in_collection merged by vayu::db::merge_siblings, so the SQL ORDER BY and the engine comparator are what is asserted; a case whose rows share one kind is also read through each table alone. Renderer side: app/src/types/tree-order.conformance.test.ts sorts the same rows with compareTreeOrder. A rule that changes on one side and not the other fails here or in ctest, never in a user's sidebar. The first seven cases are the pre-drag ordering contract (#360); the next five are shapes drag-and-drop actually produces (#364/#426), each derived from app/src/modules/collections/reorder-math.ts and the renumber in engine/src/http/routes/reorder.cpp rather than invented - a drop leaves the block dense with distinct orders, so what these pin is that the two former tiebreaks stop mattering on exactly the rows a drag rewrote. The rest mix the two kinds: the tie rule across kinds, an interleaving a Postman import produces, and the shape the schema-version-7 migration leaves a pre-#2535 workspace in.",
 	"cases": [
 		{
 			"name": "explicit order wins over both creation time and id",
 			"rows": [
-				{ "id": "row-a", "order": 1, "createdAt": 1700000000000 },
-				{ "id": "row-z", "order": 0, "createdAt": 1700000009000 }
+				{ "id": "row-a", "kind": "folder", "order": 1, "createdAt": 1700000000000 },
+				{ "id": "row-z", "kind": "folder", "order": 0, "createdAt": 1700000009000 }
 			],
 			"expected": ["row-z", "row-a"]
 		},
 		{
 			"name": "a tie on order falls to the older createdAt, not to the id",
 			"rows": [
-				{ "id": "row-a", "order": 3, "createdAt": 1700000005000 },
-				{ "id": "row-z", "order": 3, "createdAt": 1700000001000 }
+				{ "id": "row-a", "kind": "folder", "order": 3, "createdAt": 1700000005000 },
+				{ "id": "row-z", "kind": "folder", "order": 3, "createdAt": 1700000001000 }
 			],
 			"expected": ["row-z", "row-a"]
 		},
 		{
 			"name": "all-zero orders (the pre-drag world) sort by creation time, not by id",
 			"rows": [
-				{ "id": "row-alpha", "order": 0, "createdAt": 1700000003000 },
-				{ "id": "row-gamma", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "row-beta", "order": 0, "createdAt": 1700000002000 }
+				{ "id": "row-alpha", "kind": "folder", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "row-gamma", "kind": "folder", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "row-beta", "kind": "folder", "order": 0, "createdAt": 1700000002000 }
 			],
 			"expected": ["row-gamma", "row-beta", "row-alpha"]
 		},
 		{
 			"name": "a full tie on order and createdAt falls to the id",
 			"rows": [
-				{ "id": "row-z", "order": 2, "createdAt": 1700000004000 },
-				{ "id": "row-m", "order": 2, "createdAt": 1700000004000 },
-				{ "id": "row-c", "order": 2, "createdAt": 1700000004000 }
+				{ "id": "row-z", "kind": "folder", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "row-m", "kind": "folder", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "row-c", "kind": "folder", "order": 2, "createdAt": 1700000004000 }
 			],
 			"expected": ["row-c", "row-m", "row-z"]
 		},
 		{
 			"name": "the id tiebreak is byte-wise, not locale-aware (uppercase sorts first)",
 			"rows": [
-				{ "id": "row-a", "order": 0, "createdAt": 1700000000000 },
-				{ "id": "Row-A", "order": 0, "createdAt": 1700000000000 }
+				{ "id": "row-a", "kind": "folder", "order": 0, "createdAt": 1700000000000 },
+				{ "id": "Row-A", "kind": "folder", "order": 0, "createdAt": 1700000000000 }
 			],
 			"expected": ["Row-A", "row-a"]
 		},
 		{
 			"name": "negative orders sort ahead of zero",
 			"rows": [
-				{ "id": "row-zero", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "row-pinned", "order": -1, "createdAt": 1700000009000 }
+				{ "id": "row-zero", "kind": "folder", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "row-pinned", "kind": "folder", "order": -1, "createdAt": 1700000009000 }
 			],
 			"expected": ["row-pinned", "row-zero"]
 		},
 		{
 			"name": "order is the primary key even when creation time disagrees on every row",
 			"rows": [
-				{ "id": "row-1", "order": 10, "createdAt": 1700000001000 },
-				{ "id": "row-2", "order": 5, "createdAt": 1700000002000 },
-				{ "id": "row-3", "order": 7, "createdAt": 1700000003000 }
+				{ "id": "row-1", "kind": "folder", "order": 10, "createdAt": 1700000001000 },
+				{ "id": "row-2", "kind": "folder", "order": 5, "createdAt": 1700000002000 },
+				{ "id": "row-3", "kind": "folder", "order": 7, "createdAt": 1700000003000 }
 			],
 			"expected": ["row-2", "row-3", "row-1"]
 		},
 		{
 			"name": "post-drag: an adjacent swap leaves the block dense, with creation time out of sequence",
-			"comment": "Dragging req-third from index 2 to index 1 in a dense block. planRequestMove writes only the run between the two indices - req-third to 1, req-second to 2 - so the block stays 0..n-1 while createdAt no longer ascends with it. Sorting on creation time would give first, second, third.",
+			"comment": "Dragging req-third from index 2 to index 1 in a dense block. planMove writes only the run between the two indices - req-third to 1, req-second to 2 - so the block stays 0..n-1 while createdAt no longer ascends with it. Sorting on creation time would give first, second, third.",
 			"rows": [
-				{ "id": "req-first", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "req-third", "order": 1, "createdAt": 1700000003000 },
-				{ "id": "req-second", "order": 2, "createdAt": 1700000002000 }
+				{ "id": "req-first", "kind": "request", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "req-third", "kind": "request", "order": 1, "createdAt": 1700000003000 },
+				{ "id": "req-second", "kind": "request", "order": 2, "createdAt": 1700000002000 }
 			],
 			"expected": ["req-first", "req-third", "req-second"]
 		},
@@ -74,9 +74,9 @@
 			"name": "pre-drag: the display order a first drop has to renumber into, all three keys at once",
 			"comment": "The input side of normalization, which is the half that has to agree: normalize_scope renumbers in the order get_requests_in_collection returns, while the renderer plans against its own compareTreeOrder-sorted list. If the two disagreed, a normalized drop would land where the user did not point. A legacy all-zeros block with a createdAt tie inside it exercises order, createdAt and id in one case.",
 			"rows": [
-				{ "id": "leg-zulu", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "leg-bravo", "order": 0, "createdAt": 1700000002000 },
-				{ "id": "leg-alpha", "order": 0, "createdAt": 1700000002000 }
+				{ "id": "leg-zulu", "kind": "request", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "leg-bravo", "kind": "request", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "leg-alpha", "kind": "request", "order": 0, "createdAt": 1700000002000 }
 			],
 			"expected": ["leg-zulu", "leg-alpha", "leg-bravo"]
 		},
@@ -84,9 +84,9 @@
 			"name": "post-drag: the same legacy block once the first drop renumbered it, both former tiebreaks now inert",
 			"comment": "Normalization materializes the case above as zulu 0, alpha 1, bravo 2; the drop of leg-bravo onto index 0 then writes bravo 0, zulu 1, alpha 2 and wins over the renumber. Creation time would put leg-zulu first and the id tiebreak would put leg-alpha first, so both legs are pinned as inert at once.",
 			"rows": [
-				{ "id": "leg-bravo", "order": 0, "createdAt": 1700000002000 },
-				{ "id": "leg-zulu", "order": 1, "createdAt": 1700000001000 },
-				{ "id": "leg-alpha", "order": 2, "createdAt": 1700000002000 }
+				{ "id": "leg-bravo", "kind": "request", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "leg-zulu", "kind": "request", "order": 1, "createdAt": 1700000001000 },
+				{ "id": "leg-alpha", "kind": "request", "order": 2, "createdAt": 1700000002000 }
 			],
 			"expected": ["leg-bravo", "leg-zulu", "leg-alpha"]
 		},
@@ -94,10 +94,10 @@
 			"name": "post-drag: a cross-parent landing, where the destination opened a slot for a row newer than every sibling",
 			"comment": "A row moved in from another parent at toIndex 1: the destination's rows from that index shift up (dst-1 to 2, dst-2 to 3) and the arrival takes 1. A moved row keeps its own createdAt, which here is newer than every row it lands among - the one shape where the pre-drag world's creation-time order is guaranteed wrong.",
 			"rows": [
-				{ "id": "dst-0", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "moved-in", "order": 1, "createdAt": 1700000009000 },
-				{ "id": "dst-1", "order": 2, "createdAt": 1700000002000 },
-				{ "id": "dst-2", "order": 3, "createdAt": 1700000003000 }
+				{ "id": "dst-0", "kind": "request", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "moved-in", "kind": "request", "order": 1, "createdAt": 1700000009000 },
+				{ "id": "dst-1", "kind": "request", "order": 2, "createdAt": 1700000002000 },
+				{ "id": "dst-2", "kind": "request", "order": 3, "createdAt": 1700000003000 }
 			],
 			"expected": ["dst-0", "moved-in", "dst-1", "dst-2"]
 		},
@@ -105,11 +105,68 @@
 			"name": "post-drag: the source block after a second drag, the gap closed and creation time still scrambled",
 			"comment": "Two drags deep, which is what \"after any sequence of drags\" means. The block was already src-a, src-d, src-b, src-c from an earlier swap; src-b then leaves for another parent, so the rows past it close the gap (src-c to 2) and the block is dense again with creation time in neither ascending nor descending order.",
 			"rows": [
-				{ "id": "src-a", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "src-d", "order": 1, "createdAt": 1700000004000 },
-				{ "id": "src-c", "order": 2, "createdAt": 1700000003000 }
+				{ "id": "src-a", "kind": "request", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "src-d", "kind": "request", "order": 1, "createdAt": 1700000004000 },
+				{ "id": "src-c", "kind": "request", "order": 2, "createdAt": 1700000003000 }
 			],
 			"expected": ["src-a", "src-d", "src-c"]
+		},
+		{
+			"name": "across kinds an order tie ranks the folder first, ahead of createdAt and id",
+			"rows": [
+				{ "id": "a-request", "kind": "request", "order": 1, "createdAt": 1700000001000 },
+				{ "id": "z-folder", "kind": "folder", "order": 1, "createdAt": 1700000009000 }
+			],
+			"expected": ["z-folder", "a-request"]
+		},
+		{
+			"name": "a request at 1 sorts between folders at 0 and 2",
+			"rows": [
+				{ "id": "folder-two", "kind": "folder", "order": 2, "createdAt": 1700000001000 },
+				{ "id": "request-one", "kind": "request", "order": 1, "createdAt": 1700000002000 },
+				{ "id": "folder-zero", "kind": "folder", "order": 0, "createdAt": 1700000003000 }
+			],
+			"expected": ["folder-zero", "request-one", "folder-two"]
+		},
+		{
+			"name": "an interleaved request, folder, request keeps its document order",
+			"comment": "What a Postman import writes for an item list with the login request first: one counter across both kinds, in document order.",
+			"rows": [
+				{ "id": "logout", "kind": "request", "order": 2, "createdAt": 1700000001000 },
+				{ "id": "users", "kind": "folder", "order": 1, "createdAt": 1700000001000 },
+				{ "id": "login", "kind": "request", "order": 0, "createdAt": 1700000001000 }
+			],
+			"expected": ["login", "users", "logout"]
+		},
+		{
+			"name": "a negative-order request sorts ahead of every folder",
+			"rows": [
+				{ "id": "folder-zero", "kind": "folder", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "request-pinned", "kind": "request", "order": -1, "createdAt": 1700000009000 }
+			],
+			"expected": ["request-pinned", "folder-zero"]
+		},
+		{
+			"name": "legacy-migrated: requests numbered past the highest folder list after every folder",
+			"comment": "Schema version 7 moves each collection's requests up by one more than its highest sub-folder order, so a pre-#2535 parent (folders 0, 1 and requests 0, 1) keeps its folders-first display. The requests are older than the folders on purpose: creation time cannot be what holds the blocks apart.",
+			"rows": [
+				{ "id": "req-old", "kind": "request", "order": 2, "createdAt": 1700000001000 },
+				{ "id": "req-older", "kind": "request", "order": 3, "createdAt": 1700000000000 },
+				{ "id": "fld-b", "kind": "folder", "order": 1, "createdAt": 1700000005000 },
+				{ "id": "fld-a", "kind": "folder", "order": 0, "createdAt": 1700000006000 }
+			],
+			"expected": ["fld-a", "fld-b", "req-old", "req-older"]
+		},
+		{
+			"name": "legacy all-zero rows of both kinds keep the folders-first block, each kind by createdAt",
+			"comment": "A pre-drag parent the migration has nothing to separate by order alone: every row at 0. The kind rank keeps the folders above the requests, so the display survives even before any shift.",
+			"rows": [
+				{ "id": "req-later", "kind": "request", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "fld-later", "kind": "folder", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "req-earlier", "kind": "request", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "fld-earlier", "kind": "folder", "order": 0, "createdAt": 1700000003000 }
+			],
+			"expected": ["fld-earlier", "fld-later", "req-earlier", "req-later"]
 		}
 	]
 }

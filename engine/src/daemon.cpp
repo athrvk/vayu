@@ -171,6 +171,14 @@ int run_daemon (std::span<char* const> args) {
     const vayu::http::GrantSecret grant_secret =
     vayu::http::take_grant_secret_from_environment ();
 
+    // Before any worker thread allocates (#2544); a refusal keeps the
+    // allocator's default, which is slower to give memory back, not wrong.
+    if (!vayu::platform::return_large_frees_to_os (
+        vayu::core::constants::server::OWN_MAPPING_MIN_BYTES)) {
+        vayu::utils::log_warning ("startup",
+        "Fixed mmap threshold refused; freed large blocks may stay resident");
+    }
+
     // Check for single instance
     std::string lock_path = vayu::platform::path_join (data_dir, "vayu.lock");
     InstanceLock instance_lock;

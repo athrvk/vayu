@@ -10,8 +10,9 @@
  *
  * Everything decidable without a DOM already lives elsewhere: `lib/drag/drag-gesture.ts`
  * owns press-versus-drag and the trailing click, `drop-position.ts` owns the
- * zones and the folders-first block rule, `reorder-math.ts` owns which rows a
- * move rewrites, and `useReorderMutation` owns the one atomic write. What is
+ * zones and where a drop lands, `tree-children.ts` owns the one sibling list a
+ * parent has, `reorder-math.ts` owns which rows a move rewrites, and
+ * `useReorderMutation` owns the one atomic write. What is
  * left here is the part that genuinely needs the browser: pointer capture, hit
  * testing, spring-loading, auto-scroll, and putting focus back on the row that
  * moved.
@@ -38,9 +39,10 @@ import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
 import { useToastStore, useSaveStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
-import { compareTreeOrder, type Collection, type Request } from "@/types";
+import type { Collection, Request } from "@/types";
 import { isDescendant } from "./tree-utils";
-import { isEmptyPlan, planCollectionMove, planRequestMove, type OrderedRow } from "./reorder-math";
+import { childrenOf, type TreeChild } from "./tree-children";
+import { isEmptyPlan, planMove, type OrderedRow } from "./reorder-math";
 import {
 	consumeClick,
 	cancelGesture,
@@ -65,9 +67,9 @@ import { useStableCallback } from "@/hooks/useStableCallback";
 /** Alt+Arrow directions, in tree terms rather than screen terms. */
 export type TreeMoveDirection = "up" | "down" | "in" | "out";
 
-/** Where a row sits, or is being put: an ordered block and an index in it. */
+/** Where a row sits, or is being put: a parent and an index among its children. */
 interface Placement {
-	/** The collection owning the block, or `null` for the root collections. */
+	/** The parent collection, or `null` for the top level. */
 	ownerId: string | null;
 	index: number;
 }
@@ -113,7 +115,7 @@ export interface TreeDnd {
 	/** The row whose "Move to..." dialog is open. */
 	moveTarget: TreeEntity | null;
 	closeMoveDialog: () => void;
-	/** Dialog choice: append the row to the end of `ownerId`'s matching block. */
+	/** Dialog choice: append the row after every child of `ownerId`. */
 	moveToOwner: (entity: TreeEntity, ownerId: string | null) => void;
 }
 
@@ -122,12 +124,19 @@ const AUTO_SCROLL_BAND_PX = 24;
 /** Pixels per frame while auto-scrolling. */
 const AUTO_SCROLL_STEP_PX = 8;
 
-/** Subfolders of `parentId`, in the order the tree renders them. */
-function collectionSiblings(collections: readonly Collection[], parentId: string | null) {
-	return collections
-		.filter((c) => (c.parentId ?? null) === parentId)
-		.slice()
-		.sort(compareTreeOrder);
+/** The parent a row sits under: a collection id, or `null` for the top level. */
+function parentOf(entity: TreeEntity): string | null {
+	return entity.kind === "collection" ? entity.parentId : entity.collectionId;
+}
+
+/**
+ * The row as it is once it sits under `ownerId`, or `null` when it cannot: the
+ * top level holds collections only, so a placement there for a request is
+ * refused rather than sent for the engine to reject.
+ */
+function withOwner(entity: TreeEntity, ownerId: string | null): TreeEntity | null {
+	if (entity.kind === "collection") return { ...entity, parentId: ownerId };
+	return ownerId === null ? null : { ...entity, collectionId: ownerId };
 }
 
 /**
@@ -137,11 +146,11 @@ function collectionSiblings(collections: readonly Collection[], parentId: string
 const ROW_CONTROLS = "[data-tree-menu],[data-tree-toggle],input,textarea";
 
 /**
- * The index a destination names, in the block *without* the moved row - which
- * is the index `reorder-math` splices into. `null` when the anchor is not in
- * the block, which means the tree changed under the drag.
+ * The index a destination names, among the siblings *without* the moved row -
+ * which is the index `reorder-math` splices into. `null` when the anchor is not
+ * among them, which means the tree changed under the drag.
  */
-function indexInBlock(
+function indexAmongSiblings(
 	siblings: readonly OrderedRow[],
 	movedId: string,
 	destination: DropDestination
@@ -223,34 +232,25 @@ export function useTreeDnd({
 		dataRef.current = { collections, getRequestsByCollection };
 	}, [collections, getRequestsByCollection]);
 
-	const requestSiblings = useCallback(
-		(collectionId: string) => dataRef.current.getRequestsByCollection(collectionId),
+	/** The children of `parentId` as the tree renders them, folders and requests merged. */
+	const siblingsOf = useCallback(
+		(parentId: string | null): TreeChild[] =>
+			childrenOf(
+				parentId,
+				dataRef.current.collections,
+				dataRef.current.getRequestsByCollection
+			),
 		[]
 	);
 
 	/** Where the row is now - the placement an Undo has to restore. */
 	const placementOf = useCallback(
 		(entity: TreeEntity): Placement => {
-			if (entity.kind === "collection") {
-				const siblings = collectionSiblings(dataRef.current.collections, entity.parentId);
-				return {
-					ownerId: entity.parentId,
-					index: Math.max(
-						0,
-						siblings.findIndex((c) => c.id === entity.id)
-					),
-				};
-			}
-			const siblings = requestSiblings(entity.collectionId);
-			return {
-				ownerId: entity.collectionId,
-				index: Math.max(
-					0,
-					siblings.findIndex((r) => r.id === entity.id)
-				),
-			};
+			const ownerId = parentOf(entity);
+			const index = siblingsOf(ownerId).findIndex((row) => row.id === entity.id);
+			return { ownerId, index: Math.max(0, index) };
 		},
-		[requestSiblings]
+		[siblingsOf]
 	);
 
 	const nameOf = useCallback((ownerId: string | null): string => {
@@ -269,57 +269,24 @@ export function useTreeDnd({
 	 */
 	const writeMove = useCallback(
 		(entity: TreeEntity, to: Placement): { from: Placement; moved: TreeEntity } | null => {
+			// The row as it is *after* the move, so a reveal expands the folder it
+			// landed in and an Undo plans from its new parent rather than its old.
+			const moved = withOwner(entity, to.ownerId);
+			if (!moved) return null;
 			const from = placementOf(entity);
-			const { collections: allCollections } = dataRef.current;
+			const sameParent = from.ownerId === to.ownerId;
+			const fromSiblings = siblingsOf(from.ownerId);
+			const toSiblings = sameParent ? fromSiblings : siblingsOf(to.ownerId);
+			const listSize = sameParent ? toSiblings.length : toSiblings.length + 1;
 
 			let plan;
-			let blockSize: number;
-			// The row as it is *after* the move, so a reveal expands the folder it
-			// landed in and an Undo plans from its new scope rather than its old.
-			// Built inside the branches: only there is the destination owner known
-			// to be the kind of owner this row can have.
-			let moved: TreeEntity;
 			try {
-				if (entity.kind === "collection") {
-					const fromSiblings = collectionSiblings(allCollections, entity.parentId);
-					const toSiblings =
-						entity.parentId === to.ownerId
-							? fromSiblings
-							: collectionSiblings(allCollections, to.ownerId);
-					blockSize =
-						entity.parentId === to.ownerId ? toSiblings.length : toSiblings.length + 1;
-					plan = planCollectionMove({
-						movedId: entity.id,
-						from: { scope: { parentId: entity.parentId }, siblings: fromSiblings },
-						to: { scope: { parentId: to.ownerId }, siblings: toSiblings },
-						toIndex: to.index,
-					});
-					moved = { ...entity, parentId: to.ownerId };
-				} else {
-					// A request always belongs to a collection: there is no requests
-					// block at the root, so a placement that names one is refused
-					// rather than sent for the engine to reject.
-					if (!to.ownerId) return null;
-					const fromSiblings = requestSiblings(entity.collectionId);
-					const toSiblings =
-						entity.collectionId === to.ownerId
-							? fromSiblings
-							: requestSiblings(to.ownerId);
-					blockSize =
-						entity.collectionId === to.ownerId
-							? toSiblings.length
-							: toSiblings.length + 1;
-					plan = planRequestMove({
-						movedId: entity.id,
-						from: {
-							scope: { collectionId: entity.collectionId },
-							siblings: fromSiblings,
-						},
-						to: { scope: { collectionId: to.ownerId }, siblings: toSiblings },
-						toIndex: to.index,
-					});
-					moved = { ...entity, collectionId: to.ownerId };
-				}
+				plan = planMove({
+					movedId: entity.id,
+					from: { parentId: from.ownerId, siblings: fromSiblings },
+					to: { parentId: to.ownerId, siblings: toSiblings },
+					toIndex: to.index,
+				});
 			} catch (error) {
 				// The math throws when the row is not where the caller thinks it is -
 				// an Undo clicked after the tree changed under it, or a drop resolved
@@ -339,14 +306,14 @@ export function useTreeDnd({
 			if (isEmptyPlan(plan)) return null;
 			reorderMutate(plan);
 
-			const landedAt = Math.min(to.index, Math.max(blockSize - 1, 0));
+			const landedAt = Math.min(to.index, Math.max(listSize - 1, 0));
 			setAnnouncement(
-				`Moved ${entity.name} to position ${landedAt + 1} of ${blockSize} in ${nameOf(to.ownerId)}`
+				`Moved ${entity.name} to position ${landedAt + 1} of ${listSize} in ${nameOf(to.ownerId)}`
 			);
 			revealEntity(moved);
 			return { from, moved };
 		},
-		[nameOf, placementOf, reorderMutate, requestSiblings, revealEntity]
+		[nameOf, placementOf, reorderMutate, revealEntity, siblingsOf]
 	);
 
 	/**
@@ -377,22 +344,15 @@ export function useTreeDnd({
 
 	/**
 	 * The row and edge the indicator draws on, derived from the destination
-	 * rather than from the pointer: a request dropped between two folders lands
-	 * at the head of that parent's requests, and the line has to be drawn there
-	 * rather than where the pointer is.
+	 * rather than from the pointer: a drop into a folder lands after its last
+	 * child, and the line has to be drawn there rather than on the folder row.
 	 */
 	const indicatorFor = useCallback(
 		(entity: TreeEntity, destination: DropDestination): CollectionTreeDropTarget | null => {
 			if (destination.anchorId) {
 				return { id: destination.anchorId, position: destination.placement };
 			}
-			const block =
-				destination.block === "collections"
-					? collectionSiblings(dataRef.current.collections, destination.ownerId)
-					: destination.ownerId
-						? requestSiblings(destination.ownerId)
-						: [];
-			const rows = block.filter((row) => row.id !== entity.id);
+			const rows = siblingsOf(destination.ownerId).filter((row) => row.id !== entity.id);
 			if (rows.length === 0) {
 				return destination.ownerId ? { id: destination.ownerId, position: "inside" } : null;
 			}
@@ -400,7 +360,7 @@ export function useTreeDnd({
 				? { id: rows[0].id, position: "before" }
 				: { id: rows[rows.length - 1].id, position: "after" };
 		},
-		[requestSiblings]
+		[siblingsOf]
 	);
 
 	/* ── Auto-scroll ──────────────────────────────────────────────────────── */
@@ -621,13 +581,8 @@ export function useTreeDnd({
 			endDrag();
 			if (!dropped || !destination) return;
 
-			const siblings =
-				destination.block === "collections"
-					? collectionSiblings(dataRef.current.collections, destination.ownerId)
-					: destination.ownerId
-						? requestSiblings(destination.ownerId)
-						: [];
-			const index = indexInBlock(siblings, pressed.entity.id, destination);
+			const siblings = siblingsOf(destination.ownerId);
+			const index = indexAmongSiblings(siblings, pressed.entity.id, destination);
 			if (index === null) return;
 			applyPlacement(
 				pressed.entity,
@@ -635,7 +590,7 @@ export function useTreeDnd({
 				{ undoable: true }
 			);
 		},
-		[applyPlacement, endDrag, requestSiblings]
+		[applyPlacement, endDrag, siblingsOf]
 	);
 
 	const onPointerCancel = useCallback(() => {
@@ -690,104 +645,86 @@ export function useTreeDnd({
 	/* ── Keyboard move ────────────────────────────────────────────────────── */
 
 	/**
-	 * The ordered block this row sits in, and where in it - the folders-first
-	 * rule means a folder's block is its parent's subfolders and a request's is
-	 * its collection's requests, never the rows as rendered.
+	 * The siblings this row sits among - its parent's folders and requests as one
+	 * list - and where in it.
 	 *
 	 * Shared by the move itself and by the menu's gating (#1690), so "Move up is
 	 * off" and "Move up announces already first" cannot disagree about which row
 	 * is first.
 	 */
-	const blockPosition = useCallback(
-		(entity: TreeEntity): { block: OrderedRow[]; at: number } => {
-			const { collections: allCollections } = dataRef.current;
-			const block: OrderedRow[] =
-				entity.kind === "collection"
-					? collectionSiblings(allCollections, entity.parentId)
-					: [...requestSiblings(entity.collectionId)];
-			return { block, at: block.findIndex((row) => row.id === entity.id) };
+	const siblingPosition = useCallback(
+		(entity: TreeEntity): { siblings: TreeChild[]; at: number } => {
+			const siblings = siblingsOf(parentOf(entity));
+			return { siblings, at: siblings.findIndex((row) => row.id === entity.id) };
 		},
-		[requestSiblings]
+		[siblingsOf]
 	);
 
-	const moveByKeyboard = useCallback(
-		(entity: TreeEntity, direction: TreeMoveDirection) => {
-			const { collections: allCollections } = dataRef.current;
-			const owner = entity.kind === "collection" ? entity.parentId : entity.collectionId;
-			const { block, at } = blockPosition(entity);
-			if (at < 0) return;
-
-			if (direction === "up" || direction === "down") {
-				const next = direction === "up" ? at - 1 : at + 1;
-				if (next < 0 || next >= block.length) {
-					setAnnouncement(
-						`${entity.name} is already ${direction === "up" ? "first" : "last"} in ${nameOf(owner)}`
-					);
-					return;
-				}
-				applyPlacement(entity, { ownerId: owner, index: next }, { undoable: false });
+	/** Into the folder rendered immediately above the row, at its end. */
+	const moveIntoFolderAbove = useCallback(
+		(entity: TreeEntity, above: TreeChild | undefined) => {
+			if (above?.kind !== "collection") {
+				setAnnouncement(`No collection above ${entity.name} to move it into`);
 				return;
 			}
+			expandCollection(above.id);
+			applyPlacement(
+				entity,
+				{ ownerId: above.id, index: siblingsOf(above.id).length },
+				{ undoable: true }
+			);
+		},
+		[applyPlacement, expandCollection, siblingsOf]
+	);
 
-			if (direction === "in") {
-				// The folder rendered immediately above this row: the previous
-				// subfolder for a folder, and the last subfolder for the first
-				// request (requests follow the folders in every group).
-				const folders = collectionSiblings(
-					allCollections,
-					entity.kind === "collection" ? entity.parentId : (owner as string)
-				);
-				const into =
-					entity.kind === "collection"
-						? at > 0
-							? folders[at - 1]
-							: undefined
-						: at === 0
-							? folders[folders.length - 1]
-							: undefined;
-				if (!into) {
-					setAnnouncement(`No collection above ${entity.name} to move it into`);
-					return;
-				}
-				const size =
-					entity.kind === "collection"
-						? collectionSiblings(allCollections, into.id).length
-						: requestSiblings(into.id).length;
-				expandCollection(into.id);
-				applyPlacement(entity, { ownerId: into.id, index: size }, { undoable: true });
-				return;
-			}
-
-			// "out": after the parent among its own siblings for a folder; into the
-			// grandparent's requests for a request, which has no position among
-			// folders to be "after".
+	/** Out of the parent, landing right after it among the grandparent's children. */
+	const moveOutOfParent = useCallback(
+		(entity: TreeEntity) => {
+			const owner = parentOf(entity);
 			if (owner === null) {
 				setAnnouncement(`${entity.name} is already at the top level`);
 				return;
 			}
-			const parent = allCollections.find((c) => c.id === owner);
+			const parent = dataRef.current.collections.find((c) => c.id === owner);
 			const grandparentId = parent?.parentId ?? null;
-			if (entity.kind === "collection") {
-				const uncles = collectionSiblings(allCollections, grandparentId);
-				const parentAt = uncles.findIndex((c) => c.id === owner);
-				applyPlacement(
-					entity,
-					{ ownerId: grandparentId, index: parentAt + 1 },
-					{ undoable: true }
-				);
-				return;
-			}
-			if (!grandparentId) {
+			if (!withOwner(entity, grandparentId)) {
 				setAnnouncement(`${entity.name} can't move out of ${nameOf(owner)}`);
 				return;
 			}
+			const parentAt = siblingsOf(grandparentId).findIndex((row) => row.id === owner);
 			applyPlacement(
 				entity,
-				{ ownerId: grandparentId, index: requestSiblings(grandparentId).length },
+				{ ownerId: grandparentId, index: parentAt + 1 },
 				{ undoable: true }
 			);
 		},
-		[applyPlacement, blockPosition, expandCollection, nameOf, requestSiblings]
+		[applyPlacement, nameOf, siblingsOf]
+	);
+
+	const moveByKeyboard = useCallback(
+		(entity: TreeEntity, direction: TreeMoveDirection) => {
+			const { siblings, at } = siblingPosition(entity);
+			if (at < 0) return;
+			if (direction === "in") {
+				moveIntoFolderAbove(entity, siblings[at - 1]);
+				return;
+			}
+			if (direction === "out") {
+				moveOutOfParent(entity);
+				return;
+			}
+
+			const owner = parentOf(entity);
+			const next = direction === "up" ? at - 1 : at + 1;
+			if (next < 0 || next >= siblings.length) {
+				setAnnouncement(
+					`${entity.name} is already ${direction === "up" ? "first" : "last"} in ${nameOf(owner)}`
+				);
+				return;
+			}
+			applyPlacement(entity, { ownerId: owner, index: next }, { undoable: false });
+		},
+		[applyPlacement, moveIntoFolderAbove, moveOutOfParent, nameOf, siblingPosition]
 	);
 
 	/**
@@ -804,7 +741,7 @@ export function useTreeDnd({
 	 */
 	const moveActions = useCallback(
 		(entity: TreeEntity): RowAction[] => {
-			const { block, at } = blockPosition(entity);
+			const { siblings, at } = siblingPosition(entity);
 			return [
 				{
 					label: "Move up",
@@ -816,7 +753,7 @@ export function useTreeDnd({
 				{
 					label: "Move down",
 					icon: ArrowDown,
-					disabled: at < 0 || at >= block.length - 1,
+					disabled: at < 0 || at >= siblings.length - 1,
 					disabledReason: "Already last",
 					onSelect: () => moveByKeyboard(entity, "down"),
 				},
@@ -827,7 +764,7 @@ export function useTreeDnd({
 				},
 			];
 		},
-		[blockPosition, moveByKeyboard]
+		[moveByKeyboard, siblingPosition]
 	);
 
 	/* ── "Move to..." ─────────────────────────────────────────────────────── */
@@ -835,16 +772,14 @@ export function useTreeDnd({
 	const moveToOwner = useCallback(
 		(entity: TreeEntity, ownerId: string | null) => {
 			setMoveTarget(null);
-			const size =
-				entity.kind === "collection"
-					? collectionSiblings(dataRef.current.collections, ownerId).length
-					: ownerId
-						? requestSiblings(ownerId).length
-						: 0;
 			if (ownerId) expandCollection(ownerId);
-			applyPlacement(entity, { ownerId, index: size }, { undoable: true });
+			applyPlacement(
+				entity,
+				{ ownerId, index: siblingsOf(ownerId).length },
+				{ undoable: true }
+			);
 		},
-		[applyPlacement, expandCollection, requestSiblings]
+		[applyPlacement, expandCollection, siblingsOf]
 	);
 
 	const treeHandlers = useMemo<TreeDragHandlers>(
@@ -868,9 +803,9 @@ export function useTreeDnd({
 			return true;
 		}
 		// No band of this row names a destination the dragged row could
-		// take - a folder over a request row, or a request over a root
-		// folder's edges. Asked of the same resolver the drop uses, so what
-		// is greyed and what is refused cannot disagree.
+		// take - a request over a root folder's edges. Asked of the same
+		// resolver the drop uses, so what is greyed and what is refused cannot
+		// disagree.
 		return (["before", "inside", "after"] as const).every(
 			(zone) => resolveDrop({ dragged, target: entity, zone }) === null
 		);

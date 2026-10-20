@@ -248,8 +248,9 @@ struct ExportRequest {
     nlohmann::json stored_headers = nlohmann::json::array ();
     nlohmann::json stored_body    = nlohmann::json::object ();
     nlohmann::json stored_auth    = nlohmann::json::object ();
-    /// The request's position among its folder's requests, so a re-import
-    /// lists them as the sidebar did rather than in document path order.
+    /// The request's stored `order`, its position among its folder's children
+    /// (sub-folders and requests share the space, #2535), so a re-import lists
+    /// them as the sidebar did rather than in document path order.
     int order = 0;
     /**
      * The Params rows marked `in: "path"` (issue #1764): the values of the
@@ -272,6 +273,10 @@ struct ExportFolder {
     nlohmann::json variables = nlohmann::json::object ();
     nlohmann::json auth      = nlohmann::json::object ();
     nlohmann::json elements  = nlohmann::json::array ();
+    /// The folder's stored `order`, in the space it shares with its parent's
+    /// requests (#2535) - so a re-import puts a request back between two
+    /// folders where the sidebar had it.
+    int order = 0;
 };
 
 /** What a skeleton names the API after. */

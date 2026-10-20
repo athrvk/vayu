@@ -479,6 +479,131 @@
       }
     },
     {
+      "name": "a run that disallowed Expect: 100-continue against one that allowed it",
+      "base": {"metadata":{"configuration":{"expectContinue":false}}},
+      "target": {"metadata":{"configuration":{"expectContinue":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {
+            "code": "expect_continue",
+            "message": "Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+            "base": "not allowed",
+            "target": "allowed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a run that allowed Expect: 100-continue against one that disallowed it",
+      "base": {"metadata":{"configuration":{"expectContinue":true}}},
+      "target": {"metadata":{"configuration":{"expectContinue":false}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {
+            "code": "expect_continue",
+            "message": "Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+            "base": "allowed",
+            "target": "not allowed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a pre-#2516 baseline (no expectContinue) against a run that allowed it",
+      "base": {"metadata":{"configuration":{"mode":"constant_rps"}}},
+      "target": {"metadata":{"configuration":{"expectContinue":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [
+          {
+            "code": "expect_continue",
+            "message": "Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+            "base": "not allowed",
+            "target": "allowed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "two runs that both allowed Expect: 100-continue",
+      "base": {"metadata":{"configuration":{"expectContinue":true}}},
+      "target": {"metadata":{"configuration":{"expectContinue":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {"metric":"summary.throughput","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"}
+        ],
+        "reliability": [
+          {"metric":"summary.errorRate","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
       "name": "a stopped 50-user run against a completed 10-user baseline (mode, users, duration, status)",
       "base": {
         "metadata": {"status":"completed","configuration":{"mode":"constant_concurrency","concurrency":10}},
@@ -543,7 +668,8 @@
             "targetRps": 100,
             "httpVersion": "http1.1",
             "dataFileHash": "aaaaaaaa11112222",
-            "acceptEncoding": false
+            "acceptEncoding": false,
+            "expectContinue": false
           }
         },
         "summary": {"testDuration":20}
@@ -563,7 +689,8 @@
             "httpVersion": "http2",
             "dataFileName": "users.csv",
             "dataFileHash": "bbbbbbbb33334444",
-            "acceptEncoding": true
+            "acceptEncoding": true,
+            "expectContinue": true
           }
         },
         "summary": {"testDuration":3}
@@ -616,6 +743,12 @@
             "message": "Compression negotiation differs, so byte and latency figures are not directly comparable.",
             "base": "not negotiated",
             "target": "negotiated"
+          },
+          {
+            "code": "expect_continue",
+            "message": "Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+            "base": "not allowed",
+            "target": "allowed"
           }
         ]
       }

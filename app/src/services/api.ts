@@ -805,11 +805,17 @@ export const apiService = {
 	 * calls below, and for the same reason: an unstamped run reads as `other`
 	 * in History, indistinguishable from a script's. It is set after the spread
 	 * so a payload cannot claim a different one (issue #1817).
+	 *
+	 * `includeParsedBody: false` is stamped here too, and also after the spread:
+	 * the pane is built from `bodyRaw`, so the engine's parsed copy of a JSON
+	 * body would only be held on its heap and shipped over loopback for nothing
+	 * (issue #2544). The MCP server does not send it - its tool result exposes
+	 * the parsed `body`.
 	 */
 	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
 		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
-			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN },
+			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN, includeParsedBody: false },
 			{ timeout: proxiedRequestTimeoutMs() }
 		);
 	},

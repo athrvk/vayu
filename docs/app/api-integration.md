@@ -134,7 +134,9 @@ where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
 `form-data` row may be
 a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
 sends the path the user picked - never the bytes - and the engine opens the file
-at send time. A **`binary`** body is one file as the whole body,
+at send time. A text part may carry just `contentType`, the type it declares for
+itself (a Postman import keeps one, #2539); the renderer sends it, resolved like
+the file members, and a part without it sends none. A **`binary`** body is one file as the whole body,
 `{mode: "binary", file: {src, fileName?, contentType?}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
 refuse it as "no file selected" rather than send a bodiless request.
@@ -740,12 +742,18 @@ requests, and the engine applies the whole batch in one transaction - so a drop
 that displaces N siblings is one round trip, not N `updateRequest` calls that can
 half-land and race a concurrent create into the middle of their range.
 
-The payload carries `moves` (each row's new `order`, plus `parentId` /
-`collectionId` when it changes owner) and `normalize` (scopes to renumber dense
-`0..n-1` in display order first, for a collection whose rows all predate explicit
-orders). `modules/collections/reorder-math.ts` computes both from the sibling
-lists the tree is already showing; the full contract is in
-[engine/api-reference.md](../engine/api-reference.md) under `POST /reorder`.
+The payload carries `moves` (each row's `type`, its new `order`, plus
+`parentId` / `collectionId` when it changes owner) and `normalize`, one
+`{ parentId }` per parent to renumber dense `0..n-1` in sibling order first
+(`null` for the top level), for a parent whose rows predate explicit orders. A
+parent's sub-collections and requests are one list in one `order` space
+(#2535), so one entry covers both kinds and a single drop can move a request
+between two folders; the per-kind `{ type, parentId | collectionId }` entries
+earlier engines took are a `400`. `modules/collections/reorder-math.ts`
+computes both arrays from the merged sibling list the tree is already showing;
+the full contract is in
+[engine/api-reference.md](../engine/api-reference.md#post-reorder) under
+`POST /reorder`.
 
 Unlike the other writes, the response is **read**: it is the rows as written, and
 `useReorderMutation` settles its caches on them so a normalization the engine
@@ -860,6 +868,15 @@ type is `RunOrigin` (`types/domain.ts`); `listRuns` takes the kind as
 `origin` and sends `GET /runs?origin=`. See
 [engine/api-reference.md](../engine/api-reference.md) for what the engine
 validates.
+
+**`executeRequest` also stamps `includeParsedBody: false`** (#2544), at the same
+choke point and after the same spread. The pane is built from `bodyRaw`, so the
+engine's parsed copy of a JSON body is a second tree that the daemon builds,
+serializes and holds on its heap and the renderer then parses and never reads;
+declining it answers `body: null`. The MCP server does not send it - its
+`run_request` result exposes the parsed `body` to the agent, so it keeps the
+engine's default (`electron/mcp/tools.test.ts` asserts the payload). The
+streaming send answers `202` with no body, so the flag is not part of it.
 
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it
@@ -1104,7 +1121,13 @@ These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
 ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `useFetchOAuth2TokenMutation`, `useClearOAuth2TokenMutation`). The token
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
-to the engine so the app and engine agree on cache slots without a round-trip.
+to the engine so the app and engine agree on cache slots without a round-trip. The key
+reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
+#2536) beside the token URL, client id, credentials id and password-grant username, so
+two audiences sent as rows are two cached tokens; a row whose key names a credential
+(`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its
+key alone, so the key never carries the secret. `scope`, `audience` and `resource`
+themselves are still not in it.
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine).
 
@@ -1375,11 +1398,21 @@ the request builder surfaces a toast pointing the user at the Auth tab.
 
 `headers` is an ordered array of `{ name, value }` lines (issue #2466): the
 Headers table's enabled rows with a key, in row order, a repeated name repeated
-and each row in the spelling typed (`toHeaderRows`), and `POST /compose` answers
-the same shape, so a repeat survives compose to execute. The older single-valued
+and each row in the case typed with the spaces and tabs around its name trimmed
+(`toHeaderRows`), and `POST /compose` answers the same shape, so a repeat
+survives compose to execute. The older single-valued
 record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
 longer sends it: a record keeps one value per key and sends a different header
 from the one its table shows. The same holds for `POST /runs`.
+
+The engine trims the spaces and tabs around every header name (`Authorization `
+goes out as `Authorization`, never as a wire line with a space before its colon)
+and then requires a token: a name with an interior space, a colon or a
+non-ASCII byte is a `400` with code `invalid_header_name`, quoting the name, from
+`POST /compose`, `POST /execute` and `POST /runs` alike. A name of only spaces
+and tabs is no name (`empty_header_name`). A bearer token and an API key's name
+and value are trimmed the same way when auth is resolved; see the
+[API reference](../engine/api-reference.md#post-compose).
 
 **Example Request:**
 ```typescript
@@ -1494,7 +1527,7 @@ replay puts the run's recorded list back on its seeded rows.
   status: 200,
   statusText: "OK",
   headers: { "content-type": "application/json" },
-  body: { users: [...] },
+  body: null,  // { users: [...] } when the request leaves includeParsedBody unset; the app sends false
   bodyRaw: '{"users":[...]}',
   bodyEncoding: "utf8",
   httpVersion: "HTTP/1.1",
@@ -1642,7 +1675,10 @@ give the wrong instruction to half the cases.
 
 The pane reads the **received text** (`bodyRaw`), never the engine's parsed
 `body`, which is key-sorted, keeps only the last of a repeated key and has
-rounded any integer past 2^53 (issue #2459). `responseFromExecuteResult`
+rounded any integer past 2^53 (issue #2459). The app does not even ask for it
+now: `executeRequest` sends `includeParsedBody: false`, so the answer's `body`
+is `null` (#2544; the engine leaves it `null` past 4 MiB whatever is asked).
+`responseFromExecuteResult`
 builds `ResponseState.body` - the string Pretty reads - by indenting `bodyRaw`
 with `lib/json-format.ts`, a single pass that copies every token through
 without parsing a value, so member order, duplicate keys and number spellings

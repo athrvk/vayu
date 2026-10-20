@@ -19,10 +19,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -81,7 +83,29 @@ class SendRequestServer {
                 names.push_back (header.first);
             }
             echo["names"] = names;
+            // httplib consumes a multipart body into parts and leaves `body`
+            // empty, so a form-data send is read back through these.
+            auto parts = nlohmann::json::array ();
+            for (const auto& [name, field] : req.form.fields) {
+                const auto type = field.headers.find ("Content-Type");
+                parts.push_back ({ { "name", name }, { "content", field.content },
+                { "type", type == field.headers.end () ? "" : type->second } });
+            }
+            echo["parts"] = parts;
             res.set_content (echo.dump (), "application/json");
+        });
+
+        // A client-credentials token endpoint that answers only the request an
+        // OAuth server would accept: the urlencoded body, typed as such.
+        svr.Post ("/oauth/token",
+        [this] (const httplib::Request& req, httplib::Response& res) {
+            hits.fetch_add (1, std::memory_order_relaxed);
+            const bool accepted = req.get_header_value ("Content-Type") ==
+            "application/x-www-form-urlencoded" &&
+            req.body == "grant_type=client_credentials&client_id=abc&client_secret=s3cret";
+            res.status = accepted ? 200 : 400;
+            res.set_content (accepted ? R"({"access_token":"tok_oauth"})" : R"({"error":"invalid_request"})",
+            "application/json");
         });
 
         svr.Get ("/slow", [this] (const httplib::Request&, httplib::Response& res) {
@@ -401,6 +425,140 @@ TEST_F (SendRequestTest, PostmanArrayHeaderFormIsAccepted) {
     EXPECT_TRUE (result.success) << result.error_message;
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// ============================================================================
+// Form bodies (#2563)
+// ============================================================================
+
+TEST_F (SendRequestTest, UrlencodedBodyIsEncodedAndTyped) {
+    SendRequestServer server;
+
+    auto result = run (R"JS(
+        pm.environment.set('cid', 'client-7');
+        var echo = null;
+        pm.sendRequest({ url: ')JS" +
+    server.url ("/echo") + R"JS(', method: 'POST',
+          body: { mode: 'urlencoded', urlencoded: [
+            { key: 'grant_type', value: 'client_credentials' },
+            { key: 'client_id', value: '{{cid}}' },
+            { key: 'note', value: 'a b&c' },
+            { key: 'count', value: 3 },
+            { key: 'skipped', value: 'x', disabled: true }
+          ] }
+        }, function (err, res) { echo = res.json(); });
+        pm.test('sent', function () {
+          pm.expect(echo.body).to.equal(
+            'grant_type=client_credentials&client_id=client-7&note=a%20b%26c&count=3');
+          pm.expect(echo.type).to.equal('application/x-www-form-urlencoded');
+        });
+    )JS");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The object spelling a script writes by hand, and a Content-Type of the
+// script's own, which wins over the one the mode implies.
+TEST_F (SendRequestTest, UrlencodedAcceptsAPlainObjectAndAHeaderOfTheScriptsOwn) {
+    SendRequestServer server;
+
+    auto result = run (R"JS(
+        var echo = null;
+        pm.sendRequest({ url: ')JS" +
+    server.url ("/echo") + R"JS(', method: 'POST',
+          header: { 'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8' },
+          body: { mode: 'urlencoded', urlencoded: { a: '1', b: 'two words' } }
+        }, function (err, res) { echo = res.json(); });
+        pm.test('sent', function () {
+          pm.expect(echo.body).to.equal('a=1&b=two%20words');
+          pm.expect(echo.type).to.equal('application/x-www-form-urlencoded; charset=utf-8');
+        });
+    )JS");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+TEST_F (SendRequestTest, FormDataTextPartsAreSentAndAFilePartIsRefusedByName) {
+    SendRequestServer server;
+
+    auto sent = run (R"JS(
+        pm.environment.set('cid', 'client-7');
+        var echo = null;
+        pm.sendRequest({ url: ')JS" +
+    server.url ("/echo") + R"JS(', method: 'POST',
+          body: { mode: 'formdata', formdata: [
+            { key: 'client_id', value: '{{cid}}' },
+            { key: 'note', value: 'hello', contentType: 'text/markdown' },
+            { key: 'skipped', value: 'x', disabled: true }
+          ] }
+        }, function (err, res) { echo = res.json(); });
+        pm.test('sent', function () {
+          pm.expect(echo.type.indexOf('multipart/form-data; boundary=')).to.equal(0);
+          pm.expect(echo.parts.length).to.equal(2);
+          pm.expect(echo.parts[0].name).to.equal('client_id');
+          pm.expect(echo.parts[0].content).to.equal('client-7');
+          pm.expect(echo.parts[1].name).to.equal('note');
+          pm.expect(echo.parts[1].content).to.equal('hello');
+          pm.expect(echo.parts[1].type).to.equal('text/markdown');
+        });
+    )JS");
+
+    EXPECT_TRUE (sent.success) << sent.error_message;
+    ASSERT_EQ (sent.tests.size (), 1u);
+    EXPECT_TRUE (sent.tests[0].passed) << sent.tests[0].error_message;
+    ASSERT_EQ (server.hit_count (), 1);
+
+    auto refused = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', body: { mode: 'formdata', formdata: [ "
+    "{ key: 'note', value: 'hello' }, "
+    "{ key: 'avatar', type: 'file', src: '/tmp/a.png' } ] } }, function () "
+    "{});");
+
+    EXPECT_FALSE (refused.success);
+    EXPECT_NE (refused.error_message.find ("'avatar' is a file part"), std::string::npos)
+    << refused.error_message;
+    EXPECT_EQ (server.hit_count (), 1)
+    << "a body missing its file part was sent";
+}
+
+// The snippet a Postman user brings: fetch a token from a client-credentials
+// endpoint before the main request, with the credentials read from the
+// environment.
+TEST_F (SendRequestTest, TheOAuthClientCredentialsSnippetRoundTrips) {
+    SendRequestServer server;
+
+    auto result = run (R"JS(
+        pm.environment.set('id', 'abc');
+        pm.environment.set('secret', 's3cret');
+        pm.sendRequest({
+          url: ')JS" +
+    server.url ("/oauth/token") + R"JS(',
+          method: 'POST',
+          header: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: {
+            mode: 'urlencoded',
+            urlencoded: [
+              { key: 'grant_type', value: 'client_credentials' },
+              { key: 'client_id', value: pm.environment.get('id') },
+              { key: 'client_secret', value: pm.environment.get('secret') }
+            ]
+          }
+        }, function (err, res) {
+          pm.environment.set('token', res.json().access_token);
+        });
+        pm.test('token stored', function () {
+          pm.expect(pm.environment.get('token')).to.equal('tok_oauth');
+        });
+    )JS");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 1);
 }
 
 // `pm.request.url` is a Url object since #991, and "send this request again" is
@@ -766,6 +924,55 @@ TEST_F (SendRequestTest, AHeaderNameResolvingToNothingIsRefused) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
+// The third header-name rule (issue #2467), enforced here as in every layer that
+// reads a name: the spaces and tabs around it are trimmed, and what is left must
+// be a token. Mutation check: drop the `invalid_header_name_refusal` call in
+// `resolve_send_request_headers` and the second sends; drop the trim and the
+// first is refused as a name with a space in it.
+TEST_F (SendRequestTest, APaddedHeaderNameIsSentTrimmed) {
+    SendRequestServer server;
+
+    auto result = run ("var echo = null; "
+                       "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', header: { ' X-Marker\\t': 'from-script' } "
+    "}, function (err, res) { echo = res.json(); }); "
+    "pm.test('sent', function () { "
+    "  pm.expect(echo.marker).to.equal('from-script'); "
+    "});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Padding is not a spelling: ` X-Marker` beside `X-Marker` is a repeat the
+// script typed, sent, and never the collision of two names resolution made
+// one. Mutation check: pass the untrimmed `name` to `record_produced_name` in
+// `resolve_send_request_headers` and the call throws.
+TEST_F (SendRequestTest, APaddedHeaderNameBesideItsUnpaddedTwinIsARepeat) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', header: { ' X-Marker': 'one', 'X-Marker': 'two' } "
+    "}, function () {});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+TEST_F (SendRequestTest, AHeaderNameThatIsNotATokenIsRefused) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', header: { 'X Bad': 'acme' } }, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("'X Bad'"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0);
+}
+
 // ============================================================================
 // Arguments that cannot be honoured fail loudly rather than sending something
 // the script did not write
@@ -786,13 +993,42 @@ TEST_F (SendRequestTest, BothHeaderSpellingsAtOnceIsRejected) {
 TEST_F (SendRequestTest, AnUnsupportedBodyModeIsRejected) {
     SendRequestServer server;
 
-    auto result = run ("pm.sendRequest({ url: '" +
-    server.url ("/echo") + "', method: 'POST', body: { mode: 'formdata', formdata: [] } }, function () {});");
+    for (const char* mode : { "file", "graphql" }) {
+        auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+        "', method: 'POST', body: { mode: '" + mode + "' } }, function () {});");
 
-    EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("'raw'"), std::string::npos) << result.error_message;
+        EXPECT_FALSE (result.success) << mode;
+        EXPECT_NE (result.error_message.find (std::string ("(got \"") + mode + "\")"),
+        std::string::npos)
+        << result.error_message;
+        EXPECT_NE (result.error_message.find ("'urlencoded'"), std::string::npos)
+        << "the refusal does not list the modes that are supported: "
+        << result.error_message;
+    }
     EXPECT_EQ (server.hit_count (), 0)
     << "an unreadable body was sent as nothing at all";
+}
+
+TEST_F (SendRequestTest, AFormBodyWithoutItsRowsOrWithANonScalarValueIsRejected) {
+    SendRequestServer server;
+
+    const std::string head =
+    "pm.sendRequest({ url: '" + server.url ("/echo") + "', method: 'POST', body: ";
+    const auto cases = std::to_array<std::pair<std::string, std::string>> ({
+    { "{ mode: 'urlencoded' }", "options.body.urlencoded is missing" },
+    { "{ mode: 'formdata', formdata: 'a=1' }", "options.body.formdata must be an array" },
+    { "{ mode: 'urlencoded', urlencoded: [{ key: 'a', value: { x: 1 } }] }", "'a' value must be a string" },
+    { "{ mode: 'urlencoded', urlencoded: [{ value: 'v' }] }", "need a string 'key'" },
+    { "{ mode: 'urlencoded', urlencoded: { a: undefined } }", "'a' value must be a string" },
+    });
+    for (const auto& [body, expected] : cases) {
+        auto result = run (head + body + " }, function () {});");
+
+        EXPECT_FALSE (result.success) << body;
+        EXPECT_NE (result.error_message.find (expected), std::string::npos)
+        << body << " -> " << result.error_message;
+    }
+    EXPECT_EQ (server.hit_count (), 0);
 }
 
 TEST_F (SendRequestTest, AnUnknownMethodIsRejected) {

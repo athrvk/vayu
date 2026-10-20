@@ -16,7 +16,12 @@
  * how a generator ends up emitting a raw newline inside a `"`.
  */
 
-import { foldRepeatedHeaders, headerEncodingNotes, prepareRequest } from "./prepare";
+import {
+	foldRepeatedHeaders,
+	headerEncodingNotes,
+	prepareRequest,
+	type PreparedTextPart,
+} from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A Python string literal - see the file comment for why JSON's rule fits. */
@@ -26,6 +31,17 @@ export function pythonString(value: string): string {
 
 function dictLiteral(entries: Array<[string, string]>, indent = "    "): string[] {
 	return entries.map(([key, value]) => `${indent}${pythonString(key)}: ${pythonString(value)},`);
+}
+
+/**
+ * A multipart text part as a `files` entry. One that declares a type is
+ * requests' `(filename, content, type)` tuple with no filename - the one
+ * spelling that sets the part's Content-Type without making it a file upload.
+ */
+function textPartEntry([key, value, contentType]: PreparedTextPart): string {
+	const content = pythonString(value);
+	const part = contentType ? `(None, ${content}, ${pythonString(contentType)})` : content;
+	return `    ${pythonString(key)}: ${part},`;
 }
 
 export function generatePython(
@@ -80,7 +96,10 @@ export function generatePython(
 		notes.push("The file handle is opened inline and left for the interpreter to close.");
 	} else if (prepared.body) {
 		const name = prepared.body.kind === "form-data" ? "files" : "data";
-		const entries = dictLiteral(prepared.body.fields);
+		const entries =
+			prepared.body.kind === "form-data"
+				? prepared.body.fields.map(textPartEntry)
+				: dictLiteral(prepared.body.fields);
 		if (prepared.body.kind === "form-data") {
 			// requests spells a file part as a tuple: (filename, fileobj, type).
 			// The handles are deliberately not closed - a pasted snippet is one

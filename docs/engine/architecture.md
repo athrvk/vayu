@@ -661,7 +661,11 @@ reaches, decided rather than inherited (#1095): the empty-name rule reads
 posted straight to `POST /execute` are refused here too, while the collision
 rule reads only the names that still held a token - a request that arrives
 already resolved cannot carry a collision to find, two names that are already
-equal being already one key. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+equal being already one key. The same pass also trims the spaces and tabs
+around every name and refuses one that is not an RFC 9110 token once trimmed
+(#2467, `invalid_header_name`), which is how a name a script defined is judged;
+it reads every name for that rule as it does for the empty one, and a token
+nothing answered is left written while the text around it is judged. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 
@@ -1301,7 +1305,17 @@ before the `Database` and `CookieJar` its workers reach through go away.
 
 - **Throughput**: 60,000+ requests per second (on capable hardware)
 - **Latency**: P99 < 50ms overhead
-- **Memory**: Pre-allocated buffers minimize allocations during tests
+- **Memory**: Pre-allocated buffers minimize allocations during tests. A
+  design send whose body is past 4 MiB (`MAX_PARSED_RESPONSE_BODY_BYTES`)
+  answers without the parsed `body` (#2544). Two glibc settings keep what a
+  large send allocated from staying resident for the session in the HTTP
+  worker thread's arena: the daemon fixes the mmap threshold at 4 MiB at start
+  (`platform::return_large_frees_to_os`, `OWN_MAPPING_MIN_BYTES`), so a block
+  that large is unmapped when freed, and a buffered design send whose body was
+  past 1 MiB calls `malloc_trim` once it has answered
+  (`platform::release_free_heap`, `RELEASE_HEAP_AFTER_BODY_BYTES`), which
+  returns the pages a parsed body's freed nodes hold. The load path does
+  neither per request.
 - **Database**: Batch writes avoid contention during high-RPS tests
 
 ## Configuration

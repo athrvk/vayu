@@ -27,6 +27,8 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/db/sibling_order.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -573,10 +575,17 @@ bool oauth2_loses_settings (const json& config) {
     const auto prefix            = config.find ("headerPrefix");
     const bool empty_prefix = prefix != config.end () && prefix->is_string () &&
     prefix->get_ref<const std::string&> ().empty ();
-    return !text_of (config, "audience").empty () ||
-    !text_of (config, "resource").empty () || !flag_of (config, "autoFetchToken", true) ||
+    return !flag_of (config, "autoFetchToken", true) ||
     !flag_of (config, "autoRefreshToken", true) ||
     (!query_name.empty () && query_name != "access_token") || empty_prefix;
+}
+
+/// The `credentialsId` an import derives for a block naming no `tokenName`
+/// (`promoted_cache_separator` in `import_document.cpp`): written back as a
+/// `tokenName`, it would be read as one the user chose.
+std::string import_derived_credentials_id (const json& config) {
+    const std::string audience = text_of (config, "audience");
+    return audience.empty () ? text_of (config, "resource") : audience;
 }
 
 /// The value of one derived `oauth2` attribute, or nothing when it is not
@@ -588,7 +597,9 @@ oauth2_derived (std::string_view key, const json& config, const std::string& gra
     }
     if (key == "tokenName") {
         const std::string token = text_of (config, "credentialsId");
-        return token.empty () ? std::nullopt : std::make_optional (json (token));
+        return token.empty () || token == import_derived_credentials_id (config) ?
+        std::nullopt :
+        std::make_optional (json (token));
     }
     if (key == "useBrowser") {
         return text_of (config, "grantType") == "authorization_code" ?
@@ -614,10 +625,71 @@ oauth2_derived (std::string_view key, const json& config, const std::string& gra
     json (text_of (config, "credentialsPlacement") == "body" ? "body" : "header"));
 }
 
+/// The Postman `send_as` of a stored parameter row of @p list, or nothing for
+/// a `sendAs` Postman has no name for. An authorization request's rows ride
+/// the authorize URL, so they are all `request_url`.
+std::optional<std::string_view>
+postman_send_as (const json& row, const postman::OAuth2ParamList& list) {
+    if (!list.targeted) {
+        return std::string_view ("request_url");
+    }
+    const auto declared = row.find ("sendAs");
+    if (declared == row.end () || declared->is_null ()) {
+        return std::string_view ("request_body");
+    }
+    const std::string named = declared->is_string () ? declared->get<std::string> () : "";
+    for (const postman::OAuth2ParamTarget& target : postman::OAUTH2_PARAM_TARGETS) {
+        if (named == target.vayu) {
+            return target.postman;
+        }
+    }
+    return std::nullopt;
+}
+
+json postman_param_row (const std::string& key, const json& value, bool enabled, std::string_view send_as) {
+    json row;
+    row["key"]     = key;
+    row["value"]   = value;
+    row["enabled"] = enabled;
+    row["send_as"] = send_as;
+    return row;
+}
+
+/**
+ * @p list's rows of @p config as Postman's `{key, value, enabled, send_as}`,
+ * a row with no string key or an unknown `sendAs` left out. The token
+ * request's list opens with the config's `audience` and `resource`, the rows
+ * an import promotes them from (issue #2536).
+ */
+json postman_param_rows (const json& config, const postman::OAuth2ParamList& list) {
+    json rows = json::array ();
+    if (list.vayu == vayu::http::oauth::TOKEN_PARAMS) {
+        for (const char* field : { "audience", "resource" }) {
+            if (const std::string value = text_of (config, field); !value.empty ()) {
+                rows.push_back (postman_param_row (field, value, true, "request_body"));
+            }
+        }
+    }
+    const auto stored = config.find (std::string (list.vayu));
+    if (stored == config.end () || !stored->is_array ()) {
+        return rows;
+    }
+    for (const json& row : *stored) {
+        const std::string key = text_of (row, "key");
+        const std::optional<std::string_view> send_as =
+        key.empty () ? std::nullopt : postman_send_as (row, list);
+        if (send_as) {
+            rows.push_back (postman_param_row (key, text_of (row, "value"),
+            flag_of (row, "enabled", true), *send_as));
+        }
+    }
+    return rows;
+}
+
 /**
  * An `oauth2` attribute list. Postman lists attributes in the order a user
  * last edited them, so no one order is canonical; this is the one its most
- * complete recent exports show.
+ * complete recent exports show, the extra request parameter lists last.
  */
 json oauth2_attributes (const json& config, const json& original, Walk& walk) {
     const std::string grant = grant_type_of (config);
@@ -635,6 +707,11 @@ json oauth2_attributes (const json& config, const json& original, Walk& walk) {
             }
         } else if (std::optional<json> value = oauth2_derived (key, config, grant)) {
             out.push_back (attribute (std::string (key), *value));
+        }
+    }
+    for (const postman::OAuth2ParamList& list : postman::OAUTH2_PARAM_LISTS) {
+        if (json rows = postman_param_rows (config, list); !rows.empty ()) {
+            out.push_back (attribute (std::string (list.postman), rows));
         }
     }
     if (oauth2_loses_settings (config)) {
@@ -878,10 +955,16 @@ std::string raw_language (const json& body, const std::string& mode, const std::
     return text_of (reimported, "mode") == mode ? declared : mode;
 }
 
-/// One form-data part. A file part names the path it uploads.
+/// One form-data part. A file part names the path it uploads; either kind
+/// carries its own `contentType` when it has one.
 json form_part (const json& field, Walk& walk) {
     if (text_of (field, "type") != "file") {
-        return postman_row (field, RowShape::Typed);
+        json part = postman_row (field, RowShape::Typed);
+        if (const std::string content_type = text_of (field, "contentType");
+        !content_type.empty ()) {
+            part["contentType"] = content_type;
+        }
+        return part;
     }
     json out;
     out["key"] = text_of (field, "key");
@@ -1131,7 +1214,10 @@ std::string_view postman_implied_content_type (const std::optional<json>& body) 
     if (language == "json") {
         return "application/json";
     }
-    return language == "xml" ? "application/xml" : std::string_view ();
+    if (language == "xml") {
+        return "application/xml";
+    }
+    return postman::content_type_of_language (language);
 }
 
 /**
@@ -1961,15 +2047,36 @@ Walk& walk) {
     return item;
 }
 
-/// Folders first, then requests: the order the sidebar lists them in, and
-/// the one an import reads back into the same `order` values.
+/// Sub-folders and requests as one list in sibling order, the order the
+/// sidebar lists them and a run visits them in (#2535): Postman reads an
+/// `item[]` in document order, so an import of this file lists them the same.
 json postman_items (const PostmanExportFolder& folder, const json& auth_in_force, Walk& walk) {
-    json items = json::array ();
-    for (const PostmanExportFolder& child : folder.folders) {
-        items.push_back (postman_folder_item (child, auth_in_force, walk));
+    std::vector<vayu::db::SiblingSlot> slots;
+    slots.reserve (folder.folders.size () + folder.requests.size ());
+    for (std::size_t at = 0; at < folder.folders.size (); ++at) {
+        slots.push_back ({ vayu::db::SiblingKind::Folder, at });
     }
-    for (const PostmanExportRequest& request : folder.requests) {
-        items.push_back (postman_request_item (request, auth_in_force, walk));
+    for (std::size_t at = 0; at < folder.requests.size (); ++at) {
+        slots.push_back ({ vayu::db::SiblingKind::Request, at });
+    }
+    const auto order_of = [&folder] (const vayu::db::SiblingSlot& slot) {
+        return slot.kind == vayu::db::SiblingKind::Folder ?
+        folder.folders.at (slot.index).order :
+        folder.requests.at (slot.index).order;
+    };
+    // The tie rule is `sibling_order.hpp`'s, a folder first; stable, so each
+    // kind keeps the order it arrived in.
+    std::stable_sort (slots.begin (), slots.end (),
+    [&] (const vayu::db::SiblingSlot& a, const vayu::db::SiblingSlot& b) {
+        const int left  = order_of (a);
+        const int right = order_of (b);
+        return left != right ? left < right : a.kind < b.kind;
+    });
+    json items = json::array ();
+    for (const vayu::db::SiblingSlot& slot : slots) {
+        items.push_back (slot.kind == vayu::db::SiblingKind::Folder ?
+        postman_folder_item (folder.folders.at (slot.index), auth_in_force, walk) :
+        postman_request_item (folder.requests.at (slot.index), auth_in_force, walk));
     }
     return items;
 }

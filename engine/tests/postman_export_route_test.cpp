@@ -4,8 +4,10 @@
  *        the round trip of each through the importer.
  *
  * `fixtures/postman-export-roundtrip.json` is written in Postman's own export
- * shape and exercises every field the importer reads; importing it and
- * exporting the collection gives back the same bytes, `_postman_id` aside.
+ * shape and exercises every field the importer reads, with requests listed
+ * before and between sub-folders (#2535); importing it and exporting the
+ * collection gives back the same bytes, item order included, `_postman_id`
+ * aside.
  * The Postman documents of the import corpus (`fixtures/import-conformance.json`,
  * byte-identical to the renderer's old fixtures) come back equal after the
  * normalisation `normalise` documents, and for every one of them import ->
@@ -296,6 +298,61 @@ TEST_F (PostmanExportRouteTest, ADuplicatedImportExportsTheSameProtocolBehavior)
     const std::string original = exported_protocol_behavior (text, "Raw and cookieless");
     ASSERT_FALSE (original.empty ());
     EXPECT_EQ (exported_protocol_behavior (text, "Raw and cookieless (Copy)"), original);
+}
+
+/// The stored auth of the request named @p name under @p root, parsed.
+json stored_auth (vayu::db::Database& db, const std::string& root, const std::string& name) {
+    const auto row = request_named (db, root, name);
+    return row ? json::parse (row->auth) : json ();
+}
+
+// Issue #2536: an OAuth 2.0 block's audience, resource and extra request
+// parameters survive import -> export -> import once the user has edited the
+// auth, so the exporter writes the block from the config rather than the kept
+// source. Mutation check: drop the param lists from `oauth2_attributes` and
+// the second import loses every row.
+TEST_F (PostmanExportRouteTest, OAuth2RequestParamsSurviveAnExportOfAnEditedAuth) {
+    const std::string id = import_text (postman_collection (R"(
+        {"name":"Auth0","request":{"method":"GET","url":"https://x.com/a",
+          "auth":{"type":"oauth2","oauth2":[
+            {"key":"grant_type","value":"authorization_code","type":"string"},
+            {"key":"accessTokenUrl","value":"https://idp/token","type":"string"},
+            {"key":"authUrl","value":"https://idp/authorize","type":"string"},
+            {"key":"clientId","value":"cid","type":"string"},
+            {"key":"scope","value":"read","type":"string"},
+            {"key":"tokenRequestParams","value":[
+              {"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"},
+              {"key":"org","value":"o-1","enabled":true,"send_as":"request_url"},
+              {"key":"X-Trace","value":"t","enabled":true,"send_as":"request_header"}],"type":"any"},
+            {"key":"authRequestParams","value":[
+              {"key":"resource","value":"urn:r","enabled":true,"send_as":"request_body"},
+              {"key":"prompt","value":"login","enabled":true,"send_as":"request_url"}],"type":"any"},
+            {"key":"refreshRequestParams","value":[
+              {"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"}],"type":"any"}]}}})"));
+    json auth            = stored_auth (*db_, id, "Auth0");
+    ASSERT_TRUE (auth.contains ("config")) << auth.dump ();
+    EXPECT_EQ (auth["config"]["audience"], "https://api");
+    EXPECT_EQ (auth["config"]["resource"], "urn:r");
+    EXPECT_EQ (auth["config"]["credentialsId"], "https://api");
+
+    auth["config"]["scope"] = "read write";
+    const auto row          = request_named (*db_, id, "Auth0");
+    ASSERT_HAS_VALUE (row);
+    auto [status, updated] = vayu::http::routes::update_request_response (
+    *db_, row->id, json{ { "auth", auth } });
+    ASSERT_EQ (status, 200) << updated.dump ();
+    const json edited = stored_auth (*db_, id, "Auth0");
+    ASSERT_FALSE (edited.contains ("postman"))
+    << "the kept source must not answer the export";
+
+    const std::string text = export_text (id);
+    EXPECT_EQ (text.find ("\"tokenName\""), std::string::npos)
+    << "a credentialsId the import derived is not a token name";
+    const std::string again = import_text (text);
+    json reimported         = stored_auth (*db_, again, "Auth0");
+    EXPECT_EQ (reimported["config"], edited["config"]);
+    EXPECT_EQ (without_postman_id (export_text (again)), without_postman_id (text))
+    << "a second round trip changes nothing";
 }
 
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
@@ -730,7 +787,9 @@ TEST_F (PostmanExportRouteTest, ExportsTheNamedSubtreeOnly) {
     ordered doc = ordered::parse (body["text"].get<std::string> ());
     EXPECT_EQ (doc["info"]["name"], "Admin");
     EXPECT_EQ (doc["info"]["description"], "Admin-only endpoints.");
-    EXPECT_EQ (doc["item"][0]["name"], "Deep");
+    // A request before the sub-folder, as the fixture lists them (#2535).
+    EXPECT_EQ (doc["item"][0]["name"], "Delete me");
+    EXPECT_EQ (doc["item"][1]["name"], "Deep");
     EXPECT_EQ (body["notes"]["requestsExported"], 3);
     EXPECT_EQ (body["notes"]["foldersExported"], 1);
 }
@@ -739,14 +798,16 @@ TEST_F (PostmanExportRouteTest, ExportsTheNamedSubtreeOnly) {
 
 /// The Postman collection documents of `fixtures/import-conformance.json` -
 /// the renderer's retired fixtures, byte-identical to
-/// `app/src/services/importers/__fixtures__/postman-v2{0,1}.json`.
+/// `app/src/services/importers/__fixtures__/postman-v2{0,1}.json` - and the
+/// interleaved one #2535 added, whose requests sit before and between folders.
 std::vector<std::pair<std::string, std::string>> corpus_documents () {
     json fixture =
     json::parse (read_text (fixture_path ("import-conformance.json")));
     std::vector<std::pair<std::string, std::string>> out;
     for (const json& entry : fixture.at ("cases")) {
         const std::string name = entry.at ("name").get<std::string> ();
-        if (name == "postman-v21" || name == "postman-v20" || name == "postman-bodies") {
+        if (name == "postman-v21" || name == "postman-v20" ||
+        name == "postman-bodies" || name == "postman-interleaved") {
             out.emplace_back (name, entry.at ("document").get<std::string> ());
         }
     }

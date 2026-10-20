@@ -31,8 +31,10 @@
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
@@ -55,6 +57,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -85,13 +88,19 @@ postman_raw_body (const std::string& content, const std::string* language) {
             }
         }
     }
-    // No language Vayu has a mode for: sniff JSON, and keep what was declared
-    // so the export can say it again rather than the mode's own name.
+    // A language Vayu has no mode for is plain text on the wire, as in
+    // Postman, whatever the content looks like (#2539); keep the declaration
+    // so the export can say it again and `with_required_content_type` can
+    // write the row `html` and `javascript` need.
+    if (language != nullptr && !language->empty ()) {
+        return nlohmann::ordered_json{ { "mode", "text" },
+            { "content", content }, { "rawLanguage", *language } };
+    }
+    // No language declared: sniff JSON, as an unlabelled body has always been.
     const bool is_json =
     utils::parse_ordered_json (content, utils::ORDERED_JSON_UNBOUNDED).has_value ();
     return nlohmann::ordered_json{ { "mode", is_json ? "json" : "text" },
-        { "content", content },
-        { "rawLanguage", language == nullptr ? std::string () : *language } };
+        { "content", content }, { "rawLanguage", std::string () } };
 }
 
 /**
@@ -351,19 +360,27 @@ int count_examples (const json& collections) {
     return count;
 }
 
-/// The Content-Type a body mode must be sent with, or "" when it needs none.
+/// The Content-Type @p body must be sent with, or "" when it needs no row.
 ///
 /// The app-side half of the engine's own `implied_content_type`
 /// (`http/form_body.cpp`), which is what actually reaches the wire; this one
 /// writes the header *row* an imported request carries, so the user can see it.
 /// `json` and `text` are deliberately absent: the engine derives each at send
 /// time (`application/json`, `text/plain`) with no row, as the Body panel
-/// writes none for `text`.
-std::string required_content_type (const std::string& mode) {
+/// writes none for `text`. A `text` body that declared `html` or `javascript`
+/// is the exception, because those go out under their own type (#2539).
+std::string required_content_type (const json& body) {
+    const std::string mode = body.at ("mode").get<std::string> ();
     if (mode == "graphql" || mode == "jsonrpc") {
         return "application/json";
     }
-    return mode == "xml" ? "application/xml" : std::string ();
+    if (mode == "xml") {
+        return "application/xml";
+    }
+    const std::string* language = as_str (prop (&body, "rawLanguage"));
+    return language == nullptr ?
+    std::string () :
+    std::string (postman::content_type_of_language (*language));
 }
 
 /**
@@ -379,8 +396,7 @@ std::string required_content_type (const std::string& mode) {
  * none, so none is added.
  */
 json with_required_content_type (json headers, const json& body, bool refused = false) {
-    const std::string required =
-    required_content_type (body.at ("mode").get<std::string> ());
+    const std::string required = required_content_type (body);
     if (required.empty () || refused) {
         return headers;
     }
@@ -533,21 +549,179 @@ std::string detail_text (const std::map<std::string, std::string>& detail, const
 }
 
 /**
- * `mapPostmanOAuth2(d)`: a Postman v2.1 `oauth2` block.
+ * What mapping a Postman `oauth2` block could not carry, one counter per
+ * tally kind. `PostmanCounts` extends it, so the per-request counter table
+ * can name these too.
+ */
+struct OAuth2ImportLosses {
+    // `oauth2_dropped_field`: a seeded `accessToken` beside an explicit grant
+    // config. Vayu fetches through the grant and has no field to seed.
+    int oauth2_saved_token = 0;
+    // `oauth2_state_regenerated`: a fixed `state`. Vayu generates and checks
+    // its own per authorization attempt, so this changes nothing sent.
+    int oauth2_state_regenerated = 0;
+    // `oauth2_unmapped_param`: an extra request parameter row not carried
+    // (`oauth2_param_row`), and the keys of those that had one.
+    int oauth2_unmapped_param = 0;
+    std::vector<std::string> oauth2_unmapped_param_names;
+};
+
+/// The raw value of @p key in a Postman auth detail block, either schema
+/// shape: what `auth_detail` flattens to text, for a member that is a list.
+/// A repeated key reads as its last entry, as it does there.
+const json* detail_node (const json* node, std::string_view key) {
+    if (node != nullptr && node->is_object ()) {
+        return prop (node, key);
+    }
+    const json* found = nullptr;
+    if (node == nullptr || !node->is_array ()) {
+        return found;
+    }
+    for (const json& entry : *node) {
+        const json* named = prop (&entry, "key");
+        if (truthy (named) && js_string_of (*named) == key) {
+            found = prop (&entry, "value");
+        }
+    }
+    return found;
+}
+
+/// Where a Postman parameter row's `send_as` sends it, as Vayu's `sendAs`, or
+/// nothing for a value Vayu has no target for. A row with no `send_as` is
+/// sent in the body.
+std::optional<std::string_view> oauth2_param_target (const json& row) {
+    const json* declared = prop (&row, "send_as");
+    if (declared == nullptr || declared->is_null ()) {
+        return std::string_view ("body");
+    }
+    const std::string* named = as_str (declared);
+    for (const postman::OAuth2ParamTarget& target : postman::OAUTH2_PARAM_TARGETS) {
+        if (named != nullptr && *named == target.postman) {
+            return target.vayu;
+        }
+    }
+    return std::nullopt;
+}
+
+/// Whether a row is the config field of its name (`OAuth2ParamList::config_fields`).
+bool is_config_field_param (std::string_view key,
+const postman::OAuth2ParamList& list,
+std::string_view target) {
+    return list.config_fields && target == "body" && (key == "audience" || key == "resource");
+}
+
+/**
+ * Writes @p value to the config field @p key unless an earlier list already
+ * did; false when that earlier value differs, so this row is carried in its
+ * own list instead of contradicting the first.
+ */
+bool promote_param (json& config, const std::string& key, const std::string& value) {
+    const auto held = config.find (key);
+    if (held == config.end ()) {
+        config[key] = value;
+        return true;
+    }
+    return *held == value;
+}
+
+/**
+ * One enabled Postman parameter row of @p list, as the row Vayu carries, or
+ * nothing when it is not carried: promoted into @p config when it is a field
+ * the engine already sends, or counted in @p losses when it has no key, a
+ * `send_as` Vayu has no target for, or a key the engine writes itself
+ * (`RESERVED_PARAM_NAMES`). Only the key is recorded, never the value, which
+ * can be a credential. The value is kept as typed, `{{ x }}` tightened as
+ * every imported value is.
+ */
+std::optional<json> oauth2_param_row (const json& row,
+const postman::OAuth2ParamList& list,
+json& config,
+OAuth2ImportLosses& losses) {
+    const json* declared_key = prop (&row, "key");
+    if (!truthy (declared_key)) {
+        losses.oauth2_unmapped_param += 1;
+        return std::nullopt;
+    }
+    const std::string key                        = as_string (declared_key);
+    const std::optional<std::string_view> target = oauth2_param_target (row);
+    if (!target || std::ranges::contains (vayu::http::oauth::RESERVED_PARAM_NAMES, key)) {
+        losses.oauth2_unmapped_param += 1;
+        losses.oauth2_unmapped_param_names.push_back (key);
+        return std::nullopt;
+    }
+    const std::string value = normalize_vars (as_string (prop (&row, "value")));
+    if (is_config_field_param (key, list, *target) && promote_param (config, key, value)) {
+        return std::nullopt;
+    }
+    json carried = { { "key", key }, { "value", value }, { "enabled", true } };
+    if (list.targeted) {
+        carried["sendAs"] = *target;
+    }
+    return std::make_optional (std::move (carried));
+}
+
+/**
+ * A Postman block's `tokenRequestParams`, `authRequestParams` and
+ * `refreshRequestParams` (issue #2536) read from @p attributes, the raw
+ * detail block, into @p config: each list's carried rows as the config list
+ * `OAUTH2_PARAM_LISTS` names, absent when it carries none. A row Postman has
+ * switched off (`enabled: false`) is not sent there and is not read.
+ */
+void read_oauth2_params (json& config, const json* attributes, OAuth2ImportLosses& losses) {
+    for (const postman::OAuth2ParamList& list : postman::OAUTH2_PARAM_LISTS) {
+        const json* rows = detail_node (attributes, list.postman);
+        if (rows == nullptr || !rows->is_array ()) {
+            continue;
+        }
+        json carried = json::array ();
+        for (const json& row : *rows) {
+            const json* enabled = prop (&row, "enabled");
+            if (enabled != nullptr && enabled->is_boolean () && !enabled->get<bool> ()) {
+                continue;
+            }
+            if (std::optional<json> kept = oauth2_param_row (row, list, config, losses)) {
+                carried.push_back (std::move (*kept));
+            }
+        }
+        if (!carried.empty ()) {
+            config[std::string (list.vayu)] = std::move (carried);
+        }
+    }
+}
+
+/// The audience a promoted row named, else its resource, else "": what keeps
+/// two imports differing only in either from sharing one cached token, since
+/// the cache key reads neither (`oauth::cache_key`).
+std::string promoted_cache_separator (const json& config) {
+    for (const char* field : { "audience", "resource" }) {
+        if (const json* value = prop (&config, field); truthy (value)) {
+            return as_string (value);
+        }
+    }
+    return {};
+}
+
+/**
+ * `mapPostmanOAuth2(d)`: a Postman v2.1 `oauth2` block, @p detail flattened
+ * to text and @p attributes the block as written, for the members that are
+ * lists.
  *
  * A minimal export carrying only a pre-fetched `accessToken` imports as a
- * bearer token, which is immediately executable. @p dropped_field counts an
- * oauth2 detail Vayu has nowhere to carry (issue #1460): `state`, which Vayu
- * always generates and validates itself per authorization attempt rather than
- * storing (`app/src/types/domain.ts`'s `OAuth2Config`, where a fixed imported
- * value would undermine the CSRF check it exists for), and a pre-fetched
- * `accessToken` that arrives *alongside* an explicit grant config, where the
- * general shape below always drives a fresh fetch through that grant and a
- * seed token has no field to ride in. `tokenName` is not counted here - it
- * lands in `credentialsId` below, the field Vayu's own token cache already
- * reads to keep otherwise-identical configs apart.
+ * bearer token, which is immediately executable. @p losses counts what Vayu
+ * has nowhere to carry (issue #1460): `state`, which Vayu always generates
+ * and validates itself per authorization attempt rather than storing (a
+ * fixed imported value would undermine the CSRF check it exists for), a
+ * pre-fetched `accessToken` that arrives *alongside* an explicit grant
+ * config, where the general shape below always drives a fresh fetch through
+ * that grant and a seed token has no field to ride in, and an extra request
+ * parameter `read_oauth2_params` cannot carry. `tokenName` is not counted
+ * here - it lands in `credentialsId` below, the field Vayu's own token cache
+ * already reads to keep otherwise-identical configs apart. With no
+ * `tokenName`, a promoted `audience` or `resource` lands there instead.
  */
-json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& dropped_field) {
+json map_postman_oauth2 (const std::map<std::string, std::string>& detail,
+const json* attributes,
+OAuth2ImportLosses& losses) {
     // Truthiness on all four, so a key present and empty is as good as absent.
     const auto stated = [&detail] (const char* key) {
         const std::string* value = detail_of (detail, key);
@@ -573,10 +747,10 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
         return json{ { "mode", "bearer" }, { "token", token } };
     }
     if (has_grant_config && stated ("accessToken")) {
-        dropped_field += 1;
+        losses.oauth2_saved_token += 1;
     }
     if (stated ("state")) {
-        dropped_field += 1;
+        losses.oauth2_state_regenerated += 1;
     }
 
     std::string grant_type = "client_credentials";
@@ -610,11 +784,15 @@ json map_postman_oauth2 (const std::map<std::string, std::string>& detail, int& 
     // Postman's "useBrowser" is authorize-via-system-browser; embedded is the
     // inverse of it.
     config["useEmbeddedBrowser"] = detail_is (detail, "useBrowser", "false");
+    read_oauth2_params (config, attributes, losses);
     if (stated ("tokenName")) {
         // Postman's `tokenName` labels a saved token; `credentialsId` is
         // Vayu's analogous field, already read by the token cache key to
         // keep otherwise-identical configs apart (issue #1460).
         config["credentialsId"] = detail_text (detail, "tokenName");
+    } else if (const std::string separator = promoted_cache_separator (config);
+    !separator.empty ()) {
+        config["credentialsId"] = separator;
     }
     return oauth2_auth (std::move (config));
 }
@@ -772,9 +950,11 @@ json map_swagger_oauth2 (const json* scheme) {
 /// request) as a Vayu auth. @p skipped_unsupported_auth counts a scheme Vayu
 /// has no config shape for (a type the schema does not define, or a
 /// non-string `type`) - not `noauth`, whose `{mode: "none"}` answer is
-/// the correct mapping rather than a loss. @p oauth2_dropped_field is
-/// `map_postman_oauth2`'s counter, threaded through (issue #1460).
-json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
+/// the correct mapping rather than a loss. @p oauth2_losses is
+/// `map_postman_oauth2`'s, threaded through (issues #1460, #2536).
+json map_postman_auth (const json* auth,
+int& skipped_unsupported_auth,
+OAuth2ImportLosses& oauth2_losses) {
     const json* node = as_record (auth);
     if (node == nullptr || !truthy (prop (node, "type"))) {
         return json{ { "mode", "inherit" } };
@@ -785,7 +965,8 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
         skipped_unsupported_auth += 1;
         return json{ { "mode", "none" } };
     }
-    const std::map<std::string, std::string> detail = auth_detail (prop (node, *type));
+    const json* attributes                          = prop (node, *type);
+    const std::map<std::string, std::string> detail = auth_detail (attributes);
 
     if (*type == "bearer") {
         return json{ { "mode", "bearer" }, { "token", detail_text (detail, "token") } };
@@ -800,7 +981,7 @@ json map_postman_auth (const json* auth, int& skipped_unsupported_auth, int& oau
             { "in", detail_is (detail, "in", "query") ? "query" : "header" } };
     }
     if (*type == "oauth2") {
-        return map_postman_oauth2 (detail, oauth2_dropped_field);
+        return map_postman_oauth2 (detail, attributes, oauth2_losses);
     }
     // AWS Signature is `awsv4` on the wire (the v2.1.0/v2.0.0 schema's enum) and
     // `aws` internally; the two names diverge, so matching on `"aws"` here is
@@ -864,9 +1045,9 @@ json postman_auth_source (const json& node, const std::string& type) {
  * @p mapped with the Postman `auth` it came from as its `postman` member,
  * when the exporter would not write that block back from @p mapped alone:
  * attributes Vayu has no field for (`tokenType`, `state`, a seeded
- * `accessToken` beside a grant, `authRequestParams`), a type Vayu stores as
- * another mode (an `oauth2` block holding only a seeded token, sent as a
- * bearer token), attribute order and types, or `{{ x }}` spacing the
+ * `accessToken` beside a grant, a parameter row not carried), a type Vayu
+ * stores as another mode (an `oauth2` block holding only a seeded token, sent
+ * as a bearer token), attribute order and types, or `{{ x }}` spacing the
  * importer tightened. Nothing sends it: the exporter writes it verbatim
  * while mapping it again still gives the stored auth, and falls back to
  * the stored auth once the user has changed it (`postman_export.cpp`).
@@ -909,7 +1090,7 @@ std::string to_method (const json* declared, bool* unsupported = nullptr) {
 }
 
 /// What a Postman parse accumulates across its recursive walk.
-struct PostmanCounts {
+struct PostmanCounts : OAuth2ImportLosses {
     ImportOptions options;
     int requests       = 0;
     int folders        = 0;
@@ -927,10 +1108,6 @@ struct PostmanCounts {
     // An item-level `protocolProfileBehavior` setting Vayu stores for the
     // export but does not apply - see `names_unapplied_protocol_behavior`.
     int skipped_protocol_behavior = 0;
-    // A Postman oauth2 detail carrying `state` (never stored) or a pre-fetched
-    // `accessToken` alongside an explicit grant config (nowhere to seed it) -
-    // see `map_postman_oauth2` (issue #1460).
-    int oauth2_dropped_field = 0;
     // `client_certificates` registry candidates built from a request's own
     // `certificate` (issue #1656), one per distinct (host, port) this import
     // resolved a usable candidate for - see `pm_certificate`. Deduped by
@@ -1015,20 +1192,24 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
         const json single = json::array ({ row });
         const json mapped = map_key_values (&single);
         const json* type  = prop (&row, "type");
-        if (type == nullptr || *type != "file") {
-            for (const json& entry : mapped) {
-                out.push_back (entry);
-            }
+        if (mapped.empty ()) {
             continue;
         }
-        if (mapped.empty ()) {
+        const std::string* content_type = as_str (prop (&row, "contentType"));
+        if (type == nullptr || *type != "file") {
+            // A text part's own type (`{"contentType": "application/json"}`),
+            // which Postman sends as that part's Content-Type (#2539).
+            json text_part = mapped[0];
+            if (content_type != nullptr && !content_type->empty ()) {
+                text_part["contentType"] = *content_type;
+            }
+            out.push_back (std::move (text_part));
             continue;
         }
         std::vector<std::string> paths = file_part_paths (prop (&row, "src"));
         if (paths.empty ()) {
             paths.emplace_back ();
         }
-        const std::string* content_type = as_str (prop (&row, "contentType"));
         for (const std::string& path : paths) {
             out.push_back (imported_file_part (mapped[0], path, content_type));
         }
@@ -1597,7 +1778,9 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "file_body", &PostmanCounts::file_bodies },
 { "unsupported_method", &PostmanCounts::skipped_unsupported_method },
 { "unsupported_auth", &PostmanCounts::skipped_unsupported_auth },
-{ "oauth2_dropped_field", &PostmanCounts::oauth2_dropped_field },
+{ "oauth2_dropped_field", &PostmanCounts::oauth2_saved_token },
+{ "oauth2_state_regenerated", &PostmanCounts::oauth2_state_regenerated },
+{ "oauth2_unmapped_param", &PostmanCounts::oauth2_unmapped_param },
 { "url_without_raw", &PostmanCounts::skipped_url_without_raw },
 { "disabled_body", &PostmanCounts::disabled_body },
 { "certificate", &PostmanCounts::skipped_certificate },
@@ -1653,7 +1836,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     const json* rq     = declared == nullptr ? &empty : declared;
     auto [url, params] = pm_url (prop (rq, "url"), counts);
     json auth          = with_postman_source (
-    map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts.oauth2_dropped_field),
+    map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts),
     prop (rq, "auth"));
     if (is_data_only_auth (auth)) {
         counts.non_executable += 1;
@@ -1717,11 +1900,11 @@ json pm_request (const json* item, PostmanCounts& counts) {
  * must not collapse into `none`, which a descendant's `inherit` walks past.
  * Collections never inherit, so `inherit` and absent both become `none`.
  */
-json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oauth2_dropped_field) {
+json collection_auth (const json* auth, int& skipped_unsupported_auth, OAuth2ImportLosses& oauth2_losses) {
     if (const json* type = prop (auth, "type"); type != nullptr && *type == "noauth") {
         return json{ { "mode", "noauth" } };
     }
-    json mapped = map_postman_auth (auth, skipped_unsupported_auth, oauth2_dropped_field);
+    json mapped = map_postman_auth (auth, skipped_unsupported_auth, oauth2_losses);
     return mapped.at ("mode") == "inherit" ?
     json{ { "mode", "none" } } :
     with_postman_source (std::move (mapped), auth);
@@ -1730,6 +1913,10 @@ json collection_auth (const json* auth, int& skipped_unsupported_auth, int& oaut
 json pm_folder (const json* node, PostmanCounts& counts) {
     json children = json::array ();
     json requests = json::array ();
+    // Postman runs a folder's items in document order, a sub-folder where it
+    // sits (#2535). Each child keeps its place as its draft's `order`, so the
+    // two lists below flatten back into one sibling list.
+    int position = 0;
     if (const json* items = prop (node, "item"); items != nullptr && items->is_array ()) {
         for (const json& child : *items) {
             // A `null` or scalar entry - hand-edited or script-filtered JSON,
@@ -1745,8 +1932,10 @@ json pm_folder (const json* node, PostmanCounts& counts) {
             nested != nullptr && nested->is_array ()) {
                 counts.folders += 1;
                 children.push_back (pm_folder (entry, counts));
+                children.back ()["order"] = position++;
             } else if (truthy (prop (entry, "request"))) {
                 requests.push_back (pm_request_named (entry, counts));
+                requests.back ()["order"] = position++;
             }
         }
     }
@@ -1770,8 +1959,8 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     collection["description"] = pm_description_text (text, nested);
     collection["variables"] =
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
-    collection["auth"] = collection_auth (prop (node, "auth"),
-    counts.skipped_unsupported_auth, counts.oauth2_dropped_field);
+    collection["auth"] =
+    collection_auth (prop (node, "auth"), counts.skipped_unsupported_auth, counts);
     if (is_data_only_auth (collection["auth"])) {
         counts.non_executable += 1;
         counts.named["non_executable_auth"].push_back (
@@ -1798,7 +1987,9 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("malformed_item", counts.skipped_malformed);
     tally.add ("unsupported_method", counts.skipped_unsupported_method);
     tally.add ("unsupported_auth", counts.skipped_unsupported_auth);
-    tally.add ("oauth2_dropped_field", counts.oauth2_dropped_field);
+    tally.add ("oauth2_dropped_field", counts.oauth2_saved_token);
+    tally.add ("oauth2_state_regenerated", counts.oauth2_state_regenerated);
+    tally.add ("oauth2_unmapped_param", counts.oauth2_unmapped_param);
     tally.add ("url_without_raw", counts.skipped_url_without_raw);
     tally.add ("variable_metadata", counts.skipped_variable_metadata);
     tally.add ("disabled_body", counts.disabled_body);
@@ -1808,6 +1999,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     for (const auto& [kind, names] : counts.named) {
         tally.name_requests (kind, names);
     }
+    tally.name_dropped ("oauth2_unmapped_param", counts.oauth2_unmapped_param_names);
 
     json meta;
     meta["format"]            = format;
@@ -2330,12 +2522,57 @@ class InsomniaTree {
         return request;
     }
 
-    /** One child of a folder, by the resource type it declares. */
-    void add_child (const json* child, json& children, json& requests) {
+    static bool becomes_draft (const json* resource) {
+        return type_is (resource, "request_group") || type_is (resource, "request");
+    }
+
+    /// The finite number Insomnia sorts a resource by, or null.
+    static const json* sort_key_of (const json* resource) {
+        const json* key = prop (resource, "metaSortKey");
+        return key != nullptr && key->is_number () &&
+        std::isfinite (key->get<double> ()) ?
+        key :
+        nullptr;
+    }
+
+    /**
+     * Puts @p siblings in the order Insomnia lists them, ascending
+     * `metaSortKey`, folders and requests together (#2573), and answers whether
+     * it did. A parent where any sibling that becomes a draft lacks a numeric
+     * key is left as it is: a partial order would place the keyed ones against
+     * the others by a guess, so it states none and the parent keeps its
+     * folders-first listing. What becomes no draft (gRPC, WebSocket, ...) takes
+     * no position and is moved behind the rest.
+     */
+    static bool rank_by_sort_key (std::vector<const json*>& siblings) {
+        const bool all_keyed = std::ranges::all_of (siblings, [] (const json* sibling) {
+            return !becomes_draft (sibling) || sort_key_of (sibling) != nullptr;
+        });
+        if (!all_keyed) {
+            return false;
+        }
+        const auto drafts_end =
+        std::stable_partition (siblings.begin (), siblings.end (),
+        [] (const json* sibling) { return becomes_draft (sibling); });
+        std::stable_sort (siblings.begin (), drafts_end,
+        [] (const json* before, const json* after) {
+            return *sort_key_of (before) < *sort_key_of (after);
+        });
+        return true;
+    }
+
+    /**
+     * One child of a folder, by the resource type it declares. Answers the
+     * draft it added to @p children or @p requests, or null for what Vayu has
+     * no shape for.
+     */
+    json* add_child (const json* child, json& children, json& requests) {
         if (type_is (child, "request_group")) {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
-        } else if (type_is (child, "request")) {
+            return &children.back ();
+        }
+        if (type_is (child, "request")) {
             const int file_bodies           = counts_.file_body;
             const int non_executable_before = counts_.non_executable;
             json request                    = build_request (child);
@@ -2347,22 +2584,23 @@ class InsomniaTree {
                 named_["non_executable_auth"].push_back (name);
             }
             requests.push_back (std::move (request));
-        } else {
-            // What Vayu has no request shape for is still named, so the
-            // preview can say which one did not come across.
-            const json name = resource_name (child, "Untitled");
-            tally_.set_subject (as_string (&name));
-            if (type_is (child, "grpc_request")) {
-                tally_.add ("grpc");
-            } else if (type_is (child, "websocket_request")) {
-                tally_.add ("websocket");
-            } else if (type_is (child, "api_spec")) {
-                tally_.add ("api_spec");
-            } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
-                tally_.add ("unit_test");
-            }
-            tally_.set_subject ({});
+            return &requests.back ();
         }
+        // What Vayu has no request shape for is still named, so the
+        // preview can say which one did not come across.
+        const json name = resource_name (child, "Untitled");
+        tally_.set_subject (as_string (&name));
+        if (type_is (child, "grpc_request")) {
+            tally_.add ("grpc");
+        } else if (type_is (child, "websocket_request")) {
+            tally_.add ("websocket");
+        } else if (type_is (child, "api_spec")) {
+            tally_.add ("api_spec");
+        } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
+            tally_.add ("unit_test");
+        }
+        tally_.set_subject ({});
+        return nullptr;
     }
 
     json build_collection (const json* node, bool workspace) {
@@ -2375,8 +2613,18 @@ class InsomniaTree {
         }
         json children = json::array ();
         json requests = json::array ();
-        for (const json* child : children_of (node)) {
-            add_child (child, children, requests);
+        // Insomnia lists a folder's requests and sub-folders together by
+        // `metaSortKey`; each draft states its rank among the ones that become
+        // drafts, never the raw key, whose sparse or negative values would
+        // collide with `sibling_positions`' fallback (#2573).
+        std::vector<const json*> siblings = children_of (node);
+        const bool ranked                 = rank_by_sort_key (siblings);
+        int position                      = 0;
+        for (const json* child : siblings) {
+            json* draft = add_child (child, children, requests);
+            if (ranked && draft != nullptr) {
+                (*draft)["order"] = position++;
+            }
         }
         json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
@@ -2566,6 +2814,13 @@ void carry_description (const json& item, json& resource) {
     }
 }
 
+/// v5's `meta.sortKey` as v4's `metaSortKey`, so one rule orders both versions.
+void carry_sort_key (const json& item, json& resource) {
+    if (const json* key = prop (as_record (prop (&item, "meta")), "sortKey")) {
+        resource["metaSortKey"] = *key;
+    }
+}
+
 /// v5's `scripts.preRequest` / `.afterResponse` as v4's two flat members.
 void carry_scripts (const json& item, json& resource) {
     const json* scripts = as_record (prop (&item, "scripts"));
@@ -2655,6 +2910,7 @@ class InsomniaV5Flattener {
             return;
         }
         carry_description (item, resource);
+        carry_sort_key (item, resource);
         carry_scripts (item, resource);
         carry_members (item, resource, { "authentication" });
         if (kind == V5Item::Folder) {
@@ -3490,13 +3746,19 @@ json vayu_folder_of (const std::optional<json>& object, ImportTally& tally) {
     return folder;
 }
 
+/// The integer `order` @p object states, if any: a position among a parent's
+/// sub-folders and requests together (#2535), on a draft or on the
+/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote.
+std::optional<int> stated_order (const json& object) {
+    const json* order = prop (&object, "order");
+    return order != nullptr && order->is_number_integer () ?
+    std::make_optional (order->get<int> ()) :
+    std::nullopt;
+}
+
 /// The request's position among its folder's, from `x-vayu-request.order`.
 int vayu_order_of (const std::optional<json>& object) {
-    if (!object) {
-        return 0;
-    }
-    const auto order = object->find ("order");
-    return order != object->end () && order->is_number_integer () ? order->get<int> () : 0;
+    return object ? stated_order (*object).value_or (0) : 0;
 }
 
 /**
@@ -3552,6 +3814,10 @@ class VayuFolderTree {
             }
             json& node = ensure (*path);
             read_folder (folder, node);
+            if (const std::optional<int> order = stated_order (folder)) {
+                node["order"]         = *order;
+                states_sibling_order_ = true;
+            }
         }
     }
 
@@ -3661,16 +3927,26 @@ class VayuFolderTree {
         }
     }
 
-    static json sorted (std::vector<std::pair<int, json>>& list) {
+    /**
+     * @p list in its stated order. Each request keeps that order as its
+     * draft's `order` only when the document states its folders' too: a
+     * document written before #2535 numbered folders and requests in two
+     * spaces, and its requests then keep following the folders.
+     */
+    json sorted (std::vector<std::pair<int, json>>& list) const {
         std::stable_sort (list.begin (), list.end (),
         [] (const auto& a, const auto& b) { return a.first < b.first; });
         json out = json::array ();
         for (auto& [order, request] : list) {
+            if (states_sibling_order_) {
+                request["order"] = order;
+            }
             out.push_back (std::move (request));
         }
         return out;
     }
 
+    bool states_sibling_order_ = false;
     ImportTally& tally_;
     std::vector<std::string> order_;
     std::map<std::string, json> nodes_;
@@ -4114,9 +4390,60 @@ int order) {
     return item;
 }
 
+/// Where each of a draft's sub-folders and requests sits in its one sibling
+/// list, as dense positions `0..k-1` (#2535).
+struct SiblingPositions {
+    std::vector<int> folders;
+    std::vector<int> requests;
+};
+
 /**
- * Depth-first, parents before their requests before their children - the tree
- * order the preview shows.
+ * A draft's own `order` places it - a Postman item's or a JMeter element's
+ * document position, an Insomnia item's rank by sort key, an `x-vayu-*` stored
+ * order - and a draft stating none keeps the listing the other importers
+ * produce, its folders first and its requests after them.
+ * Ties fall to `sibling_order.hpp`'s rule, a folder before a request, then
+ * list position. `draft-siblings.ts`'s `siblingPositions` is the app's copy,
+ * pinned to this one by `import-conformance.json`'s payloads.
+ */
+SiblingPositions sibling_positions (const json& folders, const json& requests) {
+    struct Entry {
+        int order                  = 0;
+        vayu::db::SiblingKind kind = vayu::db::SiblingKind::Folder;
+        size_t index               = 0;
+    };
+    const auto stated = [] (const json& draft, size_t fallback) {
+        return stated_order (draft).value_or (static_cast<int> (fallback));
+    };
+    std::vector<Entry> entries;
+    entries.reserve (folders.size () + requests.size ());
+    for (size_t at = 0; at < folders.size (); ++at) {
+        entries.push_back ({ stated (folders[at], at), vayu::db::SiblingKind::Folder, at });
+    }
+    for (size_t at = 0; at < requests.size (); ++at) {
+        entries.push_back ({ stated (requests[at], folders.size () + at),
+        vayu::db::SiblingKind::Request, at });
+    }
+    std::sort (entries.begin (), entries.end (), [] (const Entry& a, const Entry& b) {
+        return std::tie (a.order, a.kind, a.index) <
+        std::tie (b.order, b.kind, b.index);
+    });
+    SiblingPositions positions{ std::vector<int> (folders.size ()),
+        std::vector<int> (requests.size ()) };
+    for (size_t at = 0; at < entries.size (); ++at) {
+        const Entry& entry     = entries[at];
+        auto& slots            = entry.kind == vayu::db::SiblingKind::Folder ?
+                   positions.folders :
+                   positions.requests;
+        slots.at (entry.index) = static_cast<int> (at);
+    }
+    return positions;
+}
+
+/**
+ * Depth-first, parents before their requests before their children - the
+ * temp-id order `assign-ids.ts` mints in. Where each child lands among its
+ * siblings is its `order`, from `sibling_positions`.
  *
  * A root states no `order`: it is joining a list that already has occupants, and
  * the engine's create path appends after the stored roots. Sending the payload
@@ -4167,15 +4494,16 @@ json& specs) {
     }
     collections.push_back (std::move (collection));
 
-    const json& own = draft.at ("requests");
+    const json& own                  = draft.at ("requests");
+    const json& children             = draft.at ("children");
+    const SiblingPositions positions = sibling_positions (children, own);
     for (size_t at = 0; at < own.size (); ++at) {
         requests.push_back (apply_request (own[at],
-        "r" + std::to_string (++ids.request), temp_id, static_cast<int> (at)));
+        "r" + std::to_string (++ids.request), temp_id, positions.requests[at]));
     }
-    const json& children = draft.at ("children");
     for (size_t at = 0; at < children.size (); ++at) {
-        const int child_order = static_cast<int> (at);
-        flatten (children[at], &temp_id, &child_order, ids, collections, requests, specs);
+        flatten (children[at], &temp_id, &positions.folders[at], ids,
+        collections, requests, specs);
     }
 }
 
@@ -4183,8 +4511,8 @@ json& specs) {
 
 nlohmann::ordered_json postman_auth_mapping (const nlohmann::ordered_json& auth) {
     int unsupported = 0;
-    int dropped     = 0;
-    return map_postman_auth (&auth, unsupported, dropped);
+    OAuth2ImportLosses losses;
+    return map_postman_auth (&auth, unsupported, losses);
 }
 
 std::vector<std::string> postman_disabled_system_headers (

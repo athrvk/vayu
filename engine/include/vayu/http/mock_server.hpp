@@ -195,9 +195,9 @@ const std::vector<std::pair<std::string, std::string>>& headers);
  * folder per tag, so a mock of the root collection that only read direct
  * children would serve nothing at all.
  *
- * Ordered by collection walk then by the request's own `order`, and the first
- * matching route wins ties - so the table is reproducible across restarts
- * rather than dependent on map iteration.
+ * Ordered as the sidebar lists the subtree (`Database::get_requests_in_subtree`),
+ * and the first matching route wins ties - so the table is reproducible across
+ * restarts rather than dependent on map iteration.
  */
 std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id);

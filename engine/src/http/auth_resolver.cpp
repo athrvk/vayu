@@ -8,6 +8,7 @@
 #include "vayu/http/auth_resolver.hpp"
 
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
@@ -46,6 +47,37 @@ void append_query_param (std::string& url, const std::string& key, const std::st
     url.push_back ('=');
     url += encode ? encode_query_component (value, QueryPart::Value) : value;
     url += fragment;
+}
+
+// A credential without the spaces and tabs a paste leaves around it (issue
+// #2467). Only the ends: a space inside a token is the token's own.
+std::string trimmed_credential (const std::string& text) {
+    return std::string (vayu::http::trim_optional_whitespace (text));
+}
+
+// Place an API key. Both halves are trimmed; a header name must also be a
+// token, and one that is not is refused with nothing written, because the
+// alternative is a header line the author did not mean.
+AuthApplyResult apply_api_key (vayu::Request& req, const ApiKeyAuth& auth) {
+    const std::string key   = trimmed_credential (auth.key);
+    const std::string value = trimmed_credential (auth.value);
+    if (key.empty ()) {
+        return {};
+    }
+    if (auth.in_query) {
+        append_query_param (req.url, key, value, !req.disable_url_encoding);
+        req.auth_query_param = key;
+        return {};
+    }
+    if (auto invalid = vayu::http::invalid_header_name_refusal (key)) {
+        return { false, vayu::ErrorCode::AuthFailed, "API key auth: " + *invalid,
+            std::string (vayu::http::INVALID_HEADER_NAME_CODE) };
+    }
+    if (req.headers.count (key) == 0) {
+        req.headers[key] = value;
+        req.secret_header_names.push_back (key);
+    }
+    return {};
 }
 
 // Fetch a boolean field, tolerating a missing key or non-boolean value.
@@ -226,7 +258,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
         } else if constexpr (std::is_same_v<T, BearerAuth>) {
             // Headers is case-insensitive, so this covers "authorization" too.
             if (req.headers.count ("Authorization") == 0) {
-                req.headers["Authorization"] = "Bearer " + a.token;
+                req.headers["Authorization"] = "Bearer " + trimmed_credential (a.token);
             }
             return {};
         } else if constexpr (std::is_same_v<T, BasicAuth>) {
@@ -236,17 +268,7 @@ AuthApplyResult apply_auth (vayu::Request& req, const Auth& auth, vayu::db::Data
             }
             return {};
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
-            if (a.key.empty ()) {
-                return {};
-            }
-            if (a.in_query) {
-                append_query_param (req.url, a.key, a.value, !req.disable_url_encoding);
-                req.auth_query_param = a.key;
-            } else if (req.headers.count (a.key) == 0) {
-                req.headers[a.key] = a.value;
-                req.secret_header_names.push_back (a.key);
-            }
-            return {};
+            return apply_api_key (req, a);
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
             return resolve_oauth2 (&req, a.config, db);
         } else {

@@ -28,6 +28,7 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_runner.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -314,6 +315,17 @@ TEST_F (RunsRouteTest, SummaryCarriesAcceptEncodingWhenSnapshotHasIt) {
     EXPECT_EQ (body["data"][1]["summary"]["acceptEncoding"], false);
     EXPECT_EQ (body["data"][2]["id"], "run_negotiated");
     EXPECT_EQ (body["data"][2]["summary"]["acceptEncoding"], true);
+}
+
+// Nothing reads `expectContinue` off a list row, so the row does not carry it
+// (issue #2516): the report's `configuration` is where the comparison finds it.
+TEST_F (RunsRouteTest, SummaryDoesNotCarryExpectContinue) {
+    seed ({ .id = "run_expect_continue",
+    .config_snapshot = R"({"url":"https://a/","defaultHeaders":{"acceptEncoding":true,"expectContinue":true}})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (body["data"][0]["summary"]["acceptEncoding"], true);
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("expectContinue"));
 }
 
 // An iterations run's count and a paced run's rate are part of what the run
@@ -1135,6 +1147,26 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
     "acceptEncoding"));
 }
 
+// The report's comparison reads `expectContinue` (issue #2516); a snapshot
+// without it stays without it, so the compare readers' absent-is-false rule is
+// the only place that defaults it.
+TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOtherwise) {
+    const auto snapshot = [] (const char* flag) {
+        return json::parse (
+        std::string (R"({"mode":"once","defaultHeaders":{"expectContinue":)") + flag + "}}");
+    };
+
+    EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("true"))["expectContinue"],
+    true);
+    EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("false"))["expectContinue"],
+    false);
+    EXPECT_FALSE (vayu::http::routes::build_run_report_config (json::parse (R"({"mode":"once"})"))
+    .contains ("expectContinue"));
+    EXPECT_FALSE (vayu::http::routes::build_run_report_config (
+    json::parse (R"({"defaultHeaders":{"expectContinue":"yes"}})"))
+    .contains ("expectContinue"));
+}
+
 // A single-request run's data file, beside the row count it describes (issue
 // #2051). Mutation check: drop `dataFileName` from `build_run_report_config`'s
 // key list and this reds.
@@ -1344,6 +1376,76 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_EQ (body["testValidation"]["samplesTested"].get<int> (), 10);
     EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
     EXPECT_EQ (body["testValidation"]["testsFailed"].get<int> (), 1);
+}
+
+// Issue #2389: a collection run's report latency is the summary's sample (the
+// steps that sent), not the stored result rows - those include a skipped step's
+// 0 ms and, past the store's cap, fewer rows than ran. The seeded rows here
+// would give a median of 0 and a max of 5; the summary's sample says otherwise.
+// Mutation check: drop the `summary["latency"]` write in
+// `build_scenario_summary_payload` (or the summary read in `apply_summary_latency`)
+// and the report falls back to the rows' figures.
+TEST_F (RunsRouteTest, ScenarioReportLatencyIsTheSummarysSentSampleNotTheStoredRows) {
+    seed ({ .id = "run_sent_sample", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    seed_result ("run_sent_sample", 0, 0.0);
+    seed_result ("run_sent_sample", 0, 0.0);
+    seed_result ("run_sent_sample", 200, 5.0);
+
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 3;
+    inputs.duration_s     = 1.0;
+    std::vector<double> sample;
+    sample.reserve (1000);
+    for (int i = 1; i <= 1000; ++i) {
+        sample.push_back (static_cast<double> (i));
+    }
+    inputs.latency = vayu::core::summarize_latencies (sample);
+    db_->update_run_summary ("run_sent_sample",
+    vayu::core::build_scenario_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_sent_sample");
+    ASSERT_EQ (status, 200);
+    const auto& latency = body["latency"];
+    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 1.0);
+    EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 500.5);
+    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 500.0);
+    EXPECT_DOUBLE_EQ (latency["median"].get<double> (), 500.0);
+    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 750.0);
+    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 950.0);
+    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 990.0);
+    EXPECT_DOUBLE_EQ (latency["p999"].get<double> (), 1000.0);
+}
+
+// A collection run in which no step sent stores `latency.count` 0, and the
+// report leaves the block out rather than writing zeros a reader would take for
+// a measurement. A summary with no `latency` key (a run stored before this
+// existed) and a load run's block, which carries no `count`, keep theirs.
+// Mutation check: remove the `latency_measured` guard in `build_report_body`
+// and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportOmitsLatencyWhenNoStepSent) {
+    seed ({ .id = "run_nothing_sent", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    seed_result ("run_nothing_sent", 0, 0.0);
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 1;
+    inputs.duration_s     = 1.0;
+    db_->update_run_summary ("run_nothing_sent",
+    vayu::core::build_scenario_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_nothing_sent");
+    ASSERT_EQ (status, 200);
+    EXPECT_FALSE (body.contains ("latency")) << body["latency"].dump ();
+    EXPECT_EQ (body["summary"]["totalRequests"].get<size_t> (), 1u);
+
+    seed ({ .id = "run_old_scenario", .type = vayu::RunType::Scenario, .start_time = 1000 });
+    seed_result ("run_old_scenario", 200, 7.0);
+    db_->update_run_summary ("run_old_scenario", R"({"total_requests":1,"test_duration":1.0})");
+    auto [old_status, old_body] =
+    vayu::http::routes::run_report_response (*db_, "run_old_scenario");
+    ASSERT_EQ (old_status, 200);
+    ASSERT_TRUE (old_body.contains ("latency"));
+    EXPECT_DOUBLE_EQ (old_body["latency"]["max"].get<double> (), 7.0);
 }
 
 // #2136: a healthy run stopped with requests in flight reports what the Stop

@@ -7,6 +7,48 @@
 	},
 	"item": [
 		{
+			"name": "Log in",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "user",
+							"value": "ada",
+							"type": "text"
+						},
+						{
+							"key": "remember",
+							"value": "1",
+							"description": "Keep me signed in",
+							"type": "text"
+						},
+						{
+							"key": "otp",
+							"value": "",
+							"type": "text",
+							"disabled": true
+						}
+					]
+				},
+				"url": {
+					"raw": "{{baseUrl}}/login",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "Users",
 			"item": [
 				{
@@ -251,55 +293,80 @@
 			"description": "Everything about users."
 		},
 		{
-			"name": "Admin",
-			"item": [
-				{
-					"name": "Deep",
-					"item": [
+			"name": "Soap call",
+			"protocolProfileBehavior": {
+				"strictSSL": false,
+				"followRedirects": false,
+				"maxRedirects": 3
+			},
+			"request": {
+				"auth": {
+					"type": "digest",
+					"digest": [
 						{
-							"name": "Intranet",
-							"request": {
-								"auth": {
-									"type": "ntlm",
-									"ntlm": [
-										{
-											"key": "password",
-											"value": "pw",
-											"type": "string"
-										},
-										{
-											"key": "username",
-											"value": "ada",
-											"type": "string"
-										},
-										{
-											"key": "domain",
-											"value": "CORP",
-											"type": "string"
-										}
-									]
-								},
-								"method": "OPTIONS",
-								"header": [],
-								"url": {
-									"raw": "http://intranet.local/api",
-									"protocol": "http",
-									"host": [
-										"intranet",
-										"local"
-									],
-									"path": [
-										"api"
-									]
-								}
-							},
-							"response": []
+							"key": "algorithm",
+							"value": "MD5",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "ada",
+							"type": "string"
+						},
+						{
+							"key": "realm",
+							"value": "ws",
+							"type": "string"
+						},
+						{
+							"key": "password",
+							"value": "pw",
+							"type": "string"
+						},
+						{
+							"key": "disableRetryRequest",
+							"value": false,
+							"type": "boolean"
 						}
-					],
-					"auth": {
-						"type": "noauth"
+					]
+				},
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/xml",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "<ping/>",
+					"options": {
+						"raw": {
+							"language": "xml"
+						}
 					}
 				},
+				"url": {
+					"raw": "https://soap.example.com:8443/ws/",
+					"protocol": "https",
+					"host": [
+						"soap",
+						"example",
+						"com"
+					],
+					"port": "8443",
+					"path": [
+						"ws",
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Admin",
+			"item": [
 				{
 					"name": "Delete me",
 					"request": {
@@ -381,6 +448,53 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Deep",
+					"item": [
+						{
+							"name": "Intranet",
+							"request": {
+								"auth": {
+									"type": "ntlm",
+									"ntlm": [
+										{
+											"key": "password",
+											"value": "pw",
+											"type": "string"
+										},
+										{
+											"key": "username",
+											"value": "ada",
+											"type": "string"
+										},
+										{
+											"key": "domain",
+											"value": "CORP",
+											"type": "string"
+										}
+									]
+								},
+								"method": "OPTIONS",
+								"header": [],
+								"url": {
+									"raw": "http://intranet.local/api",
+									"protocol": "http",
+									"host": [
+										"intranet",
+										"local"
+									],
+									"path": [
+										"api"
+									]
+								}
+							},
+							"response": []
+						}
+					],
+					"auth": {
+						"type": "noauth"
+					}
 				},
 				{
 					"name": "Bucket head",
@@ -816,120 +930,6 @@
 					"description": "Which region serves the tenant"
 				}
 			]
-		},
-		{
-			"name": "Soap call",
-			"protocolProfileBehavior": {
-				"strictSSL": false,
-				"followRedirects": false,
-				"maxRedirects": 3
-			},
-			"request": {
-				"auth": {
-					"type": "digest",
-					"digest": [
-						{
-							"key": "algorithm",
-							"value": "MD5",
-							"type": "string"
-						},
-						{
-							"key": "username",
-							"value": "ada",
-							"type": "string"
-						},
-						{
-							"key": "realm",
-							"value": "ws",
-							"type": "string"
-						},
-						{
-							"key": "password",
-							"value": "pw",
-							"type": "string"
-						},
-						{
-							"key": "disableRetryRequest",
-							"value": false,
-							"type": "boolean"
-						}
-					]
-				},
-				"method": "PUT",
-				"header": [
-					{
-						"key": "Content-Type",
-						"value": "application/xml",
-						"type": "text"
-					}
-				],
-				"body": {
-					"mode": "raw",
-					"raw": "<ping/>",
-					"options": {
-						"raw": {
-							"language": "xml"
-						}
-					}
-				},
-				"url": {
-					"raw": "https://soap.example.com:8443/ws/",
-					"protocol": "https",
-					"host": [
-						"soap",
-						"example",
-						"com"
-					],
-					"port": "8443",
-					"path": [
-						"ws",
-						""
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "Log in",
-			"request": {
-				"auth": {
-					"type": "noauth"
-				},
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "urlencoded",
-					"urlencoded": [
-						{
-							"key": "user",
-							"value": "ada",
-							"type": "text"
-						},
-						{
-							"key": "remember",
-							"value": "1",
-							"description": "Keep me signed in",
-							"type": "text"
-						},
-						{
-							"key": "otp",
-							"value": "",
-							"type": "text",
-							"disabled": true
-						}
-					]
-				},
-				"url": {
-					"raw": "{{baseUrl}}/login",
-					"host": [
-						"{{baseUrl}}"
-					],
-					"path": [
-						"login"
-					]
-				}
-			},
-			"response": []
 		},
 		{
 			"name": "Upload",

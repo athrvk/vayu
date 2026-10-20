@@ -811,7 +811,9 @@ logged as a warning: it means a client skipped composition.
   refuses one per send (a stored `disabledSystemHeaders` joins it, and adds
   libcurl's removal line for `Accept` and a body's `Content-Type`, #1765; a
   refused name is checked with `invalid_header_token`, never the
-  correlation-id rule), and none of what is added is stored - the renderer used to write
+  correlation-id rule; so is a name a request *carries*, after its surrounding
+  spaces and tabs are trimmed, #2467 below), and none of what is added is
+  stored - the renderer used to write
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
@@ -825,7 +827,9 @@ logged as a warning: it means a client skipped composition.
   scopes) is on or the request types a non-blank `Expect`. Add a default
   there, never in a driver. A
   load or collection run's `config_snapshot` records the resolved decision
-  too (#1488), for a later run's report to compare against - never re-applied
+  too (#1488, plus `expectContinue`, #2516, so a run that let libcurl wait on
+  a 100-continue does not compare as identical to one that did not), for a
+  later run's report to compare against - never re-applied
   to a send, the one deliberate exception to "none of it is stored".
 - **Every outbound transfer leaves through one `TransportPolicy`** (#705,
   `include/vayu/http/transport_policy.hpp`), resolved from `proxyMode` /
@@ -985,7 +989,19 @@ unchanged. Its `headers` are `{name, value}` lines in send order (#2466,
 `vayu::HeaderList` on `vayu::Request`): every enabled row, a repeated name
 repeated, the older object form still read; only a repeat a *resolved* name
 makes is refused (`http/header_names.hpp`), and the renderer's row flattening
-is pinned by `tests/fixtures/header-rows-conformance.json`. It also writes a request's `:name` path variables from its
+is pinned by `tests/fixtures/header-rows-conformance.json`. **A header name is
+trimmed of SP and HTAB, then must be an RFC 9110 token** (#2467):
+`trim_optional_whitespace` and `invalid_header_name_refusal` in `header_names.hpp`
+are the one rule, applied where a name enters - `stored_header_rows` and
+`settle_header_name` in composition, `stored_header_name` in
+`deserialize_request` (`ErrorCode::InvalidHeaderName`, which is how
+`POST /execute` and a single-request `POST /runs` answer `400
+invalid_header_name`), and `resolve_header_names` in the residual pass. A blank
+name is the `empty_header_name` rule's, and a `{{token}}` still in a name is
+left to the layer that resolves it while the text around it is judged (each
+token stands in as one token character, a stray `{{` is ordinary text). Refuse
+what trimming cannot settle, never repair it. It also writes a request's
+`:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
 a value still holding a token after resolution is not joined into the URL but
@@ -1001,7 +1017,10 @@ join) goes through `core::encode_query_component` (`core/query_encoding.hpp`,
 authority unless `disableUrlEncoding`, #2465), whose app copy
 is pinned by `tests/fixtures/query-encoding-conformance.json`. A header an `auth` block
 would write (bearer, basic, an api key in a header) is skipped when the request already
-carries that name, matched case-insensitively (`apply_auth`, #2475); the snippet
+carries that name, matched case-insensitively (`apply_auth`, #2475), and a bearer
+token and an api key's name and value are trimmed of SP and HTAB first (a basic
+pair is not; an api-key header name that is not a token is `AUTH_FAILED` with
+`invalid_header_name`, #2467); the snippet
 generators' copy in `prepare.ts` is pinned by
 `tests/fixtures/auth-header-precedence.json`. Compose is pure (sends nothing, no run row) and is the one place a
 payload is composed; that split is load-bearing. Two entry shapes: `requestId`

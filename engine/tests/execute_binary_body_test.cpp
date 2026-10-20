@@ -15,6 +15,10 @@
  * (or a header) the route was about to send. Driven through the handler,
  * because the dump that threw is a line in the route and no seam below it
  * sees the live body; `json_test.cpp` pins the encoding decision itself.
+ *
+ * The same harness drives the answer's parsed `body` (issue #2544): left out on
+ * `includeParsedBody: false` or past `MAX_PARSED_RESPONSE_BODY_BYTES`, with
+ * `bodyRaw` and the stored trace unchanged.
  */
 
 // Before the first include: `curl/curl.h` reaches `windows.h`, whose `min` /
@@ -45,6 +49,7 @@
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -129,8 +134,17 @@ std::vector<ServedBody> served_bodies () {
     };
 }
 
-/// Serves `served_bodies ()`, and `/latin-header`: a `200 ok` whose one odd
-/// thing is an `X-Latin` header value carrying a Latin-1 byte.
+/// A JSON document one byte past the size `POST /execute` still parses.
+std::string json_past_parse_threshold () {
+    const std::string open  = "{\"s\":\"";
+    const std::string close = "\"}";
+    const size_t bytes = vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES + 1;
+    return open + std::string (bytes - open.size () - close.size (), 'a') + close;
+}
+
+/// Serves `served_bodies ()`; `/latin-header`, a `200 ok` whose one odd thing
+/// is an `X-Latin` header value carrying a Latin-1 byte; and `/large-json`,
+/// `json_past_parse_threshold ()`.
 class BytesServer {
     public:
     BytesServer () {
@@ -146,6 +160,9 @@ class BytesServer {
         svr_.Get ("/latin-header", [] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Latin", "caf\xE9");
             res.set_content ("ok", "text/plain");
+        });
+        svr_.Get ("/large-json", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (json_past_parse_threshold (), "application/json");
         });
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -413,6 +430,60 @@ TEST_F (ExecuteBinaryBodyTest, ACappedUtf8BodyCutInsideACharacterStaysText) {
     EXPECT_FALSE (node.contains ("bodyEncoding")) << node.dump ();
     EXPECT_TRUE (node.value ("bodyCapped", false));
     EXPECT_EQ (node.value ("body", ""), answer.value ("bodyRaw", ""));
+}
+
+// ---------------------------------------------------------------------------
+// The parsed `body` (issue #2544). Mutation check: hand `build_response_json`
+// a literal `true` instead of `send.include_parsed_body` and the opted-out
+// case answers the parse; drop the flag's read from `read_execute_payload` and
+// the non-boolean case answers 200.
+// ---------------------------------------------------------------------------
+
+TEST_F (ExecuteBinaryBodyTest, ADefaultSendAnswersTheParse) {
+    const BytesServer server;
+    const auto answer = fetch (server, "/euro-json");
+
+    ASSERT_TRUE (answer.contains ("body")) << answer.dump ();
+    EXPECT_TRUE (answer.at ("body").is_object ()) << answer.dump ();
+    EXPECT_EQ (answer.value ("bodyRaw", ""), euro_json ());
+}
+
+TEST_F (ExecuteBinaryBodyTest, AnOptedOutSendAnswersBodyNullAndStoresTheBodyAsBefore) {
+    const BytesServer server;
+    const auto answer = execute ({ { "method", "GET" },
+    { "url", server.url ("/euro-json") }, { "includeParsedBody", false } });
+
+    ASSERT_TRUE (answer.contains ("body")) << answer.dump ();
+    EXPECT_TRUE (answer.at ("body").is_null ()) << answer.dump ();
+    EXPECT_EQ (answer.value ("bodyRaw", ""), euro_json ());
+    EXPECT_EQ (answer.value ("bodyEncoding", ""), "utf8");
+
+    const auto trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("response")) << trace.dump ();
+    EXPECT_EQ (trace.at ("response").value ("body", ""), euro_json ());
+}
+
+TEST_F (ExecuteBinaryBodyTest, ABodyPastTheParseThresholdAnswersBodyNull) {
+    const BytesServer server;
+    const auto answer = fetch (server, "/large-json");
+
+    ASSERT_TRUE (answer.contains ("body")) << answer.value ("errorMessage", "");
+    EXPECT_TRUE (answer.at ("body").is_null ());
+    EXPECT_EQ (answer.value ("bodyRaw", ""), json_past_parse_threshold ());
+    EXPECT_EQ (only_run ().status, vayu::RunStatus::Completed);
+}
+
+TEST_F (ExecuteBinaryBodyTest, ANonBooleanIncludeParsedBodyIsRefusedBeforeAnyRow) {
+    httplib::Client client ("127.0.0.1", port_);
+    const json payload = { { "method", "GET" },
+        { "url", "http://127.0.0.1:1/" }, { "includeParsedBody", "false" } };
+    const auto response = client.Post ("/execute", payload.dump (), "application/json");
+
+    ASSERT_TRUE (response) << "POST /execute did not answer";
+    EXPECT_EQ (response->status, 400);
+    EXPECT_NE (response->body.find ("includeParsedBody"), std::string::npos)
+    << response->body;
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
 // ---------------------------------------------------------------------------

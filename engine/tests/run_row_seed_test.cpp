@@ -249,6 +249,24 @@ TEST (DefaultHeadersSnapshot, RecordsFalseWhenNegotiationIsOff) {
 
     EXPECT_EQ (stored["defaultHeaders"]["requestId"], false);
     EXPECT_EQ (stored["defaultHeaders"]["acceptEncoding"], false);
+    EXPECT_EQ (stored["defaultHeaders"]["expectContinue"], false);
+}
+
+// Two runs that differ only in sendExpectContinue must not compare as
+// identical - issue #2516. The flag is recorded as the policy holds it.
+TEST (DefaultHeadersSnapshot, RecordsWhetherExpectContinueWasAllowed) {
+    const std::string sanitized = json::object ().dump ();
+    DefaultHeaderPolicy allowed;
+    allowed.expect_continue = true;
+    DefaultHeaderPolicy refused;
+    refused.expect_continue = false;
+
+    EXPECT_EQ (json::parse (with_default_headers_snapshot (
+               sanitized, allowed))["defaultHeaders"]["expectContinue"],
+    true);
+    EXPECT_EQ (json::parse (with_default_headers_snapshot (
+               sanitized, refused))["defaultHeaders"]["expectContinue"],
+    false);
 }
 
 TEST (DefaultHeadersSnapshot, LeavesANonObjectSnapshotAlone) {

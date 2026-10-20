@@ -254,8 +254,12 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
  * (less a capped body's incomplete last character, `response_body_text`) and
  * `body` its parse (or `null`); any other body is `bodyRaw` in base64 with
  * `body` `null`. `bodySize` counts the bytes either way.
+ *
+ * `body` is also `null`, and no parse runs, when @p include_parsed_body is
+ * false (`POST /execute`'s `includeParsedBody`) or the text is longer than
+ * `MAX_PARSED_RESPONSE_BODY_BYTES` (issue #2544). The key is always present.
  */
-[[nodiscard]] Json serialize (const Response& response);
+[[nodiscard]] Json serialize (const Response& response, bool include_parsed_body = true);
 
 /**
  * @brief The body bytes of a serialized Response: `bodyRaw`, decoded when

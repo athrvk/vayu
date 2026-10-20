@@ -114,6 +114,63 @@ TEST (JsonTest, RefusesAHeaderLineThatIsNotANameAndAValue) {
     }
 }
 
+// A name is trimmed of the spaces and tabs around it, in either shape (issue
+// #2467). Mutation check: drop the trim in `stored_header_name` and both fail.
+TEST (JsonTest, PaddedHeaderNamesAreTrimmedInBothShapes) {
+    auto array_form = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"Authorization ","value":"v"},{"name":"\tX-A","value":" w "}]})"));
+    ASSERT_TRUE (array_form.is_ok ()) << array_form.error ().message;
+    EXPECT_EQ (array_form.value ().headers,
+    (HeaderList{ { "Authorization", "v" }, { "X-A", " w " } }));
+
+    auto object_form = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":{" X-A ":"1"}})"));
+    ASSERT_TRUE (object_form.is_ok ()) << object_form.error ().message;
+    EXPECT_EQ (object_form.value ().headers, (HeaderList{ { "X-A", "1" } }));
+}
+
+// What is left after the trim must be a token, and the refusal carries the code
+// a route answers under. Mutation check: drop the `invalid_header_name_refusal`
+// call in `stored_header_name`. The last two hold braces: a `{{token}}` is set
+// aside and the text around it judged, and a `{{` closing no token is just
+// text (mutation check: restore a blanket skip of any name holding `{{`).
+TEST (JsonTest, RefusesAHeaderNameThatIsNotATokenInBothShapes) {
+    for (const std::string name :
+    { "X Bad", "X:Bad", "X-\xC3\xA9", "Evil: injected{{", "X Bad {{x}}" }) {
+        const std::vector<std::string> shapes = { R"([{"name":")" + name + R"(","value":"v"}])",
+            R"({")" + name + R"(":"v"})" };
+        for (const std::string& shape : shapes) {
+            auto result = deserialize_request (
+            R"({"method":"GET","url":"https://x.test","headers":)" + shape + "}");
+
+            ASSERT_TRUE (result.is_error ()) << shape;
+            EXPECT_EQ (result.error ().code, vayu::ErrorCode::InvalidHeaderName) << shape;
+            EXPECT_NE (result.error ().message.find ("'" + name + "'"), std::string::npos)
+            << result.error ().message;
+        }
+    }
+}
+
+// A name of nothing but padding is stored empty, for the empty-name refusal
+// every send makes - the same answer the compose route gives it.
+// A name still holding a token waits for the layer that resolves it.
+TEST (JsonTest, ABlankOrTemplatedHeaderNameIsNotThisRefusal) {
+    auto blank = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"  ","value":"v"}]})"));
+    ASSERT_TRUE (blank.is_ok ()) << blank.error ().message;
+    EXPECT_EQ (blank.value ().headers, (HeaderList{ { "", "v" } }));
+
+    auto templated = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":" {{h}} ","value":"v"}]})"));
+    ASSERT_TRUE (templated.is_ok ()) << templated.error ().message;
+    EXPECT_EQ (templated.value ().headers, (HeaderList{ { "{{h}}", "v" } }));
+
+    auto embedded = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"X-{{a}}-b","value":"v"}]})"));
+    ASSERT_TRUE (embedded.is_ok ()) << embedded.error ().message;
+    EXPECT_EQ (embedded.value ().headers, (HeaderList{ { "X-{{a}}-b", "v" } }));
+}
+
 TEST (JsonTest, DeserializesRequestWithBody) {
     std::string json_str = R"({
         "method": "POST",
@@ -430,6 +487,63 @@ TEST (BodyEncoding, ACappedBodyWithABadByteBeforeTheCutIsBase64) {
     EXPECT_EQ (response_body_bytes (serialize (capped)), capped.body);
 }
 
+// ============================================================================
+// `body` is the parsed copy, skipped on request or past a size (issue #2544).
+// Mutation check: make `parsed_body` in json.cpp ignore `include_parsed_body`,
+// or drop its size comparison, and the matching `body` assertion below fails;
+// turn `>` into `>=` and the at-the-threshold case fails.
+// ============================================================================
+
+namespace {
+
+/// A JSON document of exactly @p bytes: one string member padded out.
+std::string json_of_size (size_t bytes) {
+    const std::string open  = "{\"s\":\"";
+    const std::string close = "\"}";
+    return open + std::string (bytes - open.size () - close.size (), 'a') + close;
+}
+
+} // namespace
+
+TEST (ParsedBody, ByDefaultBodyIsTheParse) {
+    const auto json = serialize (response_with_body (R"({"id":1})"));
+
+    EXPECT_EQ (json["body"]["id"], 1);
+    EXPECT_EQ (json["bodyRaw"], R"({"id":1})");
+}
+
+TEST (ParsedBody, DeclinedBodyIsNullAndBodyRawIsUnchanged) {
+    const auto response = response_with_body (R"({"id":1})");
+    const auto parsed   = serialize (response);
+    const auto declined = serialize (response, /*include_parsed_body=*/false);
+
+    ASSERT_TRUE (declined.contains ("body"));
+    EXPECT_TRUE (declined["body"].is_null ());
+    EXPECT_EQ (declined["bodyRaw"], parsed["bodyRaw"]);
+    EXPECT_EQ (declined["bodyEncoding"], "utf8");
+    EXPECT_EQ (declined["bodySize"], parsed["bodySize"]);
+}
+
+TEST (ParsedBody, ABodyAtTheThresholdIsStillParsed) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES);
+    const auto json = serialize (response_with_body (text));
+
+    EXPECT_TRUE (json["body"].is_object ());
+    EXPECT_EQ (json["bodyRaw"].get_ref<const std::string&> ().size (), text.size ());
+}
+
+TEST (ParsedBody, ABodyPastTheThresholdIsNullWhateverTheCallerAsked) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES + 1);
+    const auto json = serialize (response_with_body (text), /*include_parsed_body=*/true);
+
+    ASSERT_TRUE (json.contains ("body"));
+    EXPECT_TRUE (json["body"].is_null ());
+    EXPECT_EQ (json["bodyRaw"], text);
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+}
+
 TEST (BodyEncoding, AnAnswerWithNoEncodingReadsAsUtf8) {
     EXPECT_EQ (response_body_bytes (Json{ { "bodyRaw", "plain" } }), "plain");
 }
@@ -541,6 +655,32 @@ TEST (JsonRequest, SerializesHttpVersion) {
     req.url          = "https://x/y";
     req.http_version = vayu::HttpVersion::Http1_1;
     EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
+}
+
+// A form-data part's own `contentType` survives serialize -> deserialize on a
+// text part as it does on a file part, and a part without one writes no key
+// (#2539). Mutation check: put the `contentType` write back inside the file
+// branch of `serialize_form_fields` and the text part loses it.
+TEST (JsonRequest, ATextPartsContentTypeRoundTripsAndAnAbsentOneWritesNoKey) {
+    vayu::Request req;
+    req.method    = vayu::HttpMethod::POST;
+    req.url       = "https://x/y";
+    req.body.mode = vayu::BodyMode::FormData;
+    vayu::FormField typed ("meta", "{}");
+    typed.content_type = "application/json";
+    req.body.fields    = { typed, vayu::FormField ("plain", "v") };
+
+    const auto written = serialize (req).at ("body").at ("fields");
+    EXPECT_EQ (written[0].at ("contentType"), "application/json");
+    EXPECT_FALSE (written[0].contains ("type"));
+    EXPECT_FALSE (written[1].contains ("contentType"));
+
+    auto read = deserialize_request (serialize (req).dump ());
+    ASSERT_TRUE (read.is_ok ());
+    ASSERT_EQ (read.value ().body.fields.size (), 2U);
+    EXPECT_EQ (read.value ().body.fields[0].type, vayu::FormFieldType::Text);
+    EXPECT_EQ (read.value ().body.fields[0].content_type, "application/json");
+    EXPECT_TRUE (read.value ().body.fields[1].content_type.empty ());
 }
 
 // GET /runs/:id: the full configSnapshot, nested keys included, and no

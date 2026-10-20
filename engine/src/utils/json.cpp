@@ -26,6 +26,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/text_escape.hpp"
@@ -65,9 +66,10 @@ std::optional<Json> try_parse_body (const std::string& body) {
 
 namespace {
 
-// A text field serializes exactly as it always did - the file members are
-// emitted only for a file part, so a stored body that has none round-trips
-// byte-identically through this.
+// A text field with no content type serializes exactly as it always did - the
+// file members are emitted only for a file part, `contentType` only when set
+// (a text part carries one too, #2539) - so a stored body that has neither
+// round-trips byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
@@ -79,9 +81,9 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.file_name.empty ()) {
                 entry["fileName"] = field.file_name;
             }
-            if (!field.content_type.empty ()) {
-                entry["contentType"] = field.content_type;
-            }
+        }
+        if (!field.content_type.empty ()) {
+            entry["contentType"] = field.content_type;
         }
         out.push_back (std::move (entry));
     }
@@ -1142,9 +1144,26 @@ std::optional<Error> drop_refused_body_mode_headers (const Json& json, Request& 
 }
 
 /**
+ * @p written as the name it is stored under (issue #2467): its surrounding
+ * spaces and tabs trimmed, then refused when what is left is not a token
+ * (`http/header_names.hpp`). A name that trims to nothing is stored empty, for
+ * the empty-name refusal every send already makes.
+ */
+Result<std::string> stored_header_name (std::string_view written) {
+    const std::string name (vayu::http::trim_optional_whitespace (written));
+    if (name.empty ()) {
+        return name;
+    }
+    if (auto refusal = vayu::http::invalid_header_name_refusal (name)) {
+        return Error{ ErrorCode::InvalidHeaderName, std::move (*refusal) };
+    }
+    return name;
+}
+
+/**
  * `headers`, in either shape (issue #2466): an array of `{"name", "value"}`
  * lines in send order, every one kept, or the older object, one line per name
- * in the object's key order.
+ * in the object's key order. Names are settled by `stored_header_name`.
  */
 std::optional<Error> read_request_headers (const Json& json, Request& request) {
     const auto headers = json.find ("headers");
@@ -1155,8 +1174,12 @@ std::optional<Error> read_request_headers (const Json& json, Request& request) {
         // A JSON object names a header once, and the map this replaced folded
         // two spellings of one name into one: `[]` keeps that (first spelling,
         // last value), where `add` would send both.
-        for (const auto& [name, value] : headers->items ()) {
-            request.headers[name] = value.get<std::string> ();
+        for (const auto& [written, value] : headers->items ()) {
+            auto name = stored_header_name (written);
+            if (name.is_error ()) {
+                return name.error ();
+            }
+            request.headers[name.value ()] = value.get<std::string> ();
         }
         return std::nullopt;
     }
@@ -1172,7 +1195,11 @@ std::optional<Error> read_request_headers (const Json& json, Request& request) {
                 "'headers' lines must be objects with a string \"name\" and a "
                 "string \"value\"" };
         }
-        request.headers.add (name->get<std::string> (), value->get<std::string> ());
+        auto stored = stored_header_name (name->get<std::string> ());
+        if (stored.is_error ()) {
+            return stored.error ();
+        }
+        request.headers.add (std::move (stored).value (), value->get<std::string> ());
     }
     return std::nullopt;
 }
@@ -1358,7 +1385,23 @@ Json serialize_redirects (const std::vector<RedirectHop>& hops) {
     return out;
 }
 
-Json serialize (const Response& response) {
+namespace {
+
+/// `serialize`'s `body` for a text body: its parse, or `null` when the caller
+/// declined one, the text is past `MAX_PARSED_RESPONSE_BODY_BYTES` (#2544), or
+/// it is not JSON. The size is checked first so a large body is never parsed.
+Json parsed_body (const std::string& text, bool include_parsed_body) {
+    if (!include_parsed_body ||
+    text.size () > vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES) {
+        return nullptr;
+    }
+    auto parsed = try_parse_body (text);
+    return parsed ? std::move (*parsed) : Json (nullptr);
+}
+
+} // namespace
+
+Json serialize (const Response& response, bool include_parsed_body) {
     Json json;
 
     json["status"]      = response.status_code;
@@ -1399,8 +1442,7 @@ Json serialize (const Response& response) {
     // a reader never has to guess which spelling `bodyRaw` is in.
     if (const auto text = response_body_text (response)) {
         std::string raw (*text);
-        auto parsed          = try_parse_body (raw);
-        json["body"]         = parsed ? std::move (*parsed) : Json (nullptr);
+        json["body"]         = parsed_body (raw, include_parsed_body);
         json["bodyRaw"]      = std::move (raw);
         json["bodyEncoding"] = BODY_ENCODING_UTF8;
     } else {

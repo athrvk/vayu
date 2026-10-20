@@ -269,13 +269,15 @@ export type ReorderMove =
 	| { type: "request"; id: string; order: number; collectionId?: string };
 
 /**
- * A scope whose children are renumbered dense `0..n-1` in display order before
- * the moves apply. `parentId: null` is the root collections, and is stated
- * rather than omitted - the engine rejects an absent `parentId` so a renumber
- * can never land on a scope the caller did not mean.
+ * A parent whose children - its sub-folders and its requests, one list (#2535) -
+ * are renumbered dense `0..n-1` in sibling order before the moves apply.
+ * `parentId: null` is the root collections, and is stated rather than omitted -
+ * the engine rejects an absent `parentId` so a renumber can never land on a
+ * scope the caller did not mean.
  */
-export type ReorderNormalize =
-	{ type: "collection"; parentId: string | null } | { type: "request"; collectionId: string };
+export interface ReorderNormalize {
+	parentId: string | null;
+}
 
 export interface ReorderRequest {
 	moves: ReorderMove[];
@@ -534,6 +536,18 @@ export interface ExecuteRequestRequest {
 	 * because the payload is the wire's shape.
 	 */
 	origin?: RunOrigin;
+	/**
+	 * Whether the answer's `body` carries a parsed copy of a JSON response
+	 * (issue #2544). The engine's default is `true`; `false` answers `body: null`
+	 * and skips building the tree, which for a large body is a copy of the whole
+	 * response held on the daemon's heap. `bodyRaw` is unaffected.
+	 *
+	 * `apiService.executeRequest` sends `false` on every execute: the pane is
+	 * built from `bodyRaw` (`paneBody`) and nothing in the renderer reads `body`.
+	 * The MCP server leaves it unset, because its `run_request` result exposes the
+	 * parsed `body` to the agent.
+	 */
+	includeParsedBody?: boolean;
 }
 
 export type ExecuteRequestResponse = SanityResult;

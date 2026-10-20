@@ -1043,6 +1043,26 @@ TEST_F (RequestComposerTest, OAuth2ConfigIsResolvedBeforeAnyCacheKeyCanBe) {
     EXPECT_EQ (pb["auth"]["config"]["accessTokenUrl"], "https://b.idp.test/token");
 }
 
+// The extra parameter lists are resolved with the rest of the config (issue
+// #2536), so a row's {{var}} reaches the token endpoint and the cache key as
+// its value, never as the template.
+TEST_F (RequestComposerTest, OAuth2ExtraParamRowsAreResolved) {
+    seed_collection ("col", "", "");
+    seed_environment ("env_a", R"({"aud":{"value":"https://api.test","enabled":true}})");
+    auto r = make_request ("req_1", "col");
+    r.url  = "https://example.test";
+    r.auth = R"({"mode":"oauth2","config":{"grantType":"client_credentials","accessTokenUrl":"https://idp.test/token","clientId":"cid","tokenParams":[{"key":"audience","value":"{{aud}}","enabled":true,"sendAs":"body"}],"authorizationParams":[{"key":"prompt","value":"{{aud}}/x"}]}})";
+    db_->save_request (r);
+
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "requestId", "req_1" }, { "environmentId", "env_a" } });
+    ASSERT_EQ (status, 200);
+    const json& config = payload["auth"]["config"];
+    EXPECT_EQ (config["tokenParams"][0]["value"], "https://api.test");
+    EXPECT_EQ (config["tokenParams"][0]["sendAs"], "body");
+    EXPECT_EQ (config["authorizationParams"][0]["value"], "https://api.test/x");
+}
+
 TEST_F (RequestComposerTest, ComposedOutputIsNeverInterpolatedTwice) {
     // A body whose *resolved* content legitimately contains {{...}} (posting a
     // Postman collection, a Handlebars template) must survive composition
@@ -1555,6 +1575,148 @@ TEST_F (RequestComposerTest, ANameThatResolvesToANameIsNotThisRefusal) {
 
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (header_of (payload, "X-Tenant"), "acme");
+}
+
+// --- A header name that is not a token (#2467) ------------------------------
+//
+// A name is trimmed of the spaces and tabs around it, and what is left must be
+// an RFC 9110 token; anything else is refused rather than sent as a line with a
+// space before its colon. See `http/header_names.hpp`.
+
+/// `POST /compose` for an inline request carrying one header line named
+/// @p name, with `env_1`'s variables in scope.
+std::pair<int, json> compose_header_named (vayu::db::Database& db, const std::string& name) {
+    const json body = {
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.test/" },
+        { "headers", json::array ({ { { "name", name }, { "value", "v" } } }) } } },
+        { "environmentId", "env_1" }
+    };
+    return vayu::http::compose_request_core (db, body);
+}
+
+// The end-to-end answer for a stored row. `stored_header_rows` trims, and so
+// does `settle_header_name` after it, so this alone does not pin the first:
+// the conformance fixture (a key of only padding) and the marker test below do.
+TEST_F (RequestComposerTest, APaddedStoredHeaderNameIsComposedTrimmed) {
+    seed_collection ("col", "");
+    auto request = make_request ("req_1", "col");
+    request.url  = "https://x.test/";
+    request.headers = R"([{"key":"Authorization ","value":"Bearer x","enabled":true}])";
+    db_->save_request (request);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"Authorization","value":"Bearer x"}])"));
+}
+
+// The marker is keyed by the trimmed name, or a padded body-mode Content-Type
+// would survive the opt-out that removes every other one.
+TEST_F (RequestComposerTest, APaddedBodyModeRowStillCarriesItsMarker) {
+    seed_collection ("col", "");
+    auto request = make_request ("req_1", "col");
+    request.url  = "https://x.test/";
+    request.body = R"({"mode":"graphql","content":"{}"})";
+    request.headers = R"([{"key":" Content-Type ","value":"application/json","enabled":true,"source":"body-mode"}])";
+    request.disabled_system_headers = R"(["content-type"])";
+    db_->save_request (request);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["bodyModeHeaders"], json::array ({ "Content-Type" }));
+    auto composed = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (composed.is_ok ()) << composed.error ().message;
+    EXPECT_FALSE (composed.value ().headers.contains ("Content-Type"));
+}
+
+TEST_F (RequestComposerTest, AnInlineHeaderNameIsTrimmedAndAPaddedRepeatIsStillARepeat) {
+    const json body        = { { "request",
+           { { "method", "GET" }, { "url", "https://x.test/" },
+           { "headers",
+           json::array ({ { { "name", " X-A\t" }, { "value", "1" } },
+           { { "name", "X-A" }, { "value", "2" } } }) } } } };
+    auto [status, payload] = vayu::http::compose_request_core (*db_, body);
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (payload["headers"],
+    json::parse (R"([{"name":"X-A","value":"1"},{"name":"X-A","value":"2"}])"));
+}
+
+// Mutation check: drop the `invalid_header_name_refusal` call in
+// `settle_header_name` and all of them compose as 200. The last two hold
+// braces: the `{{token}}` is set aside and what surrounds it is judged, and a
+// `{{` that closes no token is ordinary text (mutation check: restore a
+// blanket skip of any name holding `{{`).
+TEST_F (RequestComposerTest, AHeaderNameThatIsNotATokenIsRefused) {
+    for (const std::string name :
+    { "X Bad", "X:Bad", "X-\xC3\xA9", "Evil: injected{{", "X Bad {{x}}" }) {
+        auto [status, payload] = compose_header_named (*db_, name);
+
+        EXPECT_EQ (status, 400) << name << ": " << payload.dump ();
+        EXPECT_EQ (payload["error"]["code"], "invalid_header_name") << name;
+        const auto message = payload["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("'" + name + "'"), std::string::npos) << message;
+    }
+}
+
+TEST_F (RequestComposerTest, TheRefusalSaysWhichCharacterIsNotAllowed) {
+    const auto spaced = compose_header_named (*db_, "X Bad").second;
+    EXPECT_NE (
+    spaced["error"]["message"].get<std::string> ().find ("' ' cannot appear"),
+    std::string::npos)
+    << spaced.dump ();
+    const auto accented = compose_header_named (*db_, "X-\xC3\xA9").second;
+    EXPECT_NE (accented["error"]["message"].get<std::string> ().find (
+               "byte 0xC3 cannot appear"),
+    std::string::npos)
+    << accented.dump ();
+}
+
+TEST_F (RequestComposerTest, ANameOfOnlySpacesIsTheEmptyNameRefusal) {
+    auto [status, payload] = compose_header_named (*db_, " \t ");
+
+    EXPECT_EQ (status, 400) << payload.dump ();
+    EXPECT_EQ (payload["error"]["code"], "empty_header_name");
+}
+
+// The name a variable produces is judged after substitution: trimmed when it
+// carries padding, refused when it carries more.
+TEST_F (RequestComposerTest, AResolvedHeaderNameIsTrimmedThenJudged) {
+    seed_environment ("env_1",
+    R"({"padded":{"value":" X-Trace","enabled":true},"spaced":{"value":"X Trace","enabled":true}})");
+
+    auto [padded_status, padded] = compose_header_named (*db_, "{{padded}}");
+    ASSERT_EQ (padded_status, 200) << padded.dump ();
+    EXPECT_EQ (header_of (padded, "X-Trace"), "v");
+
+    auto [spaced_status, spaced] = compose_header_named (*db_, "{{spaced}}");
+    EXPECT_EQ (spaced_status, 400) << spaced.dump ();
+    EXPECT_EQ (spaced["error"]["code"], "invalid_header_name");
+}
+
+// A name no scope answers is left written, and a pre-request script may still
+// define it: the residual pass judges it after resolving.
+TEST_F (RequestComposerTest, AnUnresolvedHeaderNameIsLeftForTheResidualPass) {
+    seed_environment ("env_1", "{}");
+    auto [status, payload] = compose_header_named (*db_, "{{later}}");
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (header_of (payload, "{{later}}"), "v");
+}
+
+// An unanswered token among token characters is a name a script may complete,
+// so it is left for the residual pass, not refused for its braces.
+TEST_F (RequestComposerTest, ATokenAmongTokenCharactersIsNotRefused) {
+    seed_environment ("env_1", "{}");
+    auto [status, payload] = compose_header_named (*db_, "X-{{a}}-b");
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (header_of (payload, "X-{{a}}-b"), "v");
 }
 
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {

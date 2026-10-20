@@ -40,6 +40,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_export.hpp"
 #include "vayu/core/path_template.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -399,9 +400,10 @@ const std::string& root_id) {
                 children.push_back (&collection);
             }
         }
-        std::stable_sort (children.begin (), children.end (),
+        std::sort (children.begin (), children.end (),
         [] (const vayu::db::Collection* a, const vayu::db::Collection* b) {
-            return a->order < b->order;
+            return vayu::db::sibling_before (
+            vayu::db::sibling_key (*a), vayu::db::sibling_key (*b));
         });
         // Pushed in reverse so the first sibling is emitted first.
         for (auto child = children.rbegin (); child != children.rend (); ++child) {
@@ -420,7 +422,7 @@ const std::string& root_id) {
         folders.push_back ({ current.path, found->description,
         stored_json (found->variables, nlohmann::json::object ()),
         stored_json (found->auth, nlohmann::json::object ()),
-        exported_elements (found->elements) });
+        exported_elements (found->elements), found->order });
     }
     return folders;
 }
@@ -515,15 +517,15 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
         return binding.empty () || binding == exported_spec_id;
     });
 
+    // In the sidebar's order, so a skeleton lists its operations as the tree
+    // does; the walk is the whole subtree and `subtree` is where it stops.
     std::vector<vayu::core::ExportRequest> requests;
-    for (const auto& collection : collections) {
-        if (!subtree.contains (collection.id)) {
+    for (const auto& row : db.get_requests_in_subtree (collection_id)) {
+        if (!subtree.contains (row.collection_id)) {
             continue;
         }
-        for (const auto& row : db.get_requests_in_collection (collection.id)) {
-            requests.push_back (build_export_request (db, row,
-            collection_chain (collections, collection_id, collection.id)));
-        }
+        requests.push_back (build_export_request (db, row,
+        collection_chain (collections, collection_id, row.collection_id)));
     }
 
     vayu::core::ExportCollection export_collection;

@@ -34,7 +34,7 @@ namespace vayu::db {
  * `sync_schema ()` runs without `preserve`, so an older engine opening a
  * database with a column it does not map would rebuild the table without it.
  * Also bumped by a migration step that must run once and that an older engine
- * must not read past (4, 6). A database stamped newer than this is refused at startup. The
+ * must not read past (4, 6, 7). A database stamped newer than this is refused at startup. The
  * history is in `docs/engine/db-schema.md` (Schema versions):
  * 1 - scripts folded into `elements` (#1514);
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
@@ -56,9 +56,15 @@ namespace vayu::db {
  *     every existing regular file a stored body marked `unresolved: false`,
  *     then removes the key from every stored body: trust is the engine's to
  *     derive from roots and grants, and an older engine would read the
- *     missing key as untrusted and refuse every picked file.
+ *     missing key as untrusted and refuse every picked file;
+ * 7 - no mapping change: a collection's sub-folders and requests share one
+ *     `order` space (#2535). The migration moves each collection's requests
+ *     past its highest sub-folder `order`, trashed folders included, so the
+ *     folders-first display survives. An older engine numbers the two kinds
+ *     apart again on its next create or reorder, and nothing would move them
+ *     back.
  */
-inline constexpr int SCHEMA_VERSION = 6;
+inline constexpr int SCHEMA_VERSION = 7;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
@@ -350,6 +356,27 @@ class Database {
     /// a client building the whole tree needs, in one query rather than one
     /// per collection.
     std::vector<Request> get_requests_in_live_collections ();
+    /**
+     * Every live request at or beneath @p root_id, depth-first in sibling
+     * order (`sibling_order.hpp`, #2535): at each collection its sub-folders
+     * and its requests are one list, a request runs where it sits and a
+     * sub-folder's whole subtree where the sub-folder sits. What a recursive
+     * run, a mock server's route table and an OpenAPI export walk, so the
+     * three list a tree in the order the sidebar shows it. A `parent_id` cycle
+     * visits each collection once.
+     */
+    std::vector<Request> get_requests_in_subtree (const std::string& root_id);
+    /**
+     * The `order` a row appended under @p parent_id takes: one past the
+     * highest held by a live sibling of either kind, the sub-folders whose
+     * `parent_id` it is and the requests whose `collection_id` it is
+     * (`sibling_order.hpp`, #2535). `std::nullopt` is the roots, which hold
+     * collections only. @p excluded_id is left out of the scan, so a row
+     * asked to reset its own position lands after its *other* siblings
+     * rather than one past itself. `0` for a parent with no live child.
+     */
+    int next_sibling_order (const std::optional<std::string>& parent_id,
+    const std::string& excluded_id = {}); // db_collections.cpp
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
     /// takes them with it.

@@ -1,8 +1,9 @@
 /**
  * @file tests/script_variables_test.cpp
  * @brief Tests for the stored-variables round trip, the design-run persist of
- *        the three variable scopes (issues #135 and #1878), and the collection
- *        chain those scopes are loaded from (issue #234).
+ *        the three variable scopes (issues #135 and #1878), the typed value a
+ *        script set within a run (#2529), and the collection chain those
+ *        scopes are loaded from (issue #234).
  *
  * A variables blob is written by the app and rewritten by the engine after
  * every design run, so the two halves of `parse_variables`/`serialize_variables`
@@ -123,6 +124,217 @@ TEST (ScriptVariables, MalformedBlobParsesToEmptyRatherThanThrowing) {
     EXPECT_TRUE (parse_variables ("").empty ());
     // A non-object entry is skipped, not coerced.
     EXPECT_TRUE (parse_variables (R"({"a":"bare string"})").empty ());
+}
+
+// ---------------------------------------------------------------------------
+// The typed value a script set, within the run (#2529)
+//
+// Each script runs in a context of its own, so a value read back by a second
+// `run` crossed the same boundary a value set in a pre-request script and read
+// in the test script does. Every check throws on a mismatch, which fails the
+// script and names the expectation.
+// ---------------------------------------------------------------------------
+
+class ScriptVariablesTest : public ::testing::Test {
+    protected:
+    void run (const std::string& source) {
+        vayu::runtime::ScriptContext ctx;
+        vayu::http::routes::bind_variable_scopes (ctx, scopes_);
+        vayu::runtime::ScriptEngine engine;
+        const auto result = engine.execute (source, ctx);
+        ASSERT_TRUE (result.success) << result.error_message;
+    }
+
+    // The XG shape from the issue, plus one value of every other carried kind.
+    void set_one_of_each () {
+        run (R"JS(
+            pm.environment.set('n', 0);
+            pm.environment.set('n', pm.environment.get('n') + 1);
+            pm.environment.set('flag', true);
+            pm.environment.set('list', [1, 2, 3]);
+            pm.environment.set('obj', { a: 1 });
+            pm.environment.set('nothing', null);
+        )JS");
+    }
+
+    ScriptVariableScopes scopes_;
+};
+
+// Mutation check: make `cast_variable_to_jsvalue` ignore `script_value` and
+// `get('n')` is the string "01".
+TEST_F (ScriptVariablesTest, SetKeepsTheTypedValueInTheRun) {
+    set_one_of_each ();
+
+    run (R"JS(
+        pm.expect(pm.environment.get('n')).to.equal(1);
+        pm.expect(typeof pm.environment.get('n')).to.equal('number');
+        pm.expect(pm.environment.get('flag')).to.equal(true);
+        pm.expect(Array.isArray(pm.environment.get('list'))).to.equal(true);
+        pm.expect(pm.environment.get('list')).to.eql([1, 2, 3]);
+        pm.expect(pm.environment.get('obj').a).to.equal(1);
+        pm.expect(pm.environment.get('nothing')).to.equal(null);
+
+        // Every other reader answers the same value get() does.
+        pm.expect(pm.environment.toObject().n).to.equal(1);
+        pm.expect(pm.variables.get('list')).to.eql([1, 2, 3]);
+        pm.expect(pm.variables.toObject().obj).to.eql({ a: 1 });
+        pm.expect(pm.environment.has('nothing')).to.equal(true);
+    )JS");
+}
+
+// The other two scopes share the binding, and so the carry.
+TEST_F (ScriptVariablesTest, EveryScopeKeepsTheTypedValue) {
+    run (R"JS(
+        pm.globals.set('g', 2);
+        pm.collectionVariables.set('c', false);
+    )JS");
+
+    run (R"JS(
+        pm.expect(pm.globals.get('g')).to.equal(2);
+        pm.expect(pm.collectionVariables.get('c')).to.equal(false);
+        pm.expect(pm.variables.get('c')).to.equal(false);
+    )JS");
+}
+
+// A number carries as a double rather than as JSON, so the values JSON has no
+// spelling for come back as themselves.
+TEST_F (ScriptVariablesTest, ANumberJsonCannotSpellComesBackAsItself) {
+    run (R"JS(
+        pm.environment.set('nan', NaN);
+        pm.environment.set('inf', -Infinity);
+        pm.environment.set('negzero', -0);
+    )JS");
+
+    run (R"JS(
+        pm.expect(Number.isNaN(pm.environment.get('nan'))).to.equal(true);
+        pm.expect(pm.environment.get('inf')).to.equal(-Infinity);
+        pm.expect(Object.is(pm.environment.get('negzero'), -0)).to.equal(true);
+    )JS");
+    EXPECT_EQ (scopes_.environment.at ("nan").value, "NaN");
+    EXPECT_EQ (scopes_.environment.at ("negzero").value, "0");
+}
+
+// What JSON cannot write carries nothing, and the read falls back to the text
+// rather than failing the script that set it.
+TEST_F (ScriptVariablesTest, AValueJsonCannotWriteReadsBackAsItsText) {
+    run (R"JS(
+        var cycle = {};
+        cycle.self = cycle;
+        pm.environment.set('cycle', cycle);
+        pm.environment.set('fn', function () { return 1; });
+    )JS");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('cycle')).to.equal('[object Object]');
+        pm.expect(typeof pm.environment.get('fn')).to.equal('string');
+    )JS");
+}
+
+// The text form is what `set` always wrote, so `{{name}}` and the wire are
+// what they were, and what Postman substitutes.
+TEST_F (ScriptVariablesTest, TheStoredTextAndTheWireAreUnchanged) {
+    set_one_of_each ();
+
+    EXPECT_EQ (scopes_.environment.at ("n").value, "1");
+    EXPECT_EQ (scopes_.environment.at ("flag").value, "true");
+    EXPECT_EQ (scopes_.environment.at ("list").value, "1,2,3");
+    EXPECT_EQ (scopes_.environment.at ("obj").value, "[object Object]");
+    EXPECT_EQ (scopes_.environment.at ("nothing").value, "null");
+    EXPECT_EQ (scopes_.environment.at ("n").type, "string");
+
+    vayu::Request request;
+    request.url                = "https://api.example.com/items";
+    request.headers["X-Count"] = "{{n}}";
+    request.headers["X-List"]  = "{{list}}";
+    EXPECT_FALSE (vayu::http::routes::resolve_residual_tokens (request, scopes_));
+    EXPECT_EQ (request.headers["X-Count"], "1");
+    EXPECT_EQ (request.headers["X-List"], "1,2,3");
+
+    // A script's own template substitutes the text too.
+    run (R"JS(
+        pm.expect(pm.variables.replaceIn('{{n}}/{{list}}')).to.equal('1/1,2,3');
+    )JS");
+}
+
+// Postman keeps the variable with the value `undefined`, which its toString
+// substitutes as "" - not JavaScript's "undefined".
+TEST_F (ScriptVariablesTest, SetUndefinedStoresAnEmptyString) {
+    run ("pm.environment.set('u', undefined);");
+
+    EXPECT_EQ (scopes_.environment.at ("u").value, "");
+    run (R"JS(
+        pm.expect(pm.environment.has('u')).to.equal(true);
+        pm.expect(pm.environment.get('u')).to.equal(undefined);
+        pm.expect('u' in pm.environment.toObject()).to.equal(true);
+        pm.expect(pm.variables.replaceIn('[{{u}}]')).to.equal('[]');
+    )JS");
+}
+
+// A row whose type is declared keeps casting its text, as Postman casts a
+// declared type: the carry says `0` and `[5]`, the declared types answer
+// `false` and `5`. A row of the default type is the other way round.
+TEST_F (ScriptVariablesTest, ADeclaredNumberTypeStillCasts) {
+    scopes_.environment["flag"] = vayu::Variable{ "true", false, true, "boolean" };
+    scopes_.environment["count"] = vayu::Variable{ "1", false, true, "number" };
+    scopes_.environment["plain"] = vayu::Variable{ "1", false, true, "string" };
+
+    run (R"JS(
+        pm.environment.set('flag', 0);
+        pm.environment.set('count', [5]);
+        pm.environment.set('plain', [5]);
+    )JS");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('flag')).to.equal(false);
+        pm.expect(pm.environment.get('count')).to.equal(5);
+        pm.expect(pm.environment.get('plain')).to.eql([5]);
+    )JS");
+    EXPECT_EQ (scopes_.environment.at ("flag").type, "boolean");
+    EXPECT_EQ (scopes_.environment.at ("count").type, "number");
+}
+
+// A string carries nothing, so a later string set retires an earlier typed
+// value rather than leaving it to answer.
+TEST_F (ScriptVariablesTest, AStringSetReplacesAnEarlierTypedValue) {
+    run (R"JS(
+        pm.environment.set('n', 5);
+        pm.environment.set('n', '5');
+    )JS");
+
+    run ("pm.expect(pm.environment.get('n')).to.equal('5');");
+}
+
+// An `extract.*` element writes a whole new variable (`set_scope_variable`),
+// so the value a script set before it is gone and the extracted text answers.
+TEST_F (ScriptVariablesTest, AnExtractAfterASetReplacesTheTypedValue) {
+    run ("pm.environment.set('token', 5);");
+
+    vayu::http::routes::set_scope_variable (scopes_, "env", "token", "abc");
+
+    run ("pm.expect(pm.environment.get('token')).to.equal('abc');");
+}
+
+// A load run keeps a VU's writes in its `ScopeOverlay`, which holds whole
+// variables, so the typed value reaches that VU's next step; an `extract.*`
+// under load (`ScopeOverlay::set`) replaces it the way it does in a design run.
+TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheTypedValueToTheNextStep) {
+    vayu::http::routes::ScopeOverlay overlay;
+    const ScriptVariableScopes base;
+
+    scopes_ = overlay.materialize (base);
+    run ("pm.environment.set('n', 0); pm.environment.set('list', [1]);");
+    overlay.replace_from (scopes_);
+
+    scopes_ = overlay.materialize (base);
+    run ("pm.environment.set('n', pm.environment.get('n') + 1);");
+    overlay.replace_from (scopes_);
+    overlay.set ("env", "list", "extracted");
+
+    scopes_ = overlay.materialize (base);
+    run (R"JS(
+        pm.expect(pm.environment.get('n')).to.equal(1);
+        pm.expect(pm.environment.get('list')).to.equal('extracted');
+    )JS");
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +507,52 @@ TEST_F (PersistScriptVariablesTest, ASetOnADisabledRowStoresItEnabledWithTheNewV
     EXPECT_EQ (stored["token"]["secret"], true);
     EXPECT_EQ (stored["token"]["type"], "json");
     EXPECT_EQ (stored["token"]["createdAt"], 1784967810149LL);
+}
+
+// The typed value a set carries is run-local (#2529): setting the number 5 on
+// a row that already holds the text "5" changes nothing a row stores, so the
+// row is not rewritten. Mutation check: make `ScriptValue::operator==` compare
+// its fields and the row is rewritten, `updated_at` with it.
+TEST_F (PersistScriptVariablesTest, TypedValuesDoNotMakeTheRowLookEdited) {
+    auto environment = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (environment);
+    const std::string blob =
+    R"({"n":{"value":"5","enabled":true,"secret":false,"type":"string","createdAt":1784967810149}})";
+    environment->variables = blob;
+    db_->save_environment (*environment);
+
+    auto scopes = load ();
+    run_script (scopes, "pm.environment.set('n', 5);");
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_EQ (stored_environment_variables (), blob);
+    auto after = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->updated_at, 1)
+    << "a typed set of the same text rewrote the row";
+}
+
+// A typed set that does change the text is still a value-only delta, so a
+// flag another client changed on the row meanwhile survives it - the same
+// rule a string set follows. Under the mutation above this one fails too: the
+// carry makes the change look like more than the value, and the row is
+// written whole.
+TEST_F (PersistScriptVariablesTest, ATypedSetKeepsAFlagAnotherClientChanged) {
+    auto scopes    = load ();
+    auto variables = json::parse (stored_environment_variables ());
+    variables["token"]["enabled"] = false;
+    ASSERT_EQ (vayu::http::routes::update_environment_response (
+               *db_, "env_1", json{ { "variables", variables } })
+               .first,
+    200);
+
+    run_script (scopes, "pm.environment.set('token', [1, 2]);");
+    persist_script_variables (*db_, scopes);
+
+    auto stored = json::parse (stored_environment_variables ());
+    EXPECT_EQ (stored["token"]["value"], "1,2");
+    EXPECT_EQ (stored["token"]["enabled"], false) << stored.dump ();
+    EXPECT_EQ (stored["token"]["type"], "json");
 }
 
 // A run with no environment and no request must not touch the scopes it has no

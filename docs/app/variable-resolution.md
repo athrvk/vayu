@@ -671,6 +671,34 @@ refused there rather than sent. The collision rule keeps the narrower reach and
 loses nothing by it: a request that arrives already resolved cannot carry a
 collision to find, since two names that are already equal are already one key.
 
+### And the name that is not a name (#2467)
+
+A header name pasted with a trailing blank - `Authorization ` - is a name no one
+meant, and sent as written it is the wire line `Authorization : Bearer x`, with a
+space before the colon: a strict server answers `400` and a lenient one reads it
+as a header of another name. So every layer that reads a name does two things, in
+this order. It **trims** the spaces and tabs around it (SP and HTAB, nothing
+else), an obvious paste error with one reading; then it requires what is left to
+be an RFC 9110 token, and **refuses** anything that is not - an interior space,
+a colon, a byte outside ASCII - with a `400` and code `invalid_header_name` whose
+message quotes the name and says which character cannot appear in one. That is
+the line this page draws throughout: repair what has one reading, refuse what
+has none, never guess.
+
+A name of only spaces and tabs trims to nothing, so it is the empty name above,
+however it got there. A `{{token}}` nothing answered is not judged, since an
+unanswered token is sent as written, but the text around it is (`X-{{a}}-b`
+passes, `X Bad {{x}}` and a stray `{{` are refused); a name a variable
+*produces* is trimmed and judged after substitution, so `{{h}}` answering
+` X-Trace` sends `X-Trace` and answering `X Trace` is refused. Two lines written
+`X-A` and ` X-A` are a repeat the author typed, not a collision. The layers are
+the ones above: composition's `400`, the headers of a `POST /execute` or
+`POST /runs` payload, the residual pass (which also meets the name a script
+defined), the bind of a data cell, and `pm.sendRequest`. An auth credential gets
+the same trim - a bearer token and an API key's name and value, not a basic
+pair - so a pasted token's trailing blank does not end up inside the header
+value.
+
 ---
 
 ## Dynamic variables

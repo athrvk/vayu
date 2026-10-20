@@ -91,6 +91,7 @@
             "maxRedirects": {"type": "number"},
             "httpVersion": {"type": "string"},
             "acceptEncoding": {"type": "boolean"},
+            "expectContinue": {"type": "boolean"},
             "dataRowCount": {"type": "number"},
             "dataFileName": {"type": "string"},
             "dataFileHash": {"type": "string"},
@@ -558,7 +559,7 @@
                   "field": {
                     "enum": [
                       "run_type", "mode", "concurrency", "target_rps", "duration", "status",
-                      "http_version", "data_file", "request", "compression"
+                      "http_version", "data_file", "request", "compression", "expect_continue"
                     ]
                   },
                   "base": {"type": "string"},
