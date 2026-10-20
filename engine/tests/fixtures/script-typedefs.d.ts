@@ -1378,7 +1378,7 @@ declare const pm: {
 		 */
 		errorMessage: string | undefined;
 		/**
-		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: the sandbox is synchronous with no event loop, so a post-request script runs once, after the stream has terminated, over this list.
+		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
 		 * 
 		 * Absent - not empty - for an ordinary response, so typeof separates 'not a stream' from 'a stream with no events'. The list is bounded by sseMaxStoredEvents; check eventsTruncated before asserting over it as a whole.
 		 * 
@@ -2283,7 +2283,7 @@ declare function setInterval(callback: (...args: any[]) => void, delay?: number,
 /**
  * Call callback after the script body, in due order with the other timers; extra arguments are passed to it. Returns the id clearTimeout takes.
  * 
- * Every timer runs before the script ends, within its deadline - the request is not sent, and the test script's results are not reported, until they have. The delay orders the callbacks and is not waited out: nothing sleeps, and Date.now() does not move. To delay a request, add a Think time element (timer.think) instead.
+ * Every timer runs before the script ends, within its deadline - the request is not sent, and the test script's results are not reported, until they have. The delay orders the callbacks and is not waited out: nothing sleeps, and Date.now() does not advance by the delay. To delay a request, add a Think time element (timer.think) instead.
  */
 declare function setTimeout(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number;
 

@@ -2770,7 +2770,7 @@ virtual clock: firing a timer moves the clock to its due time, so callbacks run
 in due order (a tie to the one queued first) and the promise jobs each callback
 queues run before the next timer, as on an event loop. Nothing sleeps:
 `setTimeout(fn, 60000)` runs `fn` as soon as the work ahead of it has, and
-`Date.now()` does not move. A delay that is not a number from 1 to 2147483647
+`Date.now()` does not advance by the delay. A delay that is not a number from 1 to 2147483647
 counts as 1, Node's rule. **A `setTimeout` written as a sleep therefore does not
 delay the request** - in Postman it would, inside the script's deadline; in
 Vayu that is a [Think time element](./elements.md) (`timer.think`), which
