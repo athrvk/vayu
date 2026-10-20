@@ -33,7 +33,16 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, KeyRound, Plus, Square, Trash2 } from "lucide-react";
+import {
+	Check,
+	ChevronDown,
+	ChevronRight,
+	Copy,
+	KeyRound,
+	Plus,
+	Square,
+	Trash2,
+} from "lucide-react";
 import {
 	DrawerPanel,
 	DrawerSection,
@@ -50,6 +59,7 @@ import {
 	Button,
 	Collapsible,
 	CollapsibleContent,
+	IconSwap,
 	Input,
 	Select,
 	SelectContent,
@@ -355,18 +365,24 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	);
 }
 
-/** One labelled URL inside an expanded issuer, with its copy control. */
+/**
+ * One labelled URL inside an expanded issuer, with its copy control.
+ *
+ * Each copy button owns its hook, so a copy checks the glyph it came from and
+ * not its siblings'. @p copyWhat names the value in a failure's toast.
+ */
 function IssuerDetailRow({
 	label,
 	value,
 	copyLabel,
-	onCopy,
+	copyWhat,
 }: {
 	label: string;
 	value: string;
 	copyLabel: string;
-	onCopy: () => void;
+	copyWhat: string;
 }) {
+	const { copy, copied } = useCopy({ feedback: "icon" });
 	return (
 		<div className="flex items-center gap-1 py-0.5">
 			{/*
@@ -378,8 +394,57 @@ function IssuerDetailRow({
 			<TruncatedText className="min-w-0 flex-1 font-mono text-xs">{value}</TruncatedText>
 			<TooltipIconButton
 				label={copyLabel}
-				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
-				onClick={onCopy}
+				icon={
+					<IconSwap
+						state={copied ? "copied" : "copy"}
+						icons={{
+							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+							copied: (
+								<Check
+									className="size-icon-sm text-status-success-text"
+									aria-hidden="true"
+								/>
+							),
+						}}
+					/>
+				}
+				onClick={() => void copy(value, copyWhat)}
+			/>
+		</div>
+	);
+}
+
+/**
+ * The issuer's HS256 secret: copied, never displayed. Its own row rather than
+ * another `IssuerDetailRow` because there is no value to show beside the
+ * button, only a description of what it copies.
+ */
+function SigningKeyRow({ signingKey }: { signingKey: string }) {
+	const { copy, copied } = useCopy({ feedback: "icon" });
+	return (
+		<div className="flex items-center gap-1 py-0.5">
+			{/* `w-[4rem]`, not `w-16` - see {@link IssuerDetailRow}'s label column. */}
+			<span className="w-[4rem] shrink-0 text-xs text-muted-foreground">Key</span>
+			<span className="min-w-0 flex-1 text-xs text-muted-foreground">
+				HS256 shared secret
+			</span>
+			<TooltipIconButton
+				label="Copy signing key"
+				icon={
+					<IconSwap
+						state={copied ? "copied" : "key"}
+						icons={{
+							key: <KeyRound className="size-icon-sm" aria-hidden="true" />,
+							copied: (
+								<Check
+									className="size-icon-sm text-status-success-text"
+									aria-hidden="true"
+								/>
+							),
+						}}
+					/>
+				}
+				onClick={() => void copy(signingKey, "Signing key")}
 			/>
 		</div>
 	);
@@ -487,31 +552,20 @@ function IssuerRow({
 						label="Token"
 						value={issuer.tokenUrl}
 						copyLabel="Copy token URL"
-						onCopy={() => void copy(issuer.tokenUrl, "Token URL")}
+						copyWhat="Token URL"
 					/>
 					<IssuerDetailRow
 						label="Authorize"
 						value={issuer.authorizeUrl}
 						copyLabel="Copy authorize URL"
-						onCopy={() => void copy(issuer.authorizeUrl, "Authorize URL")}
+						copyWhat="Authorize URL"
 					/>
 					{/* The signing key is the whole point of the issuer being a mock:
 					    it is the HS256 secret the service under test verifies the
 					    minted tokens with. Copied, never displayed - a 32-character
 					    secret in a 260px drawer is noise, and this one is offered as
 					    a value to paste, not to read. */}
-					<div className="flex items-center gap-1 py-0.5">
-						{/* `w-[4rem]`, not `w-16` - see {@link IssuerDetailRow}'s label column. */}
-						<span className="w-[4rem] shrink-0 text-xs text-muted-foreground">Key</span>
-						<span className="min-w-0 flex-1 text-xs text-muted-foreground">
-							HS256 shared secret
-						</span>
-						<TooltipIconButton
-							label="Copy signing key"
-							icon={<KeyRound className="size-icon-sm" aria-hidden="true" />}
-							onClick={() => void copy(issuer.signingKey, "Signing key")}
-						/>
-					</div>
+					<SigningKeyRow signingKey={issuer.signingKey} />
 
 					<p className="py-1 text-xs text-muted-foreground">
 						{failureModeSummary(issuer)}

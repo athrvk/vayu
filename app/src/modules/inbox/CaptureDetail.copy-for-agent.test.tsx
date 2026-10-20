@@ -84,6 +84,15 @@ describe("Copy for agent on a capture", () => {
 		expect(useToastStore.getState().toasts).toEqual([]);
 	});
 
+	it("is the shared icon button, not a hand-rolled copy of it", () => {
+		renderDetail();
+
+		// `CopyForAgentButton` is the one place the rowAction variant and its
+		// compact hit area are written for this control.
+		expect(copyButton().className).toContain("hover:bg-accent-active");
+		expect(copyButton().className).toContain("size-control-sm");
+	});
+
 	it("keeps the query, headers and body off the clipboard", async () => {
 		renderDetail();
 		fireEvent.click(copyButton());
