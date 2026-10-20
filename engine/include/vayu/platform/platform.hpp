@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <system_error>
 
 // Platform detection macros
 // Macros, not an enum: every consumer is a preprocessor conditional
@@ -211,6 +212,60 @@ void restrict_new_files_to_owner ();
  * @throws std::runtime_error if a directory cannot be created or restricted
  */
 void prepare_data_directory (const std::string& data_dir);
+
+/**
+ * @brief Flush a file's contents to stable storage
+ * @param path The file to flush
+ * @return true when the OS reports the data written out; false when the file
+ *         cannot be opened or the flush fails. Never throws.
+ *
+ * A closed file is not a durable one: until the OS writes its cache out, a
+ * power loss can leave a snapshot that was written, validated and renamed into
+ * place as a file of zeros. POSIX: `open` + `fsync`. Windows: `CreateFileW` +
+ * `FlushFileBuffers`. Call it on the finished file, before it is renamed over
+ * the copy it replaces.
+ */
+[[nodiscard]] bool fsync_file (const std::string& path);
+
+/**
+ * @brief Flush a directory's entries (a create, a rename) to stable storage
+ * @param path The directory to flush
+ * @return true when the entries are flushed or the platform has nothing to
+ *         flush; false when @p path is not a directory it can open or the
+ *         flush fails. Never throws.
+ *
+ * A file's own `fsync` does not cover the directory entry that names it, so a
+ * file created or renamed into place can still vanish on power loss. POSIX:
+ * `open (O_DIRECTORY)` + `fsync`. Windows cannot flush a directory handle, so
+ * this only confirms @p path is a directory; the rename there is made
+ * durable by `replace_file_durably` instead.
+ */
+[[nodiscard]] bool fsync_directory (const std::string& path);
+
+/// What `replace_file_durably` did.
+struct FileReplacement {
+    /// Set when @p to was not replaced; @p from is then untouched.
+    std::error_code error;
+    /// The replacement happened and is known to be on stable storage. False
+    /// beside an empty `error` means the destination was replaced but the
+    /// directory could not be flushed: the rename is in effect and may not
+    /// survive a power loss.
+    bool durable = false;
+};
+
+/**
+ * @brief Rename @p from over @p to, atomically, and flush the rename
+ * @param from The finished, already flushed file
+ * @param to The path to replace; an existing file there is replaced
+ *
+ * One rename, so @p to always names a whole file: the old one until it
+ * returns, the new one after. POSIX: `rename`, then `fsync_directory` of
+ * @p to's parent (a failed flush cannot undo the rename, so it only clears
+ * `durable`). Windows: `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING |
+ * MOVEFILE_WRITE_THROUGH`, which returns after the move is on disk.
+ */
+[[nodiscard]] FileReplacement
+replace_file_durably (const std::string& from, const std::string& to);
 
 // ============================================================================
 // Signal Handling

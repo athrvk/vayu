@@ -594,6 +594,11 @@ struct Database::Impl {
     bool recovery_backup_cancelled      = false;
     std::thread recovery_backup_thread;
 
+    /// `sqlite3_total_changes64` on `connection` once `Database::init`'s own
+    /// seed and repair writes are done: the shutdown refresh of `<db>.bak`
+    /// skips a session that has not moved past it. Written under `mutex`.
+    int64_t session_changes_baseline = 0;
+
     /// The file `storage` was opened on, for `Database::path`. Named for the
     /// file rather than `db_path`, which the constructor below already uses for
     /// the parsed `std::filesystem::path` - MSVC builds this /W4 /WX and a

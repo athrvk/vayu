@@ -188,7 +188,8 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   so the next start skips the scan, and write `<db>.pre-upgrade.bak`
   immediately before the first rewrite. `<db>.bak` is not that copy: the same
   start refreshes it, once it listens, from a file the repair has already
-  rewritten.
+  rewritten, and a clean shutdown refreshes it again
+  (`refresh_recovery_backup_on_shutdown`, #2421).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.53), which runs before `init ()` and therefore
