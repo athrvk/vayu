@@ -1965,7 +1965,7 @@ TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
     for (const auto& row : done["results"]) {
         EXPECT_TRUE (row.contains ("trace")) << row.dump ();
     }
-    EXPECT_EQ (done["results"][2]["trace"], UNPARSEABLE);
+    EXPECT_EQ (done["results"][2]["trace"].get<std::string> (), UNPARSEABLE);
 
     // Everything else is the same report: the status distribution, the latency
     // percentiles, the selected rows and the stored count. `end_time` and the
