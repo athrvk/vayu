@@ -235,6 +235,12 @@ struct ReportExtras {
     // derived from the sampled results - only then are successful/failed
     // recounted from it (a run with neither keeps the sampled figures).
     bool status_codes_overridden = false;
+    // False when the stored summary says nothing was timed (`latency.count`
+    // of 0 - a collection run in which no step sent). The report then leaves
+    // `latency` out: its fields default to 0, which would read as steps that
+    // answered instantly. A summary with no `count` (every load run, and runs
+    // stored before collection runs wrote one) keeps the block.
+    bool latency_measured = true;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
     bool has_tests    = false;
@@ -501,6 +507,29 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
     extras.capacity     = std::move (capacity);
 }
 
+/** The stored summary's whole-run `latency` block, or the marker that nothing was timed. */
+void apply_summary_latency (const nlohmann::json& summary,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    if (!summary.contains ("latency") || !summary["latency"].is_object ()) {
+        return;
+    }
+    const auto& latency = summary["latency"];
+    if (latency.contains ("count") && latency["count"] == 0) {
+        extras.latency_measured = false;
+        return;
+    }
+    read_number (latency, "min", report.latency_min);
+    read_number (latency, "max", report.latency_max);
+    read_number (latency, "avg", report.latency_avg);
+    read_number (latency, "p50", report.latency_p50);
+    read_number (latency, "p75", report.latency_p75);
+    read_number (latency, "p90", report.latency_p90);
+    read_number (latency, "p95", report.latency_p95);
+    read_number (latency, "p99", report.latency_p99);
+    read_number (latency, "p999", report.latency_p999);
+}
+
 /** The whole-run totals and the latency distribution. */
 void apply_summary_totals (const nlohmann::json& summary,
 vayu::DetailedReport& report,
@@ -531,18 +560,7 @@ ReportExtras& extras) {
         extras.sending = sending;
     }
 
-    if (summary.contains ("latency") && summary["latency"].is_object ()) {
-        const auto& latency = summary["latency"];
-        read_number (latency, "min", report.latency_min);
-        read_number (latency, "max", report.latency_max);
-        read_number (latency, "avg", report.latency_avg);
-        read_number (latency, "p50", report.latency_p50);
-        read_number (latency, "p75", report.latency_p75);
-        read_number (latency, "p90", report.latency_p90);
-        read_number (latency, "p95", report.latency_p95);
-        read_number (latency, "p99", report.latency_p99);
-        read_number (latency, "p999", report.latency_p999);
-    }
+    apply_summary_latency (summary, report, extras);
 }
 
 /** A stored summary's `status_codes` object as the distribution it records. */
@@ -1516,11 +1534,14 @@ double target_rps) {
     if (const auto& sending = extras.sending) {
         json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
     }
-    json_report["latency"] = { { "min", report.latency_min }, { "max", report.latency_max },
-        { "avg", report.latency_avg }, { "median", report.latency_p50 },
-        { "p50", report.latency_p50 }, { "p75", report.latency_p75 },
-        { "p90", report.latency_p90 }, { "p95", report.latency_p95 },
-        { "p99", report.latency_p99 }, { "p999", report.latency_p999 } };
+    if (extras.latency_measured) {
+        json_report["latency"] = { { "min", report.latency_min },
+            { "max", report.latency_max }, { "avg", report.latency_avg },
+            { "median", report.latency_p50 }, { "p50", report.latency_p50 },
+            { "p75", report.latency_p75 }, { "p90", report.latency_p90 },
+            { "p95", report.latency_p95 }, { "p99", report.latency_p99 },
+            { "p999", report.latency_p999 } };
+    }
     json_report["statusCodes"] = report.status_codes;
 
     if (target_rps > 0) {

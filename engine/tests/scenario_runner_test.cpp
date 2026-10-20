@@ -1837,6 +1837,46 @@ TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZer
     EXPECT_DOUBLE_EQ (summary["rps"].get<double> (), 0.0);
 }
 
+// Issue #2389: the stored `latency` block is the exact nearest-rank summary of
+// the sample it was given. The sample is unsorted with one outlier, so a
+// summary that skipped the sort, took the mean for the median or read the
+// wrong rank answers differently on every figure. Mutation check: delete the
+// `summary["latency"]` write in `build_scenario_summary_payload` and this reds.
+TEST (ScenarioSummaryPayload, StoresTheExactNearestRankLatencyOfTheSentSample) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 10;
+    inputs.latency        = vayu::core::summarize_latencies (
+    { 50.0, 10.0, 30.0, 20.0, 40.0, 60.0, 70.0, 80.0, 90.0, 1000.0 });
+
+    const auto summary = vayu::core::build_scenario_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("latency")) << summary.dump ();
+    const auto& latency = summary["latency"];
+    EXPECT_EQ (latency["count"].get<size_t> (), 10u);
+    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 10.0);
+    EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 145.0);
+    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 80.0);
+    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 90.0);
+    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["p999"].get<double> (), 1000.0);
+}
+
+// A run in which no step sent has no latency to report. The block is `count: 0`
+// and nothing else - a stored p99 of 0 would read as a step that answered
+// instantly (issue #2389).
+TEST (ScenarioSummaryPayload, AnEmptyLatencySampleStoresACountOfZeroAndNoPercentiles) {
+    vayu::core::ScenarioSummaryInputs inputs;
+    inputs.steps_executed = 3;
+    inputs.latency        = vayu::core::summarize_latencies ({});
+
+    const auto summary = vayu::core::build_scenario_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("latency")) << summary.dump ();
+    EXPECT_EQ (summary["latency"], (nlohmann::json{ { "count", 0 } }))
+    << summary.dump ();
+}
+
 // ============================================================================
 // Per-step schema verdicts (issue #681)
 // ============================================================================
@@ -2197,6 +2237,49 @@ TEST_F (ScenarioRunnerTest, AStepWhoseTransferFailedKeepsItsLatency) {
     ASSERT_EQ (thresholds["checks"].size (), 1u);
     EXPECT_TRUE (thresholds["checks"][0]["evaluated"].get<bool> ())
     << thresholds["checks"][0].dump ();
+}
+
+// Issue #2389: the stored `latency` block and the latency budget's `actual`
+// are one computation over one sample, so the report's p99 is the number the
+// verdict was judged on. Mutation check: in `run_scenario`, compute
+// `summary.latency` from a different list than the threshold input and the two
+// diverge.
+TEST_F (ScenarioRunnerTest, TheStoredLatencyIsTheSampleTheLatencyBudgetJudged) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_b", 1, "/login");
+
+    const auto run_id =
+    start_with_thresholds (/*iterations=*/2, json{ { "latencyP99Ms", 60000 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    ASSERT_TRUE (summary.contains ("latency")) << summary.dump ();
+    EXPECT_EQ (summary["latency"]["count"].get<size_t> (), 4u);
+    const auto& check = summary["thresholds"]["checks"][0];
+    ASSERT_EQ (check["metric"].get<std::string> (), "latencyP99Ms");
+    EXPECT_DOUBLE_EQ (
+    summary["latency"]["p99"].get<double> (), check["actual"].get<double> ());
+    EXPECT_LE (summary["latency"]["min"].get<double> (),
+    summary["latency"]["avg"].get<double> ());
+    EXPECT_LE (summary["latency"]["avg"].get<double> (),
+    summary["latency"]["max"].get<double> ());
+}
+
+// A run whose only step was refused before the wire has no duration to report:
+// `count: 0` and no percentile keys, not a block of zeros.
+TEST_F (ScenarioRunnerTest, ARunWithNoSentStepStoresNoLatencyFigures) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", R"(pm.collectionVariables.set("header_name", "");)",
+    "", "", "", R"([{"key":"{{header_name}}","value":"acme","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    ASSERT_TRUE (summary.contains ("latency")) << summary.dump ();
+    EXPECT_EQ (summary["latency"], (nlohmann::json{ { "count", 0 } }))
+    << summary.dump ();
 }
 
 // A run whose config declares no `thresholds` block stores no verdict at all -
