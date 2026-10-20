@@ -1018,10 +1018,10 @@ Postman's and Newman's default with `stopOnError` unset. The step is `errored`
 with the script's message, never `passed`. The run option `stopOnError: true`
 restores the old rule (Newman's `--bail` shape); the Run Collection dialog's
 **Stop the iteration on a script error** switch and `run_collection`'s
-`stopOnError` argument set it. One divergence stays: a
-request that got no response at all still ends the iteration, where Postman
-carries on, because the requests after it nearly always read the response that
-never arrived. A run whose iterations an error cut short says how many steps
+`stopOnError` argument set it. A request that got no response at all is
+the same: its step is `errored` with the transport error and the iteration
+carries on, as in Postman, so a later step that reads the missing response
+errors on its own row. A run whose iterations an error cut short says how many steps
 that cost as `stepsNotRun`.
 
 Details, including every case that throws, are in

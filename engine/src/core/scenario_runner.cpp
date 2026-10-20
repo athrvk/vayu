@@ -91,15 +91,12 @@ bool script_errored (const vayu::ScriptResult& result) {
 }
 
 /**
- * Decide what one exchange amounts to, onto @p record's outcome, error and
- * `errored_by_script`.
+ * Decide what one exchange amounts to, onto @p record's outcome and error.
  *
  * The order is deliberate: a step that did not complete is `Errored` whatever
  * its scripts reported, and a script that threw is `Errored` rather than
  * `Failed`, because "the assertion did not hold" and "the assertion never ran"
  * are different facts and only the first one means the run learned something.
- * The same order is what makes `errored_by_script` mean "the exchange
- * completed": the transport check runs first.
  */
 void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRecord& record) {
     if (exchange.response.has_error ()) {
@@ -111,7 +108,6 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
         record.outcome = StepOutcome::Errored;
         record.error =
         "Pre-request script failed - " + exchange.pre_script_result.error_message;
-        record.errored_by_script = true;
         return;
     }
     // After the script check and before everything that reads a response: a
@@ -125,7 +121,6 @@ void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRec
     if (script_errored (exchange.post_script_result)) {
         record.outcome = StepOutcome::Errored;
         record.error = "Test script failed - " + exchange.post_script_result.error_message;
-        record.errored_by_script = true;
         return;
     }
     if (auto failed = describe_failed_tests (
@@ -875,17 +870,6 @@ bool& end_iteration) {
     return next_position;
 }
 
-/**
- * Whether an errored step ends its iteration (issue #2526). A script that threw
- * after the exchange completed does not, unless the run asked for
- * `stopOnError`: the request was sent and answered, so the steps after it have
- * what they need, which is Postman's default. Everything else that errors - a
- * transport failure, a row that would not bind - leaves later steps standing on
- * a response that never arrived.
- */
-bool errored_step_ends_iteration (const StepRecord& record, bool stop_on_error) {
-    return stop_on_error || !record.errored_by_script;
-}
 
 /**
  * The plan positions after @p position that this iteration has not attempted:
@@ -1134,7 +1118,10 @@ TransactionHistograms& transactions) {
         bool end_iteration   = false;
         size_t next_position = position + 1;
         if (record.outcome == StepOutcome::Errored) {
-            end_iteration = errored_step_ends_iteration (record, base.stop_on_error);
+            // Postman's default (issue #2526): an errored step - a script that
+            // threw, a transport failure, a row that would not bind - is a red
+            // row and the iteration moves on; `stopOnError` ends it instead.
+            end_iteration = base.stop_on_error;
         } else {
             next_position = decide_next_step (exchange, step_index, recent_steps, position,
             steps_this_iteration, max_steps_per_iteration, record, end_iteration);

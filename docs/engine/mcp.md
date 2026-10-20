@@ -1611,11 +1611,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   - **`stopOnError` ends an iteration at every errored step** (issue #2526), on
     `run_collection` only, matching the Run Collection dialog's switch. Top-level
     beside `scenario` and **sent only when true**, like `failOnSchemaError`.
-    Left off, the engine's default, a step whose pre-request or test script
-    threw after its exchange completed stays `errored` with its message and the
-    iteration moves on to the next request, as in Postman and Newman; a transport
-    failure, an unbindable data row and the runner's own refusals end the
-    iteration either way. What an error that ended one cost is counted:
+    Left off, the engine's default, an errored step (a script that threw, a
+    request that got no response, an unbindable data row) stays `errored` with
+    its message and the iteration moves on to the next request, as in Postman
+    and Newman; the runner's own refusals end the iteration either way. What an error that ended one cost is counted:
     `scenario.stepsNotRun` in `get_run_report`, and `stepsNotRun` on the step row
     that ended it, in its `trace` - the tool's description and the `nextStep` it
     returns both say so. `start_load_run` **refuses** it on either path for the

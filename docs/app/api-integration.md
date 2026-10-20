@@ -896,9 +896,9 @@ has drained and cannot demote a step on it.
 `stopOnError` follows the same shape (issue #2526): top-level on the design-mode
 payload, from the dialog's **Stop the iteration on a script error** switch,
 **omitted when off** and never sent on a load payload, whose executor does not
-read it. Off, the engine's default, a step whose script threw after its
-exchange completed stays `errored` and the iteration walks on, as in Postman;
-on, every errored step ends its iteration. What an error that did end one cost
+read it. Off, the engine's default, an errored step (a script that threw, a request
+that got no response) stays `errored` and the iteration walks on, as in
+Postman; on, every errored step ends its iteration. What an error that did end one cost
 comes back as `stepsNotRun`, which the renderer reads on three layers: the
 report's `scenario.stepsNotRun` (the run tab's header prints "N steps did not
 run" beside the iteration tally), and `stepsNotRun` on the `step` frame and on
