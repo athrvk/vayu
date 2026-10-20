@@ -2661,7 +2661,9 @@ so its size is held by `tool-list-budget.test.ts`, which builds the real
 registry through the real server (app host) for each writes-off/on and
 reveal-off/on pair. Measured at #2441 (reveal off): 115,370 bytes with writes
 off, 181,447 with writes on, down from 136,705 and 211,549; the caps sit about
-5% above the measured sizes. The same file fails on a sentence of 150 or more
+5% above the measured sizes. #2562's OAuth parameter lists grew the writes-off
+list to 121,210 (reveal off) and 118,484 (reveal on), and those two caps were
+re-set to that plus 5%. The same file fails on a sentence of 150 or more
 characters that more than three descriptions repeat (a rule that long belongs
 in the server instructions, with a one-line pointer in the tool: the
 withholding rules and the error definition moved that way, and
