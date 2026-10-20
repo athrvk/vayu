@@ -385,7 +385,8 @@ struct FileGrant {
  * the part declares about itself; empty means "let libcurl derive it" (the
  * basename, and `application/octet-stream`). A file part whose `src` is empty,
  * unreadable or untrusted is refused before the transfer starts - see
- * `vayu::http::unsendable_file_ref`.
+ * `vayu::http::unsendable_file_ref`. A text part may carry `content_type` too,
+ * sent as that part's own Content-Type (#2539).
  */
 struct FormField {
     FormField () = default;
