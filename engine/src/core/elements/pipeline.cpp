@@ -75,7 +75,7 @@ std::unordered_map<std::string, int64_t>& controller_state) {
         if (span == spans.end () || span->second.last == step_index) {
             continue; // Unspanned, or this occurrence already closed it.
         }
-        controller_state[transaction_sum_key (compiled.id, iteration)] += wait_ms;
+        controller_state[transaction_sum_key (compiled.id, iteration)] += wait_ms * 1000;
     }
 }
 
@@ -351,6 +351,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_status = "ok";
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
+        ctx.outcome_duration_us.reset ();
         ctx.element_id = compiled.id;
 
         std::optional<std::string> skipped;
@@ -384,6 +385,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_message,
         ctx.outcome_waited_ms,
         deferred,
+        ctx.outcome_duration_us,
         });
     }
 }

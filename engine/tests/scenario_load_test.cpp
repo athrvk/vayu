@@ -896,8 +896,9 @@ TEST_F (ScenarioLoadTest, AMixedTransactionAgreesWithTheRunsHistogram) {
     const auto whole_run = collector.calculate_percentiles ();
     const double members =
     state->steps.percentiles (0).max + state->steps.percentiles (1).max;
-    // The transaction sums whole milliseconds per member.
-    EXPECT_NEAR (transaction["latency"]["max"].get<double> (), members, 2.5);
+    // Both sides are microsecond sums read back through a histogram, each
+    // within 0.1% above the true value.
+    EXPECT_NEAR (transaction["latency"]["max"].get<double> (), members, 0.002 * members);
     EXPECT_NEAR (
     whole_run.max, state->steps.percentiles (1).max, 0.001 * whole_run.max);
 }

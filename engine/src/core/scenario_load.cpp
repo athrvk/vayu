@@ -698,13 +698,13 @@ const nlohmann::json* data_row) {
     for (const auto& outcome : outcomes) {
         state.element_tallies.record (step_index, outcome);
     }
-    // A `control.transaction` closing occurrence (issue #1515) - see
-    // `scenario_runner.cpp`'s identical fold for why `waited_ms` alone
-    // tells a close from an accumulating pass.
+    // A `control.transaction` closing occurrence (issue #1515) is the only
+    // outcome carrying `duration_us`, the same rule `scenario_runner.cpp`
+    // records by.
     for (const auto& outcome : outcomes) {
-        if (outcome.waited_ms && outcome.message) {
+        if (outcome.duration_us && outcome.message) {
             state.transactions.record (
-            *outcome.message, *outcome.waited_ms, outcome.status == "failed");
+            *outcome.message, *outcome.duration_us, outcome.status == "failed");
         }
     }
     // Same rule as `run_step_before`: empty unless `script.post` ran inline.

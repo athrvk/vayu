@@ -8076,8 +8076,8 @@ folder's first member. See [elements.md](elements.md#controllers) for the
 kind table and every config shape.
 
 **`control.transaction` reports its own percentiles.** A folder carrying one
-sums every member's own response latency into a named total per pass, and the
-run's summary gains
+sums every member's own response latency, at microsecond precision, into a
+named total per pass, and the run's summary gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
 p95, p99, max } }`, omitted for a transaction the run never closed.
 `includeTimers: true` (issue #1569) also folds a between-member `timer.*`
