@@ -327,8 +327,15 @@ const std::string& mode) {
                 callback_page ("Authorization already handled"), "text/html");
                 return;
             }
-            const CallbackOutcome outcome = resolve_oauth_callback (
-            db, raw->config, raw->code_verifier, raw->redirect_uri, params);
+            CallbackOutcome outcome;
+            try {
+                outcome = resolve_oauth_callback (
+                db, raw->config, raw->code_verifier, raw->redirect_uri, params);
+            } catch (const std::exception& e) {
+                // A claimed attempt that never publishes is never reaped.
+                outcome.error   = e.what ();
+                outcome.heading = "Token exchange failed";
+            }
             raw->publish (outcome.result_state, outcome.error, outcome.cache_key);
             res.set_content (callback_page (outcome.heading), "text/html");
         });
