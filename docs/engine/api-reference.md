@@ -8714,6 +8714,11 @@ stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
 
+The sequential collection runner follows the same population, with two differences:
+its `latency` block is computed **exact nearest-rank** over every sent step's duration
+rather than from an HDR histogram, and a run in which no step sent stores a count of `0`
+and the report omits the block (issue #2389).
+
 ### GET /runs/:runId/metrics
 
 Paginated **historical time-series** (JSON) for a run's charts. The response is
@@ -8960,6 +8965,8 @@ and show an indeterminate bar the way it would against an older engine that
 never sent this frame at all. One frame ahead of the work rather than a number
 on every tick, because this run publishes no ticks to carry one: the load
 path's total rides its `metrics` events precisely because that path has them.
+(A collection run's report likewise reads its `latency` from the stored summary, not from
+ticks: see [the report](#get-runsrunidreport).)
 
 **A run with a [`monitor` block](#the-monitor-block-server-vitals) also streams
 `monitor` events**, one per successful scrape, interleaved with its `metrics`
@@ -10013,9 +10020,20 @@ never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
-`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
-per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
-**perceived** latency.
+`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
+`summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
+latency.
+
+**A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
+over the [latency population](#latency-population) of the sequential path: every step whose
+transfer ran, answered or not, and not a step the plan skipped or one refused before the wire.
+That is the sample the run's `latency*Ms` [budgets](#the-thresholds-block-passfail-budgets)
+judge, from one computation, so `latency.p99` equals the `actual` of a `latencyP99Ms` check.
+Unlike the HDR histogram the load paths read, the figures are **exact nearest-rank** over the
+full sample (`avg` is its mean), and they are not read from the `results[]` rows, which can
+include a skipped step's `0` ms and are thinned past `maxScenarioStoredSteps`. A collection run
+in which no step sent has **no `latency` block** rather than zeros. A summary written before
+this existed carries no `latency` and reports from the stored rows as before.
 
 `summary.failedRequests` and `summary.errorRate` are the
 [one error definition](#what-counts-as-an-error), recounted from the run's

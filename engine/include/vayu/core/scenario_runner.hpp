@@ -331,6 +331,27 @@ resolve_next_step (const ScenarioStepIndex& index, const std::string& target);
  */
 [[nodiscard]] std::string describe_schema_failure (const ValidationVerdict& verdict);
 
+/**
+ * @brief A run's latency figures over the steps that sent, computed once.
+ *
+ * The one value both the run's threshold table and its stored `latency` block
+ * read (issue #2389), so `GET /runs/:id/report` and a latency budget's
+ * `actual` cannot be two different samples. `percentiles.count == 0` says no
+ * step sent; every other field is then 0 and means "not measured".
+ */
+struct LatencySummary {
+    MetricsCollector::Percentiles percentiles;
+    double avg_ms = 0.0;
+};
+
+/**
+ * @brief Exact nearest-rank percentiles, min, max and mean over @p latencies.
+ *
+ * A plain sort of the full sample, unlike the HDR histogram the load paths
+ * read: a collection run's sample is bounded by iterations x steps.
+ */
+[[nodiscard]] LatencySummary summarize_latencies (std::vector<double> latencies);
+
 /** What a scenario run reports about itself once it has finished. */
 struct ScenarioSummaryInputs {
     size_t iterations_requested = 0;
@@ -397,10 +418,12 @@ struct ScenarioSummaryInputs {
     /// concurrent load run's histogram - feeding it here only to read a
     /// snapshot back at the very end would make its *live* numbers (which
     /// nothing reads today) start reflecting a design-mode run mid-flight,
-    /// a behaviour nobody asked for. `percentiles_from_latencies` turns this
-    /// into the same `MetricsCollector::Percentiles` shape the threshold
-    /// table already reads.
+    /// a behaviour nobody asked for. `summarize_latencies` turns this into
+    /// `latency` below, once, at the run's finish point.
     std::vector<double> latencies;
+    /// `latencies` summarised: the threshold table's input and the stored
+    /// `latency` block, one computation (issue #2389).
+    LatencySummary latency;
     /// This run's combined `assert.*` element and `pm.test` tally (issue
     /// #1497's metric, extended to this run mode by #1564): every step's
     /// `StepTestTally`, summed. Assertion outcomes fold into `record.tests`

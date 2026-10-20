@@ -1423,6 +1423,10 @@ three keys `apply_run_summary` reads plus everything sequence-shaped under
 ```json
 {
   "total_requests": 6, "test_duration": 1.8, "rps": 3.3,
+  "latency": {
+    "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
+    "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
+  },
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
     "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
@@ -1445,6 +1449,14 @@ written before the issue, and a scenario load run's, carries neither. The step
 row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
 row.
+
+`latency` (issue #2389) is the run's latency over the steps that sent a transfer (a step the
+plan skipped or one refused before the wire has no duration), exact nearest-rank over the full
+sample rather than a histogram. It is computed once and is the same sample the run's `thresholds`
+judge, so `latency.p99` equals a `latencyP99Ms` check's `actual`. A run in which no step sent
+stores `{"count": 0}` alone, and the report omits its `latency` block on that marker; a summary
+with no `latency` key (a run stored before the issue) reports from the stored rows. A load run's
+`latency` carries no `count`.
 
 **`config_snapshot` redaction** - the snapshot is the run payload as composed,
 with its credentials withheld. Composition has already written every
