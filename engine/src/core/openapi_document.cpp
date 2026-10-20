@@ -22,6 +22,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/json_depth.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
 #include <array>
@@ -923,18 +924,17 @@ DocumentRead read_document (const std::string& text) {
 
     // JSON first, YAML second - `parse-raw.ts`'s order, so a JSON document is
     // read by a JSON parser on both sides.
-    nlohmann::ordered_json parsed =
-    nlohmann::ordered_json::parse (text, /*cb=*/nullptr, /*allow_exceptions=*/false);
-    if (!parsed.is_discarded ()) {
+    auto parsed = utils::parse_ordered_json (text, utils::ORDERED_JSON_UNBOUNDED);
+    if (parsed) {
         // The YAML walk enforces `MAX_READ_DEPTH` as it converts; nlohmann's
         // parser is iterative and has no depth of its own to run out of, but
         // every reader below here recurses over subtrees the document's author
         // shaped. So the bound is checked once, on the way in.
-        if (!json_within_depth (parsed, limits::MAX_READ_DEPTH)) {
+        if (!json_within_depth (*parsed, limits::MAX_READ_DEPTH)) {
             result.error = nesting_too_deep_message ();
             return result;
         }
-        result.root = std::move (parsed);
+        result.root = std::move (*parsed);
         return result;
     }
 

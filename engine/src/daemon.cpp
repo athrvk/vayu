@@ -274,7 +274,9 @@ int run_daemon (std::span<char* const> args) {
         // After the listener, never before it: the refresh is O(database size)
         // and used to be taken in the `Database` constructor, ahead of the
         // first `/health`. It reads through a connection of its own, so the
-        // app's first requests are served alongside it.
+        // app's first requests are served alongside it. It holds what the
+        // session started from; the refresh at shutdown below adds what the
+        // session wrote (#2421).
         db.start_recovery_backup_refresh ();
     }
 
@@ -288,7 +290,10 @@ int run_daemon (std::span<char* const> args) {
         }
     }
 
-    // Graceful shutdown
+    // Graceful shutdown. The app's kill timer (`server::SHUTDOWN_WINDOW_MS`)
+    // started when it asked for this; here is the engine's nearest measure of
+    // that moment.
+    const auto shutdown_began = std::chrono::steady_clock::now ();
     vayu::utils::log_info ("shutdown", "Shutting down gracefully...");
 
     // Stop the HTTP server first (with timeout)
@@ -307,15 +312,30 @@ int run_daemon (std::span<char* const> args) {
     // after 5s, leaving detached workers writing to `db` and calling into curl
     // while both were destroyed underneath them.
     //
-    // The order below is load-bearing: workers joined, then curl's global
-    // teardown, then `server` / `run_manager` / `db` at scope exit, and the
-    // instance lock last of all, after `db` has closed (see `InstanceLock`).
+    // The order below is load-bearing: workers joined, then the recovery
+    // backup's final refresh, then curl's global teardown, then `server` /
+    // `run_manager` / `db` at scope exit, and the instance lock last of all,
+    // after `db` has closed (see `InstanceLock`).
     run_manager.shutdown ();
 
     // A snapshot still reading the database must not overlap the next
     // engine's start. Interrupted rather than waited out; the previous backup
     // stands.
     db.finish_recovery_backup_refresh ();
+
+    // Nothing writes any more, and `db` and the instance lock are both still
+    // held, so the next engine cannot start against the copy. Budgeted against
+    // what the run drain above left of the app's window.
+    const auto shutdown_elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - shutdown_began);
+    const auto refreshed = db.refresh_recovery_backup_on_shutdown (
+    std::chrono::milliseconds (vayu::core::constants::server::SHUTDOWN_WINDOW_MS) - shutdown_elapsed);
+    if (!refreshed) {
+        vayu::utils::log_warning ("db",
+        "The recovery backup was not refreshed at shutdown, so the previous "
+        "one stands: " +
+        refreshed.error ());
+    }
 
     vayu::http::global_cleanup ();
 

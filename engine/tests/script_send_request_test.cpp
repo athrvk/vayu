@@ -1137,6 +1137,12 @@ TEST_F (SendRequestUrlTest, TheStringFormReachesTheWireAsPostmanSendsIt) {
     "/echo/a%20b?q=c%20d&r=%22x%22");
 }
 
+// The request line Send writes for the same text
+// (`PostmanQueryOnTheWire.ALiteralSpaceAndNonAsciiByteReachTheServerEncoded`).
+TEST_F (SendRequestUrlTest, ASpaceAndANonAsciiByteGoOutAsSendWritesThem) {
+    EXPECT_EQ (sent_target ("'" + server.url () + "/a b?q=é'"), "/echo/a%20b?q=%C3%A9");
+}
+
 TEST_F (SendRequestUrlTest, TheOptionsFormIsEncodedAlike) {
     EXPECT_EQ (sent_target ("{ url: '" + server.url () + "/café/日本?q=café&k=<日本>', method: 'POST' }"),
     "/echo/caf%C3%A9/"

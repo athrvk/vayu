@@ -390,13 +390,13 @@ std::string body_content_type_value (const Request& request) {
     // binary body an empty row is absent rather than a removal, as an empty
     // `FileRef::content_type` is: the file's own type then applies, where a
     // removal would leave the upload with no type at all.
-    const auto declared = request.headers.find ("Content-Type");
-    if (declared != request.headers.end () &&
-    (request.body.mode != BodyMode::Binary ||
-    header_value_reaches_wire (declared->second))) {
-        return {};
-    }
-    return implied;
+    const bool declared = std::any_of (request.headers.begin (),
+    request.headers.end (), [&request] (const HeaderLine& line) {
+        return CaseInsensitiveLess::equal (line.name, "Content-Type") &&
+        (request.body.mode != BodyMode::Binary ||
+        header_value_reaches_wire (line.value));
+    });
+    return declared ? std::string () : implied;
 }
 
 bool suppresses_request_header (const Request& request, const std::string& key) {
@@ -445,7 +445,7 @@ bool lists_expect) {
 
 curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
-Headers* sent) {
+HeaderList* sent) {
     curl_slist* list = nullptr;
     if (sent != nullptr) {
         sent->clear ();
@@ -456,7 +456,7 @@ Headers* sent) {
     // neither appended nor reported.
     const auto record = [&] (const std::string& key, const std::string& value) {
         if (sent != nullptr) {
-            (*sent)[key] = value;
+            sent->add (key, value);
         }
     };
     // True when the line went on the list.
@@ -472,7 +472,7 @@ Headers* sent) {
     // A default the request already names is not added: someone who typed the
     // header means it, the same rule the body-implied Content-Type follows.
     const auto adds_default = [&] (std::string_view name) {
-        return !request.headers.contains (std::string (name)) &&
+        return !request.headers.contains (name) &&
         !suppresses_default_header (request, name);
     };
 
@@ -1033,6 +1033,36 @@ std::string bad_content_encoding_message (CURL* curl, const std::string& curl_te
     return text + ". " + curl_text;
 }
 
+/// True when @p url holds a byte libcurl refuses anywhere in a URL: a space, a
+/// C0 control or DEL. Bytes above `~` are not in it - libcurl sends those raw.
+bool has_space_or_control (std::string_view url) {
+    return std::ranges::any_of (url, [] (char c) {
+        const auto byte = static_cast<unsigned char> (c);
+        return byte <= 0x20 || byte == 0x7F;
+    });
+}
+
+/**
+ * The sentence for a URL libcurl refused as malformed, derived from the URL
+ * the transfer was handed (`wire_url`) and not from libcurl's wording, which
+ * names a component ("Bad query") rather than the byte. With encoding on, a
+ * space survives `wire_url` only in the authority, where the toggle is no
+ * remedy, so it is named only when the request turned encoding off. Empty when
+ * the URL holds no such byte, which leaves libcurl's text to stand.
+ */
+std::string malformed_url_message (const Request& request) {
+    if (!has_space_or_control (vayu::http::wire_url (request))) {
+        return {};
+    }
+    std::string text =
+    "Cannot send this request: the URL contains a space or control character; "
+    "percent-encode it";
+    if (request.disable_url_encoding) {
+        text += ", or turn Send URL without encoding off";
+    }
+    return text;
+}
+
 /// Whether the proxy's own certificate is what failed verification. The code
 /// alone cannot say: `CURLE_PEER_FAILED_VERIFICATION` is the same answer for
 /// the proxy's certificate and the origin's. `CURLINFO_PROXY_SSL_VERIFYRESULT`
@@ -1053,7 +1083,7 @@ bool proxy_certificate_rejected (CURL* curl, CURLcode code) {
 
 } // namespace
 
-Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
+Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors, const Request* request) {
     Error error;
     const std::string_view message = errors.message ();
     error.message = message.empty () ? curl_easy_strerror (code) : std::string (message);
@@ -1129,9 +1159,18 @@ Error curl_to_error (CURL* curl, CURLcode code, const CurlErrorBuffer& errors) {
     case CURLE_PEER_FAILED_VERIFICATION:
         error.code = ErrorCode::SslError;
         break;
-    // A URL libcurl cannot parse, or one whose scheme the handle's allowlist
-    // refuses: a redirect's, or one libcurl guessed for a URL naming none.
+    // A URL libcurl cannot parse: the message names the space or control byte
+    // when the URL holds one.
     case CURLE_URL_MALFORMAT:
+        error.code = ErrorCode::InvalidUrl;
+        if (request) {
+            if (auto named = malformed_url_message (*request); !named.empty ()) {
+                error.message = std::move (named);
+            }
+        }
+        break;
+    // A scheme the handle's allowlist refuses: a redirect's, or one libcurl
+    // guessed for a URL naming none. libcurl's text names the scheme.
     case CURLE_UNSUPPORTED_PROTOCOL: error.code = ErrorCode::InvalidUrl; break;
     default:
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
@@ -1489,7 +1528,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
              Error{ ErrorCode::InternalError,
             "Response body exceeded the " + std::to_string (data->max_response_bytes) +
             " byte cap (maxResponseBodyBytes)" } :
-             curl_to_error (curl, result, data->errors);
+             curl_to_error (curl, result, data->errors, &data->request);
         response.error_code    = error.code;
         response.error_message = error.message;
         response.status_code   = 0;

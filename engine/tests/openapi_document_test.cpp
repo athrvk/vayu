@@ -32,6 +32,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -45,6 +46,7 @@
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/spec_coverage.hpp"
+#include "wide_json.hpp"
 
 namespace {
 
@@ -254,6 +256,41 @@ TEST (OpenApiDocumentRead, RefusesADocumentNestedPastTheDepthBound) {
     const auto result = read_document (deep + " 1\n");
     EXPECT_FALSE (result.ok ());
     EXPECT_NE (result.error.find ("nests"), std::string::npos) << result.error;
+}
+
+// Mutation check: parse with `nlohmann::ordered_json::parse` in `read_document`
+// and this runs for tens of seconds and fails the budget (#2497).
+TEST (OpenApiDocumentRead, AJsonObjectOfAHundredThousandMembersIsReadInLinearTime) {
+    const std::string text = vayu::tests::wide_object_json ();
+
+    const auto started = std::chrono::steady_clock::now ();
+    const auto result  = read_document (text);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (result.ok ()) << result.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_EQ (result.root.size (), vayu::tests::WIDE_OBJECT_KEYS);
+    EXPECT_EQ (result.root.begin ().key (), "k0");
+}
+
+// The JSON parse takes no depth bound and the rule is applied to the finished
+// tree, so a JSON document nested past `MAX_READ_DEPTH` is refused with the
+// nesting error whichever reader answers: a parse that refused it would send
+// the text to the YAML reader, whose own depth rule gives the same sentence.
+// Mutation check: drop the `json_within_depth` check in `read_document` and the
+// document is read (bounding the parse instead leaves this green, by design).
+TEST (OpenApiDocumentRead, AJsonDocumentNestedPastTheDepthBoundGetsTheNestingError) {
+    const size_t depth = vayu::core::constants::spec_document::MAX_READ_DEPTH + 2;
+    std::string deep;
+    for (size_t i = 0; i < depth; ++i) {
+        deep += R"({"a":)";
+    }
+    deep.append ("1");
+    deep.append (depth, '}');
+
+    const auto result = read_document (deep);
+    EXPECT_FALSE (result.ok ());
+    EXPECT_NE (result.error.find ("nests deeper"), std::string::npos) << result.error;
 }
 
 TEST (OpenApiDocumentRead, EmptyTextIsNotADocument) {

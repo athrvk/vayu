@@ -23,8 +23,10 @@
 #include "vayu/types.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/id.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -225,7 +227,9 @@ struct SavedFrom {
 /// into sorted `nlohmann::json`, which is also the order the request route
 /// stores its own columns in, so nothing is lost the stored request keeps.
 nlohmann::ordered_json as_ordered (const nlohmann::json& json) {
-    return nlohmann::ordered_json::parse (json.dump ());
+    return vayu::utils::invariant_value (
+    vayu::utils::parse_ordered_json (json.dump (), vayu::utils::ORDERED_JSON_UNBOUNDED),
+    "a parsed document dumps as one strict JSON document");
 }
 
 /// @p key of @p object as an array, `[]` when absent or null, or the 400
@@ -383,11 +387,11 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
     vayu::core::PostmanExportExample example;
     example.name   = x.name;
     example.status = x.status;
-    example.headers =
-    nlohmann::ordered_json::parse (x.headers, nullptr, /*allow_exceptions=*/false);
-    if (!example.headers.is_array ()) {
-        example.headers = nlohmann::ordered_json::array ();
-    }
+    auto headers =
+    vayu::utils::parse_ordered_json (x.headers, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    example.headers    = headers && headers->is_array () ?
+       std::move (*headers) :
+       nlohmann::ordered_json::array ();
     x.postman_response = vayu::core::postman_saved_response_text (saved.request,
     example, saved.status_text, saved.response_time_ms,
     saved.received_at.value_or (std::time (nullptr)));

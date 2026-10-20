@@ -16,8 +16,9 @@
  * translation). A tree built from text an attacker chose therefore has to be
  * bounded before anything walks it. The OpenAPI document reader calls this;
  * the element pipeline's response-body parse applies the same measure while it
- * builds the tree (`parse_ordered_json`), and `ordered_json_parse_test.cpp`
- * holds the two to one answer to "how deep is too deep".
+ * builds the tree (`utils::parse_ordered_json`), and
+ * `ordered_json_parse_test.cpp` holds the two to one answer to "how deep is too
+ * deep".
  */
 
 #include <cstddef>

@@ -182,7 +182,11 @@ namespace vayu::http {
  * URL a request is sent to, which is `request.url` for everything except the
  * GET transport, where the document rides in the query string - and with a
  * non-ASCII host as its punycode name (`to_ascii_host`), because libcurl has no
- * IDN support and this is the one URL every driver hands it.
+ * IDN support and this is the one URL every driver hands it. Unless
+ * `disable_url_encoding`, the bytes no request target may carry raw (space,
+ * controls, non-ASCII) are percent-encoded outside the head
+ * (`core::encode_literal_at_url_component`, issue #2465); every other byte is
+ * sent as the URL holds it.
  */
 [[nodiscard]] bool has_wire_body (const Request& request);
 

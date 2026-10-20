@@ -405,6 +405,9 @@ these:
 ```
 .to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
 .to.exist         .to.be.true       .to.be.false
+                  (.true / .false are strict, `=== true` / `=== false`: `1`, `'true'`
+                   and `{}` are not `.true`, `0`, `''` and `null` are not `.false`;
+                   `.ok` is the truthy check)
 .to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
 .to.be.NaN
 .to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
@@ -412,6 +415,8 @@ these:
 .to.be.closeTo(v, delta)            .to.be.oneOf([…])
 .to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor)
 .to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
+                  (name alone moves the chain's subject to the property's value;
+                   with v, or under .not, the subject stays the object)
 .to.have.length(n)                  .to.have.lengthOf(n)
 .to.have.keys(…) / .to.have.key(k)  .to.have.members([…])
 .to.include(v)    .to.contain(v)    .to.have.string(sub)
@@ -447,6 +452,17 @@ pm.expect(value).not.to.equal(1);                         // `not` before .to
 Terminal getters (`.to.be.true`, `.to.exist`) return the chain too, so a chain
 continues past one: `.to.be.true.and.equal(1)`.
 
+**`.property(name)` moves the subject to the property's value** (#2524), as in
+chai, so what follows asserts on the value: `expect({id: 1}).to.have.property('id')
+.that.is.a('number')` passes and `.that.is.a('string')` fails with
+`Expected type number to be string`. `.nested.property('a.b')` moves it to the
+value at the last path segment, the failure message and the `deep` / `nested`
+flags carry over, and the value is read once, so a getter runs once. Two forms
+keep the chain they were called on: `.property(name, value)`, which already
+compared the value, and `.not.have.property(name)`, which asserts absence and
+has no value to move to. A property that is missing fails the assertion before
+any retarget.
+
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and
 `expect({a:1,b:2}).to.eql({b:2,a:1})` **passes**: key order is not part of deep
@@ -481,7 +497,7 @@ that runs more than once says which value it was about:
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// user 42: Expected value to be truthy
+// user 42: Expected false to be true
 ```
 
 Non-strings are coerced and `undefined` / `null` mean no message, both as in
@@ -895,7 +911,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   deliberately absent from the language chains above for that reason: each
   changes what the matcher after it asserts - `.any` quantifies `.keys`, and
   the other two change what `.property` looks at - so accepting one as a no-op
-  would assert something other than what the script wrote
+  would assert something other than what the script wrote. `.property(name)`
+  itself is supported, including the chai behaviour of moving the chain onto the
+  property's value (see [Assertion chains](#assertion-chains-pmexpect)); only
+  the `.own` form is missing
 
 ---
 

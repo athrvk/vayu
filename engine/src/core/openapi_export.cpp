@@ -22,6 +22,7 @@
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
 #include <array>
@@ -136,11 +137,12 @@ Json example_value (const std::string& body) {
     if (text.empty ()) {
         return std::string ();
     }
-    Json parsed = Json::parse (text, /*cb=*/nullptr, /*allow_exceptions=*/false);
-    if (parsed.is_discarded ()) {
+    auto parsed =
+    vayu::utils::parse_ordered_json (text, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    if (!parsed) {
         return body;
     }
-    return parsed;
+    return std::move (*parsed);
 }
 
 /**

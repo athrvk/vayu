@@ -36,7 +36,7 @@ import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
-import { receivedHeaderLines, receivedRedirects } from "@/lib/header-lines";
+import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { decodeResponseBody, responseBodyType } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
@@ -325,6 +325,9 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// Same normalisation, for the hops before this response (issue #2461).
 		redirects: receivedRedirects(result.redirects),
 		requestHeaders: result.requestHeaders,
+		// `[]` when nothing was recorded, absent from an engine before the key and
+		// from a stored trace: `sentHeaderLines` makes all of them absent.
+		requestHeaderLines: sentHeaderLines(result.requestHeaderLines),
 		rawRequest: result.rawRequest,
 		...wireRequestHeadersField(status !== 0, result.rawRequest),
 		httpVersion: result.httpVersion,

@@ -7,7 +7,7 @@
 
 /**
  * @file ordered_json_parse_test.cpp
- * @brief `parse_ordered_json` (core/elements/json_path.hpp): the response-body
+ * @brief `parse_ordered_json` (utils/ordered_json.hpp): the response-body
  *        parse behind every JSONPath kind. It must answer exactly what
  *        `nlohmann::ordered_json::parse` answers, in linear time, and bound
  *        depth exactly as `json_within_depth` does.
@@ -27,20 +27,17 @@
 
 #include <nlohmann/json.hpp>
 
-#include "../src/core/elements/json_path.hpp"
 #include "optional_assert.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/utils/ordered_json.hpp"
+#include "wide_json.hpp"
 
 namespace {
 
-using vayu::core::detail::parse_ordered_json;
+using vayu::utils::parse_ordered_json;
 
 /// Deep enough that no parity case reaches it.
 constexpr size_t NO_DEPTH_LIMIT = 1000;
-
-/// A quadratic parse of the wide bodies below takes tens of seconds; a linear
-/// one well under one, in a Debug build included.
-constexpr auto LINEAR_PARSE_BUDGET = std::chrono::seconds (5);
 
 void expect_parity (std::string_view text) {
     const auto reference =
@@ -198,12 +195,8 @@ std::string key_number (size_t i) {
 // Mutation check: parse with `nlohmann::ordered_json::parse` instead and both
 // wide-object tests run for tens of seconds and fail the budget.
 TEST (OrderedJsonParse, AHundredThousandDistinctKeysParseInLinearTime) {
-    constexpr size_t keys = 100'000;
-    std::string body      = "{";
-    for (size_t i = 0; i < keys; ++i) {
-        body += (i == 0 ? "\"" : ",\"") + key_number (i) + "\":" + std::to_string (i);
-    }
-    body += "}";
+    constexpr size_t keys  = vayu::tests::WIDE_OBJECT_KEYS;
+    const std::string body = vayu::tests::wide_object_json ();
 
     const auto started = std::chrono::steady_clock::now ();
     const auto parsed  = parse_ordered_json (body, NO_DEPTH_LIMIT);
@@ -213,7 +206,7 @@ TEST (OrderedJsonParse, AHundredThousandDistinctKeysParseInLinearTime) {
     ASSERT_EQ (parsed->size (), keys);
     EXPECT_EQ (parsed->begin ().key (), "k0");
     EXPECT_EQ ((--parsed->end ()).key (), key_number (keys - 1));
-    EXPECT_LT (elapsed, LINEAR_PARSE_BUDGET);
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
 }
 
 TEST (OrderedJsonParse, EveryKeyRepeatedStillParsesInLinearTime) {
@@ -237,7 +230,7 @@ TEST (OrderedJsonParse, EveryKeyRepeatedStillParsesInLinearTime) {
     EXPECT_EQ (parsed->begin ().value (), 1);
     EXPECT_EQ ((--parsed->end ()).key (), key_number (keys - 1));
     EXPECT_EQ ((--parsed->end ()).value (), 1);
-    EXPECT_LT (elapsed, LINEAR_PARSE_BUDGET);
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
 }
 
 } // namespace

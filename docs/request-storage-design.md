@@ -77,9 +77,13 @@ value is written as `key=`, and one with `valueless: true` (Postman's
 `"value": null`, a URL's `?flag`) as a bare `key` (issue #1772). A pair a
 script's `query.add` writes is a row and takes the same rule. The value a
 stored `{{variable}}` token resolves to at send time is URL text instead, as
-Postman re-parses the substituted URL: its `&`, `=`, `?` and `#` are structure
-and only `QUERY_ENCODE_SET` is encoded where it lands in the query (issue
-#1773).
+Postman re-parses the substituted URL: its `/`, `&`, `=`, `?` and `#` are
+structure (issue #1773), and the rest is encoded by Postman's set for the
+path, the query or the fragment it lands in, the scheme and authority taking
+it as it stands (issue #2465). The stored URL itself stays as typed; at send
+time only its space, controls and non-ASCII bytes outside the scheme and
+authority are encoded, so `/a b` goes out as `/a%20b`, and with
+`disableUrlEncoding` nothing is.
 
 **A Params table edit rewrites only the pairs it touches.** Each enabled row
 takes the first unused pair of the current `url` with the same key and value
@@ -91,8 +95,8 @@ with no pair is encoded. The query ends at the fragment, which is put back
 after the rebuilt query. So a pair written by another rule - a row an
 older version stored decoded (`+05:00` for `%2B05%3A00`), an Insomnia, JMeter
 or OpenAPI import's `encodeURIComponent` join, a Postman `key=` - survives an
-edit of another row. Nothing re-encodes a stored `url`: it is sent verbatim,
-and an import writes it once.
+edit of another row. Nothing re-encodes a stored `url`: it is sent as stored,
+apart from the unsendable bytes above, and an import writes it once.
 
 **Path variables are the one kind of row the engine reads** (issue #1764). A
 row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`

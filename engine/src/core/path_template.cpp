@@ -7,6 +7,7 @@
 
 #include "vayu/core/path_template.hpp"
 
+#include "vayu/core/postman_encode_sets.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 #include <algorithm>
@@ -268,35 +269,6 @@ find_path_variable_row (const nlohmann::json& rows, std::string_view name) {
     }
     return nullptr;
 }
-
-namespace {
-
-/**
- * Whether @p byte is in `postman-url-encoder`'s `PATH_ENCODE_SET` (3.0.8,
- * `encoder/encode-set.js`): the C0 controls and every byte above `~` (so each
- * byte of a UTF-8 sequence), then the fragment set's space `"` `<` `>` and
- * backtick, then the path set's own `#` `?` `{` `}`. Nothing else - `/`, `%`,
- * `@`, `:`, a backslash and the rest of the reserved set go out as written.
- */
-bool in_postman_path_encode_set (unsigned char byte) {
-    if (byte < 0x20 || byte > 0x7E) {
-        return true;
-    }
-    switch (byte) {
-    case ' ':
-    case '"':
-    case '#':
-    case '<':
-    case '>':
-    case '?':
-    case '`':
-    case '{':
-    case '}': return true;
-    default: return false;
-    }
-}
-
-} // namespace
 
 std::string encode_outside_tokens (std::string_view text, bool (*in_set) (unsigned char)) {
     static constexpr std::string_view hex = "0123456789ABCDEF";

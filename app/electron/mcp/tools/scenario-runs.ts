@@ -16,6 +16,7 @@ import {
 	checkAllowlist,
 	checkLoadCaps,
 	checkMonitorHost,
+	checkSampleCap,
 	type EngineLoadDefaults,
 } from "../safety.js";
 import type { ToolContext, ToolResult } from "./contract.js";
@@ -23,6 +24,7 @@ import {
 	confirmDestructive,
 	engineErrorResult,
 	errorResult,
+	num,
 	str,
 	ToolArgError,
 	watchedRun,
@@ -365,6 +367,8 @@ export async function startScenarioLoadRun(
 	);
 	const caps = checkLoadCaps(shape, ctx.config, ctx.host);
 	if (!caps.ok) return errorResult(caps.error!);
+	const sampleCap = checkSampleCap(num(args, "maxResponseSamples"), ctx.config, ctx.host);
+	if (!sampleCap.ok) return errorResult(sampleCap.error!);
 
 	const recursive = scenario.recursive === true;
 	let environmentId: string | undefined;

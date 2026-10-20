@@ -531,6 +531,49 @@ TEST_F (ScriptEngineTest, ExpectTrueFalseAssertsOnAccess) {
     EXPECT_TRUE (result.tests[2].passed);
 }
 
+// `.true` / `.false` are `=== true` / `=== false`, as in chai; `.ok` is the
+// coercing matcher (#2523).
+TEST_F (ScriptEngineTest, ExpectTrueAndFalseRequireARealBoolean) {
+    auto result = engine.execute_test (R"(
+        pm.test("true is true", function() { pm.expect(true).to.be.true; });
+        pm.test("false is false", function() { pm.expect(false).to.be.false; });
+        pm.test("'true' is not true", function() { pm.expect('true').to.be.true; });
+        pm.test("1 is not true", function() { pm.expect(1).to.be.true; });
+        pm.test("{} is not true", function() { pm.expect({}).to.be.true; });
+        pm.test("'' is not false", function() { pm.expect('').to.be.false; });
+        pm.test("0 is not false", function() { pm.expect(0).to.be.false; });
+        pm.test("null is not false", function() { pm.expect(null).to.be.false; });
+        pm.test("undefined is not false", function() { pm.expect(undefined).to.be.false; });
+        pm.test("1 is ok", function() { pm.expect(1).to.be.ok; });
+        pm.test("0 is not ok", function() { pm.expect(0).to.be.ok; });
+    )",
+    request, response, env);
+
+    const std::vector<bool> expected = { true, true, false, false, false, false,
+        false, false, false, true, false };
+    ASSERT_EQ (result.tests.size (), expected.size ());
+    for (size_t i = 0; i < expected.size (); ++i) {
+        EXPECT_EQ (result.tests[i].passed, expected[i]) << result.tests[i].name;
+    }
+}
+
+TEST_F (ScriptEngineTest, ExpectNotTrueAndNotFalseInvertTheStrictCheck) {
+    auto result = engine.execute_test (R"(
+        pm.test("1 is not true", function() { pm.expect(1).to.not.be.true; });
+        pm.test("true is refused by not.true", function() { pm.expect(true).to.not.be.true; });
+        pm.test("0 is not false", function() { pm.expect(0).to.not.be.false; });
+        pm.test("null is not false", function() { pm.expect(null).to.not.be.false; });
+        pm.test("false is refused by not.false", function() { pm.expect(false).to.not.be.false; });
+    )",
+    request, response, env);
+
+    const std::vector<bool> expected = { true, false, true, true, false };
+    ASSERT_EQ (result.tests.size (), expected.size ());
+    for (size_t i = 0; i < expected.size (); ++i) {
+        EXPECT_EQ (result.tests[i].passed, expected[i]) << result.tests[i].name;
+    }
+}
+
 TEST_F (ScriptEngineTest, ExpectNullUndefinedOkEmpty) {
     auto result = engine.execute_test (R"(
         pm.test("null", function() { pm.expect(null).to.be.null; });
@@ -1485,6 +1528,80 @@ TEST_F (ScriptEngineTest, ExpectNestedProperty) {
         << result.tests[i].name << ": " << result.tests[i].error_message;
     }
     EXPECT_FALSE (result.tests[5].passed);
+}
+
+// #2524: `.property(name)` moves the chain's subject to the property's value, as
+// chai does, so what follows asserts on the value rather than on the object that
+// held it. Before the fix every case below that expects a failure passed: the
+// matcher after `.property` was run against the object.
+TEST_F (ScriptEngineTest, ExpectPropertyRetargetsTheChainToTheValue) {
+    auto result = engine.execute_test (R"(
+        pm.test("number", function() { pm.expect({id:1}).to.have.property("id").that.is.a("number"); });
+        pm.test("wrong type", function() { pm.expect({id:1}).to.have.property("id").that.is.a("string"); });
+        pm.test("string data is not an object", function() { pm.expect({data:"x"}).to.have.property("data").that.is.an("object"); });
+        pm.test("object data", function() { pm.expect({data:{k:1}}).to.have.property("data").that.is.an("object"); });
+        pm.test("equal compares the value", function() { pm.expect({source:"api"}).to.have.property("source").and.equal("api"); });
+        pm.test("equal misses the value", function() { pm.expect({source:"api"}).to.have.property("source").and.equal("web"); });
+        pm.test("nested", function() { pm.expect({a:{b:2}}).to.have.nested.property("a.b").that.equal(2); });
+        pm.test("nested miss", function() { pm.expect({a:{b:2}}).to.have.nested.property("a.b").that.equal(3); });
+        pm.test("deep survives the retarget", function() { pm.expect({a:{b:1}}).to.have.deep.property("a").that.equal({b:1}); });
+        pm.test("an object value is not empty", function() { pm.expect({a:{b:1}}).to.have.property("a").that.is.not.empty; });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 10u);
+    const std::array<bool, 10> expected_pass = { true, false, false, true, true,
+        false, true, false, true, true };
+    for (size_t i = 0; i < expected_pass.size (); i++) {
+        EXPECT_EQ (result.tests[i].passed, expected_pass.at (i))
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+}
+
+// The cases that must NOT move the subject: `.not` asserts absence and has no
+// value, and the value form already compared the value, so both keep handing back
+// the chain they were called on.
+TEST_F (ScriptEngineTest, ExpectPropertyKeepsTheChainForTheNegatedAndValueForms) {
+    auto result = engine.execute_test (R"(
+        pm.test("absence", function() { pm.expect({a:1}).to.not.have.property("x"); });
+        pm.test("absence still fails when present", function() { pm.expect({a:1}).to.not.have.property("a"); });
+        pm.test("negated chain keeps its subject", function() { pm.expect({a:1}).to.not.have.property("x").and.not.have.property("a"); });
+        pm.test("value form", function() { pm.expect({x:1}).to.have.property("x", 1); });
+        pm.test("value form keeps its subject", function() { pm.expect({x:1}).to.have.property("x", 1).and.be.an("object"); });
+        pm.test("value form is not retargeted", function() { pm.expect({x:1}).to.have.property("x", 1).and.be.a("number"); });
+        pm.test("missing property", function() { pm.expect({a:1}).to.have.property("x").that.is.a("number"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 7u);
+    const std::array<bool, 7> expected_pass = { true, false, false, true, true, false, false };
+    for (size_t i = 0; i < expected_pass.size (); i++) {
+        EXPECT_EQ (result.tests[i].passed, expected_pass.at (i))
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+}
+
+// The value is read once: a getter that counts its calls sees exactly one, so the
+// retarget does not double-run a side effect, and a getter that throws fails the
+// assertion with its own error rather than passing.
+TEST_F (ScriptEngineTest, ExpectPropertyReadsTheValueOnce) {
+    auto result = engine.execute_test (R"(
+        var reads = 0;
+        var counted = { get n() { reads++; return 5; } };
+        pm.test("one read", function() {
+            pm.expect(counted).to.have.property("n").that.is.a("number").and.equal(5);
+            pm.expect(reads).to.equal(1);
+        });
+        var boom = { get n() { throw new Error("getter ran"); } };
+        pm.test("a throwing getter fails", function() { pm.expect(boom).to.have.property("n"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_NE (result.tests[1].error_message.find ("getter ran"), std::string::npos)
+    << result.tests[1].error_message;
 }
 
 // `property(name, value)` and array membership compared `JS_ToCString` forms,
@@ -2599,6 +2716,40 @@ TEST_F (ScriptEngineTest, PreRequestScriptHeaderOverridesEngineAppliedAuth) {
 
     EXPECT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (built.request.headers.at ("Authorization"), "Bearer script-token");
+}
+
+// `pm.request.headers` is single-valued and shows a repeated header folded
+// (issue #2466). A script that leaves it as it read it leaves every line, in
+// place and spelling; one that writes it leaves one line. Mutation check:
+// rebuild the lines from the script's object alone in
+// `apply_script_headers` and the untouched repeat collapses to one line.
+TEST_F (ScriptEngineTest, APreRequestScriptKeepsTheRepeatedHeaderItDidNotChange) {
+    request.headers.clear ();
+    request.headers.add ("X-Dup", "one");
+    request.headers.add ("Accept", "*/*");
+    request.headers.add ("x-dup", "two");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.expect(pm.request.headers['X-Dup']).to.equal('one, two');
+        pm.request.headers['Accept'] = 'application/json';
+        pm.request.headers['X-New'] = '1';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{ { "X-Dup", "one" }, { "Accept", "application/json" },
+    { "x-dup", "two" }, { "X-New", "1" } }));
+
+    auto rewrite = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Dup'] = 'only';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (rewrite.success) << rewrite.error_message;
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{
+    { "X-Dup", "only" }, { "Accept", "application/json" }, { "X-New", "1" } }));
 }
 
 TEST_F (ScriptEngineTest, PreRequestScriptCanDeleteAHeader) {

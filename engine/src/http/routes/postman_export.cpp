@@ -23,6 +23,7 @@
 #include "vayu/core/postman_export.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -41,11 +42,12 @@ using ordered = nlohmann::ordered_json;
 /// A stored JSON column in its stored key order, or @p fallback when it is
 /// empty, unparsable or not the shape the column holds.
 ordered column (const std::string& blob, const ordered& fallback) {
-    ordered parsed = ordered::parse (blob, nullptr, /*allow_exceptions=*/false);
-    if (parsed.is_discarded () || parsed.type () != fallback.type ()) {
+    auto parsed =
+    vayu::utils::parse_ordered_json (blob, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    if (!parsed || parsed->type () != fallback.type ()) {
         return fallback;
     }
-    return parsed;
+    return std::move (*parsed);
 }
 
 /// `request_examples.postman_response` as the exporter reads it: the object in

@@ -72,7 +72,7 @@ import { useToastStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { isCommitEnter } from "@/lib/keyboard";
 import { Callout } from "@/components/shared";
-import { LOAD_TEST_CEILING_BOUNDS } from "@/constants/load-test";
+import { LOAD_TEST_CEILING_BOUNDS, RESPONSE_SAMPLES_CEILING } from "@/constants/load-test";
 import { loadTestModeLabel } from "@/constants/load-test-modes";
 import { appSetting } from "../app-settings";
 import { CollapsibleText, NumberSettingRow, ToggleRow } from "./SettingControls";
@@ -244,7 +244,8 @@ function CopyButton({
 }
 
 interface CapField {
-	key: "maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations";
+	key:
+		"maxRps" | "maxConcurrency" | "maxDurationSeconds" | "maxIterations" | "maxResponseSamples";
 	label: string;
 	/** Rendered as the input's suffix - units live there once, not in the label. */
 	unit?: string;
@@ -291,6 +292,13 @@ const CAP_FIELDS: CapField[] = [
 		description:
 			"Ceiling on requests for an iterations run, which stops on a count rather than a duration.",
 		ceiling: LOAD_TEST_CEILING_BOUNDS.iterations.MAX,
+	},
+	{
+		key: "maxResponseSamples",
+		label: "Max response samples",
+		description:
+			"Ceiling on the response bodies an agent may ask a load run to keep for it to read back. Each one is held in memory until the run's retention window ends. A run that asks for none keeps 1000, so a cap under 1000 refuses those runs until the agent asks for fewer.",
+		ceiling: RESPONSE_SAMPLES_CEILING,
 	},
 ];
 

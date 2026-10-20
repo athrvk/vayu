@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -31,6 +32,7 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "wide_json.hpp"
 
 using nlohmann::json;
 
@@ -510,6 +512,42 @@ TEST_F (ExamplesRouteTest, CreateWithSavedFromRecordsTheSavedResponse) {
     ASSERT_EQ (list_status, 200);
     EXPECT_FALSE (list[0].contains ("postmanResponse"));
     EXPECT_FALSE (list[0].contains ("savedFrom"));
+}
+
+/// The saved request's body is the client's object, re-read as ordered JSON to
+/// be written back in its member order (#2497). Mutation check: parse with
+/// `nlohmann::ordered_json::parse` in `as_ordered` and this runs for tens of
+/// seconds and fails the budget.
+TEST_F (ExamplesRouteTest, ASavedBodyOfAHundredThousandMembersIsReadInLinearTime) {
+    json saved = saved_from ({ { "body",
+    json{ { "mode", "json" }, { "content", "{}" },
+    { "extra", json::parse (vayu::tests::wide_object_json ()) } } } });
+
+    const auto started      = std::chrono::steady_clock::now ();
+    auto [status, response] = routes::create_request_example_response (
+    *db_, "req_1", json{ { "name", "Wide" }, { "savedFrom", saved } });
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_EQ (status, 200) << response.dump ().substr (0, 200);
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+}
+
+/// The stored headers are read back to build the saved response, and a row may
+/// carry members beyond `key`, `value` and `enabled` (#2497). Mutation check:
+/// parse with `nlohmann::ordered_json::parse` in `record_saved_response` and
+/// this runs for tens of seconds and fails the budget.
+TEST_F (ExamplesRouteTest, StoredHeadersWithAHundredThousandMembersAreReadInLinearTime) {
+    json row = json::parse (vayu::tests::wide_object_json ());
+    row.update (json{ { "key", "X-Wide" }, { "value", "1" }, { "enabled", true } });
+
+    const auto started = std::chrono::steady_clock::now ();
+    auto [status, response] = routes::create_request_example_response (*db_, "req_1",
+    json{ { "name", "Wide" }, { "headers", json::array ({ row }) },
+    { "savedFrom", saved_from () } });
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_EQ (status, 200) << response.dump ().substr (0, 200);
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
 }
 
 // An empty statusText (HTTP/2 carries no reason phrase) falls back to the

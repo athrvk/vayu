@@ -25,13 +25,20 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <initializer_list>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "echo_server.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/json.hpp"
 
 namespace vayu::http {
@@ -45,6 +52,44 @@ Request get_request (const std::string& url) {
     request.url        = url;
     request.timeout_ms = 5000;
     return request;
+}
+
+using Lines = std::vector<std::pair<std::string, std::string>>;
+
+/// The lines among @p lines whose name is one of @p names, compared without
+/// case, in the order they came.
+Lines lines_named (const Lines& lines, std::initializer_list<std::string_view> names) {
+    Lines out;
+    for (const auto& line : lines) {
+        if (std::any_of (names.begin (), names.end (), [&line] (std::string_view name) {
+                return vayu::utils::ascii_lower_equal (line.first, name);
+            })) {
+            out.push_back (line);
+        }
+    }
+    return out;
+}
+
+Lines lines_of (const HeaderList& headers) {
+    Lines out;
+    for (const auto& [name, value] : headers) {
+        out.emplace_back (name, value);
+    }
+    return out;
+}
+
+/// Three rows of one name, in two spellings - the issue #2466 measurement.
+Request repeated_header_request (const std::string& url) {
+    Request request = get_request (url);
+    request.headers.add ("X-Dup", "one");
+    request.headers.add ("x-dup", "two");
+    request.headers.add ("X-Dup", "three");
+    return request;
+}
+
+const Lines& repeated_header_lines () {
+    static const Lines lines{ { "X-Dup", "one" }, { "x-dup", "two" }, { "X-Dup", "three" } };
+    return lines;
 }
 
 class SentHeadersWireTest : public ::testing::Test {
@@ -203,6 +248,90 @@ TEST_F (SentHeadersWireTest, StreamConsumerDropsTheSameHeaderAndReportsTheTruth)
     EXPECT_FALSE (response.request_headers.contains ("X-Blank"))
     << "the stream consumer reported a header libcurl dropped as sent";
     EXPECT_EQ (response.request_headers.at ("X-Present"), "kept");
+}
+
+// ---------------------------------------------------------------------------
+// Every line the request carries, in order (issue #2466): a repeated name goes
+// out once per line, in its own spelling, and the record lists the same lines.
+// Mutation check: read the payload's lines into a `Headers` map again in
+// `deserialize_request`, or key `stored_header_rows` by name, and the three
+// arrive as one.
+// ---------------------------------------------------------------------------
+
+TEST_F (SentHeadersWireTest, ARepeatedHeaderGoesOutOncePerLineInOrder) {
+    auto parsed = vayu::json::deserialize_request (nlohmann::json{ { "method", "GET" },
+    { "url", server_->url () }, { "headers", nlohmann::json::parse (R"([{"name":"X-Dup","value":"one"},
+        {"name":"x-dup","value":"two"},{"name":"X-Dup","value":"three"}])") } });
+    ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+
+    auto result = client_->send (parsed.value ());
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "x-dup" }),
+    repeated_header_lines ());
+    EXPECT_EQ (lines_named (lines_of (result.value ().request_headers), { "x-dup" }),
+    repeated_header_lines ());
+    const auto answer = vayu::json::serialize (result.value ());
+    EXPECT_EQ (answer["requestHeaderLines"].size (),
+    result.value ().request_headers.size ());
+    EXPECT_EQ (answer["requestHeaders"]["X-Dup"], "one, two, three");
+}
+
+TEST_F (SentHeadersWireTest, DistinctNamesGoOutInTheOrderTheyWereWritten) {
+    Request request = get_request (server_->url ());
+    for (const char* name : { "Zeta-Header", "alpha-header", "Mixed-CASE", "Beta" }) {
+        request.headers.add (name, "v");
+    }
+
+    ASSERT_TRUE (client_->send (request).is_ok ());
+
+    const Lines arrived = lines_named (server_->header_lines (),
+    { "Zeta-Header", "alpha-header", "Mixed-CASE", "Beta" });
+    EXPECT_EQ (arrived,
+    (Lines{ { "Zeta-Header", "v" }, { "alpha-header", "v" },
+    { "Mixed-CASE", "v" }, { "Beta", "v" } }));
+}
+
+// An auth block adds its header only to a request that carries none, and two
+// typed `Authorization` lines are two lines the author wrote: both go out, and
+// the block adds a third to neither.
+TEST_F (SentHeadersWireTest, AnAuthorizationTypedTwiceIsSentTwiceAndAuthAddsNone) {
+    Request request = get_request (server_->url ());
+    request.headers.add ("Authorization", "Bearer first");
+    request.headers.add ("authorization", "Bearer second");
+    ASSERT_TRUE (
+    apply_auth (request, Auth{ BearerAuth{ "from-auth" } }, nullptr).ok);
+
+    ASSERT_TRUE (client_->send (request).is_ok ());
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "Authorization" }),
+    (Lines{ { "Authorization", "Bearer first" }, { "authorization", "Bearer second" } }));
+}
+
+TEST_F (SentHeadersWireTest, TheLoadDriverSendsEveryLineInOrder) {
+    EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (repeated_header_request (server_->url ())).future.get ();
+    loop.stop ();
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (lines_named (server_->header_lines (), { "x-dup" }),
+    repeated_header_lines ());
+}
+
+TEST_F (SentHeadersWireTest, TheStreamConsumerSendsAndRecordsEveryLineInOrder) {
+    SseStreamRequest stream_request;
+    stream_request.run_id  = "run-repeated-header";
+    stream_request.request = repeated_header_request (server_->url ());
+    SseStreamContext context (stream_request.run_id, stream_request.limits);
+
+    const vayu::Response response = consume_sse_stream (stream_request, context);
+
+    EXPECT_EQ (lines_named (server_->header_lines (), { "x-dup" }),
+    repeated_header_lines ());
+    EXPECT_EQ (lines_named (lines_of (response.request_headers), { "x-dup" }),
+    repeated_header_lines ());
 }
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import { composePathParams } from "./utils/path-variables";
-import { bodyModeHeaders, toFlatHeaders } from "./utils/key-value";
+import { bodyModeHeaders, toHeaderRows } from "./utils/key-value";
 import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./utils/elements-parts";
 import {
 	buildExecBody,
@@ -177,7 +177,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				method: request.method,
 				url: request.url,
 				params: request.params,
-				headers: toFlatHeaders(request.headers),
+				headers: toHeaderRows(request.headers),
 				body: toBodyPayload(request),
 				/*
 				 * The collection this request might have inherited auth from
@@ -437,10 +437,10 @@ export default function RequestBuilder() {
 			ownerCollectionId: string,
 			dataRow?: Record<string, unknown>
 		) => {
-			// The user's enabled headers, flattened for execution - and nothing
+			// The user's enabled header rows as ordered lines - and nothing
 			// else. What Vayu adds is the engine's since issue #1229, applied on
 			// every send path rather than by whichever client happened to send.
-			const headersRecord = toFlatHeaders(request.headers);
+			const headerRows = toHeaderRows(request.headers);
 
 			// Shared with the History run view's send path - see execute-mapping.ts.
 			// Raw: since #226 the engine resolves {{variables}} and inherit auth
@@ -464,7 +464,7 @@ export default function RequestBuilder() {
 					url: request.url,
 					// Always sent, `[]` included (#1764) - see composePathParams.
 					params: composePathParams(request.params),
-					headers: headersRecord,
+					headers: headerRows,
 					// Which of those the body mode wrote (issue #1765).
 					...bodyModeHeaders(request.headers),
 					body: execBody,
@@ -776,7 +776,7 @@ export default function RequestBuilder() {
 						method: pendingLoadTestRequest.method,
 						url: pendingLoadTestRequest.url,
 						params: composePathParams(pendingLoadTestRequest.params),
-						headers: toFlatHeaders(pendingLoadTestRequest.headers),
+						headers: toHeaderRows(pendingLoadTestRequest.headers),
 						...bodyModeHeaders(pendingLoadTestRequest.headers),
 						body: bodyPayload,
 						auth: { ...pendingLoadTestRequest.auth },

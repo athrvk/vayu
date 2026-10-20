@@ -266,7 +266,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; secret values and credential header values read `<redacted>` unless revealed |
+| `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
@@ -274,7 +274,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_live_metrics`     | read     | SSE snapshot of last N ticks                 | `limit` must be a whole number ≥ 1 |
 | `compare_runs`         | read     | 2× `GET /runs/:id/report` → diff (structured)| `baseRunId` optional - omitted, it resolves the target's pinned baseline. Two runs of different types are refused, naming both. The result carries `comparability`: what made the two runs different experiments (see below) |
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
-| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
+| `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
 | `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
@@ -314,7 +314,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -358,7 +358,15 @@ Notes:
   `successSamplePeriod` (the engine's `success_sample_rate` - a **period**, keep
   1 in N, not a percentage; the argument is named for what the value means and
   the payload key stays the engine's), `slowRequestThresholdMs`,
-  `saveTimingBreakdown` and `comment`. All four reach a **scenario** run too:
+  `saveTimingBreakdown` and `comment`, plus the two that decide what
+  `get_run_samples` can return (#2447): `responseSamplePeriod`
+  (`response_sample_rate`, a period too, 1-100000, engine default 100) and
+  `maxResponseSamples` (`max_response_samples`, 0-1000000, engine default
+  1000; 0 keeps none). A sample holds a full response body in memory, so the
+  count is held to the **Max response samples** cap
+  ([Safety config](#safety-config)), and the confirmation preview shows both
+  keys in its planned payload. Samples are read only through
+  `get_run_samples`, under the withholding it already applies. All of them reach a **scenario** run too:
   both executors read them off the one `RunContext`, and `comment` is lifted
   into the run summary and the report's `metadata.configuration` whichever
   produced the run. Bounds mirror `validate_run_config`, so a value the schema
@@ -1345,6 +1353,15 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   collection. Both declare `file` only so the
   refusal is reachable: an undeclared key is stripped by the SDK, and the
   request would go out with no body at all.
+- **Headers as lines** (issue #2466) - `headers` on `run_request`,
+  `start_load_run` and `get_graphql_schema` is an array of `{name, value}`
+  lines or a string map. Each line is sent as its own header line, in the order
+  given and in the spelling written, so `Link`, `Forwarded`, two `Cookie` lines
+  or `X-Dup` beside `x-dup` are repeated rather than collapsed; a map holds one
+  value per name and cannot repeat one. Both go to `POST /compose` as given, which
+  answers lines either way, and a line that is not an object with a string
+  `name` is refused by its position. The same payload that composes is the one
+  sent: nothing is folded between the two.
 - **What actually went out** - the engine adds headers an agent never wrote: the
   body-implied `Content-Type` (a `json` body, a `graphql` body on `POST`, or a
   `jsonrpc` body, sends `application/json`; a `graphql` body on `GET` has no
@@ -1371,20 +1388,24 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   result is the sent record - composed plus everything but the `Cookie` line,
   minus a `form-data` `Content-Type` libcurl writes itself and minus any header
   whose value is empty, which libcurl reads as a removal rather than sending -
-  and
+  folded to one value per name (a repeat joined with `", "`, `Cookie` with
+  `"; "`); `requestHeaderLines` is the same set unfolded, one `{name, value}`
+  per line in wire order, a repeated name repeated in the spelling written
+  (issue #2466), and the one to read when a header was sent more than once; and
   `rawRequest` is the
   full wire frame including the `Cookie` line and libcurl's own `Accept` /
   `Content-Length`. Both keep their shape and every non-credential value as
   the engine recorded them; read them rather than the request the call sent.
   Unless the user has turned on reveal, a credential-bearing header's value
   and every secret value in either reads `<redacted>` (see
-  [Secret values](#secret-values)); so does the response's `headerLines`, the
+  [Secret values](#secret-values)); so do the response's `headerLines`, the
   `{name, value}` rows as received, where each `Set-Cookie` is a row of its own
   (issue #2460), and so does each hop's `headerLines` on `redirects`, the
   `{status, statusText, headerLines}` of every 3xx the send followed (always
   present on the answer, `[]` when none; `headers` and `headerLines` hold the
   final response only, issue #2461). A hop's `Set-Cookie` is what the server
-  sent, not what the cookie jar kept. A `postRequestScript` reads the same set as
+  sent, not what the cookie jar kept. `requestHeaderLines` (and a stored trace's
+  `sentHeaderLines`) is masked the same way, every repeated credential line on its own. A `postRequestScript` reads the same set as
   `pm.request.headers` (see
   [scripting.md](scripting.md#request-object-pmrequest)).
 - **Transport fields** - `httpVersion` rides the inline overlay for both tools,
@@ -1973,8 +1994,8 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   from inside a script could not be checked at all - so `pm.sendRequest` is
   refused outright for runs this server starts. See
   [The script sandbox surface](#pmsendrequest-is-refused-for-mcp-started-runs).
-- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations on
-  `start_load_run`; over-cap requests are rejected. With the allowlist, these are
+- **Hard caps** - max RPS / virtual users (`concurrency`) / duration / iterations /
+  response samples (`maxResponseSamples`) on `start_load_run`; over-cap requests are rejected. With the allowlist, these are
   the real limits on load, and they cover **every** field the tool forwards:
     - `concurrency` **and** `startConcurrency` are both held to the virtual-user
       cap (**Max virtual users** in Settings). A ramp is seeded with `startConcurrency` before its first duration
@@ -1987,6 +2008,10 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
       unrecognised `mode`, and the guard still reads one carrying an
       `iterations` field as an iterations run, because the engine runs it as
       one.
+    - `maxResponseSamples` is held to its own cap (**Max response samples**,
+      10000 by default) because each retained sample is a full response body in
+      engine memory. An omitted one is judged as the engine's default of 1000, so
+      a cap under 1000 refuses a run that states no count and the refusal says so.
     - An **omitted** field is judged as the default the tool sends for it
       ([Load defaults](#load-defaults)), not as "unbounded": an omitted
       `concurrency` on a constant run is 100 virtual users, so a **Max virtual
@@ -2212,7 +2237,7 @@ whatever encoding it went out in; an agent reads `<redacted>` there instead:
 | What | Masked as | Read by |
 | ---- | --------- | ------- |
 | The value of every secret variable of the workspace (globals, every environment, every collection), and every literal credential a stored collection's or request's `auth` holds (the members the first table withholds; an empty value or a lone `{{variable}}` is none), in any string of the output, in its raw, percent-encoded (`url_encode` and query), JSON-escaped and XML-escaped forms; a value under 4 bytes is not masked, and a base64 body (`bodyEncoding: "base64"`, #2458) is searched as the bytes it decodes to, never as its base64 text, where a match is coincidence: each form is matched as UTF-8 bytes and as Latin-1 bytes, the marker replaces the bytes it matched, and the body is re-encoded so it still decodes (`bodySize` / `bodyBytes` keep the engine's count; a body with no match comes back unchanged) | the value replaced by `<redacted>` | `run_request` (the response, and the events of a streamed one), `get_run_report`, `get_run` (its `mode` / `duration` echo; the projection carries no other stored text), `export_run_report` (the document text), `get_run_samples`, `list_runs`, `get_inbox_captures`, `get_mock_activity` (each entry's `path`), `set_run_baseline`, `run_collection_smoke` (each row's `url`, `reason`, `error` and failing test lines; every row's `url` is also withheld as a saved request's is, in the table above, so a credential typed literally into it does not pass), `start_load_run`'s confirmation preview (the planned run and the question that names its target), `vayu://runs`, `vayu://run/{runId}/report`, the `summarize_run` and `diagnose_errors` prompts |
-| The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list (a response's `headerLines` and each redirect hop's `redirects[].headerLines`, #2461, included) and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
+| The value of a credential-bearing header (the names above, plus the header any API-key auth block names whatever its `in` says, including one sent inline: the engine's `api_key_header_names`) in a header map, a header row list (a response's `headerLines`, an exchange's `requestHeaderLines`, a trace's `sentHeaderLines` and each redirect hop's `redirects[].headerLines`, #2461, included) and a `rawRequest` header line, request and response alike | `<redacted>` after the name | the same |
 | The value of the query parameter auth wrote into the request at send time, named by the trace's `request.authQueryParam` (an OAuth 2.0 token or an API key placed in the query; the engine's raw, unencoded name), in the sibling `url` and in the request line of the sibling `rawRequest`; and the headers named by `request.authHeaders`, in the sibling `headers`, `sentHeaders` and `rawRequest` header block, beside the names above (#1835). `run_request`'s answer carries both keys at its top level (#1845), where the record has no `url` and `requestHeaders` stands for `headers`. The `authNotice` beside them (#2474), saying an auth mode Vayu does not execute sent the request without authentication, is a plain string naming the mode, carries no credential and is not masked | `<redacted>` after the name | the same |
 | The value of a credential-named query parameter (`SENSITIVE_PARAM_NAMES`, the saved-request rule above, whole name and case-insensitive) in the `url` of a record and in the request line of a `rawRequest`, whether it was typed into the saved URL, came from a `Params` row or was written by auth: a credential that is no secret variable and no stored auth credential has no form to match, so the name is what masks it (#1909). `?api_key=LIT&page=2` reads `?api_key=<redacted>&page=2`; `api_key2`, an empty value and a lone `{{variable}}` are shown as written. Only the query between the first `?` and the first `#` is read, so a fragment parameter is not masked here | `<redacted>` after the name | every read of run output above, and `delete_run`'s confirmation prompt, whose subject line names the run by its `url` |
 | The planned run's `auth` block, composed with the stored or inherited credential in it | as a stored row's: the member dropped, `<member>Withheld: true` | `start_load_run`'s confirmation preview |
@@ -2306,6 +2331,7 @@ secrets; see the write toggle.
 | `maxConcurrency`     | `200`   | `10000`     | Cap on virtual users: `concurrency` and `startConcurrency` (closed-loop). |
 | `maxDurationSeconds` | `300`   | `86400`     | Cap on load-run duration.                                  |
 | `maxIterations`      | `10000` | `100000000` | Cap on `iterations` (iterations mode).                     |
+| `maxResponseSamples` | `10000` | `1000000`   | Cap on `maxResponseSamples`, the response bodies a run keeps for `get_run_samples`; an omitted one is judged as the engine's `1000`. |
 | `allowWrites`        | `false` | -           | Enable the data-mutating tools.                            |
 | `allowNetworkSettings` | `false` | -         | Let `update_engine_config` change the proxy and trust-anchor keys. |
 | `revealSecretsToAgents` | `false` | -        | Lift every withholding in [Secret values](#secret-values): reads, write answers and run output. |
@@ -2321,7 +2347,9 @@ reaches the guards with a cap outside that range.
 The **ceilings** are `MCP_CAP_CEILINGS`, mirroring the renderer's
 `LOAD_TEST_CEILING_BOUNDS` maxima - the engine's own guards where it has one
 (`concurrency` at 10x `event_loop::MAX_CONCURRENT`, `durationSeconds` at the
-per-transfer timeout guard). A cap set above its ceiling is held there rather
+per-transfer timeout guard); `maxResponseSamples` is the engine's
+`run_config::MAX_RESPONSE_SAMPLES` itself, since the load dialog sends no sample
+count. A cap set above its ceiling is held there rather
 than stored: the value it would admit is one the engine refuses or one no Vayu
 surface will compose, so storing it shows a guardrail that does not exist. The
 copy is tied to the renderer constant by `config.test.ts`, the way
@@ -2495,6 +2523,7 @@ from environment variables:
 | `VAYU_MCP_MAX_CONCURRENCY`      | `200`                   | Virtual-user cap.                      |
 | `VAYU_MCP_MAX_DURATION_SECONDS` | `300`                   | Duration cap.                          |
 | `VAYU_MCP_MAX_ITERATIONS`       | `10000`                 | Iterations cap (iterations mode).      |
+| `VAYU_MCP_MAX_RESPONSE_SAMPLES` | `10000`                 | Cap on `maxResponseSamples`.           |
 | `VAYU_MCP_ALLOW_WRITES`         | `false`                 | `true` enables the data-write tools.   |
 | `VAYU_MCP_ALLOW_NETWORK_SETTINGS` | `false`               | `true` opens the proxy and CA config keys to writes. |
 | `VAYU_MCP_REVEAL_SECRETS`       | `false`                 | `true` lifts the secret withholding (reads, write answers, run output). |
@@ -2509,7 +2538,7 @@ it", and the config is fixed for the process, so a restart is part of every one.
 | Refusal                                              | Names, in the CLI                       | Names, in the app                    |
 | ---------------------------------------------------- | --------------------------------------- | ------------------------------------ |
 | Host not on the allowlist (or the list is empty)     | `VAYU_MCP_ALLOWLIST`                    | Settings → MCP, Target allowlist     |
-| `targetRps`, virtual users, duration, iterations cap | the matching `VAYU_MCP_MAX_*`           | Settings → MCP, the cap's field      |
+| `targetRps`, virtual users, duration, iterations, response samples cap | the matching `VAYU_MCP_MAX_*`           | Settings → MCP, the cap's field      |
 | Writes disabled (data writes and engine config)      | `VAYU_MCP_ALLOW_WRITES`                 | Settings → MCP, Write access         |
 | Proxy or CA config key without the network gate      | `VAYU_MCP_ALLOW_NETWORK_SETTINGS`       | Settings → MCP, Network settings     |
 | Script, or `secret: false`, while reveal is off      | `VAYU_MCP_REVEAL_SECRETS`               | Settings → MCP, Reveal secrets       |
