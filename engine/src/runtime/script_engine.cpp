@@ -685,6 +685,22 @@ extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
     return 1;
 }
 
+namespace {
+
+/// Takes @p promise off the unhandled list, freeing the tracker's reference.
+void forget_rejection (JSContext* ctx, RuntimeState& state, JSValueConst promise) {
+    auto& rejections = state.unhandled_rejections;
+    for (auto it = rejections.begin (); it != rejections.end (); ++it) {
+        if (JS_IsStrictEqual (ctx, *it, promise)) {
+            JS_FreeValue (ctx, *it);
+            rejections.erase (it);
+            return;
+        }
+    }
+}
+
+} // namespace
+
 // QuickJS reports a promise rejected with no handler (`is_handled` false), and
 // reports it again if a handler is attached later (true). What is still listed
 // once the job queue has drained is a rejection the script never observed.
@@ -696,18 +712,11 @@ void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state)
         return;
-    auto& rejections = state->unhandled_rejections;
     if (!is_handled) {
-        rejections.push_back (JS_DupValue (ctx, promise));
+        state->unhandled_rejections.push_back (JS_DupValue (ctx, promise));
         return;
     }
-    for (auto it = rejections.begin (); it != rejections.end (); ++it) {
-        if (JS_IsStrictEqual (ctx, *it, promise)) {
-            JS_FreeValue (ctx, *it);
-            rejections.erase (it);
-            return;
-        }
-    }
+    forget_rejection (ctx, *state, promise);
 }
 
 class ScriptEngine::Impl {
@@ -954,20 +963,44 @@ class ScriptEngine::Impl {
         free_script_timer (js_ctx, timer);
     }
 
+    /// Reports the script body's throw as the throw itself, the message a
+    /// synchronous script has always reported, rather than as an unhandled
+    /// rejection of the wrapper's promise.
+    static void record_body_rejection (JSContext* js_ctx,
+    RuntimeState& state,
+    ContextData& data,
+    ScriptResult& result) {
+        if (JS_PromiseState (js_ctx, data.script_body) != JS_PROMISE_REJECTED) {
+            return;
+        }
+        forget_rejection (js_ctx, state, data.script_body);
+        JSValue reason = JS_PromiseResult (js_ctx, data.script_body);
+        record_script_error (result, js_to_string (js_ctx, reason));
+        JS_FreeValue (js_ctx, reason);
+        JS_FreeValue (js_ctx, data.script_body);
+        data.script_body = JS_UNDEFINED;
+    }
+
     /// Runs what the script left to run later: the promise jobs, then the
     /// timer due first, then the jobs that callback queued, until both queues
     /// are empty (#2531, #2577).
+    ///
+    /// The body's rejection is read after every round of jobs, the only place
+    /// it can have happened since the last read, so its throw is ordered
+    /// against a timer callback's as the two happened.
     ///
     /// @return why the drain stopped with work still queued, or nullopt once
     ///         both queues are empty.
     [[nodiscard]] std::optional<std::string> drain_async_work (JSRuntime* rt,
     JSContext* js_ctx,
-    const RuntimeState& state,
+    RuntimeState& state,
     ContextData& data,
     ScriptResult& result) const {
         size_t steps_run = 0;
         while (true) {
-            if (auto stop = drain_promise_jobs (rt, state, steps_run)) {
+            auto stop = drain_promise_jobs (rt, state, steps_run);
+            record_body_rejection (js_ctx, state, data, result);
+            if (stop) {
                 return stop;
             }
             if (data.timers.empty ()) {
@@ -982,13 +1015,17 @@ class ScriptEngine::Impl {
     }
 
     /// The first promise the script left unobserved once the queue drained:
-    /// a rejection nothing handled, then a `pm.test` promise that never
-    /// settled. nullopt when there is none.
+    /// a rejection nothing handled, then a body or a `pm.test` promise that
+    /// never settled. nullopt when there is none.
     static std::optional<std::string> unobserved_promise_error (JSContext* js_ctx,
     const RuntimeState& state,
     const ContextData& data) {
         if (!state.unhandled_rejections.empty ()) {
             return unhandled_rejection_message (js_ctx, state.unhandled_rejections, data);
+        }
+        if (JS_PromiseState (js_ctx, data.script_body) == JS_PROMISE_PENDING) {
+            return "The script did not finish: it was still awaiting a promise "
+                   "that never settled";
         }
         for (const auto& [promise, test_name] : data.async_tests) {
             if (JS_PromiseState (js_ctx, promise) == JS_PROMISE_PENDING) {
@@ -1032,6 +1069,8 @@ class ScriptEngine::Impl {
             JS_FreeValue (js_ctx, promise);
         }
         state.unhandled_rejections.clear ();
+        JS_FreeValue (js_ctx, data.script_body);
+        data.script_body = JS_UNDEFINED;
         for (auto& entry : data.async_tests) {
             JS_FreeValue (js_ctx, entry.first);
         }
@@ -1121,18 +1160,24 @@ class ScriptEngine::Impl {
         JS_FreeValue (js_ctx, pm);
         JS_FreeValue (js_ctx, global);
 
-        // Wrap script in IIFE to avoid global scope pollution
-        std::string wrapped_script = "(function() { " + script + " \n})()";
+        // A function body, so a top-level `return` works, and an async one, so
+        // a top-level `await` does, as Postman wraps every script (#2577). The
+        // prefix adds no line, so a line number in a stack is the script's own.
+        // JS_EVAL_FLAG_ASYNC is not the same: it evaluates global code, where
+        // `return` is a syntax error.
+        const std::string wrapped_script = "(async function() { " + script + " \n})()";
 
-        // Execute script
         JSValue eval_result = JS_Eval (js_ctx, wrapped_script.c_str (),
         wrapped_script.size (), "<script>", JS_EVAL_TYPE_GLOBAL);
 
+        // A syntax error, or the deadline: an interrupt is uncatchable, so it
+        // leaves the call as an exception rather than rejecting the promise.
         result.success = true;
         if (JS_IsException (eval_result)) {
             record_script_error (result, take_exception_message (js_ctx));
+        } else {
+            ctx_data.script_body = eval_result;
         }
-        JS_FreeValue (js_ctx, eval_result);
 
         // Drained even after a throw, as Postman's event loop would: a job or
         // timer the script queued before throwing still runs, and the throw

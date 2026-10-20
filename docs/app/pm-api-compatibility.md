@@ -1120,7 +1120,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `assimilate`, `populate`, `clear`, `eachParent`, `toString`. Only the read
   half and the three mutators named under [Header methods](#header-methods)
   ship
-- `pm.visualizer`, `pm.test.skip` and `pm.require`
+- `pm.visualizer`, `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
 - **Postman's pre-`pm.*` globals** (`tests[...]`, `responseBody`, `responseCode`,
   `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
   `data`, `iteration`, `request`, `postman.*`) are not defined: a script that reads
@@ -1130,11 +1130,11 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
   The sandbox has no module system and none of those libraries; `pm.crypto` covers
   SHA-256 and HMAC-SHA256 and nothing else of `CryptoJS`
-- `Buffer` and a top-level `await` - the sandbox is not Node, and a script
-  body is not an async function. `await` inside an `async` function runs (see
-  [what a script can compute](../engine/scripting.md#what-a-script-can-compute));
-  the import notice names only the top-level one. The timers run, without
-  waiting (see [above](#timers-run-before-the-script-ends-and-do-not-wait))
+- `Buffer` - the sandbox is not Node. A top-level `await` runs, as it does in
+  Postman: the script body is an async function (see
+  [what a script can compute](../engine/scripting.md#what-a-script-can-compute)).
+  The timers run, without waiting (see
+  [above](#timers-run-before-the-script-ends-and-do-not-wait))
 - Chai and chai-postman members outside the list in
   [Assertion chains](#assertion-chains-pmexpect), the `require()`-able libraries
   (`chai`, `lodash`, `moment`, …) and chai-postman's own `postmanRequest`,
@@ -1397,7 +1397,7 @@ script in this editor produces them:
 
 | Code | Message | Why it is wrong here |
 |------|---------|----------------------|
-| `1108` | A `return` statement can only be used within a function body | The engine wraps every script in an IIFE before running it, so a top-level `return` to bail out early is legal |
+| `1108` | A `return` statement can only be used within a function body | The engine wraps every script in an async IIFE before running it, so a top-level `return` to bail out early is legal |
 | `2304` | Cannot find name `x` | An assignment to an undeclared name (`jsonData = pm.response.json()`) creates a global in the sloppy-mode IIFE, which the engine runs; and quickjs-ng provides nine globals the `es2022` lib does not declare |
 
 `2304` was once suppressed for a different reason, that a collection-level script part
@@ -1454,8 +1454,9 @@ shadows the global. Compiled as a global script, the same line reported "Cannot
 redeclare block-scoped variable" (2451), and did for `const URL` or `function fetch`
 before these names were added. A module is strict-mode to TypeScript, so a script that
 runs sloppy draws TypeScript's strict-mode errors on `with`, `delete name`, an octal
-literal, `yield` or `let` as a name, and a top-level `this`; a top-level `await` was an
-error before and still is.
+literal, `yield` or `let` as a name, and a top-level `this`. A top-level `await` draws
+nothing: the engine's wrapper is an async function, and `SCRIPT_COMPILER_OPTIONS` sets
+`module` to ESNext, the setting under which a module accepts one.
 
 An entry leaves `ABSENT_GLOBALS` in the commit that makes the runtime provide the name,
 and a test that executes `typeof <name>` in the real script engine for every entry holds

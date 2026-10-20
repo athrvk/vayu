@@ -248,6 +248,12 @@ struct ContextData {
 
     /// What `setTimeout` and `setInterval` queued in this execution.
     TimerQueue timers;
+
+    /// The promise the script's async wrapper returned (#2577), which rejects
+    /// with what the body throws, before its first `await` or after one. An
+    /// owned reference, freed before the context is released; undefined once
+    /// its rejection has been reported.
+    JSValue script_body = JS_UNDEFINED;
 };
 
 // Get context data from JS context

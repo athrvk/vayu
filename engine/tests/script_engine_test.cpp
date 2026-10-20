@@ -6533,6 +6533,169 @@ TEST_F (ScriptEngineTest, TimersLeftAtTheDeadlineDoNotExhaustThePooledRuntime) {
     EXPECT_EQ (pooled.idle_runtime_count (), 1U);
 }
 
+// ============================================================================
+// Top-level await: the script body is an async function (#2577)
+// ============================================================================
+
+TEST_F (ScriptEngineTest, ATopLevelAwaitOfAResolvedPromiseRuns) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        const value = await Promise.resolve(41);
+        pm.environment.set("value", String(value + 1));
+    )JS",
+        ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["value"].value, "42");
+}
+
+TEST_F (ScriptEngineTest, ATestAfterATopLevelAwaitIsRecorded) {
+    auto result = engine.execute_test (R"JS(
+        const code = await Promise.resolve(pm.response.code);
+        pm.test("passes after await", () => pm.expect(code).to.equal(200));
+        pm.test("fails after await", () => pm.expect(code).to.equal(500));
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (result.error_message.empty ()) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 2U);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+}
+
+// The body resumes when the timer it awaits fires, between the timers due
+// before and after it on the virtual clock.
+TEST_F (ScriptEngineTest, ATopLevelAwaitOfATimerResumesWhenItFires) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        const order = [];
+        setTimeout(() => order.push("t10"), 10);
+        setTimeout(() => order.push("t30"), 30);
+        order.push(await new Promise((resolve) => setTimeout(resolve, 20, "t20")));
+        setTimeout(() => order.push("t25"), 5);
+        await new Promise((resolve) => setTimeout(resolve, 60000));
+        pm.environment.set("order", order.join(","));
+    )JS",
+        ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["order"].value, "t10,t20,t25,t30");
+}
+
+// A throw after an `await` is the script's own error, reported as the throw
+// itself rather than as the wrapper's unhandled rejection.
+TEST_F (ScriptEngineTest, AThrowAfterATopLevelAwaitIsTheScriptsError) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        setTimeout(() => pm.environment.set("drained", "1"), 10);
+        await null;
+        throw new Error("after await");
+    )JS",
+        ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Error: after await");
+    EXPECT_EQ (env["drained"].value, "1");
+
+    result = engine.execute_test (
+    "await Promise.reject(new Error('awaited rejection'));", request, response, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Error: awaited rejection");
+}
+
+// The first error is the one reported, by when it happened: the body's throw
+// and a timer callback's are ordered on the virtual clock.
+TEST_F (ScriptEngineTest, ABodyThrowAndATimerThrowAreReportedInTheOrderTheyHappened) {
+    auto timer_first = engine.execute_test (R"JS(
+        setTimeout(() => { throw new Error("timer at 10"); }, 10);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error("body at 20");
+    )JS",
+    request, response, env);
+    EXPECT_EQ (timer_first.error_message, "Error: timer at 10");
+
+    auto body_first = engine.execute_test (R"JS(
+        setTimeout(() => { throw new Error("timer at 20"); }, 20);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        throw new Error("body at 10");
+    )JS",
+    request, response, env);
+    EXPECT_EQ (body_first.error_message, "Error: body at 10");
+}
+
+TEST_F (ScriptEngineTest, ATopLevelReturnStillEndsTheScript) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        pm.environment.set("before", "1");
+        if (pm.response.code === 200) return;
+        pm.environment.set("after", "1");
+    )JS",
+        ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["before"].value, "1");
+    EXPECT_EQ (env.count ("after"), 0U);
+
+    result = engine.execute (R"JS(
+        await null;
+        return;
+        pm.environment.set("after await", "1");
+    )JS",
+    ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.count ("after await"), 0U);
+}
+
+// The wrapper's promise rejects on a synchronous throw too; the message stays
+// the throw's own, with no "Unhandled promise rejection" in front of it.
+TEST_F (ScriptEngineTest, ASynchronousThrowKeepsItsOwnMessage) {
+    auto result =
+    engine.execute_test ("throw new Error('sync');", request, response, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Error: sync");
+
+    result = engine.execute_test ("throw 'a plain string';", request, response, env);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "a plain string");
+}
+
+// The wrapper adds no line, so a stack names the script's own line.
+TEST_F (ScriptEngineTest, AStackNamesTheScriptsOwnLine) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result =
+    engine.execute ("// line 1\n"
+                    "await null;\n"
+                    "pm.environment.set('stack', new Error('x').stack);",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_NE (env["stack"].value.find ("<script>:3:"), std::string::npos)
+    << env["stack"].value;
+}
+
+// Nothing can settle a promise once the queues are empty, so a body still
+// awaiting one never ran its remaining lines, and says so.
+TEST_F (ScriptEngineTest, ABodyAwaitingAPromiseThatNeverSettlesIsReported) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        await new Promise(() => {});
+        pm.environment.set("after", "1");
+    )JS",
+        ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "The script did not finish: it was still awaiting a promise that never "
+    "settled");
+    EXPECT_EQ (env.count ("after"), 0U);
+}
+
 // What a context that declares neither reports (#353): a bare `for_test` shape,
 // which is what an ordinary `POST /execute` send - one carrying no `data` row -
 // reaches the engine with. Both read undefined, and that is #300's ruling

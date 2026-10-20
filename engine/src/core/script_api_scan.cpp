@@ -248,8 +248,6 @@ struct Token {
     /// are one dotted path (`pm . variables`).
     bool chained = false;
     bool number  = false;
-    /// Inside the braces of an async function's body (see `AsyncFrames`).
-    bool in_async = false;
 };
 
 bool starts_number (char c) {
@@ -278,84 +276,11 @@ bool joined_by_dot (std::string_view code, const Token& previous, std::size_t be
     std::ranges::count (gap, '.') == 1;
 }
 
-/**
- * The brace frames of the code view, so a token can be asked whether it stands
- * inside an async function. An `async` that introduces a function sets a
- * pending flag, and the next `{` opens an async frame; any other `{` opens a
- * plain one, and `}` closes the innermost. An `await` is a syntax error only
- * outside every async frame, so a plain frame inside an async one still counts
- * as async.
- *
- * An arrow function with an expression body (`async x => await y`) has no
- * brace, so its `await` reads as top level and may be named when it need not
- * be: the notice errs toward naming too much, and the flag is dropped at the
- * `=>` so the next block is not taken for the arrow's body.
- */
-class AsyncFrames {
-    public:
-    [[nodiscard]] bool inside () const {
-        return async_open_ > 0;
-    }
-
-    void expect_body () {
-        pending_ = true;
-    }
-
-    /// Reads the non-identifier character at @p at.
-    void punctuation (std::string_view code, std::size_t at) {
-        switch (code[at]) {
-        case '{': open (); break;
-        case '}': close (); break;
-        case ';': pending_ = false; break;
-        case '=':
-            if (at + 1 < code.size () && code[at + 1] == '>' &&
-            next_significant (code, at + 2) != '{') {
-                pending_ = false;
-            }
-            break;
-        default: break;
-        }
-    }
-
-    private:
-    std::vector<bool> frames_;
-    int async_open_ = 0;
-    bool pending_   = false;
-
-    void open () {
-        frames_.push_back (pending_);
-        if (pending_) {
-            ++async_open_;
-        }
-        pending_ = false;
-    }
-
-    void close () {
-        if (frames_.empty ()) {
-            return;
-        }
-        if (frames_.back ()) {
-            --async_open_;
-        }
-        frames_.pop_back ();
-    }
-};
-
-/// Whether an `async` ending at @p end introduces a function or method:
-/// `async function`, `async (`, `async x =>`, `async *gen`, `async [key]`.
-/// `async = ...` and `async.each` are the npm package's name.
-bool starts_async_function (std::string_view code, std::size_t end) {
-    const char next = next_significant (code, end);
-    return next == '(' || next == '[' || next == '*' || is_identifier_char (next);
-}
-
 std::vector<Token> tokenize (std::string_view code) {
     std::vector<Token> tokens;
-    AsyncFrames frames;
     std::size_t at = 0;
     while (at < code.size ()) {
         if (!is_identifier_char (code[at])) {
-            frames.punctuation (code, at);
             ++at;
             continue;
         }
@@ -367,11 +292,6 @@ std::vector<Token> tokenize (std::string_view code) {
         token.member  = follows_property_dot (code, token.begin);
         token.chained = token.member && !tokens.empty () &&
         joined_by_dot (code, tokens.back (), token.begin);
-        token.in_async = frames.inside ();
-        if (!token.member && code.substr (token.begin, token.end - token.begin) == "async" &&
-        starts_async_function (code, token.end)) {
-            frames.expect_body ();
-        }
         tokens.push_back (token);
     }
     return tokens;
@@ -536,9 +456,6 @@ enum class Anchor : std::uint8_t {
     Bare,
     /// A property: after a `.` (`.postmanRequest`).
     Member,
-    /// A name in scope that is not inside an async function: `await` there is
-    /// a syntax error, and inside one it is the language.
-    OutsideAsync,
     /// Not found by the token pass; `UnsupportedScriptApis` sets it directly.
     Elsewhere,
 };
@@ -586,11 +503,11 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },
-{ "top-level await", Anchor::OutsideAsync, "await", "" },
 // `pm.*` members Vayu does not have.
 { "pm.visualizer", Anchor::Bare, "pm.visualizer", "" },
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
+{ "pm.execution.runRequest", Anchor::Bare, "pm.execution.runRequest", "" },
 // chai-postman members `pm.expect` still refuses by name (#2528); every
 // other member of chai and chai-postman runs (`chai-conformance.json`).
 { ".postmanRequest / .postmanResponse / .postmanRequestOrResponse",
@@ -636,7 +553,6 @@ bool anchored_at (Anchor anchor, const Token& token) {
     switch (anchor) {
     case Anchor::Bare: return !token.member;
     case Anchor::Member: return token.member;
-    case Anchor::OutsideAsync: return !token.member && !token.in_async;
     case Anchor::Elsewhere: break;
     }
     return false;

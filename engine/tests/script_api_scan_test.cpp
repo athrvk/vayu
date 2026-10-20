@@ -204,7 +204,6 @@ TEST (ScriptApiScan, ACodeExpressionInATemplateIsStillUse) {
 
 TEST (ScriptApiScan, NamesTheHostGlobalsASandboxLacks) {
     EXPECT_EQ (names_in ("Buffer.from(s).toString('hex');"), Names{ "Buffer" });
-    EXPECT_EQ (names_in ("const r = await fetchIt();"), Names{ "top-level await" });
     EXPECT_EQ (names_in ("return /\"/.test(x); Buffer.from(f);"), Names{ "Buffer" });
     EXPECT_EQ (names_in ("n = total / 2; Buffer.from(f); s = \"x\";"), Names{ "Buffer" });
 }
@@ -215,19 +214,15 @@ TEST (ScriptApiScan, TheTimersAreNotNamed) {
     EXPECT_EQ (names_in ("const i = setInterval(f, 10); clearInterval(i);"), Names{});
 }
 
-TEST (ScriptApiScan, AwaitInsideAnAsyncFunctionIsNotNamed) {
-    // Promises and async functions run (docs/engine/scripting.md); only an
-    // `await` outside every async function is a syntax error.
+// The script body is an async function (#2577), so an `await` runs wherever
+// it is legal JavaScript, top level included, and is not named.
+TEST (ScriptApiScan, AnAwaitIsNotNamed) {
     const std::vector<std::string> scripts = {
+        "const r = await fetchIt();",
+        "try { await x; } catch (e) {}",
+        "if (a) { await x; }",
+        "for await (const v of s) {}",
         "(async () => { const r = await Promise.resolve(1); })();",
-        "async function f() { await x; }",
-        "const f = async function () { if (a) { await x; } };",
-        "const f = async (a, b) => { for (const v of a) { await v; } };",
-        "const o = { async m() { if (a) { await x; } } };",
-        "class C { async m() { await x; } }",
-        "async function* g() { for await (const v of s) {} }",
-        "async function f() { return `${await x}`; }",
-        "async function f() { const s = \"}\"; await x; }",
         "pm.test('t', async () => { await pm.sendRequest(r); });",
     };
     for (const std::string& script : scripts) {
@@ -235,31 +230,12 @@ TEST (ScriptApiScan, AwaitInsideAnAsyncFunctionIsNotNamed) {
     }
 }
 
-TEST (ScriptApiScan, ATopLevelAwaitIsNamedWhereverItSits) {
-    const std::vector<std::string> scripts = {
-        "await x;",
-        "try { await x; } catch (e) {}",
-        "if (a) { await x; }",
-        "pm.test('t', () => { await x; });",
-        "function f() { await x; }",
-        "async function f() { await a; } await b;",
-        "async function f() {} { await x; }",
-        "const f = async x => x; { await y; }",
-        "const f = async x => x\nif (a) { await y; }",
-        "var async = require('async'); async.each(a, f); { await x; }",
-        "async(f); { await x; }",
-        "for await (const v of s) {}",
-    };
-    for (const std::string& script : scripts) {
-        const Names found = names_in (script);
-        EXPECT_NE (std::ranges::find (found, "top-level await"), found.end ()) << script;
-    }
-}
-
 TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
     EXPECT_EQ (names_in ("pm.visualizer.set(t, d);"), Names{ "pm.visualizer" });
     EXPECT_EQ (names_in ("pm.variables.set('a', 1);"), Names{ "pm.variables.set" });
     EXPECT_EQ (names_in ("pm.test.skip('later', () => {});"), Names{ "pm.test.skip" });
+    EXPECT_EQ (names_in ("await pm.execution.runRequest('uid');"),
+    Names{ "pm.execution.runRequest" });
     EXPECT_EQ (names_in ("pm . variables\n  .set('a', 1);"), Names{ "pm.variables.set" });
     EXPECT_EQ (names_in ("pm.variables.get('a'); pm.test('t', f);"), Names{});
 }
@@ -384,25 +360,25 @@ TEST (ScriptApiScan, ADeclarationElsewhereDoesNotHideADifferentName) {
 
 TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
     EXPECT_EQ (names_in (R"(
-        await later();
+        Buffer.from(later);
         tests["b"] = true;
         tests["a"] = true;
         const c = require("x");
         postman.setNextRequest(null);
-        await again();
+        Buffer.from(again);
     )"),
-    (Names{ "tests[]", "postman.*", "require()", "top-level await" }));
+    (Names{ "tests[]", "postman.*", "require()", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
     UnsupportedScriptApis uses;
     EXPECT_TRUE (uses.empty ());
-    uses.scan ("await go();");
+    uses.scan ("Buffer.from(go);");
     uses.note_packages ();
     uses.note_packages ();
     uses.scan ("tests['a'] = true;");
     EXPECT_FALSE (uses.empty ());
-    EXPECT_EQ (uses.names (), (Names{ "tests[]", "script.packages", "top-level await" }));
+    EXPECT_EQ (uses.names (), (Names{ "tests[]", "script.packages", "Buffer" }));
 }
 
 TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {

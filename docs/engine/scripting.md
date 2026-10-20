@@ -2711,8 +2711,9 @@ silently falling back to hex.
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
 other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host I/O:
-`Promise`, `async`/`await` and the timers run, on queues drained before the
-script ends, but nothing settles a promise after it has.
+`Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
+and the timers run, on queues drained before the script ends, but nothing
+settles a promise after it has.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded rather than a Promise-returning stand-in.
@@ -2776,6 +2777,32 @@ script's memory limit, so this is what bounds it.
 own callback when it is done. Otherwise it runs until the deadline stops it,
 `Script execution timed out after <n>ms`, or, with `scriptTimeout` at `0`, until
 the cap on asynchronous work in [Limitations](#limitations) does.
+
+### Top-level `await`
+
+A script runs as the body of an async function, the wrapper Postman puts around
+every script (#2577), so `await` works at the top level and a top-level
+`return` still ends the script early:
+
+```javascript
+const code = await Promise.resolve(pm.response.code);
+if (code !== 200) return;
+pm.test('the lines after an await run', function () {
+    pm.expect(pm.response.json()).to.be.an('object');
+});
+```
+
+The lines after an `await` run when the queues drain, inside the script's
+deadline, so a body awaiting a [timer](#timers-settimeout-and-setinterval)'s
+promise resumes when that timer fires on the virtual clock, after the timers
+due before it. A throw, before the first `await` or after one, is the script's
+error and reads as the throw itself (`Error: x`), never as
+`Unhandled promise rejection`; a timer callback's throw and the body's are
+reported in the order they happened. A body still awaiting when both queues
+are empty is waiting on a promise nothing can settle any more, so its
+remaining lines never run, and the script ends with `The script did not
+finish: it was still awaiting a promise that never settled`. The wrapper adds
+no line, so a line number in a stack is the script's own.
 
 ## What the editor offers, and where it comes from
 

@@ -2177,7 +2177,8 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
                               R"j(["tests[\"ok\"] = responseCode.code === 200;"])j") +
     "," + request_with_script ("Library", R"j(["const h = CryptoJS.MD5('x');"])j") + "," +
     request_with_script ("Module", R"j(["const c = require('crypto-js');"])j") + "," +
-    request_with_script ("Host", R"j(["setTimeout(next, 10);","Buffer.from('x');"])j") +
+    request_with_script (
+    "Host", R"j(["setTimeout(next, 10);","await next;","Buffer.from('x');"])j") +
     "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
     "," +
     request_with_script ("Plain",

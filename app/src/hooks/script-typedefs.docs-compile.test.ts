@@ -294,3 +294,29 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 		).toBe("");
 	});
 });
+
+/*
+ * The engine runs a script as the body of an async function (#2577), so a
+ * top-level `await` is correct code and must draw nothing. As a module it is
+ * accepted only under a `module` setting that allows one (TS1378 otherwise),
+ * which is SCRIPT_COMPILER_OPTIONS' `module`.
+ */
+describe("a top-level await, as the editor reports it", () => {
+	const compile = createCompiler(readFileSync(DECLARATIONS_PATH, "utf8"));
+	const errorsOf = (source: string) => compile({ doc: "inline", line: 1, source }).join("\n");
+
+	it("is clean", () => {
+		expect(
+			errorsOf(
+				[
+					"const code = await Promise.resolve(pm.response.code);",
+					"pm.test('after await', () => pm.expect(code).to.equal(200));",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	it("still flags an await inside a function that is not async", () => {
+		expect(errorsOf("function f() { await null; }")).toContain("TS1308");
+	});
+});

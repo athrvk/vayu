@@ -40,8 +40,8 @@ export const SCRIPT_LIB = ["es2022"];
  * therefore not be shown.
  *
  * - **1108** - "A 'return' statement can only be used within a function body."
- *   The engine wraps every script in an IIFE before running it, so a top-level
- *   `return` to bail out early is legal and is a documented pattern.
+ *   The engine wraps every script in an async IIFE before running it, so a
+ *   top-level `return` to bail out early is legal and is a documented pattern.
  * - **2304** - "Cannot find name 'x'." Two things make it fire on a script the
  *   engine runs:
  *   - an assignment to an undeclared name (`jsonData = pm.response.json()`)
@@ -101,10 +101,17 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	 *
 	 * The price is TypeScript's strict-mode diagnostics on a script that runs
 	 * sloppy: `with`, `delete name`, an octal literal, `yield` or `let` as a
-	 * name, and a top-level `this`, which a module types as `undefined`. A
-	 * top-level `await` was an error before and still is.
+	 * name, and a top-level `this`, which a module types as `undefined`.
 	 */
 	moduleDetection: 3,
+	/*
+	 * 99 is `ModuleKind.ESNext`, in Monaco's bundled enum and TypeScript's alike.
+	 * The engine's wrapper is an *async* function (#2577), so a top-level `await`
+	 * runs, and a module accepts one only under a `module` of es2022 or later
+	 * (TS1378 otherwise). Nothing here imports or emits, so this decides nothing
+	 * else.
+	 */
+	module: 99,
 	/*
 	 * Off deliberately, and *set* rather than left to Monaco's default: the
 	 * default is what it is today, and a `getCompilerOptions()` that ever
