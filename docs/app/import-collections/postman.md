@@ -333,7 +333,16 @@ reads them from the raw detail block, in either schema shape, in that order
 The token cache key reads `credentialsId` and not `audience` or `resource`, so
 two imported requests differing only in their audience would share one cached
 token. When a block names no `tokenName`, the promoted audience (else the
-resource) is stored as `config.credentialsId` to keep them apart.
+resource) is stored as `config.credentialsId` to keep them apart. (A carried
+row is read by the key itself, so two audiences sent as rows are two tokens
+already.)
+
+The export writes the lists back as Postman's three attributes, each row with
+its `send_as` (an `authorizationParams` row as `request_url`), and
+`config.audience` / `config.resource` as `request_body` rows opening
+`tokenRequestParams`, where the next import promotes them from again. A
+`credentialsId` equal to what the import derived is not written as a
+`tokenName`, so import -> export -> import gives back the same config.
 
 ## Variables & environments
 

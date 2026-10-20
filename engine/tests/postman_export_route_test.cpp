@@ -298,6 +298,61 @@ TEST_F (PostmanExportRouteTest, ADuplicatedImportExportsTheSameProtocolBehavior)
     EXPECT_EQ (exported_protocol_behavior (text, "Raw and cookieless (Copy)"), original);
 }
 
+/// The stored auth of the request named @p name under @p root, parsed.
+json stored_auth (vayu::db::Database& db, const std::string& root, const std::string& name) {
+    const auto row = request_named (db, root, name);
+    return row ? json::parse (row->auth) : json ();
+}
+
+// Issue #2536: an OAuth 2.0 block's audience, resource and extra request
+// parameters survive import -> export -> import once the user has edited the
+// auth, so the exporter writes the block from the config rather than the kept
+// source. Mutation check: drop the param lists from `oauth2_attributes` and
+// the second import loses every row.
+TEST_F (PostmanExportRouteTest, OAuth2RequestParamsSurviveAnExportOfAnEditedAuth) {
+    const std::string id = import_text (postman_collection (R"(
+        {"name":"Auth0","request":{"method":"GET","url":"https://x.com/a",
+          "auth":{"type":"oauth2","oauth2":[
+            {"key":"grant_type","value":"authorization_code","type":"string"},
+            {"key":"accessTokenUrl","value":"https://idp/token","type":"string"},
+            {"key":"authUrl","value":"https://idp/authorize","type":"string"},
+            {"key":"clientId","value":"cid","type":"string"},
+            {"key":"scope","value":"read","type":"string"},
+            {"key":"tokenRequestParams","value":[
+              {"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"},
+              {"key":"org","value":"o-1","enabled":true,"send_as":"request_url"},
+              {"key":"X-Trace","value":"t","enabled":true,"send_as":"request_header"}],"type":"any"},
+            {"key":"authRequestParams","value":[
+              {"key":"resource","value":"urn:r","enabled":true,"send_as":"request_body"},
+              {"key":"prompt","value":"login","enabled":true,"send_as":"request_url"}],"type":"any"},
+            {"key":"refreshRequestParams","value":[
+              {"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"}],"type":"any"}]}}})"));
+    json auth            = stored_auth (*db_, id, "Auth0");
+    ASSERT_TRUE (auth.contains ("config")) << auth.dump ();
+    EXPECT_EQ (auth["config"]["audience"], "https://api");
+    EXPECT_EQ (auth["config"]["resource"], "urn:r");
+    EXPECT_EQ (auth["config"]["credentialsId"], "https://api");
+
+    auth["config"]["scope"] = "read write";
+    const auto row          = request_named (*db_, id, "Auth0");
+    ASSERT_HAS_VALUE (row);
+    auto [status, updated] = vayu::http::routes::update_request_response (
+    *db_, row->id, json{ { "auth", auth } });
+    ASSERT_EQ (status, 200) << updated.dump ();
+    const json edited = stored_auth (*db_, id, "Auth0");
+    ASSERT_FALSE (edited.contains ("postman"))
+    << "the kept source must not answer the export";
+
+    const std::string text = export_text (id);
+    EXPECT_EQ (text.find ("\"tokenName\""), std::string::npos)
+    << "a credentialsId the import derived is not a token name";
+    const std::string again = import_text (text);
+    json reimported         = stored_auth (*db_, again, "Auth0");
+    EXPECT_EQ (reimported["config"], edited["config"]);
+    EXPECT_EQ (without_postman_id (export_text (again)), without_postman_id (text))
+    << "a second round trip changes nothing";
+}
+
 TEST_F (PostmanExportRouteTest, WithoutSecretsEveryCredentialIsBlankedAndCounted) {
     const std::string id =
     import_text (read_text (fixture_path ("postman-export-roundtrip.json")));

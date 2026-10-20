@@ -2954,8 +2954,13 @@ nothing else, which names where the secret lives without being one. The auth
 modes kept as a `config` bag (AWS, digest, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT,
 OAuth 2.0's own config) are blanked by an allowlist of the members known to
 describe the auth, so a member no list has heard of (Insomnia's IAM
-`secretAccessKey`) leaves blank too. A credential outside an auth block is
-blanked by name wherever it is written:
+`secretAccessKey`) leaves blank too. OAuth 2.0's extra request parameter lists
+(`tokenParams`, `authorizationParams`, `refreshParams`) are redacted per row: a
+row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
+names a credential (`client_secret`, `client_assertion`, `password`,
+`Authorization`, `X-Api-Key`, the other names below), so an `audience` row
+leaves intact. A credential outside an auth block is blanked by name wherever
+it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
   `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, the other
@@ -3820,6 +3825,10 @@ a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
 NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
 allowlist of the members known to describe the auth, not by credential name, so
 a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
+OAuth 2.0's extra request parameter rows, in its config and in a kept Postman
+block alike, keep their keys; a row's value is blanked when its key names a
+credential (`client_secret`, `client_assertion`, `password`, `Authorization`,
+`X-Api-Key`, the other names a header or query parameter is blanked by).
 A credential outside an auth block is blanked too, by name, wherever the
 document writes a value as typed or as recorded:
 
@@ -3891,7 +3900,7 @@ was before these rules.
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
-| `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
+| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
