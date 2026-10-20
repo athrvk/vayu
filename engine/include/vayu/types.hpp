@@ -712,7 +712,12 @@ enum class ErrorCode : std::uint8_t {
     /// bytes that are not that encoding, or an encoding this build has no
     /// decoder for (issue #2462). Appended for the same reason `ProxyError`
     /// was.
-    BadContentEncoding
+    BadContentEncoding,
+    /// A request header's name is not an RFC 9110 token once trimmed (issue
+    /// #2467). Raised by the payload reader, so it is a refusal a route answers
+    /// as `invalid_header_name` and never reaches a stored trace. Appended for
+    /// the same reason `ProxyError` was.
+    InvalidHeaderName
 };
 
 /**
@@ -737,6 +742,7 @@ inline const char* to_string (ErrorCode code) {
     case ErrorCode::Cancelled: return "CANCELLED";
     case ErrorCode::TooManyRedirects: return "TOO_MANY_REDIRECTS";
     case ErrorCode::BadContentEncoding: return "BAD_CONTENT_ENCODING";
+    case ErrorCode::InvalidHeaderName: return "INVALID_HEADER_NAME";
     }
     return "UNKNOWN";
 }

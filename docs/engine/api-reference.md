@@ -5417,9 +5417,9 @@ hits the wire:
 | `auth.mode` | Effect |
 |-------------|--------|
 | `none` / `inherit` | No-op (`inherit` is resolved by [`POST /compose`](#post-compose) before it reaches an execution endpoint; one arriving unresolved is a warning in the logs) |
-| `bearer` | `Authorization: Bearer <token>` |
-| `basic` | `Authorization: Basic <base64(user:pass)>` |
-| `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
+| `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467) |
+| `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
+| `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467) |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
@@ -5448,6 +5448,12 @@ A single-request load run without `requestElements` has no such pass, so the
 build encodes the name as written. Under load a name nothing answers is never a
 refusal: it is sent as written and counted like any other unresolved token
 (#1503), except inside a basic pair's base64, where it never was countable.
+
+An `apikey` with `in: "header"` whose key is not a header name once trimmed
+(`X Key`) is refused, with nothing written: the failure is `AUTH_FAILED` with an
+`authErrorCode` of `invalid_header_name` (an `apikey` with a key of only
+padding writes nothing, as an empty key always did). A `bearer` token with
+spaces *inside* it keeps them: only the ends are trimmed.
 
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
@@ -6098,7 +6104,9 @@ with specific codes:
   name resolved to the empty string, so the line would go out under no name at
   all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
   can see: the name is empty, and what libcurl is handed is the line
-  `": acme"`. Nothing further down refuses it - the pre-send gate
+  `": acme"`. A name of nothing but spaces and tabs counts as empty: it is
+  trimmed to nothing first (see `invalid_header_name`, below). Nothing further
+  down refuses it - the pre-send gate
   reads a header's text for the bytes that end a line early, and an absent name
   ends nothing - so composition is where it is caught. The message names the
   name as written, which is all there is to name; what it produced is nothing.
@@ -6120,6 +6128,36 @@ with specific codes:
   began resolving, with the call named in front of the same wording, and a data
   row that binds a name away is refused at bind time with the row in front of it
   (see [Scenario runs](#scenario-runs)).
+- `400` `{"error": {"code": "invalid_header_name", "message": "..."}}` - a
+  header name that is not an RFC 9110 `token` once the spaces and tabs around
+  it are trimmed (issue #2467): `X Bad` (an interior space), `X:Bad` (a colon),
+  `X-é` (a byte outside ASCII). The message quotes the name and says which
+  character cannot appear in one. Nothing is rewritten into a different
+  header: the trim below is for padding, which has one reading, and this
+  refusal is for what has none. The same refusal, under the same code, answers
+  a `headers` name posted to `POST /execute` or `POST /runs` and the
+  execute-time residual pass (a buffered send answers `statusCode: 0` with
+  `INTERNAL_ERROR`, a streaming send a `400`, as above), which is where a name
+  a pre-request script defined, or one a script's variable completes, is
+  judged; a script's `pm.sendRequest` and a data cell bound into a name refuse
+  the same way, with the call or the row in front of the wording. A `{{token}}`
+  nothing answered is not judged, since like every unanswered token it is sent
+  as written, but the text around it is: `X-{{a}}-b` passes, `X Bad {{x}}` and
+  `Evil: injected{{` (a `{{` that closes no token is ordinary text) are refused,
+  quoted as written.
+
+  **Header names are trimmed, then checked.** A name loses the spaces and tabs
+  (SP and HTAB, nothing else) at either end before it is checked or sent,
+  wherever it enters: a stored
+  request's header rows, a composed or resolved name, and the `headers` of
+  `POST /execute` and `POST /runs`. `Authorization ` therefore goes out as
+  `Authorization`, not as the line `Authorization : Bearer x` with a space before
+  its colon. A row whose key is only padding is no row, as an empty key always
+  was. A value is not trimmed. Two lines written `X-A` and ` X-A` are a repeat
+  the caller typed, sent as two lines, not a collision. In the object form of
+  `headers` two keys that differ only by padding or case fold to one line (the
+  last value wins), because an object has one slot per key; the array form
+  sends both.
 
 ### POST /execute
 
@@ -6213,7 +6251,15 @@ given and in its own spelling, so a name may repeat (`Link`, `Forwarded`, two
 order. The older object form (`{"Accept": "application/json"}`) is still
 accepted and behaves as it always did: one line per key, so it cannot repeat a
 name. A line without a string `name` and a string `value`, or `headers` of any
-other type, is a `400`. `POST /runs` reads the same field the same way. What
+other type, is a `400`. A name is **trimmed of the spaces and tabs around it**
+and what is left must be an RFC 9110 token: one that is not (`X Bad`, `X:Bad`,
+`X-é`) is a `400` with code `invalid_header_name` quoting the name, in either
+shape and before any run row exists (a name still holding a `{{token}}` waits
+for the residual pass below, which judges it once resolved); a name of only
+padding is the empty name the residual pass refuses (`empty_header_name`). The
+refusal and the trim are the ones [`POST /compose`](#post-compose) documents.
+`POST /runs` reads the same field the same way, and refuses a single-request
+run's bad name with the same `400` before the run row exists. What
 the engine adds (an auth header, the body-implied `Content-Type`, the
 [defaults](#default-request-headers)) is added only under a name no line
 already carries, compared without case; a typed `Authorization` sent twice is
