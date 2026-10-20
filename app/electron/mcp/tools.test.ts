@@ -3974,6 +3974,52 @@ describe("run_collection", () => {
 	});
 
 	/**
+	 * Ending an iteration at a script error (issue #2526). Top-level beside
+	 * `scenario`, like `failOnSchemaError`, and sent only when true: the engine's
+	 * default is false, so a stored payload carries the key exactly when it
+	 * changed what ended an iteration.
+	 */
+	describe("stopOnError", () => {
+		async function runWith(args: Record<string, unknown>) {
+			const client = scenarioClient();
+			const res = await dispatchTool(
+				"run_collection",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			const payload = (client.startRun as ReturnType<typeof vi.fn>).mock
+				.calls[0][0] as Record<string, unknown>;
+			return { res, payload };
+		}
+
+		test("reaches POST /runs top-level, not inside the scenario block", async () => {
+			const { payload } = await runWith({ stopOnError: true });
+			expect(payload.stopOnError).toBe(true);
+			expect(payload.scenario).not.toHaveProperty("stopOnError");
+		});
+
+		test.each([
+			["omitted", {}],
+			["false", { stopOnError: false }],
+		])("is absent from the payload when the caller passed %s", async (_label, args) => {
+			const { payload } = await runWith(args);
+			expect(payload).not.toHaveProperty("stopOnError");
+		});
+
+		test("the tool and its next step tell an agent what an error costs", async () => {
+			const tool = TOOLS.find((t) => t.name === "run_collection")!;
+			expect(tool.description).toContain("stopOnError");
+			expect(tool.description).toContain("stepsNotRun");
+			const shape = tool.inputSchema as Record<string, z.ZodType>;
+			expect(shape.stopOnError.description).toMatch(/script error/);
+
+			const { res } = await runWith({});
+			expect(firstText(res)).toContain("stepsNotRun");
+		});
+	});
+
+	/**
 	 * Pass/fail budgets (issue #1564): the engine now judges a design-mode
 	 * collection run against `thresholds` exactly as it always has a load run,
 	 * so this tool takes the same argument `start_load_run` does and forwards
@@ -4323,6 +4369,39 @@ describe("start_load_run scenario runs", () => {
 		>;
 		expect(shape.failOnSchemaError).toBeDefined();
 		expect(shape.failOnSchemaError.description).toMatch(/Not available on a load run/);
+	});
+
+	/**
+	 * `stopOnError` is the design-mode runner's too (issue #2526), refused on the
+	 * same terms and for the same reason: declared so the SDK does not strip it
+	 * before the handler can say no.
+	 */
+	test.each([
+		["a scenario", { scenario: { collectionId: "c1" } }],
+		["a single target", { url: "https://api.example.com/x" }],
+	])("refuses stopOnError beside %s, pointing at run_collection", async (_label, target) => {
+		const client = scenarioLoadClient();
+		for (const value of [true, false]) {
+			const res = await dispatchTool(
+				"start_load_run",
+				{ ...target, stopOnError: value, confirmed: true },
+				ctxWith(client, allowed)
+			);
+			expect(res.isError, String(value)).toBe(true);
+			expect(firstText(res), String(value)).toContain('"stopOnError"');
+			expect(firstText(res), String(value)).toMatch(/run_collection/);
+		}
+		expect(client.startRun).not.toHaveBeenCalled();
+		expect(client.composeRequest).not.toHaveBeenCalled();
+	});
+
+	test("declares stopOnError so the refusal survives schema validation", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		expect(shape.stopOnError).toBeDefined();
+		expect(shape.stopOnError.description).toMatch(/Not available on a load run/);
 	});
 
 	test("refuses the two modes the engine cannot drive, with its reasoning", async () => {

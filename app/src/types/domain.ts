@@ -1191,6 +1191,13 @@ export interface ScenarioStepEvent {
 	 */
 	dataRowIndex?: number;
 	/**
+	 * Plan positions the error that ended this step's iteration cost (issue
+	 * #2526). Present only on the step whose error ended the iteration short of
+	 * the plan's end, and only when above zero - absent, never `0`, everywhere
+	 * else - on the same terms as the stored row's.
+	 */
+	stepsNotRun?: number;
+	/**
 	 * The stored request this step ran (issue #831), the same id
 	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
 	 * step's request exists while the run streams, which is when a step that has
@@ -1575,6 +1582,13 @@ export interface RunResultTrace {
 	 * beside the `stepIndex` keys above, which is why it sits outside them.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * Plan positions the error that ended this step's iteration cost (issue
+	 * #2526), stored inside `trace_data` beside the identity above. Absent, never
+	 * `0`, on every step but the one that ended its iteration short of the plan's
+	 * end.
+	 */
+	stepsNotRun?: number;
 }
 
 /**
@@ -2976,6 +2990,22 @@ export interface RunReport {
 		/** Step rows the run kept - the length `results[]` should have. */
 		stepsStored: number;
 		stepsDropped: number;
+		/**
+		 * Plan positions errors cost a collection run (issue #2526): for every
+		 * iteration an `errored` step ended, the positions after it the iteration
+		 * had not attempted. A run that executed fewer steps than its plan holds
+		 * says so here, rather than reading as a complete run with an error in it.
+		 *
+		 * Collection runs only, and absent - not `0` - on a load report and on one
+		 * stored before the field existed, so absent says nothing either way.
+		 */
+		stepsNotRun?: number;
+		/**
+		 * The run's own `stopOnError`, echoed because the same counts describe a
+		 * different run under it (issue #2526). Absent on the same reports
+		 * `stepsNotRun` is.
+		 */
+		stopOnError?: boolean;
 		/**
 		 * Load-mode only (issue #357): what `concurrency` meant for this run.
 		 * A scenario load run's `concurrency` is its number of virtual users,

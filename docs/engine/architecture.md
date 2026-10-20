@@ -835,8 +835,17 @@ storing the row itself.
 A step's outcome is `passed`, `failed`, `skipped` or `errored`, counted
 separately everywhere - a skipped step counted as a pass is the false-pass class
 this project has already spent an issue eliminating. An `errored` step ends its
-iteration; the next iteration still runs, and the run still reaches
-`completed`. A stop is honoured **between steps**.
+iteration unless the only thing wrong was a script that threw after the exchange
+completed (issue #2526): that step keeps its `errored` row and the iteration
+walks on to the next plan position, as Postman's runner does, with the script's
+own redirect ignored. The cause is recorded on the `StepRecord` when the step is
+classified, so the loop reads it rather than re-deriving it. A transport
+failure, a data row that would not bind and the runner's own refusals (an
+unresolved or ambiguous target, the cycle cap) still end the iteration, and the
+run option `stopOnError: true` makes every `errored` step end it. Either way the
+next iteration still runs and the run still reaches `completed`; an iteration
+an error ended reports what it cost as `stepsNotRun`. A stop is honoured
+**between steps**.
 
 **Flow control is design-mode only.** A script returns an intent -
 `pm.execution.setNextRequest(name)`, `setNextRequest(null)`,
@@ -879,8 +888,11 @@ a lone request has no sequence for a jump, skip or transaction to act on, and
 no per-VU or shared pacing state for the kind to read.
 
 Two things were deliberately left open: whether a **stored scenario entity**
-ever lands (the seam exists; the demand does not), and **retry /
-continue-on-failure policy** beyond "an errored step ends its iteration".
+ever lands (the seam exists; the demand does not), and a **retry policy** for
+a step that errored. Continue-on-failure was the third until imported Postman
+collections supplied the demand (issue #2526): it now covers a script error
+only, because a step after a transport failure nearly always reads the response
+that never arrived.
 
 ### Load Test Mode
 
@@ -1145,7 +1157,9 @@ row exists - and the executor is the only thing that differs.
   logs a warning and does nothing.
 - **A step that got no response ends its iteration**, and the VU starts the
   next one. A VU stranded on a failing step would permanently shrink effective
-  concurrency for the rest of the run. A step that answered with an HTTP error
+  concurrency for the rest of the run. This path does not read `stopOnError`:
+  the key is the sequential runner's, and here only a missing response ends an
+  iteration - a script error, inline or deferred, never has. A step that answered with an HTTP error
   status is counted in that step's `errors` (as `httpErrors`, #2134) and the
   iteration carries on: a response arrived, so the next step has something to
   follow.

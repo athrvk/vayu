@@ -1341,8 +1341,8 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // failure this whole function is here to prevent. Absent and `null` both
     // mean "use the default", matching the null-vs-absent rule the resource
     // routes follow.
-    for (const char* key : { "phase_histograms", "save_timing_breakdown",
-         "capture_response_bodies", "stream_metrics", "failOnSchemaError" }) {
+    for (const char* key : { "phase_histograms", "save_timing_breakdown", "capture_response_bodies",
+         "stream_metrics", "failOnSchemaError", "stopOnError" }) {
         const auto it = config.find (key);
         if (it != config.end () && !it->is_null () && !it->is_boolean ()) {
             return "'" + std::string (key) + "' must be a boolean (got " +

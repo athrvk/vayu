@@ -925,6 +925,19 @@ export interface StartScenarioRunRequest {
 	 */
 	failOnSchemaError?: boolean;
 	/**
+	 * End a collection run's iteration at every `errored` step, a script error
+	 * included (issue #2526). Off, the engine's default, a step whose script threw
+	 * after its exchange completed is reported on its step and the iteration moves
+	 * on to the next request, as Postman and Newman do; a transport failure and the
+	 * runner's own refusals end the iteration either way.
+	 *
+	 * Top-level beside `failOnSchemaError`, and **omitted when off** on the same
+	 * terms: absent already means the default, and a snapshot that carries the key
+	 * only when it was on reads the same as one written before it existed.
+	 * Design-mode collection runs only - a scenario load run does not read it.
+	 */
+	stopOnError?: boolean;
+	/**
 	 * Overrides how the element pipeline runs across every step of a
 	 * **scenario load run** (`mode` present), without editing the collection
 	 * itself (issue #1495). Top-level, not inside `scenario` - the engine

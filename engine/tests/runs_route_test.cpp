@@ -555,6 +555,37 @@ TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
     EXPECT_EQ (body["resultsCap"], 150u);
 }
 
+// What a collection run's errors cost and whether it stopped on them (issue
+// #2526) reach the report's `scenario` section, and a summary that recorded
+// neither - a scenario load run's, or one written before the issue - grows
+// neither rather than a `0` and a `false` nobody measured.
+// Mutation check: drop the `stepsNotRun` write in `build_scenario_report_section`
+// and the first half fails.
+TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenStored) {
+    seed ({ .id = "run_design_seq", .type = vayu::RunType::Scenario });
+    db_->update_run_summary ("run_design_seq",
+    nlohmann::json{ { "scenario",
+                    { { "iterations", 2 }, { "steps_executed", 4 }, { "errored", 2 },
+                    { "steps_not_run", 3 }, { "stop_on_error", true } } } }
+    .dump ());
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_design_seq");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    EXPECT_EQ (body["scenario"]["stepsNotRun"], 3);
+    EXPECT_EQ (body["scenario"]["stopOnError"], true);
+
+    seed ({ .id = "run_older_seq", .type = vayu::RunType::Scenario });
+    db_->update_run_summary ("run_older_seq",
+    nlohmann::json{ { "scenario", { { "iterations", 1 }, { "steps_executed", 2 } } } }
+    .dump ());
+    auto [older_status, older] =
+    vayu::http::routes::run_report_response (*db_, "run_older_seq");
+    ASSERT_EQ (older_status, 200);
+    ASSERT_TRUE (older.contains ("scenario")) << older.dump ();
+    EXPECT_FALSE (older["scenario"].contains ("stepsNotRun"));
+    EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
+}
+
 // The sample cap stays for everything else - a design run has one row and a
 // load run's percentiles do not need per-request rows past a representative
 // few, so the report payload does not grow with an unbounded run's result

@@ -102,6 +102,11 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		// Absent for a run with no data set, and left absent rather than
 		// defaulted: a `0` here would read as "row 1 of a data file".
 		...(typeof e.dataRowIndex === "number" ? { dataRowIndex: e.dataRowIndex } : {}),
+		// Present only on the step whose error ended its iteration (issue #2526).
+		// The engine never sends `0`, so anything not above zero is no claim.
+		...(typeof e.stepsNotRun === "number" && e.stepsNotRun > 0
+			? { stepsNotRun: e.stepsNotRun }
+			: {}),
 		// The request this step ran (issue #831), so a live row offers the same
 		// way back to it that a stored one does. Left absent unless the frame
 		// carries a non-empty id: the step card keys the action off its

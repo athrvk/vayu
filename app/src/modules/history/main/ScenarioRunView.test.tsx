@@ -72,7 +72,13 @@ function storedStep(
 	iteration: number,
 	stepIndex: number,
 	outcome: StepOutcome,
-	overrides: { name?: string; body?: string; statusCode?: number; dataRowIndex?: number } = {}
+	overrides: {
+		name?: string;
+		body?: string;
+		statusCode?: number;
+		dataRowIndex?: number;
+		stepsNotRun?: number;
+	} = {}
 ) {
 	return {
 		timestamp: 1_700_000_000_000,
@@ -83,6 +89,7 @@ function storedStep(
 			iteration,
 			stepIndex,
 			dataRowIndex: overrides.dataRowIndex,
+			stepsNotRun: overrides.stepsNotRun,
 			stepName: overrides.name ?? `Step ${stepIndex + 1}`,
 			requestId: `req_${stepIndex}`,
 			outcome,
@@ -823,5 +830,92 @@ describe("the header tally", () => {
 		render(<ScenarioRunView run={RUN} />);
 
 		expect(screen.getByText("12,345 of 23,456 iterations - 34,567 steps")).toBeTruthy();
+	});
+});
+
+/**
+ * What errors cost the run (issue #2526). The header's number is the report's
+ * run-wide sum; the step row's line is the one step that ended its iteration.
+ */
+describe("steps that did not run", () => {
+	const SCENARIO = {
+		iterations: 1,
+		iterationsCompleted: 1,
+		stepsExecuted: 2,
+		passed: 0,
+		failed: 0,
+		skipped: 0,
+		errored: 2,
+		stepsStored: 2,
+		stepsDropped: 0,
+	};
+
+	it.each([
+		[3, "3 steps did not run"],
+		[1, "1 step did not run"],
+		[12345, "12,345 steps did not run"],
+	])("says so beside the header tally for %i", (stepsNotRun, text) => {
+		reportQuery.data = report({ scenario: { ...SCENARIO, stepsNotRun } });
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.getByText(text)).toBeTruthy();
+		// The tally sentence keeps its own node.
+		expect(screen.getByText("1 of 1 iteration - 2 steps")).toBeTruthy();
+	});
+
+	it.each([
+		["0", 0],
+		["undefined", undefined],
+	])("says nothing when the report carries %s", (_label, stepsNotRun) => {
+		reportQuery.data = report({ scenario: { ...SCENARIO, stepsNotRun } });
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText(/did not run/)).toBeNull();
+	});
+
+	it("marks the stored step that ended its iteration", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "errored", { name: "Broken", stepsNotRun: 3 })],
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+		fireEvent.click(screen.getByText("Broken").closest("button")!);
+
+		expect(screen.getByText("Ended this iteration: 3 steps did not run")).toBeTruthy();
+	});
+
+	it("marks the live step that ended its iteration, before its row is stored", () => {
+		render(<ScenarioRunView run={{ ...RUN, status: "running" }} />);
+		act(() => {
+			const store = useScenarioRunStore.getState();
+			store.startRun("run-1");
+			store.addSteps([
+				{
+					iteration: 0,
+					stepIndex: 0,
+					name: "Live broken",
+					outcome: "errored",
+					statusCode: 0,
+					latencyMs: 5,
+					stepsNotRun: 1,
+				},
+			]);
+		});
+		fireEvent.click(screen.getByText("Live broken").closest("button")!);
+
+		expect(screen.getByText("Ended this iteration: 1 step did not run")).toBeTruthy();
+	});
+
+	it("does not mark a step that ended nothing", () => {
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "errored", { name: "Carried on" })],
+		});
+
+		render(<ScenarioRunView run={RUN} />);
+		fireEvent.click(screen.getByText("Carried on").closest("button")!);
+
+		expect(screen.queryByText(/Ended this iteration/)).toBeNull();
 	});
 });

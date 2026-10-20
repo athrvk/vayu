@@ -217,6 +217,49 @@ describe("failing steps on schema errors", () => {
 	});
 });
 
+/**
+ * Ending an iteration at a script error (issue #2526). Off is the engine's
+ * default, so the key rides the payload only when the user asked for it.
+ */
+describe("stopping the iteration on a script error", () => {
+	const name = /stop the iteration on a script error/i;
+	const toggle = () => fireEvent.click(screen.getByRole("switch", { name }));
+
+	it("sends the flag once the user turns it on", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		toggle();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).toMatchObject({ stopOnError: true });
+	});
+
+	it("omits it entirely while it is off", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("stopOnError");
+	});
+
+	it("is not offered for a load run, and is not sent if it was on first", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		toggle();
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+
+		expect(screen.queryByRole("switch", { name })).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("stopOnError");
+	});
+
+	it("is a switch of its own, apart from the schema gate", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		toggle();
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0]).not.toHaveProperty("failOnSchemaError");
+	});
+});
+
 describe("invalid iterations", () => {
 	it("refuses a zero, a fraction and an empty field rather than sending them", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);

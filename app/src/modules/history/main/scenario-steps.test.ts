@@ -25,6 +25,7 @@ import {
 	outcomeCountsFromReport,
 	stepKey,
 	stepRowsFromReport,
+	stepsNotRunText,
 	summarizeSteps,
 	tallyTests,
 	thinningDisclosure,
@@ -55,7 +56,12 @@ function storedStep(
 	iteration: number,
 	stepIndex: number,
 	outcome: StepOutcome = "passed",
-	overrides: { name?: string; statusCode?: number; dataRowIndex?: number } = {}
+	overrides: {
+		name?: string;
+		statusCode?: number;
+		dataRowIndex?: number;
+		stepsNotRun?: number;
+	} = {}
 ): NonNullable<RunReport["results"]>[number] {
 	return {
 		timestamp: 1_700_000_000_000,
@@ -65,6 +71,7 @@ function storedStep(
 			iteration,
 			stepIndex,
 			dataRowIndex: overrides.dataRowIndex,
+			stepsNotRun: overrides.stepsNotRun,
 			stepName: overrides.name ?? `Step ${stepIndex + 1}`,
 			requestId: `req_${stepIndex}`,
 			outcome,
@@ -498,6 +505,23 @@ describe("stepRowsFromReport", () => {
 		expect(rows[1].dataRowIndex).toBeUndefined();
 	});
 
+	it("carries what an error cost the step that ended its iteration (issue #2526)", () => {
+		const rows = stepRowsFromReport(
+			report({
+				results: [
+					storedStep(0, 0, "errored", { stepsNotRun: 4 }),
+					storedStep(0, 1),
+					storedStep(1, 0, "errored", { stepsNotRun: 0 }),
+				],
+			})
+		);
+
+		expect(rows[0].stepsNotRun).toBe(4);
+		expect(rows[1]).not.toHaveProperty("stepsNotRun");
+		// The engine omits a zero, so a stored one is not a claim either.
+		expect(rows[2]).not.toHaveProperty("stepsNotRun");
+	});
+
 	it("carries the request the step ran, which is the way back to it", () => {
 		// The engine has always stamped it and no renderer read it (issue #730):
 		// without this the card has nothing to link to, and a failed step is a
@@ -740,5 +764,19 @@ describe("emptyStepListReason", () => {
 		expect(emptyStepListReason({ outcome: null, query: "  cart " }, null)?.title).toBe(
 			'No steps matching "cart"'
 		);
+	});
+});
+
+describe("stepsNotRunText", () => {
+	it.each([
+		[1, "1 step did not run"],
+		[2, "2 steps did not run"],
+		[1234, "1,234 steps did not run"],
+	])("words %i as a count of lost steps", (count, text) => {
+		expect(stepsNotRunText(count)).toBe(text);
+	});
+
+	it.each([[0], [-1], [undefined], [Number.NaN]])("says nothing for %s", (count) => {
+		expect(stepsNotRunText(count)).toBeNull();
 	});
 });

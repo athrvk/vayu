@@ -33,6 +33,8 @@ import type {
 	TestResult,
 } from "@/types";
 import type { RunResultSample } from "@/modules/request-builder/utils/restore-response";
+import { formatNumber } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 /** How many step executions ended in each outcome. */
 export type OutcomeCounts = Record<StepOutcome, number>;
@@ -61,6 +63,12 @@ export interface ScenarioStepRow {
 	 * stored copy arrives.
 	 */
 	dataRowIndex?: number;
+	/**
+	 * Plan positions the error that ended this step's iteration cost (issue
+	 * #2526), on the one step that ended it. Both sources carry it, the stored
+	 * copy from `trace_data`, so a row does not lose the line when the run ends.
+	 */
+	stepsNotRun?: number;
 	/**
 	 * The stored request this step executed, so a step that failed has a way
 	 * back to the request that sent it (issue #730).
@@ -420,6 +428,9 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 		iteration: trace.iteration,
 		stepIndex: trace.stepIndex,
 		dataRowIndex: trace.dataRowIndex,
+		...(typeof trace.stepsNotRun === "number" && trace.stepsNotRun > 0
+			? { stepsNotRun: trace.stepsNotRun }
+			: {}),
 		// The one thing the trace carried that nothing read (issue #730). A row
 		// written before the runner stamped it has none, and the card offers no
 		// link rather than one to an empty id.
@@ -579,4 +590,18 @@ export function thinningDisclosure(report: RunReport | undefined): ThinningDiscl
 		stepsStored: scenario.stepsStored,
 		stepsDropped: scenario.stepsDropped,
 	};
+}
+
+/**
+ * "3 steps did not run", or `null` when `count` says nothing was lost.
+ *
+ * One sentence for the two places an error's cost is read - the header's
+ * run-wide sum (`scenario.stepsNotRun`) and the step that ended its iteration
+ * (issue #2526) - so they cannot disagree on wording. The engine omits the
+ * field rather than sending `0`, and a report from before it is `undefined`:
+ * neither is a claim, so neither renders.
+ */
+export function stepsNotRunText(count: number | undefined): string | null {
+	if (typeof count !== "number" || !(count > 0)) return null;
+	return `${formatNumber(count)} ${pluralize(count, "step")} did not run`;
 }

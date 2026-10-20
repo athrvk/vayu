@@ -7153,7 +7153,10 @@ same `thresholdValidation` shape. A collection run's error rate and latency
 percentiles are drawn from the steps it actually sent (a step a script or an
 unbound data row skipped counts toward neither), and its assertion tally is
 the same combined `assert.*`/`pm.test` count `maxAssertionFailureRatePct`
-reads for a load run.
+reads for a load run. Since a script error no longer ends the iteration
+(issue #2526), the steps after one are sent and counted too, so the same
+collection can report a larger denominator than it did before; `stopOnError:
+true` restores the old population.
 
 **`custom.<name>.<stat>`** (issue #1500) budgets a named `metric.record` /
 `pm.metrics` value - `<name>` the metric was recorded under, `<stat>` one of
@@ -7527,7 +7530,8 @@ inside the block rather than through `mode` / `duration` / `iterations`:
     "dataFileName": "users.csv",    // optional, only beside data: the file's display name, never a path
     "dataFileHash": "<sha256>"      // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
   },
-  "environmentId": "env_123"        // optional, and what {{variables}} resolve against
+  "environmentId": "env_123",       // optional, and what {{variables}} resolve against
+  "stopOnError": false              // optional, default false - see Outcomes under Scenario runs
 }
 ```
 
@@ -7899,7 +7903,10 @@ this refuses would not have exercised the endpoint either.
 
 **Each step execution writes one `results` row** carrying the design-mode trace
 plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -
-for a run with `data` - `dataRowIndex`, the row that iteration bound. Bodies are
+for a run with `data` - `dataRowIndex`, the row that iteration bound. The step
+whose error ended its iteration short of the plan's end also carries
+`stepsNotRun`, defined under Outcomes below; it is absent, never `0`, on every
+other row. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -7928,8 +7935,39 @@ that passed everything else. The run's rollup is
 |---------|---------|-------------------------|
 | `passed` | The request completed and every assertion held. | Continues. |
 | `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
-| `errored` | The step did not complete: a transport failure, a timeout, or a script that threw. | **Ends the iteration.** The next iteration still runs. |
+| `errored`, script only | The exchange completed - a response arrived, or the send was skipped - and the one thing that went wrong is that the pre-request or test script threw (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
+| `errored`, anything else | The step did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind), or the runner refused the step's flow control (an unresolved or ambiguous `setNextRequest` target, the `maxStepsPerIteration` cap). | **Ends the iteration.** The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
+
+Either kind of `errored` is the same outcome on the row, in the summary's
+`errored` count and on the `step` frame, with the error in `results.error`; the
+table's split is only about what the iteration does next. A transport failure
+keeps ending the iteration even though Postman's runner carries on there: the
+steps after it nearly always read the response that never arrived. A step
+whose script errored while the iteration continues has its own flow control
+ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a
+script that then threw is an instruction from code that did not finish, so the
+iteration walks to the next plan position (see
+[scripting.md](scripting.md#flow-control-pmexecution)).
+
+**`stopOnError`** is a top-level boolean on `POST /runs`, default `false`,
+type-checked before the run row is created (`null` reads as the default, and a
+non-boolean is a `400` `invalid_run_config` naming the field). Set, every
+`errored` step ends its iteration, script-only ones included, which is
+Newman's `--bail` shape and what a collection run did before issue #2526. It
+is a collection-run (design-mode) key: a [scenario load
+run](#scenario-load-runs) does not read it. It rides the stored snapshot as
+sent and is echoed in the report's `scenario` section, so two runs that differ
+only in it never read as the same run.
+
+**`stepsNotRun`** counts the plan positions an error cost: when an `errored`
+step ends its iteration, the positions after it that the iteration had not
+already attempted. It rides the step row (and the `step` frame) that ended the
+iteration when it is above zero, and the report's `scenario.stepsNotRun` sums it over the run. An
+iteration that ends any other way adds nothing: `setNextRequest(null)` and a
+forward jump are a script's decision, not a loss, and a stop is the user's.
+`iterationsCompleted` keeps its meaning - an iteration an error ended still
+completed.
 
 A run whose steps failed still reaches `completed`: the outcome of the work is
 in the steps, and only the runner itself failing makes the run `failed`. A stop
@@ -7941,7 +7979,9 @@ runs a named request next instead of the one that follows, `setNextRequest(null)
 ends the iteration, and `pm.execution.skipRequest()` (pre-request scripts only)
 sends nothing and marks the step `skipped`. A target that names no step in the
 run, or one that two steps share, fails the step by name rather than guessing,
-and `maxStepsPerIteration` above is what stops a cycle. The full contract,
+and `maxStepsPerIteration` above is what stops a cycle. Both refusals end the
+iteration whatever `stopOnError` says, and a step whose script errored has its
+redirect ignored. The full contract,
 including everywhere the two methods throw, is in
 [scripting.md](scripting.md#flow-control-pmexecution).
 
@@ -8746,7 +8786,10 @@ the metrics stream above.
 `outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
 `data`, on the same terms as on the stored row, so a step reads the same live
-and after a reload. `validation` is the step's schema verdict (issue #681) in
+and after a reload. `stepsNotRun` follows the same rule: present only on the
+step whose error ended its iteration short of the plan's end, with how many
+plan positions that cost (see Outcomes under [Scenario runs](#scenario-runs)),
+and absent rather than `0` everywhere else. `validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its
 stored trace carries, so a watched run and a read-back one agree. `tests` is how
@@ -8778,8 +8821,9 @@ data: {"stepsPerIteration":4,"iterations":3,"stepsExpected":12}
 `iterations` is how many passes the engine resolved - a data set's row count
 where the run named no explicit count of its own. `stepsExpected` is
 `stepsPerIteration * iterations`, an upper bound rather than a promise, on the
-same terms as the load path's `requestsExpected` above: an errored step ends
-its iteration, `POST /runs/:id/stop` ends the run, `setNextRequest` can walk
+same terms as the load path's `requestsExpected` above: an errored step can
+end its iteration (see Outcomes under [Scenario runs](#scenario-runs)),
+`POST /runs/:id/stop` ends the run, `setNextRequest` can walk
 an iteration in fewer steps than the plan holds, and the
 `maxStepsPerIteration` cap can end one that walks in more. It rides the same
 monotonic id space as the `step` frames that follow - the same ring, so
@@ -9807,7 +9851,7 @@ and never needed to (that one reports an empty `refreshes` array).
 "scenario": {
   "iterations": 3, "iterationsCompleted": 3, "stepsExecuted": 6,
   "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
-  "stepsStored": 6, "stepsDropped": 0,
+  "stepsStored": 6, "stepsDropped": 0, "stepsNotRun": 0, "stopOnError": false,
   "transactions": [
     { "name": "checkout", "count": 3, "errors": 0,
       "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5, "p99": 33.0, "max": 55.4 } }
@@ -9819,6 +9863,16 @@ and never needed to (that one reports an empty `refreshes` array).
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
 non-passing step among the ones kept. `summary.totalRequests` is the number of
 step executions, not the number of rows that survived.
+
+`stepsNotRun` is how many plan positions errors cost the run - summed over
+every iteration an `errored` step ended, the positions after that step the
+iteration had not attempted (Outcomes under [Scenario runs](#scenario-runs)).
+`stepsExecuted` beside a non-zero `stepsNotRun` is a run that did less than its
+plan, not a complete one with an error in it. `stopOnError` is the run's own
+setting, echoed because the same counts describe a different run under it.
+Both are written by a collection run (design mode) only: a scenario load run's
+section carries neither, and a summary stored before issue #2526 carries
+neither either.
 
 `transactions` (issue #1515) is a sibling of `steps`, not a member of it - a
 `control.transaction` spans a folder, not one step - and is **absent**, never
