@@ -297,10 +297,9 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 	 * renderer asks for `includeParsedBody: false` (`apiService.executeRequest`),
 	 * so it is `null` in every answer it receives, and the engine leaves it
 	 * `null` anyway for a non-JSON or base64 body and past 4 MiB. The stringify
-	 * below is only a
-	 * guard against a producer that sends no `bodyRaw`: the original bytes are
-	 * already gone by then, and compact is the closest honest reconstruction -
-	 * indenting would invent formatting the server never sent.
+	 * below is only a guard against a producer that sends no `bodyRaw`: the
+	 * original bytes are already gone by then, and compact is the closest honest
+	 * reconstruction - indenting would invent formatting the server never sent.
 	 *
 	 * A base64 `bodyRaw` (issue #2458) is decoded first, so from here on
 	 * `bodyRaw` is text or nothing: the bytes ride `rawBytes`.

@@ -451,8 +451,8 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline);
  * stays resident there once freed. Each HTTP worker thread has an arena of its
  * own, and `malloc_trim` cannot shrink the end of one that is not the main
  * thread's, where such a block lands, so one large design send per worker left
- * the daemon hundreds of MB larger for the session (issue #2544). A fixed threshold (`mallopt (M_MMAP_THRESHOLD)`) ends the
- * raising. macOS, the Windows CRT and musl already map a large block
+ * the daemon hundreds of MB larger for the session (issue #2544). A fixed
+ * threshold (`mallopt (M_MMAP_THRESHOLD)`) ends the raising. macOS, the Windows CRT and musl already map a large block
  * separately, so there this does nothing and answers true. Call it once, at
  * daemon start, before any thread exists.
  */
