@@ -36,13 +36,6 @@ const REQUEST_COUNT = 1000;
 const VIEWPORT_PX = 600;
 /** Where the list starts inside the drawer body's scrolled content. */
 const LIST_TOP_PX = 40;
-/**
- * Measured at 0.3-1.2s a case on the cloud box (the sixty ArrowDown presses
- * the slowest, the drag's 200 frames next at 0.85s); 10s is about 8x the
- * slowest, for a loaded CI shard. The fixture's size is the point: the window
- * has to have something to leave out.
- */
-const CASE_TIMEOUT_MS = 10_000;
 /** The one request named off the pattern, for the typeahead. */
 const FAR_NAMED = 777;
 
@@ -266,42 +259,34 @@ afterEach(() => {
 });
 
 describe("a windowed tree", () => {
-	it(
-		"mounts a bounded window of a folder of 1,000 requests",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
+	it("mounts a bounded window of a folder of 1,000 requests", () => {
+		renderTree();
 
-			// The fixture is what the case claims: every request is a row of the list.
-			expect(requests.get("big")).toHaveLength(REQUEST_COUNT);
-			expect(treeItems().length).toBeLessThan(120);
-			expect(requestRow(0)).not.toBeNull();
-			expect(requestRow(REQUEST_COUNT - 1)).toBeNull();
-			// Unmounted rows still count: the set is the folder's, not the window's.
-			expect(requestRow(0)).toHaveAttribute("aria-setsize", String(REQUEST_COUNT));
-			expect(renderedUnits()).toBe(TOTAL_UNITS);
-		}
-	);
+		// The fixture is what the case claims: every request is a row of the list.
+		expect(requests.get("big")).toHaveLength(REQUEST_COUNT);
+		expect(treeItems().length).toBeLessThan(120);
+		expect(requestRow(0)).not.toBeNull();
+		expect(requestRow(REQUEST_COUNT - 1)).toBeNull();
+		// Unmounted rows still count: the set is the folder's, not the window's.
+		expect(requestRow(0)).toHaveAttribute("aria-setsize", String(REQUEST_COUNT));
+		expect(renderedUnits()).toBe(TOTAL_UNITS);
+	});
 
-	it(
-		"mounts later rows and drops earlier ones as the drawer scrolls",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
-			expect(requestRow(5)).not.toBeNull();
+	it("mounts later rows and drops earlier ones as the drawer scrolls", () => {
+		renderTree();
+		expect(requestRow(5)).not.toBeNull();
 
-			scrollDrawerTo(LIST_TOP_PX + requestTopPx(500));
+		scrollDrawerTo(LIST_TOP_PX + requestTopPx(500));
 
-			expect(requestRow(500)).not.toBeNull();
-			expect(inView(requestRow(500)!)).toBe(true);
-			expect(requestRow(5)).toBeNull();
-			expect(treeItems().length).toBeLessThan(120);
-			// Whatever is mounted, the spacers make up the rest of the list exactly.
-			expect(renderedUnits()).toBe(TOTAL_UNITS);
-		}
-	);
+		expect(requestRow(500)).not.toBeNull();
+		expect(inView(requestRow(500)!)).toBe(true);
+		expect(requestRow(5)).toBeNull();
+		expect(treeItems().length).toBeLessThan(120);
+		// Whatever is mounted, the spacers make up the rest of the list exactly.
+		expect(renderedUnits()).toBe(TOTAL_UNITS);
+	});
 
-	it("mounts every row of a list too short to window", { timeout: CASE_TIMEOUT_MS }, () => {
+	it("mounts every row of a list too short to window", () => {
 		requests = new Map([["big", requestFixture(20)]]);
 		renderTree();
 
@@ -311,22 +296,18 @@ describe("a windowed tree", () => {
 });
 
 describe("rows that stay mounted wherever the drawer is scrolled", () => {
-	it(
-		"keeps the focused row, which holds the tree's tab stop",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
-			act(() => requestRow(3)!.focus());
+	it("keeps the focused row, which holds the tree's tab stop", () => {
+		renderTree();
+		act(() => requestRow(3)!.focus());
 
-			scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
+		scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
 
-			expect(requestRow(3)).not.toBeNull();
-			expect(document.activeElement).toBe(requestRow(3));
-			expect(requestRow(3)!.tabIndex).toBe(0);
-		}
-	);
+		expect(requestRow(3)).not.toBeNull();
+		expect(document.activeElement).toBe(requestRow(3));
+		expect(requestRow(3)!.tabIndex).toBe(0);
+	});
 
-	it("keeps the row being renamed, field and all", { timeout: CASE_TIMEOUT_MS }, () => {
+	it("keeps the row being renamed, field and all", () => {
 		renderTree();
 		const row = requestRow(3)!;
 		act(() => row.focus());
@@ -338,48 +319,40 @@ describe("rows that stay mounted wherever the drawer is scrolled", () => {
 		expect(requestRow(3)?.querySelector("input")).not.toBeNull();
 	});
 
-	it(
-		"keeps the new-folder form and the folder it opens under",
-		{ timeout: CASE_TIMEOUT_MS },
-		async () => {
-			renderTree();
-			const big = collectionRow("big")!;
-			act(() => big.focus());
-			fireEvent.keyDown(big, { key: "F10", shiftKey: true });
-			fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
-			expect(await screen.findByPlaceholderText("Collection name")).toBeInTheDocument();
+	it("keeps the new-folder form and the folder it opens under", async () => {
+		renderTree();
+		const big = collectionRow("big")!;
+		act(() => big.focus());
+		fireEvent.keyDown(big, { key: "F10", shiftKey: true });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
+		expect(await screen.findByPlaceholderText("Collection name")).toBeInTheDocument();
 
-			scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
+		scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
 
-			expect(screen.getByPlaceholderText("Collection name")).toBeInTheDocument();
-			expect(collectionRow("big")).not.toBeNull();
-			// The form is a row of its own (a unit above, ten tall), and the first request
-			// below it is now its sibling, half a unit down rather than a whole one.
-			expect(renderedUnits()).toBe(TOTAL_UNITS + 11 - 0.5);
-		}
-	);
+		expect(screen.getByPlaceholderText("Collection name")).toBeInTheDocument();
+		expect(collectionRow("big")).not.toBeNull();
+		// The form is a row of its own (a unit above, ten tall), and the first request
+		// below it is now its sibling, half a unit down rather than a whole one.
+		expect(renderedUnits()).toBe(TOTAL_UNITS + 11 - 0.5);
+	});
 });
 
 describe("the keys walk every row, mounted or not", () => {
-	it(
-		"End focuses the folder's last request, scrolled into view",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
-			const alpha = collectionRow("alpha")!;
-			act(() => alpha.focus());
+	it("End focuses the folder's last request, scrolled into view", () => {
+		renderTree();
+		const alpha = collectionRow("alpha")!;
+		act(() => alpha.focus());
 
-			fireEvent.keyDown(alpha, { key: "End" });
+		fireEvent.keyDown(alpha, { key: "End" });
 
-			const last = requestRow(REQUEST_COUNT - 1);
-			expect(last).not.toBeNull();
-			expect(document.activeElement).toBe(last);
-			expect(inView(last!)).toBe(true);
-			expect(last!.tabIndex).toBe(0);
-		}
-	);
+		const last = requestRow(REQUEST_COUNT - 1);
+		expect(last).not.toBeNull();
+		expect(document.activeElement).toBe(last);
+		expect(inView(last!)).toBe(true);
+		expect(last!.tabIndex).toBe(0);
+	});
 
-	it("Home comes back to the first row from the far end", { timeout: CASE_TIMEOUT_MS }, () => {
+	it("Home comes back to the first row from the far end", () => {
 		renderTree();
 		const alpha = collectionRow("alpha")!;
 		act(() => alpha.focus());
@@ -391,24 +364,20 @@ describe("the keys walk every row, mounted or not", () => {
 		expect(inView(collectionRow("alpha")!)).toBe(true);
 	});
 
-	it(
-		"ArrowDown steps past the window's edge, mounting each row it reaches",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
-			act(() => requestRow(0)!.focus());
+	it("ArrowDown steps past the window's edge, mounting each row it reaches", () => {
+		renderTree();
+		act(() => requestRow(0)!.focus());
 
-			for (let step = 0; step < 60; step++) {
-				fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-			}
-
-			expect(document.activeElement).toBe(requestRow(60));
-			expect(inView(requestRow(60)!)).toBe(true);
-			expect(treeItems().length).toBeLessThan(120);
+		for (let step = 0; step < 60; step++) {
+			fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
 		}
-	);
 
-	it("a typeahead reaches a row that is scrolled away", { timeout: CASE_TIMEOUT_MS }, () => {
+		expect(document.activeElement).toBe(requestRow(60));
+		expect(inView(requestRow(60)!)).toBe(true);
+		expect(treeItems().length).toBeLessThan(120);
+	});
+
+	it("a typeahead reaches a row that is scrolled away", () => {
 		renderTree();
 		const alpha = collectionRow("alpha")!;
 		act(() => alpha.focus());
@@ -420,31 +389,27 @@ describe("the keys walk every row, mounted or not", () => {
 		expect(inView(requestRow(FAR_NAMED)!)).toBe(true);
 	});
 
-	it(
-		"a delete far from the folder hands focus up to the folder",
-		{ timeout: CASE_TIMEOUT_MS },
-		async () => {
-			renderTree();
-			const alpha = collectionRow("alpha")!;
-			act(() => alpha.focus());
-			fireEvent.keyDown(alpha, { key: "End" });
-			const last = requestRow(REQUEST_COUNT - 1)!;
-			// Big is 999 rows above: nothing but the tab stop's neighbours keeps it.
-			expect(inView(collectionRow("big")!)).toBe(false);
+	it("a delete far from the folder hands focus up to the folder", async () => {
+		renderTree();
+		const alpha = collectionRow("alpha")!;
+		act(() => alpha.focus());
+		fireEvent.keyDown(alpha, { key: "End" });
+		const last = requestRow(REQUEST_COUNT - 1)!;
+		// Big is 999 rows above: nothing but the tab stop's neighbours keeps it.
+		expect(inView(collectionRow("big")!)).toBe(false);
 
-			fireEvent.keyDown(last, { key: "Delete" });
-			await act(async () => {});
-			expect(deleteRequest).toHaveBeenCalledWith(`r${REQUEST_COUNT - 1}`);
-			requests = new Map([["big", requestFixture(REQUEST_COUNT - 1)]]);
-			rerenderTree();
+		fireEvent.keyDown(last, { key: "Delete" });
+		await act(async () => {});
+		expect(deleteRequest).toHaveBeenCalledWith(`r${REQUEST_COUNT - 1}`);
+		requests = new Map([["big", requestFixture(REQUEST_COUNT - 1)]]);
+		rerenderTree();
 
-			expect(document.activeElement).toBe(collectionRow("big"));
-		}
-	);
+		expect(document.activeElement).toBe(collectionRow("big"));
+	});
 });
 
 describe("revealing the active tab", () => {
-	it("scrolls a far request into view and mounts it", { timeout: CASE_TIMEOUT_MS }, () => {
+	it("scrolls a far request into view and mounts it", () => {
 		useTabsStore.setState({
 			openTabs: [{ id: "t1", type: "request", entityId: "r900" }],
 			activeTabId: "t1",
@@ -457,106 +422,94 @@ describe("revealing the active tab", () => {
 });
 
 describe("a drag in a windowed tree", () => {
-	it(
-		"auto-scrolls far from the row it started on and still drops",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
-			const source = requestRow(2)!;
-			const startY = source.getBoundingClientRect().top + ROW_PX / 2;
+	it("auto-scrolls far from the row it started on and still drops", () => {
+		renderTree();
+		const source = requestRow(2)!;
+		const startY = source.getBoundingClientRect().top + ROW_PX / 2;
 
-			fireEvent.pointerDown(source, {
-				button: 0,
-				pointerId: 1,
-				clientX: 10,
-				clientY: startY,
-			});
-			// A press is not a drag yet, and takes no capture: a captured press
-			// clicks the capturing element rather than the row's own controls.
-			expect(treeList().hasPointerCapture(1)).toBe(false);
-			fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: startY + 6 });
-			// Past the threshold the tree takes it, not the row, which the drawer
-			// is about to scroll away from.
-			expect(treeList().hasPointerCapture(1)).toBe(true);
-			expect(source.hasPointerCapture(1)).toBe(false);
-			// From here every event goes where the capture sends it: the tree.
-			// Into the bottom band: the drawer scrolls a step a frame.
-			fireEvent.pointerMove(treeList(), {
-				pointerId: 1,
-				clientX: 10,
-				clientY: VIEWPORT_PX - 4,
-			});
-			for (let frame = 0; frame < 200; frame++) flushFrame();
-			expect(scroller().scrollTop).toBeGreaterThan(1500);
+		fireEvent.pointerDown(source, {
+			button: 0,
+			pointerId: 1,
+			clientX: 10,
+			clientY: startY,
+		});
+		// A press is not a drag yet, and takes no capture: a captured press
+		// clicks the capturing element rather than the row's own controls.
+		expect(treeList().hasPointerCapture(1)).toBe(false);
+		fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: startY + 6 });
+		// Past the threshold the tree takes it, not the row, which the drawer
+		// is about to scroll away from.
+		expect(treeList().hasPointerCapture(1)).toBe(true);
+		expect(source.hasPointerCapture(1)).toBe(false);
+		// From here every event goes where the capture sends it: the tree.
+		// Into the bottom band: the drawer scrolls a step a frame.
+		fireEvent.pointerMove(treeList(), {
+			pointerId: 1,
+			clientX: 10,
+			clientY: VIEWPORT_PX - 4,
+		});
+		for (let frame = 0; frame < 200; frame++) flushFrame();
+		expect(scroller().scrollTop).toBeGreaterThan(1500);
 
-			// The source is far above the window now, and stays mounted.
-			expect(requestRow(2)).toBe(source);
-			const target = rowAtPoint(10, 300)!;
-			expect(target).not.toBeNull();
-			const targetIndex = Number(target.getAttribute("data-request-id")!.slice(1));
-			expect(targetIndex).toBeGreaterThan(40);
-			fireEvent.pointerMove(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
-			fireEvent.pointerUp(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
-			expect(treeList().hasPointerCapture(1)).toBe(false);
+		// The source is far above the window now, and stays mounted.
+		expect(requestRow(2)).toBe(source);
+		const target = rowAtPoint(10, 300)!;
+		expect(target).not.toBeNull();
+		const targetIndex = Number(target.getAttribute("data-request-id")!.slice(1));
+		expect(targetIndex).toBeGreaterThan(40);
+		fireEvent.pointerMove(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
+		fireEvent.pointerUp(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
+		expect(treeList().hasPointerCapture(1)).toBe(false);
 
-			expect(reorderMutate).toHaveBeenCalledTimes(1);
-			const [plan] = reorderMutate.mock.calls[0];
-			expect(plan.moves.some((move: { id: string }) => move.id === "r2")).toBe(true);
-			expect(document.querySelector("[data-tree-live]")?.textContent).toMatch(
-				/^Moved Request 2 to position \d+ of 1000 in Big$/
-			);
-		}
-	);
+		expect(reorderMutate).toHaveBeenCalledTimes(1);
+		const [plan] = reorderMutate.mock.calls[0];
+		expect(plan.moves.some((move: { id: string }) => move.id === "r2")).toBe(true);
+		expect(document.querySelector("[data-tree-live]")?.textContent).toMatch(
+			/^Moved Request 2 to position \d+ of 1000 in Big$/
+		);
+	});
 });
 
 describe("one menu and one set of drag handlers for the whole tree", () => {
 	/** The menu open now, by the name it gives itself. */
 	const openMenu = () => screen.getByRole("menu");
 
-	it(
-		"mounts one right-click trigger, the tree itself, however many rows are mounted",
-		{ timeout: CASE_TIMEOUT_MS },
-		() => {
-			renderTree();
+	it("mounts one right-click trigger, the tree itself, however many rows are mounted", () => {
+		renderTree();
 
-			// Enough rows that a trigger per row could not hide in the count.
-			expect(treeItems().length).toBeGreaterThan(20);
-			const triggers = document.querySelectorAll('[data-slot="context-menu-trigger"]');
-			expect(triggers).toHaveLength(1);
-			expect(triggers[0]).toBe(treeList());
-		}
-	);
+		// Enough rows that a trigger per row could not hide in the count.
+		expect(treeItems().length).toBeGreaterThan(20);
+		const triggers = document.querySelectorAll('[data-slot="context-menu-trigger"]');
+		expect(triggers).toHaveLength(1);
+		expect(triggers[0]).toBe(treeList());
+	});
 
-	it(
-		"opens the actions of the row under the pointer, and switches with the pointer",
-		{ timeout: CASE_TIMEOUT_MS },
-		async () => {
-			renderTree();
+	it("opens the actions of the row under the pointer, and switches with the pointer", async () => {
+		renderTree();
 
-			fireEvent.contextMenu(requestRow(5)!);
-			await waitFor(() =>
-				expect(openMenu()).toHaveAccessibleName("More actions for request Request 5")
-			);
-			expect(screen.getByRole("menuitem", { name: /Duplicate/ })).toBeInTheDocument();
+		fireEvent.contextMenu(requestRow(5)!);
+		await waitFor(() =>
+			expect(openMenu()).toHaveAccessibleName("More actions for request Request 5")
+		);
+		expect(screen.getByRole("menuitem", { name: /Duplicate/ })).toBeInTheDocument();
 
-			fireEvent.contextMenu(collectionRow("big")!);
-			await waitFor(() => expect(openMenu()).toHaveAccessibleName("More actions for Big"));
-			expect(screen.queryByRole("menuitem", { name: /Duplicate/ })).toBeNull();
-			expect(screen.getByRole("menuitem", { name: /Add collection/ })).toBeInTheDocument();
+		fireEvent.contextMenu(collectionRow("big")!);
+		await waitFor(() => expect(openMenu()).toHaveAccessibleName("More actions for Big"));
+		expect(screen.queryByRole("menuitem", { name: /Duplicate/ })).toBeNull();
+		expect(screen.getByRole("menuitem", { name: /Add collection/ })).toBeInTheDocument();
 
-			// And on a row the first window did not hold, the action is that row's.
-			scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
-			fireEvent.contextMenu(requestRow(603)!);
-			await waitFor(() =>
-				expect(openMenu()).toHaveAccessibleName("More actions for request Request 603")
-			);
-			fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }));
-			await waitFor(() => expect(requestRow(603)!.querySelector("input")).not.toBeNull());
-			expect(requestRow(603)!.querySelector("input")).toHaveValue("Request 603");
-		}
-	);
+		// And on a row the first window did not hold, the action is that row's.
+		scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
+		fireEvent.contextMenu(requestRow(603)!);
+		await waitFor(() =>
+			expect(openMenu()).toHaveAccessibleName("More actions for request Request 603")
+		);
+		fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }));
+		await waitFor(() => expect(requestRow(603)!.querySelector("input")).not.toBeNull());
+		expect(requestRow(603)!.querySelector("input")).toHaveValue("Request 603");
+	});
 
-	it("leaves a right-click beside the rows to the platform", { timeout: CASE_TIMEOUT_MS }, () => {
+	it("leaves a right-click beside the rows to the platform", () => {
 		renderTree();
 		const spacer = document.querySelector<HTMLElement>("[data-tree-spacer]")!;
 		expect(spacer).not.toBeNull();

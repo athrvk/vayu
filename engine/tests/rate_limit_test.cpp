@@ -5,10 +5,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -98,7 +100,10 @@ TEST_F (RateLimiterTest, EnforcesTargetRPS) {
     // - Effective RPS is typically 80-90% of target
     double submission_rps = 200.0 / submission_duration;
 
-    EXPECT_GE (submission_rps, 75.0) << "Submission rate too slow";
+    // The cap is the subject. The floor only catches a limiter that stalls,
+    // and a starved runner can halve the measured rate on its own (a Windows
+    // leg read 50.2 here), so it sits well under that.
+    EXPECT_GE (submission_rps, 40.0) << "Submission rate too slow";
     EXPECT_LE (submission_rps, 125.0) << "Submission rate too fast";
     EXPECT_GT (completed, 0) << "No requests completed successfully";
 }
@@ -189,10 +194,10 @@ TEST_F (RateLimiterTest, EnforcesTargetRPSAcrossMultipleWorkers) {
     }
     loop.stop ();
 
-    // Same ±25% window as the single-worker case. Without the split this lands
+    // Same window as the single-worker case. Without the split this lands
     // near 400 RPS (4 workers x the full target), far outside it.
     double submission_rps = 200.0 / submission_duration;
-    EXPECT_GE (submission_rps, 75.0) << "Submission rate too slow";
+    EXPECT_GE (submission_rps, 40.0) << "Submission rate too slow";
     EXPECT_LE (submission_rps, 125.0) << "Submission rate too fast";
 }
 
@@ -352,10 +357,17 @@ TEST_F (RateLimiterTest, AWorkerParkedForItsNextTokenStopsPromptly) {
     << "stop(false) waited for the parked worker's token";
 }
 
+// Best of three: the healthy stop takes about the 30ms deadline and the
+// mutation about 130ms, too close for one sample on a runner that can stall a
+// thread for 50ms. A stall lands in one attempt; the mutation lands in all.
 TEST_F (RateLimiterTest, ABoundedDrainEndsOnTimeWhileWaitingForAToken) {
-    EXPECT_LT (seconds_to_stop_a_parked_worker (
-               mock->fast_url (), true, std::chrono::milliseconds (30)),
-    0.08)
+    double fastest = std::numeric_limits<double>::max ();
+    for (int attempt = 0; attempt < 3 && fastest >= 0.08; ++attempt) {
+        fastest = std::min (fastest,
+        seconds_to_stop_a_parked_worker (
+        mock->fast_url (), true, std::chrono::milliseconds (30)));
+    }
+    EXPECT_LT (fastest, 0.08)
     << "a 30ms drain outlived its deadline: the park ran its whole "
        "TOKEN_WAIT_CAP_MS slice past it";
 }

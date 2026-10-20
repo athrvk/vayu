@@ -65,6 +65,7 @@ import path from "node:path";
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { build } from "vite";
 import { MONACO_THEME_NAMES, currentEditorMode } from "./monaco-theme";
+import { BUILD_TEST_TIMEOUT_MS } from "@/test/timeouts";
 
 const MONACO_SETUP_PATH = path.resolve(__dirname, "monaco-setup.ts");
 const RESPONSE_VIEWER_UTILS_PATH = path.resolve(
@@ -104,29 +105,14 @@ describe("the two language services monaco-setup.ts composes are honest at runti
 	/*
 	 * The json register entry pulls in a large chunk of monaco's module graph on
 	 * first import, which vitest has to transform cold. It is the only cost in
-	 * this case - the four assertions below it are property reads.
-	 *
-	 * 6.85s measured on an idle Linux container (`vitest --reporter=verbose`,
-	 * this case alone); 6.54s re-measured the same way on 0.56's graph, which
-	 * is what this case imports since #1342. The budget was 20s, call it 3x,
-	 * and it was not enough:
-	 * on `windows-latest` shard 1 it timed out twice in a row at 20s (#1219),
-	 * where this file shares two cores with the rest of the shard *and* with
-	 * the real `vite build` the last case in this file runs. Windows is the
-	 * platform this repo already sizes differently for that reason - the test
-	 * presets drop it to `-j4` with a `RESOURCE_LOCK` because concurrency there
-	 * costs more than it returns.
-	 *
-	 * 45s is ~6.6x the measured cost, which clears the observed Windows
-	 * overrun with room, and is still short enough that an import that truly
-	 * hangs fails this file inside a minute instead of sitting on a runner.
-	 * Raise it again only with a *measurement*, the way this line carries one:
-	 * a number moved by reflex is how a wall-clock budget stops meaning
-	 * anything (see the render-heavy note in `app/CLAUDE.md`).
+	 * this case - the four assertions below it are property reads. 6.85s idle
+	 * on Linux; a 20s budget timed out twice on `windows-latest` (#1219), where
+	 * this file shares two cores with the rest of the shard and with the real
+	 * `vite build` below.
 	 */
 	it(
 		"the json register entry exports what monaco.json's call sites read",
-		{ timeout: 45_000 },
+		{ timeout: BUILD_TEST_TIMEOUT_MS },
 		async () => {
 			const { jsonDefaults } = await import("monaco-editor/languages/features/json/register");
 			// variables-schema.ts's applyVariablesSchema reads exactly these two
@@ -144,7 +130,7 @@ describe("the two language services monaco-setup.ts composes are honest at runti
 	// move.
 	it(
 		"the typescript register entry exports what monaco.typescript's call sites read",
-		{ timeout: 20_000 },
+		{ timeout: BUILD_TEST_TIMEOUT_MS },
 		async () => {
 			const mod = await import("monaco-editor/languages/features/typescript/register");
 			// useScriptTypeDefinitions.ts reads exactly these off
@@ -278,34 +264,37 @@ describe("the composed entry registers those languages and really tokenizes them
 	});
 
 	// Loads the app's real setup module, which transforms monaco's editor core
-	// plus the grammars cold. Measured 8-11s locally; 40s is roughly 4x that for
-	// a slower or shared-core CI runner. Re-measured at 3.3s on 0.56's graph,
-	// warm behind the json case above - well inside the same budget, so the
-	// number stands rather than being retuned to one container's figure.
-	it("colorizes each into more than one token class", { timeout: 40_000 }, async () => {
-		const { monaco } = await import("./monaco-setup");
+	// plus the grammars cold: 8-11s measured locally.
+	it(
+		"colorizes each into more than one token class",
+		{ timeout: BUILD_TEST_TIMEOUT_MS },
+		async () => {
+			const { monaco } = await import("./monaco-setup");
 
-		const registered = new Set(monaco.languages.getLanguages().map((language) => language.id));
-		for (const id of MONACO_LANGUAGE_IDS) {
-			expect(registered, `"${id}" is not a registered language`).toContain(id);
+			const registered = new Set(
+				monaco.languages.getLanguages().map((language) => language.id)
+			);
+			for (const id of MONACO_LANGUAGE_IDS) {
+				expect(registered, `"${id}" is not a registered language`).toContain(id);
+			}
+
+			// The control. `plaintext` has no tokenizer, so it is exactly what an id
+			// with a dropped grammar degrades into - one class for the whole snippet.
+			// Without this the assertion below could pass on a Monaco that had
+			// stopped emitting `mtk` classes at all.
+			const plain = await monaco.editor.colorize(COLORIZE_SAMPLES.css, "plaintext", {});
+			expect(tokenClasses(plain).size).toBe(1);
+
+			for (const id of COLORIZED_IDS) {
+				const colorized = await monaco.editor.colorize(COLORIZE_SAMPLES[id], id, {});
+				const classes = tokenClasses(colorized);
+				expect(
+					classes.size,
+					`"${id}" colorized to ${classes.size} token class(es)`
+				).toBeGreaterThan(1);
+			}
 		}
-
-		// The control. `plaintext` has no tokenizer, so it is exactly what an id
-		// with a dropped grammar degrades into - one class for the whole snippet.
-		// Without this the assertion below could pass on a Monaco that had
-		// stopped emitting `mtk` classes at all.
-		const plain = await monaco.editor.colorize(COLORIZE_SAMPLES.css, "plaintext", {});
-		expect(tokenClasses(plain).size).toBe(1);
-
-		for (const id of COLORIZED_IDS) {
-			const colorized = await monaco.editor.colorize(COLORIZE_SAMPLES[id], id, {});
-			const classes = tokenClasses(colorized);
-			expect(
-				classes.size,
-				`"${id}" colorized to ${classes.size} token class(es)`
-			).toBeGreaterThan(1);
-		}
-	});
+	);
 });
 
 describe("the barrel and the two worker-pulling language services stay out", () => {
@@ -380,57 +369,59 @@ describe("the emitted worker set, from a real build", () => {
 
 	const specifiers = extractMonacoSpecifiers(monacoSetupCode);
 
-	// Measured 5.6-7.4s locally for this exact fixture (13 specifiers, ~1055
-	// modules transformed). 30s is roughly 4x the upper end, for a slower or
-	// shared-core CI runner. Re-measured on 0.56 (#1342): still 13 specifiers,
-	// 1084 modules, 6.7s - inside the range the budget was set from, so the
-	// budget is unchanged.
-	it("emits exactly editor/json/ts workers, never css or html", { timeout: 30_000 }, async () => {
-		// Guards everything below against a fixture that had no imports to
-		// build, which would otherwise pass this test by building nothing.
-		expect(specifiers.length).toBeGreaterThan(0);
+	// A real Vite build: 13 specifiers, 1084 modules, 6.7s measured idle (#1342)
+	// and 22s in a full parallel run on four cores.
+	it(
+		"emits exactly editor/json/ts workers, never css or html",
+		{ timeout: BUILD_TEST_TIMEOUT_MS },
+		async () => {
+			// Guards everything below against a fixture that had no imports to
+			// build, which would otherwise pass this test by building nothing.
+			expect(specifiers.length).toBeGreaterThan(0);
 
-		// Inside the app, not in `tmpdir()`. This used to build from a temp
-		// directory with `monaco-editor` aliased at `app/node_modules/monaco-editor`,
-		// which worked only while the package's subpaths were literal file paths.
-		// 0.56 publishes an `exports` map (`"./*": "./esm/vs/*.js"`), so an alias
-		// onto the package directory resolves `monaco-editor/editor` to a file that
-		// does not exist and the fixture fails to build (#1342). Resolving
-		// `monaco-editor` the ordinary way, by node_modules lookup from a directory
-		// under `app/`, is also the higher-fidelity fixture: it is exactly how the
-		// real build reaches the package.
-		const root = mkdtempSync(path.join(APP_ROOT, ".monaco-worker-fixture-"));
-		try {
-			const entry = path.join(root, "entry.ts");
-			writeFileSync(entry, buildFixtureEntry(specifiers));
-			const outDir = path.join(root, "out");
+			// Inside the app, not in `tmpdir()`. This used to build from a temp
+			// directory with `monaco-editor` aliased at `app/node_modules/monaco-editor`,
+			// which worked only while the package's subpaths were literal file paths.
+			// 0.56 publishes an `exports` map (`"./*": "./esm/vs/*.js"`), so an alias
+			// onto the package directory resolves `monaco-editor/editor` to a file that
+			// does not exist and the fixture fails to build (#1342). Resolving
+			// `monaco-editor` the ordinary way, by node_modules lookup from a directory
+			// under `app/`, is also the higher-fidelity fixture: it is exactly how the
+			// real build reaches the package.
+			const root = mkdtempSync(path.join(APP_ROOT, ".monaco-worker-fixture-"));
+			try {
+				const entry = path.join(root, "entry.ts");
+				writeFileSync(entry, buildFixtureEntry(specifiers));
+				const outDir = path.join(root, "out");
 
-			// No app plugins, deliberately - same reason as fonts-woff2-only.test.ts:
-			// this proves what Vite's OWN worker plugin does with these specifiers,
-			// not what the app's larger pipeline happens to do to them today.
-			await build({
-				root,
-				logLevel: "silent",
-				build: { outDir, rolldownOptions: { input: entry } },
-			});
+				// No app plugins, deliberately - same reason as fonts-woff2-only.test.ts:
+				// this proves what Vite's OWN worker plugin does with these specifiers,
+				// not what the app's larger pipeline happens to do to them today.
+				await build({
+					root,
+					logLevel: "silent",
+					build: { outDir, rolldownOptions: { input: entry } },
+				});
 
-			const assets = path.join(outDir, "assets");
-			const files = readdirSync(assets);
-			expect(files.length).toBeGreaterThan(0);
+				const assets = path.join(outDir, "assets");
+				const files = readdirSync(assets);
+				expect(files.length).toBeGreaterThan(0);
 
-			const workerFiles = files.filter((f) => f.includes(".worker"));
-			const workerStems = new Set(workerFiles.map((f) => f.split(".worker")[0]));
+				const workerFiles = files.filter((f) => f.includes(".worker"));
+				const workerStems = new Set(workerFiles.map((f) => f.split(".worker")[0]));
 
-			expect(workerFiles.some((f) => f.startsWith("css.worker"))).toBe(false);
-			expect(workerFiles.some((f) => f.startsWith("html.worker"))).toBe(false);
-			expect(workerStems).toEqual(new Set(["editor", "json", "ts"]));
-		} finally {
-			// The fixture sits inside `app/`, so leaving it behind on a failure
-			// would put a stray build tree in the tree every other source scan
-			// walks.
-			rmSync(root, { recursive: true, force: true });
+				expect(workerFiles.some((f) => f.startsWith("css.worker"))).toBe(false);
+				expect(workerFiles.some((f) => f.startsWith("html.worker"))).toBe(false);
+				expect(workerStems).toEqual(new Set(["editor", "json", "ts"]));
+			} finally {
+				// The fixture sits inside `app/`, so leaving it behind on a failure
+				// would put a stray build tree in the tree every other source scan
+				// walks. Retried because Windows refuses to remove a directory while
+				// the bundler's last handle in it is still closing (EBUSY).
+				rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+			}
 		}
-	});
+	);
 });
 
 describe("the composed entry registers the app's theme", () => {
@@ -452,15 +443,19 @@ describe("the composed entry registers the app's theme", () => {
 	 * this file has already imported the setup module, and a cached module
 	 * evaluates nothing.
 	 */
-	it("defines it while composing, before any editor exists", { timeout: 40_000 }, async () => {
-		vi.resetModules();
-		const editorApi = await import("monaco-editor/editor");
-		const defineTheme = vi.spyOn(editorApi.editor, "defineTheme");
+	it(
+		"defines it while composing, before any editor exists",
+		{ timeout: BUILD_TEST_TIMEOUT_MS },
+		async () => {
+			vi.resetModules();
+			const editorApi = await import("monaco-editor/editor");
+			const defineTheme = vi.spyOn(editorApi.editor, "defineTheme");
 
-		await import("./monaco-setup");
+			await import("./monaco-setup");
 
-		const names = defineTheme.mock.calls.map(([name]) => name);
-		expect(names).toContain(MONACO_THEME_NAMES[currentEditorMode()]);
-		defineTheme.mockRestore();
-	});
+			const names = defineTheme.mock.calls.map(([name]) => name);
+			expect(names).toContain(MONACO_THEME_NAMES[currentEditorMode()]);
+			defineTheme.mockRestore();
+		}
+	);
 });

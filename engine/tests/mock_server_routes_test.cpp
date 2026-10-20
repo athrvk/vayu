@@ -1281,8 +1281,10 @@ TEST_F (MockServerTest, APreflightIsExemptFromLatencyTheErrorRollAndActivity) {
     seed_pet_store ();
     MockServerManager manager;
     MockStartRequest request;
-    request.collection_id  = "col_root";
-    request.latency_ms     = 200;
+    request.collection_id = "col_root";
+    // Latency an order past the bound below, so a cold first connection on a
+    // loaded runner cannot be mistaken for the latency being applied.
+    request.latency_ms     = 2000;
     request.error_rate_pct = 100;
     const auto started     = manager.start (*db_, request);
     ASSERT_TRUE (started.ok) << started.error_message;
@@ -1301,10 +1303,10 @@ TEST_F (MockServerTest, APreflightIsExemptFromLatencyTheErrorRollAndActivity) {
     std::chrono::steady_clock::now () - before)
                             .count ();
     ASSERT_TRUE (preflight) << "no response from the mock";
-    // Neither the 200ms latency nor the 100% error rate applies to a
+    // Neither the 2000ms latency nor the 100% error rate applies to a
     // synthesized preflight - both are skipped by the same early return.
     EXPECT_EQ (preflight->status, 204);
-    EXPECT_LT (elapsed_ms, 100);
+    EXPECT_LT (elapsed_ms, 1000);
 
     const auto activity = manager.activity (started.info.mock_id, 10);
     ASSERT_HAS_VALUE (activity);

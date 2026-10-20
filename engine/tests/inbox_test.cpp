@@ -968,7 +968,11 @@ TEST_F (InboxListenerTest, AWritingStreamKeepsItsClaimPastTheStaleWindow) {
 // The #506 race: the browser reconnects before the previous stream's poll loop
 // has noticed its socket died, and the refusal is what strands it for good.
 TEST_F (InboxListenerTest, AReconnectTakesOverAClaimThatStoppedWriting) {
-    set_config ("inboxLivePollIntervalMs", inbox_constants::MIN_LIVE_POLL_INTERVAL_MS);
+    // A one-second stale window (two intervals). The floor's 100ms window let
+    // a runner stall between two consecutive calls below read as a dead
+    // holder, so a claim was taken where this asserts it was refused.
+    constexpr int POLL_MS = 500;
+    set_config ("inboxLivePollIntervalMs", POLL_MS);
     auto started    = start ();
     const auto dead = manager_->try_claim_live (started.info.inbox_id);
     ASSERT_HAS_VALUE (dead);
@@ -976,8 +980,7 @@ TEST_F (InboxListenerTest, AReconnectTakesOverAClaimThatStoppedWriting) {
     // Immediately after the last write the holder is presumed alive.
     EXPECT_FALSE (manager_->try_claim_live (started.info.inbox_id).has_value ());
 
-    std::this_thread::sleep_for (
-    std::chrono::milliseconds (inbox_constants::MIN_LIVE_CLAIM_STALE_MS + 50));
+    std::this_thread::sleep_for (std::chrono::milliseconds ((2 * POLL_MS) + 50));
     const auto reconnect = manager_->try_claim_live (started.info.inbox_id);
     ASSERT_HAS_VALUE (reconnect)
     << "a reconnect met a 409 it cannot recover from";

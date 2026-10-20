@@ -193,6 +193,19 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   unbuilt test file reports nothing (#668). The list lives there and not in
   `engine/CMakeLists.txt` because that file is a `sanitizers.yml` trigger
   path (#970); keep routine edits out of it.
+- **A test waits on a condition with `vayu::tests::wait_until`**
+  (`engine/tests/wait_until.hpp`), never on a `sleep_for` followed by an
+  assertion. Its deadline (`WAIT_DEADLINE`, 20s) only bounds how long a broken
+  build takes to report, under the 60s CTest per-test timeout. A run that has
+  to be "in flight" is stopped once the mock has seen its first request. A
+  run that has to be "finished" is awaited until `RunManager::get_run` answers
+  null, because `retain_run` is the worker's last act. A wall-clock assertion
+  that stays (a stop that must be prompt, a window that must leave out the
+  drain) names the healthy and the broken reading in its comment and sits
+  between them, with the mutation check that proves the broken side. The root
+  `CLAUDE.md` testing section has the full rule set. `sleep_for` remains right
+  in a mock handler that paces its own answer, and as the poll interval
+  inside a deadline loop.
 - **A fixture that opens a scratch `Database` cleans up with
   `vayu::tests::remove_database_files`** (`engine/tests/temp_database.hpp`),
   never a hand-written suffix list: an opened database writes six files (#413).

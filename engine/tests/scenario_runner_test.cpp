@@ -51,6 +51,7 @@
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::core::ScenarioStepStore;
@@ -430,10 +431,13 @@ class ScenarioRunnerTest : public ::testing::Test {
             auto run = db_->get_run (run_id);
             if (run && run->status != vayu::RunStatus::Pending &&
             run->status != vayu::RunStatus::Running) {
-                // The worker writes the status before its last acts (retain,
-                // closed); give it the moment it needs so a following
-                // assertion on those does not race it.
-                std::this_thread::sleep_for (std::chrono::milliseconds (50));
+                // The worker writes the status before its last acts (closed,
+                // then retain_run, which takes it out of the active map); wait
+                // for those rather than a fixed moment, so an assertion on
+                // them cannot race it.
+                (void)vayu::tests::wait_until (
+                [&] () { return manager_.get_run (run_id) == nullptr; },
+                std::chrono::seconds (5));
                 return run->status;
             }
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
@@ -1252,9 +1256,11 @@ TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     auto context = manager_.get_run (run_id);
     ASSERT_TRUE (context != nullptr);
 
-    // Long enough for the run to be inside its first iteration, short enough
-    // that it cannot have finished 80 steps of 120ms each.
-    std::this_thread::sleep_for (std::chrono::milliseconds (150));
+    // Stop once the first step has reached the server, so the run is inside
+    // its first iteration whatever the runner's speed: a fixed delay stopped
+    // it after a whole iteration on a stalled runner.
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return !server_->requests ().empty (); }));
     context->should_stop = true;
 
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);

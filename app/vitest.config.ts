@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { TEST_TIMEOUT_MS } from "./src/test/timeouts.ts";
 
 export default defineConfig({
 	test: {
@@ -16,6 +17,9 @@ export default defineConfig({
 		pool: "threads",
 		globals: true,
 		setupFiles: ["./src/test/setup.ts"],
+		// A hang detector, not a speed check: src/test/timeouts.ts says why.
+		testTimeout: TEST_TIMEOUT_MS,
+		hookTimeout: TEST_TIMEOUT_MS,
 		include: ["src/**/*.test.{ts,tsx}", "electron/**/*.test.ts"],
 		server: {
 			deps: {

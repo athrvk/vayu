@@ -165,7 +165,7 @@ function displayedRequestIds(c: ConformanceCase, reverseInput = false): string[]
 	useCollectionsStore.setState({
 		expandedCollectionIds: new Set(c.collections.map((col) => col.id)),
 	});
-	const { container } = render(
+	const { container, unmount } = render(
 		<QueryClientProvider
 			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
 		>
@@ -174,9 +174,13 @@ function displayedRequestIds(c: ConformanceCase, reverseInput = false): string[]
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
-	return Array.from(container.querySelectorAll("[data-request-id]")).map(
+	const ids = Array.from(container.querySelectorAll("[data-request-id]")).map(
 		(row) => row.getAttribute("data-request-id") ?? ""
 	);
+	// One tree at a time: a case that renders several would otherwise keep
+	// every earlier tree mounted, and pay for all of them on each render.
+	unmount();
+	return ids;
 }
 
 beforeEach(() => {
@@ -203,9 +207,12 @@ describe("recursive-run-order conformance fixture", () => {
 		}
 	);
 
-	it("displays the same order whatever order the rows arrive in", () => {
-		for (const c of fixture.cases) {
+	// One case per fixture row, as above: the loop this replaced rendered every
+	// case inside a single test and outran its budget on a loaded runner.
+	it.each(fixture.cases.map((c) => [c.name, c] as const))(
+		"displays the same order whatever order the rows arrive in: %s",
+		(_name, c) => {
 			expect(displayedRequestIds(c, /*reverseInput=*/ true)).toEqual(c.expected);
 		}
-	});
+	);
 });
