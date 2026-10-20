@@ -635,6 +635,39 @@ TEST_F (ScenarioRunnerTest, AVariableSetByAStepIsReadableByTheNextAndPersistedOn
     EXPECT_NE (env->variables.find ("from-step-1"), std::string::npos);
 }
 
+// The counter shape Postman scripts keep (#2529, the issue's XG run): step 1
+// sets 0, step 2 adds 1 to what it reads back, and step 3's `{{xgCount}}` goes
+// out as `1`. With the value stringified on set, the read was "0", the sum
+// "01", and that went on the wire. The name is not in the environment when the
+// plan is composed, so step 3's header is answered by the residual pass after
+// its own pre-request script, from the scopes the earlier steps left.
+TEST_F (ScenarioRunnerTest, ACounterSetByOneStepIsANumberToTheNextAndOneOnTheWire) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", "[]");
+    seed_request ("req_a", 0, "/ok", "", "pm.environment.set('xgCount', 0);");
+    seed_request ("req_b", 1, "/ok", "",
+    "pm.environment.set('xgCount', pm.environment.get('xgCount') + 1);");
+    seed_request ("req_c", 2,
+    "/ok", "pm.test('a number', () => pm.expect(pm.environment.get('xgCount')).to.equal(1));",
+    "", "", "", R"([{"key":"X-Marker","value":"{{xgCount}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[2].marker, "1");
+    auto scenario = summary_of (run_id)["scenario"];
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 3u) << scenario.dump ();
+
+    auto env = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (env);
+    const auto stored = vayu::json::parse_variables (env->variables);
+    ASSERT_EQ (stored.count ("xgCount"), 1u) << env->variables;
+    EXPECT_EQ (stored.at ("xgCount").value, "1");
+    EXPECT_EQ (stored.at ("xgCount").type, "string");
+}
+
 TEST_F (ScenarioRunnerTest, ACookieSetByStepOneIsSentByStepTwo) {
     seed_collection ("col_1");
     seed_environment ("env_1", "[]");

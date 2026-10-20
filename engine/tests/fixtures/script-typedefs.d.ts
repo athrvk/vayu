@@ -384,12 +384,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get a collection variable value by name. Reads the whole collection chain - the nearest enabled definition wins, so a parent collection's variable resolves here too.
+		 * Get a collection variable value by name. Reads the whole collection chain - the nearest enabled definition wins, so a parent collection's variable resolves here too. A value a script set this run reads back as it was set; a stored one is cast by its declared type.
 		 * 
 		 * Example:
 		 * const baseUrl = pm.collectionVariables.get('base_url');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the collection variable exists and is enabled - the same rows pm.collectionVariables.get() can read.
 		 * 
@@ -398,14 +398,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. The value will be persisted.
+		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.collectionVariables.set('base_url', 'https://api.example.com');
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled collection variable, each value cast by its declared type.
+		 * A plain object of every enabled collection variable, each value read as pm.collectionVariables.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.collectionVariables.toObject());
@@ -525,12 +525,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get an environment variable value by name.
+		 * Get an environment variable value by name - what a script set this run, as it was set, or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const token = pm.environment.get('auth_token');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the environment variable exists and is enabled - the same rows pm.environment.get() can read.
 		 * 
@@ -539,14 +539,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set an environment variable. The value will be persisted.
+		 * Set an environment variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.environment.set('auth_token', response.token);
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled environment variable, each value cast by its declared type.
+		 * A plain object of every enabled environment variable, each value read as pm.environment.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.environment.toObject());
@@ -621,12 +621,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get a global variable value by name.
+		 * Get a global variable value by name - what a script set this run, as it was set, or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const apiKey = pm.globals.get('api_key');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the global variable exists and is enabled - the same rows pm.globals.get() can read.
 		 * 
@@ -635,14 +635,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set a global variable. The value will be persisted.
+		 * Set a global variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.globals.set('api_key', 'new_key');
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled global variable, each value cast by its declared type.
+		 * A plain object of every enabled global variable, each value read as pm.globals.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.globals.toObject());

@@ -1244,9 +1244,11 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.environment.get" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.environment.get(\"${1:variable}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.environment.get(name: string): string | undefined" },
+    { "detail", "pm.environment.get(name: string): any | undefined" },
     { "documentation",
-    "Get an environment variable value by name.\n\nExample:\nconst token = "
+    "Get an environment variable value by name - what a script set this run, "
+    "as it was set, or else the stored text cast by its declared "
+    "type.\n\nExample:\nconst token = "
     "pm.environment.get('auth_token');" },
     { "sortText", "1_pm_environment_get" } });
 
@@ -1255,7 +1257,8 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.environment.set(name: string, value: any): void" },
     { "documentation",
-    "Set an environment variable. The value will be "
+    "Set an environment variable. Later reads in this run answer the value "
+    "as set; its string form is what {{name}} substitutes and what is "
     "persisted.\n\nExample:\npm.environment.set('auth_token', "
     "response.token);" },
     { "sortText", "1_pm_environment_set" } });
@@ -1270,9 +1273,11 @@ nlohmann::json get_script_completions () {
 
     completions.push_back ({ { "label", "pm.globals.get" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.globals.get(\"${1:variable}\")" }, { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.globals.get(name: string): string | undefined" },
+    { "detail", "pm.globals.get(name: string): any | undefined" },
     { "documentation",
-    "Get a global variable value by name.\n\nExample:\nconst apiKey = "
+    "Get a global variable value by name - what a script set this run, as it "
+    "was set, or else the stored text cast by its declared "
+    "type.\n\nExample:\nconst apiKey = "
     "pm.globals.get('api_key');" },
     { "sortText", "1_pm_globals_get" } });
 
@@ -1280,7 +1285,10 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.globals.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.globals.set(name: string, value: any): void" },
-    { "documentation", "Set a global variable. The value will be persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
+    { "documentation",
+    "Set a global variable. Later reads in this run answer the value as set; "
+    "its string form is what {{name}} substitutes and what is "
+    "persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
     { "sortText", "1_pm_globals_set" } });
 
     // ========================================
@@ -1295,12 +1303,13 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.collectionVariables.get" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.collectionVariables.get(\"${1:variable}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.collectionVariables.get(name: string): string | undefined" },
+    { "detail", "pm.collectionVariables.get(name: string): any | undefined" },
     { "documentation",
     "Get a collection variable value by name. Reads the whole collection chain "
     "- the nearest enabled definition wins, so a parent collection's variable "
-    "resolves here too.\n\nExample:\nconst baseUrl = "
-    "pm.collectionVariables.get('base_url');" },
+    "resolves here too. A value a script set this run reads back as it was "
+    "set; a stored one is cast by its declared type.\n\nExample:\nconst "
+    "baseUrl = pm.collectionVariables.get('base_url');" },
     { "sortText", "1_pm_collectionVariables_get" } });
 
     completions.push_back ({ { "label", "pm.collectionVariables.set" }, { "kind", KIND_FUNCTION },
@@ -1310,7 +1319,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Set a collection variable on the request's own collection - it shadows a "
     "parent collection's variable of the same name rather than changing it. "
-    "The value will be "
+    "Later reads in this run answer the value as set; its string form is "
+    "what {{name}} substitutes and what is "
     "persisted.\n\nExample:\npm.collectionVariables.set('base_url', "
     "'https://api.example.com');" },
     { "sortText", "1_pm_collectionVariables_set" } });
@@ -1369,10 +1379,10 @@ nlohmann::json get_script_completions () {
         { "kind", KIND_FUNCTION }, { "insertText", accessor + ".toObject()" },
         { "detail", accessor + ".toObject(): Record<string, any>" },
         { "documentation",
-        std::format ("A plain object of every enabled {}, each value cast "
-                     "by its declared "
-                     "type.\n\nExample:\nconsole.log({}.toObject());",
-        noun, accessor) },
+        std::format ("A plain object of every enabled {}, each value read "
+                     "as {}.get() would answer it.\n\nExample:\n"
+                     "console.log({}.toObject());",
+        noun, accessor, accessor) },
         { "sortText", sort + "toObject" } });
     }
 

@@ -72,6 +72,24 @@ unticked in the variables editor is ticked again by the `set` (and persisted tha
 `unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
 variable is still an enabled row that `{{name}}` resolves to.
 
+**A value a script sets keeps its JavaScript type for the rest of the run**, as in
+Postman (issue #2529): after `pm.environment.set('n', 0)`,
+`pm.environment.set('n', pm.environment.get('n') + 1)` stores `1`, not `"01"`, and
+`get` hands back the number, the boolean, the array or the object that was set, as do
+`toObject`, `pm.variables.get` and `pm.variables.toObject`. "The run" is the scripts of
+one send, the steps of a collection run, and one virtual user's steps in a load run.
+What is stored, what `{{name}}` substitutes and what goes on the wire is the value's
+string form, which is also Postman's: `1`, `true`, `1,2,3`, `[object Object]`, `null`;
+`set(name, undefined)` stores `""` and reads back as `undefined`. A variable a run only
+loaded is read from that stored text.
+
+The exception is a row whose `type` is declared `number`, `boolean` or `json`: it keeps
+casting its stored text by that type, whatever the script set, as Postman casts a declared
+type. Vayu's default `"string"` stands for Postman's `any` as well, so a set on a row of
+that type is read back as set. Objects and arrays keep what `JSON.parse(JSON.stringify(value))`
+keeps (a `Date` reads back as its ISO string, a nested `NaN` as `null`), and a value
+JSON cannot write at all (a function, a cycle, a `BigInt`) reads back as its string form.
+
 `get`, `has` and `toObject` read only **enabled** variables, so a row unticked in the
 variables editor is invisible to a script until a script sets it; `unset` and `clear`
 remove it regardless.
