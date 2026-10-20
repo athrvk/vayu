@@ -453,13 +453,16 @@ they already have their own segments in the count line.
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
-"unmapped_body" | "unresolved_base_url" | "unsupported_auth" |
-"url_without_raw" | "variable_metadata", count, requests? }`.
+"unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "oauth2_dropped_field" |
+"oauth2_state_regenerated" | "oauth2_unmapped_param" |
+"url_without_raw" | "variable_metadata", count, requests?, names? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
 per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
 resources it cannot import), so the Preview can say which request to finish rather than only
-how many. How the Preview words and ranks each kind - amber for what the user must finish, muted
+how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
+parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
+[postman.md](./postman.md#oauth-20-extra-request-parameters)). How the Preview words and ranks each kind - amber for what the user must finish, muted
 for what the import decided, not shown for what changes nothing sent - is
 `app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose

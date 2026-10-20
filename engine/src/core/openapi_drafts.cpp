@@ -1386,6 +1386,15 @@ build_drafts (const json& document, ImportTally* tally, bool include_unidentifie
     return drafts;
 }
 
+/// Appends each of @p added that @p list does not already hold, in order.
+void append_distinct (std::vector<std::string>& list, const std::vector<std::string>& added) {
+    for (const std::string& name : added) {
+        if (std::find (list.begin (), list.end (), name) == list.end ()) {
+            list.push_back (name);
+        }
+    }
+}
+
 } // namespace
 
 std::vector<SpecRequestDraft> spec_request_drafts_of (const json& document) {
@@ -1403,7 +1412,7 @@ void ImportTally::add (std::string_view kind, int count) {
     auto entry = std::find_if (counts_.begin (), counts_.end (),
     [kind] (const Entry& existing) { return existing.kind == kind; });
     if (entry == counts_.end ()) {
-        entry = counts_.insert (counts_.end (), Entry{ std::string (kind), 0, {} });
+        entry = counts_.insert (counts_.end (), Entry{ std::string (kind), 0, {}, {} });
     }
     entry->count += count;
     if (!subject_.empty () &&
@@ -1421,14 +1430,16 @@ void ImportTally::name_requests (std::string_view kind,
 const std::vector<std::string>& requests) {
     auto entry = std::find_if (counts_.begin (), counts_.end (),
     [kind] (const Entry& existing) { return existing.kind == kind; });
-    if (entry == counts_.end ()) {
-        return;
+    if (entry != counts_.end ()) {
+        append_distinct (entry->requests, requests);
     }
-    for (const std::string& request : requests) {
-        if (std::find (entry->requests.begin (), entry->requests.end (), request) ==
-        entry->requests.end ()) {
-            entry->requests.push_back (request);
-        }
+}
+
+void ImportTally::name_dropped (std::string_view kind, const std::vector<std::string>& names) {
+    auto entry = std::find_if (counts_.begin (), counts_.end (),
+    [kind] (const Entry& existing) { return existing.kind == kind; });
+    if (entry != counts_.end ()) {
+        append_distinct (entry->names, names);
     }
 }
 
@@ -1448,14 +1459,17 @@ nlohmann::ordered_json ImportTally::items () const {
     "unmapped_body", "unresolved_base_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
     "security_unmapped_mutualtls", "security_unmapped_openidconnect",
-    "security_unmapped_type", "security_unmapped_apikey_cookie",
-    "oauth2_dropped_field", "url_without_raw", "variable_metadata",
+    "security_unmapped_type", "security_unmapped_apikey_cookie", "oauth2_dropped_field",
+    "oauth2_state_regenerated", "oauth2_unmapped_param", "url_without_raw", "variable_metadata",
     "disabled_body", "certificate", "proxy_config", "protocol_behavior" });
 
     const auto item_of = [] (const Entry& entry) {
         nlohmann::ordered_json item = { { "kind", entry.kind }, { "count", entry.count } };
         if (!entry.requests.empty ()) {
             item["requests"] = entry.requests;
+        }
+        if (!entry.names.empty ()) {
+            item["names"] = entry.names;
         }
         return item;
     };

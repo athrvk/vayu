@@ -3464,7 +3464,10 @@ kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters, and Insomnia's file bodies and
 the resources it cannot import. A count that belongs to the document (a second
-server URL, a malformed section) has none.
+server URL, a malformed section) has none. **`names`**, when present, names
+what the count dropped, never its value: today only `oauth2_unmapped_param`,
+whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
+did not carry.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
@@ -3486,6 +3489,7 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
 `unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
+`oauth2_dropped_field`, `oauth2_state_regenerated`, `oauth2_unmapped_param`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
 loss: `default_response` and `url_without_raw` count a mapping

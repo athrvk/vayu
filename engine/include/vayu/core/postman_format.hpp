@@ -92,4 +92,41 @@ constexpr auto OAUTH2_GRANTS = std::to_array<OAuth2Grant> ({
 { "client_credentials", "client_credentials", false },
 });
 
+/// A Postman `oauth2` attribute holding extra request parameters
+/// (`[{key, value, enabled, send_as}]`) and the `OAuth2Config` list it
+/// becomes (issue #2536).
+struct OAuth2ParamList {
+    std::string_view postman;
+    std::string_view vayu;
+    /// Whether a body row named `audience` or `resource` is the config field
+    /// of that name, which the engine sends in the token and authorization
+    /// requests but not in a refresh.
+    bool config_fields;
+    /// Whether a row stores where it is sent (`sendAs`). An authorization
+    /// request is a browser navigation, so its parameters can only ride in
+    /// the authorize URL's query and there is no target to store.
+    bool targeted;
+};
+
+/// In the order the importer reads them: a token request's `audience` is
+/// promoted ahead of an authorization request's.
+constexpr auto OAUTH2_PARAM_LISTS = std::to_array<OAuth2ParamList> ({
+{ "tokenRequestParams", "tokenParams", true, true },
+{ "authRequestParams", "authorizationParams", true, false },
+{ "refreshRequestParams", "refreshParams", false, true },
+});
+
+/// A Postman parameter row's `send_as` and the `sendAs` Vayu stores. A row
+/// with no `send_as` is sent in the body.
+struct OAuth2ParamTarget {
+    std::string_view postman;
+    std::string_view vayu;
+};
+
+constexpr auto OAUTH2_PARAM_TARGETS = std::to_array<OAuth2ParamTarget> ({
+{ "request_body", "body" },
+{ "request_url", "url" },
+{ "request_header", "header" },
+});
+
 } // namespace vayu::core::postman

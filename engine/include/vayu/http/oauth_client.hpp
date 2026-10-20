@@ -10,13 +10,27 @@
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
 
+#include <array>
 #include <cstdint>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 
 namespace vayu::http::oauth {
+
+/**
+ * The parameter names the token and authorization requests write themselves,
+ * from the config's own fields or the flow's state. An extra parameter row
+ * (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536) of one
+ * of these names would contradict or repeat one of them, so an import does
+ * not carry it.
+ */
+constexpr auto RESERVED_PARAM_NAMES =
+std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
+"code", "redirect_uri", "code_verifier", "refresh_token", "username", "password",
+"scope", "state", "code_challenge", "code_challenge_method", "response_type" });
 
 /**
  * @brief Structured token-acquisition failure.

@@ -259,7 +259,7 @@ Auth is mapped by `mapPostmanAuth(auth)` (`import_document.cpp`). It reads `auth
 | `bearer` | `{ mode: "bearer", token }` | `token` normalized |
 | `basic` | `{ mode: "basic", username, password }` | both normalized |
 | `apikey` | `{ mode: "apikey", key, value, in }` | `in` = `"query"` only if detail `in === "query"`, else `"header"` |
-| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. A block holding only a seeded `accessToken` (no grant, token URL or auth URL - commercetools writes one on every request) is what Postman sends as is, so it imports as what sends the same bytes: a bearer token, or, when `addTokenTo` is `queryParams` or `headerPrefix` is not `Bearer`, an API key (`access_token` in the query, or `Authorization: <prefix> <token>`). `state` (Vayu generates and validates its own per authorization attempt) and a seeded `accessToken` beside an explicit grant (Vayu fetches through the grant) are not used when sending and are counted as `oauth2_dropped_field` (issue #1460); both are kept in the block's `postman` source below, so an export writes them back |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. A block holding only a seeded `accessToken` (no grant, token URL or auth URL - commercetools writes one on every request) is what Postman sends as is, so it imports as what sends the same bytes: a bearer token, or, when `addTokenTo` is `queryParams` or `headerPrefix` is not `Bearer`, an API key (`access_token` in the query, or `Authorization: <prefix> <token>`). A seeded `accessToken` beside an explicit grant (Vayu fetches a new one through the grant) is not used when sending and is counted as `oauth2_dropped_field`, named per request; `state` (Vayu generates and validates its own per authorization attempt) is counted apart as `oauth2_state_regenerated`, because it changes nothing sent (issues #1460, #2536). Both are kept in the block's `postman` source below, so an export writes them back. The extra request parameter lists are read as described [below](#oauth-20-extra-request-parameters) |
 | `awsv4` | `{ mode: "aws", config }` | `awsv4` is the schema's enum value for AWS Signature; Vayu's internal mode is `aws`, so the name is translated rather than passed through. Matching on `"aws"` here dropped every real SigV4 export to `{mode:"none"}` *and* suppressed the `nonExecutableAuth` warning. The mode is **not executed**: the request is sent without auth, and the send's `authNotice` says so ([api-reference](../../engine/api-reference.md#authentication)) |
 | `digest` / `ntlm` / `hawk` / `oauth1` / `edgegrid` / `jwt` | `{ mode: type, config }` | `config` is the raw flattened detail map; **not executed** by Vayu - the request is sent without auth, and the send's `authNotice` says so (counted as `nonExecutableAuth` on each request, folder or collection declaring it, as `aws` is). The table is `CONFIG_AUTH_TYPES` in `postman_format.hpp`, which the exporter reads too, so each exports back as its own type |
 | `inherit` | `{ mode: "inherit" }` | |
@@ -269,7 +269,7 @@ Auth is mapped by `mapPostmanAuth(auth)` (`import_document.cpp`). It reads `auth
 **The block itself, kept for the export (`with_postman_source`).** When the
 Postman exporter would not write a request's or collection's `auth` back
 exactly as the document had it - an attribute Vayu has no field for
-(`tokenType`, `state`, `authRequestParams`), a type stored as another mode
+(`tokenType`, `state`, a parameter row it does not carry), a type stored as another mode
 (the seeded-token `oauth2` above), a different attribute order or attribute
 `type`, `{{ x }}` spacing the importer tightened - the document's block is
 stored beside the mapped auth as `postman`, in v2.1 form (a v2.0 detail object
@@ -301,6 +301,40 @@ PKCE `code_verifier` and the credential rows (`client_secret`,
 
 **`nonExecutableAuth` counting:** only **request** auth contributes (`pmRequest` increments the counter), and it keys off the *mapped* mode, so `awsv4` counts as `aws`. Collection/folder auth in the data-only family is stored but not counted. `oauth2` is executable and never counts.
 
+### OAuth 2.0 extra request parameters
+
+Postman keeps an `oauth2` block's "Advanced" parameters as three attributes,
+`tokenRequestParams`, `authRequestParams` and `refreshRequestParams`, each an
+array of `{key, value, enabled, send_as}` rows (`send_as` is `request_body`,
+`request_url` or `request_header`; none means the body). `map_postman_oauth2`
+reads them from the raw detail block, in either schema shape, in that order
+(issue #2536):
+
+- A row Postman has switched off (`enabled: false`) is not read.
+- An `audience` or `resource` row of the token or authorization list sent in
+  the body becomes `config.audience` / `config.resource`, which the engine
+  already sends in both requests. The first such value wins; a later row of
+  the same name with a different value is carried in its own list instead.
+- Every other row is carried in the config list of its request, `tokenParams`,
+  `authorizationParams` or `refreshParams`, as `{key, value, enabled: true,
+  sendAs}` with `sendAs` `body`, `url` or `header`. An `authorizationParams`
+  row stores no `sendAs`: the authorization request is a browser navigation,
+  so its parameters ride in the authorize URL's query. A value is kept as
+  typed, `{{ x }}` tightened as every imported value is.
+- A row with no key, a `send_as` Vayu has no target for, or a key the engine
+  writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
+  `redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
+  `scope`, `state`, `code_challenge`, `code_challenge_method`,
+  `response_type`: `RESERVED_PARAM_NAMES` in `oauth_client.hpp`) is not
+  carried and is counted as `oauth2_unmapped_param`. The count names its
+  requests and, under `names`, the parameter keys; a value is never recorded,
+  since it can be a credential.
+
+The token cache key reads `credentialsId` and not `audience` or `resource`, so
+two imported requests differing only in their audience would share one cached
+token. When a block names no `tokenName`, the promoted audience (else the
+resource) is stored as `config.credentialsId` to keep them apart.
+
 ## Variables & environments
 
 Collection- and folder-level `variable[]` arrays map to `CollectionDraft.variables` via `to_var_record`:
@@ -318,7 +352,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request, folder or collection** whose own mapped auth mode is one of `CONFIG_AUTH_TYPES` (`aws`, `digest`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), and each is named in `meta.nonExecutableAuthRequests`. A folder's or collection's is counted once where it is declared, not once per request inheriting it. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is mapped to an executable config and does **not** count.
 

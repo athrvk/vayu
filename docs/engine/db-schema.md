@@ -636,7 +636,16 @@ the auth being written (`without_stale_postman_source`), so an edited
 credential does not stay behind in it.
 
 The `oauth2` `config` holds the grant type, endpoints, client id/secret,
-placement options, etc. Secret fields (`clientSecret`, `password`) are stored
+placement options, etc. Three optional lists hold extra request parameters
+(issue #2536): `tokenParams`, `authorizationParams` and `refreshParams`, each
+an array of `{key, value, enabled, sendAs?}` rows. `sendAs` is `body`, `url` or
+`header` and, when absent, `body`; an `authorizationParams` row stores none,
+because the authorization request carries its parameters in the authorize
+URL's query. A config with no extra parameters omits the lists. A Postman
+import fills them from the block's `tokenRequestParams`, `authRequestParams`
+and `refreshRequestParams`
+([postman.md](../app/import-collections/postman.md#oauth-20-extra-request-parameters)).
+Secret fields (`clientSecret`, `password`) are stored
 **in plaintext** here, same as bearer/basic credentials - the v1 posture. The
 resolved access tokens live separately in [`oauth_tokens`](#oauth_tokens).
 
