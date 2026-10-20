@@ -47,4 +47,33 @@ describe("apiService.importFetch", () => {
 		const body = vi.mocked(httpClient.post).mock.calls[0][1];
 		expect(body).not.toHaveProperty("maxBytes");
 	});
+
+	// A `$ref` fetch is held to a stricter rule by the engine (issue #2364), and
+	// these two fields are all that tells it which fetch it is serving.
+	it("adds reference and sourceUrl when the fetch is a $ref", async () => {
+		vi.mocked(httpClient.post).mockResolvedValue({ content: "{}", contentType: "" });
+		await apiService.importFetch("https://x/c.json", 4096, undefined, undefined, {
+			reference: true,
+			sourceUrl: "https://x/spec.json",
+		});
+		expect(httpClient.post).toHaveBeenCalledWith(
+			"/import/fetch",
+			{
+				url: "https://x/c.json",
+				maxBytes: 4096,
+				reference: true,
+				sourceUrl: "https://x/spec.json",
+			},
+			{ timeout: expect.any(Number) }
+		);
+	});
+
+	it("sends reference alone when the document has no URL, and never an undefined sourceUrl key", async () => {
+		vi.mocked(httpClient.post).mockResolvedValue({ content: "{}", contentType: "" });
+		await apiService.importFetch("https://x/c.json", undefined, undefined, undefined, {
+			reference: true,
+		});
+		const body = vi.mocked(httpClient.post).mock.calls[0][1];
+		expect(body).toStrictEqual({ url: "https://x/c.json", reference: true });
+	});
 });

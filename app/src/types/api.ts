@@ -1571,6 +1571,19 @@ export interface RequestDefaults {
 }
 
 // Import API
+
+/**
+ * What marks a `POST /import/fetch` as a `$ref` a document asked for, not a URL
+ * a person typed (issue #2364). With `reference` the engine follows no redirect
+ * and refuses a loopback or link-local peer other than `sourceUrl`'s own host
+ * and port; with no `sourceUrl` every such peer is refused.
+ */
+export interface ImportFetchOptions {
+	reference?: boolean;
+	/** The URL of the document the reference was found in. */
+	sourceUrl?: string;
+}
+
 export interface ImportFetchResponse {
 	content: string;
 	contentType: string;

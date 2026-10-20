@@ -33,6 +33,7 @@ import {
 	RefRefusedError,
 	type RefReport,
 } from "@/services/importers/ref-bundler";
+import type { ImportFetchOptions } from "@/types/api";
 
 /** Where the bound document came from, as the binding recorded it. */
 export interface SpecSource {
@@ -46,8 +47,12 @@ export interface SpecSource {
 export interface SpecRefetchIo {
 	/** The engine's live `maxSpecDocumentBytes`, for the bundle. */
 	maxBytes: number;
-	/** Fetch an absolute URL's text through the engine proxy. */
-	fetchUrl: (url: string) => Promise<string>;
+	/**
+	 * Fetch an absolute URL's text through the engine proxy. `options` is set for
+	 * a `$ref` fetch and absent for the bound document itself, which is the
+	 * user's own URL and not a reference.
+	 */
+	fetchUrl: (url: string, options?: ImportFetchOptions) => Promise<string>;
 	/**
 	 * Read a file beside a picked document - the `specFile:read` gate. Absent
 	 * outside Electron, which is also the case where a file-sourced spec cannot
