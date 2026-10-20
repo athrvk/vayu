@@ -320,13 +320,18 @@ member, on `step.between`; while its own per-iteration pass count (kept in
 `ElementContext::controller_state`, keyed by the element id and the iteration) is under `count`, it
 sets `ScriptControl::Next` back to the folder's first member - an ordinary loop-back, resolved the
 same way `control.switch`'s jump is. `control.transaction` sums every member's own response
-latency into a per-iteration accumulator (same keying) and, at the folder's last member, reports the
-closed sum as its `ElementOutcome::waitedMs` with the transaction's `name` in `message` - the two
-fields the runner (`scenario_runner.cpp` / `scenario_load.cpp`) reads to fold the value into
-`TransactionHistograms`, one HdrHistogram per declared name allocated up front from a plan scan, so
-recording it takes no lock either. `includeTimers: true` (issue #1569) also folds a between-member
-`timer.*` wait into the same running sum - the runner's own `step.between` dispatch does this fold
-generically (`fold_between_wait_into_open_transactions`, shared by both run modes, found through the
+latency into a per-iteration accumulator (same keying) at microsecond precision, each member rounded
+to the nearest microsecond (#2387; whole milliseconds per member reported three 0.9 ms members as
+0 ms). At the folder's last member it reports the closed sum as its `ElementOutcome::duration_us`
+with the transaction's `name` in `message` - the two fields the runner (`scenario_runner.cpp` /
+`scenario_load.cpp`) reads to record the value into `TransactionHistograms`, one HdrHistogram per
+declared name allocated up front from a plan scan, so recording it takes no lock either. Only the
+close carries `duration_us`, and no timer sets it, which is what tells a close from an accumulating
+pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum rounded to
+whole milliseconds; `duration_us` itself is not serialised. `includeTimers: true` (issue #1569) also
+folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
+running sum - the runner's own `step.between` dispatch does this fold generically
+(`fold_between_wait_into_open_transactions`, shared by both run modes, found through the
 registry's `category` field rather than a `kind ==` comparison), skipped for the folder's last member,
 whose sum has already closed and reported by the time any wait after it could run. The report gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90, p95, p99, max } }`, omitted

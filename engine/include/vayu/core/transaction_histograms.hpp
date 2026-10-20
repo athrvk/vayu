@@ -49,10 +49,11 @@ class TransactionHistograms {
     TransactionHistograms (TransactionHistograms&&)                 = delete;
     TransactionHistograms& operator= (TransactionHistograms&&)      = delete;
 
-    /// One closed occurrence: @p latency_ms is the sum
-    /// `control.transaction`'s own accumulator produced, @p errored whether
-    /// any member of that pass carried a response error.
-    void record (const std::string& name, int64_t latency_ms, bool errored);
+    /// One closed occurrence: @p latency_us is the sum, in microseconds,
+    /// `control.transaction`'s own accumulator produced (its close's
+    /// `ElementOutcome::duration_us`), @p errored whether any member of that
+    /// pass carried a response error.
+    void record (const std::string& name, int64_t latency_us, bool errored);
 
     /// `scenario.transactions[]`: `{ name, count, errors, latency }` per
     /// declared name that recorded at least one occurrence - a transaction

@@ -208,11 +208,12 @@ struct ElementSpan {
 /// The key `control.transaction`'s running-sum accumulator uses inside
 /// `ElementContext::controller_state` (issue #1515), keyed by this element's
 /// id and the current iteration so a later iteration - or an abandoned one -
-/// never adds onto a stale total. Exposed so a caller outside `core/elements`
-/// (`scenario_runner.cpp`'s and `scenario_load.cpp`'s own `step.between`
-/// dispatch) can fold a between-member `timer.*` wait into an *open*
-/// transaction's sum when its config asks to (`includeTimers`, issue #1569),
-/// without either side hardcoding the other's key format twice.
+/// never adds onto a stale total. The value is microseconds (#2387).
+/// Exposed so a caller outside `core/elements` (`scenario_runner.cpp`'s and
+/// `scenario_load.cpp`'s own `step.between` dispatch) can fold a
+/// between-member `timer.*` wait into an *open* transaction's sum when its
+/// config asks to (`includeTimers`, issue #1569), without either side
+/// hardcoding the other's key format twice.
 [[nodiscard]] std::string transaction_sum_key (const std::string& element_id, size_t iteration);
 
 /**
@@ -451,6 +452,11 @@ struct ElementContext {
     std::optional<std::string> outcome_message{};
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> outcome_waited_ms{};
+    /// Set only by a `control.transaction` close: the whole transaction in
+    /// microseconds (#2387), which is what the runners record. A timer's
+    /// wait never sets it, so it, not `outcome_waited_ms`, marks a close.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<int64_t> outcome_duration_us{};
 };
 
 /**
@@ -659,6 +665,10 @@ struct ElementOutcome {
     /// post-run replay), not never (#2144) - copied from `ElementSkip`. Not
     /// serialised by `to_json`; a load run's tallies are its only reader.
     bool deferred = false;
+    /// `ElementContext::outcome_duration_us`: present only on a
+    /// `control.transaction` close. Not serialised by `to_json`; the trace
+    /// shows the same close as `waitedMs`, rounded to whole milliseconds.
+    std::optional<int64_t> duration_us;
 
     [[nodiscard]] nlohmann::json to_json () const;
 };
@@ -800,6 +810,9 @@ void stamp_default_element_ids (nlohmann::json& elements);
  * last member's `apply` already closed and reported the sum by the time its
  * own `step.between` could run, so a wait after it belongs to whatever
  * comes next, never back into a transaction that already finished.
+ *
+ * @p wait_ms is whole milliseconds, as every timer reports its wait; it is
+ * added to the sum as microseconds, the sum's unit (#2387).
  */
 void fold_between_wait_into_open_transactions (const std::vector<CompiledElement>& elements,
 const std::unordered_map<std::string, ElementSpan>& spans,

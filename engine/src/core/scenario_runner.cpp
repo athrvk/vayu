@@ -1111,12 +1111,11 @@ TransactionHistograms& transactions) {
         record_step (step_ctx, step, exchange, data_bind_error, summary);
 
         // A `control.transaction` closing occurrence (issue #1515) carries
-        // its transaction's whole elapsed time in `waitedMs` and its
-        // declared name in `message` - every accumulating occurrence
-        // leaves `waitedMs` unset, which is what tells the two apart.
+        // its transaction's whole elapsed time in `duration_us` and its
+        // declared name in `message`; nothing else sets `duration_us`.
         for (const auto& outcome : record.elements) {
-            if (outcome.waited_ms && outcome.message) {
-                transactions.record (*outcome.message, *outcome.waited_ms,
+            if (outcome.duration_us && outcome.message) {
+                transactions.record (*outcome.message, *outcome.duration_us,
                 outcome.status == "failed");
             }
         }
