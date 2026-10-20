@@ -21,6 +21,7 @@
 #include "vayu/core/elements.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
@@ -538,7 +539,8 @@ bool encode) {
     out.reserve (input.size ());
     auto where       = vayu::core::UrlComponent::Head;
     const auto write = [&out, &where] (std::string_view text) {
-        out += vayu::core::encode_literal_at_url_component (text, where);
+        out += text;
+        where = vayu::core::advance_url_component (text, where);
     };
     std::vector<std::string> expanding;
     auto it = std::sregex_iterator (input.begin (), input.end (), token_pattern ());
@@ -558,7 +560,9 @@ bool encode) {
         substitute_tokens_nested (match.str (), resolve, expanding), where);
     }
     write (std::string_view (input).substr (last));
-    return out;
+    // The whole URL as the wire writes it (`wire_url`), so what compose
+    // answers is the request line every send path puts out.
+    return vayu::core::encode_url_as_postman (out);
 }
 
 TokenSplit split_tokens (const std::string& input,

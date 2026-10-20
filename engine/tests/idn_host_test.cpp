@@ -97,8 +97,8 @@ TEST_F (IdnHostTest, SendDialsTheAsciiName) {
 // Only the host is rewritten: userinfo, port, path, query and fragment keep
 // their bytes as typed under `disableUrlEncoding`, and a URL whose only
 // non-ASCII text is outside the host is not touched at all. With encoding on,
-// the path, query and fragment bytes above `~` are `%XX` (issue #2465) and the
-// head is still the host's rewrite alone.
+// the rest of the URL is written as Postman writes it (issue #2465): every
+// byte above `~` outside the host is `%XX`, user info included.
 TEST_F (IdnHostTest, TheWireUrlRewritesTheHostAlone) {
     struct Case {
         std::string url;
@@ -107,7 +107,7 @@ TEST_F (IdnHostTest, TheWireUrlRewritesTheHostAlone) {
     };
     const std::vector<Case> cases = {
         { "https://ü:p@BÜCHER.example:8443/ä?q=ü#ö", "https://ü:p@xn--bcher-kva.example:8443/ä?q=ü#ö",
-        "https://ü:p@xn--bcher-kva.example:8443/%C3%A4?q=%C3%BC#%C3%B6" },
+        "https://%C3%BC:p@xn--bcher-kva.example:8443/%C3%A4?q=%C3%BC#%C3%B6" },
         { "bücher.example/x", "xn--bcher-kva.example/x", "xn--bcher-kva.example/x" },
         { "https://example.com/ä?q=ü", "https://example.com/ä?q=ü",
         "https://example.com/%C3%A4?q=%C3%BC" },

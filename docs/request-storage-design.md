@@ -81,8 +81,9 @@ Postman re-parses the substituted URL: its `/`, `&`, `=`, `?` and `#` are
 structure (issue #1773), and the rest is encoded by Postman's set for the
 path, the query or the fragment it lands in, the scheme and authority taking
 it as it stands (issue #2465). The stored URL itself stays as typed; at send
-time only its space, controls and non-ASCII bytes outside the scheme and
-authority are encoded, so `/a b` goes out as `/a%20b`, and with
+time the whole URL is written as Postman writes it (each component by its own
+set, a backslash before the query as `/`, the host lowercased), so `/a b"`
+goes out as `/a%20b%22` while an escape such as `%2F` is kept, and with
 `disableUrlEncoding` nothing is.
 
 **A Params table edit rewrites only the pairs it touches.** Each enabled row
@@ -96,7 +97,7 @@ after the rebuilt query. So a pair written by another rule - a row an
 older version stored decoded (`+05:00` for `%2B05%3A00`), an Insomnia, JMeter
 or OpenAPI import's `encodeURIComponent` join, a Postman `key=` - survives an
 edit of another row. Nothing re-encodes a stored `url`: it is sent as stored,
-apart from the unsendable bytes above, and an import writes it once.
+apart from the send-time encoding above, and an import writes it once.
 
 **Path variables are the one kind of row the engine reads** (issue #1764). A
 row with `"in": "path"` names a `:name` segment the URL keeps verbatim (`key`

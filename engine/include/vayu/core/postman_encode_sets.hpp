@@ -10,22 +10,19 @@
 /**
  * @file core/postman_encode_sets.hpp
  * @brief The bytes `postman-url-encoder` 3.0.8 percent-encodes in each URL
- *        component (`encoder/encode-set.js`), and the narrower set no request
- *        target may carry raw.
+ *        component (`encoder/encode-set.js`).
  *
  * One copy, so the path-variable writer, the query writer, the whole-URL
- * encoder and the component walk in `query_encoding.cpp` cannot disagree
- * about a set.
+ * encoder, the component walk in `query_encoding.cpp` and `wire_url`'s check
+ * for a URL the encoder would leave alone cannot disagree about a set.
  */
 
 namespace vayu::core {
 
 /**
  * The C0 controls, space, DEL and every byte above `~` (so each byte of a
- * UTF-8 sequence): what an HTTP request target cannot carry raw (RFC 9112).
- * libcurl refuses the first three and sends the last raw. Every Postman set
- * below contains it, which is what lets literal URL text be encoded by this
- * set alone without changing a byte Postman would leave (issue #2465).
+ * UTF-8 sequence): what an HTTP request target cannot carry raw (RFC 9112),
+ * and the base every Postman set below extends.
  */
 constexpr bool is_unsendable_url_byte (unsigned char byte) {
     return byte <= 0x20 || byte >= 0x7F;

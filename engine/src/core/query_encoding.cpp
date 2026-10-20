@@ -31,10 +31,6 @@ std::string encode_query_component (std::string_view text, QueryPart part) {
 
 namespace {
 
-bool in_head (UrlComponent where) {
-    return where == UrlComponent::Head || where == UrlComponent::HeadSeparator;
-}
-
 /// Where reading @p c at @p where moves the URL.
 UrlComponent after_url_byte (char c, UrlComponent where) {
     if (c == '#') {
@@ -64,38 +60,6 @@ UrlComponent after_url_token (UrlComponent where) {
     return where == UrlComponent::HeadSeparator ? UrlComponent::Head : where;
 }
 
-using ComponentSet = bool (*) (unsigned char byte, UrlComponent where);
-
-/// @p text with each byte @p in_set answers true for at the component it is
-/// read in written as `%XX`, every whole `{{...}}` token kept verbatim, and
-/// @p where advanced past it. The component moves *before* a byte is judged,
-/// so a `?` or `#` is always structure, never encoded.
-std::string encode_by_component (std::string_view text, UrlComponent& where, ComponentSet in_set) {
-    static constexpr std::string_view hex = "0123456789ABCDEF";
-    std::string out;
-    out.reserve (text.size ());
-    for (std::size_t at = 0; at < text.size ();) {
-        if (const std::size_t end = template_token_end (text, at);
-        end != std::string_view::npos) {
-            out += text.substr (at, end - at);
-            where = after_url_token (where);
-            at    = end;
-            continue;
-        }
-        const char ch   = text[at++];
-        where           = after_url_byte (ch, where);
-        const auto byte = static_cast<unsigned char> (ch);
-        if (in_set (byte, where)) {
-            out += '%';
-            out += hex[byte >> 4U];
-            out += hex[byte & 0x0FU];
-        } else {
-            out += ch;
-        }
-    }
-    return out;
-}
-
 bool in_substituted_set (unsigned char byte, UrlComponent where) {
     switch (where) {
     case UrlComponent::Path: return in_postman_path_encode_set (byte);
@@ -105,10 +69,6 @@ bool in_substituted_set (unsigned char byte, UrlComponent where) {
     case UrlComponent::HeadSeparator: return false;
     }
     return false;
-}
-
-bool in_literal_set (unsigned char byte, UrlComponent where) {
-    return !in_head (where) && is_unsendable_url_byte (byte);
 }
 
 } // namespace
@@ -127,12 +87,32 @@ UrlComponent advance_url_component (std::string_view text, UrlComponent from) {
     return where;
 }
 
+// The component moves *before* a byte is judged, so a `?` or `#` is always
+// structure, never encoded.
 std::string encode_at_url_component (std::string_view value, UrlComponent& where) {
-    return encode_by_component (value, where, in_substituted_set);
-}
-
-std::string encode_literal_at_url_component (std::string_view text, UrlComponent& where) {
-    return encode_by_component (text, where, in_literal_set);
+    static constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string out;
+    out.reserve (value.size ());
+    for (std::size_t at = 0; at < value.size ();) {
+        if (const std::size_t end = template_token_end (value, at);
+        end != std::string_view::npos) {
+            out += value.substr (at, end - at);
+            where = after_url_token (where);
+            at    = end;
+            continue;
+        }
+        const char ch   = value[at++];
+        where           = after_url_byte (ch, where);
+        const auto byte = static_cast<unsigned char> (ch);
+        if (in_substituted_set (byte, where)) {
+            out += '%';
+            out += hex[byte >> 4U];
+            out += hex[byte & 0x0FU];
+        } else {
+            out += ch;
+        }
+    }
+    return out;
 }
 
 } // namespace vayu::core

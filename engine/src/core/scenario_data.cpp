@@ -18,6 +18,7 @@
 
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
+#include "vayu/core/url_encoding.hpp"
 #include "vayu/http/graphql_body.hpp"
 // `describe_empty_header_name` - the wording every layer that can leave a
 // header nameless shares, this one included (issue #1095).
@@ -833,7 +834,9 @@ class TemplateJoiner {
                 advance_url_component (entry.literals[i + 1], url_component_);
             }
         }
-        field = std::move (out);
+        // Whole, as composition and the residual pass end, so a bound host is
+        // lowercased and written by its ASCII name there too (issue #2465).
+        field = in_url ? encode_url_as_postman (out) : std::move (out);
     }
 
     [[nodiscard]] DataBindResult result () const {

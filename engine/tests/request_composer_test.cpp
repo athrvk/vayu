@@ -1785,16 +1785,17 @@ TEST_F (RequestComposerTest, AValuesSeparatorsAreStructureInEveryComponent) {
     "http://h/p?q=1#a/b?c%20d#e%20f%22");
 }
 
-// The scheme and the authority take a value as it stands: a non-ASCII host is
-// dialled by its punycode name, which `%C3%BC` would defeat.
-TEST_F (RequestComposerTest, TheAuthorityTakesAValueAsItStands) {
+// The authority is never percent-encoded: a host value is lowercased and a
+// non-ASCII one written by its punycode name, which `%C3%BC` would defeat.
+TEST_F (RequestComposerTest, TheAuthorityIsWrittenAsTheHostItNames) {
     EXPECT_EQ (composed_url (*db_, "http://{{host}}/{{p}}",
-               { { "host", global ("bücher.de") }, { "p", global ("a b") } }),
-    "http://bücher.de/a%20b");
+               { { "host", global ("BÜcher.de") }, { "p", global ("a b") } }),
+    "http://xn--bcher-kva.de/a%20b");
 }
 
-// Mutation check: make `in_literal_set` (query_encoding.cpp) answer false
-// and both spaces reach the composed URL raw.
+// Mutation check: drop the `encode_url_as_postman` call that ends
+// `substitute_url_tokens` (request_composer.cpp) and both spaces reach the
+// composed URL raw.
 TEST_F (RequestComposerTest, ALiteralSpaceIsEncodedInThePathAndTheQuery) {
     EXPECT_EQ (composed_url (*db_, "http://h/a b?q=c d", json::object ()),
     "http://h/a%20b?q=c%20d");
@@ -1802,11 +1803,26 @@ TEST_F (RequestComposerTest, ALiteralSpaceIsEncodedInThePathAndTheQuery) {
     "http://h/a%20b/x?q=c%20d");
 }
 
-// Only what libcurl refuses or sends raw against RFC 9112 is encoded, so every
-// URL that sent before composes to the same bytes.
-TEST_F (RequestComposerTest, ALiteralByteLibcurlAcceptsIsKept) {
-    for (const std::string url : { "http://h/a\"b?q=a\"b", "http://h/{a}?q={}", "http://h/a\\b?q=a\\b",
-         "http://h/%41?q=%41%20", "http://h/a+b?q=a+b", "http://h/p?q=1#a\"{}" }) {
+// Literal text composes to the line `wire_url` sends: Postman's bytes encoded
+// by component, a head backslash a `/`, the host lowercased (issue #2465).
+TEST_F (RequestComposerTest, ALiteralByteIsWrittenAsPostmanWritesIt) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { "http://h/a\"b?q=a\"b", "http://h/a%22b?q=a%22b" },
+        { "http://h/{a}?q={}", "http://h/%7Ba%7D?q={}" },
+        { "http://h/a\\b?q=a\\b", "http://h/a/b?q=a\\b" },
+        { "http://h/p?q='#a\"{}", "http://h/p?q=%27#a%22{}" },
+        { "http://EXAMPLE.com/P?Q=1", "http://example.com/P?Q=1" },
+    };
+    for (const auto& [url, sent] : cases) {
+        EXPECT_EQ (composed_url (*db_, url, json::object ()), sent) << url;
+    }
+}
+
+// An escape and every byte no Postman set holds compose as typed, so a stored
+// pre-signed URL is never rewritten.
+TEST_F (RequestComposerTest, AnEscapeAndAnUnlistedByteAreKept) {
+    for (const std::string url : { "http://h/%41?q=%41%20", "http://h/a+b|?q=a+b`",
+         "https://b.s3.example/k?X-Amz-Signature=ab%2Bcd%3D" }) {
         EXPECT_EQ (composed_url (*db_, url, json::object ()), url);
     }
 }

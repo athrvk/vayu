@@ -380,7 +380,7 @@
     }
   ],
   "substitutions": {
-    "$comment": "Issues #1773 and #2465: a `{{var}}` in a request's URL substituted at send time, and the literal text around it. Postman (postman-runtime 7.56.1 runner/util.js `resolveUrl`) substitutes the variables into the URL string, parses that string again (`new sdk.Url`) and encodes it with `toNodeUrl`, so a substituted value is URL text, not a row: its `/` makes path segments, a `?` it carries before the query opens the query, a `#` opens the fragment, and its `&` and `=` split pairs. Each component is then encoded by its own postman-url-encoder 3.0.8 set (encoder/encode-set.js): the path by PATH_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `<`, `>`, backtick, `{`, `}`; its `#` and `?` are structure here), the query by QUERY_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `'`, `<`, `>`; its `#` is structure), the same set for a key and a value, and the fragment by FRAGMENT_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `<`, `>`, backtick). `normalizeParam` (`&`/`#` in a value, `=` in a key) applies only to rows and never to substituted text. The scheme and the authority take a value as it stands: Postman does not percent-encode a host, and the engine dials a non-ASCII one by its punycode name. Literal text outside a token, with encoding on, has only the bytes no request target may carry raw encoded: space, the C0 controls, DEL and every byte above `~`, outside the scheme and the authority. Every other literal byte (`\"`, `{`, `}`, a backslash, `+`, an escape) is kept, because libcurl sends it as typed; this is deliberately narrower than Postman, which would encode some of them. Which part text lands in is read left to right from the text written so far, substituted values included: in the head a `/` opens the path unless it follows a `:` or a `/` (so `://` is not a path), the first `?` before the fragment opens the query, `#` opens the fragment, and a whole `{{...}}` token is skipped, kept and read as head text. A layered value is resolved whole and then encoded once. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`, which writes every value and every literal as it stands. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
+    "$comment": "Issues #1773 and #2465: a `{{var}}` in a request's URL substituted at send time, and the literal text around it. Postman (postman-runtime 7.56.1 runner/util.js `resolveUrl`) substitutes the variables into the URL string, parses that string again (`new sdk.Url`) and encodes it with `toNodeUrl`, so a substituted value is URL text, not a row: its `/` makes path segments, a `?` it carries before the query opens the query, a `#` opens the fragment, and its `&` and `=` split pairs. Each component is then encoded by its own postman-url-encoder 3.0.8 set (encoder/encode-set.js): the path by PATH_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `<`, `>`, backtick, `{`, `}`; its `#` and `?` are structure here), the query by QUERY_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `'`, `<`, `>`; its `#` is structure), the same set for a key and a value, and the fragment by FRAGMENT_ENCODE_SET (the C0 controls, DEL, every byte above `~`, space, `\"`, `<`, `>`, backtick). `normalizeParam` (`&`/`#` in a value, `=` in a key) applies only to rows and never to substituted text. The scheme and the authority are never percent-encoded by a substitution. Then, with encoding on, the substituted URL is written whole as `toNodeUrl` writes it (issue #2465, `core::encode_url_as_postman`, the same line `wire_url` sends): literal text is encoded by its component's set exactly as a value is, a backslash before the query becomes `/`, leading whitespace is dropped, the host is lowercased and a non-ASCII one written by its punycode name, and user info is encoded by USERINFO_ENCODE_SET. `%` is in no set, so an escape (a pre-signed URL's signature) passes unchanged, as does every byte no set holds: `+`, `|`, `^`, `[`, `]`, `!`, `'` outside the query, and a backtick, `{`, `}` or a backslash in the query. Which part text lands in is read left to right from the text written so far, substituted values included: in the head a `/` opens the path unless it follows a `:` or a `/` (so `://` is not a path), the first `?` before the fragment opens the query, `#` opens the fragment, and a whole `{{...}}` token is skipped, kept and read as head text. A layered value is resolved whole and then encoded once. `url` resolved against `variables` gives `sent`; `encode` false is `disableUrlEncoding`, which writes every value and every literal as it stands, host included. Read by query_encoding_test.cpp (`resolve_url_template`) and query-encoding.conformance.test.ts (`resolveUrlTemplate`).",
     "cases": [
       {
         "name": "a value in the query is encoded, and its # opens the fragment (the issue's case)",
@@ -440,13 +440,13 @@
         "sent": "https://h.test/a&b%20c%22%7Bx%7D%60?q=1"
       },
       {
-        "name": "a non-ASCII host is kept for its punycode name and the path is encoded",
+        "name": "a non-ASCII host value is written by its punycode name and the path is encoded",
         "url": "http://{{host}}/{{p}}",
         "variables": {
           "host": "bücher.de",
           "p": "é"
         },
-        "sent": "http://bücher.de/%C3%A9"
+        "sent": "http://xn--bcher-kva.de/%C3%A9"
       },
       {
         "name": "a base URL's authority is kept and the path after it is encoded",
@@ -488,16 +488,164 @@
         "sent": "http://h/a%20b/%C3%A9?q=%C3%A9%20x#f%20g"
       },
       {
-        "name": "every other literal byte goes out as typed",
+        "name": "Postman's literal bytes are encoded by component, a head backslash is a / and every other byte goes out as typed",
         "url": "http://h/\"{}\\%41+|?q=\"{}\\%41+|'<>#\"{}",
         "variables": {},
-        "sent": "http://h/\"{}\\%41+|?q=\"{}\\%41+|'<>#\"{}"
+        "sent": "http://h/%22%7B%7D/%41+|?q=%22{}\\%41+|%27%3C%3E#%22{}"
       },
       {
-        "name": "a literal non-ASCII host is kept for its punycode name",
+        "name": "a literal \" in the path is encoded",
+        "url": "http://h/a\"b",
+        "variables": {},
+        "sent": "http://h/a%22b"
+      },
+      {
+        "name": "a literal < in the path is encoded",
+        "url": "http://h/a<b",
+        "variables": {},
+        "sent": "http://h/a%3Cb"
+      },
+      {
+        "name": "a literal > in the path is encoded",
+        "url": "http://h/a>b",
+        "variables": {},
+        "sent": "http://h/a%3Eb"
+      },
+      {
+        "name": "a literal backtick in the path is encoded",
+        "url": "http://h/a`b",
+        "variables": {},
+        "sent": "http://h/a%60b"
+      },
+      {
+        "name": "a literal { in the path is encoded",
+        "url": "http://h/a{b",
+        "variables": {},
+        "sent": "http://h/a%7Bb"
+      },
+      {
+        "name": "a literal } in the path is encoded",
+        "url": "http://h/a}b",
+        "variables": {},
+        "sent": "http://h/a%7Db"
+      },
+      {
+        "name": "a literal \" in the query is encoded",
+        "url": "http://h/x?q=a\"b",
+        "variables": {},
+        "sent": "http://h/x?q=a%22b"
+      },
+      {
+        "name": "a literal ' in the query is encoded",
+        "url": "http://h/x?q=a'b",
+        "variables": {},
+        "sent": "http://h/x?q=a%27b"
+      },
+      {
+        "name": "a literal < in the query is encoded",
+        "url": "http://h/x?q=a<b",
+        "variables": {},
+        "sent": "http://h/x?q=a%3Cb"
+      },
+      {
+        "name": "a literal > in the query is encoded",
+        "url": "http://h/x?q=a>b",
+        "variables": {},
+        "sent": "http://h/x?q=a%3Eb"
+      },
+      {
+        "name": "a literal \" in the fragment is encoded",
+        "url": "http://h/x#a\"b",
+        "variables": {},
+        "sent": "http://h/x#a%22b"
+      },
+      {
+        "name": "a literal < in the fragment is encoded",
+        "url": "http://h/x#a<b",
+        "variables": {},
+        "sent": "http://h/x#a%3Cb"
+      },
+      {
+        "name": "a literal > in the fragment is encoded",
+        "url": "http://h/x#a>b",
+        "variables": {},
+        "sent": "http://h/x#a%3Eb"
+      },
+      {
+        "name": "a literal backtick in the fragment is encoded",
+        "url": "http://h/x#a`b",
+        "variables": {},
+        "sent": "http://h/x#a%60b"
+      },
+      {
+        "name": "the path keeps ' and the bytes no set holds",
+        "url": "http://h/a'+|^[]!*()~",
+        "variables": {},
+        "sent": "http://h/a'+|^[]!*()~"
+      },
+      {
+        "name": "the query keeps a backtick, the braces, a backslash and the bytes no set holds",
+        "url": "http://h/x?q=`{}\\+|^[]!",
+        "variables": {},
+        "sent": "http://h/x?q=`{}\\+|^[]!"
+      },
+      {
+        "name": "the fragment keeps ', the braces and the bytes no set holds",
+        "url": "http://h/x#'{}+|^[]!",
+        "variables": {},
+        "sent": "http://h/x#'{}+|^[]!"
+      },
+      {
+        "name": "a backslash before the query is a /",
+        "url": "http:\\\\h\\a\\b?q=\\",
+        "variables": {},
+        "sent": "http://h/a/b?q=\\"
+      },
+      {
+        "name": "an uppercase host is lowercased and the path and query keep their case",
+        "url": "http://EXAMPLE.Com:8080/A?Q=B",
+        "variables": {},
+        "sent": "http://example.com:8080/A?Q=B"
+      },
+      {
+        "name": "leading whitespace is dropped",
+        "url": "  http://h/a",
+        "variables": {},
+        "sent": "http://h/a"
+      },
+      {
+        "name": "user info is encoded by the user-info set up to the last @",
+        "url": "http://u s:p@ss@h/x",
+        "variables": {},
+        "sent": "http://u%20s:p%40ss@h/x"
+      },
+      {
+        "name": "a pre-signed URL's escapes go out unchanged",
+        "url": "https://b.s3.example/k?X-Amz-Credential=AK%2F20261020&X-Amz-Signature=ab%2Bcd%3D",
+        "variables": {},
+        "sent": "https://b.s3.example/k?X-Amz-Credential=AK%2F20261020&X-Amz-Signature=ab%2Bcd%3D"
+      },
+      {
+        "name": "literal bytes around a value are encoded by the component they sit in",
+        "url": "http://h/{{p}}<?q={{q}}'",
+        "variables": {
+          "p": "a",
+          "q": "b"
+        },
+        "sent": "http://h/a%3C?q=b%27"
+      },
+      {
+        "name": "disableUrlEncoding writes Postman's bytes, a backslash and an uppercase host as typed",
+        "url": "http://H/a\"{}\\b?q='<>",
+        "variables": {},
+        "encode": false,
+        "sent": "http://H/a\"{}\\b?q='<>"
+      },
+      {
+        "name": "a literal non-ASCII host is written by its punycode name",
         "url": "http://bücher.de/é",
         "variables": {},
-        "sent": "http://bücher.de/%C3%A9"
+        "sent": "http://xn--bcher-kva.de/%C3%A9"
       },
       {
         "name": "a literal after a kept token in the authority is in the path",

@@ -1735,10 +1735,10 @@ bound row lacks throws naming the column, the same way `replaceIn` does.
 
 **The URL goes out encoded as Postman sends it.** Once its variables resolve,
 the URL is percent-encoded component by component as `postman-url-encoder`'s
-`toNodeUrl` writes it (`core::encode_url_as_postman`): the path by Postman's
-path set and the query by its query set (both listed under
-[Query encoding](api-reference.md#query-encoding)), user info by its user-info
-set, the host lowercased. So `pm.sendRequest("https://x/a b?q=c d&r=\"x\"", cb)`
+`toNodeUrl` writes it (`core::encode_url_as_postman`): the path, query,
+fragment and user info each by its own Postman set (listed under
+[Query encoding](api-reference.md#query-encoding)), a backslash before the
+query as `/`, the host lowercased. So `pm.sendRequest("https://x/a b?q=c d&r=\"x\"", cb)`
 sends `/a%20b?q=c%20d&r=%22x%22`, where before the space made libcurl refuse
 the URL. `&` and `=` in the query stay separators, and `%` is never encoded, so
 an escape already written (or a URL composition already encoded, such as
@@ -1750,12 +1750,8 @@ encode its braces in the path. A non-ASCII host is dialled by its punycode
 name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
 path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
-Send writes the same request line for a space, a control character, a
-non-ASCII byte or a value substituted into the path, query or fragment, but it
-changes only those bytes: a typed `"`, `{` or a backslash in the path goes
-out as typed from Send and as `%22`, `%7B` or `/` from a script, as Postman
-does. The difference is deliberate and listed under
-[Query encoding](api-reference.md#query-encoding).
+Send writes the same request line for every URL with its Send URL without
+encoding toggle off (#2465): the encoder is the same one.
 
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two

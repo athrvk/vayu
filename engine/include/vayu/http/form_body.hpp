@@ -183,10 +183,9 @@ namespace vayu::http {
  * GET transport, where the document rides in the query string - and with a
  * non-ASCII host as its punycode name (`to_ascii_host`), because libcurl has no
  * IDN support and this is the one URL every driver hands it. Unless
- * `disable_url_encoding`, the bytes no request target may carry raw (space,
- * controls, non-ASCII) are percent-encoded outside the head
- * (`core::encode_literal_at_url_component`, issue #2465); every other byte is
- * sent as the URL holds it.
+ * `disable_url_encoding`, the whole URL is written as Postman writes it
+ * (`core::encode_url_as_postman`, issue #2465), so Send, a load run, a
+ * collection run and `pm.sendRequest` put out one request line for one URL.
  */
 [[nodiscard]] bool has_wire_body (const Request& request);
 

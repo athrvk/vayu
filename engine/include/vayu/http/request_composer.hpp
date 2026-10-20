@@ -218,9 +218,9 @@ const std::function<std::optional<std::string> (const std::string& name)>& resol
  * set for the path, the query or the fragment it lands in; the scheme and
  * the authority take it as it stands. A layered value is resolved whole
  * first and encoded once, so a `%` a value carries is never encoded twice.
- * The literal text around the tokens has only the bytes no request target
- * may carry raw encoded (`core::encode_literal_at_url_component`, issue
- * #2465), so `/a b` composes to `/a%20b` and every other byte is kept.
+ * The result, literal text included, is then written whole by
+ * `core::encode_url_as_postman` (issue #2465), the encoder `wire_url` ends
+ * with, so a composed URL is the request line every send path puts out.
  *
  * The component is read left to right from the text written so far, the
  * literal around the tokens and the values already written, so a `?` that a
