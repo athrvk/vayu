@@ -497,7 +497,7 @@ declare const pm: {
 	/**
 	 * SHA-256 and HMAC-SHA256 for signing an outgoing request from a pre-request script.
 	 * 
-	 * Synchronous, unlike Web Crypto's crypto.subtle: the sandbox has no event loop, so a Promise-based API would never settle. That is why this is pm.crypto rather than a global named crypto.
+	 * Synchronous, unlike Web Crypto's crypto.subtle: Web Crypto covers algorithms this sandbox does not implement, so the surface takes its own name: pm.crypto rather than a global named crypto.
 	 */
 	crypto: {
 		/**
@@ -1346,7 +1346,7 @@ declare const pm: {
 	/**
 	 * Send an auxiliary request - fetching a token in a pre-request script is what it is for.
 	 * 
-	 * Synchronous despite the callback: the sandbox has no event loop, so the send blocks and the callback runs inline before sendRequest returns. Postman's promise-returning overload is deliberately absent - it could only never resolve.
+	 * Synchronous despite the callback: the send blocks and the callback runs inline before sendRequest returns. Postman's promise-returning overload is not implemented, so a callback is required.
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 

@@ -1443,10 +1443,10 @@ nlohmann::json get_script_completions () {
     "number }, callback: (err: Error | null, res: any) => void): void" },
     { "documentation",
     "Send an auxiliary request - fetching a token in a pre-request script is "
-    "what it is for.\n\nSynchronous despite the callback: the sandbox has no "
-    "event loop, so the send blocks and the callback runs inline before "
-    "sendRequest returns. Postman's promise-returning overload is deliberately "
-    "absent - it could only never resolve.\n\nThe callback gets (err, res). "
+    "what it is for.\n\nSynchronous despite the callback: the send blocks and "
+    "the callback runs inline before sendRequest returns. Postman's "
+    "promise-returning overload is not implemented, so a callback is "
+    "required.\n\nThe callback gets (err, res). "
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
     "res is null then. res carries code, status (the reason phrase, as on "
     "pm.response - the number is code), responseTime, headers.get() "
@@ -1742,8 +1742,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "SHA-256 and HMAC-SHA256 for signing an outgoing request from a "
     "pre-request script.\n\nSynchronous, unlike Web Crypto's crypto.subtle: "
-    "the sandbox has no event loop, so a Promise-based API would never "
-    "settle. That is why this is pm.crypto rather than a global named "
+    "Web Crypto covers algorithms this sandbox does not implement, so the "
+    "surface takes its own name: pm.crypto rather than a global named "
     "crypto." },
     { "sortText", "0_pm_crypto" } });
 

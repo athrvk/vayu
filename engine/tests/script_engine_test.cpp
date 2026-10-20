@@ -218,7 +218,7 @@ TEST_F (ScriptEngineTest, DoneCallbackTreatsAnyTruthyArgumentAsTheFailure) {
 // The divergence from Postman, made loud. Postman genuinely waits for a later
 // done(); this sandbox judges the test when its callback returns, so the test
 // is failed with the reason rather than reported on a verdict nothing gave.
-TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) {
+TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingItIsJudgedOnReturn) {
     auto result = engine.execute_test (R"(
         pm.test("never completes", function (done) {
             pm.expect(1).to.equal(1);
