@@ -1409,8 +1409,9 @@ function varCountLabel(n: number): string {
 
 /**
  * One collection of the preview and everything beneath it, its sub-folders and
- * requests in the one order the sidebar will list them (issue #2535): a
- * Postman collection's document order, every other format's folders first.
+ * requests in the one order the sidebar will list them (issue #2535): the
+ * order a Postman collection, a JMeter plan, an Insomnia export or a
+ * Vayu-written OpenAPI document states, and folders first for any other format.
  */
 function TreeNode({ collection }: { collection: CollectionDraft }) {
 	return (

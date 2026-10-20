@@ -744,3 +744,81 @@ TEST (JmeterImport, ANestWithinTheDepthBoundImportsWithoutATally) {
     EXPECT_FALSE (has_skipped_kind (meta, "nesting_too_deep"));
     EXPECT_EQ (meta.at ("requestCount"), 1);
 }
+
+namespace {
+
+/// A sampler named @p name, nothing else.
+std::string sampler (const std::string& name, const char* enabled = "true") {
+    return "<HTTPSamplerProxy testname=\"" + name + "\" enabled=\"" + enabled +
+    "\"><stringProp name=\"HTTPSampler.path\">/" + name +
+    "</stringProp></HTTPSamplerProxy><hashTree/>";
+}
+
+/// A controller named @p name holding @p members.
+std::string controller (const char* tag, const std::string& name, const std::string& members) {
+    return std::string ("<") + tag + " testname=\"" + name + "\"/><hashTree>" +
+    members + "</hashTree>";
+}
+
+std::string plan_with (const std::string& body) {
+    return R"(<?xml version="1.0"?><jmeterTestPlan jmeter="5.6.3"><hashTree>)"
+           R"(<TestPlan testname="P"/><hashTree>)" +
+    body + "</hashTree></hashTree></jmeterTestPlan>";
+}
+
+/// @p list's names in the order their drafts state, each written
+/// `<name>=<order>`, so a failed comparison reads like the tree it describes.
+std::vector<std::string> stated_orders (const nlohmann::ordered_json& list) {
+    std::vector<std::string> stated;
+    for (const nlohmann::ordered_json& draft : list) {
+        stated.push_back (draft.at ("name").get<std::string> () + "=" +
+        std::to_string (draft.at ("order").get<int> ()));
+    }
+    return stated;
+}
+
+} // namespace
+
+// A plan's samplers and controllers are one sibling list in document order
+// (#2573), so each draft states its position in it: one counter per parent
+// across both kinds, shared by every ThreadGroup under it, burned by neither a
+// disabled element nor a setup group. Mutation check: stop stamping `order` in
+// `Sink` and this reds.
+TEST (JmeterImport, SamplersAndControllersShareOneOrderPerParent) {
+    const std::string plan =
+    plan_with ("<ThreadGroup testname=\"G1\"/><hashTree>" + sampler ("A") +
+    controller ("LoopController", "Loop",
+    sampler ("X") + controller ("TransactionController", "Inner", sampler ("Y")) +
+    sampler ("Z")) +
+    sampler ("Off", "false") + "<SetupThreadGroup testname=\"Setup\"/><hashTree/>" +
+    sampler ("B") + "</hashTree>" + "<ThreadGroup testname=\"G2\"/><hashTree>" +
+    sampler ("C") + "</hashTree>");
+    const ImportParse parsed = parse_import (plan, {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& root = parsed.result.at ("collections").at (0);
+    EXPECT_EQ (stated_orders (root.at ("requests")),
+    (std::vector<std::string>{ "A=0", "B=2", "C=3" }));
+    EXPECT_EQ (stated_orders (root.at ("children")), (std::vector<std::string>{ "Loop=1" }));
+
+    const nlohmann::ordered_json& loop = root.at ("children").at (0);
+    EXPECT_EQ (stated_orders (loop.at ("requests")),
+    (std::vector<std::string>{ "X=0", "Z=2" }));
+    EXPECT_EQ (stated_orders (loop.at ("children")),
+    (std::vector<std::string>{ "Inner=1" }));
+    EXPECT_EQ (stated_orders (loop.at ("children").at (0).at ("requests")),
+    (std::vector<std::string>{ "Y=0" }));
+}
+
+// Folders only: every controller states its place, in document order, so the
+// listing is the one a plan without samplers always had.
+TEST (JmeterImport, ControllersAloneAreNumberedInDocumentOrder) {
+    const ImportParse parsed = parse_import (
+    plan_with (controller ("LoopController", "B", "") + controller ("IfController", "A", "")),
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& root = parsed.result.at ("collections").at (0);
+    EXPECT_EQ (stated_orders (root.at ("children")),
+    (std::vector<std::string>{ "B=0", "A=1" }));
+    EXPECT_TRUE (root.at ("requests").empty ());
+}

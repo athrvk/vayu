@@ -51,6 +51,8 @@ Reconstruction steps in `parse()`:
    - any unlisted `_type` (including `environment`) → silently ignored by the collection walk; environments are processed separately.
 4. `buildRequest(r)` increments `requestCount` and produces a `RequestDraft`.
 
+**Sort order is kept** (issue [#2573](https://github.com/athrvk/vayu/issues/2573)). Insomnia lists a folder's requests and sub-folders together, ascending by each resource's `metaSortKey`, and a recursive run visits them in that order. The walk sorts a parent's children by that key with a stable sort (ties keep resource order), folders and requests together, and each draft records its rank among the siblings that become drafts as `order`: 0 to k-1, never the raw key, which is sparse and often negative. The apply numbers a parent's sub-folders and requests in that one sequence, so the sidebar lists them and a recursive run visits them in Insomnia's order. A gRPC, WebSocket, spec or test resource is tallied and takes no position. **A parent where any request or folder lacks a numeric `metaSortKey` states no order for any of its children** and keeps the listing every unordered import has, folders first and requests after them, rather than guessing where the unkeyed ones sit among the keyed. A folder of sub-folders only, or an export with no keys, imports as it always did.
+
 Key internal functions: `parse` (entry), `buildCollection`, `buildRequest`, `insomniaAuth`, `insomniaBody`, `to_env_vars`. Counters (`requestCount`, `folderCount`, `authCtx.nonExec`) are closures mutated during the walk.
 
 ## Resource type handling

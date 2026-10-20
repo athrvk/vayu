@@ -2522,12 +2522,57 @@ class InsomniaTree {
         return request;
     }
 
-    /** One child of a folder, by the resource type it declares. */
-    void add_child (const json* child, json& children, json& requests) {
+    static bool becomes_draft (const json* resource) {
+        return type_is (resource, "request_group") || type_is (resource, "request");
+    }
+
+    /// The finite number Insomnia sorts a resource by, or null.
+    static const json* sort_key_of (const json* resource) {
+        const json* key = prop (resource, "metaSortKey");
+        return key != nullptr && key->is_number () &&
+        std::isfinite (key->get<double> ()) ?
+        key :
+        nullptr;
+    }
+
+    /**
+     * Puts @p siblings in the order Insomnia lists them, ascending
+     * `metaSortKey`, folders and requests together (#2573), and answers whether
+     * it did. A parent where any sibling that becomes a draft lacks a numeric
+     * key is left as it is: a partial order would place the keyed ones against
+     * the others by a guess, so it states none and the parent keeps its
+     * folders-first listing. What becomes no draft (gRPC, WebSocket, ...) takes
+     * no position and is moved behind the rest.
+     */
+    static bool rank_by_sort_key (std::vector<const json*>& siblings) {
+        const bool all_keyed = std::ranges::all_of (siblings, [] (const json* sibling) {
+            return !becomes_draft (sibling) || sort_key_of (sibling) != nullptr;
+        });
+        if (!all_keyed) {
+            return false;
+        }
+        const auto drafts_end =
+        std::stable_partition (siblings.begin (), siblings.end (),
+        [] (const json* sibling) { return becomes_draft (sibling); });
+        std::stable_sort (siblings.begin (), drafts_end,
+        [] (const json* before, const json* after) {
+            return *sort_key_of (before) < *sort_key_of (after);
+        });
+        return true;
+    }
+
+    /**
+     * One child of a folder, by the resource type it declares. Answers the
+     * draft it added to @p children or @p requests, or null for what Vayu has
+     * no shape for.
+     */
+    json* add_child (const json* child, json& children, json& requests) {
         if (type_is (child, "request_group")) {
             counts_.folders += 1;
             children.push_back (build_collection (child, /*workspace=*/false));
-        } else if (type_is (child, "request")) {
+            return &children.back ();
+        }
+        if (type_is (child, "request")) {
             const int file_bodies           = counts_.file_body;
             const int non_executable_before = counts_.non_executable;
             json request                    = build_request (child);
@@ -2539,22 +2584,23 @@ class InsomniaTree {
                 named_["non_executable_auth"].push_back (name);
             }
             requests.push_back (std::move (request));
-        } else {
-            // What Vayu has no request shape for is still named, so the
-            // preview can say which one did not come across.
-            const json name = resource_name (child, "Untitled");
-            tally_.set_subject (as_string (&name));
-            if (type_is (child, "grpc_request")) {
-                tally_.add ("grpc");
-            } else if (type_is (child, "websocket_request")) {
-                tally_.add ("websocket");
-            } else if (type_is (child, "api_spec")) {
-                tally_.add ("api_spec");
-            } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
-                tally_.add ("unit_test");
-            }
-            tally_.set_subject ({});
+            return &requests.back ();
         }
+        // What Vayu has no request shape for is still named, so the
+        // preview can say which one did not come across.
+        const json name = resource_name (child, "Untitled");
+        tally_.set_subject (as_string (&name));
+        if (type_is (child, "grpc_request")) {
+            tally_.add ("grpc");
+        } else if (type_is (child, "websocket_request")) {
+            tally_.add ("websocket");
+        } else if (type_is (child, "api_spec")) {
+            tally_.add ("api_spec");
+        } else if (type_is (child, "unit_test") || type_is (child, "unit_test_suite")) {
+            tally_.add ("unit_test");
+        }
+        tally_.set_subject ({});
+        return nullptr;
     }
 
     json build_collection (const json* node, bool workspace) {
@@ -2567,8 +2613,18 @@ class InsomniaTree {
         }
         json children = json::array ();
         json requests = json::array ();
-        for (const json* child : children_of (node)) {
-            add_child (child, children, requests);
+        // Insomnia lists a folder's requests and sub-folders together by
+        // `metaSortKey`; each draft states its rank among the ones that become
+        // drafts, never the raw key, whose sparse or negative values would
+        // collide with `sibling_positions`' fallback (#2573).
+        std::vector<const json*> siblings = children_of (node);
+        const bool ranked                 = rank_by_sort_key (siblings);
+        int position                      = 0;
+        for (const json* child : siblings) {
+            json* draft = add_child (child, children, requests);
+            if (ranked && draft != nullptr) {
+                (*draft)["order"] = position++;
+            }
         }
         json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
@@ -2758,6 +2814,13 @@ void carry_description (const json& item, json& resource) {
     }
 }
 
+/// v5's `meta.sortKey` as v4's `metaSortKey`, so one rule orders both versions.
+void carry_sort_key (const json& item, json& resource) {
+    if (const json* key = prop (as_record (prop (&item, "meta")), "sortKey")) {
+        resource["metaSortKey"] = *key;
+    }
+}
+
 /// v5's `scripts.preRequest` / `.afterResponse` as v4's two flat members.
 void carry_scripts (const json& item, json& resource) {
     const json* scripts = as_record (prop (&item, "scripts"));
@@ -2847,6 +2910,7 @@ class InsomniaV5Flattener {
             return;
         }
         carry_description (item, resource);
+        carry_sort_key (item, resource);
         carry_scripts (item, resource);
         carry_members (item, resource, { "authentication" });
         if (kind == V5Item::Folder) {
@@ -4334,9 +4398,10 @@ struct SiblingPositions {
 };
 
 /**
- * A draft's own `order` places it - a Postman item's document position, an
- * `x-vayu-*` stored order - and a draft stating none keeps the listing every
- * other importer produces, its folders first and its requests after them.
+ * A draft's own `order` places it - a Postman item's or a JMeter element's
+ * document position, an Insomnia item's rank by sort key, an `x-vayu-*` stored
+ * order - and a draft stating none keeps the listing the other importers
+ * produce, its folders first and its requests after them.
  * Ties fall to `sibling_order.hpp`'s rule, a folder before a request, then
  * list position. `draft-siblings.ts`'s `siblingPositions` is the app's copy,
  * pinned to this one by `import-conformance.json`'s payloads.

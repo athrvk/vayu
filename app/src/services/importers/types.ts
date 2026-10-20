@@ -532,10 +532,10 @@ export interface CollectionDraft {
 	/**
 	 * Where this draft sits among its parent's sub-folders and requests, which
 	 * share one list (issue #2535), when the source states it: a Postman item's
-	 * document position, or the stored order a Vayu-written OpenAPI document
-	 * carries. Absent on a root and on every draft of a source that states no
-	 * order, which lists its folders first and its requests after them
-	 * (`draftSiblings`).
+	 * or a JMeter element's document position, an Insomnia item's rank by sort
+	 * key, or the stored order a Vayu-written OpenAPI document carries. Absent
+	 * on a root and on every draft of a source that states no order, which
+	 * lists its folders first and its requests after them (`draftSiblings`).
 	 */
 	order?: number;
 	/**

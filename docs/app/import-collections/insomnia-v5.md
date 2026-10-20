@@ -56,6 +56,7 @@ The flattener rewrites the v5 tree into v4's flat resource list and the v4 reade
 | `scripts.preRequest`, `scripts.afterResponse` | the pre-request and post-request script | read as v4's `preRequestScript` / `afterResponseScript`; honors `importScripts` |
 | `settings.followRedirects` | `followRedirects` | a boolean reads as `on` / `off`; v4's string values read as in v4 (`global` or absent leaves the engine default) |
 | `description`, or `meta.description` | `description` | the first that is present |
+| `meta.sortKey` | read as v4's `metaSortKey` | orders a folder's items and sub-folders together, with v4's [missing-key rule](./insomnia-v4.md#structure--tree-reconstruction) (issue [#2573](https://github.com/athrvk/vayu/issues/2573)) |
 | `environments` | `EnvironmentDraft`s | [Environments](./insomnia-v4.md#environments): a base environment with sub-environments imports as one environment per sub-environment, base values merged in; honors `importEnvironments` |
 
 Variable references go through the same [template normalization](./insomnia-v4.md#template-normalization): `{{ _.x }}` becomes `{{x}}`, and Nunjucks tags and filtered expressions stay literal text.
@@ -103,7 +104,7 @@ The row-shape errors v4 raises for `parameters`, `headers` and `body` apply unch
 Every v5 member the reader consumes is taken from Insomnia's v5 schema. **None of them has been checked against a real Insomnia 11 export**, so this list is the page's honest edge. A member spelled otherwise reads as absent, and the first real export that disagrees is a one-line fix in `InsomniaV5Flattener`.
 
 - **Document:** `type`, `name`, `description` (or `meta.description`), `collection` (the item list), `environments`.
-- **Item, any kind:** `name`, `description` or `meta.description`, `meta.id` (read for the folder, gRPC and WebSocket id prefixes only).
+- **Item, any kind:** `name`, `description` or `meta.description`, `meta.sortKey` (a number; read on folders and HTTP requests), `meta.id` (read for the folder, gRPC and WebSocket id prefixes only).
 - **Folder:** `children` (its presence is what makes an item a folder), or, for an empty folder written without it, a `fld_` prefix on `meta.id` and no `url` or `method`; `authentication`, `scripts.preRequest`, `scripts.afterResponse`.
 - **Request:** `url`, `method`, `headers`, `parameters`, `pathParameters`, `body`, `authentication`, `scripts.preRequest`, `scripts.afterResponse`, `settings.followRedirects`. Rows and bodies are assumed to keep v4's inner shape (`name` / `value` / `disabled`, `body.mimeType` / `text` / `params`).
 - **gRPC / WebSocket detection:** `protoFileId`, `protoMethodName`, the `greq_` and `ws-req_` id prefixes in `meta.id`, and a `ws://` / `wss://` URL.

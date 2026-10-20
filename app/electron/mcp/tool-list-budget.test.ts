@@ -23,6 +23,9 @@
  * (app host) plus about 5%: 115,370 / 112,644 B with writes off (reveal off /
  * on) and 181,447 / 177,050 B with writes on. Before the fix, at d6c093c
  * (reveal off): 136,705 B with writes off, 211,549 B with writes on.
+ * #2562's OAuth parameter lists then took the writes-off rows to 121,210 /
+ * 118,484 B, and those two caps were re-set to that plus 5% (127,300 /
+ * 124,500); the writes-on rows still fit their original caps.
  *
  * #2445 (an output schema on every tool) grows the list and must land under
  * these caps, or raise them in its own diff, where a reviewer sees it.
@@ -47,8 +50,8 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 121_200 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 118_300 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 127_300 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 124_500 },
 	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 190_600 },
 	{ allowWrites: true, revealSecretsToAgents: true, tools: 79, maxBytes: 186_000 },
 ];
