@@ -117,9 +117,9 @@ describe("Copy for agent on the inbox tab", () => {
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(INBOX.url));
 	});
 
-	// The two buttons share a header and a hook's worth of state would be one
-	// bug: each has its own `useCopy`, so the URL's icon swap and the text
-	// button's toast stay independent.
+	// The two buttons share a header, so one shared `useCopy` would tie them
+	// together: each has its own, and the URL's icon swap and the text button's
+	// toast stay independent.
 	it("swaps the URL button's glyph without a toast, then toasts for the text button", async () => {
 		render(<InboxView />);
 		const urlButton = await screen.findByRole("button", { name: "Copy inbox URL" });
