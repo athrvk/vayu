@@ -16,7 +16,13 @@
 
 import { describe, it, expect } from "vitest";
 
-import { rankPalette, scoreItem, MATCH_FLOOR, RECENT_LIMIT } from "./ranking";
+import {
+	rankPalette,
+	scoreItem,
+	MATCH_FLOOR,
+	PALETTE_GROUP_RENDER_LIMIT,
+	RECENT_LIMIT,
+} from "./ranking";
 import type { PaletteItem, PaletteKind } from "./types";
 
 function item(overrides: Partial<PaletteItem> & { id: string; kind: PaletteKind }): PaletteItem {
@@ -351,5 +357,126 @@ describe("a query that matched nothing", () => {
 		// answer down the list the palette just found.
 		expect(ranked.quickActions).toEqual([]);
 		expect(ranked.total).toBe(1);
+	});
+});
+
+/**
+ * The render cap (#2545): ranking runs over every row, and only the DOM is
+ * limited. The fixture is past 5,000 on purpose - the workspace size the issue
+ * measured - and each case asserts it really holds that many, so a cap test
+ * cannot pass over an empty list.
+ */
+describe("the per-group render cap", () => {
+	const SIZE = 5001;
+
+	function requests(count: number, overrides: Partial<PaletteItem> = {}): PaletteItem[] {
+		return Array.from({ length: count }, (_, n) =>
+			item({ id: `r${n}`, kind: "request", title: `Request ${n}`, ...overrides })
+		);
+	}
+
+	function requestGroup(ranked: ReturnType<typeof rankPalette>) {
+		const group = ranked.groups.find((g) => g.kind === "request");
+		if (!group) throw new Error("no request group");
+		return group;
+	}
+
+	it("renders at most the limit on the empty query and reports the rest as hidden", () => {
+		const items = requests(SIZE);
+		expect(items).toHaveLength(SIZE);
+
+		const group = requestGroup(rankPalette(items, ""));
+
+		expect(group.items).toHaveLength(PALETTE_GROUP_RENDER_LIMIT);
+		expect(group.hidden).toBe(SIZE - PALETTE_GROUP_RENDER_LIMIT);
+		// The default order is kept: the cap takes the head of it.
+		expect(group.items[0].id).toBe("r0");
+	});
+
+	it("counts the hidden rows in the announced total", () => {
+		const ranked = rankPalette(requests(SIZE), "");
+		expect(ranked.total).toBe(SIZE);
+	});
+
+	it("caps a one-letter query too, with the best matches inside the cap", () => {
+		// "q" is a mid-word jump in "Request n" and a word-start hit in the two
+		// rows placed far past the first fifty.
+		const items = requests(SIZE - 2);
+		const deepA = item({ id: "deep-a", kind: "request", title: "Quote" });
+		const deepB = item({ id: "deep-b", kind: "request", title: "Query" });
+		items.splice(4000, 0, deepA);
+		items.splice(4500, 0, deepB);
+		expect(items).toHaveLength(SIZE);
+		expect(items.indexOf(deepB)).toBeGreaterThan(PALETTE_GROUP_RENDER_LIMIT);
+		const filler = scoreItem(items[0], "q");
+		expect(filler).toBeGreaterThanOrEqual(MATCH_FLOOR);
+		expect(scoreItem(deepA, "q")).toBeGreaterThan(filler);
+
+		const ranked = rankPalette(items, "q");
+		const group = requestGroup(ranked);
+
+		// One of the two is promoted; the other leads the group.
+		expect([ranked.top[0].id, group.items[0].id].sort()).toEqual(["deep-a", "deep-b"]);
+		expect(group.items).toHaveLength(PALETTE_GROUP_RENDER_LIMIT);
+		// The promoted row is lifted out of the group, so it no longer counts there.
+		expect(group.hidden).toBe(SIZE - 1 - PALETTE_GROUP_RENDER_LIMIT);
+		expect(ranked.total).toBe(SIZE);
+	});
+
+	it("ranks a typed exact name first even when it is far past the cap in default order", () => {
+		const items = requests(SIZE);
+		const target = items[4321];
+		expect(items.indexOf(target)).toBeGreaterThan(PALETTE_GROUP_RENDER_LIMIT);
+
+		const ranked = rankPalette(items, target.title);
+
+		expect(ranked.top.map((i) => i.id)).toEqual([target.id]);
+	});
+
+	it("keeps a deep match first in its group when something else is promoted", () => {
+		// Two rows share the best name; the one not promoted must lead the group
+		// and not be cut for sitting past the cap in default order.
+		const items = requests(SIZE - 2);
+		items.splice(
+			4000,
+			0,
+			item({ id: "dup-a", kind: "request", title: "Settle invoice" }),
+			item({ id: "dup-b", kind: "request", title: "Settle invoice" })
+		);
+
+		const ranked = rankPalette(items, "Settle invoice");
+
+		expect(ranked.top.map((i) => i.id)).toEqual(["dup-a"]);
+		expect(requestGroup(ranked).items[0].id).toBe("dup-b");
+	});
+
+	it("caps collections the same way", () => {
+		const items = Array.from({ length: PALETTE_GROUP_RENDER_LIMIT + 3 }, (_, n) =>
+			item({ id: `c${n}`, kind: "collection", title: `Collection ${n}` })
+		);
+		const group = rankPalette(items, "").groups.find((g) => g.kind === "collection");
+		expect(group?.items).toHaveLength(PALETTE_GROUP_RENDER_LIMIT);
+		expect(group?.hidden).toBe(3);
+	});
+
+	it("leaves a group the sources already bound alone", () => {
+		const views = Array.from({ length: PALETTE_GROUP_RENDER_LIMIT + 3 }, (_, n) =>
+			item({ id: `v${n}`, kind: "view", title: `View ${n}` })
+		);
+		const group = rankPalette(views, "").groups.find((g) => g.kind === "view");
+		expect(group?.items).toHaveLength(views.length);
+		expect(group?.hidden).toBe(0);
+	});
+
+	it("keeps a group exactly at the limit whole", () => {
+		const group = requestGroup(rankPalette(requests(PALETTE_GROUP_RENDER_LIMIT), ""));
+		expect(group.items).toHaveLength(PALETTE_GROUP_RENDER_LIMIT);
+		expect(group.hidden).toBe(0);
+	});
+
+	it("still says nothing matched when the query matches nothing", () => {
+		const ranked = rankPalette(requests(SIZE), "zzzzz");
+		expect(ranked.total).toBe(0);
+		expect(ranked.groups).toEqual([]);
 	});
 });

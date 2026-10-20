@@ -1250,8 +1250,18 @@ Once something is typed, four rules apply:
   has to be contiguous, and that is the cost - `v1/charges` finds the row, `v1charges` does not. No
   floor could buy that back: a URL is all separators, so a query scattered across its segments
   reads as a series of *word* jumps, which is what scores the soup so highly to begin with.
-- **The announced count is the rendered count.** The `aria-live` line reports what the ranking
-  kept, which nothing downstream can hide.
+- **Requests and collections render at most `PALETTE_GROUP_RENDER_LIMIT` (50) rows each** (#2545).
+  They are the two kinds that grow with the workspace, and a row per request was ~5,200 mounted
+  `CommandItem`s at 5,000 requests, re-rendered per keystroke. `groupsOf` caps *after* ordering, so
+  ranking still sees every row and the best match is inside the cap: a typed exact name is
+  promoted to Top result however deep it sat in default order. A capped group closes with a plain
+  `N more - keep typing` line (`RankedGroup.hidden`, drawn by `HiddenRowsHint`) that is not a
+  `CommandItem`, so the arrows and Enter cannot reach it. A growing window was rejected: the
+  palette is a search box, and a longer query is the way to row 51. Tabs, views and commands are
+  bounded by the app and the deep kinds by `DEEP_GROUP_LIMIT`, so none of them is capped here;
+  Recents, Quick actions and escape rows are unaffected.
+- **The announced count is the matched count.** The `aria-live` line reports what the ranking
+  kept, hidden rows included, which nothing downstream can drop unannounced.
 
 Four rules govern the deep sources, and each exists because of a way the naive version fails:
 

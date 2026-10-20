@@ -32,6 +32,7 @@ import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { getMethodColor } from "@/lib/method-display";
+import { formatNumber } from "@/lib/format-number";
 import { chordKeys } from "@/lib/platform";
 import type { CommandContext } from "@/lib/commands";
 import { PALETTE_GROUP_LABELS, type PaletteItem } from "./types";
@@ -77,7 +78,8 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 
 	/*
 	 * The count is exact because the ranking decided it: every row it kept is a
-	 * row this renders, so nothing can hide one afterwards. `aria-live="polite"`
+	 * row this renders or one a capped group's "N more" line accounts for, so
+	 * nothing is dropped unannounced. `aria-live="polite"`
 	 * on an sr-only line is the announcement - a listbox that silently swaps its
 	 * contents as you type tells a screen-reader user nothing about whether the
 	 * query narrowed anything.
@@ -153,6 +155,7 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 							{group.items.map((item) => (
 								<PaletteRow key={item.id} item={item} onPick={onPick} />
 							))}
+							{group.hidden > 0 && <HiddenRowsHint count={group.hidden} />}
 						</CommandGroup>
 						{/* Its own group, not the last row of the one above: an
 						    escape row leaves the palette, and reads as an aside
@@ -178,6 +181,21 @@ interface LeadSection {
 	items: PaletteItem[];
 	/** Print each row's age. Only Recents, where the age is the reason it is there. */
 	withRecency?: boolean;
+}
+
+/**
+ * What a capped group says about the rows it did not render (#2545).
+ *
+ * A plain element and not a disabled `CommandItem`: cmdk only navigates and
+ * selects its items, so this is out of reach of the arrow keys and Enter
+ * without leaning on a disabled state, and it mounts no per-item effect.
+ */
+function HiddenRowsHint({ count }: { count: number }) {
+	return (
+		<p className="px-2 py-1.5 text-xs text-muted-foreground">
+			{formatNumber(count)} more - keep typing
+		</p>
+	);
 }
 
 function PaletteRow({
