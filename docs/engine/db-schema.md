@@ -449,7 +449,7 @@ Stores folder/group hierarchy for requests.
 | `elements`           | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |
-| `order`              | INTEGER | Sort order within parent; default 0          |
+| `order`              | INTEGER | Position among the parent's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
 | `created_at`         | INTEGER | Unix ms                                      |
 | `updated_at`         | INTEGER | Unix ms                                      |
 | `deleted_at`         | INTEGER | Unix ms; NULL while the collection is live (issue #988) |
@@ -577,7 +577,7 @@ Stores individual HTTP request definitions.
 | `body_type`           | TEXT    | Denormalized mirror of `body.mode`; kept for queries |
 | `auth`                | TEXT    | JSON discriminated union (see below)                 |
 | `elements`            | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
-| `order`               | INTEGER | Sort order within collection; default 0              |
+| `order`               | INTEGER | Position among the collection's children, its sub-folders and requests in one space (#2535, [Ordering](api-reference.md#ordering)); default 0 |
 | `follow_redirects`    | INTEGER | Boolean; default 1 (follow)                          |
 | `max_redirects`       | INTEGER | Hops allowed while following; default 10             |
 | `http_version`        | TEXT    | `'auto'` \| `'http1.1'` \| `'http2'`; default `'auto'` |

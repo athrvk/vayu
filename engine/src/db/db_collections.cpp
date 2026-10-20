@@ -61,8 +61,10 @@ std::vector<Collection> Database::get_collections () {
     // examples import already do. A finer timestamp was rejected: it still ties
     // under a fast enough writer, and it would make row identity depend on
     // clock resolution across three platforms. See the Ordering section of
-    // docs/engine/api-reference.md. The renderer's comparator applies the
-    // identical rule, pinned by tests/fixtures/tree-order-conformance.json.
+    // docs/engine/api-reference.md. This is the within-kind half of the
+    // sibling order in vayu/db/sibling_order.hpp, which ranks a sub-folder
+    // and a request against each other (#2535); the renderer's comparator
+    // applies the same rule, pinned by tests/fixtures/tree-order-conformance.json.
     //
     // Deleted rows are excluded here rather than at each caller (issue #988):
     // this is what the sidebar, the MCP tools, every export and every plan

@@ -40,13 +40,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <expected>
 #include <format>
 #include <set>
 #include <string_view>
 #include <thread>
-#include <unordered_set>
 #include <utility>
 
 namespace vayu::http {
@@ -304,45 +302,25 @@ const std::vector<std::pair<std::string, std::string>>& headers) {
 std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
     // The whole subtree: an OpenAPI import files its requests under a folder
-    // per tag, so a mock reading only direct children would serve nothing.
-    std::vector<vayu::db::Collection> all = db.get_collections ();
-    std::sort (all.begin (), all.end (), [] (const auto& a, const auto& b) {
-        return a.order != b.order ? a.order < b.order : a.id < b.id;
-    });
-
-    std::vector<std::string> walk;
-    std::deque<std::string> pending{ collection_id };
-    std::unordered_set<std::string> seen{ collection_id };
-    while (!pending.empty ()) {
-        const std::string current = pending.front ();
-        pending.pop_front ();
-        walk.push_back (current);
-        for (const auto& candidate : all) {
-            if (candidate.parent_id && *candidate.parent_id == current &&
-            seen.insert (candidate.id).second) {
-                pending.push_back (candidate.id);
-            }
-        }
-    }
-
+    // per tag, so a mock reading only direct children would serve nothing. In
+    // the sidebar's order, which is the order a tie between two equally
+    // specific routes falls to.
     std::vector<MockRoute> routes;
-    for (const auto& id : walk) {
-        for (const auto& request : db.get_requests_in_collection (id)) {
-            if (routes.size () > constants::mock_server::MAX_ROUTES) {
-                return routes; // The caller refuses a table this size; see start().
-            }
-            MockRoute route;
-            route.request_id    = request.id;
-            route.request_name  = request.name;
-            route.method        = to_string (request.method);
-            route.path_template = normalize_mock_path (request.url);
-            route.segments      = mock_path_segments (route.path_template);
-            route.mode = request.mock_response_mode.empty () ? "first" : request.mock_response_mode;
-            route.fixed_example_id = request.mock_example_id;
-            route.examples         = db.get_request_examples (request.id);
-            route.has_response     = !route.examples.empty ();
-            routes.push_back (std::move (route));
+    for (const auto& request : db.get_requests_in_subtree (collection_id)) {
+        if (routes.size () > constants::mock_server::MAX_ROUTES) {
+            return routes; // The caller refuses a table this size; see start().
         }
+        MockRoute route;
+        route.request_id    = request.id;
+        route.request_name  = request.name;
+        route.method        = to_string (request.method);
+        route.path_template = normalize_mock_path (request.url);
+        route.segments      = mock_path_segments (route.path_template);
+        route.mode = request.mock_response_mode.empty () ? "first" : request.mock_response_mode;
+        route.fixed_example_id = request.mock_example_id;
+        route.examples         = db.get_request_examples (request.id);
+        route.has_response     = !route.examples.empty ();
+        routes.push_back (std::move (route));
     }
     return routes;
 }

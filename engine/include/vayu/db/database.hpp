@@ -356,6 +356,16 @@ class Database {
     /// a client building the whole tree needs, in one query rather than one
     /// per collection.
     std::vector<Request> get_requests_in_live_collections ();
+    /**
+     * Every live request at or beneath @p root_id, depth-first in sibling
+     * order (`sibling_order.hpp`, #2535): at each collection its sub-folders
+     * and its requests are one list, a request runs where it sits and a
+     * sub-folder's whole subtree where the sub-folder sits. What a recursive
+     * run, a mock server's route table and an OpenAPI export walk, so the
+     * three list a tree in the order the sidebar shows it. A `parent_id` cycle
+     * visits each collection once.
+     */
+    std::vector<Request> get_requests_in_subtree (const std::string& root_id);
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
     /// takes them with it.

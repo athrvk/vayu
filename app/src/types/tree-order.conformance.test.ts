@@ -29,7 +29,7 @@ const [fixturePath] = ENGINE_READING_GUARDS.treeOrder.paths.map(fromRepoRoot);
 
 interface ConformanceCase {
 	name: string;
-	rows: Array<{ id: string; order: number; createdAt: number }>;
+	rows: Array<{ id: string; kind: "folder" | "request"; order: number; createdAt: number }>;
 	expected: string[];
 }
 
@@ -37,6 +37,15 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 	description: string;
 	cases: ConformanceCase[];
 };
+
+/**
+ * The cases whose rows are all one kind. `compareTreeOrder` does not rank a
+ * folder against a request yet, so the cross-kind cases join this suite with
+ * the renderer's half of #2535.
+ */
+const singleKindCases = fixture.cases.filter((c) =>
+	c.rows.every((row) => row.kind === c.rows[0]?.kind)
+);
 
 /**
  * The renderer holds `createdAt` as the ISO string its transformers produce
@@ -50,19 +59,20 @@ function toRow(row: ConformanceCase["rows"][number]): OrderedTreeRow {
 describe("tree-order conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
 		expect(fixture.cases.length).toBeGreaterThanOrEqual(12);
+		expect(singleKindCases.length).toBeGreaterThanOrEqual(12);
 		for (const c of fixture.cases) {
 			expect(c.rows.length).toBeGreaterThan(1);
 			expect(c.expected).toHaveLength(c.rows.length);
 		}
 	});
 
-	it.each(fixture.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+	it.each(singleKindCases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
 		const sorted = c.rows.map(toRow).sort(compareTreeOrder);
 		expect(sorted.map((r) => r.id)).toEqual(c.expected);
 	});
 
 	it("sorts the same regardless of the input order", () => {
-		for (const c of fixture.cases) {
+		for (const c of singleKindCases) {
 			const reversed = [...c.rows].reverse().map(toRow).sort(compareTreeOrder);
 			expect(reversed.map((r) => r.id)).toEqual(c.expected);
 		}

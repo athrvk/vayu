@@ -7,9 +7,10 @@
  * on rather than a detail of this one:
  *
  *  - **Ordering.** The order the sidebar displays: direct requests by
- *    `requests.order`, and - recursively - each sub-collection's whole subtree
- *    ahead of its parent's own requests, sub-collections by `collections.order`,
- *    depth-first. Driven case by case from
+ *    `requests.order`, and - recursively - a collection's sub-folders and
+ *    requests as one sibling list (#2535), a request where it sits and a
+ *    sub-folder's whole subtree where the sub-folder sits, depth-first. Driven
+ *    case by case from
  *    `fixtures/recursive-run-order-conformance.json`, which the renderer's
  *    `CollectionTree.run-order.conformance.test.tsx` reads as well, so the run
  *    and the tree cannot disagree without one of the two suites failing (issue
@@ -205,33 +206,38 @@ TEST_F (ScenarioPlanTest, DirectRequestsAreOrderedByRequestOrder) {
     }
 }
 
-TEST_F (ScenarioPlanTest, RecursiveDescentRunsEachSubtreeBeforeTheFoldersOwnRequests) {
-    //   root            [root_a, root_b]
-    //     child_b (order 1)  [b_1]
-    //     child_a (order 0)  [a_1]
-    //       grandchild       [g_1]
+TEST_F (ScenarioPlanTest, RecursiveDescentRunsEachChildWhereItSits) {
+    //   root
+    //     root_a        (request, order 0)
+    //     child_a       (folder, order 1)
+    //       a_1         (request, order 0)
+    //       grandchild  (folder, order 1)
+    //         g_1
+    //     root_b        (request, order 2)
+    //     child_b       (folder, order 3)
+    //       b_1
     //
-    // The sidebar renders every subfolder above every request at each depth
-    // (`CollectionItem.tsx`), so `g_1` (deepest) is the first row a user sees
-    // under `root` and the root's own requests are the last two. The walk used
-    // to be pre-order - `root_a, root_b, a_1, g_1, b_1` - which is an order the
-    // tree never showed (issue #431). Mutation check: restore the pre-order push
-    // in `collect_requests` and this reddens, along with every fixture case.
+    // One sibling list per collection (#2535): a request runs where it sits
+    // and a folder's subtree where the folder sits, which is the order the
+    // sidebar shows top to bottom. Mutation check: restore the two-block walk
+    // (every sub-folder's subtree before the folder's own requests) in
+    // `Database::get_requests_in_subtree` and this reddens, along with every
+    // interleaved fixture case.
     seed_collection ("root", "");
-    seed_collection ("child_b", "root", /*order=*/1);
-    seed_collection ("child_a", "root", /*order=*/0);
-    seed_collection ("grandchild", "child_a", /*order=*/0);
+    seed_collection ("child_b", "root", /*order=*/3);
+    seed_collection ("child_a", "root", /*order=*/1);
+    seed_collection ("grandchild", "child_a", /*order=*/1);
     seed_request ("root_a", "root", /*order=*/0);
-    seed_request ("root_b", "root", /*order=*/1);
+    seed_request ("root_b", "root", /*order=*/2);
     seed_request ("b_1", "child_b");
-    seed_request ("a_1", "child_a");
+    seed_request ("a_1", "child_a", /*order=*/0);
     seed_request ("g_1", "grandchild");
 
     const auto resolved = vayu::core::resolve_scenario (
     *db_, block ("root", /*recursive=*/true), options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (step_ids (resolved.plan),
-    (std::vector<std::string>{ "g_1", "a_1", "b_1", "root_a", "root_b" }));
+    (std::vector<std::string>{ "root_a", "a_1", "g_1", "root_b", "b_1" }));
 }
 
 // --- The cross-consumer order (fixture-driven) --------------------------------
@@ -241,7 +247,7 @@ TEST_F (ScenarioPlanTest, RunOrderConformanceFixtureIsNonEmpty) {
     // case below vacuously pass.
     const json fixture = load_run_order_fixture ();
     ASSERT_TRUE (fixture.contains ("cases"));
-    EXPECT_GE (fixture["cases"].size (), 5u);
+    EXPECT_GE (fixture["cases"].size (), 9u);
 }
 
 TEST_F (ScenarioPlanTest, RecursiveRunFollowsTheSidebarOrderInEveryFixtureCase) {
@@ -284,7 +290,7 @@ TEST_F (ScenarioPlanTest, RecursiveRunFollowsTheSidebarOrderInEveryFixtureCase) 
         EXPECT_EQ (step_ids (resolved.plan), expected) << "case: " << name;
         ++cases_run;
     }
-    EXPECT_GE (cases_run, 5u) << "the fixture loop asserted nothing";
+    EXPECT_GE (cases_run, 9u) << "the fixture loop asserted nothing";
 }
 
 TEST_F (ScenarioPlanTest, TiedOrdersRunInTheSameSequenceTheSidebarShows) {
@@ -335,9 +341,10 @@ TEST_F (ScenarioPlanTest, ParentIdCycleTerminatesAndVisitsEachCollectionOnce) {
     vayu::core::resolve_scenario (*db_, block ("a", /*recursive=*/true), options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
     // What is pinned is termination and each collection contributing once. The
-    // sequence follows from the subfolders-first rule - "b" is a child of "a",
-    // so its request runs first - and a cycle has no displayed order to agree
-    // with, since the sidebar renders such a row as an orphaned root.
+    // sequence follows from the sibling order - "b" is a child of "a" at the
+    // same `order` as "a"'s request, and a folder ranks first on a tie - and a
+    // cycle has no displayed order to agree with, since the sidebar renders
+    // such a row as an orphaned root.
     EXPECT_EQ (step_ids (resolved.plan), (std::vector<std::string>{ "in_b", "in_a" }));
 }
 

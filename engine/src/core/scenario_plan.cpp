@@ -99,72 +99,15 @@ std::string declared_columns_hint (const vayu::db::Collection& collection) {
  * The ordered request rows a scenario covers, before anything is composed.
  *
  * Split from composition so the plan-size cap can reject an oversized folder
- * for the cost of the row reads rather than after composing every step - and
- * so the ordering rules are readable on their own.
+ * for the cost of the row reads rather than after composing every step. A
+ * recursive run walks the subtree in the order the sidebar shows it, each
+ * sub-folder's subtree where the sub-folder sits among its parent's requests
+ * (#431, #2535; `Database::get_requests_in_subtree`).
  */
 std::vector<vayu::db::Request>
 collect_requests (vayu::db::Database& db, const std::string& root_id, bool recursive) {
-    if (!recursive) {
-        return db.get_requests_in_collection (root_id);
-    }
-
-    // One read of the collection table, grouped by parent. `get_collections`
-    // orders by `order`, so each parent's children keep that order - and the
-    // whole descent costs one query instead of one per node.
-    std::unordered_map<std::string, std::vector<vayu::db::Collection>> children;
-    for (auto& collection : db.get_collections ()) {
-        if (collection.parent_id && !collection.parent_id->empty ()) {
-            children[*collection.parent_id].push_back (std::move (collection));
-        }
-    }
-
-    // Two entry kinds share one stack. `Descend` queues a collection's subtree,
-    // `Emit` appends that collection's own requests - and because the marker is
-    // pushed *underneath* the children, every subfolder's subtree is emitted
-    // before the folder's own requests. That is the sidebar's order, which
-    // renders `childCollections` above `requests` at every depth
-    // (`CollectionItem.tsx`), and a recursive run has to execute in the order
-    // the user is looking at (issue #431, the #360 rule one level up).
-    enum class Step : std::uint8_t { Descend, Emit };
-    struct Entry {
-        Step step;
-        std::string id;
-    };
-
-    std::vector<vayu::db::Request> ordered;
-    std::unordered_set<std::string> visited;
-    std::vector<Entry> stack{ { Step::Descend, root_id } };
-    while (!stack.empty ()) {
-        const Entry entry = std::move (stack.back ());
-        stack.pop_back ();
-
-        if (entry.step == Step::Emit) {
-            for (auto& row : db.get_requests_in_collection (entry.id)) {
-                ordered.push_back (std::move (row));
-            }
-            continue;
-        }
-
-        // The visited set is what makes a corrupted `parent_id` (a self-parent,
-        // or an A -> B -> A loop written before write-time validation existed)
-        // terminate rather than grow `ordered` forever under the DB mutex -
-        // the same guard `Database::delete_collection`'s BFS carries. An `Emit`
-        // is only queued past this point, so a cycle cannot double-emit either.
-        if (!visited.insert (entry.id).second) {
-            continue;
-        }
-        stack.push_back ({ Step::Emit, entry.id });
-
-        if (auto it = children.find (entry.id); it != children.end ()) {
-            // Reversed, so the stack pops them in `collections.order`: the
-            // first child's whole subtree, then the second's, then - last -
-            // this collection's own requests.
-            for (auto child = it->second.rbegin (); child != it->second.rend (); ++child) {
-                stack.push_back ({ Step::Descend, child->id });
-            }
-        }
-    }
-    return ordered;
+    return recursive ? db.get_requests_in_subtree (root_id) :
+                       db.get_requests_in_collection (root_id);
 }
 
 /**

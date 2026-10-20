@@ -273,29 +273,39 @@ see [GET /requests](#get-requests).
 ### Ordering
 
 Collections and requests both carry an `order` column that fixes their position
-among their siblings - a collection among the children of its `parentId`, a
-request among the requests of its `collectionId`.
+among their siblings. The siblings of a row are **every child of its parent, of
+both kinds** (#2535): a collection's sub-collections and its requests share one
+`order` space, so a request can sit between two folders.
 
-**Reading.** `GET /collections` and `GET /requests` sort by `order` ascending,
-then `createdAt` ascending, then `id` ascending. All three keys are load-bearing:
-`order` alone is not a total order (every request created before explicit orders
-existed sits at `0`), and rows are stored with `INSERT OR REPLACE` on a TEXT
-primary key, which hands the row a *new* rowid on every edit - so without an
-explicit tiebreak, renaming a request silently moved it among its ties. Clients
-must apply the same rule if they sort locally; the app's `compareTreeOrder` is
-pinned to this one by
-`engine/tests/fixtures/tree-order-conformance.json`, read by both test suites.
+**Reading.** `GET /collections` and `GET /requests` each sort by `order`
+ascending, then `createdAt` ascending, then `id` ascending. All three keys are
+load-bearing: `order` alone is not a total order (every request created before
+explicit orders existed sits at `0`), and rows are stored with `INSERT OR
+REPLACE` on a TEXT primary key, which hands the row a *new* rowid on every edit -
+so without an explicit tiebreak, renaming a request silently moved it among its
+ties.
 
-A collection's sub-collections and its requests are **two separate blocks**, so
-`order` never interleaves them - a request and a subfolder in one folder can hold
-the same value. Where the two blocks sit relative to each other is the tree's
-rule rather than the column's: subfolders first, which is also the order a
-recursive [collection run](#the-scenario-block-collection-runs) executes in,
-pinned across both consumers by
-`engine/tests/fixtures/recursive-run-order-conformance.json`.
+A client that lists a parent's children merges the two lists by `order`, and on
+an `order` tie ranks the **sub-collection before the request**, ahead of
+`createdAt` and `id`: the sibling order is `(order, kind, createdAt, id)`, which
+within one kind is the three-key rule above unchanged. The engine's copy is
+`engine/include/vayu/db/sibling_order.hpp`; the app's `compareTreeOrder` is
+pinned to it by `engine/tests/fixtures/tree-order-conformance.json`, read by
+both test suites. A recursive
+[collection run](#the-scenario-block-collection-runs) walks the same merged list
+depth-first, a request where it sits and a sub-collection's whole subtree where
+the sub-collection sits, pinned across both consumers by
+`engine/tests/fixtures/recursive-run-order-conformance.json`; a mock server's
+route table and `POST /specs/export` list a subtree in that order too.
+
+A workspace from before schema version 7 numbered the two kinds apart, each
+from `0`, and showed every sub-collection above every request. The version-7
+migration moves each collection's requests past its highest sub-collection
+`order`, so that display survives (`docs/engine/db-schema.md`, Schema versions);
+rows still tied at the legacy `0` keep it through the tie rule.
 
 **Writing.** `order` defaults to "append after the current siblings" - one past
-the highest `order` any sibling holds:
+the highest `order` any sibling of either kind holds:
 
 | Write | `order` |
 |---|---|
@@ -307,8 +317,9 @@ the highest `order` any sibling holds:
 | Update, `order` `null`, no move | appended among its current siblings |
 
 A move that states no order therefore lands at the end of the destination rather
-than at whatever slot its position in the *old* list happened to name. Ordering
-*within* a list is always the caller's to state.
+than at whatever slot its position in the *old* list happened to name, after its
+folders and its requests alike. Ordering *within* a list is always the caller's
+to state, and a stated `order` may put a request between two sub-collections.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
@@ -7450,13 +7461,12 @@ inside the block rather than through `mode` / `duration` / `iterations`:
 
 The collection is resolved into an ordered, fully composed plan **once, before
 anything is sent**, in the order the sidebar displays top to bottom: direct
-requests by `requests.order` and - with `recursive` - descendant collections by
-`collections.order`, depth-first, each sub-collection's whole subtree running
-**before** its parent's own requests, and each list under the tiebreak in
-[Ordering](#ordering). Subfolders ahead of own requests is the tree's rule, not
-the column's: a folder's sub-collections and its requests are separately ordered
-blocks, so the two `order` values are free to collide, and the run follows the
-render (issue #431). Each step is
+requests by `requests.order` and - with `recursive` - each collection's
+sub-collections and requests as one sibling list, depth-first, a request
+running where it sits and a sub-collection's whole subtree where the
+sub-collection sits, under the sibling order in [Ordering](#ordering) (a
+sub-collection first on an `order` tie). The run follows the render (issues
+#431, #2535). Each step is
 composed through the same path `POST /compose` uses, so a step's request and
 joined scripts are byte-identical to what a Send of that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath

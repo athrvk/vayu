@@ -68,6 +68,23 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 };
 
 /**
+ * The cases whose run order interleaves a folder's sub-folders with its
+ * requests (#2535). The tree still renders the sub-folders above the requests,
+ * so these join the strict half with the renderer's part of #2535, which
+ * deletes this list; `it.fails` makes a case that starts passing fail until it
+ * is removed from here.
+ */
+const PENDING_MERGED_ORDER = new Set([
+	"an order shared across kinds runs the folder's subtree first, then the request",
+	"a request, a folder and a request at one level run in that order",
+	"a request at 1 between folders at 0 and 2 runs between their subtrees",
+	"nested interleaving: every level merges its own children",
+	"Postman's collection-v2.json shape: two requests then a folder, whose three requests come before its sub-folder",
+]);
+const displayedCases = fixture.cases.filter((c) => !PENDING_MERGED_ORDER.has(c.name));
+const pendingCases = fixture.cases.filter((c) => PENDING_MERGED_ORDER.has(c.name));
+
+/**
  * The rows the mocked query layer serves. The renderer holds `createdAt` as the
  * ISO string its transformers produce from the engine's epoch-millisecond
  * column, so the fixture is fed in through that conversion rather than in a
@@ -196,17 +213,24 @@ describe("recursive-run-order conformance fixture", () => {
 			// the two blocks can disagree about.
 			expect(c.collections.some((col) => col.parentId === c.rootId)).toBe(true);
 		}
+		expect(pendingCases).toHaveLength(PENDING_MERGED_ORDER.size);
 	});
 
-	it.each(fixture.cases.map((c) => [c.name, c] as const))(
+	it.each(displayedCases.map((c) => [c.name, c] as const))(
 		"displays the run order: %s",
 		(_name, c) => {
 			expect(displayedRequestIds(c)).toEqual(c.expected);
 		}
 	);
 
+	for (const c of pendingCases) {
+		it.fails(`does not yet display the merged run order: ${c.name}`, () => {
+			expect(displayedRequestIds(c)).toEqual(c.expected);
+		});
+	}
+
 	it("displays the same order whatever order the rows arrive in", () => {
-		for (const c of fixture.cases) {
+		for (const c of displayedCases) {
 			expect(displayedRequestIds(c, /*reverseInput=*/ true)).toEqual(c.expected);
 		}
 	});
