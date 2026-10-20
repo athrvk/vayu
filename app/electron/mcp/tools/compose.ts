@@ -766,10 +766,12 @@ export function describeLoadShape(shape: LoadShape): string {
 export const MAX_IN_FLIGHT_BOUND = 1_000_000;
 
 /**
- * The engine's guards on the two numeric recording knobs
+ * The engine's guards on the numeric recording knobs
  * (`validate_run_config`, `engine/src/http/routes/execution.cpp`), mirrored for
  * the reason {@link MAX_IN_FLIGHT_BOUND} is: the schema refuses an
- * out-of-range value by name instead of surfacing a `400`.
+ * out-of-range value by name instead of surfacing a `400`. The two response
+ * sample bounds are `response_sample_rate` (a period, so 1 and up) and
+ * `max_response_samples` (`run_config::MAX_RESPONSE_SAMPLES`; 0 keeps none).
  *
  * Deliberately *not* the load dialog's own ceilings - `LOAD_TEST_LIMITS`
  * narrows the slow threshold to a minute because that is a sensible thing to
@@ -779,6 +781,8 @@ export const MAX_IN_FLIGHT_BOUND = 1_000_000;
  */
 export const MAX_SUCCESS_SAMPLE_PERIOD = 100_000;
 export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
+export const MAX_RESPONSE_SAMPLE_PERIOD = 100_000;
+export const MAX_RESPONSE_SAMPLES_BOUND = 1_000_000;
 
 /**
  * The redirect ceiling `apply_request_fields` clamps a stored request to
@@ -797,18 +801,22 @@ export const MAX_SLOW_THRESHOLD_MS = 86_400_000;
 export const MAX_REDIRECTS_BOUND = 100;
 
 /**
- * The recording knobs the app's load dialog sends, as `{tool argument: run
- * config key}`. Two spellings because the engine's are snake_case here and only
- * here - `success_sample_rate` is not a rate but a *period* (keep 1 in N), and
- * the app's own `StartLoadTestRequest` carries a comment saying so. The
- * argument is named for what the value means; the payload key stays the
- * engine's, so `get_run_report`'s echo of the config snapshot matches what a
- * run was started with.
+ * The recording knobs of a load run, as `{tool argument: run config key}`. Two
+ * spellings because the engine's are snake_case here and only here -
+ * `success_sample_rate` and `response_sample_rate` are not rates but *periods*
+ * (keep 1 in N), and the app's own `StartLoadTestRequest` carries a comment
+ * saying so. The argument is named for what the value means; the payload key
+ * stays the engine's, so `get_run_report`'s echo of the config snapshot matches
+ * what a run was started with. The load dialog sends the first three of these
+ * and neither response-sample key (#2447), so only an agent ever changes the
+ * samples `get_run_samples` reads.
  */
 const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]> = [
 	["successSamplePeriod", "success_sample_rate"],
 	["slowRequestThresholdMs", "slow_threshold_ms"],
 	["saveTimingBreakdown", "save_timing_breakdown"],
+	["responseSamplePeriod", "response_sample_rate"],
+	["maxResponseSamples", "max_response_samples"],
 ];
 
 /**
@@ -816,8 +824,8 @@ const LOAD_RECORDING_FIELDS: ReadonlyArray<[argument: string, configKey: string]
  *
  * Shared by both load paths because both read them: a scenario load run is
  * driven by the same `RunContext`, whose constructor is the one place
- * `success_sample_rate` / `save_timing_breakdown` / `slow_threshold_ms` are
- * read (`core/run_manager.cpp`), and `comment` is lifted into the run summary
+ * `success_sample_rate` / `save_timing_breakdown` / `slow_threshold_ms` and the
+ * two response-sample keys are read (`core/run_manager.cpp`), and `comment` is lifted into the run summary
  * and the report's `metadata.configuration` by `routes/runs.cpp` whichever
  * executor produced the run. Forwarding them on one path only would have been a
  * knob that silently did nothing on the other.
