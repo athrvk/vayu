@@ -522,7 +522,7 @@ Vayu's variable record has a field for the value and the secret flag only (see
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
-  rows are preserved.
+  rows are preserved. A `form-data` part also carries `contentType?`, its own `Content-Type`.
 - `VariableValue`: `{ value: string, enabled: boolean, secret? }` - all values are strings.
 - `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql"|"jsonrpc"|"xml", content}` |
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
@@ -608,9 +608,10 @@ remain non-executable and are counted in `meta.nonExecutableAuth`.
 
 ### postman_raw_body
 `postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
-directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
-`text`) and never guesses `xml`, keeping the declared language (or `""` for none) as
-`rawLanguage`. Public in `import_document.hpp`: the Postman exporter calls it to decide
+directly; any other declared language is `text` whatever the content looks like (as Postman
+sends it), kept as `rawLanguage`, and `html`/`javascript` also gain their `Content-Type` row
+(`with_required_content_type`). Only a body with no language sniffs via `JSON.parse` (success →
+`json`, else `text`), never guessing `xml`, with `rawLanguage: ""`. Public in `import_document.hpp`: the Postman exporter calls it to decide
 whether a kept `rawLanguage` still describes the stored body.
 
 ### join_exec

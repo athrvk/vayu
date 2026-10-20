@@ -608,11 +608,14 @@ key an older client sends (`apply_request_fields`), and the
 removed it from every row written before. A text part may also carry
 `"type":"text"`. No file's bytes are ever stored; a binary body needs a `file`
 object (schema version 3).
-A `json` or `text` body a Postman import sniffed also carries `rawLanguage`:
-the `options.raw.language` the document declared when it named no Vayu mode
-(`"javascript"`, `"html"`), or `""` when it declared none. Nothing sends it;
-the Postman exporter writes it back while the body still sniffs to its stored
-mode, so an unlabelled body exports without `options` as Postman wrote it.
+A `json` or `text` body a Postman import produced from a raw body also
+carries `rawLanguage`: the `options.raw.language` the document declared when it
+named no Vayu mode (`"javascript"`, `"html"`, `"yaml"`; the body is `text`), or
+`""` when it declared none (the body was sniffed). Nothing sends it, though the
+import wrote the `Content-Type` row `html` and `javascript` need as an ordinary
+`body-mode` header row. The Postman exporter writes it back while importing the
+body again would still give its stored mode, so an unlabelled body exports
+without `options` as Postman wrote it.
 
 **auth** - discriminated union (same shape as collection auth, plus `inherit`):
 ```json

@@ -543,6 +543,32 @@ TEST (JsonRequest, SerializesHttpVersion) {
     EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
 }
 
+// A form-data part's own `contentType` survives serialize -> deserialize on a
+// text part as it does on a file part, and a part without one writes no key
+// (#2539). Mutation check: put the `contentType` write back inside the file
+// branch of `serialize_form_fields` and the text part loses it.
+TEST (JsonRequest, ATextPartsContentTypeRoundTripsAndAnAbsentOneWritesNoKey) {
+    vayu::Request req;
+    req.method    = vayu::HttpMethod::POST;
+    req.url       = "https://x/y";
+    req.body.mode = vayu::BodyMode::FormData;
+    vayu::FormField typed ("meta", "{}");
+    typed.content_type = "application/json";
+    req.body.fields    = { typed, vayu::FormField ("plain", "v") };
+
+    const auto written = serialize (req).at ("body").at ("fields");
+    EXPECT_EQ (written[0].at ("contentType"), "application/json");
+    EXPECT_FALSE (written[0].contains ("type"));
+    EXPECT_FALSE (written[1].contains ("contentType"));
+
+    auto read = deserialize_request (serialize (req).dump ());
+    ASSERT_TRUE (read.is_ok ());
+    ASSERT_EQ (read.value ().body.fields.size (), 2U);
+    EXPECT_EQ (read.value ().body.fields[0].type, vayu::FormFieldType::Text);
+    EXPECT_EQ (read.value ().body.fields[0].content_type, "application/json");
+    EXPECT_TRUE (read.value ().body.fields[1].content_type.empty ());
+}
+
 // GET /runs/:id: the full configSnapshot, nested keys included, and no
 // `summary` (the list row's compact stand-in for it).
 TEST (JsonTest, SerializesRun) {

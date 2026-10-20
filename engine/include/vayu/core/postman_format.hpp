@@ -28,9 +28,38 @@ constexpr std::string_view SCHEMA_V21 =
 "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
 
 /// The raw-body `options.raw.language` values that are a Vayu body mode of
-/// the same name. Every other language imports by sniffing the content.
+/// the same name. A body declaring any other language imports as `text` and
+/// keeps the declaration (`rawLanguage`); only a body declaring none is
+/// sniffed for JSON.
 constexpr auto RAW_LANGUAGES =
 std::to_array<std::string_view> ({ "json", "text", "xml" });
+
+/// A raw-body language and the Content-Type Postman sends for it.
+struct LanguageContentType {
+    std::string_view language;
+    std::string_view content_type;
+};
+
+/**
+ * The languages with no body mode of their own whose Content-Type is not the
+ * `text/plain` a `text` body already goes out under (Postman's
+ * `CONTENT_TYPE_LANGUAGE`). The importer writes the row for a body declaring
+ * one, and the exporter leaves that row to Postman, which adds it itself.
+ */
+constexpr auto LANGUAGE_CONTENT_TYPES = std::to_array<LanguageContentType> ({
+{ "html", "text/html" },
+{ "javascript", "application/javascript" },
+});
+
+/// The Content-Type @p language needs a row for, or "" when it needs none.
+constexpr std::string_view content_type_of_language (std::string_view language) {
+    for (const LanguageContentType& row : LANGUAGE_CONTENT_TYPES) {
+        if (row.language == language) {
+            return row.content_type;
+        }
+    }
+    return {};
+}
 
 /// A Vayu auth mode stored as `{mode, config}` and the Postman auth `type`
 /// whose attribute array is that `config`, key for key.

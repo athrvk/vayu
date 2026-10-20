@@ -85,13 +85,19 @@ postman_raw_body (const std::string& content, const std::string* language) {
             }
         }
     }
-    // No language Vayu has a mode for: sniff JSON, and keep what was declared
-    // so the export can say it again rather than the mode's own name.
+    // A language Vayu has no mode for is plain text on the wire, as in
+    // Postman, whatever the content looks like (#2539); keep the declaration
+    // so the export can say it again and `with_required_content_type` can
+    // write the row `html` and `javascript` need.
+    if (language != nullptr && !language->empty ()) {
+        return nlohmann::ordered_json{ { "mode", "text" },
+            { "content", content }, { "rawLanguage", *language } };
+    }
+    // No language declared: sniff JSON, as an unlabelled body has always been.
     const bool is_json =
     utils::parse_ordered_json (content, utils::ORDERED_JSON_UNBOUNDED).has_value ();
     return nlohmann::ordered_json{ { "mode", is_json ? "json" : "text" },
-        { "content", content },
-        { "rawLanguage", language == nullptr ? std::string () : *language } };
+        { "content", content }, { "rawLanguage", std::string () } };
 }
 
 /**
@@ -351,19 +357,27 @@ int count_examples (const json& collections) {
     return count;
 }
 
-/// The Content-Type a body mode must be sent with, or "" when it needs none.
+/// The Content-Type @p body must be sent with, or "" when it needs no row.
 ///
 /// The app-side half of the engine's own `implied_content_type`
 /// (`http/form_body.cpp`), which is what actually reaches the wire; this one
 /// writes the header *row* an imported request carries, so the user can see it.
 /// `json` and `text` are deliberately absent: the engine derives each at send
 /// time (`application/json`, `text/plain`) with no row, as the Body panel
-/// writes none for `text`.
-std::string required_content_type (const std::string& mode) {
+/// writes none for `text`. A `text` body that declared `html` or `javascript`
+/// is the exception, because those go out under their own type (#2539).
+std::string required_content_type (const json& body) {
+    const std::string mode = body.at ("mode").get<std::string> ();
     if (mode == "graphql" || mode == "jsonrpc") {
         return "application/json";
     }
-    return mode == "xml" ? "application/xml" : std::string ();
+    if (mode == "xml") {
+        return "application/xml";
+    }
+    const std::string* language = as_str (prop (&body, "rawLanguage"));
+    return language == nullptr ?
+    std::string () :
+    std::string (postman::content_type_of_language (*language));
 }
 
 /**
@@ -379,8 +393,7 @@ std::string required_content_type (const std::string& mode) {
  * none, so none is added.
  */
 json with_required_content_type (json headers, const json& body, bool refused = false) {
-    const std::string required =
-    required_content_type (body.at ("mode").get<std::string> ());
+    const std::string required = required_content_type (body);
     if (required.empty () || refused) {
         return headers;
     }
@@ -1015,20 +1028,24 @@ json formdata_fields (const json* rows, PostmanCounts& counts) {
         const json single = json::array ({ row });
         const json mapped = map_key_values (&single);
         const json* type  = prop (&row, "type");
-        if (type == nullptr || *type != "file") {
-            for (const json& entry : mapped) {
-                out.push_back (entry);
-            }
+        if (mapped.empty ()) {
             continue;
         }
-        if (mapped.empty ()) {
+        const std::string* content_type = as_str (prop (&row, "contentType"));
+        if (type == nullptr || *type != "file") {
+            // A text part's own type (`{"contentType": "application/json"}`),
+            // which Postman sends as that part's Content-Type (#2539).
+            json text_part = mapped[0];
+            if (content_type != nullptr && !content_type->empty ()) {
+                text_part["contentType"] = *content_type;
+            }
+            out.push_back (std::move (text_part));
             continue;
         }
         std::vector<std::string> paths = file_part_paths (prop (&row, "src"));
         if (paths.empty ()) {
             paths.emplace_back ();
         }
-        const std::string* content_type = as_str (prop (&row, "contentType"));
         for (const std::string& path : paths) {
             out.push_back (imported_file_part (mapped[0], path, content_type));
         }

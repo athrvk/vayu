@@ -207,7 +207,7 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 |---------------------|--------------------|-------|
 | `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)`, a row's non-`"text"` `type` kept as on a header |
-| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), which the parse answer marks `unresolved` unless this machine already allows it. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
+| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`, a non-empty `contentType` on one kept on the field (the engine sends it as that part's own `Content-Type`, issue #2539); a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), which the parse answer marks `unresolved` unless this machine already allows it. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
 | `file` | `{ mode: "binary", file: { src, fileName } }` | `src` is `body.file.src` as written and `fileName` its base name; `src: null` or no `file` (Postman's shape before a file is chosen) imports as `{ src: "" }`, no file chosen. Counted as `file_body`, a file reference to relink |
 | anything else | `{ mode: "none" }` | |
@@ -218,27 +218,39 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 
 **GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** a GraphQL body is a JSON envelope, so the request needs `Content-Type: application/json` - and Vayu's request builder adds that header only when you *pick* GraphQL, which an import never does. The header was therefore absent, and libcurl defaults to `application/x-www-form-urlencoded`, which most GraphQL servers answer with a `400`; nothing in the app said why. The header is now written at import, by the engine's port of the rule the mode picker uses (`contentTypeToAdd`): a Content-Type the collection declares wins (including a deliberate `application/graphql`), and a **disabled** row does not count as declaring one. The row is written as the body mode's own (`"source": "body-mode"`, the marker the Body panel writes), because Postman treats a body's Content-Type as a system header: a request whose `disabledSystemHeaders` refuses `content-type` gets no row at all, and a later opt-out in Vayu removes the marked row from the wire while a Content-Type the user typed is always sent (issue #1765). The export leaves the marked row out while Postman would add the same header on its own.
 
-**Raw language sniffing (`postman_raw_body` in `import_document.cpp`):**
+**Raw language (`postman_raw_body` in `import_document.cpp`):**
 
 | `options.raw.language` | Result |
 |------------------------|--------|
 | `"json"` | `{ mode: "json", content }` |
 | `"text"` | `{ mode: "text", content }` |
-| `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `with_required_content_type` rule GraphQL uses (below) |
-| absent / other | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` - with `rawLanguage` beside it: the declared language (`"javascript"`, `"html"`), or `""` when none was declared |
+| `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `with_required_content_type` rule GraphQL uses (above) |
+| `"html"`, `"javascript"` | `{ mode: "text", content, rawLanguage }` - and the request gains `Content-Type: text/html` / `application/javascript` as the body mode's own row (`"source": "body-mode"`), whatever the content looks like (HTML that happens to parse as JSON is still `text/html`) |
+| any other declared language (`"yaml"`, ...) | `{ mode: "text", content, rawLanguage }`, no row: sent as `text/plain`, as Postman sends it, even when the content parses as JSON |
+| absent | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` - with `rawLanguage: ""` beside it |
 
-`rawLanguage` changes nothing about what is sent - the sniffed mode decides
-that, as before. It is what the Postman export reads to write the body's
-`options` back as the document had them: none at all for an unlabelled body
-(the common shape in generated collections), the declared language otherwise.
+The language-to-type table is `LANGUAGE_CONTENT_TYPES` in `postman_format.hpp`,
+beside `RAW_LANGUAGES`, and holds only the languages that need a row: `json`,
+`xml` and `text` are modes the engine already sends under their own type.
+The row follows the GraphQL rules: an enabled Content-Type the request
+declares wins, a disabled one does not count, and a request whose
+`disabledSystemHeaders` refuses `content-type` gets none.
+
+`rawLanguage` is what the Postman export reads to write the body's `options`
+back as the document had them: none at all for an unlabelled body (the common
+shape in generated collections), the declared language otherwise.
 `postman_raw_body` is the one mapping both directions call, so the exporter
 writes a kept `rawLanguage` only while importing the body again would still
-give its stored mode.
+give its stored mode. The export leaves the `html` / `javascript` row out for
+the same reason it leaves GraphQL's: Postman adds that header itself from the
+language.
 
-An unlabelled body is never sniffed into `xml`: without Postman's language, a
-`<`-shaped document is as likely to be HTML, and guessing would hand the request
-a Content-Type the server may disagree with. `"xml"` is the only new mapping -
-`"html"`, `"javascript"` and the rest still fall through to the sniff.
+**An unlabelled body still differs from Postman.** Postman sends a body with no
+declared language as `text/plain`; Vayu sniffs it, so JSON-looking content is
+sent as `application/json` and the rest as `text/plain`. That is the one
+place a body's wire type differs from Postman's. It is also never sniffed into `xml`:
+without Postman's language, a `<`-shaped document is as likely to be HTML, and
+guessing would hand the request a Content-Type the server may disagree with.
 
 **File references are imported, never dropped.** A `file` body and every
 `formdata` file entry keep the path the export named. A path names a file on
@@ -332,7 +344,7 @@ All defined in `engine/src/core/import_document.cpp` (except `normalize_template
 | [`to_var_record`](./README.md#to_var_record) | collection/folder `variable[]` → `CollectionDraft.variables` |
 | [`map_key_values`](./README.md#map_key_values) | `header[]`, `query[]`, `urlencoded[]`, `formdata[]` → `KeyValueEntry[]` (preserves disabled + duplicates) |
 | [`map_postman_auth`](./README.md#map_postman_auth) | `auth` object → `RequestAuth` (request and, via `collectionAuth`, collection/folder) |
-| `postman_raw_body` | raw-mode body → `RequestBody` with JSON/text language sniffing, keeping a declared language Vayu has no mode for (shared with the exporter) |
+| `postman_raw_body` | raw-mode body → `RequestBody`: a declared language maps to its mode or to `text` (kept as `rawLanguage`), an unlabelled body is sniffed for JSON (shared with the exporter) |
 | [`join_exec`](./README.md#join_exec) | `event.script.exec` → joined script string |
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | rewrite `{{ x }}` / `{{ _.x }}` template syntax to Vayu `{{x}}` (`path_template.cpp`); applied to URLs, values, vars, and auth fields. Called **without** `pathTemplates`, so a literal single-brace `{x}` is left alone - in Postman only `{{x}}` is a template, and rewriting `/tags/{beta}` or `fields=friends{name}` invented a variable that resolved to nothing |
 
@@ -389,6 +401,9 @@ the request as it is at export time.
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.
+
+A form-data part exports with its own `contentType` when it has one, a text
+part as well as a file part.
 
 A binary body exports as Postman's `file` mode naming the file's path
 (`file.src`), as a form-data file part names its own; a file's own content type
