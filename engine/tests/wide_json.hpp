@@ -24,8 +24,23 @@
 
 namespace vayu::tests {
 
-/// Generous for a linear parse in a Debug build; the quadratic one is far past it.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define VAYU_WIDE_JSON_SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define VAYU_WIDE_JSON_SANITIZED 1
+#endif
+#endif
+
+/// Generous for a linear parse in a Debug build; the quadratic one is far past
+/// it (minutes). A sanitizer slows the linear parse and the route around it by
+/// an order of magnitude (the macOS TSan leg went past 5 s), so the budget
+/// scales with it and the quadratic parse stays far past that too.
+#ifdef VAYU_WIDE_JSON_SANITIZED
+inline constexpr auto LINEAR_PARSE_BUDGET = std::chrono::seconds (60);
+#else
 inline constexpr auto LINEAR_PARSE_BUDGET = std::chrono::seconds (5);
+#endif
 
 /// How many members `wide_object_json` writes.
 inline constexpr size_t WIDE_OBJECT_KEYS = 100'000;
