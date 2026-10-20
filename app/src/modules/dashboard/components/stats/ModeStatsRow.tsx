@@ -18,8 +18,9 @@
  *
  * The three throughput-led modes show three cards: their p99 sits in the hero
  * row's latency card (`LatencyPercentilesCard`, beside p95, over the run so
- * far), so it is not drawn twice. ramp_up and capacity keep p99 here, as p99 at peak. Shared cards
- * (Duration / Total / Peak) live here; the mode-only cards live in
+ * far), so it is not drawn twice. ramp_up and capacity keep p99 here, as p99
+ * at peak. Shared cards (Duration / Total / Peak) live here; the mode-only
+ * cards live in
  * ModeStatCards.tsx. Consumes {@link DashboardDerived}; never re-derives from
  * raw metrics. All InfoChip copy via TOOLTIPS.
  */
