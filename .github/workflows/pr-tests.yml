@@ -576,25 +576,21 @@ jobs:
         # the macOS runner is the only one that has ever caught a regression in
         # the macOS branch - see the testing section of CLAUDE.md.
         #
-        # Windows is split in two because it is the wall of every app-only pull
-        # request: one unsharded run measured 7m35s-7m58s there against ~5 min
-        # on the other two, for a 9m03s-9m12s job. The suite is already parallel
-        # within a run (`pool: threads`, no worker cap) - the second runner buys
-        # what more threads on one runner cannot. ubuntu and macOS stay
-        # unsharded: they are not the wall, and a second runner each would cost
-        # more than it saves.
+        # Every platform runs the suite as two shards on two runners. Windows was
+        # split first, as the wall of every app-only pull request; the suite then
+        # grew until the unsharded legs were the wall too - on 2026-10-20 the
+        # vitest step alone took 12m on ubuntu and 15m30s on macOS, inside a
+        # 20-minute job, so a slow macOS runner was cancelled for slowness and
+        # the pull request re-run. The suite is already parallel within a run
+        # (`pool: threads`, no worker cap) - the second runner buys what more
+        # threads on one runner cannot.
         #
         # `shard` is the literal vitest argument, so the index and the count
-        # cannot drift apart. Adding a third shard means adding `3/3` here *and*
-        # renumbering the others - the coverage check in `ci-gate` fails loudly
-        # if that is done by halves.
-        include:
-          - os: ubuntu-latest
-          - os: macos-latest
-          - os: windows-latest
-            shard: 1/2
-          - os: windows-latest
-            shard: 2/2
+        # cannot drift apart. Adding a third shard means changing this list
+        # *and* the count `ci-gate` expects per platform - the coverage check
+        # fails loudly if that is done by halves.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        shard: [1/2, 2/2]
     # Roughly 4 minutes on the slowest runner; the ceiling is for a cold pnpm
     # store, not for the steady state.
     timeout-minutes: 20
@@ -621,34 +617,34 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      # One step rather than two `if`-guarded ones, so the unsharded and sharded
-      # invocations cannot drift. The json report is written only where it is
-      # read - by the manifest step below.
+      # The json report is read by the manifest step below.
+      #
+      # The step has its own ceiling, under the job's: a shard measured 7-10
+      # minutes, and a hung one (2026-10-20, Windows shard 1/2, 24 minutes in
+      # this step) was cancelled with the job and left no log to say which file
+      # hung. A step that times out fails and keeps its log.
       - name: Run frontend tests
         working-directory: app
         shell: bash
+        timeout-minutes: 15
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          if [[ -z "$SHARD" ]]; then
-            pnpm test
-          else
-            pnpm test --shard="$SHARD" --reporter=default --reporter=json --outputFile.json=vitest-shard.json
-          fi
+          pnpm test --shard="$SHARD" --reporter=default --reporter=json --outputFile.json=vitest-shard.json
 
       # A sharded suite is green when each shard is green, which is also true of
       # a shard that ran nothing at all. These two files are what makes the
       # difference visible: what this shard ran, and what the suite contains.
       # `ci-gate` unions them across the shards and compares.
       - name: Record what this shard ran
-        if: matrix.shard
         id: manifest
         working-directory: app
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
+          OS: ${{ matrix.os }}
         run: |
-          index="${SHARD%%/*}"
+          index="${OS}-${SHARD%%/*}"
           node scripts/shard-manifest.mjs vitest-shard.json > "shard-${index}.txt"
           pnpm exec vitest list --filesOnly | node scripts/shard-manifest.mjs - > "full-suite-${index}.txt"
           ran=$(wc -l < "shard-${index}.txt")
@@ -667,7 +663,6 @@ jobs:
           echo "- shard \`$SHARD\` ran **$ran** of **$total** test files" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload this shard's manifest
-        if: matrix.shard
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ steps.manifest.outputs.artifact }}
@@ -1510,9 +1505,9 @@ jobs:
       actions: read
     steps:
       # The shard coverage proof lives here rather than in a job of its own
-      # because this is the only job that already runs after both Windows
-      # shards, and two file downloads add seconds to it instead of a runner
-      # start to the wall clock. It runs before the result check below so that a
+      # because this is the only job that already runs after every app shard,
+      # and six file downloads add seconds to it instead of a runner start to
+      # the wall clock. It runs before the result check below so that a
       # suite which was half-run is reported as such even on a run where every
       # job is green - which is exactly the shape of the failure it guards.
       - name: Collect the app shard manifests
@@ -1528,39 +1523,52 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          manifests=(shard-manifests/shard-*.txt)
-          suites=(shard-manifests/full-suite-*.txt)
+          # The app matrix's platforms and its per-platform shard count. A
+          # matrix that gains or loses either without this following it fails
+          # below, rather than leaving part of the suite run nowhere.
+          platforms=(ubuntu-latest macos-latest windows-latest)
+          shards=2
+          status=0
 
-          # One manifest per sharded leg. A count that is not 2 means the matrix
-          # gained or lost a shard without this number following it - the case
-          # where `1/2` and `2/3` coexist and a third of the suite runs nowhere.
-          if [[ ${#manifests[@]} -ne 2 || ${#suites[@]} -ne 2 ]]; then
-            echo "::error::Expected 2 shard manifests, found ${#manifests[@]}"
-            exit 1
-          fi
+          for os in "${platforms[@]}"; do
+            manifests=(shard-manifests/shard-"$os"-*.txt)
+            suites=(shard-manifests/full-suite-"$os"-*.txt)
 
-          # Both shards enumerate the suite from the same commit, so a
-          # disagreement means one of them was looking at a different tree and
-          # the comparison below would prove nothing.
-          if ! diff -u "${suites[0]}" "${suites[1]}"; then
-            echo "::error::The shards disagree about which test files exist"
-            exit 1
-          fi
+            if [[ ${#manifests[@]} -ne $shards || ${#suites[@]} -ne $shards ]]; then
+              echo "::error::$os: expected $shards shard manifests, found ${#manifests[@]}"
+              status=1
+              continue
+            fi
 
-          duplicated=$(sort "${manifests[@]}" | uniq -d)
-          if [[ -n "$duplicated" ]]; then
-            echo "::error::Shards overlap - these files ran twice:"
-            echo "$duplicated"
-            exit 1
-          fi
+            # Every shard enumerates the suite from the same commit, so a
+            # disagreement means one was looking at a different tree and the
+            # comparison below would prove nothing.
+            for suite in "${suites[@]:1}"; do
+              if ! diff -u "${suites[0]}" "$suite"; then
+                echo "::error::$os: the shards disagree about which test files exist"
+                status=1
+                continue 2
+              fi
+            done
 
-          sort -u "${manifests[@]}" > union.txt
-          if ! diff -u union.txt "${suites[0]}"; then
-            echo "::error::The shards did not run every test file (- ran, + expected)"
-            exit 1
-          fi
+            duplicated=$(sort "${manifests[@]}" | uniq -d)
+            if [[ -n "$duplicated" ]]; then
+              echo "::error::$os: shards overlap - these files ran twice:"
+              echo "$duplicated"
+              status=1
+              continue
+            fi
 
-          echo "- Windows shards covered all **$(wc -l < union.txt)** test files, none twice" >> "$GITHUB_STEP_SUMMARY"
+            sort -u "${manifests[@]}" > "union-$os.txt"
+            if ! diff -u "union-$os.txt" "${suites[0]}"; then
+              echo "::error::$os: the shards did not run every test file (- ran, + expected)"
+              status=1
+              continue
+            fi
+
+            echo "- $os shards covered all **$(wc -l < "union-$os.txt")** test files, none twice" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit $status
 
       - name: Pass if every job succeeded or was skipped
         run: |
