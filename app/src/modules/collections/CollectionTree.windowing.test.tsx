@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
@@ -471,20 +471,33 @@ describe("a drag in a windowed tree", () => {
 				clientX: 10,
 				clientY: startY,
 			});
+			// A press is not a drag yet, and takes no capture: a captured press
+			// clicks the capturing element rather than the row's own controls.
+			expect(treeList().hasPointerCapture(1)).toBe(false);
 			fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: startY + 6 });
+			// Past the threshold the tree takes it, not the row, which the drawer
+			// is about to scroll away from.
+			expect(treeList().hasPointerCapture(1)).toBe(true);
+			expect(source.hasPointerCapture(1)).toBe(false);
+			// From here every event goes where the capture sends it: the tree.
 			// Into the bottom band: the drawer scrolls a step a frame.
-			fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: VIEWPORT_PX - 4 });
+			fireEvent.pointerMove(treeList(), {
+				pointerId: 1,
+				clientX: 10,
+				clientY: VIEWPORT_PX - 4,
+			});
 			for (let frame = 0; frame < 200; frame++) flushFrame();
 			expect(scroller().scrollTop).toBeGreaterThan(1500);
 
-			// The source is far above the window now, and still holds the gesture.
+			// The source is far above the window now, and stays mounted.
 			expect(requestRow(2)).toBe(source);
 			const target = rowAtPoint(10, 300)!;
 			expect(target).not.toBeNull();
 			const targetIndex = Number(target.getAttribute("data-request-id")!.slice(1));
 			expect(targetIndex).toBeGreaterThan(40);
-			fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: 300 });
-			fireEvent.pointerUp(source, { pointerId: 1, clientX: 10, clientY: 300 });
+			fireEvent.pointerMove(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
+			fireEvent.pointerUp(treeList(), { pointerId: 1, clientX: 10, clientY: 300 });
+			expect(treeList().hasPointerCapture(1)).toBe(false);
 
 			expect(reorderMutate).toHaveBeenCalledTimes(1);
 			const [plan] = reorderMutate.mock.calls[0];
@@ -494,4 +507,63 @@ describe("a drag in a windowed tree", () => {
 			);
 		}
 	);
+});
+
+describe("one menu and one set of drag handlers for the whole tree", () => {
+	/** The menu open now, by the name it gives itself. */
+	const openMenu = () => screen.getByRole("menu");
+
+	it(
+		"mounts one right-click trigger, the tree itself, however many rows are mounted",
+		{ timeout: CASE_TIMEOUT_MS },
+		() => {
+			renderTree();
+
+			// Enough rows that a trigger per row could not hide in the count.
+			expect(treeItems().length).toBeGreaterThan(20);
+			const triggers = document.querySelectorAll('[data-slot="context-menu-trigger"]');
+			expect(triggers).toHaveLength(1);
+			expect(triggers[0]).toBe(treeList());
+		}
+	);
+
+	it(
+		"opens the actions of the row under the pointer, and switches with the pointer",
+		{ timeout: CASE_TIMEOUT_MS },
+		async () => {
+			renderTree();
+
+			fireEvent.contextMenu(requestRow(5)!);
+			await waitFor(() =>
+				expect(openMenu()).toHaveAccessibleName("More actions for request Request 5")
+			);
+			expect(screen.getByRole("menuitem", { name: /Duplicate/ })).toBeInTheDocument();
+
+			fireEvent.contextMenu(collectionRow("big")!);
+			await waitFor(() => expect(openMenu()).toHaveAccessibleName("More actions for Big"));
+			expect(screen.queryByRole("menuitem", { name: /Duplicate/ })).toBeNull();
+			expect(screen.getByRole("menuitem", { name: /Add collection/ })).toBeInTheDocument();
+
+			// And on a row the first window did not hold, the action is that row's.
+			scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
+			fireEvent.contextMenu(requestRow(603)!);
+			await waitFor(() =>
+				expect(openMenu()).toHaveAccessibleName("More actions for request Request 603")
+			);
+			fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }));
+			await waitFor(() => expect(requestRow(603)!.querySelector("input")).not.toBeNull());
+			expect(requestRow(603)!.querySelector("input")).toHaveValue("Request 603");
+		}
+	);
+
+	it("leaves a right-click beside the rows to the platform", { timeout: CASE_TIMEOUT_MS }, () => {
+		renderTree();
+		const spacer = document.querySelector<HTMLElement>("[data-tree-spacer]")!;
+		expect(spacer).not.toBeNull();
+
+		// `fireEvent` answers whether the default survived: nothing called
+		// `preventDefault`, so the platform's own menu is what the user gets.
+		expect(fireEvent.contextMenu(spacer)).toBe(true);
+		expect(screen.queryByRole("menu")).toBeNull();
+	});
 });

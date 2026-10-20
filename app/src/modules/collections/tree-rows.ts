@@ -116,6 +116,28 @@ export function entityRowKey(entity: Pick<TreeEntity, "kind" | "id">): string {
 	return entity.kind === "collection" ? folderRowKey(entity.id) : requestRowKey(entity.id);
 }
 
+/** What a drag and a row's menu act on, for a folder row's collection. */
+export function collectionEntity(collection: Collection): TreeEntity {
+	return {
+		kind: "collection",
+		id: collection.id,
+		name: collection.name,
+		parentId: collection.parentId ?? null,
+	};
+}
+
+/** The same for a request, listed under `collectionId`. */
+export function requestEntity(request: Request, collectionId: string): TreeEntity {
+	return { kind: "request", id: request.id, name: request.name, collectionId };
+}
+
+/** The entity a row stands for, `null` for a row that is not a treeitem. */
+export function rowEntity(row: TreeRow): TreeEntity | null {
+	if (row.kind === "folder") return collectionEntity(row.collection);
+	if (row.kind === "request") return requestEntity(row.request, row.parentId);
+	return null;
+}
+
 /** The key of the new-folder form open under `collectionId`. */
 export function newFolderFormRowKey(collectionId: string): string {
 	return `new-folder:${collectionId}`;

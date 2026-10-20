@@ -2117,8 +2117,11 @@ dropdown and the right-click menu explain a gate the same way. See
 #1360): one list, two menus. `row-actions.ts` holds the one rule about the
 list's shape - the first destructive action gets a separator above it -
 and `RowActionBody` holds what an item draws, so the `⋯` dropdown and the
-context menu cannot describe a row's actions differently. Collection rows,
-request rows, environment rows and history rows all take it.
+context menu cannot describe a row's actions differently. Environment rows and
+history rows take it. The collection tree takes one menu for all its rows
+instead (`CollectionTreeContextMenu`, #2543): the tree is the trigger, the row
+comes from the click, and the items are drawn by the same
+`RowContextMenuContent`.
 
 **A row that names an entity offers "Copy for agent" (issue #2047).** It is the
 standard copy item: `Copy` glyph, the label "Copy for agent", and the reference
@@ -2418,8 +2421,9 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   **typeahead** jumps to the next row whose name starts with what you type,
   **`*`** expands every folder at the focused row's level.
 - **Right-click is the pointer equivalent of Shift+F10 / Menu / Shift+Enter**
-  (issue #1360): it opens the same row-actions list through `RowContextMenu`
-  and focuses the row on the way past, so Escape returns focus there rather
+  (issue #1360): it opens the same row-actions list - through the tree's one
+  `CollectionTreeContextMenu` in the collection tree, `RowContextMenu` on the
+  variables sidebar's rows - and focuses the row on the way past, so Escape returns focus there rather
   than dropping it to `<body>` - the tree still has to hold its one tab stop
   after the menu closes, whichever way it opened.
 - **The second binding on those two is what a Mac keyboard can reach.** The key
@@ -2492,15 +2496,25 @@ before, so every click affordance survives - and the completed drag swallows the
 one click the browser fires after it, or the row it was just dropped on would
 open. Never a timer: `RequestItem.test.tsx` pins that opening is synchronous.
 
-**A row's pointer handlers must ignore what its own menu sends them.** The ⋯
-menu is a React child of the row and a *portal* in the DOM, and React bubbles
-synthetic events through the component tree - so a press on "Delete" arrives at
-the row's `onPointerDown`. Taking it captures the pointer on the row, the
-capture retargets the `pointerup` the menu item was waiting for, and every
-action in every row menu stops working while looking perfectly normal.
-`closest("[data-tree-menu]")` does not catch it (portalled content is not inside
-its trigger); a DOM containment check - `currentTarget.contains(target)` - does,
-and is the guard on every pointer handler a row spreads.
+**The drag's pointer handlers must ignore what a row's menu sends them.** They
+sit on the `role="tree"` element, one set for every row (#2543), and a press
+resolves its row from the rows model. The ⋯ menu is a React child of the row and
+a *portal* in the DOM, and React bubbles synthetic events through the component
+tree - so a press on "Delete" arrives at the tree's `onPointerDown`. Taking it
+would capture the pointer, the capture retargets the `pointerup` the menu item
+was waiting for, and every action in every row menu stops working while looking
+perfectly normal. `closest("[data-tree-menu]")` does not catch it (portalled
+content is not inside its trigger); a DOM containment check -
+`currentTarget.contains(target)` - does, and is the guard on every one of those
+handlers.
+
+**The capture is the tree's, and it is taken when the press becomes a drag.**
+On the tree rather than the row, so a source row the drawer has scrolled out of
+the window cannot take the gesture with it; at the threshold rather than the
+press, because a captured press clicks the capturing element and a click on a
+row has to land on the row's own controls. A press carried out of the tree
+before it is a drag is dropped, since its release would land where the tree
+never hears it.
 
 **Drop indicators are classes on rows that already exist.** A line between two
 rows is a 2px `bg-primary` span positioned inside the target row and indented to
@@ -2509,8 +2523,8 @@ collapsed folder", "into it" and "after its parent". Dropping *into* a folder
 reuses the selected-row ring. Nothing new gets `role="treeitem"`: an indicator
 node between rows would join the tree's rows and change its shape mid-drag - a
 row with no level, sitting between a folder and its children. The row being
-dragged stays mounted however far the drawer auto-scrolls from it, since it
-holds the pointer capture the whole gesture runs on. A row that cannot take
+dragged stays mounted however far the drawer auto-scrolls from it, so the source
+keeps its place and its dimmed state for the whole gesture. A row that cannot take
 the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
 subtree, and the block the dragged row does not belong to.
 

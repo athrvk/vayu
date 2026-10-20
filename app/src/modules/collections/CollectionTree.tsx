@@ -24,7 +24,8 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import CollectionTreeRows, { type TreeRowWindow } from "./CollectionTreeRows";
-import { flattenVisibleRows, folderIdOfRowKey, navigableRows } from "./tree-rows";
+import { CollectionTreeContextMenu } from "./CollectionTreeContextMenu";
+import { flattenVisibleRows, folderIdOfRowKey, navigableRows, rowEntity } from "./tree-rows";
 import { focusTreeRow, type TreeRowModel } from "./tree-focus";
 import ExportSpecDialog from "./ExportSpecDialog";
 import ExportPostmanDialog from "./ExportPostmanDialog";
@@ -126,6 +127,20 @@ export default function CollectionTree() {
 	);
 	const treeFocus = useRovingTreeFocus(treeRef, navigationModel);
 
+	// The row an event came from, from the rows model: what the tree's one
+	// right-click menu and its drag handlers act on, in place of a handler per row.
+	const rowAt = useCallback(
+		(element: Element) => rowWindowRef.current?.rowOf(element) ?? null,
+		[]
+	);
+	const entityAt = useCallback(
+		(element: Element) => {
+			const row = rowAt(element);
+			return row ? rowEntity(row) : null;
+		},
+		[rowAt]
+	);
+
 	/*
 	 * The toolbar's "+" asks the same question every other "New request" entry
 	 * point asks, so it cannot disagree with them about where the request lands.
@@ -218,15 +233,17 @@ export default function CollectionTree() {
 		[rowState]
 	);
 
-	const { dnd, announcement, moveTarget, closeMoveDialog, moveToOwner } = useTreeDnd({
-		collections,
-		getRequestsByCollection,
-		treeRef,
-		isRowBusy,
-		revealEntity,
-	});
+	const { dnd, treeHandlers, announcement, moveTarget, closeMoveDialog, moveToOwner } =
+		useTreeDnd({
+			collections,
+			getRequestsByCollection,
+			treeRef,
+			entityAt,
+			isRowBusy,
+			revealEntity,
+		});
 
-	const treeHandlers = useMemo<CollectionTreeHandlers>(
+	const rowHandlers = useMemo<CollectionTreeHandlers>(
 		() => ({ ...handlers, dnd }),
 		[handlers, dnd]
 	);
@@ -421,27 +438,33 @@ export default function CollectionTree() {
 				    contexts - see CollectionTreeContext for why it is not props. */}
 				{!isLoadingCollections && rows.length > 0 && (
 					<div className="flex-1 min-h-0">
-						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
-						<div
-							ref={setTreeList}
-							role="tree"
-							aria-label="Collections"
-							onKeyDown={treeFocus.onKeyDown}
-							onFocus={treeFocus.onFocus}
-							className="select-none"
+						<CollectionTreeProviders
+							handlers={rowHandlers}
+							state={treeState}
+							folderDraft={folderDraft}
 						>
-							<CollectionTreeProviders
-								handlers={treeHandlers}
-								state={treeState}
-								folderDraft={folderDraft}
-							>
-								<CollectionTreeRows
-									rows={rows}
-									list={treeList}
-									windowRef={rowWindowRef}
-								/>
-							</CollectionTreeProviders>
-						</div>
+							{/* One right-click menu and one set of drag handlers for
+							    every row, each resolving its row from the event
+							    (#2543): nothing per row but the row. */}
+							<CollectionTreeContextMenu rowAt={rowAt}>
+								{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:125-130 seeds one row's `tabIndex={0}` and moves it */}
+								<div
+									ref={setTreeList}
+									role="tree"
+									aria-label="Collections"
+									onKeyDown={treeFocus.onKeyDown}
+									onFocus={treeFocus.onFocus}
+									{...treeHandlers}
+									className="select-none"
+								>
+									<CollectionTreeRows
+										rows={rows}
+										list={treeList}
+										windowRef={rowWindowRef}
+									/>
+								</div>
+							</CollectionTreeContextMenu>
+						</CollectionTreeProviders>
 					</div>
 				)}
 

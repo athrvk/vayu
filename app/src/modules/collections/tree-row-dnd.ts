@@ -6,14 +6,15 @@
  */
 
 /**
- * The drag wiring a tree row needs, in one place for both row types.
+ * The drag state a tree row draws, in one place for both row types.
  *
  * `CollectionItem` and `RequestItem` are different components with the same
- * drag contract - the same pointer handlers, the same indicator, the same four
- * hidden Alt+Arrow controls - and a second copy of any of it would be a copy
- * that stops receiving the first one's fixes. That is this repo's most repeated
- * defect, so the shared half lives here and each row keeps only what differs:
- * its own indent and its own entity.
+ * drag contract - the same indicator, the same four hidden Alt+Arrow controls -
+ * and a second copy of any of it would be a copy that stops receiving the first
+ * one's fixes. That is this repo's most repeated defect, so the shared half
+ * lives here and each row keeps only what differs: its own indent and its own
+ * entity. The pointer handlers are not a row's at all: the tree takes every
+ * press on its own element and resolves the row from it (`useTreeDnd`).
  *
  * Everything degrades to nothing when no drag machinery is mounted (`dnd` is
  * `null`), which is what a test rendering one row in isolation gets.
@@ -22,17 +23,12 @@
 import { useMemo } from "react";
 import { createStore, useStore } from "zustand";
 import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
-import type {
-	CollectionTreeDragState,
-	CollectionTreeRowHandlers,
-} from "./context/CollectionTreeContext";
+import type { CollectionTreeDragState } from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 import { entityRowKey } from "./tree-rows";
 import type { RowAction } from "@/components/shared";
 
 export interface RowDnd {
-	/** Spread onto the row's own box - the element the gesture is captured on. */
-	handlers: Partial<CollectionTreeRowHandlers>;
 	/** This row is the one being dragged. */
 	isDragging: boolean;
 	/** This row cannot be dropped on: it is inside the dragged folder's subtree. */
@@ -52,7 +48,7 @@ const IDLE_DRAG_STATE = createStore<CollectionTreeDragState>(() => ({
 }));
 
 /**
- * A row's drag wiring, subscribed per fact (#2543). The drop target changes on
+ * A row's drag state, subscribed per fact (#2543). The drop target changes on
  * every row the pointer crosses, so it is read through a selector that answers
  * only for this row: a crossing re-renders the row the line left and the row it
  * arrived on, not the tree. `dragging` changes twice per drag, so every row
@@ -72,7 +68,6 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 
 	if (!dnd) {
 		return {
-			handlers: {},
 			isDragging: false,
 			isBlocked: false,
 			dropEdge: null,
@@ -81,7 +76,6 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 		};
 	}
 	return {
-		handlers: dnd.rowHandlers(entity),
 		isDragging: dragging?.id === entity.id,
 		isBlocked,
 		dropEdge: target === "inside" ? null : target,
@@ -103,10 +97,12 @@ export function rowDndClasses(row: RowDnd): string {
 }
 
 /**
- * The key of the row being dragged, which has to stay mounted while the drawer
- * auto-scrolls under it (#2543): it holds the pointer capture, and an unmounted
- * row takes the rest of the gesture with it. A string, so the list re-renders
- * when a drag starts or ends and not on every pointer move.
+ * The key of the row being dragged, which stays mounted while the drawer
+ * auto-scrolls away from it (#2543), so the source keeps its place and its
+ * dimmed state for the whole gesture rather than remounting as the drawer
+ * passes it. The gesture itself does not depend on it: the pointer is captured
+ * on the tree. A string, so the list re-renders when a drag starts or ends and
+ * not on every pointer move.
  */
 export function useDraggingRowKey(): string | null {
 	const { dnd } = useCollectionTreeHandlers();

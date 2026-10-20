@@ -61,6 +61,12 @@ export interface TreeRowWindow {
 	revealRow: (key: string, then?: (row: HTMLElement) => void) => boolean;
 	/** The key of the row an element belongs to, `null` outside any row. */
 	keyOf: (element: Element) => string | null;
+	/**
+	 * The row of the list an element belongs to, `null` outside any row: how
+	 * the tree's one right-click menu and its drag handlers learn which row an
+	 * event came from, from the model rather than from the element.
+	 */
+	rowOf: (element: Element) => TreeRow | null;
 }
 
 function RowContent({ row }: { row: TreeRow }) {
@@ -248,7 +254,16 @@ function CollectionTreeRowList({ rows, list = null, windowRef }: CollectionTreeR
 		[]
 	);
 
-	useImperativeHandle(windowRef, () => ({ revealRow, keyOf }), [revealRow, keyOf]);
+	const rowOf = useCallback(
+		(element: Element) => {
+			const key = keyOf(element);
+			const index = key === null ? undefined : keyIndex.get(key);
+			return index === undefined ? null : rows[index];
+		},
+		[keyOf, keyIndex, rows]
+	);
+
+	useImperativeHandle(windowRef, () => ({ revealRow, keyOf, rowOf }), [revealRow, keyOf, rowOf]);
 
 	// No dependency list: a reveal waits for the commit that brings in the list,
 	// then the one that mounts its row, and nothing but the DOM says which.

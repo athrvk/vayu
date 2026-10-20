@@ -53,20 +53,6 @@ export interface CollectionTreeDropTarget {
 	position: "before" | "after" | "inside";
 }
 
-/**
- * The pointer wiring a row spreads onto its own box. One object rather than
- * five props because a row takes all of them or none: the gesture is only
- * coherent if the same element sees the press, the moves and the release.
- */
-export interface CollectionTreeRowHandlers {
-	onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
-	onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
-	onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
-	onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
-	/** Swallows the click the browser fires after a completed drag. */
-	onClickCapture: (e: React.MouseEvent<HTMLElement>) => void;
-}
-
 /** Alt+Arrow, in tree terms: among siblings, into the folder above, out to the parent. */
 export type TreeMoveDirection = "up" | "down" | "in" | "out";
 
@@ -95,7 +81,6 @@ export interface CollectionTreeDragState {
  */
 export interface CollectionTreeDnd {
 	dragState: StoreApi<CollectionTreeDragState>;
-	rowHandlers: (entity: TreeEntity) => CollectionTreeRowHandlers;
 	/**
 	 * True while `entity` is an illegal target for the row being `dragged` - the
 	 * dragged folder's own subtree, or a row no band of which names a destination.

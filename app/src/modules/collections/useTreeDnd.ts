@@ -17,9 +17,14 @@
  * moved.
  *
  * **Pointer events, not HTML5 drag-and-drop.** Capture keeps the event stream
- * on the source row wherever the pointer goes, which is what makes auto-scroll
- * and an Escape cancel possible at all, and it leaves the click semantics the
- * hit-area rules depend on untouched below the movement threshold.
+ * on the tree wherever the pointer goes, which is what makes auto-scroll and an
+ * Escape cancel possible at all, and it leaves the click semantics the hit-area
+ * rules depend on untouched below the movement threshold.
+ *
+ * **One set of handlers, on the tree** (#2543). The tree spreads `treeHandlers`
+ * onto its `role="tree"` element and a press resolves its row from the rows
+ * model (`entityAt`), so no row carries a handler and none has to stay mounted
+ * for the gesture to survive: the capture is the tree's.
  *
  * **One move goes through one function.** A drop, an Alt+Arrow, a "Move to..."
  * and an Undo all end in `applyPlacement`, so the optimistic write, the
@@ -52,6 +57,7 @@ import type {
 	CollectionTreeDragState,
 	CollectionTreeDropTarget,
 } from "./context/CollectionTreeContext";
+import { TREE_ITEM } from "./tree-focus";
 import type { RowAction } from "@/components/shared";
 import { TIMING } from "@/config/timing";
 import { useStableCallback } from "@/hooks/useStableCallback";
@@ -71,15 +77,37 @@ export interface TreeDndOptions {
 	getRequestsByCollection: (collectionId: string) => Request[];
 	/** The tree root, for hit testing and for finding the scroll container. */
 	treeRef: RefObject<HTMLElement | null>;
+	/**
+	 * The folder or request a tree row's element stands for, from the rows
+	 * model; `null` for anything that is not one. Called from events only.
+	 */
+	entityAt: (element: Element) => TreeEntity | null;
 	/** Rows mid-rename or mid-delete are neither drag sources nor drop targets. */
 	isRowBusy: (entityId: string) => boolean;
 	/** Re-expand and re-focus a row after it moves - see `useRevealActiveSelection`. */
 	revealEntity: (entity: TreeEntity) => void;
 }
 
+/**
+ * Every row's drag, spread onto the `role="tree"` element. One object rather
+ * than six props because the tree takes all of them or none: the gesture is
+ * only coherent if the same element sees the press, the moves and the release.
+ */
+export interface TreeDragHandlers {
+	onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
+	onPointerLeave: (e: React.PointerEvent<HTMLElement>) => void;
+	/** Swallows the click the browser fires after a completed drag. */
+	onClickCapture: (e: React.MouseEvent<HTMLElement>) => void;
+}
+
 export interface TreeDnd {
 	/** The slice every row reads. */
 	dnd: CollectionTreeDnd;
+	/** The tree element's pointer handlers. */
+	treeHandlers: TreeDragHandlers;
 	/** Text for the tree's live region; empty until something moves. */
 	announcement: string;
 	/** The row whose "Move to..." dialog is open. */
@@ -103,29 +131,10 @@ function collectionSiblings(collections: readonly Collection[], parentId: string
 }
 
 /**
- * The row a DOM node stands for, or `null` if it is not a tree row.
- *
- * Read off the row's own data attributes rather than looked up by id: the hit
- * test already has the element, and a request's owning collection is not
- * derivable from the loaded collections without scanning every request list.
+ * A press on one of these, inside a row, is a press on that control - the
+ * chevron, the `⋯` menu, a rename field - and not on the row.
  */
-function entityFromRow(el: Element | null): TreeEntity | null {
-	if (!(el instanceof HTMLElement)) return null;
-	const name = el.getAttribute("data-tree-label") ?? "";
-	const requestId = el.getAttribute("data-request-id");
-	if (requestId) {
-		const collectionId = el.getAttribute("data-owner-id");
-		return collectionId ? { kind: "request", id: requestId, name, collectionId } : null;
-	}
-	const collectionId = el.getAttribute("data-collection-id");
-	if (!collectionId) return null;
-	return {
-		kind: "collection",
-		id: collectionId,
-		name,
-		parentId: el.getAttribute("data-parent-id") || null,
-	};
-}
+const ROW_CONTROLS = "[data-tree-menu],[data-tree-toggle],input,textarea";
 
 /**
  * The index a destination names, in the block *without* the moved row - which
@@ -148,6 +157,7 @@ export function useTreeDnd({
 	collections,
 	getRequestsByCollection,
 	treeRef,
+	entityAt: entityAtNow,
 	isRowBusy: isRowBusyNow,
 	revealEntity: revealEntityNow,
 }: TreeDndOptions): TreeDnd {
@@ -166,6 +176,7 @@ export function useTreeDnd({
 	 * of them changed (#2543).
 	 */
 	const isRowBusy = useStableCallback(isRowBusyNow);
+	const entityAt = useStableCallback(entityAtNow);
 	const revealEntity = useStableCallback(revealEntityNow);
 	const isExpanded = useStableCallback((id: string) => expandedCollectionIds.has(id));
 
@@ -191,6 +202,7 @@ export function useTreeDnd({
 	 * the indicator actually moves.
 	 */
 	const gestureRef = useRef<DragGesture>(IDLE_GESTURE);
+	/** The pressed row, the pointer, and the tree element that captures it. */
 	const pressedRef = useRef<{ entity: TreeEntity; pointerId: number; el: HTMLElement } | null>(
 		null
 	);
@@ -506,19 +518,13 @@ export function useTreeDnd({
 	}, []);
 
 	const onPointerDown = useCallback(
-		(e: React.PointerEvent<HTMLElement>, entity: TreeEntity) => {
+		(e: React.PointerEvent<HTMLElement>) => {
 			if (e.button !== 0) return;
-			// An open row menu is a React child of this row but not a DOM one.
+			// An open row menu is a React child of the tree but not a DOM one.
 			if (!isOwnEvent(e)) return;
-			// The chevron, the ⋯ menu and a rename field are their own controls;
-			// a press on one of them is not a press on the row.
-			if (
-				e.target instanceof Element &&
-				e.target.closest("[data-tree-menu],[data-tree-toggle],input,textarea")
-			) {
-				return;
-			}
-			if (isRowBusy(entity.id)) return;
+			if (!(e.target instanceof Element) || e.target.closest(ROW_CONTROLS)) return;
+			const entity = entityAt(e.target);
+			if (!entity || isRowBusy(entity.id)) return;
 			if (hasUnsavedEdits(entity)) {
 				useToastStore.getState().showToast({
 					message: `Saving ${entity.name} - try again in a moment`,
@@ -528,58 +534,69 @@ export function useTreeDnd({
 			}
 			gestureRef.current = pressGesture({ x: e.clientX, y: e.clientY });
 			pressedRef.current = { entity, pointerId: e.pointerId, el: e.currentTarget };
-			// Capture keeps `pointermove` coming to this row even when the pointer
-			// leaves it, which is what makes auto-scroll and a drop on a row far
-			// away work at all. jsdom has neither method, hence the guards.
-			e.currentTarget.setPointerCapture?.(e.pointerId);
 		},
-		[hasUnsavedEdits, isRowBusy]
+		[entityAt, hasUnsavedEdits, isRowBusy]
+	);
+
+	/**
+	 * The drop the pointer at `clientY` over `under` names for `dragged`, and
+	 * the folder a spring would open: only ever the one the drop lands
+	 * *inside*. Tracked beside the destination rather than derived from it,
+	 * because a destination alone cannot answer this - "before Beta" and "into
+	 * Beta" are both drops Beta's row resolved, and only the second is a
+	 * request to see what is in it.
+	 */
+	const dropUnder = useCallback(
+		(
+			dragged: TreeEntity,
+			under: Element | null,
+			clientY: number
+		): { destination: DropDestination | null; spring: TreeEntity | null } => {
+			const row = under?.closest<HTMLElement>(TREE_ITEM) ?? null;
+			const target = row ? entityAt(row) : null;
+			if (!row || !target || isRowBusy(target.id)) return { destination: null, spring: null };
+			// A folder cannot be dropped into its own subtree; the engine's cycle
+			// guard stays the backstop, this is what greys the rows.
+			if (
+				dragged.kind === "collection" &&
+				isDescendant(target.id, dragged.id, dataRef.current.collections)
+			) {
+				return { destination: null, spring: null };
+			}
+			const rect = row.getBoundingClientRect();
+			const zone = zoneAt(clientY - rect.top, rect.height, target.kind === "collection");
+			const destination = resolveDrop({ dragged, target, zone });
+			return { destination, spring: destination && zone === "inside" ? target : null };
+		},
+		[entityAt, isRowBusy]
 	);
 
 	const onPointerMove = useCallback(
 		(e: React.PointerEvent<HTMLElement>) => {
 			const pressed = pressedRef.current;
 			// `isOwnEvent` again for the same reason as the press: while a drag is
-			// live the row holds the pointer capture, so every real move targets
-			// the row - anything else reaching here came through a portal.
+			// live the tree holds the pointer capture, so every real move targets
+			// the tree - anything else reaching here came through a portal.
 			if (!pressed || !isOwnEvent(e)) return;
 
 			const next = moveGesture(gestureRef.current, { x: e.clientX, y: e.clientY });
 			if (next !== gestureRef.current) {
 				gestureRef.current = next;
-				if (next.phase === "dragging") dragState.setState({ dragging: pressed.entity });
+				if (next.phase === "dragging") {
+					dragState.setState({ dragging: pressed.entity });
+					// Captured on the tree, not the row: the drawer auto-scrolls
+					// under a drag, and the pressed row can scroll out of the
+					// window. And only now, not at the press - a captured press
+					// clicks the capturing element, and the row's click has to
+					// land on the row's own controls. jsdom has no capture
+					// methods of its own, hence the guards.
+					pressed.el.setPointerCapture?.(pressed.pointerId);
+				}
 			}
 			if (gestureRef.current.phase !== "dragging") return;
 
 			const under = document.elementFromPoint?.(e.clientX, e.clientY) ?? null;
-			const row = under?.closest("[data-collection-id],[data-request-id]") ?? null;
-			const target = entityFromRow(row);
-
-			let destination: DropDestination | null = null;
-			// The folder a spring would open: only ever the one the drop lands
-			// *inside*. Tracked beside `destination` rather than derived from it,
-			// because a destination alone cannot answer this - "before Beta" and
-			// "into Beta" are both drops Beta's row resolved, and only the second
-			// is a request to see what is in it.
-			let springTarget: TreeEntity | null = null;
-			if (target && !isRowBusy(target.id)) {
-				const rect = (row as HTMLElement).getBoundingClientRect();
-				const zone = zoneAt(
-					e.clientY - rect.top,
-					rect.height,
-					target.kind === "collection"
-				);
-				// A folder cannot be dropped into its own subtree; the engine's
-				// cycle guard stays the backstop, this is what greys the rows.
-				const intoOwnSubtree =
-					pressed.entity.kind === "collection" &&
-					isDescendant(target.id, pressed.entity.id, dataRef.current.collections);
-				if (!intoOwnSubtree) {
-					destination = resolveDrop({ dragged: pressed.entity, target, zone });
-					if (destination && zone === "inside") springTarget = target;
-				}
-			}
-
+			const { destination, spring } = dropUnder(pressed.entity, under, e.clientY);
 			destinationRef.current = destination;
 			const indicator = destination ? indicatorFor(pressed.entity, destination) : null;
 			dragState.setState((current) =>
@@ -588,10 +605,10 @@ export function useTreeDnd({
 					? current
 					: { dropTarget: indicator }
 			);
-			armSpring(springTarget);
+			armSpring(spring);
 			updateAutoScroll(e.clientY);
 		},
-		[armSpring, dragState, indicatorFor, isRowBusy, updateAutoScroll]
+		[armSpring, dragState, dropUnder, indicatorFor, updateAutoScroll]
 	);
 
 	const onPointerUp = useCallback(
@@ -626,8 +643,17 @@ export function useTreeDnd({
 		endDrag();
 	}, [endDrag]);
 
+	// A press that is not a drag yet holds no capture, so its release outside
+	// the tree never arrives here. Leaving the tree drops it, or the next hover
+	// back over the tree would arm a drag with no button down.
+	const onPointerLeave = useCallback(() => {
+		if (!pressedRef.current || gestureRef.current.phase === "dragging") return;
+		gestureRef.current = cancelGesture(gestureRef.current);
+		pressedRef.current = null;
+	}, []);
+
 	const onClickCapture = useCallback((e: React.MouseEvent<HTMLElement>) => {
-		// A menu item's click bubbles through the row it belongs to. Swallowing
+		// A menu item's click bubbles through the tree it belongs to. Swallowing
 		// it would be the drag eating the very action the user chose *because*
 		// the drag before it left a suppression armed.
 		if (!isOwnEvent(e)) return;
@@ -821,15 +847,16 @@ export function useTreeDnd({
 		[applyPlacement, expandCollection, requestSiblings]
 	);
 
-	const rowHandlers = useCallback(
-		(entity: TreeEntity) => ({
-			onPointerDown: (e: React.PointerEvent<HTMLElement>) => onPointerDown(e, entity),
+	const treeHandlers = useMemo<TreeDragHandlers>(
+		() => ({
+			onPointerDown,
 			onPointerMove,
 			onPointerUp,
 			onPointerCancel,
+			onPointerLeave,
 			onClickCapture,
 		}),
-		[onClickCapture, onPointerCancel, onPointerDown, onPointerMove, onPointerUp]
+		[onClickCapture, onPointerCancel, onPointerDown, onPointerLeave, onPointerMove, onPointerUp]
 	);
 
 	const isDropBlocked = useCallback((dragged: TreeEntity, entity: TreeEntity) => {
@@ -850,11 +877,11 @@ export function useTreeDnd({
 	}, []);
 
 	const dnd = useMemo<CollectionTreeDnd>(
-		() => ({ dragState, rowHandlers, isDropBlocked, moveByKeyboard, moveActions }),
-		[dragState, rowHandlers, isDropBlocked, moveByKeyboard, moveActions]
+		() => ({ dragState, isDropBlocked, moveByKeyboard, moveActions }),
+		[dragState, isDropBlocked, moveByKeyboard, moveActions]
 	);
 
 	const closeMoveDialog = useCallback(() => setMoveTarget(null), []);
 
-	return { dnd, announcement, moveTarget, closeMoveDialog, moveToOwner };
+	return { dnd, treeHandlers, announcement, moveTarget, closeMoveDialog, moveToOwner };
 }
