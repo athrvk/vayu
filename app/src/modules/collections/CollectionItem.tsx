@@ -13,8 +13,8 @@ import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
 import { rowDndClasses, useRowDnd } from "./tree-row-dnd";
 import type { TreeEntity } from "./drop-position";
 import { countSubtreeRequests } from "./tree-utils";
+import { childrenOf } from "./tree-children";
 import type { Collection } from "@/types";
-import { compareTreeOrder } from "@/types";
 import { Button, DialogCancelButton, IconSwap, Input } from "@/components/ui";
 import {
 	RowActionsMenu,
@@ -81,7 +81,6 @@ export default function CollectionItem({
 		"size-icon shrink-0",
 		depth === 0 ? "text-primary" : "text-primary/70"
 	);
-	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
 	const isDeleting = deletingCollectionId === collection.id;
 
@@ -95,12 +94,9 @@ export default function CollectionItem({
 		[collection.id, collection.name, collection.parentId]
 	);
 	const dnd = useRowDnd(entity);
-	const childCollections = allCollections
-		.filter((c) => c.parentId === collection.id)
-		.sort(compareTreeOrder);
-	// Folders and requests are one set of treeitems inside one group, so the
-	// requests continue the folders' numbering rather than restarting it.
-	const childSetSize = childCollections.length + requests.length;
+	// Sub-folders and requests are one list in one order space (#2535), and one
+	// set of treeitems inside one group: the numbering runs over the merged list.
+	const children = childrenOf(collection.id, allCollections, getRequestsByCollection);
 	// A root counts every request beneath it (what an import preview reports);
 	// a nested folder counts its direct children. See `DrawerSectionCount`.
 	const subtreeRequestCount = useMemo(
@@ -114,8 +110,7 @@ export default function CollectionItem({
 				: 0,
 		[depth, collection.id, allCollections, getRequestsByCollection]
 	);
-	const badgeCount =
-		depth === 0 ? subtreeRequestCount : requests.length + childCollections.length;
+	const badgeCount = depth === 0 ? subtreeRequestCount : children.length;
 	// Ties the children's group back to this row for assistive tech - see the
 	// `aria-owns` note on the row itself.
 	const childrenId = `tree-group-${collection.id}`;
@@ -129,10 +124,7 @@ export default function CollectionItem({
 	 * stop.
 	 */
 	const emptyId = `tree-empty-${collection.id}`;
-	const showsEmptyPlaceholder =
-		requests.length === 0 &&
-		childCollections.length === 0 &&
-		creatingSubfolder !== collection.id;
+	const showsEmptyPlaceholder = children.length === 0 && creatingSubfolder !== collection.id;
 
 	const rowRef = useRef<HTMLDivElement>(null);
 
@@ -229,9 +221,9 @@ export default function CollectionItem({
 					// Lets the tree scroll a selected collection into view, the way
 					// `data-request-id` on RequestItem already does for a request.
 					data-collection-id={collection.id}
-					// The folder block this row sits in, for the drag hit test - it has
-					// the element, not the row's model. Absent at the root, which is
-					// exactly the `null` parent scope the reorder batch names.
+					// The parent this row sits under, for the drag hit test - it has the
+					// element, not the row's model. Absent at the root, which is exactly
+					// the `null` parent scope the reorder batch names.
 					data-parent-id={collection.parentId ?? undefined}
 					data-tree-label={collection.name}
 					aria-expanded={isExpanded}
@@ -448,20 +440,6 @@ export default function CollectionItem({
 						</div>
 					)}
 
-					{/* Child Collections (Subfolders) - Recursive.
-					    Four props, all of them this row's own position in the tree:
-					    everything shared arrives through the context instead. */}
-					{childCollections.map((childCollection, index) => (
-						<CollectionItem
-							key={childCollection.id}
-							collection={childCollection}
-							depth={depth + 1}
-							posInSet={index + 1}
-							setSize={childSetSize}
-						/>
-					))}
-
-					{/* Requests */}
 					{showsEmptyPlaceholder && (
 						<div
 							id={emptyId}
@@ -471,16 +449,28 @@ export default function CollectionItem({
 							Empty collection
 						</div>
 					)}
-					{requests.map((request, index) => (
-						<RequestItem
-							key={request.id}
-							request={request}
-							collectionId={collection.id}
-							depth={depth + 1}
-							posInSet={childCollections.length + index + 1}
-							setSize={childSetSize}
-						/>
-					))}
+					{/* Sub-folders recurse. Every prop is this row's own position in
+					    the tree: everything shared arrives through the context. */}
+					{children.map((child, index) =>
+						child.kind === "collection" ? (
+							<CollectionItem
+								key={`${child.kind}:${child.id}`}
+								collection={child.collection}
+								depth={depth + 1}
+								posInSet={index + 1}
+								setSize={children.length}
+							/>
+						) : (
+							<RequestItem
+								key={`${child.kind}:${child.id}`}
+								request={child.request}
+								collectionId={collection.id}
+								depth={depth + 1}
+								posInSet={index + 1}
+								setSize={children.length}
+							/>
+						)
+					)}
 				</div>
 			)}
 		</div>

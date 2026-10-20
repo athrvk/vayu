@@ -160,9 +160,9 @@ export default function RequestItem({
 			<div
 				ref={rowRef}
 				data-request-id={request.id}
-				// The collection this row's requests block belongs to. Read by the drag
-				// hit test, which has the element and no way to derive its owner: a
-				// request is not in the loaded collections list.
+				// The collection this row sits under. Read by the drag hit test, which
+				// has the element and no way to derive its owner: a request is not in
+				// the loaded collections list.
 				data-owner-id={collectionId}
 				data-tree-label={request.name}
 				role="treeitem"

@@ -9,12 +9,12 @@
  * RunCollectionDialog
  *
  * Starts a collection run. Two options and nothing else, because the scenario
- * *is* the folder: the sequence is `requests.order` (and, with Recursive,
- * descendant collections by `collections.order`, depth-first, each subfolder's
- * subtree ahead of its parent's own requests), which is the order the sidebar
- * already shows - top to bottom, subfolders above requests at every depth. There
- * is no step list to author here, and inventing one would be a second source of
- * truth for an ordering the tree already owns.
+ * *is* the folder: the sequence is its requests by `order` (and, with
+ * Recursive, its sub-folders and requests as one list by the shared `order`,
+ * depth-first, a sub-folder's whole subtree where the sub-folder sits, #2535),
+ * which is the order the sidebar already shows, top to bottom. There is no step
+ * list to author here, and inventing one would be a second source of truth for
+ * an ordering the tree already owns.
  *
  * The engine resolves the whole plan before it answers, so a collection with no
  * requests, a step that will not compose, or a plan over `maxScenarioSteps` all

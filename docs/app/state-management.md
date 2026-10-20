@@ -1761,16 +1761,18 @@ sidebar had never shown. The rule is pinned to the engine's comparator
 `types/tree-order.conformance.test.ts` and by the engine's `tree_order_test.cpp`
 - change one side and the other suite fails.
 
-That rule orders **one block**. A folder's sub-collections and its requests are
-two separately ordered blocks, so their `order` values can collide, and where the
-blocks sit relative to each other is the render's rule: `CollectionItem` puts
-every subfolder above every request, at every depth
-(`CollectionTree.folders-first.test.tsx`). A recursive collection run has to
-execute in that same sequence - each subfolder's whole subtree, then the folder's
-own requests - which is pinned across the render and the engine's plan by
+A folder's sub-collections and its requests are **one list in one `order`
+space** (#2535), so a request can sit between two folders. The kind is only a
+tiebreak, and only a merged list states it: `childrenOf`
+(`modules/collections/tree-children.ts`) builds a parent's children from the
+collections list and the parent's request list, and the render, the drag, the
+keyboard move and "Move to..." all read that one list
+(`CollectionTree.sibling-order.test.tsx`). A recursive collection run executes
+the same sequence - a request where it sits, a sub-folder's whole subtree where
+the sub-folder sits - which is pinned across the render and the engine's plan by
 `engine/tests/fixtures/recursive-run-order-conformance.json`, read by
 `modules/collections/CollectionTree.run-order.conformance.test.tsx` and by the
-engine's `scenario_plan_test.cpp` (issue #431).
+engine's `scenario_plan_test.cpp` (issues #431, #2535).
 
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection

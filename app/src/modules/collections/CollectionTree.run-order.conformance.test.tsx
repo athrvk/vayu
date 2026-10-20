@@ -12,13 +12,14 @@
  * Cross-consumer conformance: the request sequence the sidebar *displays* for a
  * recursive run against the sequence the engine's plan *executes* (issue #431).
  *
- * `CollectionTree.folders-first.test.tsx` pins the relationship between one
- * folder's two blocks, and `tree-order-conformance.json` pins the order within a
- * block. Neither could notice the case this file exists for: the engine's walk
- * was pre-order (a folder's own requests, then its subfolders'), the tree renders
- * subfolders above requests at every depth, and each side had a test asserting
- * its own order. "Run this folder" therefore executed in a sequence the user had
- * never seen - the #360 defect one level up.
+ * `tree-order-conformance.json` pins how one parent's children sort, folders and
+ * requests together (#2535). It could not notice the case this file exists
+ * for: the engine's walk was once pre-order (a folder's own requests, then its
+ * subfolders') while the tree rendered subfolders above requests, and each side
+ * had a test asserting its own order. "Run this folder" therefore executed in a
+ * sequence the user had never seen - the #360 defect one level up. The fixture
+ * now also holds interleaved parents, a request between two folders, which is
+ * what a Postman import produces.
  *
  * So the fixture is read by both sides:
  * `engine/tests/scenario_plan_test.cpp` seeds each case and reads
@@ -35,7 +36,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
-import { compareTreeOrder } from "@/types";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -66,23 +66,6 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 	description: string;
 	cases: ConformanceCase[];
 };
-
-/**
- * The cases whose run order interleaves a folder's sub-folders with its
- * requests (#2535). The tree still renders the sub-folders above the requests,
- * so these join the strict half with the renderer's part of #2535, which
- * deletes this list; `it.fails` makes a case that starts passing fail until it
- * is removed from here.
- */
-const PENDING_MERGED_ORDER = new Set([
-	"an order shared across kinds runs the folder's subtree first, then the request",
-	"a request, a folder and a request at one level run in that order",
-	"a request at 1 between folders at 0 and 2 runs between their subtrees",
-	"nested interleaving: every level merges its own children",
-	"Postman's collection-v2.json shape: two requests then a folder, whose three requests come before its sub-folder",
-]);
-const displayedCases = fixture.cases.filter((c) => !PENDING_MERGED_ORDER.has(c.name));
-const pendingCases = fixture.cases.filter((c) => PENDING_MERGED_ORDER.has(c.name));
 
 /**
  * The rows the mocked query layer serves. The renderer holds `createdAt` as the
@@ -138,8 +121,7 @@ vi.mock("@/queries", () => ({
  * `reverseInput` feeds the collections list back to front. The tree sorts roots
  * and each folder's children itself, so a case that only passes in fixture order
  * would be reading the array rather than applying the rule. The request lists
- * are *not* reversed: the tree renders them as the query layer hands them over,
- * and that layer's sort is pinned by `tree-order.conformance.test.ts`.
+ * are reversed too: the merged sort is the tree's, not the query layer's.
  */
 function toTreeData(c: ConformanceCase, reverseInput = false): TreeData {
 	const collections = c.collections.map((col) => ({
@@ -165,11 +147,10 @@ function toTreeData(c: ConformanceCase, reverseInput = false): TreeData {
 			row,
 		]);
 	}
-	// The query layer hands each collection's list out already sorted
-	// (`queries/collections.ts`, pinned by tree-order.conformance.test.ts); only
-	// the folders/requests split and the child order are this file's subject.
-	for (const [id, rows] of requestsByCollection) {
-		requestsByCollection.set(id, [...rows].sort(compareTreeOrder));
+	if (reverseInput) {
+		for (const [id, rows] of requestsByCollection) {
+			requestsByCollection.set(id, [...rows].reverse());
+		}
 	}
 
 	return {
@@ -205,32 +186,25 @@ beforeEach(() => {
 
 describe("recursive-run-order conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
-		expect(fixture.cases.length).toBeGreaterThanOrEqual(5);
+		expect(fixture.cases.length).toBeGreaterThanOrEqual(9);
 		for (const c of fixture.cases) {
 			expect(c.collections.length).toBeGreaterThan(1);
 			expect(c.expected.length).toBe(c.requests.length);
 			// Every case is a folder that holds subfolders, which is the only shape
-			// the two blocks can disagree about.
+			// where walking a folder and listing its children can disagree.
 			expect(c.collections.some((col) => col.parentId === c.rootId)).toBe(true);
 		}
-		expect(pendingCases).toHaveLength(PENDING_MERGED_ORDER.size);
 	});
 
-	it.each(displayedCases.map((c) => [c.name, c] as const))(
+	it.each(fixture.cases.map((c) => [c.name, c] as const))(
 		"displays the run order: %s",
 		(_name, c) => {
 			expect(displayedRequestIds(c)).toEqual(c.expected);
 		}
 	);
 
-	for (const c of pendingCases) {
-		it.fails(`does not yet display the merged run order: ${c.name}`, () => {
-			expect(displayedRequestIds(c)).toEqual(c.expected);
-		});
-	}
-
 	it("displays the same order whatever order the rows arrive in", () => {
-		for (const c of displayedCases) {
+		for (const c of fixture.cases) {
 			expect(displayedRequestIds(c, /*reverseInput=*/ true)).toEqual(c.expected);
 		}
 	});
