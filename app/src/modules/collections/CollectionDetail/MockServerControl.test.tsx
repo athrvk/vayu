@@ -49,6 +49,11 @@ vi.mock("@/services/api", async (importOriginal) => {
 
 const writeText = vi.fn();
 
+/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+function liveGlyph(button: HTMLElement): string {
+	return button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+}
+
 function mock(overrides: Partial<MockServer> = {}): MockServer {
 	return {
 		mockId: "mock_a",
@@ -166,6 +171,33 @@ describe("the collection header's mock-server control", () => {
 			await screen.findByRole("button", { name: /start mock server/i })
 		).toBeInTheDocument();
 		expect(screen.queryByText("http://127.0.0.1:43100")).not.toBeInTheDocument();
+	});
+
+	it("swaps the copy button's glyph to a check and raises no toast", async () => {
+		listMockServers.mockResolvedValue([mock()]);
+		renderControl();
+
+		const button = await screen.findByRole("button", { name: "Copy mock server URL" });
+		expect(liveGlyph(button)).toContain("lucide-copy");
+
+		fireEvent.click(button);
+
+		await waitFor(() => expect(liveGlyph(button)).toContain("lucide-check"));
+		expect(useToastStore.getState().toasts).toEqual([]);
+	});
+
+	it("toasts a refused copy and keeps the copy glyph", async () => {
+		writeText.mockRejectedValue(new Error("Clipboard write denied"));
+		listMockServers.mockResolvedValue([mock()]);
+		renderControl();
+
+		const button = await screen.findByRole("button", { name: "Copy mock server URL" });
+		fireEvent.click(button);
+
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]).toMatchObject({ variant: "error" })
+		);
+		expect(liveGlyph(button)).toContain("lucide-copy");
 	});
 
 	it("copies the base URL and stops the mock", async () => {

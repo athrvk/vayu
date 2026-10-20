@@ -62,6 +62,11 @@ vi.mock("@/services/api", async (importOriginal) => {
 
 const writeText = vi.fn();
 
+/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+function liveGlyph(button: HTMLElement): string {
+	return button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+}
+
 function inbox(overrides: Partial<Inbox> = {}): Inbox {
 	return {
 		inboxId: "inbox_a",
@@ -680,6 +685,70 @@ describe("an issuer row", () => {
 		);
 		await waitFor(() => expect(stopMockIssuer).toHaveBeenCalledWith("iss_a"));
 	});
+});
+
+describe("an issuer's copy buttons", () => {
+	async function expandIssuer() {
+		listMockIssuers.mockResolvedValue([issuer()]);
+		renderPanel();
+		fireEvent.click(
+			await screen.findByRole("button", { name: /expand issuer on port 42000/i })
+		);
+		return {
+			token: screen.getByRole("button", { name: "Copy token URL" }),
+			authorize: screen.getByRole("button", { name: "Copy authorize URL" }),
+			key: screen.getByRole("button", { name: "Copy signing key" }),
+		};
+	}
+
+	it.each([
+		["token", "Copy token URL", "http://127.0.0.1:42000/token", "lucide-copy"],
+		["authorize", "Copy authorize URL", "http://127.0.0.1:42000/authorize", "lucide-copy"],
+		["signing key", "Copy signing key", "k".repeat(32), "lucide-key-round"],
+	] as const)(
+		"swaps the %s button's glyph to a check and raises no toast",
+		async (_name, label, copied, restingGlyph) => {
+			await expandIssuer();
+			const button = screen.getByRole("button", { name: label });
+			expect(liveGlyph(button)).toContain(restingGlyph);
+
+			fireEvent.click(button);
+
+			await waitFor(() => expect(liveGlyph(button)).toContain("lucide-check"));
+			expect(writeText).toHaveBeenCalledWith(copied);
+			expect(useToastStore.getState().toasts).toEqual([]);
+		}
+	);
+
+	// Each button owns its hook: one shared by the three would check all of them.
+	it("checks only the button that was clicked", async () => {
+		const { token, authorize, key } = await expandIssuer();
+
+		fireEvent.click(token);
+
+		await waitFor(() => expect(liveGlyph(token)).toContain("lucide-check"));
+		expect(liveGlyph(authorize)).toContain("lucide-copy");
+		expect(liveGlyph(key)).toContain("lucide-key-round");
+	});
+
+	it.each([
+		["Copy token URL", "lucide-copy"],
+		["Copy signing key", "lucide-key-round"],
+	] as const)(
+		"toasts a refused copy from %s and keeps its resting glyph",
+		async (label, restingGlyph) => {
+			writeText.mockRejectedValue(new Error("Clipboard write denied"));
+			await expandIssuer();
+			const button = screen.getByRole("button", { name: label });
+
+			fireEvent.click(button);
+
+			await waitFor(() =>
+				expect(useToastStore.getState().toasts[0]).toMatchObject({ variant: "error" })
+			);
+			expect(liveGlyph(button)).toContain(restingGlyph);
+		}
+	);
 });
 
 describe("starting an issuer", () => {

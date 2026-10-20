@@ -20,10 +20,11 @@
  * view's own switcher writes - never mirrored into local state.
  */
 
-import { Copy, ExternalLink, Radio as MockIcon, Square } from "lucide-react";
+import { Check, Copy, ExternalLink, Radio as MockIcon, Square } from "lucide-react";
 import {
 	Badge,
 	Button,
+	IconSwap,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -53,6 +54,8 @@ import { shownService } from "@/lib/shown-service";
 export default function MockServerView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
+	// A second instance, for the reason `inbox/index.tsx` gives.
+	const { copy: copyUrl, copied: urlCopied } = useCopy({ feedback: "icon" });
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const openTab = useTabsStore((s) => s.openTab);
@@ -109,9 +112,20 @@ export default function MockServerView() {
 						variant="ghost"
 						size="sm"
 						aria-label="Copy mock server URL"
-						onClick={() => void copy(mock.url, "Mock server URL")}
+						onClick={() => void copyUrl(mock.url, "Mock server URL")}
 					>
-						<Copy className="size-icon-sm" aria-hidden="true" />
+						<IconSwap
+							state={urlCopied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+								copied: (
+									<Check
+										className="size-icon-sm text-status-success-text"
+										aria-hidden="true"
+									/>
+								),
+							}}
+						/>
 					</Button>
 					<Button
 						variant="ghost"

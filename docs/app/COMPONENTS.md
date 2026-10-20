@@ -404,9 +404,10 @@ The surfaces that put a line on the clipboard are the "Copy for agent" row actio
 environment, history, inbox, mock-issuer and mock-server rows, the tab menu and the palette's
 `copy-for-agent` command, each through `useCopy()` with the name "Reference" (toast "Reference copied"). A collection's line takes the chain *above* it and a request's the chain of its own
 collection, so neither names a folder twice. The same line is on the surfaces that have no row menu:
-a trash entry, an example row, a capture's detail header, a variable row and a run sample's header carry an
-icon button (`useCopy({ feedback: "icon" })` with `IconSwap`, so the glyph swaps to a check and no toast
-follows), and the inbox and mock-server tab headers a text "Copy for agent" button (toast "Reference copied").
+a trash entry, an example row, a capture's detail header (the shared `CopyForAgentButton`), a variable row and a
+run sample's header carry an icon button (`useCopy({ feedback: "icon" })` with `IconSwap`, so the glyph swaps to a
+check and no toast follows), and the inbox and mock-server tab headers a text "Copy for agent" button (toast
+"Reference copied"). The URL copy buttons beside it are icon buttons too (#2315).
 A pipeline element row (`ElementList`) has a "Copy for agent" item in its `⋯` menu, after Duplicate, built from
 the element's id, kind and name alone; the host names the owner through `referenceOwner` (the request builder's
 Elements tab for a saved request, the collection's Elements tab for the collection) and the item is absent without
@@ -804,7 +805,9 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   #556's tab pass, which both issues named as the shared brush). The header's copy control answers
   to the same discipline through the shared `useCopy` (see [Services](#services-modulesservices)) -
   it is not a mutation, but it is the other thing here that can fail, and it claimed success
-  regardless until #565.
+  regardless until #565. The URL button is an icon button, so a landed copy swaps its glyph to a check
+  and raises no toast (`useCopy({ feedback: "icon" })`, #2315); the "Copy for agent" text button beside
+  it keeps its own plain `useCopy()` and toasts.
 - `InboxStartOptions.tsx` - the secondary start path (issue #2367): an **Inbox options** icon button
   beside every Start (the tab's empty state and its stopped-inbox **Start new**, and the Services
   drawer's **New inbox**) opening a dialog with the **Allowed origins** box. The one-click start
@@ -1032,7 +1035,9 @@ both reveal it.
   unfocused document, and a `void` call with an unconditional "copied" reports a refusal as a
   success while the rejection goes unhandled. It is a shared hook rather than a local one because
   the inbox tab's header offers the same URL and kept that exact defect after the drawer's fix
-  (#555 item 6, then #565 item 1) - a hand-rolled copy does not receive the primitive's fixes. Rows are ordered **by port**, because the engine lists them in map order (not stable across
+  (#555 item 6, then #565 item 1) - a hand-rolled copy does not receive the primitive's fixes. A row's
+  `⋯` menu items toast; the icon buttons inside an expanded issuer (token URL, authorize URL, signing
+  key) each own a `useCopy({ feedback: "icon" })` and swap their glyph to a check instead (#2315). Rows are ordered **by port**, because the engine lists them in map order (not stable across
   polls) and the record carries no creation stamp; the inbox tab's switcher orders the same way.
   Creating one **toasts and flashes** the new row for `TIMING.ROW_FLASH_MS` - it lands wherever its
   ephemeral port sorts, not at the end. The activator's verb is `sr-only` text **prefixed to** the
