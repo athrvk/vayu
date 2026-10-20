@@ -69,7 +69,7 @@ export function untypedTextPartNote(
 	if (body?.kind !== "form-data") return undefined;
 	const keys = body.fields.flatMap(([key, , contentType]) => (contentType ? [key] : []));
 	if (keys.length === 0) return undefined;
-	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} is sent without the type the request declares.`;
+	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} ${keys.length > 1 ? "are" : "is"} sent without the type the request declares.`;
 }
 
 export interface PreparedRequest {
