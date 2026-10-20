@@ -615,8 +615,10 @@ Result<Response> Client::send (const Request& request) {
 
     impl_->errors.attach (curl);
 
-    // Set URL
-    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request).c_str ());
+    // Also what the client-certificate match and the h2 hint below read, so
+    // both see the host, port and scheme the transfer dials.
+    const std::string url = vayu::http::wire_url (request);
+    set_opt<CURLOPT_URL> (curl, url.c_str ());
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
@@ -672,7 +674,7 @@ Result<Response> Client::send (const Request& request) {
     // the response rather than looked up again by a reader: see
     // Response::client_certificate.
     if (const ClientCertRule* certificate = detail::apply_transport_policy (
-        curl, impl_->config.transport, request.verify_ssl, request.url)) {
+        curl, impl_->config.transport, request.verify_ssl, url)) {
         response.client_certificate = client_cert_label (*certificate);
     }
 
@@ -758,7 +760,7 @@ Result<Response> Client::send (const Request& request) {
         // broken: CURL_HTTP_VERSION_2TLS offers h2 over TLS only, so an
         // `http://` request never attempts it. Naming that is why this is one
         // message with a suffix and not two call sites.
-        const bool cleartext = request.url.rfind ("http://", 0) == 0;
+        const bool cleartext = url.rfind ("http://", 0) == 0;
         vayu::utils::log_warning ("client",
         "HTTP/2 was requested but the connection negotiated " + response.http_version +
         " - " + vayu::utils::strip_url_secrets (request.url) +

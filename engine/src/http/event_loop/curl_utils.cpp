@@ -162,12 +162,16 @@ int extract_port (const std::string& url) {
 }
 
 std::optional<Error> validate_transferable (const Request& request) {
+    // Every URL rule reads the URL the handle is given, not `request.url`:
+    // with encoding on, `wire_url` drops leading whitespace and turns `\` into
+    // `/`, so the typed text can name a different scheme, host or port than
+    // the one dialled (#2465).
+    const std::string url = vayu::http::wire_url (request);
     // First, because nothing else about a request matters if it is not HTTP.
-    // Read off the URL as it stands here - composed, bound and residual-resolved
-    // - which is the URL the handle is given. `apply_transport_policy`'s
-    // protocol allowlist is the backstop for what this cannot see: a redirect,
-    // and a scheme libcurl guesses for a URL that names none.
-    if (auto problem = vayu::http::unsendable_scheme (request.url)) {
+    // `apply_transport_policy`'s protocol allowlist is the backstop for what
+    // this cannot see: a redirect, and a scheme libcurl guesses for a URL that
+    // names none.
+    if (auto problem = vayu::http::unsendable_scheme (url)) {
         return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
     }
     // The body-level answer on purpose: this gate is about a body existing at
@@ -201,14 +205,14 @@ std::optional<Error> validate_transferable (const Request& request) {
     }
     // `wire_url` sends a non-ASCII host by its punycode name, and one with no
     // such name has nothing to send to.
-    if (auto problem = vayu::http::unsendable_host (request.url)) {
+    if (auto problem = vayu::http::unsendable_host (url)) {
         return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
     }
     // The literal half of the loopback guard (#2355): a URL naming Vayu's own
     // port is refused before anything is dialled, proxy or not. Redirects and
     // names that resolve there are the pre-request callback's
     // (`apply_transport_policy`).
-    if (const auto port = vayu::http::reserved_target_port (request.url)) {
+    if (const auto port = vayu::http::reserved_target_port (url)) {
         return Error{ ErrorCode::InvalidUrl,
             "Cannot send this request: " + vayu::http::reserved_target_refusal (*port) };
     }
@@ -1219,15 +1223,17 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     data->errors.attach (curl);
 
-    // Set URL
-    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request).c_str ());
+    // The DNS pin and the client-certificate match below read this same URL,
+    // so they key on the host and port the transfer dials.
+    const std::string url = vayu::http::wire_url (request);
+    set_opt<CURLOPT_URL> (curl, url.c_str ());
 
     // DNS Pre-resolution: Use cached DNS to bypass system resolver
     // This is critical for high-RPS loads (prevents DNS saturation)
     // An IP-literal URL has nothing to resolve, so it is never pinned - that
     // also keeps a malformed literal out of the cache's blocking lookup path.
     if (dns_cache) {
-        const UrlAuthority authority = parse_authority (request.url);
+        const UrlAuthority authority = parse_authority (url);
         if (!authority.host.empty () && !authority.is_ip_literal) {
             struct curl_slist* resolve_list = dns_cache->get_resolve_list (
             authority.host, authority.port, config.dns_cache_timeout);
@@ -1335,7 +1341,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // connection when its proxy and TLS config match, so varying either per
     // transfer would partition every worker's pool and multiply handshakes
     // (epic decision 3 of #704).
-    apply_transport_policy (curl, config.transport, request.verify_ssl, request.url);
+    apply_transport_policy (curl, config.transport, request.verify_ssl, url);
 
     // =========================================================================
     // HIGH-PERFORMANCE OPTIMIZATIONS (Phase 1 - Target: 60k RPS)

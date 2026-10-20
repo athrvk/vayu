@@ -186,6 +186,8 @@ namespace vayu::http {
  * `disable_url_encoding`, the whole URL is written as Postman writes it
  * (`core::encode_url_as_postman`, issue #2465), so Send, a load run, a
  * collection run and `pm.sendRequest` put out one request line for one URL.
+ * Every check made beside the transfer (the scheme and loopback gates, the DNS
+ * pin, the client-certificate match) reads this URL too, never `request.url`.
  */
 [[nodiscard]] bool has_wire_body (const Request& request);
 

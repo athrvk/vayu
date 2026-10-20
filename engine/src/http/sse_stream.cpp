@@ -434,7 +434,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.started_at = std::chrono::steady_clock::now ();
 
     errors.attach (curl);
-    set_opt<CURLOPT_URL> (curl, vayu::http::wire_url (request.request).c_str ());
+    // Also what the client-certificate match below reads, so it keys on the
+    // host and port the transfer dials.
+    const std::string url = vayu::http::wire_url (request.request);
+    set_opt<CURLOPT_URL> (curl, url.c_str ());
     detail::BodySource body_source;
     detail::apply_method_and_body (curl, request.request, body_source);
 
@@ -471,8 +474,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
     // shared applier is what makes that unrepeatable.
-    if (const ClientCertRule* certificate = detail::apply_transport_policy (curl,
-        request.transport, request.request.verify_ssl, request.request.url)) {
+    if (const ClientCertRule* certificate = detail::apply_transport_policy (
+        curl, request.transport, request.request.verify_ssl, url)) {
         response.client_certificate = client_cert_label (*certificate);
     }
     set_opt<CURLOPT_HTTP_VERSION> (

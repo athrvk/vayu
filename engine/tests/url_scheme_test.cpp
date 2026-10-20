@@ -238,6 +238,18 @@ TEST (UrlSchemeTransfer, AStreamRefusesAFileUrl) {
     EXPECT_EQ (context.end_reason (), vayu::http::SseEndReason::Error);
 }
 
+// With encoding on the transfer is handed the URL with its leading whitespace
+// dropped (#2465), so the gate must read the scheme there too. Mutation-check:
+// let `validate_transferable` read `request.url` and libcurl's allowlist
+// refuses this instead, in its own words.
+TEST (UrlSchemeTransfer, ALeadingSpaceDoesNotHideAFileUrl) {
+    const SecretFile secret;
+    vayu::http::Client client;
+    const auto result = client.send (get (" \t" + secret.url ()));
+    ASSERT_TRUE (result.is_ok ());
+    expect_scheme_refusal (result.value (), "file");
+}
+
 // ---------------------------------------------------------------------------
 // The handle's own allowlist: what the URL check never sees
 // ---------------------------------------------------------------------------

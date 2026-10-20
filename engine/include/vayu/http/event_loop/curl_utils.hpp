@@ -81,9 +81,11 @@ const Request* request = nullptr);
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
- * @param url The target this transfer dials, for the client-certificate lookup
- *            (issue #707). Parsed only when the registry is non-empty, so the
- *            load path pays nothing for a feature it is not using.
+ * @param url The URL the handle was given (`wire_url`), for the
+ *            client-certificate lookup (issue #707); never `request.url`, whose
+ *            typed text can name another scheme or host (#2465). Parsed only
+ *            when the registry is non-empty, so the load path pays nothing for
+ *            a feature it is not using.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched. Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the
@@ -116,6 +118,11 @@ struct UrlAuthority {
 
 /**
  * @brief Parse the authority of a request URL.
+ *
+ * A caller holding a `Request` passes `wire_url (request)`, the URL the handle
+ * is given: with encoding on that drops leading whitespace and turns `\` into
+ * `/`, either of which changes the scheme default port and the host read off
+ * the typed text (#2465).
  *
  * Handles the two forms the DNS pre-resolution path used to mis-parse: an IPv6
  * literal (`http://[::1]:8080/`, whose colons are part of the address) and
@@ -153,7 +160,8 @@ int extract_port (const std::string& url);
  * `vayu::http::unsendable_header_text` - and a non-ASCII host with no ASCII
  * name (`vayu::http::unsendable_host`), and a URL naming Vayu's own engine or
  * MCP port (`vayu::http::reserved_target_port`, #2355). In each case the
- * caller is told rather than having half its request silently discarded.
+ * caller is told rather than having half its request silently discarded. The
+ * URL rules read `wire_url (request)`, the URL the handle is given (#2465).
  *
  * Being the one gate every driver passes through *before* configuring anything
  * is what makes it the home for a rule that has to hold for every origin -

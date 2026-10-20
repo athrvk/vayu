@@ -21,8 +21,8 @@
  *
  * Only those ports, never the rest of loopback: testing a local server is an
  * everyday use. Every driver applies the rule twice, through
- * `detail::validate_transferable` (the URL as written, refused before
- * anything is dialled) and through `detail::apply_transport_policy`'s
+ * `detail::validate_transferable` (the URL the handle is given, `wire_url`,
+ * refused before anything is dialled) and through `detail::apply_transport_policy`'s
  * pre-request callback (the address libcurl actually connected to, which is
  * what catches a redirect and a name that resolves to loopback). With a proxy
  * in force the connected peer is the proxy, so only the first check sees the
@@ -72,7 +72,8 @@ std::optional<int> registered_engine_port () noexcept;
 bool is_reserved_loopback_target (std::string_view host_or_ip, int port);
 
 /// The reserved port @p url names on a loopback host, or nullopt. The literal
-/// check every driver and `pm.sendRequest` run before dialling.
+/// check every driver and `pm.sendRequest` run before dialling, on the URL the
+/// transfer is handed (`wire_url`, or the encoded URL `pm.sendRequest` sends).
 std::optional<int> reserved_target_port (const std::string& url);
 
 /// The sentence a refused transfer reports, naming which of Vayu's ports

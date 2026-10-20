@@ -5826,7 +5826,13 @@ unchanged, as is every byte no set holds (`+`, `|`, `^`, `[`, `]`, `!`, `'`
 outside the query). A `{{token}}` nothing answered is kept whole, where
 Postman would encode its braces in the path. The rule is applied where every
 driver takes its URL (`wire_url`) and at the end of composition, so
-`POST /compose` answers the line that will be sent. With `disableUrlEncoding`
+`POST /compose` answers the line that will be sent. Every check made beside
+the transfer reads that same URL - the [scheme rule](#url-schemes), the
+[reserved-port refusal](#reserved-local-ports), the DNS pin and the
+client-certificate match - so a leading space or a backslash cannot make the
+typed text name another scheme, host or port than the one dialled:
+`localhost:9876/x` with a leading space is refused as it is without one, and
+`https://h/` with one pins and matches port 443. With `disableUrlEncoding`
 on the URL goes out exactly as typed (a non-ASCII host still by its punycode
 name), and libcurl refuses a raw space: the send fails with status `0` and
 error code `INVALID_URL`, and a message that names the space and the toggle
@@ -5897,9 +5903,11 @@ collection run, a streaming request, History replay, MCP, `pm.sendRequest`, an
 OAuth 2.0 token request, `POST /import/fetch` and the server-vitals monitor.
 The scheme is read case-insensitively from the URL as it stands just before
 the transfer - after composition, a data row's bind, the pre-request script
-and the residual pass - so a `{{baseUrl}}` that resolves to `file:///etc` is
-refused like a typed one. A refused send never reaches the network: status
-`0`, error code `INVALID_URL`, and the message
+and the residual pass, and as the transfer is handed it
+([Query encoding](#query-encoding)) - so a `{{baseUrl}}` that resolves to
+`file:///etc` is refused like a typed one, and so is `file:///etc` with a
+leading space. A refused send never reaches the network: status `0`, error code
+`INVALID_URL`, and the message
 `Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent`,
 naming the scheme as written. A `pm.sendRequest` gets the same code and
 message as its callback's `err`.
@@ -5979,7 +5987,8 @@ or without a trailing dot - and the unspecified `0.0.0.0` and `::`, which
 connect to the local host. Every other port on loopback is sent as usual. The
 rule is applied twice:
 
-- **The URL as written**, before anything is dialled: status `0`, error code
+- **The URL the transfer is handed** ([Query encoding](#query-encoding)),
+  before anything is dialled: status `0`, error code
   `INVALID_URL`, and the message
   `Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine - not when the URL names it, a redirect leads there or a host name resolves there`
   (`MCP port 9877` for the other). This holds with a proxy configured too.
