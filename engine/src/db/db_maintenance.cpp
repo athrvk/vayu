@@ -698,15 +698,25 @@ void plan_refused_roots (sqlite3* connection, std::vector<RefusedRoot>& out) {
     sqlite3_finalize (statement);
 }
 
+/// The first version whose stored bodies carry no trust key and whose allowed
+/// folders all pass `refused_root_reason`.
+constexpr int64_t DERIVED_FILE_TRUST_VERSION = 6;
+
 /**
- * The file-trust step for a database stamped @p version. Requests (the trash
- * included, which is the same table) and run snapshots are the two places a
- * body `FilePlan` sends is stored. `request_examples.body` is a response's
- * text and `inbox_requests.body` the bytes a listener received: neither is
- * ever parsed as a request body, so neither is visited.
+ * The file-trust step for a database stamped @p version, empty from version 6
+ * on: a version-6 database already holds only what the step leaves, and
+ * re-running `plan_refused_roots` against a rule that has since moved would
+ * delete folders the user allowed under it. Requests (the trash included,
+ * which is the same table) and run snapshots are the two places a body
+ * `FilePlan` sends is stored. `request_examples.body` is a response's text and
+ * `inbox_requests.body` the bytes a listener received: neither is ever parsed
+ * as a request body, so neither is visited.
  */
 FileTrustPlan plan_file_trust_migration (sqlite3* connection, int64_t version) {
     FileTrustPlan plan;
+    if (version >= DERIVED_FILE_TRUST_VERSION) {
+        return plan;
+    }
     const bool absent_means_chosen = version < 4;
     plan_trust_removal (connection, "requests", "body", /*in_snapshot=*/false,
     absent_means_chosen, plan);
@@ -1069,10 +1079,10 @@ const std::vector<SiblingOrderShift>& order_shifts) {
  *
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
  * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`);
- * 1 and 2 are stamped without a fold; anything older than this build also
- * gets the file-trust step (`plan_file_trust_migration`, versions 4 and 6)
- * and, below 7, the sibling-order shift (`plan_sibling_order_shift`) in the
- * same transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
+ * 1 and 2 are stamped without a fold; below 6 the file-trust step
+ * (`plan_file_trust_migration`, the rules of versions 4 and 6) and below 7 the
+ * sibling-order shift (`plan_sibling_order_shift`) run in the same
+ * transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
  * than `SCHEMA_VERSION` refuses to start rather than silently serving - and
  * possibly writing - settings this build does not understand.
  *
@@ -1136,10 +1146,10 @@ const std::function<void (sqlite3*)>& on_connection) {
     const bool requests_need_fold = table_has_script_columns (connection.get (), "requests");
     const bool collections_need_fold =
     table_has_script_columns (connection.get (), "collections");
-    // 5 -> 6 (every earlier version passes through it too): grant the files
-    // a person chose, take the trust key out of every stored body, and drop
-    // the allowed folders the root rule refuses (4) - see `plan_trust_removal`
-    // and `plan_refused_roots`.
+    // 5 -> 6 (every earlier version passes through it too, 6 itself does
+    // not): grant the files a person chose, take the trust key out of every
+    // stored body, and drop the allowed folders the root rule refuses (4) -
+    // see `plan_trust_removal` and `plan_refused_roots`.
     const FileTrustPlan trust_plan =
     plan_file_trust_migration (connection.get (), *version);
     // 6 -> 7: requests move past their sub-folders into one sibling order.

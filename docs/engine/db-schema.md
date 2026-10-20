@@ -337,8 +337,11 @@ database below version `6`, after the fold:
 mapping generates, or `sync_schema ()` would rebuild the table empty. All of it is planned before
 anything is written, so a database with nothing to change is only stamped; otherwise
 `<db>.pre-migration.bak` is written first, as for the fold. A second run finds nothing to change
-and grants nothing twice. **The cost**: a body a non-editor caller managed to store as
-`unresolved: false` before the upgrade is granted once, like a pick.
+and grants nothing twice. A database already at `6` does not run it on its way to a later
+version (`plan_file_trust_migration` plans nothing from `6` on), so a root rule that has since
+moved never removes a folder allowed under the rule it was written with. **The cost**: a body a
+non-editor caller managed to store as `unresolved: false` before the upgrade is granted once,
+like a pick.
 
 ### The sibling-order migration (schema version 7)
 

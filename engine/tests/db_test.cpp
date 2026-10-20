@@ -3076,6 +3076,32 @@ TEST_F (DatabaseTest, TheFileTrustStepIsIdempotent) {
     std::filesystem::remove_all ("trust-migration");
 }
 
+// A version-6 database has had the file-trust step, so the later steps it
+// passes through must not run it again: an allowed folder the root rule
+// refuses today was accepted by the rule it was written under, and stays.
+// Mutation check: drop the version gate in `plan_file_trust_migration` and
+// the folder is removed.
+TEST_F (DatabaseTest, AVersionSixDatabaseKeepsItsAllowedFoldersThroughLaterSteps) {
+    seed_workspace (TEST_DB_PATH, 6, [] (Database& db) {
+        vayu::FileRoot root;
+        root.id         = "froot_home";
+        root.path       = canonical_home ();
+        root.created_at = 1;
+        db.save_file_root (root);
+    });
+    ASSERT_TRUE (vayu::http::refused_root_reason (canonical_home (), canonical_home ()))
+    << "the root rule accepts the seeded folder, so there is nothing to keep";
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    std::vector<std::string> ids;
+    for (const auto& row : db.get_file_roots ()) {
+        ids.push_back (row.id);
+    }
+    EXPECT_EQ (ids, std::vector<std::string>{ "froot_home" });
+}
+
 // From version 4 every write stated the key, so only an explicit `false` was a
 // person's choice: it is granted (once, however many bodies name it) and still
 // sends; `true`, an absent key, a path that is gone and a templated path are
