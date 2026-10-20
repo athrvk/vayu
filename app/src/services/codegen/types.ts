@@ -41,6 +41,7 @@ export interface SnippetBody {
 		type?: "text" | "file";
 		src?: string;
 		fileName?: string;
+		/** A file part's type, or the one a `form-data` text part declares (#2539). */
 		contentType?: string;
 	}>;
 }

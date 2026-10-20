@@ -96,12 +96,22 @@ export function generateCurl(
 		// `--data-binary` is `application/x-www-form-urlencoded`.
 		args.push(`--data-binary @${shellQuote(prepared.body.path)}`);
 	} else if (prepared.body?.kind === "form-data") {
-		for (const [key, value] of prepared.body.fields) {
+		for (const [key, value, contentType] of prepared.body.fields) {
 			// `--form-string`, not `-F`: `-F` reads a value beginning with `@` or
 			// `<` as a file reference and `;type=` as a per-part override, so a
 			// generated command would upload a local file the request never
 			// contained. `--form-string` takes the value literally, always.
-			args.push(`--form-string ${shellQuote(`${key}=${value}`)}`);
+			if (!contentType) {
+				args.push(`--form-string ${shellQuote(`${key}=${value}`)}`);
+				continue;
+			}
+			// `--form-string` has no modifiers, so a typed text part is the one
+			// text case that needs `-F`. A double-quoted value is text to curl
+			// whatever it starts with (`"@x"` is the literal `@x`), with `\` and
+			// `\"` the only escapes; `;type=` is last so a type carrying `;`
+			// parameters is taken whole.
+			const quoted = `"${value.replace(/[\\"]/g, "\\$&")}"`;
+			args.push(`-F ${shellQuote(`${key}=${quoted};type=${contentType}`)}`);
 		}
 		for (const file of prepared.body.files) {
 			// A file part is the one case where `-F` is right: `@path` is exactly

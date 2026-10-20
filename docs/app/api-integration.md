@@ -134,7 +134,9 @@ where libcurl would write `application/x-www-form-urlencoded` (issue #2464). A
 `form-data` row may be
 a **file part** (`{type: "file", src, fileName?, contentType?}`): the renderer
 sends the path the user picked - never the bytes - and the engine opens the file
-at send time. A **`binary`** body is one file as the whole body,
+at send time. A text part may carry just `contentType`, the type it declares for
+itself (a Postman import keeps one, #2539); the renderer sends it, resolved like
+the file members, and a part without it sends none. A **`binary`** body is one file as the whole body,
 `{mode: "binary", file: {src, fileName?, contentType?}}`, built from
 `RequestState.binaryFile`; it is sent even with an empty `src`, so the engine can
 refuse it as "no file selected" rather than send a bodiless request.
