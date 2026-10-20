@@ -68,6 +68,28 @@ export const QUICK_ACTIONS_LABEL = "Quick actions";
 export const RECENT_LIMIT = 6;
 
 /**
+ * How many rows an unbounded group renders before it says how many it left out.
+ *
+ * Requests and collections are the two kinds that grow with the workspace (the
+ * deep sources cap themselves at `DEEP_GROUP_LIMIT`; tabs, views and commands
+ * are bounded by the app). Mounting one cmdk row per request is a render cost
+ * that scales with the data and repeats per keystroke (#2545). The cap is
+ * applied *after* ordering, so the best match is always inside it: ranking sees
+ * the whole set and only the DOM is limited.
+ *
+ * A growing window was the alternative and was rejected: the palette is a
+ * search box, so the way to reach row 51 is a longer query, and the group's
+ * "N more" line says how many exist.
+ */
+export const PALETTE_GROUP_RENDER_LIMIT = 50;
+
+/** The kinds that grow with the workspace, and so the ones `PALETTE_GROUP_RENDER_LIMIT` caps. */
+const RENDER_CAPPED_KINDS: ReadonlySet<PaletteKind> = new Set<PaletteKind>([
+	"request",
+	"collection",
+]);
+
+/**
  * What a row is matched against: what it reads as, plus its extra terms.
  *
  * The id is deliberately absent - it is a uuid, and a query of "b7" would
@@ -114,7 +136,10 @@ const SUBSTRING_SCORE = 0.15;
 /** One rendered section: a heading, its rows, and any escape row below them. */
 export interface RankedGroup {
 	kind: PaletteKind;
+	/** The rows that render: at most `PALETTE_GROUP_RENDER_LIMIT` for a workspace-sized kind. */
 	items: PaletteItem[];
+	/** Rows ranked into this group and left off the screen by the cap. */
+	hidden: number;
 	escapes: PaletteItem[];
 }
 
@@ -137,9 +162,9 @@ export interface RankedPalette {
 	/** The familiar fixed order, minus whatever was promoted or lifted. */
 	groups: RankedGroup[];
 	/**
-	 * How many result rows render. Escape rows are navigation, not results, and
-	 * are not counted - the announcement answers "did what I typed narrow
-	 * anything", and an escape row is present either way.
+	 * How many result rows matched, hidden ones included. Escape rows are
+	 * navigation, not results, and are not counted - the announcement answers
+	 * "did what I typed narrow anything", and an escape row is present either way.
 	 */
 	total: number;
 }
@@ -325,14 +350,19 @@ function groupsOf(
 ): RankedGroup[] {
 	return PALETTE_GROUPS.map((kind) => {
 		const ofKind = items.filter((item) => item.kind === kind);
+		const ordered = order(ofKind.filter((item) => !item.escape));
+		const shown = RENDER_CAPPED_KINDS.has(kind)
+			? ordered.slice(0, PALETTE_GROUP_RENDER_LIMIT)
+			: ordered;
 		return {
 			kind,
-			items: order(ofKind.filter((item) => !item.escape)),
+			items: shown,
+			hidden: ordered.length - shown.length,
 			escapes: ofKind.filter((item) => item.escape),
 		};
 	}).filter((group) => group.items.length > 0 || group.escapes.length > 0);
 }
 
 function countItems(groups: RankedGroup[]): number {
-	return groups.reduce((n, group) => n + group.items.length, 0);
+	return groups.reduce((n, group) => n + group.items.length + group.hidden, 0);
 }
