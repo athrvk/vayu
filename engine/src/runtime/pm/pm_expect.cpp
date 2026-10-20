@@ -404,7 +404,7 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
  * `members` target that is not an array, a `length` read off a target with
  * none, an `include` pair chai has no rule for (#2582). A script-text mistake
  * stays a `TypeError`: a matcher called with no argument or a malformed one
- * (`members` given a non-array, `keys()` with no names), a misspelled name, and
+ * (`members` given a non-array argument, `keys()` with no names), a misspelled name, and
  * the ordering matchers' refusal of a value that is not a number or a Date.
  * Nothing was asserted; the call itself was wrong.
  */
@@ -435,7 +435,7 @@ namespace {
  * prefix itself, so the prefix is one rule in one place: a matcher added later
  * gets it by throwing the way its neighbours do, and cannot report a bare
  * message by forgetting a concatenation. Usage errors - `above()` with no
- * argument, `members()` given a non-array - deliberately do **not** come
+ * argument, `members()` given a non-array argument - deliberately do **not** come
  * through here: they name a mistake in the script text, not the value under
  * test, and their message already names the matcher that rejected the call.
  */
@@ -1117,8 +1117,8 @@ LengthSubject read_length_subject (JSContext* ctx, JSValueConst target) {
 
     ScopedValue measured (ctx, JS_GetPropertyStr (ctx, target, out.descriptor));
     // A measurement the read could not produce is neither absent nor a number:
-    // the script's own error is the answer, not "requires a value with a
-    // length" and not a comparison against an uninitialised double.
+    // the script's own error is the answer, not the missing-length assertion
+    // and not a comparison against an uninitialised double.
     if (JS_IsException (measured.get ())) {
         out.status = LengthRead::Failed;
     } else if (JS_IsUndefined (measured.get ())) {
