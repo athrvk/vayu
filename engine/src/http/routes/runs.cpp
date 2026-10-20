@@ -84,24 +84,25 @@ void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// Whether this run negotiated a compressed response, read out of the nested
-// `defaultHeaders` object issue #1488 added to the snapshot at run start.
-// Nested rather than flat so it cannot collide with a client-controlled
-// top-level key `add_if_present` would otherwise copy verbatim.
+// One run-scoped default-header decision (`acceptEncoding`, issue #1488, or
+// `expectContinue`, issue #2516), read out of the nested `defaultHeaders`
+// object the snapshot gains at run start. Nested rather than flat so it cannot
+// collide with a client-controlled top-level key `add_if_present` would
+// otherwise copy verbatim.
 //
-// Omitted, not defaulted, when the snapshot predates this field - unlike
+// Omitted, not defaulted, when the snapshot predates the field - unlike
 // httpVersion, an absent key here does not mean "the engine's own default
 // applied at read time", it means "no run-scoped decision was ever
 // recorded". The baseline comparison (app side) is the one place that reads
-// an absent key as false, because that is what every pre-0.26 run actually
+// an absent key as false, because that is what every earlier run actually
 // sent.
-void add_accept_encoding (nlohmann::json& dst, const nlohmann::json& src) {
+void add_default_header_flag (nlohmann::json& dst, const nlohmann::json& src, const char* key) {
     if (!src.contains ("defaultHeaders") || !src["defaultHeaders"].is_object ()) {
         return;
     }
     const auto& headers = src["defaultHeaders"];
-    if (headers.contains ("acceptEncoding") && headers["acceptEncoding"].is_boolean ()) {
-        dst["acceptEncoding"] = headers["acceptEncoding"];
+    if (headers.contains (key) && headers[key].is_boolean ()) {
+        dst[key] = headers[key];
     }
 }
 
@@ -176,7 +177,7 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
             }
             add_target_rps (summary, config);
             add_http_version (summary, config);
-            add_accept_encoding (summary, config);
+            add_default_header_flag (summary, config, "acceptEncoding");
             add_scenario (summary, config);
         }
     } catch (...) {
@@ -1051,10 +1052,11 @@ int64_t offset) {
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
  * bound and the budgets it carried (fifteen keys total) and, when the
- * snapshot carries one,
- * `acceptEncoding` (issue #1488), built from an already-parsed
- * config_snapshot. `rps`/`targetRps` is the one rename (add_target_rps), so the
- * caller applies it rather than this key list.
+ * snapshot carries them, `acceptEncoding` (issue #1488) and `expectContinue`
+ * (issue #2516), built from an already-parsed config_snapshot. `rps`/
+ * `targetRps` is the one rename (add_target_rps), so the caller applies it
+ * rather than this key list. `expectContinue` is not in the list-row summary
+ * (build_run_summary): only the report's comparison reads it.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
  * runs_route_test.cpp - without the full report handler's DB/metrics reads.
@@ -1078,7 +1080,8 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
-    add_accept_encoding (config_obj, config);
+    add_default_header_flag (config_obj, config, "acceptEncoding");
+    add_default_header_flag (config_obj, config, "expectContinue");
     return config_obj;
 }
 

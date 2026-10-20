@@ -316,6 +316,17 @@ TEST_F (RunsRouteTest, SummaryCarriesAcceptEncodingWhenSnapshotHasIt) {
     EXPECT_EQ (body["data"][2]["summary"]["acceptEncoding"], true);
 }
 
+// Nothing reads `expectContinue` off a list row, so the row does not carry it
+// (issue #2516): the report's `configuration` is where the comparison finds it.
+TEST_F (RunsRouteTest, SummaryDoesNotCarryExpectContinue) {
+    seed ({ .id = "run_expect_continue",
+    .config_snapshot = R"({"url":"https://a/","defaultHeaders":{"acceptEncoding":true,"expectContinue":true}})" });
+
+    auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    EXPECT_EQ (body["data"][0]["summary"]["acceptEncoding"], true);
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("expectContinue"));
+}
+
 // An iterations run's count and a paced run's rate are part of what the run
 // was, so the list row carries them (issue #2437); `rps` is the body's other
 // spelling of the rate and reads as `targetRps` in the row, as in the report.
@@ -1133,6 +1144,26 @@ TEST (RunReportConfigTest, CarriesAcceptEncodingWhenSnapshotHasItAndOmitsItOther
     vayu::http::routes::build_run_report_config (negotiated)["acceptEncoding"], true);
     EXPECT_FALSE (vayu::http::routes::build_run_report_config (pre_1488).contains (
     "acceptEncoding"));
+}
+
+// The report's comparison reads `expectContinue` (issue #2516); a snapshot
+// without it stays without it, so the compare readers' absent-is-false rule is
+// the only place that defaults it.
+TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOtherwise) {
+    const auto snapshot = [] (const char* flag) {
+        return json::parse (
+        std::string (R"({"mode":"once","defaultHeaders":{"expectContinue":)") + flag + "}}");
+    };
+
+    EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("true"))["expectContinue"],
+    true);
+    EXPECT_EQ (vayu::http::routes::build_run_report_config (snapshot ("false"))["expectContinue"],
+    false);
+    EXPECT_FALSE (vayu::http::routes::build_run_report_config (json::parse (R"({"mode":"once"})"))
+    .contains ("expectContinue"));
+    EXPECT_FALSE (vayu::http::routes::build_run_report_config (
+    json::parse (R"({"defaultHeaders":{"expectContinue":"yes"}})"))
+    .contains ("expectContinue"));
 }
 
 // A single-request run's data file, beside the row count it describes (issue

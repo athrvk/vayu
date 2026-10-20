@@ -4166,8 +4166,10 @@ answers. Its members:
   a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
   `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
   the first 8 characters of its hash; none against one *is* a difference),
-  `request` (method and URL with the query, fragment and userinfo cut) and
-  `compression`. The two values are strings formatted as the app shows them.
+  `request` (method and URL with the query, fragment and userinfo cut),
+  `compression` and `expect_continue` (#2516; `allowed` against `not allowed`,
+  an absent key reading as `not allowed`). The two values are strings formatted
+  as the app shows them.
   Every report the export reads carries `metadata.runType`, so a `mode`,
   `concurrency` or `target_rps` only one run recorded is listed, its missing
   side `not recorded` (the shared rule leaves such a field unknown when either
@@ -9304,8 +9306,13 @@ so a later run's report can say whether the two measured under the same
 conditions:
 
 ```json
-"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true }
+"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true, "expectContinue": false }
 ```
+
+`expectContinue` (issue #2516) is whether `sendExpectContinue` let libcurl add
+`Expect: 100-continue` to a body over 1 MiB, which makes it wait up to a second
+for the server's answer before sending. A run recorded before it has no such
+key, and a comparison reads that as `false`, which is what the run sent.
 
 Absent on a design run (it carries no throughput to compare) and on any run
 recorded before this issue.
@@ -9540,7 +9547,8 @@ named it.
       "dataFileName": "users.csv",
       "dataFileHash": "<sha256>",
       "carriedBudgets": ["latencyP99Ms"],
-      "acceptEncoding": true
+      "acceptEncoding": true,
+      "expectContinue": false
     },
     "openapi": {
       "specId": "spec_3f2b1c9a-...",
@@ -9989,9 +9997,10 @@ snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`,
 each omitted when absent, and recording what the run was sent, never a default
 the engine filled in; issue #2437) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
-above), and `acceptEncoding` (issue #1488), read out of the snapshot's
-`defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
-of the same name. `rps` in the raw snapshot is renamed to `targetRps` here,
+above), and `acceptEncoding` (issue #1488) and `expectContinue` (issue
+#2516), read out of the snapshot's `defaultHeaders` and omitted on the same
+terms as `GET /runs`'s `summary` key `acceptEncoding` (`expectContinue` is on
+the report only, not in the list row: only the comparison reads it). `rps` in the raw snapshot is renamed to `targetRps` here,
 and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
 null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
