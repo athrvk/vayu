@@ -604,10 +604,15 @@ rather than ajv. A failure names the first path that broke the schema
 the assertion **in both polarities**, naming the keyword, because ignoring it
 makes the schema looser anywhere but inside `not`, where it makes it stricter:
 neither verdict could be trusted, so neither is given. `options` is ajv's and is accepted and not read.
-**`format` is checked only for `date`, `time`, `date-time` and `ipv4`**; the
-validator treats every other format (`email`, `uri`, `uuid`, `hostname`, ...) as
-an annotation, so a schema that relies on ajv's formats passes values it would
-fail in Postman. The body of `pm.response.to.have.jsonSchema` is read as
+**`format` is checked for `date`, `time`, `date-time`, `ipv4`, `email`, `uri`,
+`uuid`, `hostname` and `ipv6`**; every other format (`uri-reference`, `regex`,
+`int64`, ...) is an annotation, as the specification allows, so a schema that
+relies on one of ajv's other formats passes values it would fail in Postman. The
+checks are the engine's own, not ajv's, and are stricter or looser than ajv in
+the corners: `email` is a dot-atom `local@hostname` (no quoted local part, no
+bracketed address literal), `uri` is an absolute RFC 3986 URI checked for a
+scheme and its character set rather than the grammar of the authority, and
+`uuid` is the hyphenated form without a `urn:uuid:` prefix. The body of `pm.response.to.have.jsonSchema` is read as
 `JSON.parse` reads it, so `1.0` is the integer `1`.
 
 **Where the vocabulary stops matching chai.** Each of these is a difference in

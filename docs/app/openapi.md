@@ -863,6 +863,12 @@ part of its schema that would have rejected it was never looked at, and saying s
 is the only honest way to show a green verdict beside a schema that was half
 read.
 
+**`format` is asserted for `date`, `time`, `date-time`, `ipv4`, `email`, `uri`,
+`uuid`, `hostname` and `ipv6`** (the checks are in
+`engine/src/core/schema_format.cpp`). Any other name - `int64`, `binary`,
+`uri-reference` - is an annotation the specification allows a validator to
+ignore, so it never fails a body and is not counted as an unread keyword.
+
 ## Schema validation under load
 
 A **load run** of a bound collection reports whether the responses it kept

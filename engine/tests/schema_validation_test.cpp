@@ -472,6 +472,182 @@ TEST (SchemaValidationBoundsTest, AScriptSchemaTheValidatorRefusesNamesWhy) {
     EXPECT_FALSE (judged->valid);
 }
 
+// ─── `format` (issue #2581) ─────────────────────────────────────────────────
+
+namespace {
+
+/// What `{"format": <format>}` makes of @p value; unchecked when the validator
+/// refused the schema, which every caller below treats as a failure.
+ValidationVerdict format_verdict (const std::string& format, const json& value) {
+    const auto verdict =
+    validate_document_against_schema (json{ { "format", format } }, value);
+    if (!verdict.has_value ()) {
+        ADD_FAILURE () << "format " << format << " was refused: " << verdict.error ();
+        return {};
+    }
+    return *verdict;
+}
+
+bool format_accepts (const std::string& format, const json& value) {
+    const auto verdict = format_verdict (format, value);
+    return verdict.checked && verdict.valid;
+}
+
+bool format_rejects (const std::string& format, const json& value) {
+    const auto verdict = format_verdict (format, value);
+    return verdict.checked && !verdict.valid;
+}
+
+void expect_format (const std::string& format,
+const std::vector<std::string>& good,
+const std::vector<std::string>& bad) {
+    for (const auto& value : good) {
+        EXPECT_TRUE (format_accepts (format, value))
+        << format << " should accept '" << value << "'";
+    }
+    for (const auto& value : bad) {
+        EXPECT_TRUE (format_rejects (format, value))
+        << format << " should reject '" << value << "'";
+    }
+}
+
+} // namespace
+
+TEST (SchemaFormatTest, EmailIsAnAddrSpec) {
+    expect_format ("email",
+    { "a@b.co", "first.last+tag@example.com", "x@localhost", "o'brien@sub.example-host.org" },
+    { "not-an-email", "", "@b.co", "a@", "a@@b.co", ".a@b.co", "a.@b.co", "a..b@b.co", "a b@b.co",
+    "a@-b.co", "a@b..co", "a@b.co.", "a@b_c.co", std::string (65, 'a') + "@b.co" });
+}
+
+TEST (SchemaFormatTest, HostnameIsDottedLdhLabels) {
+    expect_format ("hostname",
+    { "example.com", "localhost", "a-b.example.org", "123.example",
+    "xn--nxasmq6b", std::string (63, 'a') + ".com" },
+    { "", "-a.com", "a-.com", "a..com", "a_b.com", "example.com.", "has space.com",
+    ".com", std::string (64, 'a') + ".com", std::string (254, 'a') });
+}
+
+TEST (SchemaFormatTest, UuidIsTheHyphenatedHexForm) {
+    expect_format ("uuid",
+    { "123e4567-e89b-12d3-a456-426614174000", "123E4567-E89B-12D3-A456-426614174000" },
+    { "", "123e4567e89b12d3a456426614174000", "123e4567-e89b-12d3-a456-42661417400",
+    "123e4567-e89b-12d3-a456-4266141740000", "123e4567-e89b-12d3-a456-42661417400g",
+    "urn:uuid:123e4567-e89b-12d3-a456-426614174000" });
+}
+
+TEST (SchemaFormatTest, UriIsAnAbsoluteRfc3986Uri) {
+    expect_format ("uri",
+    { "http://example.com", "https://example.com/a/b?q=1#frag", "mailto:a@b.co",
+    "urn:isbn:0451450523", "http://[::1]:8080/x", "http://example.com/a%20b" },
+    { "not a uri", "", "/relative/path", "example.com", "://x", "1http://x",
+    "http://exa mple.com", "http://x/%zz", "http://x/%2", "http://x/#a#b",
+    "http://x/\"q\"", "http://example.com/\xC3\xA9" });
+}
+
+TEST (SchemaFormatTest, Ipv6IsTheRfc4291TextForm) {
+    expect_format ("ipv6",
+    { "::", "::1", "2001:db8::8a2e:370:7334", "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+    "1:2:3:4:5:6:7::", "::2:3:4:5:6:7:8", "::ffff:192.0.2.1",
+    "64:ff9b::192.0.2.33", "1:2:3:4:5:6:1.2.3.4", "FE80::ABCD" },
+    { "", "1.2.3.4", ":", ":::", "1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "1::2::3",
+    "1:::2", "12345::", "g::1", ":1::2", "1::2:", "fe80::1%eth0", "::1.2.3", "::256.1.1.1",
+    "::01.2.3.4", "1.2.3.4::", ":1.2.3.4", "1:2:3:4:5:6:7:8::", "1:2:3:4:5:6:7::8" });
+}
+
+TEST (SchemaFormatTest, AValueThatIsNotAStringIsNotJudgedByAFormat) {
+    // `format` applies to strings only, as valijson's own four do.
+    for (const char* format : { "email", "uri", "uuid", "hostname", "ipv6" }) {
+        EXPECT_TRUE (format_accepts (format, 5)) << format;
+        EXPECT_TRUE (format_accepts (format, nullptr)) << format;
+        EXPECT_TRUE (format_accepts (format, json::object ())) << format;
+    }
+}
+
+TEST (SchemaFormatTest, AnUnknownFormatStaysAnAnnotation) {
+    // `int64` is what an OpenAPI document writes beside `type: integer`, and
+    // `uri-reference` is a real format this table does not claim: neither may
+    // start rejecting what it always passed.
+    for (const char* format : { "int64", "int32", "binary", "uri-reference", "x-custom" }) {
+        EXPECT_TRUE (format_accepts (format, "anything at all")) << format;
+        EXPECT_TRUE (format_accepts (format, "")) << format;
+    }
+    // Names are case-sensitive, as in the specification.
+    EXPECT_TRUE (format_accepts ("Email", "not-an-email"));
+}
+
+TEST (SchemaFormatTest, TheFormatsValijsonChecksAreReportedOnce) {
+    // The extra constraint must not repeat a name valijson owns, or each
+    // failure would be counted twice in `failuresTotal`.
+    const auto date = format_verdict ("date", "2022-13-01");
+    EXPECT_FALSE (date.valid);
+    EXPECT_EQ (date.failures_total, 1u);
+    const auto ipv4 = format_verdict ("ipv4", "999.1.1.1");
+    EXPECT_FALSE (ipv4.valid);
+    EXPECT_EQ (ipv4.failures_total, 1u);
+    EXPECT_TRUE (format_accepts ("ipv4", "10.0.0.1"));
+}
+
+TEST (SchemaFormatTest, AFailureNamesTheFieldAndTheFormat) {
+    const auto schema  = json::parse (R"({
+        "type": "object",
+        "properties": {"contact": {"type": "string", "format": "email"}}
+    })");
+    const auto verdict = validate_body_against_schema (
+    schema, json::object (), json::parse (R"({"contact":"not-an-email"})"));
+
+    ASSERT_FALSE (verdict.valid);
+    ASSERT_EQ (verdict.failures.size (), 1u);
+    EXPECT_EQ (verdict.failures.front ().path, "/contact");
+    EXPECT_EQ (verdict.failures.front ().message, "String should be a valid email address");
+}
+
+TEST (SchemaFormatTest, AFormatIsCheckedInsideCombinatorsAndRefs) {
+    const auto ref_roots = json::parse (R"({"definitions": {"Id": {"format": "uuid"}}})");
+    const auto schema     = json::parse (R"({
+        "type": "object",
+        "properties": {
+            "either": {"anyOf": [{"format": "email"}, {"format": "uuid"}]},
+            "ids": {"type": "array", "items": {"$ref": "#/definitions/Id"}}
+        }
+    })");
+    const auto verdict_of = [&] (const char* body) {
+        return validate_body_against_schema (schema, ref_roots, json::parse (body));
+    };
+
+    EXPECT_TRUE (verdict_of (R"({"either":"a@b.co","ids":["123e4567-e89b-12d3-a456-426614174000"]})")
+    .valid);
+    EXPECT_TRUE (
+    verdict_of (R"({"either":"123e4567-e89b-12d3-a456-426614174000"})").valid);
+    EXPECT_FALSE (verdict_of (R"({"either":"neither"})").valid);
+    EXPECT_FALSE (
+    verdict_of (R"({"ids":["123e4567-e89b-12d3-a456-426614174000","nope"]})").valid);
+}
+
+TEST (SchemaFormatTest, AFormatIsNotAnUnevaluatedKeyword) {
+    // Every format is either asserted or an annotation the specification
+    // allows; neither is a gap the verdict has to disclose.
+    const auto schema = json::parse (R"({"properties": {
+        "a": {"format": "email"}, "b": {"format": "int64"}, "c": {"format": "uri"}}})");
+    EXPECT_TRUE (collect_unevaluated_keywords (schema, json::object ()).empty ());
+}
+
+TEST (SchemaFormatTest, AStoredResponseSchemaIsHeldToItsFormats) {
+    // The contract path (#628), not only a script's `jsonSchema`.
+    const auto index = ResponseSchemaIndex::parse (one_operation_index (json::parse (
+    R"({"type":"object","properties":{"email":{"type":"string","format":"email"}}})")));
+    ASSERT_HAS_VALUE (index);
+
+    const auto bad =
+    index->check (GET_PET, 200, "application/json", R"({"email":"not-an-email"})");
+    EXPECT_TRUE (bad.checked);
+    EXPECT_FALSE (bad.valid);
+    const auto good =
+    index->check (GET_PET, 200, "application/json", R"({"email":"a@b.co"})");
+    EXPECT_TRUE (good.checked);
+    EXPECT_TRUE (good.valid);
+}
+
 // ─── Sampled tallies, for a load run (issue #682) ───────────────────────────
 
 namespace {

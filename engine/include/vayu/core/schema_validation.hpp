@@ -78,6 +78,12 @@
  * **counted and named** in the verdict (`unevaluatedKeywords`), the truncation
  * disclosure discipline applied to a dialect gap: nothing here ever reports a
  * body as clean when part of its contract went unread.
+ *
+ * ### Formats
+ *
+ * `format` is an assertion here for the names valijson checks and those in
+ * `schema_format.hpp`; any other name is an annotation, which the
+ * specification allows and which is not a dialect gap to disclose.
  */
 
 #include <cstddef>
