@@ -1110,15 +1110,18 @@ export interface RunConfigSnapshot {
 	/**
 	 * A load or collection run's resolved default-header decision at start
 	 * (issue #1488) - `userAgent` is the value verbatim, `requestId` and
-	 * `acceptEncoding` are whether each was negotiated at all. Absent on a
-	 * design run and on any run recorded before this field existed. Never
-	 * re-applied to a send; kept only so a baseline comparison can tell
+	 * `acceptEncoding` are whether each was negotiated at all, and
+	 * `expectContinue` (issue #2516) is whether libcurl was allowed to add
+	 * `Expect: 100-continue`. Absent on a design run and on any run recorded
+	 * before this field existed (a run before #2516 has no `expectContinue`).
+	 * Never re-applied to a send; kept only so a baseline comparison can tell
 	 * whether two runs measured under the same conditions.
 	 */
 	defaultHeaders?: {
 		userAgent: string;
 		requestId: boolean;
 		acceptEncoding: boolean;
+		expectContinue?: boolean;
 	};
 	[key: string]: unknown;
 }
@@ -2520,6 +2523,12 @@ export interface RunReport {
 			maxRedirects?: number;
 			/** See {@link RunSummary.acceptEncoding} (issue #1488). */
 			acceptEncoding?: boolean;
+			/**
+			 * Whether `Expect: 100-continue` was allowed (issue #2516). Read by the
+			 * baseline comparison only, which treats an absent key as `false`; the
+			 * list-row {@link RunSummary} does not carry it.
+			 */
+			expectContinue?: boolean;
 			/**
 			 * How many `data` rows the run bound (issue #993); the rows themselves
 			 * are never stored. Absent for a run without a data file.

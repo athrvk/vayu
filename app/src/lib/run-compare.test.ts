@@ -200,6 +200,42 @@ describe("comparability", () => {
 				target: "negotiated",
 			},
 		},
+		{
+			name: "expect_continue, refused against allowed",
+			base: report({ expectContinue: false }),
+			target: report({ expectContinue: true }),
+			expected: {
+				code: "expect_continue",
+				message:
+					"Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+				base: "not allowed",
+				target: "allowed",
+			},
+		},
+		{
+			name: "expect_continue, allowed against refused",
+			base: report({ expectContinue: true }),
+			target: report({ expectContinue: false }),
+			expected: {
+				code: "expect_continue",
+				message:
+					"Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+				base: "allowed",
+				target: "not allowed",
+			},
+		},
+		{
+			name: "expect_continue, a run recorded before the key against one that allowed it",
+			base: report(),
+			target: report({ expectContinue: true }),
+			expected: {
+				code: "expect_continue",
+				message:
+					"Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+				base: "not allowed",
+				target: "allowed",
+			},
+		},
 	];
 
 	// Filtered to the case's own code: a stopped run also trips `status`, and the
@@ -217,6 +253,7 @@ describe("comparability", () => {
 				httpVersion: "http2",
 				dataFileHash: "aaaaaaaa11112222",
 				acceptEncoding: true,
+				expectContinue: true,
 			},
 			{ requestMethod: "GET", requestUrl: "https://api.test/a" },
 			{ testDuration: 20 }
@@ -375,12 +412,24 @@ describe("comparability", () => {
 
 	test("entries come out in one fixed order, whatever the report's key order", () => {
 		const base = report(
-			{ acceptEncoding: false, mode: "constant_rps", concurrency: 10, targetRps: 100 },
+			{
+				acceptEncoding: false,
+				expectContinue: false,
+				mode: "constant_rps",
+				concurrency: 10,
+				targetRps: 100,
+			},
 			{ requestMethod: "GET", runType: "load" },
 			{ testDuration: 20 }
 		);
 		const target = report(
-			{ concurrency: 50, mode: "constant_concurrency", targetRps: 400, acceptEncoding: true },
+			{
+				concurrency: 50,
+				mode: "constant_concurrency",
+				targetRps: 400,
+				acceptEncoding: true,
+				expectContinue: true,
+			},
 			{ status: "stopped", requestMethod: "POST", runType: "design" },
 			{ testDuration: 3 }
 		);
@@ -393,6 +442,7 @@ describe("comparability", () => {
 			"status",
 			"request",
 			"compression",
+			"expect_continue",
 		]);
 	});
 });

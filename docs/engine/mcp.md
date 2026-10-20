@@ -611,8 +611,9 @@ Notes:
   is unknown and never differs), `data_file` (by content hash; none against
   one counts), `request` (method or URL, the URL without userinfo, query or
   fragment because the comparison is not masked the way `get_run_report` is)
-  and `compression` (the same fact as `compressionNegotiationDiffers`, which
-  stays). When both reports carry `metadata.runType`, a `mode`,
+  `compression` (the same fact as `compressionNegotiationDiffers`, which
+  stays) and `expect_continue` (#2516; `Expect: 100-continue` `allowed` or
+  `not allowed`, an absent key reading as `not allowed`). When both reports carry `metadata.runType`, a `mode`,
   `concurrency` or `target_rps` only one of them recorded is a difference,
   its missing side `not recorded`; a report with no `runType` is from an
   engine that may not record them, and there a field a report does not carry
