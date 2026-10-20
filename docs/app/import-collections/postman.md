@@ -42,34 +42,36 @@ The match is a substring check (`schema.includes(...)`), so the full schema URL 
 
 ## Parse flow
 
-`parse()` on either class delegates to the module-level `parsePostman(parsed, opts, formatName)`, which:
+`parse_postman(parsed, options, format)` serves both versions:
 
-1. Creates a mutable `Ctx` (`{ opts, requestCount, folderCount, nonExecutableAuth, skippedFileBody, skippedMalformed, skippedUnsupportedMethod, skippedUnsupportedAuth, skippedUrlWithoutRaw, skippedVariableMetadata }`) threaded through the whole walk to accumulate counters.
-2. Calls `pmFolder(parsed, ctx)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
-3. Builds `meta`, pushing a `SkippedItem` for each counter that is greater than zero.
+1. Creates one `PostmanCounts` (the options, the request, folder and non-executable-auth counts, a counter per skipped kind, the client-certificate candidates, and the request names each counter grew on) threaded through the whole walk.
+2. Calls `pm_folder(parsed, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
+3. Builds `meta`, adding a `SkippedItem` for each counter that is greater than zero.
 
-### Tree walk - `pmFolder`
+### Tree walk - `pm_folder`
 
-`pmFolder(node, ctx)` walks `node.item[]`. For each `child`:
+`pm_folder(node, counts)` walks `node.item[]`. For each `child`:
 
-- **Folder** (`Array.isArray(child.item)` is true) → `ctx.folderCount += 1`, recurse via `pmFolder(child, ctx)`, push into `children`.
-- **Request** (`child.request` is present) → `pmRequest(child, ctx)`, push into `requests`.
-- **Not an object at all** (`null`, a string, a number) → skipped, counting toward `ctx.skippedMalformed`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; dereferencing the entry used to throw a bare `TypeError: Cannot read properties of null` that failed the whole import naming neither the format nor an item. `event[]` entries are filtered the same way (`pmEvents`).
+- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, counts)`, push into `children`.
+- **Request** (`child.request` is truthy) → `pm_request_named(child, counts)`, push into `requests`.
+- **Not an object at all** (`null`, a string, a number) → skipped, counting toward `malformed_item`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; such an entry used to fail the whole import with an error naming neither the format nor an item. `event[]` entries are filtered the same way (`pm_events`).
 - Anything else (an object with no `item[]` and no `request`) is silently ignored.
 
 Folder vs request discrimination is purely structural: **presence of an `item` array makes a node a folder**, otherwise presence of a `request` makes it a request. Nesting is bounded by the engine's reader, not by the walk: `read_document` refuses a document nested past `MAX_READ_DEPTH` (100 levels, about 50 folders) before `pm_folder` runs, so a hostile file fails with a "nests deeper" error rather than overflowing the stack.
 
-The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth`, the two scripts, and its `children`/`requests`. The root and every folder are built by the same function - the root is simply the outermost `pmFolder` result and becomes `collections[0]` (the only root; `parentId = null`).
+**Document order is kept** (issue [#2535](https://github.com/athrvk/vayu/issues/2535)). Postman runs a folder's items in the order the file lists them and descends into a sub-folder where it sits, so a "Log in" request at the top of a collection runs before the folders after it. Each folder and request draft records its position among the items kept from its parent's `item[]` as `order`, and the apply numbers a parent's sub-folders and requests in that one sequence: the sidebar lists them, a recursive run visits them and an export writes them in the file's order. Postman's own `collection-v2.json` example, two requests then a folder at the root and three requests then a folder inside it, imports exactly so.
 
-### Request build - `pmRequest`
+The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth`, its script elements, and its `children`/`requests`. The root and every folder are built by the same function - the root is simply the outermost `pm_folder` result and becomes `collections[0]` (the only root; `parentId = null`, and no `order`, because it joins the roots already stored).
 
-`pmRequest(item, ctx)` reads `item.request`, derives `url`/`params` via `pmUrl`, maps auth via `map_postman_auth`, increments `ctx.requestCount`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `ctx.nonExecutableAuth`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)).
+### Request build - `pm_request`
+
+`pm_request(item, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, increments `counts.requests`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `counts.non_executable`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
 
 ## Field mapping
 
 ### Collection (root)
 
-The root is produced by `pmFolder(parsed, ctx)`; `parsed` is the whole collection object.
+The root is produced by `pm_folder(parsed, counts)`; `parsed` is the whole collection object.
 
 | Postman | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
@@ -80,10 +82,11 @@ The root is produced by `pmFolder(parsed, ctx)`; `parsed` is the whole collectio
 | `event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
 | nested `item[]` (folders) | `children` | recursion |
 | `item[]` (requests) | `requests` | |
+| an item's position in its parent's `item[]` | `order` on each folder and request draft | one count across both kinds, malformed entries skipped - see [Tree walk](#tree-walk---pm_folder) |
 
 ### Collection (folder)
 
-Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth`/`event` at the top level (no `info` wrapper), but the code reads `node.info?.name ?? node.name` and `node.info?.description ?? node.description`, so both shapes work. Each nested folder increments `ctx.folderCount`.
+Same `pm_folder` mapping. A folder node has `name`/`description`/`variable`/`auth`/`event` at the top level (no `info` wrapper), but the code reads `node.info?.name ?? node.name` and `node.info?.description ?? node.description`, so both shapes work. Each nested folder increments `counts.folders`.
 
 ### Request
 
@@ -140,7 +143,7 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 
 `postmanResponse` keeps what no example field models - the request the response was recorded against (`originalRequest`, which usually differs per example: its own query values, headers, body and path variables), the status text as recorded, `_postman_previewlanguage` / `_postman_previewtype`, `cookie[]`, `responseTime`, and the header rows as written (`name` fields, number values) - so an export writes them back. It is stored in `request_examples.postman_response` and read only by the Postman export; nothing is lost, so nothing is counted in `meta.skipped`. An entry whose text would pass the cap is imported without it and its export regenerates those members.
 
-An entry that is not an object counts toward `malformed_item`, the same treatment `pmFolder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
+An entry that is not an object counts toward `malformed_item`, the same treatment `pm_folder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
 
 `meta.exampleCount` totals what survived, counted off the drafts by `count_examples` (the same read-the-result approach `unattached_file_parts` uses), and the import preview shows it.
 
@@ -299,7 +302,7 @@ PKCE `code_verifier` and the credential rows (`client_secret`,
 
   Collections never inherit (`CollectionDraft.auth` excludes `inherit`), which is why `inherit` collapses to `none`. The explicit-`noauth` case must not collapse with it: the resolution walk steps over `none`, so a request set to Inherit inside a No Auth folder used to resolve to the *root* collection's credentials - sending a bearer token to the endpoints the user had marked unauthenticated. The terminal mode is read by `resolveAuthSource` (renderer) and `composeAuth` (MCP); see [variable resolution → auth inheritance](../variable-resolution.md#auth-inheritance).
 
-**`nonExecutableAuth` counting:** only **request** auth contributes (`pmRequest` increments the counter), and it keys off the *mapped* mode, so `awsv4` counts as `aws`. Collection/folder auth in the data-only family is stored but not counted. `oauth2` is executable and never counts.
+**`nonExecutableAuth` counting:** only **request** auth contributes (`pm_request` increments the counter), and it keys off the *mapped* mode, so `awsv4` counts as `aws`. Collection/folder auth in the data-only family is stored but not counted. `oauth2` is executable and never counts.
 
 ## Variables & environments
 
@@ -316,7 +319,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 ## Options & lossy behavior
 
-**`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
+**`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
 **`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 

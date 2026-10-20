@@ -269,13 +269,15 @@ export type ReorderMove =
 	| { type: "request"; id: string; order: number; collectionId?: string };
 
 /**
- * A scope whose children are renumbered dense `0..n-1` in display order before
- * the moves apply. `parentId: null` is the root collections, and is stated
- * rather than omitted - the engine rejects an absent `parentId` so a renumber
- * can never land on a scope the caller did not mean.
+ * A parent whose children - its sub-folders and its requests, one list (#2535) -
+ * are renumbered dense `0..n-1` in sibling order before the moves apply.
+ * `parentId: null` is the root collections, and is stated rather than omitted -
+ * the engine rejects an absent `parentId` so a renumber can never land on a
+ * scope the caller did not mean.
  */
-export type ReorderNormalize =
-	{ type: "collection"; parentId: string | null } | { type: "request"; collectionId: string };
+export interface ReorderNormalize {
+	parentId: string | null;
+}
 
 export interface ReorderRequest {
 	moves: ReorderMove[];

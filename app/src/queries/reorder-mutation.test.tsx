@@ -19,6 +19,10 @@
  * Each test is mutation-checked in the same shape: remove the `onMutate` draw
  * and the first group reddens; remove the `onError` restore and the second
  * group reddens; remove the `onSettled` invalidation and the third does.
+ *
+ * A parent's sub-folders and requests are one sibling list (#2535), so a plan
+ * over one parent can write both caches - the collections list and the
+ * parent's request list - and every pass covers both.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -44,6 +48,37 @@ const req = (id: string, collectionId: string, order: number): Request =>
 
 const col = (id: string, order: number, parentId?: string): Collection =>
 	({ id, name: id, order, parentId, createdAt: "2026-01-01T00:00:00.000Z" }) as Collection;
+
+/**
+ * `col_p` holds two sub-folders and two requests, every row at the legacy `0`:
+ * displayed f1, f2, r1, r2 (folders first on the tie, then createdAt). A root
+ * and an unrelated parent's sub-folder sit beside it, also at 0.
+ */
+function seedLegacyParent(client: QueryClient) {
+	const at = (stamp: string) => ({ createdAt: `2026-01-0${stamp}T00:00:00.000Z` });
+	client.setQueryData(queryKeys.collections.list(), [
+		col("col_p", 0),
+		{ ...col("f2", 0, "col_p"), ...at("3") },
+		{ ...col("f1", 0, "col_p"), ...at("2") },
+		col("col_q", 0),
+		col("q_child", 0, "col_q"),
+	]);
+	client.setQueryData(queryKeys.requests.listByCollection("col_p"), [
+		{ ...req("r2", "col_p", 0), ...at("5") },
+		{ ...req("r1", "col_p", 0), ...at("1") },
+	]);
+	client.setQueryData(queryKeys.requests.listByCollection("col_q"), []);
+}
+
+/** `id -> order` across the collections list and one request list. */
+function ordersOf(client: QueryClient, collectionId: string): Record<string, number> {
+	const rows = [
+		...(client.getQueryData<Collection[]>(queryKeys.collections.list()) ?? []),
+		...(client.getQueryData<Request[]>(queryKeys.requests.listByCollection(collectionId)) ??
+			[]),
+	];
+	return Object.fromEntries(rows.map((row) => [row.id, row.order]));
+}
 
 function makeClient() {
 	return new QueryClient({
@@ -133,27 +168,63 @@ describe("useReorderMutation draws the drop before the write returns", () => {
 		);
 	});
 
-	it("renumbers a normalized scope dense in display order", async () => {
+	it("renumbers a normalized parent's folders and requests as one list", async () => {
 		reorder.mockResolvedValue({ collections: [], requests: [] });
 		const client = makeClient();
-		// The legacy shape: every row at 0, position living only in the tiebreak.
-		client.setQueryData(queryKeys.requests.listByCollection("col_a"), [
-			req("a", "col_a", 0),
-			req("b", "col_a", 0),
-			req("c", "col_a", 0),
-		]);
+		seedLegacyParent(client);
 
 		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync({ moves: [], normalize: [{ parentId: "col_p" }] });
+
+		// One run across both caches, in the order the tree showed them. Rows of
+		// other parents keep their 0.
+		expect(ordersOf(client, "col_p")).toEqual({
+			col_p: 0,
+			f1: 0,
+			f2: 1,
+			r1: 2,
+			r2: 3,
+			col_q: 0,
+			q_child: 0,
+		});
+	});
+
+	it("renumbers the top level over collections alone", async () => {
+		reorder.mockResolvedValue({ collections: [], requests: [] });
+		const client = makeClient();
+		seedLegacyParent(client);
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync({ moves: [], normalize: [{ parentId: null }] });
+
+		expect(ordersOf(client, "col_p")).toEqual({
+			col_p: 0,
+			f1: 0,
+			f2: 0,
+			r1: 0,
+			r2: 0,
+			col_q: 1,
+			q_child: 0,
+		});
+	});
+
+	it("draws a request between two folders into both caches", async () => {
+		reorder.mockResolvedValue({ collections: [], requests: [] });
+		const client = makeClient();
+		seedLegacyParent(client);
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		// r2 to index 1: f1, r2, f2, r1.
 		await result.current.mutateAsync({
-			moves: [],
-			normalize: [{ type: "request", collectionId: "col_a" }],
+			normalize: [{ parentId: "col_p" }],
+			moves: [
+				{ type: "request", id: "r2", order: 1 },
+				{ type: "collection", id: "f2", order: 2 },
+				{ type: "request", id: "r1", order: 3 },
+			],
 		});
 
-		expect(
-			client
-				.getQueryData<Request[]>(queryKeys.requests.listByCollection("col_a"))
-				?.map((r) => r.order)
-		).toEqual([0, 1, 2]);
+		expect(ordersOf(client, "col_p")).toMatchObject({ f1: 0, r2: 1, f2: 2, r1: 3 });
 	});
 
 	it("reparents a collection and renumbers its new scope", async () => {
@@ -233,6 +304,23 @@ describe("useReorderMutation rolls back a failed drop", () => {
 		]);
 	});
 
+	it("restores both caches a normalized parent drew into", async () => {
+		reorder.mockRejectedValue(new Error("engine said no"));
+		const client = makeClient();
+		seedLegacyParent(client);
+		const before = ordersOf(client, "col_p");
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await expect(
+			result.current.mutateAsync({
+				normalize: [{ parentId: "col_p" }],
+				moves: [{ type: "request", id: "r2", order: 0 }],
+			})
+		).rejects.toThrow();
+
+		expect(ordersOf(client, "col_p")).toEqual(before);
+	});
+
 	it("puts a cross-collection move back in its source list", async () => {
 		reorder.mockRejectedValue(new Error("engine said no"));
 		const client = makeClient();
@@ -280,6 +368,23 @@ describe("useReorderMutation invalidates only what the plan touched", () => {
 				?.isInvalidated
 		).toBe(false);
 		expect(client.getQueryState(queryKeys.collections.list())?.isInvalidated).toBe(false);
+	});
+
+	it("invalidates both caches of a normalized parent", async () => {
+		reorder.mockResolvedValue({ collections: [], requests: [] });
+		const client = makeClient();
+		seedLegacyParent(client);
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync({ moves: [], normalize: [{ parentId: "col_p" }] });
+
+		expect(client.getQueryState(queryKeys.collections.list())?.isInvalidated).toBe(true);
+		expect(
+			client.getQueryState(queryKeys.requests.listByCollection("col_p"))?.isInvalidated
+		).toBe(true);
+		expect(
+			client.getQueryState(queryKeys.requests.listByCollection("col_q"))?.isInvalidated
+		).toBe(false);
 	});
 
 	it("invalidates the collections list for a collection move", async () => {

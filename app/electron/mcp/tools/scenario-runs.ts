@@ -42,6 +42,8 @@ import {
 	resolveLoadShape,
 	withMcpOrigin,
 } from "./compose.js";
+import { collectionParent, type CollectionRow, readCollectionRows } from "./cascade.js";
+import { mergeSiblings, readRequestRows } from "./sibling-order.js";
 
 /** A step of a scenario plan, as much of it as the pre-flight walk needs. */
 interface ScenarioStepRow {
@@ -54,69 +56,54 @@ interface ScenarioStepRow {
  * execute them (issue #754).
  *
  * Mirrors `collect_requests` (`engine/src/core/scenario_plan.cpp`): without
- * `recursive` a collection's direct requests are the whole plan; with it, every
- * sub-collection's subtree is emitted **before** that level's own requests, which
- * is the order the sidebar renders. The order matters here for one reason - the
- * pre-flight refusal names the first step that fails - so a walk in some other
- * order would name a different step than the run would have reached first.
+ * `recursive` a collection's direct requests are the whole plan; with it, each
+ * collection's sub-collections and requests are walked as one sibling list
+ * (#2535), a request emitted where it sits and a sub-collection's whole subtree
+ * where the sub-collection sits - the order the sidebar renders. The order
+ * matters here for one reason - the pre-flight refusal names the first step
+ * that fails - so a walk in some other order would name a different step than
+ * the run would have reached first. `recursive-run-order-conformance.json`
+ * pins this walk to the engine's (`sibling-order.conformance.test.ts`).
  *
  * The `visited` set is the same guard the engine's walk carries: a corrupted
  * `parentId` (a self-parent, an A -> B -> A loop) must terminate rather than
  * enumerate forever.
  */
-async function scenarioStepRows(
-	client: EngineClient,
+export async function scenarioStepRows(
+	client: Pick<EngineClient, "listCollections" | "listRequests">,
 	collectionId: string,
 	recursive: boolean,
 	signal?: AbortSignal
 ): Promise<ScenarioStepRow[]> {
-	const requestsIn = async (id: string): Promise<ScenarioStepRow[]> => {
-		const rows = await client.listRequests(id, signal);
-		return (Array.isArray(rows) ? rows : []).map((row) => {
-			const rec = (row ?? {}) as { id?: unknown; name?: unknown };
-			return {
-				id: typeof rec.id === "string" ? rec.id : "",
-				name: String(rec.name ?? rec.id ?? "request"),
-			};
-		});
-	};
-	if (!recursive) return requestsIn(collectionId);
+	const requestsIn = async (id: string) => readRequestRows(await client.listRequests(id, signal));
+	if (!recursive) return (await requestsIn(collectionId)).map(toStepRow);
 
-	const all = await client.listCollections(signal);
-	// One read, grouped by parent - `GET /collections` is ordered by `order`, so
-	// each parent's children keep that order without a sort here.
-	const childrenOf = new Map<string, string[]>();
-	for (const item of Array.isArray(all) ? all : []) {
-		if (!item || typeof item !== "object") continue;
-		const rec = item as { id?: unknown; parentId?: unknown };
-		if (typeof rec.id !== "string" || typeof rec.parentId !== "string" || !rec.parentId) {
-			continue;
-		}
-		childrenOf.set(rec.parentId, [...(childrenOf.get(rec.parentId) ?? []), rec.id]);
+	// One read, grouped by parent; each parent's folders are merged with its
+	// requests below, so their order here does not matter.
+	const foldersOf = new Map<string, CollectionRow[]>();
+	for (const row of readCollectionRows(await client.listCollections(signal))) {
+		const parent = collectionParent(row);
+		if (parent === null) continue;
+		foldersOf.set(parent, [...(foldersOf.get(parent) ?? []), row]);
 	}
 
 	const ordered: ScenarioStepRow[] = [];
 	const visited = new Set<string>();
-	// Two entry kinds on one stack, exactly as the engine walks it: `emit` is
-	// pushed *under* the children, so a folder's own requests come last.
-	const stack: Array<{ step: "descend" | "emit"; id: string }> = [
-		{ step: "descend", id: collectionId },
-	];
-	while (stack.length > 0) {
-		const entry = stack.pop() as { step: "descend" | "emit"; id: string };
-		if (entry.step === "emit") {
-			ordered.push(...(await requestsIn(entry.id)));
-			continue;
+	const walk = async (id: string): Promise<void> => {
+		if (visited.has(id)) return;
+		visited.add(id);
+		for (const child of mergeSiblings(foldersOf.get(id) ?? [], await requestsIn(id))) {
+			if (child.kind === "request") ordered.push(toStepRow(child));
+			else await walk(child.id);
 		}
-		if (visited.has(entry.id)) continue;
-		visited.add(entry.id);
-		stack.push({ step: "emit", id: entry.id });
-		const children = childrenOf.get(entry.id) ?? [];
-		for (let i = children.length - 1; i >= 0; i--) {
-			stack.push({ step: "descend", id: children[i] });
-		}
-	}
+	};
+	await walk(collectionId);
 	return ordered;
+}
+
+/** A `GET /requests` row as a plan step, named the way the engine's refusal names it. */
+function toStepRow(row: { id: string; name?: unknown }): ScenarioStepRow {
+	return { id: row.id, name: typeof row.name === "string" ? row.name : row.id };
 }
 
 /**

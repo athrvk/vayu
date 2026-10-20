@@ -656,15 +656,9 @@ struct SyncScope {
 struct SyncPlan {
     vayu::db::SpecSyncBatch batch;
     ClaimedIds claimed;
-    /**
-     * Parent id -> the next `order` to hand out, seeded from the stored
-     * siblings by the applier and advanced here: the applier computes its
-     * default from rows that exist, so two folders created in one payload
-     * would otherwise land on the same number (the same reason
-     * `/import/apply` hands out its own slots).
-     */
-    std::unordered_map<std::string, int> next_folder_order;
-    std::unordered_map<std::string, int> next_request_order;
+    /// The `order`s a folder or request this payload creates without stating
+    /// one takes, one space per parent across both kinds.
+    SiblingSlots slots;
     /// Request ids this payload has already updated or deleted.
     std::unordered_set<std::string> touched;
 };
@@ -940,19 +934,17 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        auto slot = plan.next_folder_order.try_emplace (parent, folder.order).first;
-        folder.order = slot->second++;
+        folder.order = plan.slots.take (db, parent);
     }
     plan.batch.new_collections.push_back (std::move (folder));
     return {};
 }
 
 /** Which collection a created request lands in, stored or claimed here. */
-RouteResult resolve_create_owner (vayu::db::Database& db,
-const nlohmann::json& item,
+RouteResult resolve_create_owner (const nlohmann::json& item,
 const std::string& temp,
 const SyncScope& scope,
-SyncPlan& plan,
+const SyncPlan& plan,
 std::string& owner) {
     if (item.contains ("collectionTempId") && !item["collectionTempId"].is_null ()) {
         if (!item["collectionTempId"].is_string ()) {
@@ -972,8 +964,6 @@ std::string& owner) {
             temp));
         }
         owner = plan.claimed.real.at (named);
-        // A folder this payload creates has no stored siblings to scan.
-        plan.next_request_order.try_emplace (owner, 0);
         return {};
     }
     if (!item.contains ("collectionId") || !item["collectionId"].is_string ()) {
@@ -988,13 +978,6 @@ std::string& owner) {
         return std::unexpected (item_error (400,
         "Invalid 'collectionId': '" + owner + "' is not the collection being synced or one beneath it",
         temp));
-    }
-    if (!plan.next_request_order.contains (owner)) {
-        int highest = -1;
-        for (const auto& existing : db.get_requests_in_collection (owner)) {
-            highest = std::max (highest, existing.order);
-        }
-        plan.next_request_order.emplace (owner, highest + 1);
     }
     return {};
 }
@@ -1050,7 +1033,7 @@ SyncPlan& plan) {
     }
 
     std::string owner;
-    if (auto outcome = resolve_create_owner (db, item, temp, scope, plan, owner); !outcome) {
+    if (auto outcome = resolve_create_owner (item, temp, scope, plan, owner); !outcome) {
         return outcome;
     }
 
@@ -1071,7 +1054,7 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        row.order = plan.next_request_order[owner]++;
+        row.order = plan.slots.take (db, owner);
     }
     if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan);
     !outcome) {

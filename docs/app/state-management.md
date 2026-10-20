@@ -1752,23 +1752,28 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 **Sorting:** every tree list - roots, a collection's children, a collection's
 requests - sorts with the single exported `compareTreeOrder` (`types/domain.ts`):
-`order`, then `createdAt`, then `id` byte-wise. There were two comparators with
-two different tie rules and neither matched the engine's, so "run this folder"
-could execute in an order the sidebar had never shown. The rule is pinned to the
-engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
+`order`, then kind (a sub-collection before a request), then `createdAt`, then
+`id` byte-wise. There were two comparators with two different tie rules and
+neither matched the engine's, so "run this folder" could execute in an order the
+sidebar had never shown. The rule is pinned to the engine's comparator
+(`engine/include/vayu/db/sibling_order.hpp`) by
+`engine/tests/fixtures/tree-order-conformance.json`, read by
 `types/tree-order.conformance.test.ts` and by the engine's `tree_order_test.cpp`
 - change one side and the other suite fails.
 
-That rule orders **one block**. A folder's sub-collections and its requests are
-two separately ordered blocks, so their `order` values can collide, and where the
-blocks sit relative to each other is the render's rule: `flattenVisibleRows` puts
-every subfolder above every request, at every depth
-(`CollectionTree.folders-first.test.tsx`). A recursive collection run has to
-execute in that same sequence - each subfolder's whole subtree, then the folder's
-own requests - which is pinned across the render and the engine's plan by
+A folder's sub-collections and its requests are **one list in one `order`
+space** (#2535), so a request can sit between two folders. The kind is only a
+tiebreak, and only a merged list states it: `childrenOf`
+(`modules/collections/tree-children.ts`) builds a parent's children from the
+collections list and the parent's request list, `flattenVisibleRows` lists each
+expanded folder's children through the same merge (`mergeSiblings`), and the
+drag, the keyboard move and "Move to..." all read that one list
+(`CollectionTree.sibling-order.test.tsx`). A recursive collection run executes
+the same sequence - a request where it sits, a sub-folder's whole subtree where
+the sub-folder sits - which is pinned across the render and the engine's plan by
 `engine/tests/fixtures/recursive-run-order-conformance.json`, read by
 `modules/collections/CollectionTree.run-order.conformance.test.tsx` and by the
-engine's `scenario_plan_test.cpp` (issue #431).
+engine's `scenario_plan_test.cpp` (issues #431, #2535).
 
 **Mutations:**
 - **`useCreateCollectionMutation()`** - Create collection
@@ -1806,11 +1811,13 @@ three times, because a drag is only believable if the row is where the pointer
 left it before the write returns:
 
 - `onMutate` snapshots every key the plan can touch and *draws the plan* into the
-  caches - the same two steps the engine performs, normalize each named scope to
-  `0..n-1` in display order, then position each move. A cross-collection move
-  crosses list caches and updates `requests.detail` (which carries
-  `staleTime: Infinity`, so a stale `collectionId` there would outlive every
-  refetch).
+  caches - the same two steps the engine performs, normalize each named parent
+  to `0..n-1` in sibling order, then position each move. A normalized parent
+  spans **two** caches, its sub-collections in the collections list and its
+  requests in its own list, renumbered as one run; both are snapshotted. A
+  cross-collection move crosses list caches and updates `requests.detail`
+  (which carries `staleTime: Infinity`, so a stale `collectionId` there would
+  outlive every refetch).
 - `onSuccess` re-applies the rows the engine actually wrote, which the response
   carries. They are normally what was drawn, but a normalization is authoritative
   from the engine, so the tree settles on real positions rather than a guess.
@@ -1821,14 +1828,16 @@ left it before the write returns:
   `save-store.ts`). The mutation owns this rather than its caller, so the
   gesture layer cannot forget it.
 - `onSettled` invalidates the affected keys **once** - the collections list only
-  if a collection moved, and only the request lists the plan named.
+  if a collection moved or a parent was normalized, and only the request lists
+  the plan named or normalized.
 
 Every write goes through `setQueryData` with a fresh array, never a mutation in
 place: the map `useMultipleCollectionRequests` builds is compared by reference by
 the reveal effect, so an in-place edit would move a row on screen that the tree
 never notices. The plan itself comes from
 `modules/collections/reorder-math.ts` - a pure module, node-tested, that turns
-sibling lists and a drop index into the minimal set of rows to rewrite.
+a parent's merged sibling list and a drop index into the minimal set of rows to
+rewrite, each written as the kind it is.
 
 #### Trash
 

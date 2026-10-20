@@ -229,12 +229,13 @@ class MockServerTest : public ::testing::Test {
 
     void seed_collection (const std::string& id,
     const std::optional<std::string>& parent,
-    const std::string& name) {
+    const std::string& name,
+    int order = 0) {
         vayu::db::Collection col;
         col.id         = id;
         col.parent_id  = parent;
         col.name       = name;
-        col.order      = 0;
+        col.order      = order;
         col.created_at = 1;
         col.updated_at = 1;
         db_->create_collection (col);
@@ -324,6 +325,26 @@ TEST_F (MockServerTest, TheTableCoversTheWholeCollectionSubtree) {
 
     // A mock of the sub-collection is exactly its own subtree.
     EXPECT_EQ (vayu::http::build_mock_routes (*db_, "col_pets").size (), 4u);
+}
+
+// The table lists the subtree as the sidebar does, a folder's routes where the
+// folder sits among its parent's requests (#2535), because a tie between two
+// equally specific routes falls to the first. Mutation check: walk the subtree
+// breadth-first, every collection's own requests before its sub-folders', and
+// `req_last` comes ahead of `req_mid`.
+TEST_F (MockServerTest, TheTableListsTheSubtreeInSidebarOrder) {
+    seed_request ("req_first", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/first", {}, /*order=*/0);
+    seed_collection ("col_mid", "col_root", "Middle", /*order=*/1);
+    seed_request ("req_mid", "col_mid", vayu::HttpMethod::GET, "{{baseUrl}}/mid");
+    seed_request ("req_last", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/last", {}, /*order=*/2);
+
+    std::vector<std::string> ids;
+    for (const auto& route : vayu::http::build_mock_routes (*db_, "col_root")) {
+        ids.push_back (route.request_id);
+    }
+    EXPECT_EQ (ids, (std::vector<std::string>{ "req_first", "req_mid", "req_last" }));
 }
 
 TEST_F (MockServerTest, TheFirstExampleInStoredOrderIsTheOneServed) {

@@ -19,8 +19,9 @@
  *    cannot close, because it validates and writes under different locks.
  *
  *  - **Normalization materializes the displayed order** of a legacy all-zeros
- *    scope as dense 0..n-1, in the pinned `order`/`createdAt`/`id` rule, and is
- *    idempotent - a second call writes nothing.
+ *    parent as dense 0..n-1 over its sub-folders and requests together, in the
+ *    sibling order of `vayu/db/sibling_order.hpp` (#2535), and is idempotent -
+ *    a second call writes nothing.
  *
  *  - **The lock scope spans validate + stage + write** (issue #386). The three
  *    tests at the bottom of this file each drive a genuinely concurrent writer
@@ -53,6 +54,7 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 
 using nlohmann::json;
 
@@ -165,12 +167,41 @@ class ReorderRouteTest : public ::testing::Test {
         return orders;
     }
 
+    /**
+     * A parent's children as (id, stored order), sub-folders and requests
+     * merged in sibling order - the one list the sidebar and a recursive run
+     * read (#2535).
+     */
+    std::vector<std::pair<std::string, int>> children (const std::string& parent_id) {
+        const std::vector<vayu::db::Collection> collections = db_->get_collections ();
+        std::vector<const vayu::db::Collection*> folders;
+        for (const auto& c : collections) {
+            if (c.parent_id == parent_id) {
+                folders.push_back (&c);
+            }
+        }
+        const std::vector<vayu::db::Request> requests =
+        db_->get_requests_in_collection (parent_id);
+        std::vector<std::pair<std::string, int>> listed;
+        for (const auto& slot : vayu::db::merge_siblings (folders, requests)) {
+            if (slot.kind == vayu::db::SiblingKind::Folder) {
+                listed.emplace_back (
+                folders.at (slot.index)->id, folders.at (slot.index)->order);
+            } else {
+                listed.emplace_back (
+                requests.at (slot.index).id, requests.at (slot.index).order);
+            }
+        }
+        return listed;
+    }
+
     static json move_request (const std::string& id, int order) {
         return json{ { "type", "request" }, { "id", id }, { "order", order } };
     }
 
-    static json normalize_requests (const std::string& collection_id) {
-        return json{ { "type", "request" }, { "collectionId", collection_id } };
+    /** A scope: a parent's sub-folders and requests together (#2535). */
+    static json normalize_parent (const json& parent_id) {
+        return json{ { "parentId", parent_id } };
     }
 
     /** A collection move; `parent_id` is a collection id or `json(nullptr)`. */
@@ -215,7 +246,7 @@ TEST_F (ReorderRouteTest, ANormalizationIsAbandonedWhenAMoveIsInvalid) {
     set_request_order (a, 0);
     set_request_order (b, 0); // The legacy all-zeros shape.
 
-    json body{ { "normalize", json::array ({ normalize_requests (col) }) },
+    json body{ { "normalize", json::array ({ normalize_parent (col) }) },
         { "moves", json::array ({ move_request (b, -1) }) } };
     auto [status, response] = reorder_response (*db_, body);
 
@@ -283,11 +314,33 @@ TEST_F (ReorderRouteTest, RejectsAnUnknownTypeAndAMalformedNormalizeScope) {
     json::array ({ json{ { "type", "folder" }, { "id", col }, { "order", 0 } } }) } });
     EXPECT_EQ (type_status, 400) << type_body.dump ();
 
-    // A collection scope must *state* parentId - absent cannot be read as "the
-    // roots" without a renumber occasionally landing on the wrong folder.
-    auto [scope_status, scope_body] = reorder_response (*db_,
-    json{ { "normalize", json::array ({ json{ { "type", "collection" } } }) } });
+    // A scope must *state* parentId - absent cannot be read as "the roots"
+    // without a renumber occasionally landing on the wrong folder.
+    auto [scope_status, scope_body] = reorder_response (
+    *db_, json{ { "normalize", json::array ({ json::object () }) } });
     EXPECT_EQ (scope_status, 400) << scope_body.dump ();
+}
+
+// The per-kind scopes from before #2535 are refused, naming the shape that
+// replaced them, and nothing is renumbered: one kind renumbered alone would
+// tie with the other kind's slots.
+TEST_F (ReorderRouteTest, RefusesAPerKindNormalizeScopeNamingTheParentShape) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+    const std::string b   = make_request (col, "b");
+    set_request_order (a, 0);
+    set_request_order (b, 0);
+
+    for (const json& legacy : { json{ { "type", "request" }, { "collectionId", col } },
+         json{ { "type", "collection" }, { "parentId", col } },
+         json{ { "type", "collection" }, { "parentId", nullptr } } }) {
+        auto [status, response] =
+        reorder_response (*db_, json{ { "normalize", json::array ({ legacy }) } });
+        ASSERT_EQ (status, 400) << legacy.dump () << " -> " << response.dump ();
+        const auto message = response["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find (R"({"parentId": )"), std::string::npos) << message;
+    }
+    EXPECT_EQ (request_orders (col), (std::vector<int>{ 0, 0 }));
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +426,7 @@ TEST_F (ReorderRouteTest, NormalizationMaterializesTheDisplayedOrderOfALegacySco
     const std::vector<std::string> displayed = request_ids (col);
 
     auto [status, response] = reorder_response (
-    *db_, json{ { "normalize", json::array ({ normalize_requests (col) }) } });
+    *db_, json{ { "normalize", json::array ({ normalize_parent (col) }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
     // Dense, and in exactly the order the client was already showing - nothing
@@ -387,7 +440,7 @@ TEST_F (ReorderRouteTest, NormalizationIsIdempotent) {
     for (const auto& name : { "a", "b", "c" }) {
         set_request_order (make_request (col, name), 0);
     }
-    json body{ { "normalize", json::array ({ normalize_requests (col) }) } };
+    json body{ { "normalize", json::array ({ normalize_parent (col) }) } };
 
     auto [first_status, first] = reorder_response (*db_, body);
     ASSERT_EQ (first_status, 200) << first.dump ();
@@ -413,7 +466,7 @@ TEST_F (ReorderRouteTest, NormalizationRunsBeforeTheMovesAndTheMovesWin) {
     // The first drop into a legacy collection: normalize to 0,1,2 and, in the
     // same batch, move `c` to the head - which is only expressible because the
     // renumber gave the other two real slots to shift into.
-    json body{ { "normalize", json::array ({ normalize_requests (col) }) },
+    json body{ { "normalize", json::array ({ normalize_parent (col) }) },
         { "moves",
         json::array ({ move_request (c, 0), move_request (a, 1), move_request (b, 2) }) } };
     auto [status, response] = reorder_response (*db_, body);
@@ -433,9 +486,8 @@ TEST_F (ReorderRouteTest, NormalizesTheRootCollectionsWhenParentIdIsNull) {
     set_collection_position (a, 0, EARLIER);
     set_collection_position (b, 0, LATER);
 
-    auto [status, response] = reorder_response (*db_,
-    json{ { "normalize",
-    json::array ({ json{ { "type", "collection" }, { "parentId", nullptr } } }) } });
+    auto [status, response] = reorder_response (
+    *db_, json{ { "normalize", json::array ({ normalize_parent (nullptr) }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
     const auto a_row = db_->get_collection (a);
@@ -448,6 +500,59 @@ TEST_F (ReorderRouteTest, NormalizesTheRootCollectionsWhenParentIdIsNull) {
     const auto child_row = db_->get_collection (child);
     ASSERT_HAS_VALUE (child_row);
     EXPECT_EQ (child_row->order, 0);
+}
+
+// A scope is a parent's sub-folders and requests together (#2535): the
+// renumber walks the merged list, so the two kinds share one dense range.
+// Mutation check: renumber each kind from 0 on its own in `normalize_scope`
+// and the request comes out at 0, tied with the first folder.
+TEST_F (ReorderRouteTest, TheDenseRenumberCoversFoldersAndRequestsAsOneList) {
+    const std::string parent  = make_collection ("parent");
+    const std::string first   = make_collection ("first", parent);
+    const std::string second  = make_collection ("second", parent);
+    const std::string between = make_request (parent, "between");
+    set_collection_position (first, 5, EARLIER);
+    set_collection_position (second, 9, EARLIER);
+    set_request_order (between, 7);
+
+    auto [status, response] = reorder_response (
+    *db_, json{ { "normalize", json::array ({ normalize_parent (parent) }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (children (parent),
+    (std::vector<std::pair<std::string, int>>{ { first, 0 }, { between, 1 }, { second, 2 } }));
+    EXPECT_EQ (response["collections"].size (), 2u) << response.dump ();
+    EXPECT_EQ (response["requests"].size (), 1u) << response.dump ();
+}
+
+// A pre-#2535 parent with every row at the legacy 0: the tie rule ranks the
+// sub-folders first, so the renumber writes the folders 0..m-1 and the
+// requests after them - the display the sidebar already showed, now in real
+// slots - and a second normalize writes nothing.
+TEST_F (ReorderRouteTest, ALegacyAllZeroParentDensifiesItsFoldersFirstThenItsRequests) {
+    const std::string parent = make_collection ("parent");
+    const std::string fa     = make_collection ("fa", parent);
+    const std::string fb     = make_collection ("fb", parent);
+    const std::string ra     = make_request (parent, "ra");
+    const std::string rb     = make_request (parent, "rb");
+    set_collection_position (fa, 0, EARLIER);
+    set_collection_position (fb, 0, LATER);
+    set_request_order (ra, 0);
+    set_request_order (rb, 0);
+    const std::vector<std::string> requests_displayed = request_ids (parent);
+
+    json body{ { "normalize", json::array ({ normalize_parent (parent) }) } };
+    auto [status, response] = reorder_response (*db_, body);
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (children (parent),
+    (std::vector<std::pair<std::string, int>>{ { fa, 0 }, { fb, 1 },
+    { requests_displayed.at (0), 2 }, { requests_displayed.at (1), 3 } }));
+
+    auto [again_status, again] = reorder_response (*db_, body);
+    ASSERT_EQ (again_status, 200) << again.dump ();
+    EXPECT_EQ (again["collections"].size (), 0u);
+    EXPECT_EQ (again["requests"].size (), 0u);
 }
 
 /**
@@ -468,9 +573,8 @@ TEST_F (ReorderRouteTest, NormalizesTiedRootsInStoredOrderNotCreationOrder) {
     set_collection_position (a, 0, LATER);
     set_collection_position (b, 0, EARLIER);
 
-    auto [status, response] = reorder_response (*db_,
-    json{ { "normalize",
-    json::array ({ json{ { "type", "collection" }, { "parentId", nullptr } } }) } });
+    auto [status, response] = reorder_response (
+    *db_, json{ { "normalize", json::array ({ normalize_parent (nullptr) }) } });
 
     ASSERT_EQ (status, 200) << response.dump ();
     const auto b_row = db_->get_collection (b);
@@ -519,6 +623,33 @@ TEST_F (ReorderRouteTest, MovesARequestAcrossCollectionsInOneBatch) {
     EXPECT_EQ (request_ids (target), (std::vector<std::string>{ a, t }));
     EXPECT_EQ (request_orders (source), (std::vector<int>{ 0 }));
     EXPECT_EQ (request_orders (target), (std::vector<int>{ 0, 1 }));
+}
+
+// The drop #2535 makes possible: a request between two folders of one parent,
+// and a recursive run follows it - the request runs between the two folders'
+// subtrees instead of after both.
+TEST_F (ReorderRouteTest, ADropPutsARequestBetweenTwoFolders) {
+    const std::string parent    = make_collection ("parent");
+    const std::string first     = make_collection ("first", parent);
+    const std::string second    = make_collection ("second", parent);
+    const std::string in_first  = make_request (first, "in first");
+    const std::string in_second = make_request (second, "in second");
+    const std::string dropped   = make_request (parent, "dropped");
+    ASSERT_EQ (children (parent),
+    (std::vector<std::pair<std::string, int>>{ { first, 0 }, { second, 1 }, { dropped, 2 } }));
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ move_request (dropped, 1), move_collection (second, 2, parent) }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (children (parent),
+    (std::vector<std::pair<std::string, int>>{ { first, 0 }, { dropped, 1 }, { second, 2 } }));
+    std::vector<std::string> run;
+    for (const auto& r : db_->get_requests_in_subtree (parent)) {
+        run.push_back (r.id);
+    }
+    EXPECT_EQ (run, (std::vector<std::string>{ in_first, dropped, in_second }));
 }
 
 TEST_F (ReorderRouteTest, AMoveWithoutAnOwnerKeepsTheOneItHas) {
@@ -658,8 +789,7 @@ TEST_F (ReorderRouteTest, ACreateDuringABatchWaitsAndAppendsPastTheRenumberedRan
     CompetingWriter creator ([&] { late = make_request (col, "late"); });
 
     auto [status, response] = reorder_response (*db_,
-    json{ { "normalize", json::array ({ normalize_requests (col) }) } },
-    creator.probe ());
+    json{ { "normalize", json::array ({ normalize_parent (col) }) } }, creator.probe ());
     ASSERT_EQ (status, 200) << response.dump ();
     creator.join ();
 

@@ -16,6 +16,7 @@
 #include <expected>
 #include <format>
 #include <functional>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -876,6 +877,29 @@ bool is_create);
 RouteResult apply_request_example_fields (vayu::db::RequestExample& x,
 const nlohmann::json& json,
 bool is_create);
+
+/**
+ * Consecutive `order`s for the rows a batch writer (`POST /import/apply`,
+ * `POST /specs/sync`) creates without stating one. The single-row default,
+ * `Database::next_sibling_order`, reads rows that are stored, and none of a
+ * batch's own are yet, so every sibling would land on one number. Each parent
+ * starts at that append point and counts up across both kinds (#2535): rows
+ * taken in the order the batch builds them, folders before requests.
+ */
+class SiblingSlots {
+    public:
+    /// The next slot under @p parent (`std::nullopt` for the roots).
+    int take (vayu::db::Database& db, const std::optional<std::string>& parent) {
+        auto slot = next_.find (parent);
+        if (slot == next_.end ()) {
+            slot = next_.emplace (parent, db.next_sibling_order (parent)).first;
+        }
+        return slot->second++;
+    }
+
+    private:
+    std::map<std::optional<std::string>, int> next_;
+};
 
 /**
  * Hex-encoded SHA-256 of an OpenAPI document's text (issue #637) - what

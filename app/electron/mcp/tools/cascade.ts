@@ -16,13 +16,15 @@ import { ToolArgError } from "./kit.js";
 
 /**
  * A `GET /collections` row, narrowed to the fields the cascade walk reads - plus
- * the `order` a move reads, since both work from the same one list read.
+ * the sibling-order keys a move and the scenario pre-flight read, since all
+ * three work from the same one list read.
  */
-interface CollectionRow {
+export interface CollectionRow {
 	id: string;
 	name?: string;
 	parentId?: string | null;
 	order?: number;
+	createdAt?: number;
 }
 
 /**

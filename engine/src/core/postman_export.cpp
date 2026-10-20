@@ -27,6 +27,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
 #include "vayu/core/vayu_extensions.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -1961,15 +1962,36 @@ Walk& walk) {
     return item;
 }
 
-/// Folders first, then requests: the order the sidebar lists them in, and
-/// the one an import reads back into the same `order` values.
+/// Sub-folders and requests as one list in sibling order, the order the
+/// sidebar lists them and a run visits them in (#2535): Postman reads an
+/// `item[]` in document order, so an import of this file lists them the same.
 json postman_items (const PostmanExportFolder& folder, const json& auth_in_force, Walk& walk) {
-    json items = json::array ();
-    for (const PostmanExportFolder& child : folder.folders) {
-        items.push_back (postman_folder_item (child, auth_in_force, walk));
+    std::vector<vayu::db::SiblingSlot> slots;
+    slots.reserve (folder.folders.size () + folder.requests.size ());
+    for (std::size_t at = 0; at < folder.folders.size (); ++at) {
+        slots.push_back ({ vayu::db::SiblingKind::Folder, at });
     }
-    for (const PostmanExportRequest& request : folder.requests) {
-        items.push_back (postman_request_item (request, auth_in_force, walk));
+    for (std::size_t at = 0; at < folder.requests.size (); ++at) {
+        slots.push_back ({ vayu::db::SiblingKind::Request, at });
+    }
+    const auto order_of = [&folder] (const vayu::db::SiblingSlot& slot) {
+        return slot.kind == vayu::db::SiblingKind::Folder ?
+        folder.folders.at (slot.index).order :
+        folder.requests.at (slot.index).order;
+    };
+    // The tie rule is `sibling_order.hpp`'s, a folder first; stable, so each
+    // kind keeps the order it arrived in.
+    std::stable_sort (slots.begin (), slots.end (),
+    [&] (const vayu::db::SiblingSlot& a, const vayu::db::SiblingSlot& b) {
+        const int left  = order_of (a);
+        const int right = order_of (b);
+        return left != right ? left < right : a.kind < b.kind;
+    });
+    json items = json::array ();
+    for (const vayu::db::SiblingSlot& slot : slots) {
+        items.push_back (slot.kind == vayu::db::SiblingKind::Folder ?
+        postman_folder_item (folder.folders.at (slot.index), auth_in_force, walk) :
+        postman_request_item (folder.requests.at (slot.index), auth_in_force, walk));
     }
     return items;
 }

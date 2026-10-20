@@ -51,6 +51,7 @@
 
 #include "competing_writer.hpp"
 #include "optional_assert.hpp"
+#include "sibling_listing.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
@@ -272,6 +273,64 @@ TEST (ImportApplyPayload, MatchesWhatTheOrchestratorFlattens) {
         entry.at ("payload"))
         << "case: " << name;
     }
+}
+
+/// The `order` each section of @p payload gives the item named @p name.
+int payload_order (const json& payload, const char* section, const std::string& name) {
+    for (const json& item : payload.at (section)) {
+        if (item.at ("name") == name) {
+            return item.value ("order", -1);
+        }
+    }
+    ADD_FAILURE () << "no " << section << " item named " << name;
+    return -1;
+}
+
+/// A draft with nothing beneath it, named @p name, as every importer emits one.
+nlohmann::ordered_json bare_draft (const std::string& name) {
+    return nlohmann::ordered_json{ { "name", name }, { "description", "" },
+        { "variables", nlohmann::ordered_json::object () },
+        { "auth", { { "mode", "none" } } },
+        { "children", nlohmann::ordered_json::array () },
+        { "requests", nlohmann::ordered_json::array () } };
+}
+
+nlohmann::ordered_json bare_request (const std::string& name) {
+    return nlohmann::ordered_json{ { "name", name }, { "description", "" },
+        { "method", "GET" }, { "url", "https://x/" + name },
+        { "params", nlohmann::ordered_json::array () },
+        { "headers", nlohmann::ordered_json::array () },
+        { "body", { { "mode", "none" } } }, { "auth", { { "mode", "inherit" } } } };
+}
+
+// A parent's folders and requests share one `order` space (#2535). A draft
+// that states no `order` - every importer but Postman's and a Vayu-written
+// OpenAPI document - keeps the display it always had, its folders first and
+// its requests after them, and a draft that states one is placed by it.
+TEST (ImportApplyPayload, NumbersFoldersAndRequestsInOneSpace) {
+    nlohmann::ordered_json root = bare_draft ("root");
+    root["requests"].push_back (bare_request ("first"));
+    root["requests"].push_back (bare_request ("second"));
+    root["children"].push_back (bare_draft ("folder"));
+    nlohmann::ordered_json result{ { "collections", nlohmann::ordered_json::array ({ root }) },
+        { "environments", nlohmann::ordered_json::array () } };
+
+    json payload = json::parse (vayu::core::import_apply_payload (result).dump ());
+    EXPECT_EQ (payload_order (payload, "collections", "folder"), 0);
+    EXPECT_EQ (payload_order (payload, "requests", "first"), 1);
+    EXPECT_EQ (payload_order (payload, "requests", "second"), 2);
+    EXPECT_EQ (payload_order (payload, "collections", "root"), -1)
+    << "a root states no order";
+
+    // Stated: the second request first, the folder between, gaps closed.
+    auto& stated                   = result["collections"][0];
+    stated["requests"][0]["order"] = 7;
+    stated["requests"][1]["order"] = 2;
+    stated["children"][0]["order"] = 5;
+    payload = json::parse (vayu::core::import_apply_payload (result).dump ());
+    EXPECT_EQ (payload_order (payload, "requests", "second"), 0);
+    EXPECT_EQ (payload_order (payload, "collections", "folder"), 1);
+    EXPECT_EQ (payload_order (payload, "requests", "first"), 2);
 }
 
 TEST (ImportParse, RefusesADocumentNoFormatClaims) {
@@ -1522,6 +1581,73 @@ TEST (ImportParse, BuildsTheFolderTreeTheDocumentStates) {
     EXPECT_FALSE (parsed.result.at ("meta").contains ("folderStrategy"));
 }
 
+/// A Vayu-written document whose root holds the folders `Pets` and `Users`
+/// and the requests `/login` and `/logout`, each request's `order` as an
+/// export states it. @p pets and @p users are the folder entries' own
+/// `order` members, empty for a document written before #2535, which
+/// numbered the requests from 0 in a space of their own.
+std::string vayu_tree_document (const std::string& pets, const std::string& users) {
+    return R"json({"openapi":"3.1.0","info":{"title":"T"},
+        "x-vayu-collection":{"folders":[{"path":["Pets"])json" +
+    pets + R"json(},{"path":["Users"])json" + users + R"json(}]},
+        "paths":{
+          "/login":{"post":{"responses":{},"x-vayu-request":{"order":0}}},
+          "/logout":{"post":{"responses":{},"x-vayu-request":{"order":)json" +
+    (pets.empty () ? "1" : "2") + R"json(}}}}})json";
+}
+
+/// The root's children as the payload numbers them, `folder:` / `request:`
+/// and the name, in `order`.
+std::vector<std::string> root_payload_listing (const ImportParse& parsed) {
+    const json payload =
+    json::parse (vayu::core::import_apply_payload (parsed.result).dump ());
+    std::vector<std::pair<int, std::string>> slots;
+    for (const json& c : payload.at ("collections")) {
+        if (c.at ("parentTempId") == "c1") {
+            slots.emplace_back (c.at ("order").get<int> (),
+            "folder:" + c.at ("name").get<std::string> ());
+        }
+    }
+    for (const json& r : payload.at ("requests")) {
+        if (r.at ("collectionTempId") == "c1") {
+            slots.emplace_back (r.at ("order").get<int> (),
+            "request:" + r.at ("url").get<std::string> ());
+        }
+    }
+    std::ranges::sort (slots);
+    std::vector<std::string> listed;
+    listed.reserve (slots.size ());
+    for (auto& [order, name] : slots) {
+        listed.push_back (std::move (name));
+    }
+    return listed;
+}
+
+// A folder's `order` in `x-vayu-collection.folders` shares its parent's space
+// with the requests' `x-vayu-request.order` (#2535), so a request exported
+// between two folders imports there. Mutation check: drop the folder's
+// `order` in `VayuFolderTree` and the folder moves to the front.
+TEST (ImportParse, AVayuDocumentsFolderOrderInterleavesItWithTheRequests) {
+    const ImportParse parsed =
+    parse_import (vayu_tree_document (R"(,"order":1)", R"(,"order":3)"), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (root_payload_listing (parsed),
+    (std::vector<std::string>{ "request:{{baseUrl}}/login", "folder:Pets",
+    "request:{{baseUrl}}/logout", "folder:Users" }));
+}
+
+// A document written before #2535 numbered folders and requests in two
+// spaces and stated no folder order: its requests keep following the folders
+// rather than pairing up with them (`f0 r0 f1 r1`). Mutation check: stamp the
+// requests' `order` in `VayuFolderTree::sorted` unconditionally and this reds.
+TEST (ImportParse, AnOlderVayuDocumentKeepsItsFoldersFirst) {
+    const ImportParse parsed = parse_import (vayu_tree_document ("", ""), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (root_payload_listing (parsed),
+    (std::vector<std::string>{ "folder:Pets", "folder:Users",
+    "request:{{baseUrl}}/login", "request:{{baseUrl}}/logout" }));
+}
+
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
     const ImportParse v30 =
     parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});
@@ -2644,6 +2770,67 @@ TEST_F (ImportParseRoute, PersistsTheWholeTreeInOneCall) {
     EXPECT_TRUE (body.at ("idMap").contains ("c1"));
     EXPECT_TRUE (body.at ("idMap").contains ("r1"));
     EXPECT_EQ (db_->get_collections ().size (), 1U);
+}
+
+/// The fixture document whose requests sit before, between and after
+/// sub-folders, at three depths - Postman's own `collection-v2.json` shape.
+std::string interleaved_postman_document () {
+    const json fixture = read_fixture ();
+    for (const json& entry : fixture.at ("cases")) {
+        if (entry.at ("name") == "postman-interleaved") {
+            return entry.at ("document").get<std::string> ();
+        }
+    }
+    ADD_FAILURE () << "no postman-interleaved case in the fixture";
+    return {};
+}
+
+// Postman runs a folder's items in document order, descending into a
+// sub-folder where it sits (#2535); the import keeps that order, so the
+// sidebar lists it and a recursive run visits it the same way. Mutation
+// check: give `flatten` one counter per kind again and this reds.
+TEST_F (ImportParseRoute, APostmanCollectionKeepsItsDocumentOrder) {
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", interleaved_postman_document () } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+
+    using vayu::tests::listed_children;
+    EXPECT_EQ (listed_children (*db_, root),
+    (std::vector<std::string>{ "request:Log in", "request:Who am I",
+    "folder:This is a folder", "request:Log out" }));
+    const std::string folder = vayu::tests::child_folder_id (*db_, root, "This is a folder");
+    EXPECT_EQ (listed_children (*db_, folder),
+    (std::vector<std::string>{
+    "request:First", "request:Second", "request:Third", "folder:Nested" }));
+    const std::string nested = vayu::tests::child_folder_id (*db_, folder, "Nested");
+    EXPECT_EQ (listed_children (*db_, nested),
+    (std::vector<std::string>{ "folder:Users", "request:Between", "folder:Orders" }));
+
+    std::vector<std::string> run;
+    for (const auto& request : db_->get_requests_in_subtree (root)) {
+        run.push_back (request.name);
+    }
+    EXPECT_EQ (run,
+    (std::vector<std::string>{ "Log in", "Who am I", "First", "Second", "Third",
+    "List users", "Between", "Log out" }));
+}
+
+// A collection of folders only lists them as the document does, numbered
+// from 0 as before #2535.
+TEST_F (ImportParseRoute, APostmanCollectionOfFoldersOnlyIsUnchanged) {
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", R"({"info":{"name":"F","schema":"v2.1.0"},"item":[
+        {"name":"B","item":[]},{"name":"A","item":[]}]})" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    EXPECT_EQ (vayu::tests::listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:B", "folder:A" }));
+    for (const char* temp : { "c2", "c3" }) {
+        const auto row = db_->get_collection (body.at ("idMap").at (temp));
+        ASSERT_HAS_VALUE (row) << temp;
+        EXPECT_EQ (row->order, temp == std::string ("c2") ? 0 : 1);
+    }
 }
 
 /// What an import writes is what the write routes accept: a binary body

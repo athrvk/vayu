@@ -22,7 +22,10 @@
  *
  * The tie rule itself is driven from `fixtures/tree-order-conformance.json`,
  * which `app/src/types/tree-order.conformance.test.ts` also reads - the sidebar
- * and the engine cannot disagree without one of the two suites failing.
+ * and the engine cannot disagree without one of the two suites failing. Since
+ * #2535 a collection's sub-folders and requests are one sibling list, so each
+ * case is read merged (`vayu::db::merge_siblings`); a case of one kind is also
+ * read through each table alone, which is the within-kind half.
  *
  * Route cores are exercised directly, no in-process HTTP server, matching the
  * suite's other route tests.
@@ -42,6 +45,7 @@
 
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 
 using nlohmann::json;
 
@@ -67,6 +71,14 @@ json load_fixture () {
     std::ifstream in (path);
     EXPECT_TRUE (in.good ()) << "fixture missing: " << path;
     return json::parse (in);
+}
+
+/// Whether every row of @p conformance_case is the same kind: the cases the
+/// within-kind tests read through one table, whatever kind they state.
+bool single_kind (const json& conformance_case) {
+    const auto& rows = conformance_case["rows"];
+    return std::all_of (rows.begin (), rows.end (),
+    [&] (const json& row) { return row["kind"] == rows.front ()["kind"]; });
 }
 
 class TreeOrderTest : public ::testing::Test {
@@ -145,6 +157,25 @@ class TreeOrderTest : public ::testing::Test {
         return ids;
     }
 
+    // The holder's sub-folders and requests as one sibling list.
+    std::vector<std::string> sibling_ids () {
+        const auto collections = db_->get_collections ();
+        std::vector<const vayu::db::Collection*> folders;
+        for (const auto& c : collections) {
+            if (c.parent_id == HOLDER) {
+                folders.push_back (&c);
+            }
+        }
+        const auto requests = db_->get_requests_in_collection (HOLDER);
+        std::vector<std::string> ids;
+        for (const auto& slot : vayu::db::merge_siblings (folders, requests)) {
+            ids.push_back (slot.kind == vayu::db::SiblingKind::Folder ?
+            folders.at (slot.index)->id :
+            requests.at (slot.index).id);
+        }
+        return ids;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -155,7 +186,13 @@ TEST_F (TreeOrderTest, ConformanceFixtureIsNonEmpty) {
     // Guards the scan itself: a fixture that failed to load would otherwise make
     // every case below vacuously pass.
     ASSERT_TRUE (fixture.contains ("cases"));
-    EXPECT_GE (fixture["cases"].size (), 12u);
+    EXPECT_GE (fixture["cases"].size (), 18u);
+    for (const auto& c : fixture["cases"]) {
+        for (const auto& row : c["rows"]) {
+            EXPECT_TRUE (row["kind"] == "folder" || row["kind"] == "request")
+            << c["name"] << ": " << row.dump ();
+        }
+    }
 }
 
 TEST_F (TreeOrderTest, RequestsFollowTheConformanceOrder) {
@@ -166,6 +203,9 @@ TEST_F (TreeOrderTest, RequestsFollowTheConformanceOrder) {
     const json fixture = load_fixture ();
     size_t cases_run   = 0;
     for (const auto& c : fixture["cases"]) {
+        if (!single_kind (c)) {
+            continue;
+        }
         const std::string name = c["name"].get<std::string> ();
         std::vector<std::string> expected;
         for (const auto& row : c["rows"]) {
@@ -190,6 +230,9 @@ TEST_F (TreeOrderTest, CollectionsFollowTheConformanceOrder) {
     const json fixture = load_fixture ();
     size_t cases_run   = 0;
     for (const auto& c : fixture["cases"]) {
+        if (!single_kind (c)) {
+            continue;
+        }
         const std::string name = c["name"].get<std::string> ();
         std::vector<std::string> expected;
         for (const auto& row : c["rows"]) {
@@ -208,6 +251,47 @@ TEST_F (TreeOrderTest, CollectionsFollowTheConformanceOrder) {
         }
     }
     EXPECT_GE (cases_run, 12u) << "the fixture loop asserted nothing";
+}
+
+// Mutation check: rank requests before folders in `sibling_before`, or drop the
+// kind from it, and the cross-kind cases red here and in the app's suite.
+TEST_F (TreeOrderTest, SiblingsOfBothKindsFollowTheConformanceOrder) {
+    const json fixture = load_fixture ();
+    size_t cases_run   = 0;
+    size_t cross_kind  = 0;
+    for (const auto& c : fixture["cases"]) {
+        const std::string name = c["name"].get<std::string> ();
+        std::vector<std::string> expected;
+        for (const auto& row : c["rows"]) {
+            const auto id         = row["id"].get<std::string> ();
+            const auto order      = row["order"].get<int> ();
+            const auto created_at = row["createdAt"].get<int64_t> ();
+            if (row["kind"] == "folder") {
+                seed_collection (id, order, created_at, HOLDER);
+            } else {
+                seed_request (id, HOLDER, order, created_at);
+            }
+        }
+        for (const auto& id : c["expected"]) {
+            expected.push_back (id.get<std::string> ());
+        }
+
+        EXPECT_EQ (sibling_ids (), expected) << "case: " << name;
+        ++cases_run;
+        if (!single_kind (c)) {
+            ++cross_kind;
+        }
+
+        for (const auto& row : c["rows"]) {
+            if (row["kind"] == "folder") {
+                db_->delete_collection (row["id"].get<std::string> ());
+            } else {
+                db_->delete_request (row["id"].get<std::string> ());
+            }
+        }
+    }
+    EXPECT_GE (cases_run, 18u) << "the fixture loop asserted nothing";
+    EXPECT_GE (cross_kind, 6u) << "no case mixes the two kinds";
 }
 
 // --- Stability across an edit (the rowid-churn mutation check) -----------------

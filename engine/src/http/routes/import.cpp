@@ -667,11 +667,9 @@ RouteResult build_collection_rows (vayu::db::Database& db,
 const nlohmann::json& collections,
 const TempIds& temps,
 int64_t now,
+SiblingSlots& slots,
 std::vector<vayu::db::Collection>& out) {
     out.reserve (collections.size ());
-    // Parent real id ("" for a root) -> the next `order` to hand out.
-    std::unordered_map<std::string, int> next_order;
-
     for (size_t i = 0; i < collections.size (); ++i) {
         const auto& item        = collections[i];
         const std::string& temp = temps.collections[i];
@@ -700,17 +698,8 @@ std::vector<vayu::db::Collection>& out) {
             return outcome;
         }
 
-        // An absent `order` means "append after the current siblings", which
-        // apply_collection_fields computes from the *stored* rows - and inside a
-        // bulk import none of the payload's own siblings are stored yet, so all of
-        // them would land on the same number. Hand out consecutive slots from that
-        // starting point instead, in payload order.
         if (!item.contains ("order") || item["order"].is_null ()) {
-            const std::string sibling_key = fields["parentId"].is_null () ?
-            std::string () :
-            fields["parentId"].get<std::string> ();
-            auto slot = next_order.try_emplace (sibling_key, c.order).first;
-            c.order   = slot->second++;
+            c.order = slots.take (db, c.parent_id);
         }
         out.push_back (std::move (c));
     }
@@ -778,7 +767,7 @@ std::vector<vayu::db::RequestExample>& out) {
         // Payload order, unless the payload states its own. The create route's
         // append-scan cannot help here: none of these rows are stored yet, so
         // every one of them would compute the same slot - the same reason
-        // build_collection_rows hands out consecutive `order`s itself.
+        // `SiblingSlots` exists for collections and requests.
         if (!example.contains ("order") || example["order"].is_null ()) {
             x.order = static_cast<int> (i);
         }
@@ -792,6 +781,7 @@ RouteResult build_request_rows (vayu::db::Database& db,
 const nlohmann::json& requests,
 const TempIds& temps,
 int64_t now,
+SiblingSlots& slots,
 std::vector<vayu::db::Request>& out,
 std::vector<vayu::db::RequestExample>& examples_out) {
     out.reserve (requests.size ());
@@ -826,6 +816,9 @@ std::vector<vayu::db::RequestExample>& examples_out) {
             "request", temp);
         !outcome) {
             return outcome;
+        }
+        if (!item.contains ("order") || item["order"].is_null ()) {
+            r.order = slots.take (db, r.collection_id);
         }
         const size_t examples_start = examples_out.size ();
         if (auto outcome = build_example_rows (item, r.id, temp, now, examples_out); !outcome) {
@@ -1117,11 +1110,15 @@ import_apply_response (vayu::db::Database& db, const nlohmann::json& body) {
     if (auto outcome = build_spec_rows (db, *specs, temps, now, spec_rows); !outcome) {
         return as_response (outcome.error ());
     }
-    if (auto outcome = build_collection_rows (db, *collections, temps, now, collection_rows);
+    // One slot space per parent across both builders, so a request that
+    // states no `order` lands after its folder's sub-folders (#2535).
+    SiblingSlots slots;
+    if (auto outcome = build_collection_rows (db, *collections, temps, now, slots, collection_rows);
     !outcome) {
         return as_response (outcome.error ());
     }
-    if (auto outcome = build_request_rows (db, *requests, temps, now, request_rows, example_rows);
+    if (auto outcome = build_request_rows (
+        db, *requests, temps, now, slots, request_rows, example_rows);
     !outcome) {
         return as_response (outcome.error ());
     }

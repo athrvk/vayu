@@ -12,17 +12,19 @@
 
 import { z } from "zod";
 import { secretsShape, withholdReorderRows, withheldPointer } from "../withhold.js";
-import type { McpTool } from "./contract.js";
+import type { McpTool, ToolContext } from "./contract.js";
 import {
 	callEngine,
 	engineErrorResult,
 	errorResult,
 	requireStr,
 	str,
+	ToolArgError,
 	writesDisabled,
 } from "./kit.js";
-import { collectionParent, collectionSubtree, readCollectionRows } from "./cascade.js";
-import { MOVE_POSITIONS, moveBatch, readOrderedSiblings } from "./move.js";
+import { collectionSubtree, readCollectionRows } from "./cascade.js";
+import { destinationSiblings, MOVE_POSITIONS, moveBatch } from "./move.js";
+import { readRequestRows } from "./sibling-order.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
 export const MOVE_TOOLS: McpTool[] = [
@@ -41,7 +43,7 @@ export const MOVE_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Move a collection or a saved request into another collection - the row menu's 'Move to...', over MCP. " +
 			GUARDED_WRITE_SENTENCE +
-			". It lands at the end of its new parent by default, or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree." +
+			". It lands at the end of its new parent by default, after the sub-collections and requests there alike (the two share one order, so a request can sit between folders), or at the front with `position: 'first'`; positions in between stay a UI gesture, because naming one means doing the app's ordering arithmetic from the outside. A collection may move to the top level (`parentId: null`); a request always belongs to a collection. Refused, with nothing written, when a collection would move into itself or into its own subtree." +
 			withheldPointer(config),
 		annotations: {
 			title: "Move an item",
@@ -91,65 +93,12 @@ export const MOVE_TOOLS: McpTool[] = [
 
 			let batch: Record<string, unknown>;
 			try {
-				if (type === "collection") {
-					// Stated, not inferred: `parentId` absent would have to mean
-					// either "the top level" or "leave it where it is", and a move
-					// that guessed wrong is a folder somewhere nobody asked for.
-					if (!("parentId" in args)) {
-						return errorResult(
-							'Moving a collection needs "parentId" - another collection\'s id, or null for the top level.'
-						);
-					}
-					const parentId = args.parentId === null ? null : str(args, "parentId");
-					if (parentId === undefined) {
-						return errorResult('"parentId" must be a collection id or null.');
-					}
-					const rows = readCollectionRows(await ctx.client.listCollections(signal));
-					const subtree = collectionSubtree(rows, id);
-					if (subtree === null) return errorResult(`No collection with id "${id}".`);
-					// The UI's own refusal set, walked here so the answer names the
-					// problem. The engine rejects the same batch under its lock -
-					// that check is the one that is race-free and stays the
-					// authority; this one exists so an agent is told "into its own
-					// subtree" rather than handed a 400 about a move entry.
-					if (parentId !== null && subtree.includes(parentId)) {
-						return errorResult(
-							parentId === id
-								? `A collection cannot be moved into itself ("${id}").`
-								: `"${id}" cannot be moved into "${parentId}" - that collection is inside it.`
-						);
-					}
-					if (parentId !== null && !rows.some((row) => row.id === parentId)) {
-						return errorResult(`No collection with id "${parentId}".`);
-					}
-					batch = moveBatch({
-						type,
-						movedId: id,
-						position,
-						owner: { parentId },
-						siblings: rows.filter(
-							(row) => collectionParent(row) === parentId && row.id !== id
-						),
-					});
-				} else {
-					const collectionId = str(args, "collectionId");
-					if (collectionId === undefined) {
-						return errorResult(
-							'Moving a request needs "collectionId" - the collection it should end up in.'
-						);
-					}
-					const siblings = readOrderedSiblings(
-						await ctx.client.listRequests(collectionId, signal)
-					).filter((row) => row.id !== id);
-					batch = moveBatch({
-						type,
-						movedId: id,
-						position,
-						owner: { collectionId },
-						siblings,
-					});
-				}
+				batch =
+					type === "collection"
+						? await planCollectionMove(args, id, position, ctx, signal)
+						: await planRequestMove(args, id, position, ctx, signal);
 			} catch (err) {
+				if (err instanceof ToolArgError) return errorResult(err.message);
 				return engineErrorResult(err, ctx);
 			}
 			return callEngine(
@@ -160,3 +109,97 @@ export const MOVE_TOOLS: McpTool[] = [
 		},
 	},
 ];
+
+/**
+ * The batch that moves collection `id` under the `parentId` the call states.
+ * Throws {@link ToolArgError} for a refusal; engine failures propagate.
+ */
+async function planCollectionMove(
+	args: Record<string, unknown>,
+	id: string,
+	position: "first" | "last",
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	// Stated, not inferred: `parentId` absent would have to mean either "the
+	// top level" or "leave it where it is", and a move that guessed wrong is a
+	// folder somewhere nobody asked for.
+	if (!("parentId" in args)) {
+		throw new ToolArgError(
+			'Moving a collection needs "parentId" - another collection\'s id, or null for the top level.'
+		);
+	}
+	const parentId = args.parentId === null ? null : str(args, "parentId");
+	if (parentId === undefined) {
+		throw new ToolArgError('"parentId" must be a collection id or null.');
+	}
+	const rows = readCollectionRows(await ctx.client.listCollections(signal));
+	const subtree = collectionSubtree(rows, id);
+	if (subtree === null) throw new ToolArgError(`No collection with id "${id}".`);
+	// The UI's own refusal set, walked here so the answer names the problem.
+	// The engine rejects the same batch under its lock - that check is the one
+	// that is race-free and stays the authority; this one exists so an agent is
+	// told "into its own subtree" rather than handed a 400 about a move entry.
+	if (parentId !== null && subtree.includes(parentId)) {
+		throw new ToolArgError(
+			parentId === id
+				? `A collection cannot be moved into itself ("${id}").`
+				: `"${id}" cannot be moved into "${parentId}" - that collection is inside it.`
+		);
+	}
+	if (parentId !== null && !rows.some((row) => row.id === parentId)) {
+		throw new ToolArgError(`No collection with id "${parentId}".`);
+	}
+	// The top level holds collections only, so there is no request list to read.
+	const requests =
+		parentId === null ? [] : readRequestRows(await ctx.client.listRequests(parentId, signal));
+	return moveBatch({
+		type: "collection",
+		movedId: id,
+		position,
+		owner: { parentId },
+		siblings: destinationSiblings({
+			type: "collection",
+			movedId: id,
+			parentId,
+			collections: rows,
+			requests,
+		}),
+	});
+}
+
+/**
+ * The batch that moves request `id` into the `collectionId` the call states.
+ * Throws {@link ToolArgError} for a refusal; engine failures propagate.
+ */
+async function planRequestMove(
+	args: Record<string, unknown>,
+	id: string,
+	position: "first" | "last",
+	ctx: ToolContext,
+	signal?: AbortSignal
+): Promise<Record<string, unknown>> {
+	const collectionId = str(args, "collectionId");
+	if (collectionId === undefined) {
+		throw new ToolArgError(
+			'Moving a request needs "collectionId" - the collection it should end up in.'
+		);
+	}
+	const [collections, requests] = await Promise.all([
+		ctx.client.listCollections(signal),
+		ctx.client.listRequests(collectionId, signal),
+	]);
+	return moveBatch({
+		type: "request",
+		movedId: id,
+		position,
+		owner: { collectionId },
+		siblings: destinationSiblings({
+			type: "request",
+			movedId: id,
+			parentId: collectionId,
+			collections: readCollectionRows(collections),
+			requests: readRequestRows(requests),
+		}),
+	});
+}

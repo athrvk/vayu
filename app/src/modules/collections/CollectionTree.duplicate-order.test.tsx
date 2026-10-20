@@ -15,7 +15,8 @@
  * right for "New request" and wrong for "Duplicate" - a copy that jumps to the
  * bottom of a long collection reads as a failed action. The copy therefore
  * states its source's own `order`, and the shared tie rule (`compareTreeOrder`:
- * order, then createdAt, then id) puts the newer row immediately after. No
+ * order, then kind, then createdAt, then id) puts the newer row immediately
+ * after. No
  * sibling is renumbered, so this needs no multi-row write.
  */
 
@@ -112,6 +113,35 @@ describe("duplicating a request", () => {
 		};
 		const sorted = [first, source, last, copy].sort(compareTreeOrder);
 		expect(sorted.map((r) => r.id)).toEqual(["r0", "r1", "r1_copy", "r2"]);
+	});
+
+	it("keeps the copy beside its source when folders share the list (#2535)", () => {
+		// A folder right after the source, and one tied with it on order: the
+		// kind rank puts the tied folder first, and nothing lands between the
+		// source and its copy either way.
+		const asRequest = <T extends object>(row: T) => ({ ...row, kind: "request" as const });
+		const copy = asRequest({
+			id: "r1_copy",
+			order: source.order,
+			createdAt: "2026-06-01T00:00:00.000Z",
+		});
+		// Newer than both, so only the kind rank can put it ahead of them.
+		const tied = {
+			id: "f-tied",
+			kind: "collection" as const,
+			order: source.order,
+			createdAt: "2026-12-01T00:00:00.000Z",
+		};
+		const next = { id: "f-next", kind: "collection" as const, order: source.order + 1 };
+		const sorted = [
+			asRequest(first),
+			asRequest(source),
+			next,
+			tied,
+			asRequest({ ...last, order: 3 }),
+			copy,
+		].sort(compareTreeOrder);
+		expect(sorted.map((r) => r.id)).toEqual(["r0", "f-tied", "r1", "r1_copy", "f-next", "r2"]);
 	});
 });
 

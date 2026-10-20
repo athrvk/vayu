@@ -64,9 +64,11 @@ function describeRow(row: TreeRow): string {
 const shape = (rows: TreeRow[]) => rows.map(describeRow);
 
 describe("flattenVisibleRows", () => {
-	it("lists roots by tree order, then each expanded folder's sub-folders before its requests", () => {
-		// Stored out of order on purpose, and the request's `order` is lower than
-		// either folder's: the two blocks are ordered separately and folders win.
+	it("lists roots by tree order, then each expanded folder's children as one list", () => {
+		// Stored out of order on purpose, and the requests' orders fall between
+		// the folders': sub-folders and requests share one order space (#2535),
+		// so a request renders above and between folders, and a folder wins the
+		// tie at order 1.
 		const collections = [
 			folder("beta", 1),
 			folder("acme", 0),
@@ -80,23 +82,27 @@ describe("flattenVisibleRows", () => {
 
 		expect(shape(rows)).toEqual([
 			"folder acme @0",
-			"folder auth @1",
-			"folder billing @1",
 			"request r-ping @1",
+			"folder auth @1",
 			"request r-pong @1",
+			"folder billing @1",
 			"folder beta @0",
 		]);
+		const positions = rows
+			.slice(1, 5)
+			.map((row) => (row.kind === "folder" || row.kind === "request" ? row.posInSet : null));
+		expect(positions).toEqual([1, 2, 3, 4]);
 	});
 
-	it("keeps the requests in the order the query layer gave them", () => {
-		// `getRequestsByCollection` is already sorted by `compareTreeOrder`; a
-		// second sort here would be a second opinion about the same order.
+	it("orders a folder's requests by sibling order, however the lookup lists them", () => {
+		// The query layer sorts by the same `compareTreeOrder`, so the two agree;
+		// the merge does not lean on that to place a request among folders.
 		const rows = flatten([folder("acme", 0)], {
 			expanded: ["acme"],
 			requests: { acme: [request("second", "acme", 5), request("first", "acme", 1)] },
 		});
 
-		expect(shape(rows).slice(1)).toEqual(["request second @1", "request first @1"]);
+		expect(shape(rows).slice(1)).toEqual(["request first @1", "request second @1"]);
 	});
 
 	it("lists a collection whose parent is not loaded at the root, with its requests", () => {

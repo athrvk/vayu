@@ -17,7 +17,6 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 
-#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -96,26 +95,6 @@ const std::optional<std::string>& parent_id) {
         return {};
     }
     return route_error (409, "Collection '" + *parent_id + "' is in the trash - restore it first");
-}
-
-/**
- * The `order` a collection takes when the caller states none: one past the
- * highest already held by a sibling under @p parent_id.
- *
- * @p self_id is excluded so a collection asked to reset its own order lands
- * after its *other* siblings rather than one past itself. On a create the id is
- * not stored yet, so the exclusion is a no-op there.
- */
-static int next_sibling_order (vayu::db::Database& db,
-const std::optional<std::string>& parent_id,
-const std::string& self_id) {
-    int max_order = -1;
-    for (const auto& col : db.get_collections ()) {
-        if (col.id != self_id && col.parent_id == parent_id) {
-            max_order = std::max (max_order, col.order);
-        }
-    }
-    return max_order + 1;
 }
 
 using vayu::core::constants::data_schema::MAX_COLUMN_CHARS;
@@ -255,7 +234,9 @@ bool is_create) {
         // update ("reset to the default"). Null used to reset to 0 instead,
         // which collided with the first sibling rather than resetting anything;
         // a reparent used to keep a position from the list it had just left.
-        c.order = next_sibling_order (db, c.parent_id, c.id);
+        // The siblings are the parent's requests too (#2535). On a create the
+        // id is not stored yet, so excluding it is a no-op there.
+        c.order = db.next_sibling_order (c.parent_id, c.id);
     }
 
     if (auto outcome = apply_json_field (json, "variables", c.variables, "{}", is_create);

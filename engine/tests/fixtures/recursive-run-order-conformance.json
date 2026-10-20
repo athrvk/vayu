@@ -1,8 +1,8 @@
 {
-	"description": "The recursive run order, read by both suites (issue #431). A folder's sub-collections and its requests are two separately ordered blocks - `tree-order-conformance.json` pins each block, this pins the sequence the two blocks produce when a folder holding both is run recursively. The rule is the sidebar's: every subfolder's whole subtree runs before the folder's own requests, subfolders by `collections.order` and requests by `requests.order`, each under the `order, createdAt, id` tiebreak. Engine side: engine/tests/scenario_plan_test.cpp seeds each case's rows and reads `resolve_scenario`'s step ids, so the real SQL and the real walk are what is asserted. Renderer side: app/src/modules/collections/CollectionTree.run-order.conformance.test.tsx renders the same tree fully expanded and reads the request rows top to bottom out of the DOM, so the real render is what is asserted. A rule that changes on one side and not the other fails here or in ctest, never in a user's run. `collections` is listed parent-first so a case reads as a tree; neither consumer depends on that order, and `expected` names every request in the tree, so a row a reader forgets to seed fails rather than passes.",
+	"description": "The recursive run order, read by both suites (issues #431, #2535). A collection's sub-folders and its requests are one sibling list - `tree-order-conformance.json` pins how its rows sort, `order` then a folder before a request on a tie, then `createdAt`, then `id` - and this pins the sequence that list produces when a folder holding both is run recursively: depth-first, a request where it sits and a sub-folder's whole subtree where the sub-folder sits. Engine side: engine/tests/scenario_plan_test.cpp seeds each case's rows and reads `resolve_scenario`'s step ids, so the real SQL and the real walk are what is asserted. Renderer side: app/src/modules/collections/CollectionTree.run-order.conformance.test.tsx renders the same tree fully expanded and reads the request rows top to bottom out of the DOM, so the real render is what is asserted. A rule that changes on one side and not the other fails here or in ctest, never in a user's run. The cases marked legacy-migrated are pre-#2535 trees (each kind numbered from 0, folders displayed first) as the schema-version-7 migration leaves them, requests moved past the highest sub-folder; they run exactly as they did before it. `collections` is listed parent-first so a case reads as a tree; neither consumer depends on that order, and `expected` names every request in the tree, so a row a reader forgets to seed fails rather than passes.",
 	"cases": [
 		{
-			"name": "the deepest subtree runs first and the root's own requests last",
+			"name": "legacy-migrated: the deepest subtree runs first and the root's own requests last",
 			"rootId": "top",
 			"collections": [
 				{ "id": "top", "parentId": null, "order": 0, "createdAt": 1700000000000 },
@@ -10,14 +10,14 @@
 				{ "id": "leaf", "parentId": "mid", "order": 0, "createdAt": 1700000002000 }
 			],
 			"requests": [
-				{ "id": "top_r", "collectionId": "top", "order": 0, "createdAt": 1700000003000 },
-				{ "id": "mid_r", "collectionId": "mid", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "top_r", "collectionId": "top", "order": 1, "createdAt": 1700000003000 },
+				{ "id": "mid_r", "collectionId": "mid", "order": 1, "createdAt": 1700000004000 },
 				{ "id": "leaf_r", "collectionId": "leaf", "order": 0, "createdAt": 1700000005000 }
 			],
 			"expected": ["leaf_r", "mid_r", "top_r"]
 		},
 		{
-			"name": "two subfolders in collections.order, then the parent's own requests in requests.order",
+			"name": "legacy-migrated: two subfolders in order, then the parent's own requests",
 			"rootId": "root",
 			"collections": [
 				{ "id": "root", "parentId": null, "order": 0, "createdAt": 1700000000000 },
@@ -26,32 +26,16 @@
 				{ "id": "grandchild", "parentId": "child_a", "order": 0, "createdAt": 1700000003000 }
 			],
 			"requests": [
-				{ "id": "root_a", "collectionId": "root", "order": 0, "createdAt": 1700000004000 },
-				{ "id": "root_b", "collectionId": "root", "order": 1, "createdAt": 1700000005000 },
-				{ "id": "a_1", "collectionId": "child_a", "order": 0, "createdAt": 1700000006000 },
+				{ "id": "root_a", "collectionId": "root", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "root_b", "collectionId": "root", "order": 3, "createdAt": 1700000005000 },
+				{ "id": "a_1", "collectionId": "child_a", "order": 1, "createdAt": 1700000006000 },
 				{ "id": "b_1", "collectionId": "child_b", "order": 0, "createdAt": 1700000007000 },
 				{ "id": "g_1", "collectionId": "grandchild", "order": 0, "createdAt": 1700000008000 }
 			],
 			"expected": ["g_1", "a_1", "b_1", "root_a", "root_b"]
 		},
 		{
-			"name": "colliding orders across the two blocks (the post-densify shape) do not interleave",
-			"rootId": "acme",
-			"collections": [
-				{ "id": "acme", "parentId": null, "order": 0, "createdAt": 1700000000000 },
-				{ "id": "billing", "parentId": "acme", "order": 0, "createdAt": 1700000001000 },
-				{ "id": "shipping", "parentId": "acme", "order": 1, "createdAt": 1700000002000 }
-			],
-			"requests": [
-				{ "id": "ping", "collectionId": "acme", "order": 0, "createdAt": 1700000003000 },
-				{ "id": "pong", "collectionId": "acme", "order": 1, "createdAt": 1700000004000 },
-				{ "id": "invoice", "collectionId": "billing", "order": 0, "createdAt": 1700000005000 },
-				{ "id": "label", "collectionId": "shipping", "order": 0, "createdAt": 1700000006000 }
-			],
-			"expected": ["invoice", "label", "ping", "pong"]
-		},
-		{
-			"name": "all-zero orders in both blocks fall to createdAt, block by block",
+			"name": "legacy all-zero orders of both kinds run folders first, each kind by createdAt",
 			"rootId": "legacy",
 			"collections": [
 				{ "id": "legacy", "parentId": null, "order": 0, "createdAt": 1700000000000 },
@@ -67,7 +51,7 @@
 			"expected": ["in_alpha", "in_zeta", "earlier", "later"]
 		},
 		{
-			"name": "an empty subfolder contributes nothing and shifts nothing",
+			"name": "legacy-migrated: an empty subfolder contributes nothing and shifts nothing",
 			"rootId": "orders",
 			"collections": [
 				{ "id": "orders", "parentId": null, "order": 0, "createdAt": 1700000000000 },
@@ -75,10 +59,90 @@
 				{ "id": "archive", "parentId": "orders", "order": 1, "createdAt": 1700000002000 }
 			],
 			"requests": [
-				{ "id": "list_orders", "collectionId": "orders", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "list_orders", "collectionId": "orders", "order": 2, "createdAt": 1700000003000 },
 				{ "id": "list_archive", "collectionId": "archive", "order": 0, "createdAt": 1700000004000 }
 			],
 			"expected": ["list_archive", "list_orders"]
+		},
+		{
+			"name": "an order shared across kinds runs the folder's subtree first, then the request",
+			"rootId": "acme",
+			"collections": [
+				{ "id": "acme", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "billing", "parentId": "acme", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "shipping", "parentId": "acme", "order": 1, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "ping", "collectionId": "acme", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "pong", "collectionId": "acme", "order": 1, "createdAt": 1700000004000 },
+				{ "id": "invoice", "collectionId": "billing", "order": 0, "createdAt": 1700000005000 },
+				{ "id": "label", "collectionId": "shipping", "order": 0, "createdAt": 1700000006000 }
+			],
+			"expected": ["invoice", "ping", "label", "pong"]
+		},
+		{
+			"name": "a request, a folder and a request at one level run in that order",
+			"rootId": "api",
+			"collections": [
+				{ "id": "api", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "users", "parentId": "api", "order": 1, "createdAt": 1700000001000 }
+			],
+			"requests": [
+				{ "id": "login", "collectionId": "api", "order": 0, "createdAt": 1700000002000 },
+				{ "id": "logout", "collectionId": "api", "order": 2, "createdAt": 1700000003000 },
+				{ "id": "list_users", "collectionId": "users", "order": 0, "createdAt": 1700000004000 }
+			],
+			"expected": ["login", "list_users", "logout"]
+		},
+		{
+			"name": "a request at 1 between folders at 0 and 2 runs between their subtrees",
+			"rootId": "shop",
+			"collections": [
+				{ "id": "shop", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "cart", "parentId": "shop", "order": 0, "createdAt": 1700000001000 },
+				{ "id": "checkout", "parentId": "shop", "order": 2, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "health", "collectionId": "shop", "order": 1, "createdAt": 1700000003000 },
+				{ "id": "add_item", "collectionId": "cart", "order": 0, "createdAt": 1700000004000 },
+				{ "id": "place_order", "collectionId": "checkout", "order": 0, "createdAt": 1700000005000 }
+			],
+			"expected": ["add_item", "health", "place_order"]
+		},
+		{
+			"name": "nested interleaving: every level merges its own children",
+			"rootId": "svc",
+			"collections": [
+				{ "id": "svc", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "admin", "parentId": "svc", "order": 1, "createdAt": 1700000001000 },
+				{ "id": "reports", "parentId": "admin", "order": 1, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "auth", "collectionId": "svc", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "done", "collectionId": "svc", "order": 2, "createdAt": 1700000004000 },
+				{ "id": "admin_login", "collectionId": "admin", "order": 0, "createdAt": 1700000005000 },
+				{ "id": "admin_logout", "collectionId": "admin", "order": 2, "createdAt": 1700000006000 },
+				{ "id": "daily", "collectionId": "reports", "order": 0, "createdAt": 1700000007000 }
+			],
+			"expected": ["auth", "admin_login", "daily", "admin_logout", "done"]
+		},
+		{
+			"name": "Postman's collection-v2.json shape: two requests then a folder, whose three requests come before its sub-folder",
+			"rootId": "example",
+			"collections": [
+				{ "id": "example", "parentId": null, "order": 0, "createdAt": 1700000000000 },
+				{ "id": "a_folder", "parentId": "example", "order": 2, "createdAt": 1700000001000 },
+				{ "id": "a_subfolder", "parentId": "a_folder", "order": 3, "createdAt": 1700000002000 }
+			],
+			"requests": [
+				{ "id": "first", "collectionId": "example", "order": 0, "createdAt": 1700000003000 },
+				{ "id": "second", "collectionId": "example", "order": 1, "createdAt": 1700000004000 },
+				{ "id": "in_folder_1", "collectionId": "a_folder", "order": 0, "createdAt": 1700000005000 },
+				{ "id": "in_folder_2", "collectionId": "a_folder", "order": 1, "createdAt": 1700000006000 },
+				{ "id": "in_folder_3", "collectionId": "a_folder", "order": 2, "createdAt": 1700000007000 },
+				{ "id": "in_subfolder", "collectionId": "a_subfolder", "order": 0, "createdAt": 1700000008000 }
+			],
+			"expected": ["first", "second", "in_folder_1", "in_folder_2", "in_folder_3", "in_subfolder"]
 		}
 	]
 }

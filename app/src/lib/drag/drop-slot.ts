@@ -15,7 +15,7 @@
  *
  * Pure and node-tested, so a surface (a tab strip, a list) shares the maths
  * without sharing a DOM. The collection tree does not use it: its drops resolve
- * against folder blocks and anchors, and it keeps its own `indexInBlock`
+ * against a parent and an anchor row, and it keeps its own `indexAmongSiblings`
  * (`useTreeDnd.ts`) deliberately.
  */
 
