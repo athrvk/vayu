@@ -647,6 +647,24 @@ TEST_F (ElementsControllersTest, ControlIfReadsABoundDataRowAlongsideCollectionV
     EXPECT_EQ (summary["scenario"]["skipped"], 1);
 }
 
+// The run-local scope (#2564) sits above the bound row for a condition too, as
+// it does for the script that set it: the row's `region` is "us", the
+// pre-request script sets the local "eu", and the condition reads "eu".
+// Mutation check: drop `columns.local = local` from
+// `resolve_template_with_optional_row` and the row wins, so the step skips.
+TEST_F (ElementsControllersTest, ControlIfReadsALocalAboveABoundDataRowsColumn) {
+    seed_root ();
+    seed_request ("req_a", "col_1", 0, "/a",
+    json::array ({ element ("el_pre", "script.pre",
+                   { { "script", "pm.variables.set('region', 'eu');" } }),
+    element ("el_if", "control.if", { { "condition", "{{region}} == eu" } }) }));
+
+    const std::string run_id = start (1, json::array ({ json{ { "region", "us" } } }));
+    EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+    EXPECT_EQ (server_->hit_count ("/a"), 1u)
+    << "the condition read the row's region rather than the local one";
+}
+
 TEST_F (ElementsControllersTest, ControlOnceRunsOnlyOnTheFirstOfThreeIterations) {
     seed_root ();
     seed_request ("req_a", "col_1", 0, "/a",
@@ -1043,6 +1061,29 @@ TEST_F (ElementsControllersLoadTest, ControlIfReadsABoundDataRowUnderLoad) {
     EXPECT_EQ (server.hit_count ("/a"), 2u)
     << "only the gold row's iterations should reach the wire";
     EXPECT_EQ (state->steps_skipped.load (), 2u);
+}
+
+// The same precedence under load, where the local lives on the VU's overlay:
+// an inline `script.pre` sets it and the condition beside it reads it above
+// the bound row. Mutation check: the one named on the sequential test above.
+TEST_F (ElementsControllersLoadTest, ControlIfReadsALocalAboveABoundDataRowsColumnUnderLoad) {
+    ControllerLoadMockServer server;
+    std::vector<json> elements{
+        element ("el_pre", "script.pre",
+        { { "script", "pm.variables.set('region', 'eu');" }, { "inline", true } }),
+        element ("el_if", "control.if", { { "condition", "{{region}} == eu" } })
+    };
+    auto execution      = plan_over (server, std::move (elements), {});
+    execution.data_rows = { json{ { "region", "us" } } };
+
+    const json config{ { "scenario", { { "collectionId", "col_test" } } },
+        { "mode", "iterations" }, { "concurrency", 1 }, { "iterations", 2 } };
+    auto state = run (config, execution);
+
+    ASSERT_NE (state, nullptr);
+    EXPECT_EQ (server.hit_count ("/a"), 2u)
+    << "the condition read the row's region rather than the VU's local one";
+    EXPECT_EQ (state->steps_skipped.load (), 0u);
 }
 
 // ============================================================================

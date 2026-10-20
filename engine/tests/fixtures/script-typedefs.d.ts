@@ -2043,31 +2043,49 @@ declare const pm: {
 	 */
 	test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm;
 	/**
-	 * Read a variable without naming its scope. Resolves environment, then collection, then global - the same order {{name}} uses. Writes must name a scope: pm.variables.set() throws.
+	 * Read a variable without naming its scope. Resolves the local scope, then a bound data row, then environment, collection and global - the same order {{name}} uses. set, unset and clear write the local scope: it lasts for the run (one send, a collection run, one virtual user's iteration in a scenario load run, one submission in a single-request load run with requestElements) and is never stored.
 	 */
 	variables: {
 		/**
-		 * Get a variable from the highest-precedence scope that has it enabled: environment, then collection, then global.
+		 * Remove every local variable. No other scope is touched.
+		 */
+		clear(): void;
+		/**
+		 * Get a variable from the highest-precedence tier that has it: local, then a bound data row, then environment, collection and global.
 		 * 
 		 * Example:
 		 * const baseUrl = pm.variables.get('base_url');
 		 */
 		get(name: string): any | undefined;
 		/**
-		 * True when any scope has the variable enabled.
+		 * True when the local scope, a bound data row or any other scope holds the name; a disabled variable does not count.
 		 */
 		has(name: string): boolean;
 		/**
-		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with - 1 and 0 outside a load run, which is a run of one. This is the way to use {{...}} inside a script: script code itself is never interpolated.
+		 * Resolve {{name}} placeholders in a string, exactly as the request's own URL/headers/body are resolved: scopes first (local > data row > environment > collection > global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, {{$random*}} generate a fresh value per occurrence. {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with - 1 and 0 outside a load run, which is a run of one. This is the way to use {{...}} inside a script: script code itself is never interpolated.
 		 * 
 		 * Example:
 		 * const id = pm.variables.replaceIn('{{$guid}}');
 		 */
 		replaceIn(template: string): string;
 		/**
-		 * Every enabled variable from all three scopes, merged in precedence order - each name resolves to what pm.variables.get() would answer.
+		 * Set a local variable: read before every other scope by pm.variables and {{name}} for the rest of the run, and never stored. Later reads answer the value as set; its string form is what {{name}} substitutes.
+		 * 
+		 * Example:
+		 * pm.variables.set('signature', sig);
+		 */
+		set(name: string, value: any): void;
+		/**
+		 * Every enabled variable from every tier, merged in precedence order - each name resolves to what pm.variables.get() would answer.
 		 */
 		toObject(): Record<string, any>;
+		/**
+		 * Remove a local variable, so the name resolves from the scopes below it again. No other scope is touched.
+		 * 
+		 * Example:
+		 * pm.variables.unset('signature');
+		 */
+		unset(name: string): void;
 	};
 };
 

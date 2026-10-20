@@ -410,6 +410,10 @@ DynamicResolution dynamic             = DynamicResolution::Generate);
 struct DataRowColumns {
     /// Column name (no `data.` prefix) -> the text it substitutes.
     VariableValues columns;
+    /// The script's run-local scope (#2564), the one tier Postman puts above
+    /// the row: a bare name it holds answers from here first. A
+    /// `{{data.column}}` never reads it.
+    VariableValues local;
 };
 
 /**
@@ -443,10 +447,15 @@ const std::optional<IterationIdentity>& identity = std::nullopt);
  *
  * @p row is null for a design send and for a run with no dataset behind it,
  * both of which resolve @p input against @p vars alone.
+ *
+ * @p local is the run-local scope (#2564), `DataRowColumns::local`: a bare
+ * name it holds beats the row's column of that name, as it does for the
+ * script. It must also be in @p vars, which is what answers it with no row.
  */
 [[nodiscard]] std::string resolve_template_with_optional_row (const std::string& input,
 const VariableValues& vars,
-const nlohmann::json* row);
+const nlohmann::json* row,
+const VariableValues& local);
 
 /**
  * Deep-resolve every string *value* inside a JSON value (object keys are left

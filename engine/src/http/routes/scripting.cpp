@@ -1515,14 +1515,17 @@ nlohmann::json get_script_completions () {
     }
 
     // ========================================
-    // pm.variables - merged read across the scopes
+    // pm.variables - merged read across the scopes, and the local scope
     // ========================================
     completions.push_back ({ { "label", "pm.variables" }, { "kind", KIND_VARIABLE },
-    { "insertText", "pm.variables" }, { "detail", "Merged variables object (read-only)" },
+    { "insertText", "pm.variables" }, { "detail", "Merged variables object" },
     { "documentation",
-    "Read a variable without naming its scope. Resolves environment, then "
-    "collection, then global - the same order {{name}} uses. Writes must name "
-    "a scope: pm.variables.set() throws." },
+    "Read a variable without naming its scope. Resolves the local scope, then "
+    "a bound data row, then environment, collection and global - the same "
+    "order {{name}} uses. set, unset and clear write the local scope: it "
+    "lasts for the run (one send, a collection run, one virtual user's "
+    "iteration in a scenario load run, one submission in a single-request "
+    "load run with requestElements) and is never stored." },
     { "sortText", "0_pm_variables" } });
 
     completions.push_back ({ { "label", "pm.variables.get" },
@@ -1530,24 +1533,51 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.variables.get(name: string): any | undefined" },
     { "documentation",
-    "Get a variable from the highest-precedence scope that has it enabled: "
-    "environment, then collection, then global.\n\nExample:\nconst baseUrl = "
-    "pm.variables.get('base_url');" },
+    "Get a variable from the highest-precedence tier that has it: local, then "
+    "a bound data row, then environment, collection and global.\n\nExample:\n"
+    "const baseUrl = pm.variables.get('base_url');" },
     { "sortText", "1_pm_variables_get" } });
+
+    completions.push_back ({ { "label", "pm.variables.set" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.variables.set(\"${1:variable}\", ${2:value})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.variables.set(name: string, value: any): void" },
+    { "documentation",
+    "Set a local variable: read before every other scope by pm.variables and "
+    "{{name}} for the rest of the run, and never stored. Later reads answer "
+    "the value as set; its string form is what {{name}} "
+    "substitutes.\n\nExample:\npm.variables.set('signature', sig);" },
+    { "sortText", "1_pm_variables_set" } });
+
+    completions.push_back ({ { "label", "pm.variables.unset" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.unset(\"${1:variable}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", "pm.variables.unset(name: string): void" },
+    { "documentation",
+    "Remove a local variable, so the name resolves from the scopes below it "
+    "again. No other scope is touched.\n\nExample:\n"
+    "pm.variables.unset('signature');" },
+    { "sortText", "1_pm_variables_unset" } });
+
+    completions.push_back ({ { "label", "pm.variables.clear" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.variables.clear()" }, { "detail", "pm.variables.clear(): void" },
+    { "documentation", "Remove every local variable. No other scope is touched." },
+    { "sortText", "1_pm_variables_clear" } });
 
     completions.push_back ({ { "label", "pm.variables.has" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.has(\"${1:variable}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.variables.has(name: string): boolean" },
-    { "documentation", "True when any scope has the variable enabled." },
+    { "documentation",
+    "True when the local scope, a bound data row or any other scope holds the "
+    "name; a disabled variable does not count." },
     { "sortText", "1_pm_variables_has" } });
 
     completions.push_back ({ { "label", "pm.variables.toObject" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.variables.toObject()" },
     { "detail", "pm.variables.toObject(): Record<string, any>" },
     { "documentation",
-    "Every enabled variable from all three scopes, merged in precedence "
-    "order - each name resolves to what pm.variables.get() would answer." },
+    "Every enabled variable from every tier, merged in precedence order - "
+    "each name resolves to what pm.variables.get() would answer." },
     { "sortText", "1_pm_variables_toObject" } });
 
     completions.push_back ({ { "label", "pm.variables.replaceIn" },
@@ -1556,8 +1586,9 @@ nlohmann::json get_script_completions () {
     { "detail", "pm.variables.replaceIn(template: string): string" },
     { "documentation",
     "Resolve {{name}} placeholders in a string, exactly as the request's own "
-    "URL/headers/body are resolved: scopes first (environment > collection > "
-    "global), then the dynamic-variable table - {{$guid}}, {{$timestamp}}, "
+    "URL/headers/body are resolved: scopes first (local > data row > "
+    "environment > collection > global), then the dynamic-variable table - "
+    "{{$guid}}, {{$timestamp}}, "
     "{{$random*}} generate a fresh value per occurrence. {{$vu}} and "
     "{{$iteration}} resolve to the numbers the request beside this script was "
     "bound with - 1 and 0 outside a load run, which is a run of one. This is "

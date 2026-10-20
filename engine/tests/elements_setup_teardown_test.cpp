@@ -517,6 +517,45 @@ TEST_F (ScriptLifecycleTest, LoadSetupWritesAVariableEveryVirtualUserSees) {
     }
 }
 
+// The local scope `pm.variables.set` writes (#2564) belongs to whoever owns
+// the scopes. A collection run owns one for the whole run, so setup's local
+// reaches the first step.
+TEST_F (ScriptLifecycleTest, SequentialSetupLocalReachesTheFirstStep) {
+    seed_collection (script_setup_element (
+    "pm.variables.set('lifecycleToken', 'local-by-setup');"));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_sequential (execution), vayu::RunStatus::Completed);
+
+    auto hits = server_->requests ();
+    ASSERT_EQ (hits.size (), 1u);
+    EXPECT_NE (hits[0].target.find ("tok=local-by-setup"), std::string::npos)
+    << hits[0].target;
+}
+
+// Under load each virtual user owns its own local scope, starting empty, and
+// setup is no user's iteration, so its local ends with it and every
+// submission keeps the literal token. Mutation check: drop
+// `base_scopes.local.clear ()` from `run_collection_setup` (run_manager.cpp)
+// and every hit carries the value.
+TEST_F (ScriptLifecycleTest, LoadSetupLocalReachesNoVirtualUser) {
+    seed_collection (script_setup_element (
+    "pm.variables.set('lifecycleToken', 'local-by-setup');"));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/3, /*concurrency=*/3),
+    vayu::RunStatus::Completed);
+
+    auto hits = server_->requests ();
+    ASSERT_EQ (hits.size (), 3u);
+    for (const auto& hit : hits) {
+        EXPECT_EQ (hit.target.find ("local-by-setup"), std::string::npos) << hit.target;
+        EXPECT_NE (hit.target.find ("lifecycleToken"), std::string::npos) << hit.target;
+    }
+}
+
 // The load-mode half of the issue's own acceptance scenario: a script.setup
 // that fetches a token with pm.sendRequest makes it available to every
 // virtual user's first submission. Mutation check: skip binding

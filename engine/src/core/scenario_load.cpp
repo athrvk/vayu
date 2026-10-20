@@ -551,13 +551,15 @@ const nlohmann::json* data_row) {
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
         .should_stop = nullptr,
         // This iteration's bound row, under its `data.*` namespace, beside
-        // the scopes (issue #1515) - the same precedence a script's own
+        // the scopes (issue #1515), this VU's local scope above the row
+        // (#2564) - the same precedence a script's own
         // `pm.variables.replaceIn` already gives it.
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
             vu.scope_overlay.apply_onto (vars);
-            return vayu::http::resolve_template_with_optional_row (text, vars, data_row);
+            return vayu::http::resolve_template_with_optional_row (
+            text, vars, data_row, vu.scope_overlay.local_values ());
         },
         .iteration               = iteration,
         .step_position           = step_index,
@@ -674,7 +676,8 @@ const nlohmann::json* data_row) {
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
             vu.scope_overlay.apply_onto (vars);
-            return vayu::http::resolve_template_with_optional_row (text, vars, data_row);
+            return vayu::http::resolve_template_with_optional_row (
+            text, vars, data_row, vu.scope_overlay.local_values ());
         },
         .iteration        = vu.iteration,
         .step_position    = step_index,

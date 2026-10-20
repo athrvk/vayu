@@ -5060,24 +5060,25 @@ TEST_F (ScriptEngineTest, ReplaceInRejectsANonStringArgument) {
     }
 }
 
-// Postman's pm.variables.set writes to a local scope that lives for one request.
-// Vayu has none, and both substitutes lie: writing to the environment persists
-// a value the author expects to vanish, dropping it loses a write they believe
-// happened. So it throws, and the message names the three scopes that exist.
-TEST_F (ScriptEngineTest, PmVariablesSetThrowsRatherThanGuessingAScope) {
+// pm.variables.set writes the local scope (#2564), never a named one. A context
+// that binds no local scope - this convenience entry point binds only the
+// environment - still gives the script one for its own duration, so the write
+// reads back rather than reporting success and landing nowhere.
+TEST_F (ScriptEngineTest, PmVariablesSetWritesTheLocalScopeAndNoNamedOne) {
+    env["token"] = Variable{ "from-env", false, true };
+
     auto result = engine.execute_prerequest (R"JS(
-        pm.variables.set('token', 'value');
+        pm.variables.set('token', 'local');
+        pm.environment.set('read', pm.variables.get('token'));
+        pm.environment.set('replaced', pm.variables.replaceIn('{{token}}'));
     )JS",
     request, env);
 
-    EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("pm.variables.set is not supported"),
-    std::string::npos)
-    << result.error_message;
-    EXPECT_NE (result.error_message.find ("pm.environment.set()"), std::string::npos)
-    << result.error_message;
-    EXPECT_EQ (env.count ("token"), 0U)
-    << "the throwing write still landed somewhere";
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["read"].value, "local");
+    EXPECT_EQ (env["replaced"].value, "local");
+    EXPECT_EQ (env["token"].value, "from-env")
+    << "the local write reached the environment";
 }
 
 // A run can be given fewer than three scopes - a design run with no active

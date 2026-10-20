@@ -120,15 +120,18 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
 // Variable scopes: pm.environment / pm.globals / pm.collectionVariables
 // ============================================================================
 
-// Which of the run's three variable maps a binding reads and writes. The value
-// is the `magic` argument QuickJS hands back, so one implementation serves all
-// three scopes. They were three hand-written copies of get/set; six methods
-// each would have tripled that, and a copy is exactly what stops a fix landing
-// everywhere it belongs.
+// Which of the run's variable maps a binding reads and writes. The value is the
+// `magic` argument QuickJS hands back, so one implementation serves every
+// scope. They were three hand-written copies of get/set; six methods each
+// would have tripled that, and a copy is exactly what stops a fix landing
+// everywhere it belongs. `SCOPE_LOCAL` is the run-local scope behind
+// `pm.variables.set` / `unset` / `clear` (#2564); it has no accessor of its own
+// on `pm`, so it is not in the binding table below.
 enum VariableScope : int {
     SCOPE_ENVIRONMENT,
     SCOPE_GLOBALS,
-    SCOPE_COLLECTION_VARIABLES
+    SCOPE_COLLECTION_VARIABLES,
+    SCOPE_LOCAL
 };
 
 struct VariableScopeBinding {
@@ -143,10 +146,10 @@ constexpr VariableScopeBinding variable_scope_bindings[] = {
 };
 
 // Postman resolves an unqualified name local -> data -> environment ->
-// collection -> global. Vayu has no local scope, and its data tier is not a
-// map of variables but the bound row itself, so this is the chain *below* the
-// row: `pm.variables` reads the row first (issue #1007, `iteration_cell`) and
-// then walks these - the same order `{{name}}` resolution uses app-side
+// collection -> global. Vayu's data tier is not a map of variables but the
+// bound row itself, so this is the chain *below* the row: `pm.variables` reads
+// the local scope, then the row (issue #1007, `iteration_cell`), then walks
+// these - the same order `{{name}}` resolution uses app-side
 // (docs/app/variable-resolution.md), which is what keeps a script's reading of
 // a name identical to the URL's.
 constexpr VariableScope variables_precedence[] = { SCOPE_ENVIRONMENT,
@@ -166,6 +169,7 @@ Environment* scope_variables (JSContext* ctx, int magic) {
     case SCOPE_ENVIRONMENT: return data->environment;
     case SCOPE_GLOBALS: return data->globals;
     case SCOPE_COLLECTION_VARIABLES: return data->collectionVariables;
+    case SCOPE_LOCAL: return data->local;
     default: return nullptr;
     }
 }
@@ -247,16 +251,14 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 
 // Update a variable's value while preserving an existing key's secret and type
 // fields; a brand-new key gets the current defaults. Shared by every scope's
-// set() so a script that re-sets an existing (e.g. secret) variable does not
-// silently strip its flag or reset its type.
+// set(), `pm.variables.set` included, so a script that re-sets an existing
+// (e.g. secret) variable does not silently strip its flag or reset its type.
 //
 // `enabled` is the one field a set deliberately turns on (#2479). A set is a
 // write of a value the script intends to use, so leaving the row unticked would
 // make the script's own get/has/replaceIn and the execute-time residual pass
 // look past it and send `{{name}}` literally, and the row would be persisted
-// unticked. A run-local override instead would need a second layer in every
-// scope map, `scope_maps`/`lookup_variable`, `build_variable_values` and
-// `apply_scope_delta`.
+// unticked.
 //
 // A brand-new key is also stamped with its creation time, the app's ordering
 // key for the variables editor (issue #135). This is the one place the engine
@@ -440,7 +442,7 @@ void setup_pm_variable_scopes (JSContext* ctx, JSValue pm) {
 namespace {
 
 // ============================================================================
-// pm.variables - the merged, read-only accessor
+// pm.variables - the merged reader, and the writer of the run-local scope
 // ============================================================================
 
 // Defined with `pm.iterationData` below, which is what it was written for: a
@@ -476,7 +478,10 @@ JSValue js_pm_variables_get (JSContext* ctx, JSValueConst this_val, int argc, JS
     }
 
     const std::string key = js_to_string (ctx, argv[0]);
-    // The row first, typed exactly as `pm.iterationData.get` hands it back - a
+    if (const Variable* found = lookup_variable (ctx, SCOPE_LOCAL, key)) {
+        return cast_variable_to_jsvalue (ctx, *found);
+    }
+    // Then the row, typed exactly as `pm.iterationData.get` hands it back - a
     // number column reads as a number through either accessor.
     if (const nlohmann::json* cell = iteration_cell (ctx, key)) {
         return js_from_json (ctx, *cell, key.c_str ());
@@ -499,7 +504,8 @@ JSValue js_pm_variables_has (JSContext* ctx, JSValueConst this_val, int argc, JS
     const std::string key = js_to_string (ctx, argv[0]);
     // A column that is present and null is `true` here, as it is on
     // `pm.iterationData.has`: the row carries the name (issue #1007).
-    if (iteration_cell (ctx, key) != nullptr) {
+    if (lookup_variable (ctx, SCOPE_LOCAL, key) != nullptr ||
+    iteration_cell (ctx, key) != nullptr) {
         return JS_NewBool (ctx, 1);
     }
     for (const VariableScope scope : variables_precedence) {
@@ -531,8 +537,8 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
             cast_variable_to_jsvalue (ctx, variable));
         });
     }
-    // The bound row last, because it is the strongest tier (issue #1007) - the
-    // same reason the loop above runs weakest first.
+    // Then the bound row (issue #1007) and the local scope, the two strongest
+    // tiers - the same reason the loop above runs weakest first.
     auto* data = get_context_data (ctx);
     if (data != nullptr && data->iteration_data != nullptr &&
     data->iteration_data->is_object ()) {
@@ -541,6 +547,11 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
             js_from_json (ctx, cell, column.c_str ()));
         }
     }
+    merge_visible_variables (
+    ctx, SCOPE_LOCAL, [&] (const std::string& key, const Variable& variable) {
+        JS_SetPropertyStr (
+        ctx, snapshot, key.c_str (), cast_variable_to_jsvalue (ctx, variable));
+    });
 
     return snapshot;
 }
@@ -554,10 +565,11 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 // replaceIn keeps values as data - the same resolver the engine's POST
 // /compose uses (`resolve_template`), so the semantics are identical: the
 // `{{$vu}}`/`{{$iteration}}` identity answers ahead of every scope (issue
-// #1088), a bound row's column wins over the scopes (issue #1007), scopes
-// win over generators, a dynamic `{{$guid}}` generates per occurrence, and
-// a name nothing answers keeps its braces - an unknown `$name` and an
-// ordinary unknown name alike (issue #1009). A substituted value that
+// #1088), the local scope wins over a bound row's column (#2564), which wins
+// over the scopes (issue #1007), scopes win over generators, a dynamic
+// `{{$guid}}` generates per occurrence, and a name nothing answers keeps its
+// braces - an unknown `$name` and an ordinary unknown name alike (issue
+// #1009). A substituted value that
 // carries tokens of its own is resolved through them in turn, bounded by
 // `MAX_NESTED_RESOLUTIONS` (`request_composer.cpp`) and by a cycle rule
 // that leaves a name already being expanded written as it stands.
@@ -569,8 +581,8 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
 //    which was composed before the script started (D1).
 //  - The collection scope is the script context's - the request's collection
 //    chain, leaf shadowing ancestor (issue #234) - with pm.variables' own
-//    precedence (environment > collection > globals). The raw stored string
-//    substitutes, never the typed value - matching `{{}}`, not
+//    precedence (local > environment > collection > globals). The raw stored
+//    string substitutes, never the typed value - matching `{{}}`, not
 //    pm.variables.get.
 //
 // Strict about its argument: a non-string is a TypeError rather than a
@@ -591,10 +603,21 @@ std::string describe_iteration_columns (const nlohmann::json& row) {
     return out.empty () ? "none" : out;
 }
 
+// The local scope's enabled values, the text each substitutes.
+vayu::http::VariableValues local_variable_values (JSContext* ctx) {
+    vayu::http::VariableValues values;
+    merge_visible_variables (
+    ctx, SCOPE_LOCAL, [&] (const std::string& key, const Variable& variable) {
+        values[key] = variable.value;
+    });
+    return values;
+}
+
 // Every name a script can see, folded weakest scope first so a stronger one
 // overwrites - the same walk toObject() does, and the same answer get() would
 // give per name. Read at call time rather than at bind time, which is what
-// makes a write earlier in the same script visible here.
+// makes a write earlier in the same script visible here. The bound row is not
+// in it: `resolve_script_template` hands the row to the resolver beside it.
 vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     vayu::http::VariableValues values;
     for (auto it = std::rbegin (variables_precedence);
@@ -603,6 +626,9 @@ vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
         ctx, *it, [&] (const std::string& key, const Variable& variable) {
             values[key] = variable.value;
         });
+    }
+    for (auto& [key, value] : local_variable_values (ctx)) {
+        values[key] = std::move (value);
     }
     return values;
 }
@@ -641,7 +667,7 @@ vayu::http::IterationIdentity script_identity (const ContextData* data) {
 
 } // namespace
 
-// One resolution of `input` against everything the script can see: the three
+// One resolution of `input` against everything the script can see: the four
 // scopes as they stand now, the iteration identity this script is running as,
 // plus the bound data row's columns when the run has one.
 // `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
@@ -677,6 +703,7 @@ std::string& missing_column) {
     for (const auto& [column, cell] : data->iteration_data->items ()) {
         row.columns[column] = vayu::http::render_data_value (cell);
     }
+    row.local = local_variable_values (ctx);
 
     std::optional<std::string> missing;
     std::string resolved =
@@ -722,25 +749,11 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
     return JS_NewString (ctx, resolved->c_str ());
 }
 
-// Postman's pm.variables.set writes to the *local* scope: alive for one
-// request, never stored. Vayu has no such scope, and neither substitute is
-// honest - writing to the environment persists a value the author expects to
-// vanish, and dropping the call loses a write they believe happened. So it
-// throws, naming the three scopes that do exist. Documented in
-// docs/engine/scripting.md; changing this changes a documented contract.
-JSValue js_pm_variables_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)this_val;
-    (void)argc;
-    (void)argv;
-    return JS_ThrowTypeError (ctx,
-    "pm.variables.set is not supported: Vayu has no local variable scope. "
-    "Use pm.environment.set(), pm.collectionVariables.set() or "
-    "pm.globals.set() "
-    "to choose where the value is stored.");
-}
-
 } // namespace
 
+// The reads merge every tier; the writes are Postman's local scope (#2564):
+// the scope binding's own set/unset/clear over `SCOPE_LOCAL`, so the value a
+// set carries (#2529) and the keep-the-flags rule are the same code.
 void setup_pm_variables (JSContext* ctx, JSValue pm) {
     JSValue variables = JS_NewObject (ctx);
 
@@ -752,8 +765,14 @@ void setup_pm_variables (JSContext* ctx, JSValue pm) {
     JS_NewCFunction (ctx, js_pm_variables_to_object, "toObject", 0));
     JS_SetPropertyStr (ctx, variables, "replaceIn",
     JS_NewCFunction (ctx, js_pm_variables_replace_in, "replaceIn", 1));
-    JS_SetPropertyStr (
-    ctx, variables, "set", JS_NewCFunction (ctx, js_pm_variables_set, "set", 2));
+    JS_SetPropertyStr (ctx, variables, "set",
+    JS_NewCFunctionMagic (ctx, js_pm_scope_set, "set", 2, JS_CFUNC_generic_magic, SCOPE_LOCAL));
+    JS_SetPropertyStr (ctx, variables, "unset",
+    JS_NewCFunctionMagic (
+    ctx, js_pm_scope_unset, "unset", 1, JS_CFUNC_generic_magic, SCOPE_LOCAL));
+    JS_SetPropertyStr (ctx, variables, "clear",
+    JS_NewCFunctionMagic (
+    ctx, js_pm_scope_clear, "clear", 0, JS_CFUNC_generic_magic, SCOPE_LOCAL));
 
     JS_SetPropertyStr (ctx, pm, "variables", variables);
 }

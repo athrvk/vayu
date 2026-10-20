@@ -717,7 +717,8 @@ std::string render_data_value (const nlohmann::json& value) {
 
 std::string resolve_template_with_optional_row (const std::string& input,
 const VariableValues& vars,
-const nlohmann::json* row) {
+const nlohmann::json* row,
+const VariableValues& local) {
     if (row == nullptr || !row->is_object ()) {
         return resolve_template (input, vars);
     }
@@ -725,6 +726,7 @@ const nlohmann::json* row) {
     for (const auto& [column, cell] : row->items ()) {
         columns.columns[column] = render_data_value (cell);
     }
+    columns.local = local;
     std::optional<std::string> missing;
     std::string resolved = resolve_template_with_data (input, vars, columns, missing);
     return missing ? input : resolved;
@@ -753,6 +755,9 @@ const std::optional<IterationIdentity>& identity) {
             // above the scopes, because that is where Postman puts a data
             // variable, and silent when the row does not carry the name -
             // which is an ordinary variable, not a mistake about a column.
+            if (const auto local = row.local.find (name); local != row.local.end ()) {
+                return local->second;
+            }
             if (const auto cell = row.columns.find (name); cell != row.columns.end ()) {
                 return cell->second;
             }

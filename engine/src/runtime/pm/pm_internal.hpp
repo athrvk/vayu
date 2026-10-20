@@ -97,6 +97,9 @@ struct ContextData {
     Environment* globals                                = nullptr;
     Environment* collectionVariables                    = nullptr;
     const std::vector<Environment>* collectionAncestors = nullptr;
+    /// `ScriptContext::local`, or `script_local` when the caller bound none.
+    Environment* local = nullptr;
+    Environment script_local;
     std::optional<std::string> request_id;
     std::optional<std::string> request_name;
     std::optional<ScriptEvent> event;

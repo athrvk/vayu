@@ -757,6 +757,24 @@ TEST_F (ResidualTokenExchangeTest, ADisabledRowThePreRequestScriptSetsReachesThe
     EXPECT_EQ (server_->header ("Authorization"), "Bearer new");
 }
 
+/// `pm.variables.set` in the pre-request script (#2564) reaches the header the
+/// way a named scope's set does, above an environment value of the same name,
+/// and the environment keeps its own. Mutation check: drop `local` from
+/// `values_from_scopes` and the stale environment value goes out.
+TEST_F (ResidualTokenExchangeTest, PreRequestLocalSetReachesTheResidualToken) {
+    vayu::Request request;
+    request.url              = server_->url () + "/users";
+    request.headers["X-Sig"] = "{{sig}}";
+
+    auto scopes  = environment_with ("sig", "stale");
+    auto outcome = send (std::move (request), scopes,
+    "pm.variables.set('sig', pm.variables.get('sig') + '-signed');");
+
+    ASSERT_EQ (outcome.response.status_code, 200);
+    EXPECT_EQ (server_->header ("X-Sig"), "stale-signed");
+    EXPECT_EQ (scopes.environment.at ("sig").value, "stale");
+}
+
 /// The same rule one step further on: a scenario step reaches the pass with the
 /// previous steps' writes in the scopes, and no script of its own to run.
 TEST_F (ResidualTokenExchangeTest, AVariableAnEarlierStepSetIsResolvedWithNoScriptOfItsOwn) {

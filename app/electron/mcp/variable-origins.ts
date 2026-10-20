@@ -439,7 +439,7 @@ export const VARIABLE_RESOLUTION_MODEL = {
 	],
 	fromAScript: {
 		scoped: "pm.environment.get, pm.collectionVariables.get and pm.globals.get each read one scope only, and answer emptily when that scope has no such name - they do not fall through.",
-		merged: "pm.variables.get reads across scopes in this page's order, top down: environment, then the collection chain, then globals, stopping at the first scope that has the name enabled. While a row is bound its bare column names are checked first, above all three.",
+		merged: "pm.variables.get reads the run-local scope first - what pm.variables.set wrote this run, which is never stored and so appears in no resource - then, while a row is bound, its bare column names, then this page's order, top down: environment, then the collection chain, then globals, stopping at the first scope that has the name enabled.",
 		chain: "The collection scope a script reads is the whole chain, the same one {{name}} merges - not just the request's own collection.",
 	},
 } as const;

@@ -668,6 +668,40 @@ TEST_F (ScenarioRunnerTest, ACounterSetByOneStepIsANumberToTheNextAndOneOnTheWir
     EXPECT_EQ (stored.at ("xgCount").type, "string");
 }
 
+// The run-local scope (#2564) lives for the whole collection run: step 1's
+// `pm.variables.set` answers step 2's `{{localToken}}` through the residual
+// pass, the next iteration's step 1 still reads it, and a second run starts
+// without it. Nothing reaches the environment.
+TEST_F (ScenarioRunnerTest, LocalSetSurvivesStepsOfARunAndEndsWithIt) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", "[]");
+    seed_request ("req_a", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: String(pm.variables.get("localToken"))});
+       pm.variables.set("localToken", "from-step-1");)");
+    seed_request ("req_b", 1, "/ok", "", "", "", "",
+    R"([{"key":"X-Marker","value":"{{localToken}}","enabled":true}])");
+
+    const auto first_run = start (/*iterations=*/2, "env_1");
+    ASSERT_EQ (await_terminal (first_run), vayu::RunStatus::Completed);
+    const auto second_run = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (second_run), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 6u);
+    EXPECT_EQ (seen[0].marker, "undefined");
+    EXPECT_EQ (seen[1].marker, "from-step-1");
+    EXPECT_EQ (seen[2].marker, "from-step-1")
+    << "the local did not reach the next iteration";
+    EXPECT_EQ (seen[3].marker, "from-step-1");
+    EXPECT_EQ (seen[4].marker, "undefined")
+    << "the second run inherited the first's local";
+    EXPECT_EQ (seen[5].marker, "from-step-1");
+
+    auto env = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (env);
+    EXPECT_EQ (env->variables.find ("localToken"), std::string::npos) << env->variables;
+}
+
 TEST_F (ScenarioRunnerTest, ACookieSetByStepOneIsSentByStepTwo) {
     seed_collection ("col_1");
     seed_environment ("env_1", "[]");
