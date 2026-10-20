@@ -221,6 +221,121 @@ TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
     expect_exchanged_token_stored (config, idp);
 }
 
+json loopback_config (const MockTokenServer& idp) {
+    return { { "grantType", "authorization_code" }, { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
+        { "clientSecret", "sec" } };
+}
+
+std::string state_of (const vayu::http::AuthorizeStart& start) {
+    return parse_q (query_of (start.authorize_url))["state"];
+}
+
+// The callback listener's origin, for an httplib::Client playing the browser.
+std::string callback_origin (const vayu::http::AuthorizeStart& start) {
+    return start.redirect_uri.substr (0, start.redirect_uri.find ("/callback"));
+}
+
+// A local GET with no state is not the IdP's redirect, even one carrying
+// `error`, so it must not fail the attempt the real redirect then completes.
+TEST_F (OAuthAuthorizeTest, LoopbackStatelessErrorLeavesAttemptPending) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    const json config = loopback_config (idp);
+    auto start        = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+
+    auto stray = cli.Get ("/callback?error=x");
+    ASSERT_TRUE (stray != nullptr);
+    EXPECT_EQ (stray->status, 400);
+    const auto waiting = mgr.status (start.attempt_id);
+    EXPECT_EQ (waiting.state, "pending");
+    EXPECT_EQ (waiting.error, "");
+
+    auto real = cli.Get ("/callback?code=AUTHCODE&state=" + state_of (start));
+    ASSERT_TRUE (real != nullptr);
+    EXPECT_EQ (real->status, 200);
+    EXPECT_EQ (mgr.status (start.attempt_id).state, "completed");
+    expect_exchanged_token_stored (config, idp);
+}
+
+TEST_F (OAuthAuthorizeTest, LoopbackWrongStateNeverExchanges) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    auto start = mgr.start (*db_, loopback_config (idp), "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+
+    auto resp = cli.Get ("/callback?code=C&state=WRONG");
+    ASSERT_TRUE (resp != nullptr);
+    EXPECT_EQ (resp->status, 400);
+    EXPECT_EQ (mgr.status (start.attempt_id).state, "pending");
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+TEST_F (OAuthAuthorizeTest, LoopbackIdpErrorWithStateFailsAttempt) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    auto start = mgr.start (*db_, loopback_config (idp), "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+
+    auto resp = cli.Get (
+    "/callback?error=access_denied&error_description=User%20said%20no&state=" +
+    state_of (start));
+    ASSERT_TRUE (resp != nullptr);
+    EXPECT_EQ (resp->status, 200);
+    const auto st = mgr.status (start.attempt_id);
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_EQ (st.error, "access_denied: User said no");
+    EXPECT_EQ (idp.hits (), 0);
+}
+
+// The status poll would stop the listener, so every late request goes in
+// before the first poll.
+TEST_F (OAuthAuthorizeTest, LoopbackSettlesOnce) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    const json config = loopback_config (idp);
+    auto start        = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+    const std::string callback = "/callback?code=AUTHCODE&state=" + state_of (start);
+
+    auto first = cli.Get (callback);
+    ASSERT_TRUE (first != nullptr);
+    EXPECT_EQ (first->status, 200);
+    auto forged = cli.Get ("/callback?error=x&state=WRONG");
+    ASSERT_TRUE (forged != nullptr);
+    EXPECT_EQ (forged->status, 400);
+    auto repeat = cli.Get (callback);
+    ASSERT_TRUE (repeat != nullptr);
+    EXPECT_EQ (repeat->status, 409);
+
+    const auto st = mgr.status (start.attempt_id);
+    EXPECT_EQ (st.state, "completed");
+    EXPECT_EQ (st.error, "");
+    EXPECT_EQ (st.cache_key, vayu::http::oauth::cache_key (config));
+    expect_exchanged_token_stored (config, idp);
+}
+
+TEST_F (OAuthAuthorizeTest, CompleteDoesNotOverwriteASettledLoopbackAttempt) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    const json config = loopback_config (idp);
+    auto start        = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+    auto first = cli.Get ("/callback?code=AUTHCODE&state=" + state_of (start));
+    ASSERT_TRUE (first != nullptr);
+    ASSERT_EQ (first->status, 200);
+
+    const auto again = mgr.complete (*db_, start.attempt_id, "http://x/cb?error=denied");
+    EXPECT_EQ (again.state, "completed");
+    EXPECT_EQ (mgr.status (start.attempt_id).error, "");
+}
+
 TEST_F (OAuthAuthorizeTest, StatusNotFoundForUnknownAttempt) {
     vayu::http::OAuth2AuthorizeManager mgr;
     EXPECT_EQ (mgr.status ("nope").state, "not_found");
