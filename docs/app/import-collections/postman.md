@@ -328,7 +328,10 @@ reads them from the raw detail block, in either schema shape, in that order
   `response_type`: `RESERVED_PARAM_NAMES` in `oauth_client.hpp`) is not
   carried and is counted as `oauth2_unmapped_param`. The count names its
   requests and, under `names`, the parameter keys; a value is never recorded,
-  since it can be a credential.
+  since it can be a credential. The Preview shows it as an amber line naming
+  the request and the keys. A saved `accessToken` (`oauth2_dropped_field`) is a
+  muted note that the grant fetches a new token, and a regenerated `state`
+  (`oauth2_state_regenerated`) is not shown: nothing sent changes.
 
 The token cache key reads `credentialsId` and not `audience` or `resource`, so
 two imported requests differing only in their audience would share one cached
