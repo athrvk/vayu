@@ -2484,8 +2484,10 @@ reuses the selected-row ring. Nothing new gets `role="treeitem"`: every row in
 document order *is* the tree's row list, so an indicator node between rows would
 join it and change the tree's shape mid-drag - a row with no level, sitting
 between a folder and its children. A row that cannot take
-the drop is dimmed and carries `data-drop-blocked` - the dragged folder's own
-subtree, and the block the dragged row does not belong to.
+the drop is dimmed and carries `data-drop-blocked` - the dragged row itself and
+a dragged folder's own subtree. A folder's sub-folders and requests are one
+list (#2535), so a row of the other kind is a legal neighbour, not a blocked
+one.
 
 **The tab strip joins the tree** (#2039), with the same rules in one dimension.
 The whole tab is the handle and a press becomes a drag at the same ~4px (the

@@ -14,8 +14,9 @@
  * The tree is driven through real pointer events on real rows, with only the
  * two things jsdom cannot provide stubbed: layout (`getBoundingClientRect`) and
  * hit testing (`elementFromPoint`). Everything between the press and the batch -
- * the threshold, the zone, the block rule, the index math - is the code under
- * test rather than an assertion about it.
+ * the threshold, the zone, the landing rule, the index math - is the code under
+ * test rather than an assertion about it. A folder's sub-folders and requests
+ * are one sibling list (#2535), so the fixture numbers them in one space.
  *
  * The reorder mutation is mocked, but not inertly: it applies the plan to the
  * fixture, because an Undo has to plan from where the row is *after* the move
@@ -35,8 +36,8 @@ const ROW_HEIGHT = 32;
 
 /**
  * Alpha [c1]                      row 0
- *   Gamma [c3]                    row 1   (nested folder, expanded and empty)
- *   One [r1], Two [r2]            rows 2, 3
+ *   Gamma [c3]          order 0   row 1   (nested folder, expanded and empty)
+ *   One [r1], Two [r2]  order 1,2 rows 2, 3
  * Beta [c2]                       row 4   (collapsed, so it can spring open)
  *   Three [r3]
  */
@@ -61,8 +62,8 @@ function freshFixture(): Fixture {
 			[
 				"c1",
 				[
-					{ id: "r1", collectionId: "c1", name: "One", method: "GET", order: 0 },
-					{ id: "r2", collectionId: "c1", name: "Two", method: "GET", order: 1 },
+					{ id: "r1", collectionId: "c1", name: "One", method: "GET", order: 1 },
+					{ id: "r2", collectionId: "c1", name: "Two", method: "GET", order: 2 },
 				],
 			],
 			["c2", [{ id: "r3", collectionId: "c2", name: "Three", method: "GET", order: 0 }]],
@@ -229,14 +230,15 @@ describe("a drag that crosses the threshold", () => {
 describe("a drop", () => {
 	it("sends one batch holding only the rows whose position changed", () => {
 		renderTree();
-		// Two onto One's upper half: a reorder inside Alpha's requests.
+		// Two onto One's upper half: a reorder inside Alpha. Gamma, above both,
+		// keeps its slot and is not written.
 		dragTo(requestRow("r2"), yIn(rowIndex(requestRow("r1")), 0.2));
 
 		expect(reorderMutate).toHaveBeenCalledTimes(1);
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
-				{ type: "request", id: "r1", order: 1 },
+				{ type: "request", id: "r2", order: 1 },
+				{ type: "request", id: "r1", order: 2 },
 			],
 			normalize: [],
 		});
@@ -246,19 +248,20 @@ describe("a drop", () => {
 	});
 
 	it("counts the drop index in the list the moved row has left", () => {
-		// Three rows, because with two the clamp hides the difference: dropping
-		// One below Two means index 1 among [Two, Four], not index 2 among all
-		// three - the moved row is not in the list it is being spliced into.
+		// A row after Two, because without one the clamp hides the difference:
+		// dropping One below Two means index 2 among [Gamma, Two, Four], not
+		// index 3 among all four - the moved row is not in the list it is being
+		// spliced into.
 		fixture.requests
 			.get("c1")!
-			.push({ id: "r4", collectionId: "c1", name: "Four", method: "GET", order: 2 });
+			.push({ id: "r4", collectionId: "c1", name: "Four", method: "GET", order: 3 });
 		renderTree();
 		dragTo(requestRow("r1"), yIn(rowIndex(requestRow("r2")), 0.8));
 
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
-				{ type: "request", id: "r1", order: 1 },
+				{ type: "request", id: "r2", order: 1 },
+				{ type: "request", id: "r1", order: 2 },
 			],
 			normalize: [],
 		});
@@ -266,13 +269,39 @@ describe("a drop", () => {
 
 	it("carries the new owner when the row lands in another collection", () => {
 		renderTree();
-		// Onto Beta's middle band: into that folder's requests, at the end.
+		// Onto Beta's middle band: into that folder, after everything in it.
 		dragTo(requestRow("r1"), yIn(rowIndex(collectionRow("c2")), 0.5));
 
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
+				{ type: "request", id: "r2", order: 1 },
 				{ type: "request", id: "r1", order: 1, collectionId: "c2" },
+			],
+			normalize: [],
+		});
+	});
+
+	it("lands a request between two folders, writing each displaced row as its kind", () => {
+		// Alpha: Gamma, Delta, One, Two. Two onto Delta's top quarter is a drop
+		// between the two folders - a real slot now, not the head of a block.
+		fixture.collections.push({ id: "c4", name: "Delta", order: 1, parentId: "c1" });
+		fixture.requests.get("c1")![0].order = 2;
+		fixture.requests.get("c1")![1].order = 3;
+		renderTree();
+		dragTo(requestRow("r2"), yIn(rowIndex(collectionRow("c4")), 0.1), { hold: true });
+
+		expect(collectionRow("c4").querySelector('[data-drop-indicator="before"]')).not.toBeNull();
+		fireEvent.pointerUp(requestRow("r2"), {
+			pointerId: 1,
+			clientX: 10,
+			clientY: yIn(rowIndex(collectionRow("c4")), 0.1),
+		});
+
+		expect(reorderMutate.mock.calls[0][0]).toEqual({
+			moves: [
+				{ type: "request", id: "r2", order: 1 },
+				{ type: "collection", id: "c4", order: 2 },
+				{ type: "request", id: "r1", order: 3 },
 			],
 			normalize: [],
 		});
@@ -280,13 +309,13 @@ describe("a drop", () => {
 
 	it("draws the indicator where the row will land, not where the pointer is", () => {
 		renderTree();
-		// The lower edge of the nested folder Gamma. A request cannot sit between
-		// two folders, so the drop resolves to the head of Alpha's requests - and
-		// the line has to be drawn there.
-		dragTo(requestRow("r2"), yIn(rowIndex(collectionRow("c3")), 0.9), { hold: true });
+		// Alpha's middle band: into Alpha, after its last child. The pointer is on
+		// the folder row; the line belongs under One, the last row Two would
+		// follow.
+		dragTo(requestRow("r2"), yIn(rowIndex(collectionRow("c1")), 0.5), { hold: true });
 
-		expect(requestRow("r1").querySelector('[data-drop-indicator="before"]')).not.toBeNull();
-		expect(collectionRow("c3").querySelector("[data-drop-indicator]")).toBeNull();
+		expect(requestRow("r1").querySelector('[data-drop-indicator="after"]')).not.toBeNull();
+		expect(collectionRow("c1").querySelector("[data-drop-indicator]")).toBeNull();
 		fireEvent.pointerUp(requestRow("r2"), { pointerId: 1, clientX: 10, clientY: 0 });
 	});
 
@@ -305,12 +334,13 @@ describe("a drop", () => {
 		renderTree();
 		dragTo(collectionRow("c1"), yIn(rowIndex(collectionRow("c3")), 0.5), { hold: true });
 
-		// Its own subtree, and the request rows - a folder is not in that block.
+		// Itself and its own subtree.
 		expect(collectionRow("c1").getAttribute("data-drop-blocked")).toBe("true");
 		expect(collectionRow("c3").getAttribute("data-drop-blocked")).toBe("true");
-		expect(requestRow("r1").getAttribute("data-drop-blocked")).toBe("true");
-		// A legal target keeps its state.
+		// A legal target keeps its state - a request row included, since a
+		// folder can sit beside one.
 		expect(collectionRow("c2").getAttribute("data-drop-blocked")).toBeNull();
+		expect(requestRow("r1").getAttribute("data-drop-blocked")).toBeNull();
 
 		fireEvent.pointerUp(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: 8 });
 		expect(reorderMutate).not.toHaveBeenCalled();
@@ -341,7 +371,7 @@ describe("a drop", () => {
 	 *
 	 * Dragging a *folder* is the reachable case, which is why the source here is
 	 * one: a request over a **root** folder's edge is refused outright
-	 * (`resolveDrop` - the root level has no requests block), so no destination
+	 * (`resolveDrop` - the top level holds no requests), so no destination
 	 * resolves and no spring was armed. A folder over a folder's edge is a legal
 	 * reorder among siblings, and that is what sprang the target open.
 	 */
@@ -380,7 +410,7 @@ describe("a drop", () => {
 	/**
 	 * The same rule for a request, over a folder that *does* accept an edge drop.
 	 *
-	 * Gamma is nested, so its parent has a requests block and "before Gamma"
+	 * Gamma is nested, so a request can sit beside it and "before Gamma"
 	 * resolves - which is what made this reachable while the root-folder case was
 	 * not. Collapsed here on purpose: an already-open folder never arms a spring,
 	 * so the fixture's expanded Gamma would have hidden this.
@@ -436,23 +466,40 @@ describe("the keyboard move", () => {
 
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
-				{ type: "request", id: "r1", order: 1 },
+				{ type: "request", id: "r2", order: 1 },
+				{ type: "request", id: "r1", order: 2 },
 			],
 			normalize: [],
 		});
-		expect(row("[data-tree-live]").textContent).toBe("Moved One to position 2 of 2 in Alpha");
+		// Counted over Alpha's whole list, Gamma included.
+		expect(row("[data-tree-live]").textContent).toBe("Moved One to position 3 of 3 in Alpha");
 		expect(document.activeElement).toBe(requestRow("r1"));
 	});
 
-	it("says so rather than writing when there is nowhere to go", () => {
+	it("steps a request up past a folder", () => {
 		renderTree();
 		const moved = requestRow("r1");
 		moved.focus();
 		fireEvent.keyDown(moved, { key: "ArrowUp", altKey: true });
 
+		expect(reorderMutate.mock.calls[0][0]).toEqual({
+			moves: [
+				{ type: "request", id: "r1", order: 0 },
+				{ type: "collection", id: "c3", order: 1 },
+			],
+			normalize: [],
+		});
+		expect(row("[data-tree-live]").textContent).toBe("Moved One to position 1 of 3 in Alpha");
+	});
+
+	it("says so rather than writing when there is nowhere to go", () => {
+		renderTree();
+		const moved = collectionRow("c3");
+		moved.focus();
+		fireEvent.keyDown(moved, { key: "ArrowUp", altKey: true });
+
 		expect(reorderMutate).not.toHaveBeenCalled();
-		expect(row("[data-tree-live]").textContent).toBe("One is already first in Alpha");
+		expect(row("[data-tree-live]").textContent).toBe("Gamma is already first in Alpha");
 	});
 
 	it("moves into the folder above, opening it and carrying focus along", () => {
@@ -467,7 +514,7 @@ describe("the keyboard move", () => {
 
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
+				{ type: "request", id: "r2", order: 1 },
 				{ type: "request", id: "r1", order: 0, collectionId: "c3" },
 			],
 			normalize: [],
@@ -476,6 +523,38 @@ describe("the keyboard move", () => {
 		expect(fixture.requests.get("c3")?.map((r) => r.id)).toEqual(["r1"]);
 		expect(document.activeElement).toBe(requestRow("r1"));
 		expect(requestRow("r1").tabIndex).toBe(0);
+	});
+
+	it("moves in only when the row directly above is a folder", () => {
+		renderTree();
+		// One sits above Two: a request, so there is nothing to move into.
+		const moved = requestRow("r2");
+		moved.focus();
+		fireEvent.keyDown(moved, { key: "ArrowRight", altKey: true });
+
+		expect(reorderMutate).not.toHaveBeenCalled();
+		expect(row("[data-tree-live]").textContent).toBe("No collection above Two to move it into");
+	});
+
+	it("moves out to just after the parent, among the grandparent's children", () => {
+		fixture.requests.set("c3", [
+			{ id: "r5", collectionId: "c3", name: "Five", method: "GET", order: 0 },
+		]);
+		renderTree();
+		const moved = requestRow("r5");
+		moved.focus();
+		fireEvent.keyDown(moved, { key: "ArrowLeft", altKey: true });
+
+		// Gamma is at 0 in Alpha, so Five takes 1 and One and Two make room.
+		expect(reorderMutate.mock.calls[0][0]).toEqual({
+			moves: [
+				{ type: "request", id: "r1", order: 2 },
+				{ type: "request", id: "r2", order: 3 },
+				{ type: "request", id: "r5", order: 1, collectionId: "c1" },
+			],
+			normalize: [],
+		});
+		expect(row("[data-tree-live]").textContent).toBe("Moved Five to position 2 of 4 in Alpha");
 	});
 
 	it("leaves the plain arrows navigating", () => {
@@ -536,7 +615,7 @@ describe("Move to...", () => {
 
 		expect(reorderMutate.mock.calls[0][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 0 },
+				{ type: "request", id: "r2", order: 1 },
 				{ type: "request", id: "r1", order: 1, collectionId: "c2" },
 			],
 			normalize: [],
@@ -550,13 +629,13 @@ describe("Move to...", () => {
 		act(() => undo!.onClick());
 
 		expect(reorderMutate).toHaveBeenCalledTimes(2);
-		// Alpha closed the gap while the row was away, so putting it back at the
-		// head displaces Two again - the inverse of a move is not the same batch
+		// Alpha closed the gap while the row was away, so putting it back after
+		// Gamma displaces Two again - the inverse of a move is not the same batch
 		// mirrored, it is a fresh plan against the tree as it now stands.
 		expect(reorderMutate.mock.calls[1][0]).toEqual({
 			moves: [
-				{ type: "request", id: "r2", order: 1 },
-				{ type: "request", id: "r1", order: 0, collectionId: "c1" },
+				{ type: "request", id: "r2", order: 2 },
+				{ type: "request", id: "r1", order: 1, collectionId: "c1" },
 			],
 			normalize: [],
 		});

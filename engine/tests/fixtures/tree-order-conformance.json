@@ -62,7 +62,7 @@
 		},
 		{
 			"name": "post-drag: an adjacent swap leaves the block dense, with creation time out of sequence",
-			"comment": "Dragging req-third from index 2 to index 1 in a dense block. planRequestMove writes only the run between the two indices - req-third to 1, req-second to 2 - so the block stays 0..n-1 while createdAt no longer ascends with it. Sorting on creation time would give first, second, third.",
+			"comment": "Dragging req-third from index 2 to index 1 in a dense block. planMove writes only the run between the two indices - req-third to 1, req-second to 2 - so the block stays 0..n-1 while createdAt no longer ascends with it. Sorting on creation time would give first, second, third.",
 			"rows": [
 				{ "id": "req-first", "kind": "request", "order": 0, "createdAt": 1700000001000 },
 				{ "id": "req-third", "kind": "request", "order": 1, "createdAt": 1700000003000 },

@@ -1808,11 +1808,13 @@ three times, because a drag is only believable if the row is where the pointer
 left it before the write returns:
 
 - `onMutate` snapshots every key the plan can touch and *draws the plan* into the
-  caches - the same two steps the engine performs, normalize each named scope to
-  `0..n-1` in display order, then position each move. A cross-collection move
-  crosses list caches and updates `requests.detail` (which carries
-  `staleTime: Infinity`, so a stale `collectionId` there would outlive every
-  refetch).
+  caches - the same two steps the engine performs, normalize each named parent
+  to `0..n-1` in sibling order, then position each move. A normalized parent
+  spans **two** caches, its sub-collections in the collections list and its
+  requests in its own list, renumbered as one run; both are snapshotted. A
+  cross-collection move crosses list caches and updates `requests.detail`
+  (which carries `staleTime: Infinity`, so a stale `collectionId` there would
+  outlive every refetch).
 - `onSuccess` re-applies the rows the engine actually wrote, which the response
   carries. They are normally what was drawn, but a normalization is authoritative
   from the engine, so the tree settles on real positions rather than a guess.
@@ -1823,14 +1825,16 @@ left it before the write returns:
   `save-store.ts`). The mutation owns this rather than its caller, so the
   gesture layer cannot forget it.
 - `onSettled` invalidates the affected keys **once** - the collections list only
-  if a collection moved, and only the request lists the plan named.
+  if a collection moved or a parent was normalized, and only the request lists
+  the plan named or normalized.
 
 Every write goes through `setQueryData` with a fresh array, never a mutation in
 place: the map `useMultipleCollectionRequests` builds is compared by reference by
 the reveal effect, so an in-place edit would move a row on screen that the tree
 never notices. The plan itself comes from
 `modules/collections/reorder-math.ts` - a pure module, node-tested, that turns
-sibling lists and a drop index into the minimal set of rows to rewrite.
+a parent's merged sibling list and a drop index into the minimal set of rows to
+rewrite, each written as the kind it is.
 
 #### Trash
 

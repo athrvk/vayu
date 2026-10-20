@@ -733,12 +733,18 @@ requests, and the engine applies the whole batch in one transaction - so a drop
 that displaces N siblings is one round trip, not N `updateRequest` calls that can
 half-land and race a concurrent create into the middle of their range.
 
-The payload carries `moves` (each row's new `order`, plus `parentId` /
-`collectionId` when it changes owner) and `normalize` (scopes to renumber dense
-`0..n-1` in display order first, for a collection whose rows all predate explicit
-orders). `modules/collections/reorder-math.ts` computes both from the sibling
-lists the tree is already showing; the full contract is in
-[engine/api-reference.md](../engine/api-reference.md) under `POST /reorder`.
+The payload carries `moves` (each row's `type`, its new `order`, plus
+`parentId` / `collectionId` when it changes owner) and `normalize`, one
+`{ parentId }` per parent to renumber dense `0..n-1` in sibling order first
+(`null` for the top level), for a parent whose rows predate explicit orders. A
+parent's sub-collections and requests are one list in one `order` space
+(#2535), so one entry covers both kinds and a single drop can move a request
+between two folders; the per-kind `{ type, parentId | collectionId }` entries
+earlier engines took are a `400`. `modules/collections/reorder-math.ts`
+computes both arrays from the merged sibling list the tree is already showing;
+the full contract is in
+[engine/api-reference.md](../engine/api-reference.md#post-reorder) under
+`POST /reorder`.
 
 Unlike the other writes, the response is **read**: it is the rows as written, and
 `useReorderMutation` settles its caches on them so a normalization the engine

@@ -18,8 +18,8 @@
  *
  * These cases drive the menu, not the chord, and assert the write: the items go
  * through the same `moveByKeyboard` the chords do, so what is under test here is
- * that the menu reaches it and that the ends are gated off the same block the
- * announcement is computed from. The drag and chord halves of that path are
+ * that the menu reaches it and that the ends are gated off the same sibling
+ * list the announcement is computed from. The drag and chord halves of that path are
  * covered in `CollectionTree.dnd.test.tsx`; this file needs no layout stubs,
  * because a menu click is not a pointer gesture.
  */
@@ -200,8 +200,8 @@ describe("the row menu's move entries", () => {
 	/**
 	 * Off at the ends, with the reason on the item: a disabled menu item cannot
 	 * hold a tooltip, so `RowAction`'s `disabledReason` is where it goes. Gated
-	 * off the same block the announcement is computed from, so "already first"
-	 * and a disabled Move up cannot disagree.
+	 * off the same sibling list the announcement is computed from, so "already
+	 * first" and a disabled Move up cannot disagree.
 	 */
 	it("disables Move up on the first row and Move down on the last, and says why", async () => {
 		renderTree();
@@ -220,6 +220,27 @@ describe("the row menu's move entries", () => {
 		const down = within(last).getByRole("menuitem", { name: /Move down/ });
 		expect(down).toHaveAttribute("aria-disabled", "true");
 		expect(down.textContent).toMatch(/Already last/);
+	});
+
+	it("gates the ends over folders and requests together", async () => {
+		// Gamma, a sub-folder, sits above One in Alpha's one list: One is no
+		// longer first, and Gamma is.
+		fixture.collections.push({ id: "c3", name: "Gamma", order: 0, parentId: "c1" });
+		fixture.requests.get("c1")!.forEach((r, index) => (r.order = index + 1));
+		renderTree();
+
+		const one = await requestMenu("One");
+		expect(within(one).getByRole("menuitem", { name: /Move up/ })).not.toHaveAttribute(
+			"aria-disabled",
+			"true"
+		);
+		fireEvent.keyDown(one, { key: "Escape" });
+
+		const gamma = await openRowMenu("More actions for Gamma");
+		expect(within(gamma).getByRole("menuitem", { name: /Move up/ })).toHaveAttribute(
+			"aria-disabled",
+			"true"
+		);
 	});
 
 	it("writes nothing when a disabled entry is clicked anyway", async () => {
