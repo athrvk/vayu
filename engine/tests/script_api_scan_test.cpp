@@ -21,9 +21,11 @@
 #include <algorithm>
 #include <chrono>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "chai_conformance_table.hpp"
 #include "vayu/core/script_api_scan.hpp"
 #include "wide_json.hpp"
 
@@ -268,46 +270,82 @@ TEST (ScriptApiScan, ASendRequestFormBodyIsNotNamed) {
     Names{});
 }
 
-TEST (ScriptApiScan, NamesTheChaiSpellingsPmExpectRefuses) {
-    const std::vector<std::pair<std::string, std::string>> cases = {
-        { "pm.expect(n).to.be.within(1, 5);", ".within()" },
-        { "pm.expect(n).to.be.greaterThan(1);", ".greaterThan() / .lessThan()" },
-        { "pm.expect(n).to.be.lessThan(1);", ".greaterThan() / .lessThan()" },
-        { "pm.expect(n).to.be.instanceof(Array);", ".instanceof()" },
-        { "pm.expect(n).to.be.approximately(1, 0.1);", ".approximately()" },
-        { "pm.expect(o).to.have.ownProperty('a');", ".ownProperty()" },
-        { "pm.expect(o).to.have.own.property('a');", ".own.property" },
-        { "pm.expect(o).to.have.any.keys('a', 'b');", ".any.keys" },
-        { "pm.expect(o).to.include.keys('a');", ".include.keys" },
-        { "pm.expect(o).to.contain.keys(['a']);", ".include.keys" },
-        { "pm.expect(a).to.include.members([1]);", ".include.members" },
-        { "pm.expect(a).to.contain.oneOf([1]);", ".include.oneOf" },
-        { "pm.expect(a).to.have.ordered.members([1]);", ".ordered.members" },
-        { "pm.expect(o).to.nested.include({'a.b': 1});", ".nested.include" },
-        { "pm.expect(n).to.be.finite;", ".finite" },
-        { "pm.expect(a).to.have.lengthOf.above(2);", ".length.above" },
-        { "pm.response.to.have.jsonSchema(s);", "jsonSchema" },
-        { "pm.expect(j).to.have.jsonSchema(s);", "jsonSchema" },
-        { "pm.expect(pm.response.responseSize).to.be.above(1);", "responseSize" },
-        { "pm.response.to.not.have.status(500);", "pm.response.to.not" },
+constexpr std::string_view POSTMAN_MEMBERS =
+".postmanRequest / .postmanResponse / .postmanRequestOrResponse";
+
+TEST (ScriptApiScan, NamesTheChaiPostmanMembersPmExpectRefuses) {
+    const std::vector<std::string> scripts = {
+        "pm.expect(pm.request).to.be.postmanRequest;",
+        "pm.expect(pm.response).to.be.postmanResponse;",
+        "pm.expect(pm.response).to.be.postmanRequestOrResponse;",
     };
-    for (const auto& [script, expected] : cases) {
-        EXPECT_EQ (names_in (script), Names{ expected }) << script;
+    for (const std::string& script : scripts) {
+        EXPECT_EQ (names_in (script), Names{ std::string (POSTMAN_MEMBERS) }) << script;
     }
+    // A name of the script's own, or a bare variable, is not a chai member.
+    EXPECT_EQ (
+    names_in ("var postmanResponse = pm.response; postmanResponse.code;"), Names{});
 }
 
-TEST (ScriptApiScan, TheSupportedChaiSpellingsAreNotNamed) {
+// Every one of these was named while `pm.expect` refused the spelling and runs
+// since #2528 (`chai-conformance.json` holds each member to a snippet that
+// passes), so naming one would tell a person their working script does not run.
+TEST (ScriptApiScan, TheChaiSpellingsThatNowRunAreNotNamed) {
     EXPECT_EQ (names_in (R"(
+        pm.expect(n).to.be.within(1, 5);
+        pm.expect(n).to.be.greaterThan(1).and.lessThan(9);
+        pm.expect(n).to.be.instanceof(Array);
+        pm.expect(n).to.be.approximately(1, 0.1);
+        pm.expect(o).to.have.ownProperty('a');
+        pm.expect(o).to.have.own.property('a');
+        pm.expect(o).to.have.any.keys('a', 'b');
+        pm.expect(o).to.include.keys('a');
+        pm.expect(o).to.contain.keys(['a']);
+        pm.expect(a).to.include.members([1]);
+        pm.expect(a).to.contain.oneOf([1]);
+        pm.expect(a).to.have.ordered.members([1]);
+        pm.expect(o).to.nested.include({'a.b': 1});
+        pm.expect(n).to.be.finite;
+        pm.expect(a).to.have.lengthOf.above(2);
+        pm.response.to.have.jsonSchema(s);
+        pm.expect(j).to.have.jsonSchema(s);
+        pm.expect(pm.response.responseSize).to.be.above(1);
+        pm.response.to.have.responseSize.below(9);
+        pm.response.to.not.have.status(500);
         pm.expect(n).to.be.above(1).and.below(9);
         pm.expect(a).to.have.lengthOf(2);
-        pm.expect(a).to.include(1);
-        pm.expect(o).to.have.keys('a');
         pm.expect(o).to.have.property('a');
-        pm.expect(n).to.be.closeTo(1, 0.1);
-        pm.response.to.have.status(200);
         pm.response.to.be.ok;
     )"),
     Names{});
+}
+
+// The table `pm.expect` is held to is the authority on what runs, so the scan
+// is held to it too: a snippet a row says passes or fails as chai does is never
+// named, and a member a row marks unsupported is the one the scan names.
+TEST (ScriptApiScan, NothingTheChaiConformanceTableRunsIsNamed) {
+    const auto& table   = vayu::tests::chai_conformance_table ();
+    std::size_t scanned = 0;
+    for (const char* section : { "expect", "response" }) {
+        ASSERT_TRUE (table.contains (section)) << "the table did not load";
+        for (const auto& row : table.at (section)) {
+            const std::string member = row.at ("member");
+            const bool unsupported = row.value ("status", std::string{}) == "unsupported";
+            const Names expected =
+            unsupported ? Names{ std::string (POSTMAN_MEMBERS) } : Names{};
+            const std::string pass = row.value ("pass", std::string{});
+            if (pass.empty ()) {
+                continue;
+            }
+            EXPECT_EQ (names_in (pass), expected) << member << ": " << pass;
+            if (!unsupported) {
+                EXPECT_EQ (names_in (row.at ("fail")), Names{})
+                << member << ": " << row.at ("fail").get<std::string> ();
+            }
+            ++scanned;
+        }
+    }
+    EXPECT_GT (scanned, 100u) << "the guard read almost nothing";
 }
 
 // ---------------------------------------------------------------------------

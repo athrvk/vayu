@@ -1107,7 +1107,9 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `postmanResponse` and `postmanRequestOrResponse`. Each throws a `TypeError`
   rather than reporting a pass. A flag that changes what the matcher after it
   asserts (`any`, `own`, `ordered`, `itself`) is never accepted as a no-op for
-  that reason: it is either read by the matcher or it throws
+  that reason: it is either read by the matcher or it throws. The three
+  chai-postman names are the only chai spelling a Postman import's
+  `meta.unsupportedScriptApis` names; every other member of the list above runs
 
 The editor underlines a use of any of the names above that the sandbox lacks
 (see [Type declarations](#type-declarations-hover-signature-help)) and its hover

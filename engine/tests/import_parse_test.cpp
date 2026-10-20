@@ -2178,9 +2178,10 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
     "," + request_with_script ("Library", R"j(["const h = CryptoJS.MD5('x');"])j") + "," +
     request_with_script ("Module", R"j(["const c = require('crypto-js');"])j") + "," +
     request_with_script ("Host", R"j(["setTimeout(next, 10);","Buffer.from('x');"])j") +
-    "," + request_with_script ("Chai", R"j(["pm.expect(n).to.be.within(1, 5);"])j") + "," +
+    "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
+    "," +
     request_with_script ("Plain",
-    R"j(["const j = pm.response.json();","pm.test('ok', () => pm.expect(j.id).to.eql(1));"])j") +
+    R"j(["const j = pm.response.json();","pm.test('ok', () => pm.expect(j.id).to.be.within(1, 5));"])j") +
     "," +
     request_with_script ("Mentions only",
     R"j(["// CryptoJS.MD5(x); tests[0]","const s = 'require(x) postman.x';"])j");
@@ -2193,7 +2194,7 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
         {"request":"Library","names":["CryptoJS"]},
         {"request":"Module","names":["require()"]},
         {"request":"Host","names":["setTimeout","Buffer"]},
-        {"request":"Chai","names":[".within()"]}
+        {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]}
     ])j"));
     // A notice, not a drop: the scripts still import verbatim.
     EXPECT_EQ (parsed.result.at ("collections")[0]

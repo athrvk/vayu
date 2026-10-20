@@ -534,10 +534,8 @@ class Declarations {
 enum class Anchor : std::uint8_t {
     /// Not a property of something: a name in scope (`responseBody`, `pm`).
     Bare,
-    /// A property: after a `.` (`.within`).
+    /// A property: after a `.` (`.postmanRequest`).
     Member,
-    /// Either (`jsonSchema` is a chai chain member and a Postman global).
-    Any,
     /// A name in scope that is not inside an async function: `await` there is
     /// a syntax error, and inside one it is the language.
     OutsideAsync,
@@ -595,24 +593,10 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "pm.visualizer", Anchor::Bare, "pm.visualizer", "" },
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
-// Chai spellings `pm.expect` refuses by name (#2528).
-{ ".within()", Anchor::Member, "within", "" },
-{ ".greaterThan() / .lessThan()", Anchor::Member, "greaterThan|lessThan", "" },
-{ ".instanceof()", Anchor::Member, "instanceof", "" },
-{ ".approximately()", Anchor::Member, "approximately", "" },
-{ ".ownProperty()", Anchor::Member, "ownProperty", "" },
-{ ".own.property", Anchor::Member, "own.property", "" },
-{ ".any.keys", Anchor::Member, "any.keys", "" },
-{ ".include.keys", Anchor::Member, "include|contain.keys|key", "" },
-{ ".include.members", Anchor::Member, "include|contain.members", "" },
-{ ".include.oneOf", Anchor::Member, "include|contain.oneOf", "" },
-{ ".ordered.members", Anchor::Member, "ordered.members", "" },
-{ ".nested.include", Anchor::Member, "nested.include|contain", "" },
-{ ".finite", Anchor::Member, "finite", "" },
-{ ".length.above", Anchor::Member, "length|lengthOf.above|below|least|most|within", "" },
-{ "jsonSchema", Anchor::Any, "jsonSchema", "" },
-{ "responseSize", Anchor::Member, "responseSize", "" },
-{ "pm.response.to.not", Anchor::Bare, "pm.response.to.not", "" },
+// chai-postman members `pm.expect` still refuses by name (#2528); every
+// other member of chai and chai-postman runs (`chai-conformance.json`).
+{ ".postmanRequest / .postmanResponse / .postmanRequestOrResponse",
+Anchor::Member, "postmanRequest|postmanResponse|postmanRequestOrResponse", "" },
 });
 
 constexpr std::size_t rule_index (std::string_view name) {
@@ -654,7 +638,6 @@ bool anchored_at (Anchor anchor, const Token& token) {
     switch (anchor) {
     case Anchor::Bare: return !token.member;
     case Anchor::Member: return token.member;
-    case Anchor::Any: return true;
     case Anchor::OutsideAsync: return !token.member && !token.in_async;
     case Anchor::Elsewhere: break;
     }
