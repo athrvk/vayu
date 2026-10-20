@@ -111,6 +111,68 @@ describe("switching a row between text and file", () => {
 	});
 });
 
+/**
+ * A text part may carry the type it was imported with (#2539). The editor has
+ * no control for it, so an ordinary edit has to leave it alone: it is a member
+ * of the row the user did not touch.
+ */
+describe("a text part that declares its own type", () => {
+	const typedRow: KeyValueItem = {
+		id: "r1",
+		key: "payload",
+		value: "{}",
+		enabled: true,
+		contentType: "application/json",
+	};
+
+	function changed(rows: KeyValueItem[]) {
+		return rows.find((row) => row.id === "r1");
+	}
+
+	it("keeps the type when its value is edited", () => {
+		const { container, onChange } = editor([typedRow]);
+		const input = container.querySelector<HTMLInputElement>('input[placeholder="Value"]');
+		fireEvent.change(input!, { target: { value: '{"a":1}' } });
+
+		expect(changed(onChange.mock.calls[0][0])).toMatchObject({
+			value: '{"a":1}',
+			contentType: "application/json",
+		});
+	});
+
+	it("keeps the type when its key is edited", () => {
+		const { container, onChange } = editor([typedRow]);
+		const input = container.querySelector<HTMLInputElement>('input[placeholder="Key"]');
+		fireEvent.change(input!, { target: { value: "body" } });
+
+		expect(changed(onChange.mock.calls[0][0])).toMatchObject({
+			key: "body",
+			contentType: "application/json",
+		});
+	});
+
+	it("keeps the type when it is switched off", () => {
+		const { container, onChange } = editor([typedRow]);
+		fireEvent.click(container.querySelector('[aria-label="Enable payload"]')!);
+
+		expect(changed(onChange.mock.calls[0][0])).toMatchObject({
+			enabled: false,
+			contentType: "application/json",
+		});
+	});
+
+	it("keeps the type when another row is removed", () => {
+		const other: KeyValueItem = { id: "r2", key: "other", value: "x", enabled: true };
+		const { container, onChange } = editor([typedRow, other]);
+		const removes = container.querySelectorAll('button[aria-label="Remove row"]');
+		fireEvent.click(removes[1]);
+
+		expect(changed(onChange.mock.calls[0][0])).toMatchObject({
+			contentType: "application/json",
+		});
+	});
+});
+
 describe("picking a file", () => {
 	function pick(container: HTMLElement, file: File) {
 		const input = container.querySelector<HTMLInputElement>('input[type="file"]');

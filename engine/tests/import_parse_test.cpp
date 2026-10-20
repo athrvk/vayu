@@ -2651,6 +2651,127 @@ TEST (PostmanImport, AGraphqlContentTypeIsTheBodyModesRowUnlessRefused) {
     nlohmann::ordered_json::array ({ "content-type" }));
 }
 
+/// The requests of a one-folder Postman collection whose bodies are the raw
+/// bodies in @p raw_bodies, each `{name, raw, language?, header?, extra?}`.
+json raw_body_requests (const json& raw_bodies) {
+    json items = json::array ();
+    for (const json& spec : raw_bodies) {
+        json request = { { "method", "POST" }, { "url", "https://x.com/r" },
+            { "body", { { "mode", "raw" }, { "raw", spec.at ("raw") } } } };
+        if (spec.contains ("language")) {
+            request["body"]["options"] = { { "raw",
+            { { "language", spec.at ("language") } } } };
+        }
+        if (spec.contains ("header")) {
+            request["header"] = spec.at ("header");
+        }
+        json item = { { "name", spec.at ("name") }, { "request", request } };
+        if (spec.contains ("behavior")) {
+            item["protocolProfileBehavior"] = spec.at ("behavior");
+        }
+        items.push_back (item);
+    }
+    const json document = { { "info", { { "name", "C" }, { "schema", POSTMAN_SCHEMA } } },
+        { "item", items } };
+    const ImportParse parsed = parse_import (document.dump (), {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return json::array ();
+    }
+    return json::parse (parsed.result.at ("collections")[0].at ("requests").dump ());
+}
+
+json body_mode_row (const std::string& content_type) {
+    return json::parse (R"([{"key":"Content-Type","value":")" + content_type +
+    R"(","enabled":true,"source":"body-mode"}])");
+}
+
+// Issue #2539: Postman sends a raw body under the type its language implies
+// (`CONTENT_TYPE_LANGUAGE`), so an `html` or `javascript` body imports as a text
+// body with that type as the body mode's own row - even when its content parses
+// as JSON, which the sniff would have sent as `application/json`. Mutation
+// check: drop the `rawLanguage` lookup in `required_content_type` and both rows
+// vanish; restore the JSON sniff for a declared language and the first body
+// reads `json`.
+TEST (PostmanImport, AnHtmlOrJavascriptBodyCarriesItsLanguagesContentType) {
+    const json requests = raw_body_requests (json::parse (R"([
+        {"name":"Html","raw":"<p>hi</p>","language":"html"},
+        {"name":"HtmlThatIsJson","raw":"{\"a\":1}","language":"html"},
+        {"name":"Js","raw":"let a;","language":"javascript"}])"));
+    ASSERT_EQ (requests.size (), 3U);
+    EXPECT_EQ (requests[0].at ("body").at ("mode"), "text");
+    EXPECT_EQ (requests[0].at ("body").at ("rawLanguage"), "html");
+    EXPECT_EQ (requests[0].at ("headers"), body_mode_row ("text/html"));
+    EXPECT_EQ (requests[1].at ("body").at ("mode"), "text");
+    EXPECT_EQ (requests[1].at ("headers"), body_mode_row ("text/html"));
+    EXPECT_EQ (requests[2].at ("body").at ("mode"), "text");
+    EXPECT_EQ (requests[2].at ("headers"), body_mode_row ("application/javascript"));
+}
+
+// The row follows the same two guards GraphQL's does: a Content-Type the
+// request declares is kept, and one it refuses leaves none. Mutation check:
+// drop the `refused` early return, or the enabled-header scan, in
+// `with_required_content_type`, and the matching request here reds.
+TEST (PostmanImport, AnHtmlBodysRowYieldsToADeclaredOrRefusedContentType) {
+    const json requests = raw_body_requests (json::parse (R"([
+        {"name":"Own","raw":"<p/>","language":"html",
+            "header":[{"key":"content-type","value":"text/html; charset=utf-8"}]},
+        {"name":"Disabled","raw":"<p/>","language":"html",
+            "header":[{"key":"Content-Type","value":"text/x","disabled":true}]},
+        {"name":"Refused","raw":"<p/>","language":"html",
+            "behavior":{"disabledSystemHeaders":{"content-type":true}}}])"));
+    ASSERT_EQ (requests.size (), 3U);
+    EXPECT_EQ (requests[0].at ("headers").size (), 1U);
+    EXPECT_EQ (requests[0].at ("headers")[0].at ("value"), "text/html; charset=utf-8");
+    EXPECT_FALSE (requests[0].at ("headers")[0].contains ("source"));
+    // A disabled row is not sent, so it does not count as declaring one.
+    EXPECT_EQ (requests[1].at ("headers").size (), 2U);
+    EXPECT_EQ (requests[1].at ("headers")[1],
+    json::parse (R"({"key":"Content-Type","value":"text/html","enabled":true,"source":"body-mode"})"));
+    EXPECT_EQ (requests[2].at ("headers"), json::array ());
+}
+
+// Postman sends a language it has no content type for (`yaml`) as text/plain
+// whatever the content looks like, where the sniff would have sent JSON. Only a
+// body declaring no language is still sniffed. Mutation check: let a declared
+// language fall through to the sniff in `postman_raw_body` and the yaml body
+// reads `json`.
+TEST (PostmanImport, ADeclaredLanguageWithNoModeIsTextEvenWhenItsContentIsJson) {
+    const json requests = raw_body_requests (json::parse (R"([
+        {"name":"Yaml","raw":"{\"a\":1}","language":"yaml"},
+        {"name":"Unlabelled","raw":"{\"a\":1}"}])"));
+    ASSERT_EQ (requests.size (), 2U);
+    EXPECT_EQ (requests[0].at ("body"),
+    (json{ { "mode", "text" }, { "content", "{\"a\":1}" }, { "rawLanguage", "yaml" } }));
+    EXPECT_EQ (requests[0].at ("headers"), json::array ());
+    EXPECT_EQ (requests[1].at ("body"),
+    (json{ { "mode", "json" }, { "content", "{\"a\":1}" }, { "rawLanguage", "" } }));
+    EXPECT_EQ (requests[1].at ("headers"), json::array ());
+}
+
+// A form-data text part's own type is Postman's `contentType` on a text row, and
+// the engine sends it as that part's Content-Type. Mutation check: drop the
+// `contentType` copy in `formdata_fields` and the first part reds.
+TEST (PostmanImport, AFormDataTextPartKeepsItsContentType) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"formdata","formdata":[
+                {"key":"meta","value":"{}","type":"text","contentType":"application/json"},
+                {"key":"plain","value":"v","type":"text"},
+                {"key":"blank","value":"v","type":"text","contentType":""}]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& fields =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("body").at (
+    "fields");
+    ASSERT_EQ (fields.size (), 3U);
+    EXPECT_EQ (fields[0].at ("contentType"), "application/json");
+    EXPECT_FALSE (fields[1].contains ("contentType"));
+    EXPECT_FALSE (fields[2].contains ("contentType"));
+}
+
 class ImportParseRoute : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_import_parse_route.db";

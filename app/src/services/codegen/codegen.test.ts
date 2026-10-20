@@ -243,6 +243,116 @@ describe("form bodies", () => {
 		});
 	});
 
+	/**
+	 * A text part that declares its own Content-Type (a Postman import keeps
+	 * one, #2539) is sent with it, so a snippet that dropped the type would
+	 * preview a request the wire does not send.
+	 */
+	describe("a text part that declares its own type", () => {
+		const typed: SnippetRequest = {
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "payload", value: '{"a":1}', contentType: "application/json" },
+					{ key: "plain", value: "hi" },
+					{ key: "blank", value: "x", contentType: "  " },
+				],
+			},
+		};
+
+		it("curl sends it with -F, quoted so the value stays text", () => {
+			const { code } = generateCurl(typed);
+			expect(code).toContain(`-F 'payload="{\\"a\\":1}";type=application/json'`);
+			// An untyped part, and one whose type is only whitespace, keep the
+			// literal flag.
+			expect(code).toContain(`--form-string 'plain=hi'`);
+			expect(code).toContain(`--form-string 'blank=x'`);
+		});
+
+		it("curl does not let a typed value be read as a file reference", () => {
+			const value = '@/etc/passwd;type=x "\\';
+			const { code } = generateCurl({
+				...typed,
+				body: {
+					mode: "form-data",
+					fields: [{ key: "field", value, contentType: "text/plain; charset=utf-8" }],
+				},
+			});
+			const [row] = parseCommand(code)!.formData;
+			expect(row).toMatchObject({
+				key: "field",
+				value,
+				contentType: "text/plain; charset=utf-8",
+			});
+			expect(row.type).toBeUndefined();
+			expect(row.src).toBeUndefined();
+		});
+
+		it("curl's command imports back as the same typed part", () => {
+			const [row] = parseCommand(generateCurl(typed).code)!.formData;
+			expect(row).toMatchObject({
+				key: "payload",
+				value: '{"a":1}',
+				contentType: "application/json",
+			});
+		});
+
+		it("python gives it a filename-less tuple, the one spelling that sets the type", () => {
+			const { code } = generatePython(typed);
+			expect(code).toContain(`"payload": (None, "{\\"a\\":1}", "application/json"),`);
+			expect(code).toContain(`"plain": "hi",`);
+		});
+
+		it.each([
+			["HTTPie", generateHttpie],
+			["fetch", generateFetch],
+			["powershell", generatePowerShell],
+		])("%s names the part it sends untyped instead of dropping the type quietly", (_n, gen) => {
+			const { notes } = gen(typed);
+			expect(notes.join(" ")).toContain("payload is sent without the type");
+			// The untyped parts are not blamed.
+			expect(notes.join(" ")).not.toContain("plain");
+		});
+
+		it("says nothing when no part declares a type", () => {
+			const untyped: SnippetRequest = {
+				...typed,
+				body: { mode: "form-data", fields: [{ key: "plain", value: "hi" }] },
+			};
+			expect(generateHttpie(untyped).notes).toEqual([]);
+		});
+
+		it("urlencoded has no per-field type, so a stray one changes nothing", () => {
+			const { code } = generateCurl({
+				...typed,
+				body: {
+					mode: "x-www-form-urlencoded",
+					fields: [{ key: "q", value: "a", contentType: "application/json" }],
+				},
+			});
+			expect(code).toContain(`--data-urlencode 'q=a'`);
+			expect(code).not.toContain("application/json");
+		});
+
+		it("masks the value and keeps the type", () => {
+			const { code, masked } = generateCurl(
+				{
+					...typed,
+					body: {
+						mode: "form-data",
+						fields: [{ key: "t", value: "s3cr3t", contentType: "text/plain" }],
+					},
+				},
+				{ mask: true, secrets: ["s3cr3t"] }
+			);
+			expect(code).not.toContain("s3cr3t");
+			expect(code).toContain("type=text/plain");
+			expect(masked).toBe(true);
+		});
+	});
+
 	it("urlencodes rather than raw-posting the x-www-form-urlencoded mode", () => {
 		const urlencoded: SnippetRequest = {
 			...GET,

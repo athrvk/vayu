@@ -393,11 +393,15 @@ so a body that round-trips through storage sends the same bytes.
 `fields` is an array of `{key: string, value: string, enabled?: bool}` - the
 same row shape `params` and `headers` use. `key` is required and must be a
 string; `value` defaults to `""` and a non-boolean `enabled` reads as enabled.
+A `form-data` row may add `contentType`, the part's own Content-Type, on a text
+part as well as a file part (a Postman import writes it for a text row that
+carries one); a part without it sends none.
 A form mode carrying no `fields` array is a `400`, as is a `fields` on a mode
 whose content is a string. Rows with `enabled: false` are stored and returned
 but never sent, so switching one back on needs no re-compose; `{{variables}}`
-resolve inside `key`, `value`, and a file reference's `src` / `fileName` /
-`contentType` (a file part's, or a binary body's `file`) during composition.
+resolve inside `key`, `value`, `contentType` on a part, and a file reference's
+`src` / `fileName` / `contentType` (a file part's, or a binary body's `file`)
+during composition.
 
 The Content-Type rules follow from the encoding:
 
@@ -578,7 +582,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `type` | Form rows only: `"text"` (default) or `"file"`. Any other value is a `400`. |
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
-| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
+| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. A text part takes it too (see above). |
 | `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
@@ -3956,10 +3960,10 @@ are written as one list in sibling order, a folder first on a tie); a request's 
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its
 `noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
 are `raw` with that `options.raw.language` (or the language a Postman import
-kept as `rawLanguage`, none at all for `""`, while the body still sniffs to its
-mode), `graphql` is `graphql` with the
+kept as `rawLanguage`, none at all for `""`, while importing it again would still
+give its stored mode), `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
-`form-data` is `formdata` with a file part's `src`, `binary` is `file` with
+`form-data` is `formdata` with a file part's `src` and any part's `contentType`, `binary` is `file` with
 `file.src` (`file: {}` when no file is chosen); `script.pre` /
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime

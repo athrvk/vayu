@@ -879,10 +879,16 @@ std::string raw_language (const json& body, const std::string& mode, const std::
     return text_of (reimported, "mode") == mode ? declared : mode;
 }
 
-/// One form-data part. A file part names the path it uploads.
+/// One form-data part. A file part names the path it uploads; either kind
+/// carries its own `contentType` when it has one.
 json form_part (const json& field, Walk& walk) {
     if (text_of (field, "type") != "file") {
-        return postman_row (field, RowShape::Typed);
+        json part = postman_row (field, RowShape::Typed);
+        if (const std::string content_type = text_of (field, "contentType");
+        !content_type.empty ()) {
+            part["contentType"] = content_type;
+        }
+        return part;
     }
     json out;
     out["key"] = text_of (field, "key");
@@ -1132,7 +1138,10 @@ std::string_view postman_implied_content_type (const std::optional<json>& body) 
     if (language == "json") {
         return "application/json";
     }
-    return language == "xml" ? "application/xml" : std::string_view ();
+    if (language == "xml") {
+        return "application/xml";
+    }
+    return postman::content_type_of_language (language);
 }
 
 /**

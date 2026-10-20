@@ -398,7 +398,7 @@ TEST (PostmanExport, ARawLanguageAnImportKeptIsWrittenBackWhileItStillHolds) {
     EXPECT_EQ (
     body_of ({ { "mode", "json" }, { "content", "{}" }, { "rawLanguage", "" } }).dump (),
     R"({"mode":"raw","raw":"{}"})");
-    // A language Vayu has no mode for, sniffed into `text`.
+    // A language Vayu has no mode for, imported as `text`.
     EXPECT_EQ (body_of ({ { "mode", "text" }, { "content", "let a;" },
                         { "rawLanguage", "javascript" } })
                .dump (),
@@ -409,6 +409,63 @@ TEST (PostmanExport, ARawLanguageAnImportKeptIsWrittenBackWhileItStillHolds) {
     body_of ({ { "mode", "json" }, { "content", "not json" }, { "rawLanguage", "" } })
     .dump (),
     R"({"mode":"raw","raw":"not json","options":{"raw":{"language":"json"}}})");
+}
+
+/// The one request of a Postman collection whose single item is
+/// @p request_json, imported and handed to the exporter as the app would store
+/// and send it back.
+ordered reexported_request (const std::string& request_json) {
+    const auto parsed = vayu::core::parse_import (
+    R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"R","request":)" +
+    request_json + "}]}",
+    {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return ordered ();
+    }
+    const ordered& draft = parsed.result.at ("collections")[0].at ("requests")[0];
+    PostmanExportRequest entry = request ("R", draft.at ("url"));
+    entry.method               = draft.at ("method");
+    entry.headers              = draft.at ("headers");
+    entry.body                 = draft.at ("body");
+    return only_item (entry)["request"];
+}
+
+// Issue #2539: an imported `html` or `javascript` body carries a Content-Type
+// row marked as the body mode's, which Postman adds itself from the language, so
+// exporting it again writes the language and no stray header. A row the request
+// declared stays. Mutation check: drop `content_type_of_language` from
+// `postman_implied_content_type` and the html header reappears.
+TEST (PostmanExport, AnImportedHtmlOrJavascriptBodyRoundTripsItsLanguageWithoutAHeader) {
+    const ordered html = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"raw","raw":"{\"a\":1}","options":{"raw":{"language":"html"}}}})");
+    EXPECT_EQ (html.at ("header"), ordered::array ());
+    EXPECT_EQ (html.at ("body").dump (),
+    R"({"mode":"raw","raw":"{\"a\":1}","options":{"raw":{"language":"html"}}})");
+
+    const ordered javascript = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"raw","raw":"let a;","options":{"raw":{"language":"javascript"}}}})");
+    EXPECT_EQ (javascript.at ("header"), ordered::array ());
+    EXPECT_EQ (javascript.at ("body").at ("options").dump (),
+    R"({"raw":{"language":"javascript"}})");
+
+    const ordered declared = reexported_request (
+    R"({"method":"POST","url":"https://x.com","header":[{"key":"Content-Type","value":"text/html; charset=utf-8"}],"body":{"mode":"raw","raw":"<p/>","options":{"raw":{"language":"html"}}}})");
+    EXPECT_EQ (declared.at ("header").dump (),
+    R"([{"key":"Content-Type","value":"text/html; charset=utf-8","type":"text"}])");
+}
+
+// A form-data text part's own type is written back as Postman's `contentType`
+// on the text row. Mutation check: drop the `contentType` copy in `form_part`
+// and the part loses it.
+TEST (PostmanExport, AFormDataTextPartsContentTypeIsWrittenBack) {
+    const ordered body = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"formdata","formdata":[{"key":"meta","value":"{}","type":"text","contentType":"application/json"},{"key":"plain","value":"v","type":"text"}]}})")
+                         .at ("body");
+    const ordered& parts = body.at ("formdata");
+    EXPECT_EQ (parts[0].dump (),
+    R"({"key":"meta","value":"{}","type":"text","contentType":"application/json"})");
+    EXPECT_EQ (parts[1].dump (), R"({"key":"plain","value":"v","type":"text"})");
 }
 
 TEST (PostmanExport, NoBodyWritesNoBodyKey) {

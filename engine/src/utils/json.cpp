@@ -65,9 +65,10 @@ std::optional<Json> try_parse_body (const std::string& body) {
 
 namespace {
 
-// A text field serializes exactly as it always did - the file members are
-// emitted only for a file part, so a stored body that has none round-trips
-// byte-identically through this.
+// A text field with no content type serializes exactly as it always did - the
+// file members are emitted only for a file part, `contentType` only when set
+// (a text part carries one too, #2539) - so a stored body that has neither
+// round-trips byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
@@ -79,9 +80,9 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.file_name.empty ()) {
                 entry["fileName"] = field.file_name;
             }
-            if (!field.content_type.empty ()) {
-                entry["contentType"] = field.content_type;
-            }
+        }
+        if (!field.content_type.empty ()) {
+            entry["contentType"] = field.content_type;
         }
         out.push_back (std::move (entry));
     }

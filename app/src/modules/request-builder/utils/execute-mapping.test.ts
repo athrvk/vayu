@@ -383,6 +383,29 @@ describe("buildExecBody form modes", () => {
 		]);
 	});
 
+	it("sends a text part's own type, resolved, and no file members", () => {
+		const request = stateWith({
+			bodyMode: "form-data",
+			formData: [
+				{
+					id: "typed-row",
+					key: "payload",
+					value: '{"a":1}',
+					enabled: true,
+					contentType: "application/{{sub}}",
+				},
+				{ id: "empty-row", key: "plain", value: "x", enabled: true, contentType: "" },
+			],
+		});
+
+		const body = buildExecBody(request, (s) => s.split("{{sub}}").join("json"));
+
+		expect(body?.fields).toEqual([
+			{ key: "payload", value: '{"a":1}', enabled: true, contentType: "application/json" },
+			{ key: "plain", value: "x", enabled: true },
+		]);
+	});
+
 	it("resolves variables inside field keys and values", () => {
 		const request = stateWith({
 			bodyMode: "x-www-form-urlencoded",
@@ -491,6 +514,26 @@ describe("the file trust flag never leaves the editor", () => {
 			const [part] = write(formState(given)).fields ?? [];
 			// Non-vacuous: the part under test is the file part, path and all.
 			expect(part).toMatchObject({ type: "file", src: "/tmp/a.png" });
+			expect(part).not.toHaveProperty("unresolved");
+		});
+
+		it("keeps a text part's type while dropping its flag", () => {
+			const state: RequestState = {
+				...createDefaultRequestState(),
+				bodyMode: "form-data",
+				formData: [
+					{
+						id: "text-row",
+						key: "payload",
+						value: "{}",
+						enabled: true,
+						contentType: "application/json",
+						unresolved: true,
+					},
+				],
+			};
+			const [part] = write(state).fields ?? [];
+			expect(part).toMatchObject({ key: "payload", contentType: "application/json" });
 			expect(part).not.toHaveProperty("unresolved");
 		});
 

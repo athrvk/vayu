@@ -68,7 +68,10 @@ class EchoServer {
                 // half a part lands in is itself an assertion the file tests
                 // make, through `Part::filename`.
                 for (const auto& [name, field] : req.form.fields) {
-                    parts_[name] = Part{ field.content, "", "" };
+                    // A text part's own type is a header of the part.
+                    const auto declared = field.headers.find ("Content-Type");
+                    parts_[name]        = Part{ field.content, "",
+                        declared == field.headers.end () ? "" : declared->second };
                 }
                 for (const auto& [name, file] : req.form.files) {
                     parts_[name] = Part{ file.content, file.filename, file.content_type };

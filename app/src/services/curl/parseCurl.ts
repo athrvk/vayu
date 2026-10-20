@@ -417,7 +417,7 @@ interface FormPart {
  * part whose text this parser cannot read. It stays skipped.
  */
 function formPart(key: string, raw: string): FormPart | null {
-	if (!raw.startsWith("@")) return { key, value: raw };
+	if (!raw.startsWith("@")) return textPart(key, raw);
 	// Modifiers are `;name=value` after the path. A `;` inside a quoted path is
 	// not something curl supports either, so splitting on it is faithful.
 	const [pathPart, ...modifiers] = raw.slice(1).split(";");
@@ -436,6 +436,21 @@ function formPart(key: string, raw: string): FormPart | null {
 	return part;
 }
 
+/**
+ * A text `-F` value: `v`, or a typed one, `v;type=application/json` or
+ * `"v";type=...` with the double-quoted form curl reads as text whatever it
+ * starts with (`\` and `\"` the only escapes, #2539). The type takes the rest
+ * of the word, as curl does, so `;charset=` parameters stay inside it. Anything
+ * else is the literal text it always was.
+ */
+function textPart(key: string, raw: string): FormPart {
+	const typed = /^(?:"((?:[^"\\]|\\.)*)"|([^";]*));type=(.+)$/is.exec(raw);
+	if (!typed) return { key, value: raw };
+	const [, quoted, bare, contentType] = typed;
+	const value = quoted === undefined ? bare : quoted.replace(/\\(.)/gs, "$1");
+	return { key, value, contentType: contentType.trim() };
+}
+
 /** `-F` parts as editor rows, files included. */
 function toFormItems(parts: FormPart[]): KeyValueItem[] {
 	return parts.map((part) => ({
@@ -450,7 +465,9 @@ function toFormItems(parts: FormPart[]): KeyValueItem[] {
 					fileName: part.fileName,
 					...(part.contentType ? { contentType: part.contentType } : {}),
 				}
-			: {}),
+			: part.contentType
+				? { contentType: part.contentType }
+				: {}),
 	}));
 }
 
