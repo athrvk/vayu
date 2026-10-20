@@ -3195,7 +3195,7 @@ and what it wrote.
 ```json
 {
   "normalize": [
-    {"type": "request", "collectionId": "col_1234567890"}
+    {"parentId": "col_1234567890"}
   ],
   "moves": [
     {"type": "request",    "id": "req_1", "order": 0, "collectionId": "col_2"},
@@ -3220,18 +3220,26 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 A row may appear in `moves` at most once - two positions for one row is a `400`
 naming it, not a last-writer-wins accident of iteration order.
 
-**`normalize`** - each entry names a scope whose children are renumbered dense
-`0..n-1` in the [pinned display order](#ordering) **before** any move applies. A
-collection scope states `parentId` (`null` for the root collections) and a
-request scope states `collectionId`; the named collection must exist, and for a
-collection scope `parentId` must be *stated* rather than omitted, so a renumber
-can never land on a scope the caller did not mean.
+**`normalize`** - each entry names a **parent**, and its children are
+renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
+applies. The children are the parent's sub-collections and its requests as one
+list (#2535), so a tie across the two kinds comes out as distinct numbers with
+the sub-collection first. An entry is `{"parentId": <collection id>}`, or
+`{"parentId": null}` for the root collections (the roots hold collections
+only). The named collection must exist, and `parentId` must be *stated* rather
+than omitted, so a renumber can never land on a scope the caller did not mean.
+The per-kind shapes engines before #2535 took, `{"type": "collection",
+"parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`
+naming the shape above: renumbering one kind alone would leave it tied with the
+other kind's slots.
 
 Normalization exists for the first drop into a collection whose rows predate
 explicit orders: every row sits at `0`, so its displayed position lives only in
 the tiebreak and there are no slots to shift into. Materializing that order in
-the same batch is what keeps the other siblings from appearing to jump. It is
-idempotent - a scope already dense writes nothing at all.
+the same batch is what keeps the other siblings from appearing to jump; a
+parent with every row at `0` comes out with its sub-collections at `0..m-1` and
+its requests after them, the order the tie rule already showed. It is idempotent
+- a scope already dense writes nothing at all.
 
 Where a row is named by both lists, the move wins.
 
@@ -3266,8 +3274,9 @@ without waiting for a refetch.
 }
 ```
 
-**Errors:** `400` for any malformed entry, a row or owner that does not exist, a
-duplicate move, a cycle, or a batch over 10000 entries. `409` if a staged row is
+**Errors:** `400` for any malformed entry (a per-kind `normalize` entry
+included), a row or owner that does not exist, a duplicate move, a cycle, or a
+batch over 10000 entries. `409` if a staged row is
 gone by the time the batch commits. In every case nothing at all was written.
 Body that is not JSON or not an object is also a `400`.
 
