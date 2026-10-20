@@ -1750,9 +1750,12 @@ Individual request outcomes - all errors plus sampled successes (sampling is con
 A load run's captured response headers and bodies are **not** here - they live in
 [`result_bodies`](#result_bodies) / [`body_blobs`](#body_blobs). That split is load-bearing:
 `Database::get_results` loads every row for a run with no limit and
-`calculate_detailed_report` JSON-parses each `trace_data` on every report fetch, which the
-dashboard polls. At ~200 bytes per trace that is free; with bodies inline it would be megabytes
-read and parsed per poll, to compute aggregates that never look at a body.
+`calculate_detailed_report` JSON-parses each `trace_data` on every report fetch of a finished
+run. At ~200 bytes per trace that is free; with bodies inline it would be megabytes read and
+parsed per fetch, to compute aggregates that never look at a body. A run that is not terminal
+yet is read through `Database::get_results_without_traces` instead (#2548), which selects every
+column but `trace_data`, so a report polled while the run is in flight copies and parses no
+trace at all.
 
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived

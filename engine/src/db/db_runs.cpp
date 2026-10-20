@@ -570,6 +570,28 @@ std::vector<Result> Database::get_results (const std::string& run_id) {
     return impl_->storage.get_all<Result> (where (c (&Result::run_id) == run_id));
 }
 
+std::vector<Result> Database::get_results_without_traces (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.select (
+    columns (&Result::id, &Result::timestamp, &Result::status_code,
+    &Result::status_text, &Result::latency_ms, &Result::error),
+    where (c (&Result::run_id) == run_id), order_by (&Result::id));
+
+    std::vector<Result> results;
+    results.reserve (rows.size ());
+    for (auto& [id, timestamp, status_code, status_text, latency_ms, error] : rows) {
+        Result& result     = results.emplace_back ();
+        result.id          = id;
+        result.run_id      = run_id;
+        result.timestamp   = timestamp;
+        result.status_code = status_code;
+        result.status_text = std::move (status_text);
+        result.latency_ms  = latency_ms;
+        result.error       = std::move (error);
+    }
+    return results;
+}
+
 std::unordered_map<std::string, DesignResultOutcome>
 Database::get_design_result_outcomes (const std::vector<std::string>& run_ids) {
     std::unordered_map<std::string, DesignResultOutcome> outcomes;

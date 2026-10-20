@@ -131,6 +131,22 @@ class RunsRouteTest : public ::testing::Test {
     }
     VAYU_DIAGNOSTIC_POP
 
+    /// One stored result carrying @p trace_data as written, parseable or not.
+    void seed_traced_result (const std::string& run_id,
+    int status_code,
+    double latency_ms,
+    const std::string& trace_data) {
+        vayu::db::Result result;
+        result.run_id      = run_id;
+        result.timestamp   = 1000;
+        result.status_code = status_code;
+        result.status_text = "OK";
+        result.latency_ms  = latency_ms;
+        result.error       = status_code == 0 ? "timed out" : "";
+        result.trace_data  = trace_data;
+        db_->add_result (result);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     /// One per test, like the database beside it: the cache is keyed by run id
     /// and these cases reuse ids across tests, so a shared one would answer a
@@ -1911,6 +1927,89 @@ TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     EXPECT_EQ (done["metadata"]["status"].get<std::string> (), "completed");
     ASSERT_TRUE (done.contains ("thresholdValidation"));
     EXPECT_EQ (done["thresholdValidation"]["verdict"].get<std::string> (), "passed");
+}
+
+// #2548: a report polled while the run is in flight never reads `trace_data`.
+// The same rows, once the run is terminal, are read with their traces, so the
+// two reports differ in exactly what only a trace can say.
+TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
+    seed ({ .id = "run_traced", .status = vayu::RunStatus::Running, .start_time = 1000 });
+    seed_traced_result ("run_traced", 200, 10.0,
+    R"({"dnsMs":1,"connectMs":2,"tlsMs":3,"firstByteMs":4,"downloadMs":5,"isSlow":true,"thresholdMs":8})");
+    seed_traced_result ("run_traced", 0, 0.0, R"({"error_type":"timeout"})");
+    // Not JSON: a report that read this column would carry it back as a string.
+    constexpr std::string_view UNPARSEABLE = "not json {";
+    seed_traced_result ("run_traced", 503, 30.0, std::string (UNPARSEABLE));
+
+    auto [live_status, live] = vayu::http::routes::run_report_response (*db_, "run_traced");
+    ASSERT_EQ (live_status, 200);
+    EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
+    EXPECT_TRUE (live["errors"]["types"].empty ());
+    EXPECT_EQ (live["errors"]["withDetails"].get<size_t> (), 0u);
+    EXPECT_FALSE (live.contains ("timingBreakdown"));
+    EXPECT_FALSE (live.contains ("slowRequests"));
+    ASSERT_EQ (live["results"].size (), 3u);
+    for (const auto& row : live["results"]) {
+        EXPECT_FALSE (row.contains ("trace")) << row.dump ();
+    }
+
+    db_->update_run_status ("run_traced", vayu::RunStatus::Completed);
+    auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_traced");
+    ASSERT_EQ (done_status, 200);
+    EXPECT_EQ (done["errors"]["types"]["timeout"].get<size_t> (), 1u);
+    EXPECT_EQ (done["errors"]["withDetails"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (done["timingBreakdown"]["avgDnsMs"].get<double> (), 1.0);
+    EXPECT_EQ (done["slowRequests"]["count"].get<size_t> (), 1u);
+    ASSERT_EQ (done["results"].size (), 3u);
+    for (const auto& row : done["results"]) {
+        EXPECT_TRUE (row.contains ("trace")) << row.dump ();
+    }
+    EXPECT_EQ (done["results"][2]["trace"], UNPARSEABLE);
+
+    // Everything else is the same report: the status distribution, the latency
+    // percentiles, the selected rows and the stored count. `end_time` and the
+    // duration derived from it moved when the status did.
+    auto expected                     = done;
+    expected["metadata"]["status"]    = "running";
+    expected["errors"]["types"]       = nlohmann::json::object ();
+    expected["errors"]["withDetails"] = 0;
+    expected.erase ("timingBreakdown");
+    expected.erase ("slowRequests");
+    for (auto& row : expected["results"]) {
+        row.erase ("trace");
+    }
+    for (auto* report : { &live, &expected }) {
+        (*report)["metadata"].erase ("endTime");
+        for (const char* key : { "avgRps", "testDuration", "totalDurationSeconds" }) {
+            (*report)["summary"].erase (key);
+        }
+    }
+    EXPECT_EQ (live, expected);
+}
+
+TEST_F (RunsRouteTest, ResultsWithoutTracesKeepEveryOtherColumnInIdOrder) {
+    seed ({ .id = "run_cols" });
+    seed_traced_result ("run_cols", 0, 0.0, R"({"error_type":"timeout"})");
+    seed_traced_result ("run_cols", 201, 7.5, R"({"dnsMs":1})");
+    seed_traced_result ("other_run", 200, 1.0, R"({"dnsMs":1})");
+
+    const auto full    = db_->get_results ("run_cols");
+    const auto without = db_->get_results_without_traces ("run_cols");
+    ASSERT_EQ (full.size (), 2u);
+    ASSERT_EQ (without.size (), full.size ());
+    for (size_t i = 0; i < full.size (); ++i) {
+        EXPECT_FALSE (full[i].trace_data.empty ());
+        EXPECT_TRUE (without[i].trace_data.empty ());
+        EXPECT_EQ (without[i].id, full[i].id);
+        EXPECT_EQ (without[i].run_id, full[i].run_id);
+        EXPECT_EQ (without[i].timestamp, full[i].timestamp);
+        EXPECT_EQ (without[i].status_code, full[i].status_code);
+        EXPECT_EQ (without[i].status_text, full[i].status_text);
+        EXPECT_DOUBLE_EQ (without[i].latency_ms, full[i].latency_ms);
+        EXPECT_EQ (without[i].error, full[i].error);
+    }
+    EXPECT_LT (without[0].id, without[1].id);
+    EXPECT_EQ (without[0].error, "timed out");
 }
 
 // This run's custom trends, counters and rates (issue #1500), round-tripped

@@ -9631,10 +9631,19 @@ the engine died mid-run; its report is built from those sampled `results` alone 
 erroring. **The response shape is the same either way.**
 
 A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
-come from whatever results have been sampled so far, `metadata.status` says the run is still in
+come from whatever results have been stored so far, `metadata.status` says the run is still in
 flight, and `thresholdValidation` is absent even when the run declared budgets, because the
 verdict is computed from the summary written at the end. Read `metadata.status` before treating a
 report as final.
+
+A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A
+partial report also never reads the rows' stored traces (issue #2548), because it is the one a
+client re-reads on a timer: what only a trace can say takes the answer a run that stored no
+traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
+`errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
+unless the run recorded `phases`) and `slowRequests` is absent. The status distribution, latency
+percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
+a finished run.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
