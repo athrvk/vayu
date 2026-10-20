@@ -789,35 +789,6 @@ TEST_F (ScenarioRunnerTest, TheVirtualUserReachesTheStepsScriptsBesideTheIterati
 // Failure paths
 // ============================================================================
 
-TEST_F (ScenarioRunnerTest, AnErroredStepEndsItsIterationAndTheRunStillCompletes) {
-    seed_collection ("col_1");
-    seed_request ("req_a", 0, "/ok");
-    // Nothing listens on port 1; the send fails to connect rather than hanging.
-    seed_request ("req_dead", 1, "", "", "", "http://127.0.0.1:1/never");
-    seed_request ("req_c", 2, "/login");
-
-    const auto run_id = start (/*iterations=*/2);
-    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
-
-    // Step 3 never runs in either iteration - the iteration ended at the step
-    // that did not complete - but the second iteration still started.
-    auto seen = server_->requests ();
-    ASSERT_EQ (seen.size (), 2u);
-    EXPECT_EQ (seen[0].path, "/ok");
-    EXPECT_EQ (seen[1].path, "/ok");
-
-    auto scenario = summary_of (run_id)["scenario"];
-    EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 4u);
-    EXPECT_EQ (scenario["passed"].get<size_t> (), 2u);
-    EXPECT_EQ (scenario["errored"].get<size_t> (), 2u);
-    EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 2u);
-
-    auto rows = db_->get_results (run_id);
-    ASSERT_EQ (rows.size (), 4u);
-    EXPECT_EQ (json::parse (rows[1].trace_data)["outcome"].get<std::string> (), "errored");
-    EXPECT_FALSE (rows[1].error.empty ());
-}
-
 TEST_F (ScenarioRunnerTest, AFailedAssertionIsNotAnErrorAndTheIterationContinues) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok", "",
@@ -848,8 +819,8 @@ TEST_F (ScenarioRunnerTest, AFailedAssertionIsNotAnErrorAndTheIterationContinues
 // Postman's default (`stopOnError` unset): a pre-request script that throws
 // still sends its request, and the run moves on to the next one. The step is
 // still `errored` - the verdict stays honest - but it costs no later step.
-// Mutation check: make `errored_step_ends_iteration` return true for every
-// errored step and this fails on the request count.
+// Mutation check: set `end_iteration = true` for every errored step in
+// `run_iteration` and this fails on the request count.
 TEST_F (ScenarioRunnerTest, AScriptErrorDoesNotEndTheIteration) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");
@@ -964,10 +935,11 @@ TEST_F (ScenarioRunnerTest, StopOnErrorEndsTheIteration) {
     EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 1u);
 }
 
-// The unchanged half: a step that got no response leaves the steps after it
-// standing on state that never arrived, so it still ends its iteration with
-// `stopOnError` unset.
-TEST_F (ScenarioRunnerTest, ATransportErrorStillEndsTheIteration) {
+// Postman's default for a step that got no response too (the owner decision on
+// #2526): the failed step is recorded and the steps after it still run.
+// Mutation check: set `end_iteration = true` for every errored step in
+// `run_iteration` and this fails on the request count.
+TEST_F (ScenarioRunnerTest, ATransportErrorContinuesTheIteration) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok");
     // Nothing listens on port 1; the send fails to connect rather than hanging.
@@ -975,6 +947,34 @@ TEST_F (ScenarioRunnerTest, ATransportErrorStillEndsTheIteration) {
     seed_request ("req_c", 2, "/login");
 
     const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 4u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/login");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 6u);
+    const auto errored = json::parse (rows[1].trace_data);
+    EXPECT_EQ (errored["outcome"].get<std::string> (), "errored");
+    EXPECT_FALSE (errored.contains ("stepsNotRun")) << errored.dump ();
+    EXPECT_EQ (json::parse (rows[2].trace_data)["outcome"].get<std::string> (), "passed");
+
+    EXPECT_EQ (summary_of (run_id)["scenario"]["steps_not_run"].get<size_t> (), 0u);
+}
+
+// `stopOnError` ends the iteration at a transport failure as it does at a
+// script error.
+// Mutation check: ignore `stop_on_error` for an errored step and this fails on
+// the request count.
+TEST_F (ScenarioRunnerTest, StopOnErrorEndsTheIterationAtATransportError) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    seed_request ("req_dead", 1, "", "", "", "http://127.0.0.1:1/never");
+    seed_request ("req_c", 2, "/login");
+
+    const auto run_id = start_stopping_on_error (/*iterations=*/2);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
     auto seen = server_->requests ();
@@ -1031,7 +1031,7 @@ TEST_F (ScenarioRunnerTest, AnErrorAfterAForwardJumpCountsOnlyThePositionsAfterI
     seed_request ("req_dead", 2, "", "", "", "http://127.0.0.1:1/never", "Dead");
     seed_request ("req_d", 3, "/observe");
 
-    const auto run_id = start (/*iterations=*/1);
+    const auto run_id = start_stopping_on_error (/*iterations=*/1);
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
 
     auto rows = db_->get_results (run_id);

@@ -849,11 +849,11 @@ this project has already spent an issue eliminating. An `errored` step ends its
 iteration unless the only thing wrong was a script that threw after the exchange
 completed (issue #2526): that step keeps its `errored` row and the iteration
 walks on to the next plan position, as Postman's runner does, with the script's
-own redirect ignored. The cause is recorded on the `StepRecord` when the step is
-classified, so the loop reads it rather than re-deriving it. A transport
-failure, a data row that would not bind and the runner's own refusals (an
-unresolved or ambiguous target, the cycle cap) still end the iteration, and the
-run option `stopOnError: true` makes every `errored` step end it. Either way the
+own redirect ignored. A transport
+failure and a data row that would not bind continue the same way. Only the
+runner's own refusals (an unresolved or ambiguous target, the cycle cap) end
+the iteration, and the run option `stopOnError: true` makes every `errored`
+step end it. Either way the
 next iteration still runs and the run still reaches `completed`; an iteration
 an error ended reports what it cost as `stepsNotRun`. A stop is honoured
 **between steps**.

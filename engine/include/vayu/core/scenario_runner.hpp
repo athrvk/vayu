@@ -53,9 +53,9 @@ namespace vayu::core {
  *
  * `Failed` is an assertion that did not hold - the request itself completed, so
  * the iteration continues. `Errored` is the step not completing at all (a
- * transport failure, a timeout, a script that threw). Whether it ends the
- * iteration is `StepRecord::errored_by_script` plus the run's `stopOnError`,
- * not the outcome alone (issue #2526).
+ * transport failure, a timeout, a script that threw). It ends the iteration
+ * only when the run asked for `stopOnError`, as in Postman and Newman; the
+ * runner's own flow-control refusals end it either way (issue #2526).
  */
 enum class StepOutcome : std::uint8_t { Passed, Failed, Skipped, Errored };
 
@@ -102,14 +102,6 @@ struct StepRecord {
     double latency_ms = 0.0;
     /// Transport error, script error or failed-assertion summary; "" on a pass.
     std::string error;
-    /**
-     * `Errored` by a pre-request or test script alone: the exchange completed
-     * (a response arrived, or the send was skipped) and nothing else went
-     * wrong. Set where the step is classified, so the iteration loop reads the
-     * cause rather than re-deriving it from `error`'s wording; such a step does
-     * not end its iteration unless the run asked for `stopOnError` (#2526).
-     */
-    bool errored_by_script = false;
     /**
      * On the step whose error ended its iteration: the plan positions after it
      * that the iteration had not attempted. 0 on every other step, which the

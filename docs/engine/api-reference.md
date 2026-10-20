@@ -8150,16 +8150,16 @@ that passed everything else. The run's rollup is
 |---------|---------|-------------------------|
 | `passed` | The request completed and every assertion held. | Continues. |
 | `failed` | A `pm.test` assertion did not hold. | Continues - the request itself completed. |
-| `errored`, script only | The exchange completed - a response arrived, or the send was skipped - and the one thing that went wrong is that the pre-request or test script threw (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
-| `errored`, anything else | The step did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind), or the runner refused the step's flow control (an unresolved or ambiguous `setNextRequest` target, the `maxStepsPerIteration` cap). | **Ends the iteration.** The next iteration still runs. |
+| `errored`, step | The step did not run clean: the pre-request or test script threw (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
+| `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
 
 Either kind of `errored` is the same outcome on the row, in the summary's
 `errored` count and on the `step` frame, with the error in `results.error`; the
 table's split is only about what the iteration does next. A transport failure
-keeps ending the iteration even though Postman's runner carries on there: the
-steps after it nearly always read the response that never arrived. A step
-whose script errored while the iteration continues has its own flow control
+continues the iteration like a script error does, as Postman's and Newman's
+runners do by default; a later step that reads a response that never arrived
+errors on its own row. A step that errored while the iteration continues has its own flow control
 ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a
 script that then threw is an instruction from code that did not finish, so the
 iteration walks to the next plan position (see
@@ -8168,8 +8168,9 @@ iteration walks to the next plan position (see
 **`stopOnError`** is a top-level boolean on `POST /runs`, default `false`,
 type-checked before the run row is created (`null` reads as the default, and a
 non-boolean is a `400` `invalid_run_config` naming the field). Set, every
-`errored` step ends its iteration, script-only ones included, which is
-Newman's `--bail` shape and what a collection run did before issue #2526. It
+`errored` step ends its iteration, a transport failure and a script error
+alike, which is Newman's `--bail` shape and what a collection run did before
+issue #2526. It
 is a collection-run (design-mode) key: a [scenario load
 run](#scenario-load-runs) does not read it. It rides the stored snapshot as
 sent and is echoed in the report's `scenario` section, so two runs that differ
