@@ -161,7 +161,7 @@ function revealGateSentence(host: McpHost): string {
 		"captures, mock activity) reads `<redacted>` in place of every secret variable's " +
 		"value and every literal credential a stored collection's or request's auth holds, 4 " +
 		"bytes or longer, raw, percent-encoded, JSON- or XML-escaped; in place of a credential " +
-		"header's value in header maps, `headerLines` and `rawRequest` header lines, request " +
+		"header's value in header maps, `headerLines` / `requestHeaderLines` and `rawRequest` header lines, request " +
 		"and response alike; in place of what auth wrote at send time (an OAuth 2.0 token " +
 		"or an API key, whatever its source) in the request's `url`, header maps and " +
 		"`rawRequest`; and in place of a credential-named query value (matched on the whole " +

@@ -964,7 +964,11 @@ The engine owns request composition (#226): `POST /compose`
 (`engine/src/http/request_composer.cpp`) resolves `{{variables}}` and `inherit`
 auth (collection-chain walk; `noauth` terminates, `none` steps over) and
 returns the execute-ready payload `POST /execute` / `POST /runs` accept
-unchanged. It also writes a request's `:name` path variables from its
+unchanged. Its `headers` are `{name, value}` lines in send order (#2466,
+`vayu::HeaderList` on `vayu::Request`): every enabled row, a repeated name
+repeated, the older object form still read; only a repeat a *resolved* name
+makes is refused (`http/header_names.hpp`), and the renderer's row flattening
+is pinned by `tests/fixtures/header-rows-conformance.json`. It also writes a request's `:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
 a value still holding a token after resolution is not joined into the URL but

@@ -649,8 +649,8 @@ A name nothing defines still goes out written as it stands, and the load path
 does not run this pass at all. What the pass can *refuse* is what resolving a
 header **name** can produce, both rules held in
 `engine/include/vayu/http/header_names.hpp`: a name landing on one the request
-already carries (#1051), where the map holds one value per name and the send
-would go out a header short; and a name landing on nothing at all (#1084),
+already carries (#1051), where the rows show two different names and the
+request would carry one header twice; and a name landing on nothing at all (#1084),
 where what would go out is a `": value"` line no name owns. Either is stopped
 rather than sent - in composition's words and under composition's refusal
 code, as a `statusCode: 0` response carrying the reason (a `400` on the

@@ -15,11 +15,12 @@
  * primitive and needs the same conversion (issue #567).
  *
  * What stayed behind in `modules/request-builder/utils/key-value.ts` is
- * `toFlatHeaders`, which is execution-shaped: it builds the flat header record
- * for the engine's execute endpoint and no table ever asks for it.
+ * `toHeaderRows`, which is execution-shaped: it builds the ordered header lines
+ * for the engine's execute and compose endpoints and no table ever asks for it.
  *
  * There is no conversion to/from Record<string,string> for storage - that was
- * the source of silent data loss. Flat headers are only built for HTTP execution.
+ * the source of silent data loss, and a record cannot send a repeated header
+ * either (issue #2466).
  */
 
 import type { FormFieldEntry, KeyValueItem } from "@/types";

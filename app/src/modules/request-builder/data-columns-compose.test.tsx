@@ -422,10 +422,10 @@ describe("the body mode's headers reach both compose sites", () => {
 			);
 		});
 		expect(composedRequest().bodyModeHeaders).toEqual(["Content-Type"]);
-		expect(composedRequest().headers).toEqual({
-			"Content-Type": "application/json",
-			"X-Typed": "1",
-		});
+		expect(composedRequest().headers).toEqual([
+			{ name: "Content-Type", value: "application/json" },
+			{ name: "X-Typed", value: "1" },
+		]);
 	});
 
 	it("a Send with none leaves the field out", async () => {

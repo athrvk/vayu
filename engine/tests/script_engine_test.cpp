@@ -2582,6 +2582,40 @@ TEST_F (ScriptEngineTest, PreRequestScriptHeaderOverridesEngineAppliedAuth) {
     EXPECT_EQ (built.request.headers.at ("Authorization"), "Bearer script-token");
 }
 
+// `pm.request.headers` is single-valued and shows a repeated header folded
+// (issue #2466). A script that leaves it as it read it leaves every line, in
+// place and spelling; one that writes it leaves one line. Mutation check:
+// rebuild the lines from the script's object alone in
+// `apply_script_headers` and the untouched repeat collapses to one line.
+TEST_F (ScriptEngineTest, APreRequestScriptKeepsTheRepeatedHeaderItDidNotChange) {
+    request.headers.clear ();
+    request.headers.add ("X-Dup", "one");
+    request.headers.add ("Accept", "*/*");
+    request.headers.add ("x-dup", "two");
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.expect(pm.request.headers['X-Dup']).to.equal('one, two');
+        pm.request.headers['Accept'] = 'application/json';
+        pm.request.headers['X-New'] = '1';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{ { "X-Dup", "one" }, { "Accept", "application/json" },
+    { "x-dup", "two" }, { "X-New", "1" } }));
+
+    auto rewrite = engine.execute_prerequest (R"JS(
+        pm.request.headers['X-Dup'] = 'only';
+    )JS",
+    request, env);
+
+    EXPECT_TRUE (rewrite.success) << rewrite.error_message;
+    EXPECT_EQ (request.headers,
+    (vayu::HeaderList{
+    { "X-Dup", "only" }, { "Accept", "application/json" }, { "X-New", "1" } }));
+}
+
 TEST_F (ScriptEngineTest, PreRequestScriptCanDeleteAHeader) {
     auto result = engine.execute_prerequest (R"JS(
         delete pm.request.headers['Authorization'];

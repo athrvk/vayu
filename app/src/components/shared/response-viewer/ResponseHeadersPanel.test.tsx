@@ -178,3 +178,73 @@ describe("ResponseHeadersPanel, the request as sent (issue #2464)", () => {
 		expect(container.textContent?.toLowerCase()).not.toContain("libcurl");
 	});
 });
+
+describe("ResponseHeadersPanel, the request's own lines (issue #2466)", () => {
+	const lines = [
+		{ name: "X-Dup", value: "one" },
+		{ name: "x-dup", value: "two" },
+		{ name: "X-Dup", value: "three" },
+	];
+	const openRequest = () =>
+		fireEvent.click(screen.getByRole("button", { name: /request headers/i }));
+	const requestRows = () =>
+		screen
+			.getAllByRole("row")
+			.slice(1, 1 + lines.length)
+			.map((row) => [row.children[0].textContent, row.children[1].textContent]);
+
+	it("renders three X-Dup lines where the folded record holds one", () => {
+		// Mutation check: drop `requestHeaderLines` from the viewer and the one
+		// folded row below is all that is left.
+		render(
+			<ResponseHeadersPanel
+				requestHeaders={{ "X-Dup": "one, two, three" }}
+				requestHeaderLines={lines}
+				responseHeaders={{ server: "nginx" }}
+			/>
+		);
+
+		expect(screen.getByRole("button", { name: /request headers/i })).toHaveTextContent("3");
+		openRequest();
+		expect(requestRows()).toEqual([
+			["X-Dup", "one"],
+			["x-dup", "two"],
+			["X-Dup", "three"],
+		]);
+		expect(screen.queryByText("one, two, three")).toBeNull();
+	});
+
+	it("lists them with no folded record at all", () => {
+		render(<ResponseHeadersPanel requestHeaderLines={lines} responseHeaders={{ a: "b" }} />);
+
+		openRequest();
+		expect(requestRows()).toHaveLength(3);
+	});
+
+	it("yields to the wire frame when there is one, and takes over when there is not", () => {
+		const { rerender } = render(
+			<ResponseHeadersPanel
+				requestHeaderLines={lines}
+				wireRequestHeaders={[
+					["Host", "a.test"],
+					["X-Dup", "one"],
+				]}
+				responseHeaders={{ a: "b" }}
+			/>
+		);
+		openRequest();
+		expect(screen.getByText("Host")).toBeInTheDocument();
+		expect(screen.queryByText("three")).toBeNull();
+
+		// A failed send records no frame, and every row is still listed.
+		rerender(
+			<ResponseHeadersPanel
+				requestHeaderLines={lines}
+				wireRequestHeaders={undefined}
+				responseHeaders={{ a: "b" }}
+			/>
+		);
+		expect(screen.getByText("three")).toBeInTheDocument();
+		expect(screen.queryByText("Host")).toBeNull();
+	});
+});

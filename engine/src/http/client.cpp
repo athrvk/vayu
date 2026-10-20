@@ -842,7 +842,7 @@ Result<Response> Client::get (const std::string& url, const Headers& headers) {
     Request request;
     request.method  = HttpMethod::GET;
     request.url     = url;
-    request.headers = headers;
+    request.headers = HeaderList (headers);
     return send (request);
 }
 
@@ -853,7 +853,7 @@ Client::post (const std::string& url, const std::string& body, const Headers& he
     request.url          = url;
     request.body.mode    = BodyMode::Text;
     request.body.content = body;
-    request.headers      = headers;
+    request.headers      = HeaderList (headers);
     return send (request);
 }
 

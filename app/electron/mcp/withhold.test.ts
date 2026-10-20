@@ -652,6 +652,36 @@ describe("withholdRunOutput", () => {
 		});
 	});
 
+	test("masks the request-side line lists the same way, whatever the member is called (#2466)", () => {
+		// `requestHeaderLines` (the live answer) and `sentHeaderLines` (a stored
+		// trace's request): the repeats the folded maps beside them lose.
+		const lines = [
+			{ name: "Authorization", value: "Bearer a" },
+			{ name: "authorization", value: "Bearer b" },
+			{ name: "Set-Cookie", value: "sid=1" },
+			{ name: "Cookie", value: "a=1" },
+			{ name: "X-Tenant-Key", value: "from-auth" },
+			{ name: "X-Plain", value: "one" },
+			{ name: "X-Plain", value: "two" },
+		];
+		const masked = [
+			{ name: "Authorization", value: "<redacted>" },
+			{ name: "authorization", value: "<redacted>" },
+			{ name: "Set-Cookie", value: "<redacted>" },
+			{ name: "Cookie", value: "<redacted>" },
+			{ name: "X-Tenant-Key", value: "<redacted>" },
+			{ name: "X-Plain", value: "one" },
+			{ name: "X-Plain", value: "two" },
+		];
+		const apiKeyRule = { ...rule, apiKeyHeaders: ["x-tenant-key"] };
+		expect(
+			withholdRunOutput(
+				{ requestHeaderLines: lines, request: { sentHeaderLines: lines } },
+				apiKeyRule
+			)
+		).toEqual({ requestHeaderLines: masked, request: { sentHeaderLines: masked } });
+	});
+
 	test("masks a redirect hop's Set-Cookie as it does the final headers, keeping status, Location and order (#2461)", () => {
 		const hops = [
 			{

@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { receivedHeaderLines, resolveHeaderLines } from "./header-lines";
+import {
+	headerLinesOf,
+	receivedHeaderLines,
+	resolveHeaderLines,
+	sentHeaderLines,
+} from "./header-lines";
 
 const LINES = [
 	{ name: "X-Dup", value: "a" },
@@ -45,5 +50,30 @@ describe("resolveHeaderLines", () => {
 	it("is empty when there is nothing at all", () => {
 		expect(resolveHeaderLines({}, [])).toEqual([]);
 		expect(resolveHeaderLines(undefined, undefined)).toEqual([]);
+	});
+});
+
+describe("sentHeaderLines (issue #2466)", () => {
+	it("keeps the lines the engine sent and reads an empty list as an absent one", () => {
+		expect(sentHeaderLines(LINES)).toBe(LINES);
+		expect(sentHeaderLines([])).toBeUndefined();
+		expect(sentHeaderLines(undefined)).toBeUndefined();
+	});
+});
+
+describe("headerLinesOf (issue #2466)", () => {
+	it("passes the ordered lines through, a repeat kept", () => {
+		expect(headerLinesOf(LINES)).toEqual(LINES);
+	});
+
+	it("reads the older record as one line per key, in key order", () => {
+		expect(headerLinesOf({ Zeta: "z", Alpha: "a" })).toEqual([
+			{ name: "Zeta", value: "z" },
+			{ name: "Alpha", value: "a" },
+		]);
+	});
+
+	it("reads an absent payload as no lines", () => {
+		expect(headerLinesOf(undefined)).toEqual([]);
 	});
 });

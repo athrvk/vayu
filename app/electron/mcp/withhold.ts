@@ -67,7 +67,7 @@ export const WITHHELD_AUTH_SENTENCE = `An auth credential (a token, password, cl
 export const REDACTED_MARKER = "<redacted>";
 
 /** What the run resources say about the secrets a run sent. */
-export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map, a header row list (\`headerLines\`, a followed redirect's \`redirects[].headerLines\` included) and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
+export const WITHHELD_RUN_OUTPUT_SENTENCE = `Unless the user has chosen to ${REVEAL_SETTING_TOKEN}, every secret variable's value and every literal credential a stored collection's or request's auth holds reads \`${REDACTED_MARKER}\` in this result (4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped), and so does the value of a credential-bearing header (\`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`Set-Cookie\`, \`X-Api-Key\`, \`X-Auth-Token\`, \`X-CSRF-Token\`, or one an API-key auth names), in a header map, a header row list (\`headerLines\`, \`requestHeaderLines\`, \`sentHeaderLines\`, a followed redirect's \`redirects[].headerLines\` included) and on a \`rawRequest\` header line, request and response alike. The query value and the headers a request's auth wrote at send time (an OAuth 2.0 token or an API key placed in the URL, whatever its source) read \`${REDACTED_MARKER}\` in the request's \`url\` and \`rawRequest\` request line, and in its header maps and \`rawRequest\` header block; so does the value of a credential-named query parameter (\`api_key\`, \`token\`, \`signature\` and the like, matched on the whole name) in that \`url\` and request line, however it came to be there, a pure {{variable}} reference or an empty value being shown as written. A base64 body (\`bodyEncoding: "base64"\`) is searched as the bytes it decodes to, each of those forms matched as UTF-8 and as Latin-1 bytes, and comes back as base64 that still decodes, with \`${REDACTED_MARKER}\` in place of the bytes it matched; its size fields still count the bytes the engine read. Everything else is kept - the shape, the order and the engine's size fields - and the request itself was sent with the real values. If a lookup the masking reads those values from fails, the call answers an error naming it and none of the result.`;
 
 /** What the engine config resource says about proxy URLs. */
 export const WITHHELD_CONFIG_SENTENCE = `A URL entry's credentials (\`proxyUrl\`'s user:password) are stripped, with \`credentialsWithheld: true\` on the entry, unless the user has chosen to ${REVEAL_SETTING_TOKEN}.`;
@@ -1071,12 +1071,16 @@ function withholdHeaderSet(headers: unknown, apiKeyHeaders: readonly string[]): 
 
 /**
  * A member holding a header set: `headers`, a trace's `sentHeaders`, a
- * response's `requestHeaders`, or a response's `headerLines` (the `{name,
- * value}` rows as received, which carry each `Set-Cookie` the map folds). A
- * redirect hop's `headerLines` (`redirects[]`, #2461) is the same member and
- * is masked by recursion.
+ * response's `requestHeaders`, or one of the `{name, value}` line lists the
+ * folded maps beside them lose a repeat to - a response's `headerLines` (each
+ * `Set-Cookie` as received), an exchange's `requestHeaderLines` and a trace's
+ * `sentHeaderLines` (issue #2466, a repeated `Authorization` or `Cookie` line
+ * as sent). Written `headerLines$`, not `^headerLines$`, so the request-side
+ * lists are masked by the same rule and a future `...HeaderLines` member is
+ * masked rather than leaked. A redirect hop's `headerLines` (`redirects[]`,
+ * #2461) is the same member and is masked by recursion.
  */
-const HEADER_SET_MEMBER = /headers$|^headerLines$/i;
+const HEADER_SET_MEMBER = /headers$|headerLines$/i;
 
 /**
  * The name of the credential @p pair carries, or undefined: one of @p authNames

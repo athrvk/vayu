@@ -343,7 +343,7 @@ describe("server instructions, per host", () => {
 			"a url cut short before its host ends",
 			"inbox captures, mock activity) reads `<redacted>`",
 			"4 bytes or longer, raw, percent-encoded, JSON- or XML-escaped",
-			"`headerLines` and `rawRequest` header lines, request and response alike",
+			"`headerLines` / `requestHeaderLines` and `rawRequest` header lines, request and response alike",
 			"an OAuth 2.0 token or an API key, whatever its source",
 			"credential-named query value (matched on the whole name",
 			"matched as UTF-8 and as Latin-1",

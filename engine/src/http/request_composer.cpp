@@ -1010,53 +1010,54 @@ const vayu::db::Request& request) {
     return out;
 }
 
-/// A stored headers blob as /execute takes it, plus the names whose winning
-/// row the body mode wrote (`source: "body-mode"`, issue #1765).
-struct FlatHeaders {
-    nlohmann::json headers   = nlohmann::json::object ();
+/// A stored headers blob as /execute takes it, plus the names whose last row
+/// the body mode wrote (`source: "body-mode"`, issue #1765).
+struct StoredHeaderRows {
+    nlohmann::json lines     = nlohmann::json::array ();
     nlohmann::json body_mode = nlohmann::json::array ();
 };
 
-// Flatten a stored KeyValueEntry[] headers blob into the object map /execute
-// expects: enabled-only, non-empty keys, later duplicates win. A name whose
-// winning row carries the body mode's marker is listed as `bodyModeHeaders`,
-// so a refused Content-Type drops it rather than reading it as the user's.
-FlatHeaders flatten_stored_headers (const std::string& blob) {
-    FlatHeaders flat;
-    nlohmann::json& out = flat.headers;
-    std::map<std::string, bool> marked;
+/// A stored row's string member, or "" when it is absent or not a string.
+std::string row_text (const nlohmann::json& row, const char* member) {
+    const auto it = row.find (member);
+    return it != row.end () && it->is_string () ? it->get<std::string> () : "";
+}
+
+// Every enabled row of a stored KeyValueEntry[] headers blob with a non-empty
+// key, as the `{name, value}` lines /execute takes: in row order, a repeated
+// name repeated, each in its own spelling (issue #2466). The renderer's
+// `toHeaderRows` is the other copy; `tests/fixtures/header-rows-conformance.json`
+// holds the two to one answer. A name whose last row carries the body mode's
+// marker is listed as `bodyModeHeaders`, so a refused Content-Type drops it
+// rather than reading it as the user's.
+StoredHeaderRows stored_header_rows (const std::string& blob) {
+    StoredHeaderRows stored;
     if (blob.empty ()) {
-        return flat;
+        return stored;
     }
-    auto rows = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
+    const auto rows = nlohmann::json::parse (blob, nullptr, /*allow_exceptions=*/false);
     if (!rows.is_array ()) {
-        return flat;
+        return stored;
     }
+    std::map<std::string, bool, vayu::CaseInsensitiveLess> marked;
     for (const auto& row : rows) {
-        if (!row.is_object ()) {
-            continue;
-        }
-        const auto key = row.find ("key");
-        if (key == row.end () || !key->is_string () || key->get<std::string> ().empty ()) {
+        const std::string name = row.is_object () ? row_text (row, "key") : "";
+        if (name.empty ()) {
             continue;
         }
         if (auto enabled = row.find ("enabled"); enabled != row.end () &&
         enabled->is_boolean () && !enabled->get<bool> ()) {
             continue;
         }
-        const auto value = row.find ("value");
-        out[key->get<std::string> ()] =
-        (value != row.end () && value->is_string ()) ? value->get<std::string> () : "";
-        const auto source                = row.find ("source");
-        marked[key->get<std::string> ()] = source != row.end () &&
-        source->is_string () && source->get<std::string> () == "body-mode";
+        stored.lines.push_back ({ { "name", name }, { "value", row_text (row, "value") } });
+        marked.insert_or_assign (name, row_text (row, "source") == "body-mode");
     }
     for (const auto& [name, is_body_mode] : marked) {
         if (is_body_mode) {
-            flat.body_mode.push_back (name);
+            stored.body_mode.push_back (name);
         }
     }
-    return flat;
+    return stored;
 }
 
 // The stored body blob as an /execute body, or null for "no body".
@@ -1084,9 +1085,9 @@ const std::vector<vayu::db::Collection>& chain) {
     payload["method"] = to_string (request.method);
     payload["url"]    = request.url;
 
-    FlatHeaders headers = flatten_stored_headers (request.headers);
-    if (!headers.headers.empty ()) {
-        payload["headers"] = std::move (headers.headers);
+    StoredHeaderRows headers = stored_header_rows (request.headers);
+    if (!headers.lines.empty ()) {
+        payload["headers"] = std::move (headers.lines);
     }
     if (!headers.body_mode.empty ()) {
         payload["bodyModeHeaders"] = std::move (headers.body_mode);
@@ -1197,59 +1198,77 @@ std::string& environment_id) {
 /// reasons composition rejects a payload over a header rather than over its
 /// shape, gathered so the caller answers them in one place.
 struct ResolvedHeaders {
-    nlohmann::json headers = nlohmann::json::object ();
+    /// `{name, value}` lines, in the order the block held them.
+    nlohmann::json lines = nlohmann::json::array ();
     /// A variable whose value cannot be written into a header line (#738).
     std::optional<HeaderTextRefusal> unspellable;
-    /// Two names that resolved to one (#1051).
+    /// Two names written differently that resolved to one (#1051).
     std::optional<vayu::http::HeaderNameCollision> collision;
     /// A name that resolved to nothing, as it was written (#1084).
     std::optional<std::string> nameless;
 };
 
 /**
- * Resolve every header name and value in @p headers.
+ * A payload's `headers` in either shape `POST /execute` takes (issue #2466) as
+ * `{name, value}` lines: an array as it stands, an object one line per key in
+ * key order. Anything else is no lines.
+ */
+nlohmann::json header_lines_of (const nlohmann::json& headers) {
+    if (headers.is_array ()) {
+        return headers;
+    }
+    nlohmann::json lines = nlohmann::json::array ();
+    if (headers.is_object ()) {
+        for (const auto& [name, value] : headers.items ()) {
+            lines.push_back ({ { "name", name }, { "value", value } });
+        }
+    }
+    return lines;
+}
+
+/**
+ * Resolve every header name and value in @p headers, into lines in the same
+ * order.
  *
- * Rebuilt rather than edited in place, because a resolved name is a different
- * key - and a name a variable produced can land on a name another header
- * already holds, which is the collision `http/header_names.hpp` refuses.
+ * A name a variable produced can land on a name another line already carries,
+ * which is the collision `http/header_names.hpp` refuses. Names are compared
+ * the way `Headers` compares them, without case, because that is what the
+ * request this payload becomes compares them by. Two lines *written* alike are
+ * a repeated header the author typed, and both are kept.
  *
- * Names are tracked the way `Headers` compares them rather than the way this
- * JSON object keys them, because that is what the payload becomes: two names
- * differing only in case are two keys here and one header in the map
- * `POST /execute` parses this into, so a collision only that map can see would
- * otherwise be composed happily and drop a header one layer further on, with
- * the variable that caused it already forgotten.
+ * A line that is not an object with a string `name` is passed through as it
+ * stands: `POST /execute` refuses it, naming the shape it wants.
  */
 ResolvedHeaders resolve_header_block (const nlohmann::json& headers,
 const VariableValues& vars,
 const BoundColumnNames& bound_columns,
 DynamicResolution dynamic) {
     ResolvedHeaders out;
-    // The written name it keeps is load-bearing here rather than only in the
-    // message: it is what separates a collision resolution *made* from two
-    // names the author typed themselves, which are two lines they can see side
-    // by side and which composition has always let the later one win. This
-    // refusal is for the one that is invisible until the request comes back
-    // wrong.
     vayu::http::HeaderNameOrigins produced;
-    for (const auto& [key, value] : headers.items ()) {
-        const std::string name =
+    for (nlohmann::json line : header_lines_of (headers)) {
+        const auto written = line.find ("name");
+        if (written == line.end () || !written->is_string ()) {
+            out.lines.push_back (std::move (line));
+            continue;
+        }
+        const std::string key = written->get<std::string> ();
+        std::string name =
         resolve_header_template (key, vars, bound_columns, dynamic, out.unspellable);
         if (name.empty () && !out.nameless) {
             // However it got there, unlike a collision: a name that is not
             // there is nothing the author can see, whoever wrote it.
             out.nameless = key;
         }
-        const auto [taken, was_free] = produced.emplace (name, key);
-        const bool resolution_made_it = name != key || taken->second != taken->first;
-        if (!was_free && resolution_made_it && !out.collision) {
-            out.collision =
-            vayu::http::HeaderNameCollision{ key, taken->second, taken->first };
+        auto collision = vayu::http::record_produced_name (produced, name, key);
+        if (collision && !out.collision) {
+            out.collision = std::move (collision);
         }
-        out.headers[name] = value.is_string () ?
-        nlohmann::json (resolve_header_template (value.get<std::string> (),
-        vars, bound_columns, dynamic, out.unspellable)) :
-        value;
+        line["name"] = std::move (name);
+        if (auto value = line.find ("value"); value != line.end () && value->is_string ()) {
+            *value = resolve_header_template (value->get<std::string> (), vars,
+            bound_columns, dynamic, out.unspellable);
+        }
+        out.lines.push_back (std::move (line));
     }
     return out;
 }
@@ -1267,8 +1286,8 @@ bool url_encoding_disabled (const nlohmann::json& payload) {
  * A header is the one field composition refuses a payload over, because it is
  * the one the author cannot see the result of: its text has a terminator and no
  * escape for it, so a substituted CR or LF ends the line rather than sitting in
- * it (`http/header_text.hpp`), and its name is a map key, so a substituted name
- * can quietly take another header's place - or leave the line with no name at
+ * it (`http/header_text.hpp`), and a substituted name can quietly repeat
+ * another header the author did not repeat - or leave the line with no name at
  * all (`http/header_names.hpp`). Both files carry the rules and the layers that
  * share them.
  *
@@ -1289,7 +1308,7 @@ nlohmann::json& payload) {
     }
 
     if (auto headers = payload.find ("headers");
-    headers != payload.end () && headers->is_object ()) {
+    headers != payload.end () && (headers->is_object () || headers->is_array ())) {
         auto resolved = resolve_header_block (*headers, vars, bound_columns, dynamic);
         if (resolved.unspellable) {
             return compose_error (400, "unsendable_header",
@@ -1306,7 +1325,7 @@ nlohmann::json& payload) {
             return compose_error (400, vayu::http::COLLIDING_HEADER_NAMES_CODE,
             vayu::http::describe_header_name_collision (*resolved.collision));
         }
-        *headers = std::move (resolved.headers);
+        *headers = std::move (resolved.lines);
     }
     return std::nullopt;
 }
@@ -1422,11 +1441,10 @@ nlohmann::json& file) {
     declared->is_string () && !declared->get<std::string> ().empty ()) {
         return;
     }
-    if (const auto headers = payload.find ("headers");
-    headers != payload.end () && headers->is_object ()) {
-        for (const auto& [name, value] : headers->items ()) {
-            if (vayu::utils::ascii_lower_equal (name, "content-type") && value.is_string () &&
-            value.get<std::string> ().find_first_not_of (" \t") != std::string::npos) {
+    if (const auto headers = payload.find ("headers"); headers != payload.end ()) {
+        for (const auto& line : header_lines_of (*headers)) {
+            if (vayu::utils::ascii_lower_equal (row_text (line, "name"), "content-type") &&
+            row_text (line, "value").find_first_not_of (" \t") != std::string::npos) {
                 return;
             }
         }

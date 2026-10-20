@@ -390,13 +390,13 @@ std::string body_content_type_value (const Request& request) {
     // binary body an empty row is absent rather than a removal, as an empty
     // `FileRef::content_type` is: the file's own type then applies, where a
     // removal would leave the upload with no type at all.
-    const auto declared = request.headers.find ("Content-Type");
-    if (declared != request.headers.end () &&
-    (request.body.mode != BodyMode::Binary ||
-    header_value_reaches_wire (declared->second))) {
-        return {};
-    }
-    return implied;
+    const bool declared = std::any_of (request.headers.begin (),
+    request.headers.end (), [&request] (const HeaderLine& line) {
+        return CaseInsensitiveLess::equal (line.name, "Content-Type") &&
+        (request.body.mode != BodyMode::Binary ||
+        header_value_reaches_wire (line.value));
+    });
+    return declared ? std::string () : implied;
 }
 
 bool suppresses_request_header (const Request& request, const std::string& key) {
@@ -445,7 +445,7 @@ bool lists_expect) {
 
 curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
-Headers* sent) {
+HeaderList* sent) {
     curl_slist* list = nullptr;
     if (sent != nullptr) {
         sent->clear ();
@@ -456,7 +456,7 @@ Headers* sent) {
     // neither appended nor reported.
     const auto record = [&] (const std::string& key, const std::string& value) {
         if (sent != nullptr) {
-            (*sent)[key] = value;
+            sent->add (key, value);
         }
     };
     // True when the line went on the list.
@@ -472,7 +472,7 @@ Headers* sent) {
     // A default the request already names is not added: someone who typed the
     // header means it, the same rule the body-implied Content-Type follows.
     const auto adds_default = [&] (std::string_view name) {
-        return !request.headers.contains (std::string (name)) &&
+        return !request.headers.contains (name) &&
         !suppresses_default_header (request, name);
     };
 

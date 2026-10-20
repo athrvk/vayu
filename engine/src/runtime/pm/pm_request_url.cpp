@@ -364,12 +364,16 @@ std::string script_body_view (const Body& body) {
  * empty map would take `pm.request.headers` from "missing the two derived
  * entries" to "empty", a worse answer than the one this fixes. An empty sent
  * record means nothing was recorded, never that nothing was sent.
+ *
+ * Either set is shown folded, one value per name (`HeaderList::folded`): the
+ * scripting API is single-valued, so a repeated header reads as its values
+ * joined (issue #2466).
  */
-const Headers& script_request_header_view (const ContextData& data) {
+Headers script_request_header_view (const ContextData& data) {
     if (data.response != nullptr && !data.response->request_headers.empty ()) {
-        return data.response->request_headers;
+        return data.response->request_headers.folded ();
     }
-    return data.request->headers;
+    return data.request->headers.folded ();
 }
 
 // ============================================================================
@@ -1790,11 +1794,47 @@ Headers& out) {
     return error;
 }
 
+namespace {
+
+/**
+ * The script's single-valued header object applied back onto the request's
+ * lines (issue #2466). A name whose value the script left as it read it keeps
+ * every line it had, in place and in its own spelling, so a repeated header
+ * survives a script that never touched it - the same "unchanged means
+ * untouched" rule the body follows below. A changed name becomes one line
+ * where its first line was; a removed name loses every line; a new one is
+ * appended.
+ */
+HeaderList apply_script_headers (const HeaderList& lines, const Headers& written) {
+    const Headers shown = lines.folded ();
+    HeaderList out;
+    for (const auto& line : lines) {
+        const auto now = written.find (line.name);
+        if (now == written.end ()) {
+            continue;
+        }
+        if (now->second == shown.at (line.name)) {
+            out.add (line.name, line.value);
+        } else if (!out.contains (line.name)) {
+            out.add (now->first, now->second);
+        }
+    }
+    for (const auto& [name, value] : written) {
+        if (!shown.contains (name)) {
+            out.add (name, value);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
 /**
  * @brief Apply the script's `pm.request` back onto the request that will be sent.
  *
  * The JS object is authoritative, not a diff: the header set it holds when the
- * script returns is the header set that goes on the wire, so
+ * script returns is the header set that goes on the wire (a name it left as
+ * it read it keeps its repeated lines, `apply_script_headers`), so
  * `delete pm.request.headers['Authorization']` removes an engine-applied
  * header, and dropping `pm.request.body` drops the body. That is the only rule
  * that stays true for a script which replaces `pm.request` wholesale.
@@ -1862,11 +1902,12 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     }
 
     ScopedValue js_headers (ctx, JS_GetPropertyStr (ctx, js_request.get (), "headers"));
-    staged.headers.clear ();
+    Headers written;
     if (auto reason = read_header_object (ctx, js_headers.get (), "pm.request.headers",
-        /*suggest_delete=*/true, staged.headers)) {
+        /*suggest_delete=*/true, written)) {
         return reason;
     }
+    staged.headers = apply_script_headers (request.headers, written);
 
     ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
     if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {

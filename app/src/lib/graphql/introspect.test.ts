@@ -39,11 +39,11 @@ const TARGET: IntrospectionTarget = {
 	environmentId: "env_1",
 };
 
-/** What the engine hands back: everything resolved, `inherit` walked. */
+/** What the engine hands back: everything resolved, `inherit` walked, headers as lines. */
 const COMPOSED = {
 	method: "POST",
 	url: "https://api.test/gql",
-	headers: { "X-Team": "payments" },
+	headers: [{ name: "X-Team", value: "payments" }],
 	auth: { mode: "bearer", token: "sk_live" },
 };
 
@@ -73,8 +73,10 @@ describe("buildIntrospectionRequest", () => {
 		} as ComposedRequest);
 		expect(req.method).toBe("POST");
 		expect(req.url).toBe("https://api.test/gql");
-		expect(req.headers?.["Content-Type"]).toBe("application/json");
-		expect(req.headers?.["X-Team"]).toBe("payments");
+		expect(req.headers).toEqual([
+			{ name: "X-Team", value: "payments" },
+			{ name: "Content-Type", value: "application/json" },
+		]);
 		expect(req.auth).toEqual({ mode: "bearer", token: "sk_live" });
 		const body = req.body as { mode: string; content: string };
 		expect(body.mode).toBe("json");
@@ -114,6 +116,34 @@ describe("buildIntrospectionRequest", () => {
 		} as ComposedRequest);
 		expect(req.auth).toBeUndefined();
 	});
+
+	it("keeps a repeated header, in order, and sends one Content-Type of its own", () => {
+		// Mutation check: spread the lines into a record and the repeat is gone.
+		const req = buildIntrospectionRequest({
+			...COMPOSED,
+			headers: [
+				{ name: "X-Dup", value: "one" },
+				{ name: "content-type", value: "text/plain" },
+				{ name: "x-dup", value: "two" },
+			],
+		} as ComposedRequest);
+		expect(req.headers).toEqual([
+			{ name: "X-Dup", value: "one" },
+			{ name: "x-dup", value: "two" },
+			{ name: "Content-Type", value: "application/json" },
+		]);
+	});
+
+	it("still reads a composed payload whose headers are the older record", () => {
+		const req = buildIntrospectionRequest({
+			...COMPOSED,
+			headers: { "X-Team": "payments", "Content-Type": "text/plain" },
+		} as ComposedRequest);
+		expect(req.headers).toEqual([
+			{ name: "X-Team", value: "payments" },
+			{ name: "Content-Type", value: "application/json" },
+		]);
+	});
 });
 
 describe("introspectSchema", () => {
@@ -141,7 +171,7 @@ describe("introspectSchema", () => {
 		const sent = vi.mocked(apiService.executeRequest).mock.calls[0][0];
 		expect(sent.url).toBe("https://api.test/gql");
 		expect(sent.auth).toEqual({ mode: "bearer", token: "sk_live" });
-		expect(sent.headers?.["X-Team"]).toBe("payments");
+		expect(sent.headers).toContainEqual({ name: "X-Team", value: "payments" });
 		// Composed by the environment, and sent through that environment's
 		// cookie jar - the two halves of #382 on the send itself.
 		expect(sent.transient).toBe(true);

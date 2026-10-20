@@ -937,6 +937,11 @@ Rules worth knowing before you rely on them:
 - **The object is authoritative, not a diff.** The header set left in
   `pm.request.headers` is the header set that is sent, which is what makes
   `delete` work.
+- **A repeated header reads folded and survives untouched** (issue #2466).
+  `pm.request.headers` holds one value per name, so two `X-Dup` rows read as
+  `'one, two'` (a `Cookie` joined with `'; '`). A name the script leaves at the
+  value it read keeps every line it had, in place and in its own spelling; a
+  name the script writes goes out as the one line it wrote.
 - **A script beats engine-applied auth.** Auth (bearer / basic / apikey /
   oauth2) is resolved into the request *before* the script runs, so the script
   sees the real `Authorization` header and can replace or remove it. The one
@@ -1690,9 +1695,10 @@ does. The difference is deliberate and listed under
 
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
-names that resolve to one name would send the request a header short, so the
-call throws naming both spellings and the name they produced, and nothing goes
-out. Names are compared without case, the way the header map keys them. A name
+names written differently that resolve to one name would send that header twice
+where the script wrote two different ones, so the call throws naming both
+spellings and the name they produced, and nothing goes out. Names are compared
+without case. A name
 that resolves to nothing at all is refused the same way, and it is the one thing
 resolution can produce that nothing further down the send would catch: the
 pre-send gate reads header text for the bytes that break a line, and what is

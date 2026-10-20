@@ -259,6 +259,10 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * libcurl's removal line `Content-Type:`, which is not a sent header and is not
  * recorded as one.
  *
+ * The request's own lines go first, one list line per `HeaderList` line in
+ * the order the request holds them (issue #2466): a repeated name is sent
+ * repeated, and authored order is wire order.
+ *
  * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
  * waits a second for the interim reply (issue #2468). Unless
  * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
@@ -268,8 +272,9 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * libcurl decides, unless the send refuses the `Expect` default
  * (`suppresses_default_header`), which removes it again.
  *
- * @param sent When non-null, cleared and filled with exactly the headers
- *        appended to the returned list. That is `Response::request_headers`,
+ * @param sent When non-null, cleared and filled with exactly the lines
+ *        appended to the returned list, in order. That is
+ *        `Response::request_headers`,
  *        the "sent record" the response pane's Headers tab and a test script's
  *        `pm.request.headers` read - built from the same appends as the list
  *        rather than snapshotted beside it, because a snapshot taken
@@ -283,7 +288,7 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  */
 [[nodiscard]] curl_slist* build_request_header_list (const Request& request,
 const DefaultHeaderPolicy& policy,
-Headers* sent);
+HeaderList* sent);
 
 /**
  * @brief Apply the transfer options a default header rides on rather than a

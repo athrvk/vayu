@@ -16,11 +16,14 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -130,7 +133,11 @@ struct CaseInsensitiveLess {
 };
 
 /**
- * @brief HTTP Headers (case-insensitive keys)
+ * @brief HTTP headers, one value per name (case-insensitive keys).
+ *
+ * A response's folded map and a header set that is single-valued by contract
+ * (`Client::get`, a script's `pm.request.headers`). A request's own headers
+ * are a `HeaderList`, because a name can go out more than once.
  */
 using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 
@@ -144,6 +151,145 @@ using Headers = std::map<std::string, std::string, CaseInsensitiveLess>;
 struct HeaderLine {
     std::string name;
     std::string value;
+
+    bool operator== (const HeaderLine&) const = default;
+};
+
+/**
+ * @brief A request's headers as the lines that go on the wire, in order
+ *        (issue #2466).
+ *
+ * `Headers` holds one value per name; a `curl_slist` carries any number of
+ * same-named lines and sends them in order. So a request keeps every line it
+ * was given, each in its own spelling, and the order it was given them in is
+ * the order they are sent in.
+ *
+ * Every lookup compares names without case, as `Headers` does. `operator[]` is
+ * the single-valued write: it leaves one line under the name (the first one's
+ * spelling and place), which is what an engine-applied header such as auth
+ * means. `add` appends, which is what an authored row means.
+ */
+class HeaderList {
+    public:
+    using value_type     = HeaderLine;
+    using iterator       = std::vector<HeaderLine>::iterator;
+    using const_iterator = std::vector<HeaderLine>::const_iterator;
+
+    HeaderList () = default;
+    HeaderList (std::initializer_list<HeaderLine> lines) : lines_ (lines) {
+    }
+    /// One line per entry of a single-valued map, in the map's order.
+    explicit HeaderList (const Headers& folded) {
+        lines_.reserve (folded.size ());
+        for (const auto& [name, value] : folded) {
+            lines_.push_back ({ name, value });
+        }
+    }
+
+    [[nodiscard]] iterator begin () noexcept {
+        return lines_.begin ();
+    }
+    [[nodiscard]] iterator end () noexcept {
+        return lines_.end ();
+    }
+    [[nodiscard]] const_iterator begin () const noexcept {
+        return lines_.begin ();
+    }
+    [[nodiscard]] const_iterator end () const noexcept {
+        return lines_.end ();
+    }
+    [[nodiscard]] bool empty () const noexcept {
+        return lines_.empty ();
+    }
+    [[nodiscard]] size_t size () const noexcept {
+        return lines_.size ();
+    }
+    [[nodiscard]] const std::vector<HeaderLine>& lines () const noexcept {
+        return lines_;
+    }
+    void clear () noexcept {
+        lines_.clear ();
+    }
+
+    /// The first line under @p name, or `end ()`.
+    [[nodiscard]] const_iterator find (std::string_view name) const {
+        return std::find_if (lines_.begin (), lines_.end (),
+        [name] (const HeaderLine& line) { return names_one (line.name, name); });
+    }
+    [[nodiscard]] iterator find (std::string_view name) {
+        return std::find_if (lines_.begin (), lines_.end (),
+        [name] (const HeaderLine& line) { return names_one (line.name, name); });
+    }
+    [[nodiscard]] bool contains (std::string_view name) const {
+        return find (name) != end ();
+    }
+    /// How many lines carry @p name.
+    [[nodiscard]] size_t count (std::string_view name) const {
+        return static_cast<size_t> (std::count_if (lines_.begin (), lines_.end (),
+        [name] (const HeaderLine& line) { return names_one (line.name, name); }));
+    }
+    /// The first line's value under @p name; throws `std::out_of_range` when
+    /// there is none, as `std::map::at` does.
+    [[nodiscard]] const std::string& at (std::string_view name) const {
+        const auto it = find (name);
+        if (it == end ()) {
+            throw std::out_of_range ("no header named " + std::string (name));
+        }
+        return it->value;
+    }
+
+    /// Append a line, whatever is already there under its name.
+    void add (std::string name, std::string value) {
+        lines_.push_back ({ std::move (name), std::move (value) });
+    }
+    /// The value of the one line left under @p name: the first keeps its
+    /// spelling and place, every later one is removed, and a name not there
+    /// is appended with an empty value - `std::map`'s `operator[]`, kept to
+    /// one line per name.
+    std::string& operator[] (std::string_view name) {
+        auto first = find (name);
+        if (first == end ()) {
+            lines_.push_back ({ std::string (name), std::string () });
+            return lines_.back ().value;
+        }
+        const auto offset = first - lines_.begin ();
+        lines_.erase (
+        std::remove_if (first + 1, lines_.end (),
+        [name] (const HeaderLine& line) { return names_one (line.name, name); }),
+        lines_.end ());
+        return lines_.at (static_cast<size_t> (offset)).value;
+    }
+    /// Remove every line under @p name; how many there were.
+    size_t erase (std::string_view name) {
+        return std::erase_if (lines_,
+        [name] (const HeaderLine& line) { return names_one (line.name, name); });
+    }
+
+    /**
+     * One value per name: a repeated name's values joined with `", "` (RFC 9110
+     * section 5.3), `Cookie`'s with `"; "` (RFC 6265 section 5.4), under the
+     * first line's spelling. For the readers that hold a header as one value -
+     * a script's `pm.request.headers`, the `requestHeaders` record.
+     */
+    [[nodiscard]] Headers folded () const {
+        Headers out;
+        for (const auto& [name, value] : lines_) {
+            const auto [it, inserted] = out.emplace (name, value);
+            if (!inserted) {
+                it->second += (names_one (name, "Cookie") ? "; " : ", ") + value;
+            }
+        }
+        return out;
+    }
+
+    bool operator== (const HeaderList&) const = default;
+
+    private:
+    static bool names_one (std::string_view a, std::string_view b) {
+        return utils::ascii_lower_equal (a, b);
+    }
+
+    std::vector<HeaderLine> lines_;
 };
 
 /**
@@ -374,7 +520,8 @@ struct Request {
      * nearly all of them.
      */
     std::vector<PendingPathVariable> path_variables;
-    Headers headers;
+    /// Every line the request carries, in send order - see `HeaderList`.
+    HeaderList headers;
     /**
      * @brief Header names `apply_auth` filled from a credential the request's
      *        auth block names (API-key auth), redacted from the verbose
@@ -709,7 +856,14 @@ struct Response {
      */
     std::vector<RedirectHop> redirect_hops;
 
-    Headers request_headers; // Headers that were sent in the request
+    /**
+     * @brief Every header line `build_request_header_list` put on the wire, in
+     *        order, a repeated name repeated (issue #2466).
+     *
+     * Served as `requestHeaderLines`, and folded to one value per name
+     * (`HeaderList::folded`) as `requestHeaders`.
+     */
+    HeaderList request_headers;
     std::string raw_request; // Complete raw HTTP request
     std::string body;
     size_t body_size = 0;

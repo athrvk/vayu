@@ -66,32 +66,35 @@ describe("MCP sensitive header conformance", () => {
 	});
 });
 
-describe("MCP sensitive header conformance in run output's headerLines (#2460)", () => {
-	it("read a non-empty fixture", () => {
-		expect(fixture.sensitiveHeaderNames.length).toBeGreaterThan(0);
-	});
+describe.each(["headerLines", "requestHeaderLines", "sentHeaderLines"])(
+	"MCP sensitive header conformance in run output's %s (#2460, #2466)",
+	(member) => {
+		it("read a non-empty fixture", () => {
+			expect(fixture.sensitiveHeaderNames.length).toBeGreaterThan(0);
+		});
 
-	it.each(fixture.sensitiveHeaderNames)("withholds a %s row's value in any case", (name) => {
-		for (const spelled of [name, name.toUpperCase()]) {
-			expect(
-				withholdRunOutput(
-					{
-						headerLines: [
-							{ name: spelled, value: "v" },
-							{ name: "X-Plain", value: "kept" },
-						],
-					},
-					{ forms: [], apiKeyHeaders: [] }
-				)
-			).toEqual({
-				headerLines: [
-					{ name: spelled, value: "<redacted>" },
-					{ name: "X-Plain", value: "kept" },
-				],
-			});
-		}
-	});
-});
+		it.each(fixture.sensitiveHeaderNames)("withholds a %s row's value in any case", (name) => {
+			for (const spelled of [name, name.toUpperCase()]) {
+				expect(
+					withholdRunOutput(
+						{
+							[member]: [
+								{ name: spelled, value: "v" },
+								{ name: "X-Plain", value: "kept" },
+							],
+						},
+						{ forms: [], apiKeyHeaders: [] }
+					)
+				).toEqual({
+					[member]: [
+						{ name: spelled, value: "<redacted>" },
+						{ name: "X-Plain", value: "kept" },
+					],
+				});
+			}
+		});
+	}
+);
 
 describe("MCP sensitive header conformance in a redirect hop's headerLines (#2461)", () => {
 	it("read a non-empty fixture", () => {

@@ -4014,6 +4014,62 @@ describe("run_collection", () => {
 	});
 });
 
+describe("start_load_run headers (#2466)", () => {
+	const allowed = { allowlist: ["api.example.com"] };
+	const composeClient = () =>
+		fakeClient({
+			composeRequest: vi
+				.fn()
+				.mockResolvedValue({ method: "GET", url: "https://api.example.com/x" }),
+		});
+	const composedRequest = (client: EngineClient) =>
+		(client.composeRequest as ReturnType<typeof vi.fn>).mock.calls[0][0].request as Record<
+			string,
+			unknown
+		>;
+	const send = (client: EngineClient, headers: unknown) =>
+		dispatchTool(
+			"start_load_run",
+			{
+				url: "https://api.example.com/x",
+				headers,
+				mode: "constant_concurrency",
+				concurrency: 1,
+				duration: "5s",
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+
+	test("takes ordered lines and composes them as given", async () => {
+		const client = composeClient();
+		const lines = [
+			{ name: "Link", value: "<a>; rel=next" },
+			{ name: "Link", value: "<b>; rel=prev" },
+		];
+		const res = await send(client, lines);
+		expect(res.isError).toBeFalsy();
+		expect(composedRequest(client).headers).toEqual(lines);
+	});
+
+	test("still takes the string map", async () => {
+		const client = composeClient();
+		const res = await send(client, { "X-Tenant": "acme" });
+		expect(res.isError).toBeFalsy();
+		expect(composedRequest(client).headers).toEqual({ "X-Tenant": "acme" });
+	});
+
+	test("declares both shapes in the schema the client reads", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		expect(shape.headers.safeParse([{ name: "A", value: "1" }]).success).toBe(true);
+		expect(shape.headers.safeParse({ A: "1" }).success).toBe(true);
+		expect(shape.headers.safeParse([{ name: "A" }]).success).toBe(false);
+	});
+});
+
 describe("start_load_run scenario runs", () => {
 	function scenarioLoadClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}) {
 		return fakeClient({
@@ -6175,6 +6231,36 @@ describe("dispatchTool", () => {
 			const bare = savedRequestClient();
 			await dispatchTool("run_request", { requestId: "req_1" }, ctxWith(bare, OFF));
 			expect(executed(bare).method).toBe("POST");
+		});
+
+		test("headers given as ordered lines reach compose as the lines, a repeat kept (#2466)", async () => {
+			// Mutation check: read only the map form and the lines are dropped, so
+			// compose answers the stored headers.
+			const client = savedRequestClient();
+			const lines = [
+				{ name: "X-Dup", value: "one" },
+				{ name: "x-dup", value: "two" },
+				{ name: "X-Dup", value: "three" },
+			];
+			const res = await dispatchTool(
+				"run_request",
+				{ requestId: "req_1", headers: lines },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBeFalsy();
+			expect(composeBody(client).request).toEqual({ headers: lines });
+		});
+
+		test("a header line that names nothing is refused by position, not forwarded", async () => {
+			const client = savedRequestClient();
+			const res = await dispatchTool(
+				"run_request",
+				{ url: "https://api.example.com/x", headers: [{ name: "A", value: "1" }, 7] },
+				ctxWith(client, OFF)
+			);
+			expect(res.isError).toBe(true);
+			expect(firstText(res)).toContain("headers[1]");
+			expect(client.composeRequest).not.toHaveBeenCalled();
 		});
 
 		test("an empty url names no target, so the saved request is sent", async () => {
@@ -12707,6 +12793,49 @@ describe("secret withholding", () => {
 		});
 	});
 
+	test("run_request masks credential lines in requestHeaderLines, every repeat, keeping names and order (#2466)", async () => {
+		// Mutation check: match only `headers` / `headerLines` and these lines
+		// read back verbatim.
+		const lines = [
+			{ name: "Authorization", value: "Bearer typed-bearer-token" },
+			{ name: "authorization", value: "Bearer second-typed-token" },
+			{ name: "Cookie", value: "sid=request-cookie-value" },
+			{ name: "Cookie", value: "theme=dark" },
+			{ name: "X-Api-Key", value: "api-key-line-value" },
+			{ name: "X-Plain", value: "kept-one" },
+			{ name: "X-Plain", value: "kept-two" },
+		];
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({
+				...EXECUTE_ANSWER,
+				requestHeaderLines: lines,
+			}),
+		});
+		const { text, body } = await sendRequest(client);
+		expect(body.requestHeaderLines).toEqual([
+			{ name: "Authorization", value: "<redacted>" },
+			{ name: "authorization", value: "<redacted>" },
+			{ name: "Cookie", value: "<redacted>" },
+			{ name: "Cookie", value: "<redacted>" },
+			{ name: "X-Api-Key", value: "<redacted>" },
+			{ name: "X-Plain", value: "kept-one" },
+			{ name: "X-Plain", value: "kept-two" },
+		]);
+		for (const leak of ["typed-bearer-token", "second-typed-token", "request-cookie-value"]) {
+			expect(text).not.toContain(leak);
+		}
+
+		const revealed = await sendRequest(
+			runClient({
+				executeRequest: vi
+					.fn()
+					.mockResolvedValue({ ...EXECUTE_ANSWER, requestHeaderLines: lines }),
+			}),
+			REVEAL
+		);
+		expect(revealed.body.requestHeaderLines).toEqual(lines);
+	});
+
 	test("run_request passes a followed redirect through and masks the hop's Set-Cookie (#2461)", async () => {
 		const hop = {
 			status: 302,
@@ -13888,7 +14017,11 @@ describe("get_graphql_schema", () => {
 	const STORED = {
 		method: "GET",
 		url: ENDPOINT,
-		headers: { "X-Tenant": "acme" },
+		headers: [
+			{ name: "X-Tenant", value: "acme" },
+			{ name: "x-tenant", value: "beta" },
+			{ name: "content-type", value: "text/plain" },
+		],
 		body: { mode: "graphql", content: "{ order(id: 1) { id } }" },
 		auth: { mode: "bearer", token: "t0k3n" },
 	};
@@ -13940,7 +14073,13 @@ describe("get_graphql_schema", () => {
 			transient: true,
 			environmentId: "env_1",
 			auth: STORED.auth,
-			headers: { "X-Tenant": "acme", "Content-Type": "application/json" },
+			// The composed lines, a repeat kept, with the one Content-Type this
+			// request needs in place of the composed one.
+			headers: [
+				{ name: "X-Tenant", value: "acme" },
+				{ name: "x-tenant", value: "beta" },
+				{ name: "Content-Type", value: "application/json" },
+			],
 		});
 		const body = payload.body as { mode: string; content: string };
 		expect(body.mode).toBe("json");
