@@ -147,6 +147,60 @@ describe("detectAnomalies - latency spikes", () => {
 	});
 });
 
+/** A stored second in which nothing completed: the engine writes no percentile keys (#2386). */
+function emptySecond(m: LoadTestMetrics): LoadTestMetrics {
+	const out = { ...m, current_rps: 0 };
+	delete out.latency_p50_ms;
+	delete out.latency_p95_ms;
+	delete out.latency_p99_ms;
+	return out;
+}
+
+/** `run` with the seconds `from`..`to` (inclusive) emptied. */
+function stalled(run: LoadTestMetrics[], from: number, to: number): LoadTestMetrics[] {
+	return run.map((m, i) => (i >= from && i <= to ? emptySecond(m) : m));
+}
+
+describe("detectAnomalies - a second with no completion (#2386)", () => {
+	it("leaves the stall out of the baseline of the spike that follows it", () => {
+		// Ticks 10-17 stall, 25-26 run at 4x. The baseline at 25 is the median of
+		// the readings among ticks 10-24 (118…124 → 121). Read as 0 ms, the eight
+		// stalled seconds would be the median, and a 0 baseline judges nothing.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 25 || i === 26 ? { latency_p99_ms: 480 } : {})),
+			10,
+			17
+		);
+		expect(run.filter((m) => m.latency_p99_ms === undefined)).toHaveLength(8);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(25);
+		expect(found[0].magnitude).toBeCloseTo(480 / 121, 3);
+	});
+
+	it("does not read a stall inside a spike as its recovery", () => {
+		// Ticks 20-21 open the spike, 22-24 complete nothing, 25 is back to normal.
+		const run = stalled(
+			healthyRun(40, (i) => (i === 20 || i === 21 ? { latency_p99_ms: 480 } : {})),
+			22,
+			24
+		);
+
+		const found = detectAnomalies(run).filter((a) => a.kind === "latency_spike");
+		expect(found).toHaveLength(1);
+		expect(found[0].startSeconds).toBe(20);
+		expect(found[0].endSeconds).toBe(24);
+		expect(found[0].magnitude).toBeCloseTo(480 / 112, 3);
+	});
+
+	it("reports a stall as a throughput drop, never as a latency spike", () => {
+		const found = detectAnomalies(stalled(healthyRun(40), 20, 22));
+		expect(found.map((a) => a.kind)).toEqual(["throughput_drop"]);
+		expect(found[0]).toMatchObject({ startSeconds: 20, endSeconds: 22 });
+	});
+});
+
 describe("detectAnomalies - error bursts", () => {
 	it("reads the cumulative failure counter as a rate, not as a level", () => {
 		// 500 failures happened once, early; the counter carries them for the rest
@@ -439,6 +493,23 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 			"latency_spike",
 			"throughput_drop",
 		]);
+	});
+
+	it("agrees over a randomized sequence whose run stalls now and then (#2386)", () => {
+		const rand = mulberry32(2386);
+		const run = noisyRun(900, rand);
+		// Stalls of one to four seconds, so a baseline, a hot run and a recovery
+		// tail each meet a second with no reading.
+		for (let i = BASELINE_TICKS; i < run.length; i++) {
+			if (rand() >= 0.03) continue;
+			const length = 1 + Math.floor(rand() * 4);
+			for (let k = i; k < Math.min(run.length, i + length); k++) run[k] = emptySecond(run[k]);
+		}
+		expect(run.filter((m) => m.latency_p99_ms === undefined).length).toBeGreaterThan(30);
+
+		const { commits, kinds } = replay(run, rand, { windowSeconds: 60, cap: 5000 });
+		expect(commits).toBeGreaterThan(100);
+		expect(kinds.has("latency_spike")).toBe(true);
 	});
 
 	it("falls silent for a window whose lead-in has rolled out, exactly as a rescan does", () => {

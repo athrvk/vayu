@@ -162,3 +162,11 @@ frame included). A gate's p99 is its `second_p99_ms`, and its `current_rps`, a
 the previous gate, which is what a stored tick holds. That figure is fixed the
 first time a gate is seen and cached per frame, so a later trim of the gate
 before it changes neither the figure nor the object the detector aligns on.
+
+**A second with no p99 is no reading to the spike rule** (#2386). It is not
+hot, it is left out of the trailing median (a baseline is the median of the
+readings among the fifteen ticks before, `null` if there are none), and it
+does not close a recovery tail, so a stall inside a spike extends the window
+rather than ending it. Read as 0 ms, a few stalled seconds dragged the median
+to 0, and a 0 baseline judges nothing. The throughput rule still sees the
+stall, as the drop it is.

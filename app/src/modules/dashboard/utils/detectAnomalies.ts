@@ -159,30 +159,40 @@ class TickCache<T> {
 	}
 }
 
-/** One number read off a tick, with the same `?? 0` the from-scratch pass used. */
-type Reader = (m: LoadTestMetrics) => number;
+/** One reading off a tick; `null` is no reading, which a baseline leaves out. */
+type Reader = (m: LoadTestMetrics) => number | null;
 
 // A live gate's own `latency_p99_ms` is still its ~100 ms window, so the
-// whole-second figure comes through `secondPercentiles` (#2589). An idle second
-// reads 0, as its stored row does.
-const readP99: Reader = (m) => secondPercentiles(m)?.p99 ?? 0;
-const readRps: Reader = (m) => m.current_rps ?? 0;
-const readConcurrency: Reader = (m) => m.current_concurrency ?? 0;
+// whole-second figure comes through `secondPercentiles` (#2589). A second with
+// no completion has no p99 (#2386): it is neither hot nor a recovery, and a 0
+// in the trailing median would lower the bar every later second is judged by.
+const readP99: Reader = (m) => secondPercentiles(m)?.p99 ?? null;
+const readRps = (m: LoadTestMetrics): number => m.current_rps ?? 0;
+const readConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
+
+/** Median of `values`, sorted in place; `null` for an empty list. */
+function medianInPlace(values: number[]): number | null {
+	if (values.length === 0) return null;
+	values.sort((a, b) => a - b);
+	const mid = values.length >> 1;
+	return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+}
 
 /**
- * Trailing-median baselines for one series: the median of the
- * {@link BASELINE_TICKS} ticks *before* each tick, computed when that tick
+ * Trailing-median baselines for one series: the median of the readings among
+ * the {@link BASELINE_TICKS} ticks *before* each tick, computed when that tick
  * arrives and never revisited - the values behind it cannot change.
  *
  * `null` for a tick that arrived without that much history in front of it, which
  * is what makes the opening seconds of a run (where every value is its own
- * outlier) produce nothing. A tick that *loses* its lead-in to a later trim is
- * not handled here - it keeps a baseline no rule may use any more, and
- * {@link clipRunsFront} is what stops any of them using it.
+ * outlier) produce nothing, and for one whose lead-in held no reading at all. A
+ * tick that *loses* its lead-in to a later trim is not handled here - it keeps a
+ * baseline no rule may use any more, and {@link clipRunsFront} is what stops any
+ * of them using it.
  */
 function createBaselines(read: Reader) {
 	const cache = new TickCache<number | null>();
-	const scratch = new Array<number>(BASELINE_TICKS);
+	const scratch: number[] = [];
 
 	return {
 		dropBefore(abs: number): void {
@@ -194,14 +204,12 @@ function createBaselines(read: Reader) {
 				cache.push(null);
 				return;
 			}
+			scratch.length = 0;
 			for (let k = 0; k < BASELINE_TICKS; k++) {
-				scratch[k] = read(history[pos - BASELINE_TICKS + k]);
+				const value = read(history[pos - BASELINE_TICKS + k]);
+				if (value != null) scratch.push(value);
 			}
-			scratch.sort((a, b) => a - b);
-			const mid = BASELINE_TICKS >> 1;
-			cache.push(
-				BASELINE_TICKS % 2 === 0 ? (scratch[mid - 1] + scratch[mid]) / 2 : scratch[mid]
-			);
+			cache.push(medianInPlace(scratch));
 		},
 
 		at(abs: number): number | null {
@@ -354,9 +362,10 @@ function createSpikeDetector(): RuleDetector {
 		const base = baselines.at(run.startAbs) ?? 0;
 
 		// The hot span is the spike itself, so this is short whatever the tail did.
+		// Every tick in it was hot, so every one has a reading.
 		run.hotPeak = 0;
 		for (let abs = run.startAbs; abs <= run.endAbs; abs++) {
-			run.hotPeak = Math.max(run.hotPeak, readP99(history[abs - firstAbs]));
+			run.hotPeak = Math.max(run.hotPeak, readP99(history[abs - firstAbs]) ?? 0);
 		}
 
 		if (base !== run.base) {
@@ -375,19 +384,22 @@ function createSpikeDetector(): RuleDetector {
 		run.window = null;
 	}
 
-	/** Walk the recovery tail forward from where the last commit left it. */
+	/**
+	 * Walk the recovery tail forward from where the last commit left it. A second
+	 * with no reading does not end it: nothing completing is not a recovery.
+	 */
 	function advanceTail(run: SpikeRun, history: LoadTestMetrics[], firstAbs: number): void {
 		if (run.tailClosed) return;
 		const lastAbs = firstAbs + history.length - 1;
 		let end = run.tailAbs;
 		while (end < lastAbs) {
 			const next = readP99(history[end + 1 - firstAbs]);
-			if (next <= run.base * LATENCY_RECOVERY_FACTOR) {
+			if (next != null && next <= run.base * LATENCY_RECOVERY_FACTOR) {
 				run.tailClosed = true;
 				break;
 			}
 			end++;
-			run.tailPeak = Math.max(run.tailPeak, next);
+			run.tailPeak = Math.max(run.tailPeak, next ?? 0);
 		}
 		if (end !== run.tailAbs) {
 			run.tailAbs = end;
@@ -406,7 +418,9 @@ function createSpikeDetector(): RuleDetector {
 			const abs = firstAbs + pos;
 			const base = baselines.at(abs);
 			const p99 = readP99(history[pos]);
-			if (base == null || base <= 0 || p99 <= base * LATENCY_SPIKE_FACTOR) return;
+			if (p99 == null || base == null || base <= 0 || p99 <= base * LATENCY_SPIKE_FACTOR) {
+				return;
+			}
 
 			const run = extendOrOpen<SpikeRun>(runs, abs, () => ({
 				startAbs: abs,
