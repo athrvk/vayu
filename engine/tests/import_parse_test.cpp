@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -55,6 +56,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "wide_json.hpp"
 
 namespace vayu::http::routes {
 std::pair<int, nlohmann::json>
@@ -1585,6 +1587,129 @@ TEST (PostmanImport, AFolderNestedFarPastTheDepthBoundIsRefusedNotWalked) {
     {}, {});
     EXPECT_FALSE (parsed.ok ());
     EXPECT_NE (parsed.error.find ("nests deeper"), std::string::npos) << parsed.error;
+}
+
+/// A raw body is sniffed for JSON by parsing it, and the body is whatever the
+/// collection's author pasted (#2497). Mutation check: parse with
+/// `nlohmann::ordered_json::parse` in `postman_raw_body` and this runs for tens
+/// of seconds and fails the budget.
+TEST (PostmanImport, ARawBodyOfAHundredThousandMembersIsSniffedInLinearTime) {
+    const std::string raw = vayu::tests::wide_object_json ();
+    const json document   = {
+        { "info", { { "schema", POSTMAN_SCHEMA } } },
+        { "item",
+          json::array ({ { { "name", "R" },
+          { "request",
+          { { "method", "POST" }, { "url", "https://x.com" },
+          { "body", { { "mode", "raw" }, { "raw", raw } } } } } } }) },
+    };
+    const std::string text = document.dump ();
+
+    const auto started       = std::chrono::steady_clock::now ();
+    const ImportParse parsed = parse_import (text, {}, {});
+    const auto elapsed       = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    const json& body = parsed.result.at ("collections")[0].at ("requests")[0].at ("body");
+    EXPECT_EQ (body.at ("mode"), "json");
+    EXPECT_EQ (body.at ("content"), raw);
+}
+
+/// A GraphQL Variables pane is read as JSON and laid back in as a value (#2497).
+/// Mutation check: parse with `nlohmann::ordered_json::parse` in
+/// `graphql_content` and this runs for tens of seconds and fails the budget.
+TEST (PostmanImport, AGraphqlVariablesPaneOfAHundredThousandMembersIsReadInLinearTime) {
+    const std::string variables = vayu::tests::wide_object_json ();
+    const json document         = {
+        { "info", { { "schema", POSTMAN_SCHEMA } } },
+        { "item",
+                json::array ({ { { "name", "R" },
+                { "request",
+                { { "method", "POST" }, { "url", "https://x.com" },
+                { "body",
+                { { "mode", "graphql" },
+                { "graphql", { { "query", "{ me }" }, { "variables", variables } } } } } } } } }) },
+    };
+    const std::string text = document.dump ();
+
+    const auto started       = std::chrono::steady_clock::now ();
+    const ImportParse parsed = parse_import (text, {}, {});
+    const auto elapsed       = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    const json& body = parsed.result.at ("collections")[0].at ("requests")[0].at ("body");
+    EXPECT_EQ (body.at ("mode"), "graphql");
+    EXPECT_EQ (
+    json::parse (body.at ("content").get<std::string> ()).at ("variables").size (),
+    vayu::tests::WIDE_OBJECT_KEYS);
+}
+
+/// Insomnia's GraphQL body is sniffed for an envelope by parsing it (#2497).
+/// Mutation check: parse with `nlohmann::ordered_json::parse` in
+/// `to_graphql_envelope` and this runs for tens of seconds and fails the
+/// budget.
+TEST (InsomniaImport, AGraphqlBodyOfAHundredThousandMembersIsSniffedInLinearTime) {
+    json envelope          = json::parse (vayu::tests::wide_object_json ());
+    envelope["query"]      = "{ me }";
+    const std::string text = envelope.dump ();
+    const json document    = {
+        { "_type", "export" },
+        { "__export_format", 4 },
+        { "resources",
+           json::array ({ { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } },
+           { { "_id", "req" }, { "_type", "request" }, { "parentId", "wrk" },
+           { "name", "G" }, { "method", "POST" }, { "url", "https://x.com/g" },
+           { "body", { { "mimeType", "application/graphql" }, { "text", text } } } } }) },
+    };
+    const std::string source = document.dump ();
+
+    const auto started       = std::chrono::steady_clock::now ();
+    const ImportParse parsed = parse_import (source, {}, {});
+    const auto elapsed       = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    const json& body = parsed.result.at ("collections")[0].at ("requests")[0].at ("body");
+    EXPECT_EQ (body.at ("mode"), "graphql");
+    EXPECT_EQ (body.at ("content"), text)
+    << "already an envelope, kept as written";
+}
+
+/// A request's `auth` is a client's, and deciding whether its `postman` source
+/// still stands re-reads that block as ordered JSON (#2497). Mutation check:
+/// parse with `nlohmann::ordered_json::parse` in `postman_source_stands` and
+/// this runs for tens of seconds and fails the budget.
+TEST (PostmanImport, AStaleSourceBlockOfAHundredThousandMembersIsJudgedInLinearTime) {
+    json source     = json::parse (vayu::tests::wide_object_json ());
+    source["type"]  = "bearer";
+    const json auth = { { "type", "bearer" }, { "postman", source } };
+
+    const auto started = std::chrono::steady_clock::now ();
+    const json stripped =
+    json::parse (vayu::core::without_stale_postman_source (auth.dump ()));
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_FALSE (stripped.contains ("postman"))
+    << "the block no longer maps to the stored auth, so it is dropped";
+    EXPECT_EQ (stripped.at ("type"), "bearer");
+}
+
+/// The other half of the sniff: raw text that is not JSON stays text.
+TEST (PostmanImport, ARawBodyThatIsNotJsonImportsAsText) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"POST","url":"https://x.com",
+            "body":{"mode":"raw","raw":"{\"a\":"}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("body").at (
+    "mode"),
+    "text");
 }
 
 /// A body's own `disabled: true` ("prevent request body from being sent")

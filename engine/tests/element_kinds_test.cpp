@@ -38,6 +38,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
 #include "vayu/core/elements.hpp"
+#include "wide_json.hpp"
 
 namespace {
 
@@ -788,15 +789,9 @@ TEST_F (ElementKindsTest, AssertJsonPathReportsAnObjectMatchInItsOwnMemberOrder)
 // it quadratically. Mutation check: parse with `ordered_json::parse` in
 // `ensure_parsed_body` and this runs for tens of seconds.
 TEST_F (ElementKindsTest, ExtractJsonReadsTheLastOfAHundredThousandMembersInLinearTime) {
-    constexpr size_t members = 100'000;
-    std::string body         = "{";
-    for (size_t i = 0; i < members; ++i) {
-        body +=
-        (i == 0 ? "\"k" : ",\"k") + std::to_string (i) + "\":" + std::to_string (i);
-    }
-    body += "}";
-    response           = ok_json_response (200, body);
-    ElementContext ctx = make_context ();
+    const std::string body = vayu::tests::wide_object_json ();
+    response               = ok_json_response (200, body);
+    ElementContext ctx     = make_context ();
     // About 1.04 MiB, a little over the default bound a user may raise.
     ctx.max_body_bytes = body.size ();
 
@@ -809,7 +804,7 @@ TEST_F (ElementKindsTest, ExtractJsonReadsTheLastOfAHundredThousandMembersInLine
     ASSERT_EQ (sink.size (), 1u);
     EXPECT_EQ (sink[0].status, "ok") << message_of (sink[0]);
     EXPECT_EQ (variables["collection:v"], "99999");
-    EXPECT_LT (elapsed, std::chrono::seconds (5));
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
 }
 
 TEST_F (ElementKindsTest, MetricJsonPathWildcardRecordsTheBodysFirstMember) {

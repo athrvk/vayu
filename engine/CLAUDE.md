@@ -135,6 +135,23 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   alive for the whole transfer, cleared between transfers on a reused handle).
   Guard: `tests/bounds_primitives_test.cpp`. A subscript is not a token, so for
   the rest of the family the lint gate is the whole guard.
+- **Untrusted JSON text becomes an `ordered_json` through
+  `vayu::utils::parse_ordered_json`** (`utils/ordered_json.hpp`, #2497), never
+  `nlohmann::ordered_json::parse`: that parse places each member with a scan of
+  the members before it, so one object of 100,000 keys is minutes of one core
+  in a Debug build. Pass `ORDERED_JSON_UNBOUNDED` where the caller bounds depth
+  itself (`read_document` does, on the finished tree) and a depth where it
+  does not. Only text the engine wrote itself, at a size no client chose, may
+  keep `ordered_json::parse`; a stored row is not that (its members are a
+  client's), so `engine/src` has no such site today. A file that aliases the
+  type (`using json = nlohmann::ordered_json`) makes `json::parse` the same
+  call, so grep for the alias too. Guard: `tests/wide_json.hpp` builds the
+  input (`wide_object_json`, 100,000 keys) and holds `LINEAR_PARSE_BUDGET`;
+  each entry point (`jsonrpc_wire_body`, `parse_import`, `read_document`, the
+  element pipeline, `postmanProtocolBehavior`, an example's `savedFrom`, the
+  Postman export's stored columns) has a test that fails the budget on the
+  quadratic parse. The rest of a path can still be quadratic after the parse is
+  not (`ordered_map::operator[]` per member); the test measures the whole path.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as

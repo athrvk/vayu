@@ -14,6 +14,9 @@
 #include "vayu/http/jsonrpc_body.hpp"
 
 #include <nlohmann/json.hpp>
+#include <optional>
+
+#include "vayu/utils/ordered_json.hpp"
 
 namespace vayu::http {
 
@@ -39,21 +42,22 @@ std::string jsonrpc_wire_body (const std::string& content) {
         return content;
     }
 
-    // Non-throwing parse, and `ordered_json` rather than `json`: a body arrives
-    // from a user, being unreadable is an expected answer here, and the members
-    // they wrote must come back out in the order they wrote them.
-    auto call = nlohmann::ordered_json::parse (content, nullptr, false);
+    // Non-throwing, linear parse, and `ordered_json` rather than `json`: a body
+    // arrives from a user, being unreadable is an expected answer here, and the
+    // members they wrote must come back out in the order they wrote them. A body
+    // with a hundred thousand members is still one call to complete.
+    auto parsed = utils::parse_ordered_json (content, utils::ORDERED_JSON_UNBOUNDED);
 
     // Three of the four inputs leave by this door, and one test covers all
     // three because they are one question - is there a single call object here
-    // to complete? A parse failure yields a *discarded* value, which is not an
-    // object; a batch array is not an object either; and an object that already
-    // declares its version is finished.
-    if (!call.is_object () || is_full_envelope (call)) {
+    // to complete? A parse failure is no value at all; a batch array is not an
+    // object; and an object that already declares its version is finished.
+    if (!parsed || !parsed->is_object () || is_full_envelope (*parsed)) {
         return content;
     }
 
-    call["jsonrpc"] = kVersion;
+    nlohmann::ordered_json& call = *parsed;
+    call["jsonrpc"]              = kVersion;
     if (!call.contains ("id")) {
         call["id"] = kDefaultId;
     }

@@ -13,8 +13,8 @@
  *        `[n]`, `[*]`, `..name` - shared by `extract.json`, `assert.jsonpath`
  *        and `metric.record` (issue #1514), so the kinds cannot come to read
  *        one path expression two ways. A quoted name runs to the next matching
- *        quote and has no escape for it. Also the parse that builds the tree
- *        the subset walks.
+ *        quote and has no escape for it. The tree the subset walks is built by
+ *        `vayu::utils::parse_ordered_json` (`vayu/utils/ordered_json.hpp`).
  *
  * Source-tree-local (not under `include/vayu/`): nothing outside
  * `engine/src/core/elements/` needs this subset.
@@ -47,19 +47,6 @@ struct JsonPathStep {
  */
 [[nodiscard]] std::optional<std::string>
 json_path_problem (const nlohmann::json& holder, std::string_view key, std::string_view label);
-
-/**
- * @p text as an `ordered_json`, in time linear in its length, or `nullopt`
- * when it is not one strict JSON document or a node sits deeper than
- * @p max_depth (measured as `json_within_depth` measures it). A repeated key
- * keeps its first position and its last value, as `ordered_json::parse`
- * does; that parse finds a key with a linear scan of the members already
- * read, so an object of n members costs O(n^2) there, and the text here is
- * whatever a server chose to send. The depth is checked while the tree is
- * built, so a deep body costs the bound in memory rather than its length.
- */
-[[nodiscard]] std::optional<nlohmann::ordered_json>
-parse_ordered_json (std::string_view text, size_t max_depth);
 
 /**
  * Every node the compiled path reaches, in encounter order. The tree is an
