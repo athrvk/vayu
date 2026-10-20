@@ -14,13 +14,13 @@
  *
  * Visible order comes from the DOM (`[role="treeitem"]` in document order):
  * collapsed subtrees are not rendered, so the NodeList is exactly the rows a
- * user can see, in the order they see them. That avoids maintaining a second,
- * flattenable copy of the tree purely for navigation.
+ * user can see, in the order they see them - in the collection tree, the list
+ * `flattenVisibleRows` built - with no second copy kept purely for navigation.
  *
  * **Depth, though, comes from `aria-level`** - `parentRow` in `tree-focus.ts`,
  * the same reading the delete refocus uses (#1237). Order is the one thing the
  * DOM states plainly here; hierarchy it does not, since a row's children are
- * rendered beside it rather than within it and one tree renders no nesting at
+ * rendered beside it rather than within it and two trees render no nesting at
  * all. Every row of every consumer already announces its level, because that
  * same shape is why the hierarchy has to be announced. A consumer that omits it
  * gets a tree of roots: ArrowLeft moves nowhere and `*` calls every row a

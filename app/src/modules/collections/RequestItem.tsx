@@ -164,10 +164,9 @@ function RequestItemRow({ request, collectionId, depth = 1, posInSet, setSize }:
 				role="treeitem"
 				tabIndex={-1}
 				aria-selected={isSelected}
-				// The hierarchy a screen reader announces. Without these every row in
-				// the tree reads as a flat list item: the group wrapper that nests a
-				// folder's children is not a treeitem, so depth is invisible unless
-				// each row states it. Level is 1-based, so a root row is level 1.
+				// The hierarchy a screen reader announces. Every row is a sibling in
+				// one flat list, so depth is invisible unless each row states it.
+				// Level is 1-based, so a root row is level 1.
 				aria-level={depth + 1}
 				aria-posinset={posInSet}
 				aria-setsize={setSize}

@@ -23,7 +23,8 @@ import {
 	DialogCancelButton,
 	ICON_MOTION,
 } from "@/components/ui";
-import CollectionItem from "./CollectionItem";
+import CollectionTreeRows from "./CollectionTreeRows";
+import { flattenVisibleRows } from "./tree-rows";
 import ExportSpecDialog from "./ExportSpecDialog";
 import ExportPostmanDialog from "./ExportPostmanDialog";
 import RunCollectionDialog from "./RunCollectionDialog";
@@ -37,7 +38,6 @@ import type { CollectionTreeHandlers, CollectionTreeState } from "./context/Coll
 import { CollectionTreeProviders } from "./context/CollectionTreeProviders";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
 import type { Request } from "@/types";
-import { compareTreeOrder } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
@@ -77,21 +77,6 @@ export default function CollectionTree() {
 		[requestsByCollection]
 	);
 
-	/*
-	 * Roots are the collections with no parent *and* the ones whose parent is not
-	 * loaded. An orphan used to match neither the roots filter nor any parent's
-	 * children, so it rendered nowhere at all - which is precisely the shape a bad
-	 * or half-applied reparent leaves behind, and the user saw a collection
-	 * silently disappear rather than a tree that looked wrong. Degrading visibly
-	 * is the point: the row is reachable, so it can be moved or deleted.
-	 */
-	const rootCollections = useMemo(() => {
-		const loadedIds = new Set(collections.map((c) => c.id));
-		return collections
-			.filter((c) => !c.parentId || !loadedIds.has(c.parentId))
-			.sort(compareTreeOrder);
-	}, [collections]);
-
 	const { revealEntity } = useRevealActiveSelection(treeRef, {
 		selectedCollectionId,
 		selectedRequestId,
@@ -106,6 +91,18 @@ export default function CollectionTree() {
 		requestsByCollection,
 		getRequestsByCollection,
 	});
+
+	const creatingSubfolder = rowState.creatingSubfolder;
+	const rows = useMemo(
+		() =>
+			flattenVisibleRows({
+				collections,
+				getRequestsByCollection,
+				expandedCollectionIds,
+				creatingSubfolder,
+			}),
+		[collections, getRequestsByCollection, expandedCollectionIds, creatingSubfolder]
+	);
 
 	/*
 	 * The toolbar's "+" asks the same question every other "New request" entry
@@ -395,12 +392,12 @@ export default function CollectionTree() {
 						/>
 					)}
 
-				{/* Root-level collections (no parent loaded) - sorted by order, scrollable.
-			    role="tree" + roving tabindex: the whole tree is one tab stop and
-			    arrow keys move between rows (see useRovingTreeFocus).
-			    Everything a row needs beyond its own entity comes from the
-			    contexts - see CollectionTreeContext for why it is not props. */}
-				{!isLoadingCollections && rootCollections.length > 0 && (
+				{/* Every visible row, one flat list in `flattenVisibleRows` order.
+				    role="tree" + roving tabindex: the whole tree is one tab stop and
+				    arrow keys move between rows (see useRovingTreeFocus).
+				    Everything a row needs beyond its own entity comes from the
+				    contexts - see CollectionTreeContext for why it is not props. */}
+				{!isLoadingCollections && rows.length > 0 && (
 					<div className="flex-1 min-h-0">
 						{/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- roving tabindex - the tree is never a tab stop, useRovingTreeFocus.ts:118-123 seeds one row's `tabIndex={0}` and moves it */}
 						<div
@@ -408,22 +405,14 @@ export default function CollectionTree() {
 							aria-label="Collections"
 							onKeyDown={treeFocus.onKeyDown}
 							onFocus={treeFocus.onFocus}
-							className="space-y-0.5"
+							className="select-none"
 						>
 							<CollectionTreeProviders
 								handlers={treeHandlers}
 								state={treeState}
 								folderDraft={folderDraft}
 							>
-								{rootCollections.map((collection, index) => (
-									<CollectionItem
-										key={collection.id}
-										collection={collection}
-										depth={0}
-										posInSet={index + 1}
-										setSize={rootCollections.length}
-									/>
-								))}
+								<CollectionTreeRows rows={rows} />
 							</CollectionTreeProviders>
 						</div>
 					</div>
@@ -439,8 +428,8 @@ export default function CollectionTree() {
 				 * markup). Keyboard move announcements are the first thing that will
 				 * write here; until then the region exists and says nothing.
 				 *
-				 * Outside `role="tree"`: a tree's children are treeitems and groups,
-				 * and this is neither.
+				 * Outside `role="tree"`: a tree's children are treeitems, and this is
+				 * not one.
 				 */}
 				<div
 					role="status"

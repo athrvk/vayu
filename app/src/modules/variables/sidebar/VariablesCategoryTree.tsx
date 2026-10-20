@@ -109,7 +109,7 @@ const SCOPE_SECTIONS = 3;
  * of the header rather than a sibling of it. Named because it was four
  * different paddings before (#1372) - `px-3`, `pl-6`, `px-1`, and the rows'
  * own `pl-12.5` - which put up to four left edges under one expanded header.
- * The collection tree derives the same rule from its depth (`childInsetPx`);
+ * The collection tree derives the same rule from its depth (`rowInsetPx`);
  * this tree is exactly two levels deep, so the value is a constant rather than
  * a function of one.
  *

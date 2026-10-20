@@ -8,12 +8,10 @@
 /**
  * Collection tree context
  *
- * Every value a tree row needs that is not the row itself. `CollectionItem`
- * renders itself recursively, so anything threaded as a prop had to be
- * re-listed at four sites - the tree's map, the item's prop list, its
- * destructure, and its recursive call. Thirty of the item's thirty-three props
- * were the same object arriving at every depth, so a single new value (a drag
- * id, a drop target) cost four edits before it did anything.
+ * Every value a tree row needs that is not the row itself. Thirty-odd values
+ * are the same for every row, and as props each had to be re-listed at every
+ * site between the tree and the row, so a single new value (a drag id, a drop
+ * target) cost several edits before it did anything.
  *
  * The context carries exactly that shared slice. What stays a prop is what
  * genuinely differs per row: the entity, its depth, and its position in the
@@ -87,8 +85,7 @@ export interface CollectionTreeDragState {
 
 /**
  * The drag-and-drop slice, phase 3 of #364 (#367). It arrives through the
- * context rather than as props because `CollectionItem` renders itself, so
- * every one of these would otherwise be re-threaded at each depth.
+ * context rather than as props because it is the same for every row.
  *
  * Every member keeps one identity for the life of the tree (#2543): the volatile
  * part of a drag is `dragState`, subscribed to, never read off this object.
@@ -180,7 +177,7 @@ export interface CollectionTreeHandlers extends CollectionTreeCrudHandlers {
 }
 
 export interface CollectionTreeState extends CollectionTreeCrudState {
-	/** Every loaded collection - a row filters it for its own children. */
+	/** Every loaded collection - what a row's count and its path are read from. */
 	allCollections: Collection[];
 	expandedCollectionIds: Set<string>;
 	selectedCollectionId: string | null;

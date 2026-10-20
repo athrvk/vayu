@@ -15,7 +15,7 @@ import { Button, DialogCancelButton, Input } from "@/components/ui";
 import { isCommitEnter } from "@/lib/keyboard";
 
 /**
- * The inline "new collection" form a folder row opens inside its group.
+ * The inline "new collection" form a folder row opens, as the first row under it.
  *
  * A component of its own, not markup in `CollectionItem`, because it is the one
  * reader of the draft name: that string changes on every keystroke, and a folder

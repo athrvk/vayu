@@ -57,10 +57,10 @@ function levelOf(row: HTMLElement): number {
  * with whichever treeitem an ancestor holds first: the group's own first row,
  * which is a preceding *sibling* of every row after it. That walk sent
  * ArrowLeft to the top of a list instead of out of it (#1237). Two of the three
- * trees defeat any shape-based rule outright - the schema explorer renders every
- * row, at every depth, as a direct child of `role="tree"` - while `aria-level`
- * is on every row of all three, because the same sibling shape is why the
- * hierarchy has to be announced rather than inferred.
+ * trees defeat any shape-based rule outright - the schema explorer and the
+ * collection tree render every row, at every depth, as a sibling - while
+ * `aria-level` is on every row of all three, because the same sibling shape is
+ * why the hierarchy has to be announced rather than inferred.
  *
  * Takes the row list rather than the tree: both callers already hold one, and
  * re-querying per row turned the `*` key into a DOM sweep per candidate.

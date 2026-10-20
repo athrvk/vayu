@@ -2213,15 +2213,17 @@ header band, body below it.
 - **Non-row content inside a level takes a child row's left edge.** A
   placeholder, an inline form, a loading skeleton and an inline error all stand
   in for the rows that are not there, so they start where those rows would:
-  `childInsetPx(depth)` in the collections tree, the named `GROUP_CHILD_INSET`
-  in the two-level variables tree, and `rowInsetPx(0)` - a root row's own inset,
-  there being no parent row to be a child of - in the GraphQL schema explorer,
-  whose search results are one flat level. Each carrying its own
-  `px-*` is how one expanded folder came to show up to five different left
-  edges, with "Empty collection" left of its own parent's label (#1372). An empty
-  level also has to _say_ so: its group holds no `treeitem`, so the folder row
-  carries `aria-describedby` pointing at the placeholder rather than the
-  placeholder taking a role inside a group that owns rows.
+  in the collections tree they are rows of their own at the children's depth
+  (`flattenVisibleRows`), so `rowInsetPx(depth)` places them; the named
+  `GROUP_CHILD_INSET` in the two-level variables tree; and `rowInsetPx(0)` - a
+  root row's own inset, there being no parent row to be a child of - in the
+  GraphQL schema explorer, whose search results are one flat level. Each
+  carrying its own `px-*` is how one expanded folder came to show up to five
+  different left edges, with "Empty collection" left of its own parent's label
+  (#1372). An empty
+  level also has to _say_ so: nothing under the folder is a `treeitem`, so the
+  folder row carries `aria-describedby` pointing at the placeholder rather than
+  the placeholder taking a role in a tree whose children are rows.
 - **A group heading is a label, not a placeholder - and it follows the rule
   anyway.** The schema explorer's `Query` / `Mutation` / `Types` eyebrows were
   the one case #1372 left open, because an uppercase label over a flat group
@@ -2383,8 +2385,16 @@ The collection tree follows the WAI-ARIA treeview pattern: **the whole tree is
 one tab stop**. Previously every row and every control in it was a stop - a
 workspace with 2 collections and 4 requests cost 17 presses to tab past.
 
-- Container: `role="tree"`. Rows: `role="treeitem"`, `aria-expanded` on
-  collections, `aria-selected` for the open entity.
+- Container: `role="tree"`, holding every visible row as **one flat list** in
+  the order `flattenVisibleRows` (`tree-rows.ts`) gives it (#2543): no row
+  renders another, and there is no `role="group"`. Rows: `role="treeitem"`,
+  `aria-expanded` on collections, `aria-selected` for the open entity. The new
+  folder form and the "Empty collection" line are rows of the list too, but not
+  treeitems.
+- **The pitch is per row.** Every row is `h-8` and its wrapper carries the gap
+  above it: `mt-0.5` between rows, `mt-1` above the first row inside an expanded
+  folder (`rowSpacingAbove`) - the spacing the nested groups' `space-y-0.5` and
+  `mt-1` drew, said from depth alone.
 - Rows render `tabIndex={-1}`; `useRovingTreeFocus` promotes exactly one to `0`.
 - Keys: Up/Down move, Home/End jump, Right expands then steps in, Left collapses
   then moves to the parent, Enter/Space opens, **F2** renames, **Delete /
@@ -2552,10 +2562,12 @@ which attribute identifies its rows and where its last resort is (#1279).
 
 **Order comes from the DOM; hierarchy comes from `aria-level`.** Order the DOM
 states plainly - `[role="treeitem"]` in document order is exactly the rows a
-user can see, since collapsed subtrees are not rendered. Parentage it does not:
-a row's children are a **sibling** of that row inside a shared wrapper, not
-nested within it, so `closest()` finds nothing and a walk up the ancestors takes
-whichever treeitem an ancestor holds first - a group's own first row, which is a
+user can see, since collapsed subtrees are not rendered; in the collection tree
+it is the order `flattenVisibleRows` lists them in. Parentage it does not: a
+row's children are rendered **beside** it, never nested within it - in the
+collection tree every row is a sibling in one flat list - so `closest()` finds
+nothing. When the children sat in a shared wrapper, a walk up the ancestors took
+whichever treeitem an ancestor held first - a group's own first row, which is a
 preceding *sibling* of every row after it. Under that walk Left moved to the top
 of a list instead of out of it, and self-corrected on the next press, so it read
 as hesitation rather than as breakage (#1237). One function answers the question
@@ -2570,14 +2582,14 @@ schema explorer is why the level and not the shape is the source - it renders
 every row, at every depth, as a direct child of the tree, so no DOM rule can
 answer for it at all.
 
-**That same shape is why the hierarchy has to be stated, not inferred.** A
-sibling group is not a child group, so the accessibility tree read as a flat
-list of rows. Every row carries `aria-level` (1-based), `aria-posinset` and
-`aria-setsize`; the children wrapper is `role="group"` and the folder row claims
-it with `aria-owns`, which buys the ownership without moving the DOM the
-roving-focus order and the hit-area rules depend on. Folders and requests inside
-one group are **one** set - the requests continue the folders' numbering, or two
-adjacent rows both announce "1 of 1".
+**That same shape is why the hierarchy has to be stated, not inferred.** Rows
+that are siblings in the DOM read as a flat list of rows. Every row carries
+`aria-level` (1-based), `aria-posinset` and `aria-setsize`, and in the
+collection tree those three are the whole of the hierarchy: a flat list holds no
+`role="group"` to own a folder's children, so there is none, and no `aria-owns`
+tying one to its folder (both went with the nesting, #2543). Folders and
+requests under one parent are **one** set - the requests continue the folders'
+numbering, or two adjacent rows both announce "1 of 1".
 
 `CollectionTree` also renders one polite live region (`data-tree-live`). It
 shipped empty, ahead of anything that wrote to it, on purpose: a live region
