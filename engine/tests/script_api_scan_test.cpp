@@ -243,8 +243,13 @@ TEST (ScriptApiScan, AnAwaitIsNotNamed) {
     }
 }
 
+// `pm.visualizer` is accepted and warns (#2577), so a script using it is not
+// named.
+TEST (ScriptApiScan, PmVisualizerIsNotNamed) {
+    EXPECT_EQ (names_in ("pm.visualizer.set(t, d); pm.visualizer.clear();"), Names{});
+}
+
 TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
-    EXPECT_EQ (names_in ("pm.visualizer.set(t, d);"), Names{ "pm.visualizer" });
     EXPECT_EQ (names_in ("pm.variables.set('a', 1);"), Names{ "pm.variables.set" });
     EXPECT_EQ (names_in ("pm.test.skip('later', () => {});"), Names{ "pm.test.skip" });
     EXPECT_EQ (names_in ("await pm.execution.runRequest('uid');"),

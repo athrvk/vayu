@@ -2173,8 +2173,9 @@ const ImportOptions& options = {}) {
  * the list.
  */
 TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
-    const std::string items = request_with_script ("Legacy tests",
-                              R"j(["tests[\"ok\"] = responseCode.code === 200;"])j") +
+    const std::string items =
+    request_with_script ("Legacy tests",
+    R"j(["tests[\"ok\"] = responseCode.code === 200;","pm.visualizer.set('<p></p>', {});"])j") +
     "," + request_with_script ("Library", R"j(["const h = CryptoJS.MD5('x');"])j") + "," +
     request_with_script ("Module", R"j(["const c = require('crypto-js');"])j") + "," +
     request_with_script (
@@ -2189,7 +2190,8 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     const ImportParse parsed = parse_postman_items (items);
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
 
-    // Postman's pre-pm.* globals run (#2577), so "Legacy tests" is not named.
+    // Postman's pre-pm.* globals and pm.visualizer run (#2577), so "Legacy
+    // tests" is not named.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"Library","names":["CryptoJS"]},

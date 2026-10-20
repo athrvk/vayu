@@ -405,6 +405,10 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
+// `pm.visualizer` (pm_visualizer.cpp): Postman's calls, accepted with a
+// console warning.
+void setup_pm_visualizer (JSContext* ctx, JSValue pm);
+
 // `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
 void setup_pm_execution (JSContext* ctx, JSValue pm);
 void setup_pm_metrics (JSContext* ctx, JSValue pm);

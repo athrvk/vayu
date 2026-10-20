@@ -492,7 +492,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },
 // `pm.*` members Vayu does not have.
-{ "pm.visualizer", Anchor::Bare, "pm.visualizer", "" },
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
 { "pm.execution.runRequest", Anchor::Bare, "pm.execution.runRequest", "" },

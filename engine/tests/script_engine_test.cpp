@@ -8214,3 +8214,100 @@ TEST_F (ScriptEngineTest, AScriptThatDeclaresALegacyNameItselfKeepsItsOwn) {
     ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
+
+// ============================================================================
+// pm.visualizer (#2577)
+// ============================================================================
+//
+// Accepted and not drawn: before this, `pm.visualizer.set` read a member of
+// undefined, and the script ended there with its remaining tests unrun.
+
+namespace {
+
+/// The console lines at Warn level, in order.
+std::vector<std::string> warnings_of (const vayu::ScriptResult& result) {
+    std::vector<std::string> out;
+    for (const auto& entry : result.console_output) {
+        if (entry.level == vayu::ConsoleLevel::Warn) {
+            out.push_back (entry.message);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+// Postman's own snippet: the call is accepted, warns once, and the pm.test
+// after it still runs and passes.
+TEST_F (ScriptEngineTest, VisualizerSetDoesNotAbortTheScriptAndWarns) {
+    auto result = engine.execute_test (R"JS(
+        pm.visualizer.set("<p>{{name}}</p>", {name: "x"});
+        pm.test("runs after the visualizer", function () {
+            pm.expect(pm.response.code).to.equal(200);
+        });
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_EQ (result.tests[0].name, "runs after the visualizer");
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    const auto warnings = warnings_of (result);
+    ASSERT_EQ (warnings.size (), 1u);
+    EXPECT_NE (warnings[0].find ("visualizer not rendered"), std::string::npos)
+    << warnings[0];
+}
+
+// Postman's three-argument form, the options object its documentation shows,
+// and a template alone: all accepted, one warning each.
+TEST_F (ScriptEngineTest, VisualizerSetAcceptsPostmansArgumentShapes) {
+    auto result = engine.execute_test (R"JS(
+        pm.visualizer.set("<p>a</p>");
+        pm.visualizer.set("<p>{{x}}</p>", pm.response.json());
+        pm.visualizer.set("<p>{{x}}</p>", { x: [1, 2] }, { helpers: {}, noEscape: true });
+        pm.visualizer.set("<p></p>", undefined, undefined);
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (warnings_of (result).size (), 4u);
+}
+
+TEST_F (ScriptEngineTest, VisualizerClearDoesNotThrowAndWarns) {
+    auto result = engine.execute_test (R"JS(
+        pm.visualizer.clear();
+        pm.test("runs after clear", function () {});
+    )JS",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed);
+    const auto warnings = warnings_of (result);
+    ASSERT_EQ (warnings.size (), 1u);
+    EXPECT_NE (warnings[0].find ("visualizer not rendered"), std::string::npos)
+    << warnings[0];
+}
+
+// A template that is not a string is a script bug, refused by name as the
+// other pm calls refuse a bad argument, and records no warning for a call that
+// did not happen.
+TEST_F (ScriptEngineTest, VisualizerSetRefusesATemplateThatIsNotAString) {
+    for (const char* call : { "pm.visualizer.set();", "pm.visualizer.set(42, {});",
+         "pm.visualizer.set({ html: '<p></p>' });", "pm.visualizer.set(null);" }) {
+        auto result = engine.execute_test (call, request, response, env);
+        EXPECT_FALSE (result.success) << call;
+        EXPECT_NE (result.error_message.find ("pm.visualizer.set"), std::string::npos)
+        << call << ": " << result.error_message;
+        EXPECT_TRUE (warnings_of (result).empty ()) << call;
+    }
+}
+
+// A pre-request script has no response and still meets the call.
+TEST_F (ScriptEngineTest, VisualizerIsAvailableInAPreRequestScript) {
+    auto result = engine.execute_prerequest (
+    "pm.visualizer.set('<p></p>', {}); pm.visualizer.clear();", request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (warnings_of (result).size (), 2u);
+}

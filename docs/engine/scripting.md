@@ -2921,6 +2921,20 @@ The script runs inside a function, so a script's own `const data` or
 `let responseBody` is a local that shadows the global, and an assignment with
 no declaration (`data = ...`) writes the global, sloppy mode's rule.
 
+### Visualizer (`pm.visualizer`)
+
+`pm.visualizer.set(template, data, options)` and `pm.visualizer.clear()`
+(#2577, `engine/src/runtime/pm/pm_visualizer.cpp`) are bound so a Postman
+script that draws a visualization keeps running: Postman renders a Handlebars
+template in its Visualize tab and Vayu has no such tab. A call is accepted,
+pushes one `console.warn` line beginning `visualizer not rendered`, and returns
+`undefined`. Nothing is stored: the template and data are not read, there is no
+trace field for them, and the line in the script's console output is the only
+record. `set` refuses a first argument that is not a string with a `TypeError`
+and takes `data` and `options` as given. Both calls exist in a
+pre-request and a test script alike. The import scan no longer names
+`pm.visualizer`.
+
 ## What the editor offers, and where it comes from
 
 Everything the script editor advertises - completions, hover documentation and

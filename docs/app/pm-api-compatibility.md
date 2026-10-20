@@ -44,6 +44,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Timers              | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` - globals, run before the script ends without waiting, see below |
 | Legacy `postman`    | `postman.setEnvironmentVariable` and the other ten pre-`pm.*` helper methods, each an alias of the `pm.*` method Postman names - see [The legacy `postman` object](#the-legacy-postman-object) |
 | Legacy globals      | `tests[...]`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration` and `request`, each read off the `pm.*` member Postman names - see [Postman's legacy globals](#postmans-legacy-globals) |
+| Visualizer          | `pm.visualizer.set(template, data?, options?)`, `.clear()` - accepted and not drawn, one console warning per call - see [Visualizer](#visualizer-pmvisualizer) |
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
@@ -1214,6 +1215,27 @@ Postman's rules carry over with them:
 paragraph describing the status, from its `http-reasons` table, which Vayu does
 not carry; it is the empty string, Postman's own fallback.
 
+### Visualizer (`pm.visualizer`)
+
+Postman's `pm.visualizer.set(template, data, options)` draws a Handlebars
+template over the response in its Visualize tab. Vayu has no such tab, so the
+calls are accepted and draw nothing (#2577) - a script that has one keeps
+running, and the `pm.test` calls after it still run:
+
+```javascript
+pm.visualizer.set("<p>{{name}}</p>", { name: pm.response.json().name });
+pm.test("runs after the visualizer", function () {
+    pm.expect(pm.response.code).to.equal(200);
+});
+pm.visualizer.clear();
+```
+
+Each call leaves one `console.warn`, `visualizer not rendered: ...`, in either
+script; nothing else is recorded, and the template and its data are not kept.
+`template` must be a string: anything else (or no argument)
+throws a `TypeError` naming `pm.visualizer.set`. `data` and `options` are
+accepted as given and not read. `clear()` takes no argument.
+
 ---
 
 ## Not (yet) supported
@@ -1239,7 +1261,10 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   `assimilate`, `populate`, `clear`, `eachParent`, `toString`. Only the read
   half and the three mutators named under [Header methods](#header-methods)
   ship
-- `pm.visualizer`, `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
+- Drawing a visualization: `pm.visualizer.set` and `.clear` are accepted and
+  warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
+  show the template in
+- `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
 - **`require(...)`, `script.packages` and the libraries Postman bundles** -
   `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
   The sandbox has no module system and none of those libraries; `pm.crypto` covers

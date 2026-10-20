@@ -1916,6 +1916,36 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_metrics_rate" } });
 
     // ========================================
+    // pm.visualizer - Postman's calls, accepted and not rendered (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "pm.visualizer" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.visualizer" }, { "detail", "Postman's Visualize tab, not drawn here" },
+    { "documentation",
+    "Postman draws a template over the response in its Visualize tab. Vayu "
+    "has no such tab, so both calls are accepted - a script that has one "
+    "keeps running, tests included - and each leaves a console warning, "
+    "\"visualizer not rendered\". Nothing is kept." },
+    { "sortText", "0_pm_visualizer" } });
+
+    completions.push_back ({ { "label", "pm.visualizer.set" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.visualizer.set(\"${1:template}\", ${2:data})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.visualizer.set(template: string, data?: any, options?: any): void" },
+    { "documentation",
+    "Accepts Postman's call and draws nothing: the template must be a string "
+    "(anything else throws a TypeError), and data and options are not read. "
+    "One console warning, \"visualizer not rendered\", per call.\n\nExample:\n"
+    "pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });" },
+    { "sortText", "1_pm_visualizer_set" } });
+
+    completions.push_back ({ { "label", "pm.visualizer.clear" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.visualizer.clear()" }, { "detail", "pm.visualizer.clear(): void" },
+    { "documentation",
+    "Accepts Postman's call; there is nothing drawn to clear. One console "
+    "warning, \"visualizer not rendered\", per call." },
+    { "sortText", "1_pm_visualizer_clear" } });
+
+    // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it
     // ========================================
     completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },

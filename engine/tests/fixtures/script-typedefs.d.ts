@@ -2117,6 +2117,22 @@ declare const pm: {
 		 */
 		unset(name: string): void;
 	};
+	/**
+	 * Postman draws a template over the response in its Visualize tab. Vayu has no such tab, so both calls are accepted - a script that has one keeps running, tests included - and each leaves a console warning, "visualizer not rendered". Nothing is kept.
+	 */
+	visualizer: {
+		/**
+		 * Accepts Postman's call; there is nothing drawn to clear. One console warning, "visualizer not rendered", per call.
+		 */
+		clear(): void;
+		/**
+		 * Accepts Postman's call and draws nothing: the template must be a string (anything else throws a TypeError), and data and options are not read. One console warning, "visualizer not rendered", per call.
+		 * 
+		 * Example:
+		 * pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });
+		 */
+		set(template: string, data?: any, options?: any): void;
+	};
 };
 
 /**

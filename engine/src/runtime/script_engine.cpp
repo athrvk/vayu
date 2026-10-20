@@ -572,6 +572,9 @@ void setup_pm_object (JSContext* ctx) {
     // same way and for the same reason as pm.execution above.
     setup_pm_metrics (ctx, pm);
 
+    // pm.visualizer - Postman's calls, accepted and not rendered (#2577).
+    setup_pm_visualizer (ctx, pm);
+
     // pm.sendRequest - always bound, even when the capability is off, so a
     // script that calls it gets a sentence explaining why rather than
     // "not a function".

@@ -332,6 +332,25 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 		).toBe("");
 		expect(errorsOf("postman.getResponseCookie('session').size;")).toContain("TS2339");
 	});
+
+	/*
+	 * `pm.visualizer` is accepted and warns (#2577), so Postman's calls draw
+	 * nothing - and the template is typed a string, where the engine refuses
+	 * anything else.
+	 */
+	it("declares pm.visualizer as the calls Postman makes", () => {
+		expect(
+			errorsOf(
+				[
+					"pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });",
+					"pm.visualizer.set('<p></p>');",
+					"pm.visualizer.set('<p></p>', pm.response.json(), { noEscape: true });",
+					"pm.visualizer.clear();",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("pm.visualizer.set(42);")).toContain("TS2345");
+	});
 });
 
 /*
