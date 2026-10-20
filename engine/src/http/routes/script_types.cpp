@@ -99,8 +99,7 @@ bool is_language_chain (const std::string& name) {
 
 /**
  * @brief Names a script may reach for that this sandbox does not have: the host
- *        globals of a browser or Node, and Postman's pre-`pm.*` globals and
- *        bundled libraries.
+ *        globals of a browser or Node, and the libraries Postman bundles.
  *
  * Declared, rather than simply left out, so that using one is an *error the
  * editor can explain* instead of silence. The app suppresses `Cannot find name`
@@ -109,12 +108,6 @@ bool is_language_chain (const std::string& name) {
  * call, member access or assignment that follows is an error ("not callable",
  * "property does not exist"), and the documentation below is what hover shows
  * in place of the error text.
- *
- * `never` is assignable to every type, so a bare read passes: passing a `never`
- * to `JSON.parse` is no error. The three legacy names whose only use is as a
- * bare value (`responseBody`, `responseTime`, `iteration`) are `void` instead,
- * which is assignable to nothing: passing it, comparing it, adding to it or
- * testing it for truthiness is an error.
  *
  * Declaring a name does not take it from a script that declares it itself:
  * the editor compiles each script as a module (`moduleDetection` in
@@ -128,7 +121,6 @@ bool is_language_chain (const std::string& name) {
 struct AbsentGlobal {
     const char* name;
     const char* reason;
-    const char* type = "never";
 };
 constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "fetch",
@@ -160,50 +152,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "alert",
 "Not a browser. Use console.log, shown in the response pane's "
 "Console tab." },
-
-// Postman's pre-`pm.*` globals. The replacements are Postman's own
-// (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox), each one a `pm.*` member
-// this engine has.
-{ "tests",
-"Postman's pre-pm.* assertion object, written tests[\"name\"] = bool. Use "
-"pm.test(\"name\", function () { ... })." },
-{ "responseBody",
-"Postman's pre-pm.* global for the response body. Use pm.response.text() "
-"for the text, or pm.response.json() for the parsed body.",
-"void" },
-{ "responseCode",
-"Postman's pre-pm.* global for the status, read as responseCode.code. Use "
-"pm.response.code for the number and pm.response.reason() for the reason "
-"phrase." },
-{ "responseHeaders",
-"Postman's pre-pm.* global for the response headers. Use "
-"pm.response.headers.get(name), which is case-insensitive, or "
-"pm.response.headers.toObject()." },
-{ "responseCookies",
-"Postman's pre-pm.* global for the response cookies. Use "
-"pm.response.cookies for the cookies this response set, or "
-"pm.cookies.get(name) for the stored session." },
-{ "responseTime",
-"Postman's pre-pm.* global for the response time in milliseconds. Use "
-"pm.response.responseTime.",
-"void" },
-{ "environment",
-"Postman's pre-pm.* environment object. Use pm.environment.get(name) and "
-"pm.environment.set(name, value)." },
-{ "globals",
-"Postman's pre-pm.* globals object. Use pm.globals.get(name) and "
-"pm.globals.set(name, value)." },
-{ "data",
-"Postman's pre-pm.* iteration data. Use pm.iterationData.get(name), or "
-"pm.iterationData.toObject() for the whole row; it is undefined outside a "
-"data-driven run." },
-{ "iteration",
-"Postman's pre-pm.* iteration index. Use pm.info.iteration, which is "
-"undefined outside a run.",
-"void" },
-{ "request",
-"Postman's pre-pm.* request object. Use pm.request - its url, method, "
-"headers and body." },
 
 // The libraries Postman bundles. Its replacement for most is a require() this
 // sandbox has no loader for, so each says what Vayu has instead.
@@ -847,9 +795,7 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
     out += absent.reason;
     out += "\n */\ndeclare const ";
     out += absent.name;
-    out += ": ";
-    out += absent.type;
-    out += ";\n";
+    out += ": never;\n";
 }
 
 } // namespace

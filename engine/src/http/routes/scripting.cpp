@@ -2080,6 +2080,96 @@ nlohmann::json get_script_completions () {
         { "documentation", method.documentation }, { "sortText", "2_postman_" + name } });
     }
 
+    // ========================================
+    // Postman's pre-pm.* globals, read off pm when the script starts (#2577)
+    // ========================================
+    struct LegacyGlobal {
+        const char* label;
+        int kind;
+        const char* detail;
+        const char* documentation;
+    };
+    constexpr auto LEGACY_GLOBALS = std::to_array<LegacyGlobal> ({
+    { "tests", KIND_VARIABLE, "object",
+    "Postman's legacy assertion object: each property assigned is a test "
+    "result, named by its key and passed when its value is truthy.\n\n"
+    "tests[\"Status code is 200\"] = responseCode.code === 200;\n\nThe "
+    "object is read once the script has finished, in key order, after the "
+    "pm.test results: a key assigned twice is one result, with the last "
+    "value. pm.test(name, fn) is what to write in a new script." },
+    { "responseBody", KIND_VARIABLE, "string",
+    "The response body as text, what pm.response.text() answers.\n\nA test "
+    "script only, as in Postman: a pre-request script has no response, and "
+    "no responseBody." },
+    { "responseCode", KIND_VARIABLE, "object",
+    "The response status in Postman's legacy shape: code, name, detail and "
+    "standardName.\n\nA test script only, as in Postman." },
+    { "responseCode.code", KIND_FIELD, "number", "The status code, pm.response.code." },
+    { "responseCode.name", KIND_FIELD, "string", "The reason phrase, what pm.response.reason() answers." },
+    { "responseCode.detail", KIND_FIELD, "string",
+    "Always the empty string: Postman fills it with a description of the "
+    "status that Vayu does not carry." },
+    { "responseCode.standardName", KIND_FIELD, "string",
+    "The registered reason phrase for the code, whatever the server sent." },
+    { "responseHeaders", KIND_VARIABLE, "object",
+    "The response headers as an object of name to value, each name as the "
+    "server sent it, and the last value of a repeated one. The lookup is "
+    "case-sensitive, as in Postman: responseHeaders['Content-Type'] misses a "
+    "content-type header, and a load run's sampled response keeps only "
+    "lower-cased names. postman.getResponseHeader(name) and "
+    "pm.response.headers.get(name) ignore case.\n\nA test script only, as in "
+    "Postman." },
+    { "responseTime", KIND_VARIABLE, "number",
+    "The response time in milliseconds, pm.response.responseTime.\n\nA test "
+    "script only, as in Postman." },
+    { "responseCookies", KIND_VARIABLE, "object[]",
+    "The cookies the jar holds for this request's URL, the list "
+    "pm.cookies.all() answers, read when the script first uses it. Where "
+    "there is no jar to read it throws, as pm.cookies does.\n\nA test script "
+    "only, as in Postman." },
+    { "environment", KIND_VARIABLE, "object",
+    "The environment's variables as a plain object, as they were when the "
+    "script started. A snapshot: assigning to it changes no variable and "
+    "pm.environment.set does not update it, while "
+    "postman.setEnvironmentVariable and the two clear calls do, as in "
+    "Postman. pm.environment.get(name) reads the live value." },
+    { "globals", KIND_VARIABLE, "object",
+    "The global variables as a plain object, as they were when the script "
+    "started. A snapshot: assigning to it changes no variable and "
+    "pm.globals.set does not update it, while postman.setGlobalVariable and "
+    "the two clear calls do, as in Postman. pm.globals.get(name) reads the "
+    "live value." },
+    { "data", KIND_VARIABLE, "object",
+    "The iteration's data row as a plain object, what "
+    "pm.iterationData.toObject() answers; {} outside a data-driven run." },
+    { "iteration", KIND_VARIABLE, "number",
+    "Which pass this is, 0-based: pm.info.iteration, or 0 where there is no "
+    "run to count." },
+    { "request", KIND_VARIABLE, "object",
+    "The request this script belongs to, in Postman's legacy shape. A copy: "
+    "changing it changes nothing about what is sent; pm.request is the "
+    "request itself." },
+    { "request.url", KIND_FIELD, "string", "The URL, as text." },
+    { "request.method", KIND_FIELD, "string", "The method, upper-case." },
+    { "request.headers", KIND_FIELD, "object",
+    "The headers, each name lower-cased and a repeated one as the array of "
+    "its values. The headers that were sent in a test script, the request's "
+    "own before the send, as pm.request.headers reads them." },
+    { "request.data", KIND_FIELD, "any",
+    "A form body as an object of its enabled fields (a repeated one as an "
+    "array), a text body as its text, and {} for no body, a file or GraphQL." },
+    { "request.name", KIND_FIELD, "string | undefined",
+    "The request's name inside a collection, pm.info.requestName." },
+    { "request.id", KIND_FIELD, "string | undefined",
+    "The request's id inside a collection, pm.info.requestId." },
+    });
+    for (const auto& legacy : LEGACY_GLOBALS) {
+        const std::string label = legacy.label;
+        completions.push_back ({ { "label", label }, { "kind", legacy.kind },
+        { "insertText", label }, { "detail", legacy.detail },
+        { "documentation", legacy.documentation }, { "sortText", "2_legacy_" + label } });
+    }
+
     completions.push_back ({ { "label", "Sign the outgoing request" }, { "kind", KIND_SNIPPET },
     { "insertText",
     "// Pre-request: sign what is actually about to be sent.\nconst timestamp "

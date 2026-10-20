@@ -343,10 +343,10 @@ constexpr auto BINDING_KEYWORDS = std::to_array<BindingKeyword> ({
 });
 
 /**
- * The names the script declares itself. A script with its own `data` or `_` is
- * not reading Postman's global of that name, and counting it would name nearly
- * every script that keeps a response in `data`. A name is declared by a
- * binding keyword, a parameter list, or sitting before `=>`.
+ * The names the script declares itself. A script with its own `_` or `moment`
+ * is not reading Postman's global of that name, and counting it would name
+ * every script that keeps a value under one of those words. A name is declared
+ * by a binding keyword, a parameter list, or sitting before `=>`.
  *
  * Scope is the whole script: a name declared anywhere stops being counted
  * anywhere, which can hide a global used beside a local of the same name, a
@@ -452,7 +452,7 @@ class Declarations {
 
 /// Where a row's first word may stand.
 enum class Anchor : std::uint8_t {
-    /// Not a property of something: a name in scope (`responseBody`, `pm`).
+    /// Not a property of something: a name in scope (`CryptoJS`, `pm`).
     Bare,
     /// A property: after a `.` (`.postmanRequest`).
     Member,
@@ -466,8 +466,7 @@ enum class Anchor : std::uint8_t {
  * @p path is dotted words that must follow one another as a property path;
  * `|` separates alternatives for a word (`include|contain.keys`).
  * @p follow, when set, lists the characters one of which must come next (after
- * whitespace): `tests` is the legacy global only as `tests[`, and a bare
- * `data` is a variable more often than the iteration data.
+ * whitespace): `require` is the module loader only as `require(`.
  */
 struct ApiRule {
     std::string_view name;
@@ -479,16 +478,6 @@ struct ApiRule {
 /// The table, in the order names are reported. The name is what the person
 /// sees: the spelling to search for in their script.
 constexpr auto API_RULES = std::to_array<ApiRule> ({
-// Legacy globals from before `pm.*`.
-{ "tests[]", Anchor::Bare, "tests", "[" },
-{ "responseBody", Anchor::Bare, "responseBody", "" },
-{ "responseCode", Anchor::Bare, "responseCode", "" },
-{ "responseHeaders", Anchor::Bare, "responseHeaders", "" },
-{ "responseCookies", Anchor::Bare, "responseCookies", "" },
-{ "responseTime", Anchor::Bare, "responseTime", "" },
-{ "globals.*", Anchor::Bare, "globals", "." },
-{ "environment.*", Anchor::Bare, "environment", "." },
-{ "data", Anchor::Bare, "data", "[." },
 // Modules and the libraries Postman bundles.
 { "require()", Anchor::Bare, "require", "(" },
 { "pm.require", Anchor::Bare, "pm.require", "" },

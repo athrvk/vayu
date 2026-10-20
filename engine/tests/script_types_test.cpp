@@ -462,7 +462,7 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 }
 
 // The declarations name the globals the sandbox lacks (`fetch`, `require`,
-// Postman's `responseBody`, ...) so that using one is an error the editor can
+// Postman's bundled `CryptoJS`, ...) so that using one is an error the editor can
 // explain, rather than the silence the app's suppression of "Cannot find name"
 // would otherwise leave.
 //
@@ -472,9 +472,8 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 // entry. Give QuickJS a `fetch` and the test that claims it has none
 // fails, which is the only honest way to hold this list to the sandbox.
 //
-// An absent root is found by the sentence every one of them carries, because
-// its type alone does not say so: `responseBody` is `void`, and a declared
-// function returns `void` too.
+// An absent root is found by the sentence every one of them carries, the one
+// hover shows, rather than by its type.
 TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #ifdef VAYU_HAS_QUICKJS
     const std::string dts = generate_script_typedefs ();
@@ -509,7 +508,7 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
         checked++;
     }
 
-    EXPECT_GT (checked, 30u)
+    EXPECT_GT (checked, 15u)
     << "too few absent globals were probed - the scan found nothing";
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
@@ -532,15 +531,16 @@ std::string documentation_above (const std::string& dts, const std::string& decl
     return open == std::string::npos ? std::string{} : dts.substr (open, at - open);
 }
 
-// Postman's pre-`pm.*` globals and the libraries it bundles (#2576), each with
-// the replacement Postman itself names (`LEGACY_GLOBS_ALTERNATIVES` in
-// postman-sandbox). A script imported from Postman reaches for these by habit,
-// and the editor says what to write instead on hover.
+// The libraries Postman bundles (#2576), each with the replacement Postman
+// itself names (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox). A script
+// imported from Postman reaches for these by habit, and the editor says what
+// to write instead on hover. Postman's pre-`pm.*` globals left this list when
+// they started running (#2577).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
 // leaves this list in the commit that makes Vayu run it, and not before.
-TEST (ScriptTypesTest, EveryPostmanLegacyGlobalIsAbsentAndNamesItsReplacement) {
+TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement) {
     const std::string dts = generate_script_typedefs ();
 
     struct Legacy {
@@ -548,17 +548,6 @@ TEST (ScriptTypesTest, EveryPostmanLegacyGlobalIsAbsentAndNamesItsReplacement) {
         const char* replacement;
     };
     constexpr auto globals = std::to_array<Legacy> ({
-    { "tests", "pm.test(" },
-    { "globals", "pm.globals" },
-    { "environment", "pm.environment" },
-    { "data", "pm.iterationData" },
-    { "request", "pm.request" },
-    { "responseCookies", "pm.cookies" },
-    { "responseHeaders", "pm.response.headers" },
-    { "responseTime", "pm.response.responseTime" },
-    { "responseCode", "pm.response.code" },
-    { "responseBody", "pm.response.text()" },
-    { "iteration", "pm.info.iteration" },
     { "_", "require('lodash')" },
     { "CryptoJS", "crypto" },
     { "tv4", "require('ajv')" },
@@ -615,20 +604,37 @@ TEST (ScriptTypesTest, ThePostmanObjectDeclaresTheAliasesItRuns) {
     EXPECT_FALSE (contains (root, "Not available in the Vayu script sandbox."));
 }
 
-// `never` is assignable to every type, so `JSON.parse(responseBody)` - the one
-// line most legacy scripts open with - would pass a `never`. A name whose only
-// use is as a bare value is `void`, assignable to nothing, so that line, a
-// comparison against it and arithmetic on it are errors. The names that are
-// used through a member, a call or an index stay `never`: assigning to
-// `tests["x"]` is only an error on that.
-TEST (ScriptTypesTest, ALegacyValueIsVoidSoThatReadingItIsAnError) {
-    const std::string dts = generate_script_typedefs ();
-    for (const char* value : { "responseBody", "responseTime", "iteration" }) {
-        EXPECT_TRUE (contains (dts, std::string ("declare const ") + value + ": void;\n"))
-        << value << " is not a value that cannot be read";
+// Postman's pre-`pm.*` globals run (#2577), so each is declared as the value
+// it is: `JSON.parse(responseBody)`, `responseTime < 200` and
+// `iteration + 1` are correct code, and the editor must not flag them. Pinned
+// here so a global declared absent again, or as a type that makes its
+// ordinary use an error, fails.
+TEST (ScriptTypesTest, ThePostmanLegacyGlobalsAreDeclaredAsTheValuesTheyAre) {
+    const std::string dts       = generate_script_typedefs ();
+    constexpr auto declarations = std::to_array<const char*> ({
+    "declare const tests: { [key: string]: any };\n",
+    "declare const responseBody: string;\n",
+    "declare const responseTime: number;\n",
+    "declare const responseHeaders: { [key: string]: any };\n",
+    "declare const responseCookies: { [key: string]: any }[];\n",
+    "declare const environment: { [key: string]: any };\n",
+    "declare const globals: { [key: string]: any };\n",
+    "declare const data: { [key: string]: any };\n",
+    "declare const iteration: number;\n",
+    "declare const responseCode: {\n",
+    "declare const request: {\n",
+    });
+    for (const char* declaration : declarations) {
+        EXPECT_TRUE (contains (dts, declaration)) << declaration << "is not declared";
+        EXPECT_FALSE (contains (documentation_above (dts, declaration),
+        "Not available in the Vayu script sandbox."))
+        << declaration << "is still declared absent";
     }
-    EXPECT_TRUE (contains (dts, "declare const tests: never;\n"));
+    EXPECT_TRUE (contains (dts, "\tcode: number;\n"));
+    EXPECT_TRUE (contains (dts, "\turl: string;\n"));
+    // What stays absent stays `never`.
     EXPECT_TRUE (contains (dts, "declare const fetch: never;\n"));
+    EXPECT_TRUE (contains (dts, "declare const CryptoJS: never;\n"));
 }
 
 // `pm.cookies.jar` is listed in its own right *and* is the parent of the

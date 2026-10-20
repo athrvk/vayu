@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <regex>
 #include <set>
@@ -1024,6 +1025,50 @@ TEST (ScriptCompletions, TheOfferedPostmanMethodsAreExactlyWhatTheRuntimeHas) {
     EXPECT_EQ (offered.size (), 11u)
     << "the postman surface changed - update the docs";
     EXPECT_EQ (offered, bound);
+}
+
+// Postman's legacy globals (#2577) both ways: each one the runtime binds in a
+// test script is offered, and the members offered for the two objects the
+// editor describes (`responseCode`, `request`) are exactly what each holds.
+TEST (ScriptCompletions, TheOfferedLegacyGlobalsAreWhatTheRuntimeBinds) {
+    const auto completions = get_script_completions ();
+    constexpr auto roots   = std::to_array<const char*> (
+    { "tests", "responseBody", "responseCode", "responseHeaders", "responseTime",
+      "responseCookies", "environment", "globals", "data", "iteration", "request" });
+    std::string script;
+    for (const char* root : roots) {
+        EXPECT_NE (find_by_label (completions, root), nullptr) << root << " is not offered";
+        script += std::format ("if (!(\"{0}\" in globalThis)) throw new "
+                               "Error(\"{0} is not bound\");\n",
+        root);
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    request.url = "https://x.test/a";
+    vayu::Response response;
+    vayu::Environment env;
+    auto ctx = vayu::runtime::ScriptContext::for_test (request, response);
+    ctx.environment  = &env;
+    ctx.request_id   = "req_1";
+    ctx.request_name = "A";
+    for (const std::string object : { "responseCode", "request" }) {
+        std::set<std::string> offered;
+        for (const auto& item : completions) {
+            const std::string label = item.value ("label", std::string{});
+            if (label.starts_with (object + ".")) {
+                offered.insert (label.substr (object.size () + 1));
+            }
+        }
+        const auto result =
+        engine.execute (std::format ("{}pm.environment.set('keys', "
+                                     "Object.keys({}).sort().join(','));",
+                        script, object),
+        ctx);
+        ASSERT_TRUE (result.success) << result.error_message;
+        const auto names = split_commas (env["keys"].value);
+        EXPECT_EQ (offered, std::set<std::string> (names.begin (), names.end ())) << object;
+    }
 }
 
 // The widening above trades one silent hole for a noisy false positive unless

@@ -2695,7 +2695,8 @@ carry from one script to the next belongs in a variable scope
 ### What a script can compute
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
-four timer functions and Postman's legacy `postman` object.
+four timer functions and Postman's legacy globals (`postman`, `tests`,
+`responseBody`, ...).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2710,6 +2711,7 @@ and the rest of the ES2020 built-ins, plus:
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
+| `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
 `encoding` is `'hex'` (the default), `'base64'`, `'base64url'` or `'bytes'`;
 `'bytes'` returns a `Uint8Array`, and any other value throws rather than
@@ -2728,11 +2730,10 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Postman's other pre-`pm.*` globals (`responseBody`, `tests[...]`, ...) and
-the libraries it bundles (`CryptoJS`, `_`, `moment`, ...) are absent too. The
-editor declares each as unusable, so a use is underlined and the hover names the
-replacement; [the compatibility page](../app/pm-api-compatibility.md#postmans-pre-pm-globals-and-what-to-write-instead)
-maps every one.
+The libraries Postman bundles (`CryptoJS`, `_`, `moment`, ...) are absent too.
+The editor declares each as unusable, so a use is underlined and the hover names
+the replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
+lists them.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based and covers algorithms this sandbox does not implement, so a
@@ -2852,6 +2853,73 @@ Every other behaviour, refusals included, is the `pm.*` method's:
 `pm.execution.setNextRequest is not available here` sentence, and
 `postman.getResponseCookie` without a jar throws `pm.cookies.get`'s. Postman's
 once-per-method deprecation warning is not written.
+
+The `environment` and `globals` setters and clears also write through to the
+snapshot of that name below, before calling the `pm.*` method, as
+`postman-legacy-interface.js` writes through to its `__environment` and
+`__globals`.
+
+### Postman's legacy globals
+
+The values postman-sandbox's legacy interface binds beside `postman` (#2577),
+in the same file. Each is set on the global object per execution, once the
+`pm.*` surfaces are refreshed, and read off the `pm.*` member Postman names as
+its replacement, so the two spellings cannot answer differently:
+
+| Global | Value | Read off |
+| ------ | ----- | -------- |
+| `tests` | `{}`; each property assigned becomes a test result | - |
+| `environment`, `globals` | the scope's variables as a plain object, a snapshot | `pm.environment.toObject()`, `pm.globals.toObject()` |
+| `data` | the iteration's row, `{}` without one | `pm.iterationData.toObject()` |
+| `iteration` | `ScriptContext::iteration`, `0` without one | what `pm.info.iteration` reads |
+| `request` | `{ id, name, headers, method, url, data }` in Postman's legacy shape | the request `pm.request` reads |
+| `responseBody` | the body text | `pm.response.text()` |
+| `responseCode` | `{ name, detail, code, standardName }` | the response `pm.response.code` and `reason()` read |
+| `responseHeaders` | header name to value, as received | `Response::header_lines`, the folded map without them |
+| `responseTime` | milliseconds | `pm.response.responseTime` |
+| `responseCookies` | the jar's cookies for the URL, on first read | `pm.cookies.all()` |
+
+```javascript
+tests["Status code is 200"] = responseCode.code === 200;
+var jsonData = JSON.parse(responseBody);
+tests["Has an id"] = jsonData.id !== undefined;
+```
+
+The rules, each Postman's:
+
+- **`tests` is read after the script.** `record_legacy_tests` runs once the
+  queues have drained, before the results are copied, and appends a row per
+  own enumerable key, in key order, after the `pm.test` rows: passed when the
+  value is truthy, failed with `AssertionError: expected <value> to be truthy`
+  otherwise. It reads the object it bound (`ContextData::legacy_tests`), not
+  whatever the global names by then, and it runs after a throw too.
+- **The five `response*` globals are bound only when the execution has a
+  response.** A pre-request script has the other six.
+- **`environment` and `globals` are snapshots** taken when the script starts.
+  Writing to one changes no variable and `pm.*.set` does not update it; only
+  the `postman` setters and clears write through, above.
+- **`responseHeaders` keeps each name as received**, the last of a repeated
+  one winning, from `Response::header_lines`. The load path keeps no lines, so
+  there it is the folded, lower-cased map.
+- **`responseCookies` is an accessor that replaces itself** with what
+  `pm.cookies.all()` answers on its first read, as `pm.response.cookies` does,
+  so a script that never reads it never reads the jar, and where there is no
+  jar the read throws `pm.cookies`' refusal. An assignment replaces it as it
+  would any global.
+- **`request`** lower-cases each header name and holds a repeated one as an
+  array (`toObject(true, false, true, true)` in Postman), over the header set
+  `pm.request.headers` shows (`script_request_header_lines`). `data` is a form
+  body's enabled fields (a repeated field as an array, an empty first value
+  replaced, as Postman's form reader does), a text body's text, and `{}` for
+  no body, an empty one, a file or GraphQL.
+- **`responseCode.detail` is `""`.** Postman fills it from `http-reasons`, a
+  paragraph per status that Vayu does not carry; the empty string is Postman's
+  own fallback. `name` is the reason phrase `pm.response.reason()` answers and
+  `standardName` the registered one.
+
+The script runs inside a function, so a script's own `const data` or
+`let responseBody` is a local that shadows the global, and an assignment with
+no declaration (`data = ...`) writes the global, sloppy mode's rule.
 
 ## What the editor offers, and where it comes from
 

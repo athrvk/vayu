@@ -137,29 +137,32 @@ TEST (ScriptApiScan, NamesNothingForAScriptThatUsesOnlyPm) {
     Names{});
 }
 
-TEST (ScriptApiScan, NamesTheLegacyGlobals) {
-    EXPECT_EQ (names_in (R"(tests["Status is 200"] = responseCode.code === 200;)"),
-    (Names{ "tests[]", "responseCode" }));
-    EXPECT_EQ (names_in ("var j = JSON.parse(responseBody);"), Names{ "responseBody" });
-    EXPECT_EQ (names_in ("responseHeaders['Content-Type']"), Names{ "responseHeaders" });
-    EXPECT_EQ (names_in ("var c = responseCookies;"), Names{ "responseCookies" });
-    EXPECT_EQ (names_in ("if (responseTime > 100) {}"), Names{ "responseTime" });
-    EXPECT_EQ (names_in (R"(globals.token = "x";)"), Names{ "globals.*" });
-    EXPECT_EQ (names_in ("var n = environment.name;"), Names{ "environment.*" });
-    EXPECT_EQ (names_in (R"(var n = data["name"];)"), Names{ "data" });
-    EXPECT_EQ (names_in ("var n = data.name;"), Names{ "data" });
-}
-
-TEST (ScriptApiScan, ALegacyNameNeedsItsFollowingCharacter) {
-    // `tests` alone and `data` alone are plain variables.
-    EXPECT_EQ (names_in ("var tests = []; tests.push(1); data;"), Names{});
-}
-
-TEST (ScriptApiScan, APropertyOfSomethingElseIsNotALegacyGlobal) {
+// Postman's pre-`pm.*` globals run (#2577), so a script that uses them is not
+// named.
+TEST (ScriptApiScan, TheLegacyGlobalsAreNotNamed) {
     EXPECT_EQ (names_in (R"(
-        pm.response.responseTime; x.responseBody; opts.responseCode;
-        pm.environment.get("a"); pm.globals.set("b", 1); thing?.tests[0];
-        const copy = { ...base, ...tests };
+        tests["Status is 200"] = responseCode.code === 200;
+        var j = JSON.parse(responseBody);
+        var t = responseHeaders['Content-Type'];
+        var c = responseCookies;
+        if (responseTime > 100) {}
+        globals.token = "x";
+        var n = environment.name + data["name"] + data.name + iteration;
+        var u = request.url;
+    )"),
+    Names{});
+}
+
+TEST (ScriptApiScan, ARuleNeedsItsFollowingCharacter) {
+    // `require` not called is not the module loader.
+    EXPECT_EQ (
+    names_in ("if (typeof require === 'undefined') {} var r = require;"), Names{});
+}
+
+TEST (ScriptApiScan, APropertyOfSomethingElseIsNotTheGlobal) {
+    EXPECT_EQ (names_in (R"(
+        x.CryptoJS.MD5(a); opts._; thing?.moment(); lib.require('x');
+        pm.environment.get("Buffer"); o.tv4 = 1; x?.cheerio;
     )"),
     Names{});
 }
@@ -343,40 +346,41 @@ TEST (ScriptApiScan, NothingTheChaiConformanceTableRunsIsNamed) {
 // ---------------------------------------------------------------------------
 
 TEST (ScriptApiScan, ANameTheScriptDeclaresItselfIsNotTheGlobal) {
-    EXPECT_EQ (
-    names_in ("const data = pm.response.json(); pm.expect(data.id).to.eql(1);"), Names{});
-    EXPECT_EQ (names_in ("let data; data = {}; data.x = 1;"), Names{});
-    EXPECT_EQ (names_in ("function show(data) { return data.name; }"), Names{});
-    EXPECT_EQ (names_in ("items.forEach((x, data) => data.id);"), Names{});
-    EXPECT_EQ (names_in ("items.map(data => data.id);"), Names{});
-    EXPECT_EQ (names_in ("try {} catch (environment) { environment.message; }"), Names{});
-    EXPECT_EQ (names_in ("const { data } = pm.response.json(); data.id;"), Names{});
+    EXPECT_EQ (names_in ("const moment = pm.response.json(); "
+                         "pm.expect(moment.id).to.eql(1);"),
+    Names{});
+    EXPECT_EQ (names_in ("let moment; moment = {}; moment.x = 1;"), Names{});
+    EXPECT_EQ (names_in ("function show(moment) { return moment.name; }"), Names{});
+    EXPECT_EQ (names_in ("items.forEach((x, moment) => moment.id);"), Names{});
+    EXPECT_EQ (names_in ("items.map(moment => moment.id);"), Names{});
+    EXPECT_EQ (names_in ("try {} catch (cheerio) { cheerio.message; }"), Names{});
+    EXPECT_EQ (names_in ("const { moment } = pm.response.json(); moment.id;"), Names{});
     EXPECT_EQ (names_in ("const [_, second] = parts; _.length;"), Names{});
-    EXPECT_EQ (names_in ("function globals() {} globals.cache = 1;"), Names{});
+    EXPECT_EQ (names_in ("function tv4() {} tv4.cache = 1;"), Names{});
 }
 
 TEST (ScriptApiScan, ADeclarationElsewhereDoesNotHideADifferentName) {
-    // `data` is declared; `responseBody` and `tests` are not.
-    EXPECT_EQ (names_in ("const data = 1; JSON.parse(responseBody); "
-                         "tests['x'] = data;"),
-    (Names{ "tests[]", "responseBody" }));
+    // `moment` is declared; `CryptoJS` and `Buffer` are not.
+    EXPECT_EQ (names_in ("const moment = 1; CryptoJS.MD5(x); "
+                         "Buffer.from(moment);"),
+    (Names{ "CryptoJS", "Buffer" }));
     // A class declares its name, not what its methods read.
-    EXPECT_EQ (names_in ("class Checker { run () { return responseBody; } }"),
-    Names{ "responseBody" });
+    EXPECT_EQ (names_in ("class Checker { run () { return CryptoJS; } }"),
+    Names{ "CryptoJS" });
     // A declaration of one name does not declare what shares a function body.
-    EXPECT_EQ (names_in ("function f(a) { return responseCode; }"), Names{ "responseCode" });
+    EXPECT_EQ (names_in ("function f(a) { return Buffer; }"), Names{ "Buffer" });
 }
 
 TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
     EXPECT_EQ (names_in (R"(
         Buffer.from(later);
-        tests["b"] = true;
-        tests["a"] = true;
+        CryptoJS.MD5(b);
+        CryptoJS.MD5(a);
         const c = require("x");
-        var t = responseTime;
+        _.each(list, f);
         Buffer.from(again);
     )"),
-    (Names{ "tests[]", "responseTime", "require()", "Buffer" }));
+    (Names{ "require()", "CryptoJS", "_", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
@@ -385,13 +389,13 @@ TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
     uses.scan ("Buffer.from(go);");
     uses.note_packages ();
     uses.note_packages ();
-    uses.scan ("tests['a'] = true;");
+    uses.scan ("CryptoJS.MD5('a');");
     EXPECT_FALSE (uses.empty ());
-    EXPECT_EQ (uses.names (), (Names{ "tests[]", "script.packages", "Buffer" }));
+    EXPECT_EQ (uses.names (), (Names{ "script.packages", "CryptoJS", "Buffer" }));
 }
 
 TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {
-    EXPECT_EQ (names_in ("tests['a' = ((( {{{ `${ 'x"), Names{ "tests[]" });
+    EXPECT_EQ (names_in ("CryptoJS['a' = ((( {{{ `${ 'x"), Names{ "CryptoJS" });
     std::string binary = "\xff\xfe";
     binary.push_back ('\0');
     binary += " Buffer";
@@ -423,28 +427,29 @@ TEST (ScriptApiScan, ReadsALargeScriptWithinTheParseBudget) {
     // parameter list against every token, is quadratic in this.
     std::string script;
     for (int i = 0; i < 20000; ++i) {
-        script += "function f" + std::to_string (i) + "(a, b) { return a.b.c(b) + data.x; }\n";
+        script += "function f" + std::to_string (i) + "(a, b) { return a.b.c(b) + moment.x; }\n";
     }
-    EXPECT_EQ (names_within_budget (script), Names{ "data" });
+    EXPECT_EQ (names_within_budget (script), Names{ "moment" });
 }
 
 TEST (ScriptApiScan, ClosersWithNoOpenerCostNothingPerArrow) {
     // Each `=>` once looked back over every earlier byte for the bracket that
     // opens its parameter list.
-    EXPECT_EQ (names_within_budget (repeated ("a)=>", 250000) + " data.x"), Names{ "data" });
+    EXPECT_EQ (names_within_budget (repeated ("a)=>", 250000) + " moment.x"),
+    Names{ "moment" });
 }
 
 TEST (ScriptApiScan, AnUnclosedPatternCostsNothingPerBindingKeyword) {
     // Each `var [` once looked ahead to the end of the script for its `]`.
-    EXPECT_EQ (names_within_budget (repeated ("var [", 200000) + "; data.x"),
-    Names{ "data" });
+    EXPECT_EQ (names_within_budget (repeated ("var [", 200000) + "; moment.x"),
+    Names{ "moment" });
 }
 
 TEST (ScriptApiScan, NestedPatternsDeclareEachNameOnce) {
     // Each of these closed patterns holds every name inside the ones within
     // it, which is quadratic when each pair is walked on its own.
     const std::string script =
-    repeated ("var [", 200000) + "data" + repeated ("]", 200000) + "; data.x";
+    repeated ("var [", 200000) + "moment" + repeated ("]", 200000) + "; moment.x";
     EXPECT_EQ (names_within_budget (script), Names{});
 }
 
@@ -461,11 +466,11 @@ TEST (ScriptApiScan, ManyDeclaredNamesAreLookedUpWithoutScanningThemAll) {
 }
 
 TEST (ScriptApiScan, PairsBracketsOfMixedKindsAsTheScanAlwaysDid) {
-    EXPECT_EQ (names_in ("const [a, data] = x; (data) => data.id;"), Names{});
-    EXPECT_EQ (names_in ("const { a: [b, data] } = x; data.id;"), Names{});
-    EXPECT_EQ (names_in ("function f(a, data] { } data.x"), Names{});
-    EXPECT_EQ (names_in ("var [ data.x"), Names{ "data" });
-    EXPECT_EQ (names_in ("data) => 1; data.x"), Names{ "data" });
+    EXPECT_EQ (names_in ("const [a, moment] = x; (moment) => moment.id;"), Names{});
+    EXPECT_EQ (names_in ("const { a: [b, moment] } = x; moment.id;"), Names{});
+    EXPECT_EQ (names_in ("function f(a, moment] { } moment.x"), Names{});
+    EXPECT_EQ (names_in ("var [ moment.x"), Names{ "moment" });
+    EXPECT_EQ (names_in ("moment) => 1; moment.x"), Names{ "moment" });
 }
 
 } // namespace

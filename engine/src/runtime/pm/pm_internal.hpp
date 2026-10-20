@@ -254,6 +254,12 @@ struct ContextData {
     /// owned reference, freed before the context is released; undefined once
     /// its rejection has been reported.
     JSValue script_body = JS_UNDEFINED;
+
+    /// The `tests` object the legacy globals bind (#2577), read once the script
+    /// has finished. The object bound, not whatever the global names by then,
+    /// as Postman reads it. An owned reference, freed before the context is
+    /// released.
+    JSValue legacy_tests = JS_UNDEFINED;
 };
 
 // Get context data from JS context
@@ -430,17 +436,27 @@ JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JS
 // `pm.cookies`; `postman.getResponseCookie` is its one caller (pm_legacy.cpp).
 JSValue js_jar_cookies_one (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
-// The `postman` global (pm_legacy.cpp): Postman's pre-`pm.*` helper methods as
-// aliases of the `pm` members it names as their replacements (#2577). Installed
-// per execution, after `setup_pm_response`, because the two response readers
-// exist only where there is a response, as in Postman.
+// Postman's pre-`pm.*` globals (pm_legacy.cpp, #2577): the `postman` object,
+// whose helper methods alias the `pm` members Postman names as their
+// replacements, and the values (`tests`, `environment`, `responseBody`, ...)
+// read off `pm` when the script starts. Installed per execution, after the
+// `pm` surfaces are refreshed, because the response globals exist only where
+// there is a response, as in Postman.
 void setup_postman_legacy (JSContext* ctx, JSValue global, JSValue pm);
+
+// Appends a result to `data.tests` for each property of the `tests` object, in
+// its key order, as Postman does once the script has finished.
+void record_legacy_tests (JSContext* ctx, ContextData& data);
 
 // `pm.request` and `pm.info` (pm_request_url.cpp), and the write-back that
 // applies a pre-request script's `pm.request` to the request about to be sent.
 void setup_pm_request (JSContext* ctx, JSValue pm);
 void setup_pm_info (JSContext* ctx, JSValue pm);
 std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& request);
+
+// The header lines a script reads as the request's: the sent record in a test
+// script, the composed request before the send (pm_request_url.cpp).
+const HeaderList& script_request_header_lines (const ContextData& data);
 
 // The state behind a `pm.request.url` Url object, or nullptr for anything
 // else - a class test, so the jar can tell a Url from a forged look-alike.

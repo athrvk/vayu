@@ -2172,7 +2172,7 @@ const ImportOptions& options = {}) {
  * of the table in `script_api_scan.cpp` and the request using it drops out of
  * the list.
  */
-TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
+TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     const std::string items = request_with_script ("Legacy tests",
                               R"j(["tests[\"ok\"] = responseCode.code === 200;"])j") +
     "," + request_with_script ("Library", R"j(["const h = CryptoJS.MD5('x');"])j") + "," +
@@ -2189,9 +2189,9 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
     const ImportParse parsed = parse_postman_items (items);
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
 
+    // Postman's pre-pm.* globals run (#2577), so "Legacy tests" is not named.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
-        {"request":"Legacy tests","names":["tests[]","responseCode"]},
         {"request":"Library","names":["CryptoJS"]},
         {"request":"Module","names":["require()"]},
         {"request":"Host","names":["Buffer"]},
@@ -2199,11 +2199,11 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
     ])j"));
     // A notice, not a drop: the scripts still import verbatim.
     EXPECT_EQ (parsed.result.at ("collections")[0]
-               .at ("requests")[0]
+               .at ("requests")[1]
                .at ("elements")[0]
                .at ("config")
                .at ("script"),
-    "tests[\"ok\"] = responseCode.code === 200;");
+    "const h = CryptoJS.MD5('x');");
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_script_api"));
 }
@@ -2214,15 +2214,15 @@ TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
 /// as before leaves no element and no name.
 TEST (PostmanImport, ReadsAStringValuedEventScriptAsItsText) {
     const ImportParse parsed = parse_postman_items (
-    R"j({"name":"Old","event":[{"listen":"prerequest","script":"var body = responseBody;"}],
+    R"j({"name":"Old","event":[{"listen":"prerequest","script":"var h = CryptoJS.MD5(responseBody);"}],
          "request":{"method":"GET","url":"https://x.com"}})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& element =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("elements")[0];
     EXPECT_EQ (element.at ("kind"), "script.pre");
-    EXPECT_EQ (element.at ("config").at ("script"), "var body = responseBody;");
+    EXPECT_EQ (element.at ("config").at ("script"), "var h = CryptoJS.MD5(responseBody);");
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
-    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["responseBody"]}])j"));
+    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["CryptoJS"]}])j"));
 }
 
 /// A non-empty `script.packages` is a use of Postman's package library, which
@@ -2251,10 +2251,10 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
         "event":[{"listen":"prerequest","script":{"exec":["Buffer.from(f);"]}}],
         "item":[
-        {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = data.name;"]}}],
+        {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = moment().format();"]}}],
          "item":[{"name":"R","event":[
-             {"listen":"prerequest","script":{"exec":["var t = responseTime;"]}},
-             {"listen":"test","script":{"exec":["tests['a'] = true;"]}}],
+             {"listen":"prerequest","script":{"exec":["var t = _.now();"]}},
+             {"listen":"test","script":{"exec":["const c = require('x');"]}}],
              "request":{"method":"GET","url":"https://x.com/r"}}]},
         {"name":"A","request":{"method":"GET","url":"https://x.com/a"}}
     ]})j",
@@ -2262,8 +2262,8 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
-        {"request":"R","names":["tests[]","responseTime"]},
-        {"request":"Reports","names":["data"]},
+        {"request":"R","names":["require()","_"]},
+        {"request":"Reports","names":["moment"]},
         {"request":"Signed API","names":["Buffer"]}
     ])j"));
 }
@@ -2273,7 +2273,7 @@ TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
 /// script qualifies. Mutation check: scanning before the option gate, or
 /// emitting an empty list, reds one of these.
 TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
-    const std::string legacy = request_with_script ("Legacy", R"j(["tests['a'] = true;"])j");
+    const std::string legacy = request_with_script ("Legacy", R"j(["CryptoJS.MD5('a');"])j");
     ImportOptions off;
     off.import_scripts      = false;
     const ImportParse gated = parse_postman_items (legacy, off);
@@ -2283,7 +2283,7 @@ TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
 
     const ImportParse disabled = parse_postman_items (
     R"j({"name":"Off","event":[{"listen":"test","disabled":true,
-            "script":{"exec":["tests['a'] = true;"]}}],
+            "script":{"exec":["CryptoJS.MD5('a');"]}}],
          "request":{"method":"GET","url":"https://x.com"}})j");
     ASSERT_TRUE (disabled.ok ()) << disabled.error;
     EXPECT_FALSE (

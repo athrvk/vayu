@@ -43,6 +43,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Timers              | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` - globals, run before the script ends without waiting, see below |
 | Legacy `postman`    | `postman.setEnvironmentVariable` and the other ten pre-`pm.*` helper methods, each an alias of the `pm.*` method Postman names - see [The legacy `postman` object](#the-legacy-postman-object) |
+| Legacy globals      | `tests[...]`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration` and `request`, each read off the `pm.*` member Postman names - see [Postman's legacy globals](#postmans-legacy-globals) |
 | Console             | `console.log/info/warn/error`                                                    |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
@@ -1137,8 +1138,81 @@ Postman's rules carry over with the methods:
   throws where `pm.cookies` does.
 
 Postman also writes a `Using "postman.setEnvironmentVariable" is deprecated`
-warning to the console on first use; Vayu does not. The other pre-`pm.*`
-globals are [not yet supported](#not-yet-supported).
+warning to the console on first use; Vayu does not, for these methods or for
+the globals below.
+
+### Postman's legacy globals
+
+The values Postman binds beside `postman` run too (#2577), so the test script a
+collection written before `pm.*` opens with passes as it did there:
+
+```javascript
+tests["Status code is 200"] = responseCode.code === 200;
+var jsonData = JSON.parse(responseBody);
+tests["Has an id"] = jsonData.id !== undefined;
+tests["Response time is less than 200ms"] = responseTime < 200;
+postman.setEnvironmentVariable("token", jsonData.token);
+```
+
+Each is read once, when the script starts, off the `pm.*` member Postman names
+as its replacement, so the two spellings answer alike. The second column is
+what to write in a new script.
+
+| Global | What it holds | `pm.*` spelling |
+|--------|---------------|-----------------|
+| `tests` | An object: each property assigned is a test result, named by its key and passed when its value is truthy | `pm.test("name", function () { ... })` |
+| `responseBody` | The body as text | `pm.response.text()`, or `pm.response.json()` for the parsed body |
+| `responseCode` | `{ name, detail, code, standardName }`: the reason phrase, `""`, the status code and the registered phrase | `pm.response.code`, `pm.response.reason()` |
+| `responseHeaders` | An object of header name to value | `pm.response.headers.get(name)`, which ignores case |
+| `responseCookies` | The cookies the jar holds for this request's URL | `pm.cookies.all()` |
+| `responseTime` | Milliseconds | `pm.response.responseTime` |
+| `environment`, `globals` | The scope's variables as a plain object | `pm.environment.toObject()`, `pm.globals.toObject()` |
+| `data` | The iteration's data row, `{}` outside a data-driven run | `pm.iterationData.toObject()` |
+| `iteration` | Which pass this is, 0-based, `0` where there is no run | `pm.info.iteration` |
+| `request` | `{ id, name, headers, method, url, data }` | `pm.request`, `pm.info.requestId`, `pm.info.requestName` |
+
+Postman's rules carry over with them:
+
+- **`tests` is read once the script has finished.** A row per key, in the
+  object's key order, after the `pm.test` rows, so a key assigned twice is one
+  result with its last value. A falsy value fails with Postman's message,
+  `AssertionError: expected false to be truthy`. What was assigned before a
+  throw is recorded, and the throw stays the script's error. The object read is
+  the one bound, so a script that declares its own `tests` (`var tests = []`)
+  records nothing through it.
+- **The `response*` values exist only in a test script.** A pre-request script
+  has no response, so it has none of the five; every other global is in both.
+- **`environment` and `globals` are snapshots.** Assigning to one changes no
+  variable, and `pm.environment.set` does not update it. The legacy setters
+  write through to it, as in Postman: `postman.setEnvironmentVariable`,
+  `clearEnvironmentVariable` and `clearEnvironmentVariables` change the
+  `environment` object as well as the variable, and the four globals methods
+  change `globals`. `pm.environment.get(name)` is the live read.
+- **`responseHeaders` keeps each name as it arrived.** The lookup is
+  case-sensitive, as in Postman (`responseHeaders['Content-Type']` misses a
+  `content-type` header), and the last value of a repeated header wins. A load
+  run's sampled response keeps only the folded, lower-cased names, so the
+  object has those there.
+- **`responseCookies` is read on first use.** It is the list `pm.cookies.all()`
+  answers, read when the script first touches it, so where there is no jar to
+  read (a load run's deferred test script) that read throws `pm.cookies`' own
+  refusal rather than answering an empty list.
+- **`request` is a copy in Postman's legacy shape.** `headers` lower-cases each
+  name and holds a repeated one as the array of its values; they are the
+  headers that were sent in a test script and the request's own before the
+  send, as `pm.request.headers` reads them. `data` is a form body's enabled
+  fields as an object (a repeated field as an array), a text body's text, and
+  `{}` for no body, a file or GraphQL. `id` and `name` are there inside a
+  collection. Changing it changes nothing about what is sent; that is
+  `pm.request`.
+- **A script's own declaration wins.** The engine runs a script inside a
+  function, so `const data = pm.response.json()` or `let responseBody = ...`
+  is a local of the script's own. An assignment with no declaration
+  (`data = JSON.parse(responseBody)`) writes the global, as in Postman.
+
+`responseCode.detail` is the one value that differs: Postman fills it with a
+paragraph describing the status, from its `http-reasons` table, which Vayu does
+not carry; it is the empty string, Postman's own fallback.
 
 ---
 
@@ -1166,12 +1240,6 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   half and the three mutators named under [Header methods](#header-methods)
   ship
 - `pm.visualizer`, `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **Postman's pre-`pm.*` globals** (`tests[...]`, `responseBody`, `responseCode`,
-  `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
-  `data`, `iteration`, `request`) are not defined: a script that reads
-  one throws a `ReferenceError`. Each has a `pm.*` replacement, listed
-  [below](#postmans-pre-pm-globals-and-what-to-write-instead). The `postman.*`
-  methods run, as [aliases of `pm`](#the-legacy-postman-object)
 - **`require(...)`, `script.packages` and the libraries Postman bundles** -
   `CryptoJS`, `_` (lodash), `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`.
   The sandbox has no module system and none of those libraries; `pm.crypto` covers
@@ -1195,27 +1263,11 @@ The editor underlines a use of any of the names above that the sandbox lacks
 (see [Type declarations](#type-declarations-hover-signature-help)) and its hover
 gives the replacement Postman itself names.
 
-### Postman's pre-pm.* globals and what to write instead
-
-| Legacy | Write instead |
-|--------|---------------|
-| `tests["name"] = bool` | `pm.test("name", function () { ... })` |
-| `responseBody` | `pm.response.text()`, or `pm.response.json()` for the parsed body |
-| `responseCode.code` | `pm.response.code` (the number), `pm.response.reason()` (the phrase) |
-| `responseHeaders` | `pm.response.headers.get(name)`, case-insensitive |
-| `responseCookies` | `pm.response.cookies`, or `pm.cookies.get(name)` for the stored session |
-| `responseTime` | `pm.response.responseTime` |
-| `environment`, `globals` | `pm.environment`, `pm.globals` |
-| `data` | `pm.iterationData` (`undefined` outside a data-driven run) |
-| `iteration` | `pm.info.iteration` |
-| `request` | `pm.request` |
-
-The `postman.*` methods are not in this table because they run: each is an
-alias of the `pm.*` method it names ([above](#the-legacy-postman-object)).
-
 A collection imported from Postman lists the requests whose scripts use any of these,
 under `meta.unsupportedScriptApis` (see
-[Postman import](./import-collections/postman.md#scripts)).
+[Postman import](./import-collections/postman.md#scripts)). Postman's pre-`pm.*`
+globals and the `postman.*` methods are not among them: they run (see
+[above](#postmans-legacy-globals)).
 
 ---
 
@@ -1473,24 +1525,20 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 (`ABSENT_GLOBALS` in `script_types.cpp`), and the editor underlines a use:
 
 - the host globals of a browser or Node: `fetch`, `require`, `URL`, `Buffer`, ...
-- Postman's pre-`pm.*` globals: `tests`, `responseBody`, `responseCode`,
-  `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`,
-  `data`, `iteration` and `request`
 - the libraries Postman bundles: `CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
   `moment` and `Backbone`
 
-Hover names the replacement Postman itself gives: `responseBody` is `pm.response.text()`,
-`responseCode` is `pm.response.code`, `tests` is `pm.test()`. The `postman` object is
-declared as the methods it has, each hover naming the `pm.*` method it aliases.
+Hover names the replacement Postman itself gives: `_` is `require('lodash')`, `CryptoJS`
+is the global `crypto` object, and says what Vayu has instead. The `postman` object is
+declared as the methods it has, each hover naming the `pm.*` method it aliases, and
+Postman's pre-`pm.*` globals (`tests`, `responseBody`, ...) as the values they are
+(`string`, `number`, an object), so `JSON.parse(responseBody)` and `responseTime < 200`
+are correct code to the editor as they are to the engine.
 
 A name is declared `never`, so a call, a member access or an assignment is an error
-(`responseCode.code`, `tests['x'] = true`, `_.map(...)`).
-`never` is assignable to everything, so a bare read would pass; the three names only ever
-read bare are `void` instead, which makes `JSON.parse(responseBody)`,
-`responseTime < 200` and `iteration + 1` errors too. What is left unflagged is a bare
-read into something that takes anything (`console.log(responseBody)`) and an index read
-(`environment['baseUrl']`, `responseHeaders['Content-Type']`): hover still names the
-replacement there.
+(`_.map(...)`, `CryptoJS.MD5(x)`). `never` is assignable to everything, so a bare read
+into something that takes anything (`console.log(moment)`) is left unflagged: hover
+still names the replacement there.
 
 **A script that declares one of these names itself is not flagged.** `const data =
 pm.response.json()` and `var request = pm.request` are common and correct: the engine

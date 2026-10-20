@@ -827,7 +827,8 @@ class ScriptEngine::Impl {
 
     /// A context with the standard intrinsics and the sandbox globals
     /// (`console`, `btoa`/`atob`, the timers, `pm`) and nothing else; `execute`
-    /// binds `postman` once the execution's data is in place.
+    /// binds the legacy globals (`postman`, `tests`, ...) once the execution's
+    /// data is in place.
     JSContext* build_context (JSRuntime* rt) {
         JSContext* ctx = JS_NewContext (rt);
         if (!ctx) {
@@ -1084,6 +1085,8 @@ class ScriptEngine::Impl {
         state.unhandled_rejections.clear ();
         JS_FreeValue (js_ctx, data.script_body);
         data.script_body = JS_UNDEFINED;
+        JS_FreeValue (js_ctx, data.legacy_tests);
+        data.legacy_tests = JS_UNDEFINED;
         for (auto& entry : data.async_tests) {
             JS_FreeValue (js_ctx, entry.first);
         }
@@ -1161,8 +1164,8 @@ class ScriptEngine::Impl {
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with
-        // new data, then bind `postman` over them: its response readers exist
-        // only where there is a response.
+        // new data, then bind Postman's legacy globals over them: the response
+        // ones exist only where there is a response.
         JSValue global = JS_GetGlobalObject (js_ctx);
         JSValue pm     = JS_GetPropertyStr (js_ctx, global, "pm");
         if (!JS_IsUndefined (pm)) {
@@ -1205,6 +1208,9 @@ class ScriptEngine::Impl {
         if (async_error) {
             record_script_error (result, std::move (*async_error));
         }
+        // After the pm.test rows, as Postman appends the legacy ones, and even
+        // after a throw: what the script assigned before it threw was assigned.
+        record_legacy_tests (js_ctx, ctx_data);
 
         // Apply the script's pm.request edits to the request that is about to
         // be sent. Deliberately runs even when the script threw: the edits it
