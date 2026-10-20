@@ -14,7 +14,8 @@
  * carries no state between buffers - not that either still answers what the
  * detector answered before the rewrite, which is what #1151's second acceptance
  * criterion actually asks. Only an independent implementation can say that, and
- * this is that implementation, taken verbatim from `db346d3`.
+ * this is that implementation, taken verbatim from `db346d3`, with its p99
+ * reader moved to whole-second figures in step with the detector (#2589).
  *
  * It is a deliberate copy and it is meant to stay one. A rule change has to be
  * made here as well, on purpose, with the equivalence tests failing in between -
@@ -33,6 +34,7 @@ import {
 	MIN_CONSECUTIVE_TICKS,
 	MAX_ANOMALIES,
 } from "./detectAnomalies";
+import { secondPercentiles } from "./tickPercentiles";
 
 function median(values: number[]): number {
 	if (values.length === 0) return 0;
@@ -78,7 +80,7 @@ function span(history: LoadTestMetrics[], start: number, end: number): string {
 }
 
 function detectLatencySpikes(history: LoadTestMetrics[]): Anomaly[] {
-	const p99 = history.map((m) => m.latency_p99_ms ?? 0);
+	const p99 = history.map((m) => secondPercentiles(m)?.p99 ?? 0);
 	const baselines = trailingMedians(p99);
 	const isHot = (i: number) => {
 		const base = baselines[i];

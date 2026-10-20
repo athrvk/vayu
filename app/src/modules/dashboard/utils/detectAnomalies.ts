@@ -26,6 +26,10 @@
  * live dashboard and the history view both derive from their own series and pass
  * the result down, so no card re-derives from raw metrics.
  *
+ * Every rule counts ticks, so a tick has to mean one second in both views. A
+ * stored series already does; the live dashboard passes its buffer through
+ * {@link wholeSecondTicks} first, which keeps only the gate frames (#2589).
+ *
  * ## One-shot, or incremental over a live buffer
  *
  * {@link detectAnomalies} is the one-shot: a whole series in, its windows out,
@@ -65,6 +69,7 @@
 
 import { formatPercent, formatSeconds } from "@/lib/format-number";
 import type { LoadTestMetrics } from "@/types";
+import { secondPercentiles } from "./tickPercentiles";
 
 export type AnomalyKind = "latency_spike" | "error_burst" | "throughput_drop" | "first_5xx";
 
@@ -157,10 +162,10 @@ class TickCache<T> {
 /** One number read off a tick, with the same `?? 0` the from-scratch pass used. */
 type Reader = (m: LoadTestMetrics) => number;
 
-// The tick's own `latency_p99_ms`, not `secondPercentiles`: this rule counts
-// ticks (a 15-tick baseline, 2 ticks to open), so it cannot skip the live
-// frames between gates the way the charts and the breakpoint do (#2385).
-const readP99: Reader = (m) => m.latency_p99_ms ?? 0;
+// A live gate's own `latency_p99_ms` is still its ~100 ms window, so the
+// whole-second figure comes through `secondPercentiles` (#2589). An idle second
+// reads 0, as its stored row does.
+const readP99: Reader = (m) => secondPercentiles(m)?.p99 ?? 0;
 const readRps: Reader = (m) => m.current_rps ?? 0;
 const readConcurrency: Reader = (m) => m.current_concurrency ?? 0;
 
@@ -807,4 +812,63 @@ export function createAnomalyDetector(): AnomalyDetector {
  */
 export function detectAnomalies(history: LoadTestMetrics[]): Anomaly[] {
 	return createAnomalyDetector().detect(history);
+}
+
+/* -------------------------------------------------------------------------- */
+/* One tick a second                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Restated gates by source frame. The figure depends on the previous gate, which
+ * a later trim can remove, so it is fixed when the gate is first seen - at the
+ * buffer's tail, with its predecessor behind it - and the same frame then maps
+ * to the same object on every commit, which is the identity
+ * {@link createAnomalyDetector} recognises the next buffer by.
+ */
+const restatedGates = new WeakMap<LoadTestMetrics, LoadTestMetrics>();
+
+/**
+ * A gate with `current_rps` restated as the completions since the previous
+ * gate over the time between them, the figure a stored tick holds. Its own is
+ * the last ~100 ms delta, which a run's first gate keeps for want of a
+ * previous one. The final gate can close less than a second, which is why the
+ * divisor is the interval and not 1.
+ */
+function restateGate(gate: LoadTestMetrics, previous: LoadTestMetrics | null): LoadTestMetrics {
+	const cached = restatedGates.get(gate);
+	if (cached) return cached;
+	const interval = previous ? gate.elapsed_seconds - previous.elapsed_seconds : 0;
+	let restated = gate;
+	if (previous && interval > 0) {
+		const completed = Math.max(0, gate.requests_completed - previous.requests_completed);
+		restated = { ...gate, current_rps: completed / interval };
+	}
+	restatedGates.set(gate, restated);
+	return restated;
+}
+
+/**
+ * The series the detector reads, one tick a second whatever its source: a
+ * stored tick as it is, and of a live stream only the gate frames (the final
+ * frame is one), each with its throughput restated by {@link restateGate}. A
+ * frame between gates is dropped, never read as 0: it is a tenth of a second,
+ * and every rule here counts ticks.
+ *
+ * The other rules need nothing restated: `second_samples` gives the gate its
+ * whole-second p99, the burst rule's counter deltas span gate to gate once the
+ * frames between are gone, and concurrency and the status map are as of the
+ * tick in both sources.
+ */
+export function wholeSecondTicks(history: LoadTestMetrics[]): LoadTestMetrics[] {
+	const out: LoadTestMetrics[] = [];
+	let previousGate: LoadTestMetrics | null = null;
+	for (const m of history) {
+		if (!m.live) {
+			out.push(m);
+		} else if (m.second_samples !== undefined) {
+			out.push(restateGate(m, previousGate));
+			previousGate = m;
+		}
+	}
+	return out;
 }

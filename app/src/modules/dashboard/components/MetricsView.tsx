@@ -45,7 +45,7 @@ import {
 	latestThroughputMbps,
 	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
-import { createAnomalyDetector } from "../utils/detectAnomalies";
+import { createAnomalyDetector, wholeSecondTicks } from "../utils/detectAnomalies";
 import { cumulativePercentiles, hasSecondPercentiles } from "../utils/tickPercentiles";
 import { errorBreakdown } from "../utils/errorBreakdown";
 import { liveRateFidelity } from "../utils/rateFidelity";
@@ -159,9 +159,14 @@ function MetricsView({
 	 * starts over on - so nothing here depends on the instance surviving. Held in
 	 * `useState` rather than a ref because the state initialiser is the one hook
 	 * that runs exactly once without reading anything during render.
+	 *
+	 * It reads the gate frames only, one a second like History's stored ticks,
+	 * since its rules count ticks (#2589). Filtered in a memo of its own so a
+	 * second render of one buffer still reaches the detector's memo.
 	 */
 	const [detector] = useState(createAnomalyDetector);
-	const anomalies = useMemo(() => detector.detect(chartWindow), [detector, chartWindow]);
+	const detectorSeries = useMemo(() => wholeSecondTicks(chartWindow), [chartWindow]);
+	const anomalies = useMemo(() => detector.detect(detectorSeries), [detector, detectorSeries]);
 
 	// Read the monotonic aggregates from the store - they are folded into running
 	// values on each tick in addMetricsBatch, so this is O(1) per render instead

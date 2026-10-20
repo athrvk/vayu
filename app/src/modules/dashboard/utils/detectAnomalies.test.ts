@@ -24,6 +24,7 @@ import {
 	MAX_ANOMALIES,
 	ERROR_BURST_RATE,
 	THROUGHPUT_DROP_FACTOR,
+	wholeSecondTicks,
 } from "./detectAnomalies";
 import { detectAnomaliesFromScratch } from "./detectAnomalies.testkit";
 
@@ -323,22 +324,33 @@ function noisyRun(ticks: number, rand: () => number): LoadTestMetrics[] {
 /**
  * Replay a run through the store's own buffer discipline - append a batch, drop
  * the front past the time window, then past the hard cap - checking after every
- * commit that the detector and a from-scratch pass say the same thing.
+ * commit that the detector and a from-scratch pass say the same thing about the
+ * series `view` makes of the buffer. Returns the sorts the detector spent.
  */
 function replay(
 	source: LoadTestMetrics[],
 	rand: () => number,
-	windowSeconds: number,
-	cap: number
-): { commits: number; kinds: Set<string> } {
+	{
+		windowSeconds,
+		cap,
+		maxBatch = 6,
+		view = (buffer) => buffer,
+	}: {
+		windowSeconds: number;
+		cap: number;
+		maxBatch?: number;
+		view?: (buffer: LoadTestMetrics[]) => LoadTestMetrics[];
+	}
+): { commits: number; kinds: Set<string>; sorts: number } {
 	const detector = createAnomalyDetector();
 	let buffer: LoadTestMetrics[] = [];
 	let next = 0;
 	let commits = 0;
+	let sorts = 0;
 	const kinds = new Set<string>();
 
 	while (next < source.length) {
-		const batch = 1 + Math.floor(rand() * 6);
+		const batch = 1 + Math.floor(rand() * maxBatch);
 		buffer = [...buffer, ...source.slice(next, next + batch)];
 		next += batch;
 
@@ -348,15 +360,17 @@ function replay(
 		if (start > 0) buffer = buffer.slice(start);
 		if (buffer.length > cap) buffer = buffer.slice(-cap);
 
-		const found = detector.detect(buffer);
-		expect(found).toEqual(detectAnomaliesFromScratch(buffer));
+		const series = view(buffer);
+		const { result: found, sorts: spent } = measure(() => detector.detect(series));
+		sorts += spent;
+		expect(found).toEqual(detectAnomaliesFromScratch(series));
 		// The one-shot has to answer the oracle too - it is what the history view
 		// calls, and it is now a wrapper over the same rules.
-		expect(detectAnomalies(buffer)).toEqual(found);
+		expect(detectAnomalies(series)).toEqual(found);
 		for (const a of found) kinds.add(a.kind);
 		commits++;
 	}
-	return { commits, kinds };
+	return { commits, kinds, sorts };
 }
 
 /**
@@ -396,7 +410,10 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 		// windows going quiet as the history they rested on rolls out - is the
 		// common case here rather than an edge one.
 		const rand = mulberry32(20260831);
-		const { commits, kinds } = replay(noisyRun(900, rand), rand, 30, 40);
+		const { commits, kinds } = replay(noisyRun(900, rand), rand, {
+			windowSeconds: 30,
+			cap: 40,
+		});
 		expect(commits).toBeGreaterThan(100);
 		// An agreement on nothing is not an agreement: the sequence has to have
 		// actually produced findings of every kind for the equivalence to mean
@@ -411,7 +428,10 @@ describe("createAnomalyDetector - the same answer as a from-scratch pass", () =>
 
 	it("agrees over a randomized append/trim sequence on a window wide enough to hold whole windows", () => {
 		const rand = mulberry32(31082026);
-		const { commits, kinds } = replay(noisyRun(900, rand), rand, 200, 5000);
+		const { commits, kinds } = replay(noisyRun(900, rand), rand, {
+			windowSeconds: 200,
+			cap: 5000,
+		});
 		expect(commits).toBeGreaterThan(100);
 		expect([...kinds].sort()).toEqual([
 			"error_burst",
@@ -726,5 +746,218 @@ describe("createAnomalyDetector - the edges of recognising the next buffer", () 
 		// rule reads one more, and the tail advances by ten. Restarting the tail
 		// at the run's end instead would add ~600 reads on top.
 		expect(p99Reads).toBeLessThan(10 * (BASELINE_TICKS + 2) + 50);
+	});
+});
+
+/*
+ * One cadence live and stored (#2589). The engine sends a live frame every
+ * ~100 ms and closes a second on about one frame in ten, the gate, which
+ * carries that second's percentiles; History stores one row per gate. Every
+ * rule counts ticks, so the live dashboard runs the detector on the gates alone,
+ * and the same run has to show the same windows in both views.
+ */
+
+const FRAMES_PER_SECOND = 10;
+
+/** The figure a window frame reads `k` tenths of the way from one gate to the next. */
+function partWay(from: number, to: number, k: number): number {
+	return from + ((to - from) * k) / FRAMES_PER_SECOND;
+}
+
+/**
+ * A frame between gates: counters part-way to the next stored tick, the status
+ * map as of the last gate, and a window p99 of 30 ms except the last two of each
+ * second at 900 - two hot frames in a row, so a detector that counted frames
+ * would find a spike every second.
+ */
+function windowFrame(previous: LoadTestMetrics, next: LoadTestMetrics, k: number): LoadTestMetrics {
+	return {
+		...next,
+		live: true,
+		elapsed_seconds: partWay(previous.elapsed_seconds, next.elapsed_seconds, k),
+		requests_completed: Math.round(
+			partWay(previous.requests_completed, next.requests_completed, k)
+		),
+		requests_failed: Math.round(partWay(previous.requests_failed, next.requests_failed, k)),
+		status_codes: previous.status_codes,
+		latency_p99_ms: k >= FRAMES_PER_SECOND - 2 ? 900 : 30,
+	};
+}
+
+/**
+ * The gate frame for a stored tick: the tick's second in `second_*`, its own
+ * `latency_p99_ms` a 30 ms window, and its own `current_rps` the last ~100 ms.
+ */
+function gateFrame(m: LoadTestMetrics, ownRps: number): LoadTestMetrics {
+	return {
+		...m,
+		live: true,
+		current_rps: ownRps,
+		latency_p99_ms: 30,
+		second_samples: 500,
+		second_p50_ms: m.latency_p50_ms,
+		second_p95_ms: m.latency_p95_ms,
+		second_p99_ms: m.latency_p99_ms,
+	};
+}
+
+/**
+ * The live stream a stored series was recorded from: nine window frames leading
+ * up to each stored tick after the first, then its gate at the tick's elapsed
+ * time. `gateRps` is the gate's own 100 ms throughput, which no stored tick holds.
+ */
+function liveStream(
+	stored: LoadTestMetrics[],
+	gateRps: (m: LoadTestMetrics, i: number) => number = (m) => m.current_rps
+): LoadTestMetrics[] {
+	const frames: LoadTestMetrics[] = [];
+	stored.forEach((m, i) => {
+		const previous = stored[i - 1];
+		if (previous) {
+			for (let k = 1; k < FRAMES_PER_SECOND; k++) frames.push(windowFrame(previous, m, k));
+		}
+		frames.push(gateFrame(m, gateRps(m, i)));
+	});
+	return frames;
+}
+
+/** Index of stored tick `i`'s gate in {@link liveStream}'s output. */
+const gateIndex = (i: number) => i * FRAMES_PER_SECOND;
+
+/**
+ * A stored series whose cumulative completions agree with its per-tick
+ * throughput, as a recorded run's do. `healthyRun` counts 500 a tick whatever
+ * its `current_rps` says, and a live gate's throughput is read off the counter.
+ */
+function recorded(run: LoadTestMetrics[]): LoadTestMetrics[] {
+	let completed = 0;
+	return run.map((m) => ({ ...m, requests_completed: (completed += m.current_rps) }));
+}
+
+/** A gate's own 100 ms throughput dipping to a fifth for two seconds in every eight. */
+const lullingGateRps = (m: LoadTestMetrics, i: number) =>
+	i % 8 >= 6 ? m.current_rps * 0.2 : m.current_rps;
+
+/** A stored run that trips every rule once: a drop, a burst, a spike, then a 5xx. */
+function eventfulRun(): LoadTestMetrics[] {
+	return recorded(
+		healthyRun(60, (i): Partial<LoadTestMetrics> => ({
+			...(i >= 25 && i <= 27 ? { current_rps: 200 } : {}),
+			...(i === 40 || i === 41 ? { latency_p99_ms: 560 } : {}),
+			requests_failed: (i < 30 ? 0 : i === 30 ? 25 : 50) + (i >= 50 ? 3 : 0),
+			status_codes: i >= 50 ? { "200": 500 * i, "503": 3 } : { "200": 500 * i },
+		}))
+	);
+}
+
+describe("detectAnomalies - a live stream reads as its stored seconds (#2589)", () => {
+	it("finds the same windows in a live stream's gates as in its stored ticks", () => {
+		const stored = eventfulRun();
+		const expected = detectAnomalies(stored);
+		// An agreement on nothing is not an agreement.
+		expect(expected.map((a) => a.kind).sort()).toEqual([
+			"error_burst",
+			"first_5xx",
+			"latency_spike",
+			"throughput_drop",
+		]);
+
+		const live = liveStream(stored, lullingGateRps);
+		expect(detectAnomalies(wholeSecondTicks(live))).toEqual(expected);
+	});
+
+	it("takes a baseline over fifteen gates, not fifteen frames", () => {
+		// Ten seconds in is a hundred frames, but only ten gates: too early.
+		const early = recorded(
+			healthyRun(40, (i) => (i === 10 || i === 11 ? { latency_p99_ms: 480 } : {}))
+		);
+		expect(detectAnomalies(wholeSecondTicks(liveStream(early)))).toEqual([]);
+
+		const settled = recorded(
+			healthyRun(40, (i) =>
+				i === BASELINE_TICKS || i === BASELINE_TICKS + 1 ? { latency_p99_ms: 480 } : {}
+			)
+		);
+		const found = detectAnomalies(wholeSecondTicks(liveStream(settled)));
+		expect(found).toHaveLength(1);
+		expect(found[0]).toMatchObject({ kind: "latency_spike", startSeconds: BASELINE_TICKS });
+	});
+
+	it("restates a gate's throughput over the interval since the previous gate", () => {
+		// The gate's own figure is a 100 ms delta, which lulls two seconds in eight
+		// here; read as it is, that would be a throughput drop every eight seconds.
+		const stored = eventfulRun();
+		const series = wholeSecondTicks(liveStream(stored, lullingGateRps));
+
+		expect(series.map((m) => m.current_rps)).toEqual(stored.map((m) => m.current_rps));
+		const drops = detectAnomalies(series).filter((a) => a.kind === "throughput_drop");
+		expect(drops).toHaveLength(1);
+		expect(drops[0]).toMatchObject({ startSeconds: 25, endSeconds: 27 });
+	});
+
+	it("restates the final gate over its own part of a second", () => {
+		// The final frame closes whatever followed the last gate, here 0.3 s at
+		// the run's steady 500/s, and reports a 100 ms figure of its own.
+		const stored = recorded(healthyRun(30));
+		const last = stored[stored.length - 1];
+		const final = {
+			...gateFrame(last, 40),
+			elapsed_seconds: last.elapsed_seconds + 0.3,
+			requests_completed: last.requests_completed + 150,
+			second_samples: 150,
+		};
+
+		const series = wholeSecondTicks([...liveStream(stored), final]);
+		expect(series).toHaveLength(stored.length + 1);
+		expect(series[series.length - 1].current_rps).toBeCloseTo(500, 6);
+		expect(detectAnomalies(series)).toEqual([]);
+	});
+
+	it("passes a stored series through as it is", () => {
+		const stored = healthyRun(20);
+		const series = wholeSecondTicks(stored);
+		expect(series).toHaveLength(stored.length);
+		series.forEach((m, i) => expect(m).toBe(stored[i]));
+	});
+
+	it("maps a gate to the same object after the gate before it is trimmed", () => {
+		// The detector recognises the next buffer by tick identity, and a gate's
+		// figure depends on the gate before it, which the front trim removes.
+		const live = liveStream(recorded(healthyRun(30)), lullingGateRps);
+		const full = wholeSecondTicks(live);
+		const trimmed = wholeSecondTicks(live.slice(gateIndex(6)));
+
+		expect(trimmed).toHaveLength(full.length - 6);
+		trimmed.forEach((m, i) => expect(m).toBe(full[i + 6]));
+		// Gate 6 lulls on its own figure; it keeps the one it was restated to.
+		expect(trimmed[0].current_rps).toBe(500);
+	});
+});
+
+describe("createAnomalyDetector - over a live buffer's gates", () => {
+	it("agrees with a from-scratch pass commit by commit, without starting over", () => {
+		const rand = mulberry32(2589);
+		const ticks = 400;
+		const source = liveStream(noisyRun(ticks, rand));
+		// About 30 gates held at a time: the window binds, so every commit trims.
+		const { commits, kinds, sorts } = replay(source, rand, {
+			windowSeconds: 30,
+			cap: 40 * FRAMES_PER_SECOND,
+			maxBatch: 12,
+			view: wholeSecondTicks,
+		});
+
+		expect(commits).toBeGreaterThan(300);
+		expect([...kinds].sort()).toEqual([
+			"error_burst",
+			"first_5xx",
+			"latency_spike",
+			"throughput_drop",
+		]);
+		// Three trailing medians per gate, each gate taken once, plus at most two
+		// report sorts a commit. A detector that failed to recognise the next
+		// series - a gate mapped to a new object - would pay the medians for every
+		// gate it holds on every commit, some 45 sorts each.
+		expect(sorts).toBeLessThanOrEqual(3 * ticks + 2 * commits);
 	});
 });
