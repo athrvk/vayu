@@ -736,15 +736,18 @@ class Database {
     std::optional<Run> set_run_baseline (const std::string& id, bool baseline);
 
     /**
-     * @brief Prune old runs (and their cascaded metrics/results) by two limits.
+     * @brief Prune old runs (and their cascaded metrics/results) by three limits.
      *
-     * A run is a victim when it falls beyond @p max_runs most-recent runs
-     * (ordered by start_time) OR its start_time is older than @p max_age_days.
-     * Either limit is disabled by passing 0. Runs still `running`/`pending` are
-     * never pruned and never count toward @p max_runs, and neither is a run
-     * pinned as a baseline (`Run::baseline`). Deletion goes through the
-     * `delete_run` cascade in start_time-batched transactions, releasing the DB
-     * mutex between batches so a large backlog cannot stall other endpoints.
+     * The count caps are per kind (#2429): @p max_runs counts load and
+     * scenario runs, @p max_design_runs counts design Sends, and neither kind
+     * evicts the other. A run is a victim when it falls beyond its kind's
+     * most-recent N (ordered by start_time) OR its start_time is older than
+     * @p max_age_days, which applies to every kind. Each limit is disabled by
+     * passing 0. Runs still `running`/`pending` are never pruned and never
+     * count toward either cap, and neither is a run pinned as a baseline
+     * (`Run::baseline`). Deletion goes through the run cascade in
+     * batched transactions, releasing the DB mutex between batches so a large
+     * backlog cannot stall other endpoints.
      *
      * Selection and deletion are separate acquisitions, so each victim is
      * re-read inside its batch's lock and spared when it has since been pinned,
@@ -754,15 +757,18 @@ class Database {
      * @param after_selection Test seam, invoked once victims are chosen, with
      *        the mutex released and before the first batch - the window a
      *        competing pin lands in.
+     * @param max_design_runs The design Send cap; after the seam so the
+     *        existing three-argument callers keep their meaning.
      */
     void prune_runs (int max_runs,
     int max_age_days,
-    const std::function<void ()>& after_selection = nullptr);
+    const std::function<void ()>& after_selection = nullptr,
+    int max_design_runs                           = 0);
 
     /**
-     * @brief Prune runs using the configured `maxRunsRetained` /
-     * `runRetentionDays` knobs. Called at startup and after a run reaches a
-     * terminal status.
+     * @brief Prune runs using the configured `maxRunsRetained`,
+     * `maxDesignRunsRetained` and `runRetentionDays` knobs. Called at startup
+     * and after a run reaches a terminal status.
      */
     void prune_runs_configured ();
 
@@ -1142,11 +1148,22 @@ class Database {
     /**
      * @brief Delete a run and every child row it owns (ticks, metrics, results).
      *
-     * The single definition of the run cascade - `delete_run` and `prune_runs`
-     * both call it, so a new child table is wired into both by editing one
-     * function. The caller must already hold the DB mutex.
+     * The single definition of the run cascade - `delete_run` and
+     * `remove_unexempt_runs` both call it, so a new child table is wired into
+     * every delete by editing one function. The caller must already hold the
+     * DB mutex.
      */
     void remove_run_cascade_locked (const std::string& id); // db_runs.cpp
+
+    /**
+     * @brief Cascade-delete @p ids in batches, sparing what retention exempts.
+     *
+     * The deleting half of `prune_runs`: the mutex is taken
+     * per batch of 100 and released between them, and each row is re-read
+     * under its batch's lock, so a run pinned, back in flight or already gone
+     * since the caller chose it is skipped (#1906). Answers the ids deleted.
+     */
+    std::vector<std::string> remove_unexempt_runs (const std::vector<std::string>& ids); // db_runs.cpp
 
     /**
      * @brief Every collection id in @p root_id's subtree, @p root_id first.

@@ -1088,14 +1088,17 @@ TEST_F (DatabaseTest, DropsTheLegacyMetricsTableFromAPreUpgradeDatabase) {
 namespace {
 
 // A terminal run with an explicit id/start_time, plus one metric tick and one
-// result so prune's cascade delete is observable.
+// result so prune's cascade delete is observable. A load run unless asked
+// otherwise: `max_runs`, the cap most cases here exercise, counts load and
+// collection runs and leaves design Sends to their own cap (#2429).
 void seed_run_with_children (Database& db,
 const std::string& id,
 int64_t start_time,
-vayu::RunStatus status = vayu::RunStatus::Completed) {
+vayu::RunStatus status = vayu::RunStatus::Completed,
+vayu::RunType type     = vayu::RunType::Load) {
     vayu::db::Run run;
     run.id              = id;
-    run.type            = vayu::RunType::Design;
+    run.type            = type;
     run.status          = status;
     run.start_time      = start_time;
     run.config_snapshot = "{}";
@@ -1266,6 +1269,146 @@ TEST_F (DatabaseTest, PruneRunsSparesARunPinnedAfterSelection) {
     EXPECT_EQ (db.get_results ("oldest").size (), 1u);
     // The rest of the selection is still pruned.
     EXPECT_EQ (run_ids (db), (std::set<std::string>{ "oldest", "recent" }));
+}
+
+// Each kind has its own count (#2429): a design Send never evicts a load run
+// and a load run never evicts a Send, however they interleave in time.
+TEST_F (DatabaseTest, PruneRunsCountsLoadRunsAndSendsUnderSeparateCaps) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    // load_1, send_1, load_2, send_2, ... - oldest first, alternating.
+    for (int i = 1; i <= 5; ++i) {
+        seed_run_with_children (db, "load_" + std::to_string (i),
+        int64_t{ i } * 2000, vayu::RunStatus::Completed, vayu::RunType::Load);
+        seed_run_with_children (db, "send_" + std::to_string (i),
+        (int64_t{ i } * 2000) + 1000, vayu::RunStatus::Completed, vayu::RunType::Design);
+    }
+
+    db.prune_runs (3, 0, nullptr, 2);
+
+    EXPECT_EQ (run_ids (db),
+    (std::set<std::string>{ "load_3", "load_4", "load_5", "send_4", "send_5" }));
+}
+
+// The defect itself: one afternoon of Sends used to push last week's load runs
+// out of History, because 300 newer Sends filled a cap of 200 on their own.
+TEST_F (DatabaseTest, PruneRunsKeepsOlderLoadRunsBehindManyNewerSends) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    for (int i = 1; i <= 3; ++i) {
+        seed_run_with_children (db, "load_" + std::to_string (i), i,
+        vayu::RunStatus::Completed, vayu::RunType::Load);
+    }
+    for (int i = 1; i <= 300; ++i) {
+        seed_run_with_children (db, "send_" + std::to_string (i), 1000 + i,
+        vayu::RunStatus::Completed, vayu::RunType::Design);
+    }
+
+    db.prune_runs (200, 0, nullptr, 100);
+
+    const auto ids = run_ids (db);
+    EXPECT_TRUE (ids.count ("load_1")) << "Sends evicted a load run";
+    EXPECT_TRUE (ids.count ("load_2"));
+    EXPECT_TRUE (ids.count ("load_3"));
+    EXPECT_EQ (ids.size (), 103u) << "three load runs and the 100 newest Sends";
+    EXPECT_TRUE (ids.count ("send_300"));
+    EXPECT_TRUE (ids.count ("send_201"));
+    EXPECT_FALSE (ids.count ("send_200"));
+}
+
+// A collection run is compared over time the same way a load run is, so it
+// shares the load cap rather than getting a third one.
+TEST_F (DatabaseTest, PruneRunsCountsScenarioRunsWithLoadRuns) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (
+    db, "load_old", 1000, vayu::RunStatus::Completed, vayu::RunType::Load);
+    seed_run_with_children (db, "scenario_new", 2000,
+    vayu::RunStatus::Completed, vayu::RunType::Scenario);
+    seed_run_with_children (
+    db, "send", 3000, vayu::RunStatus::Completed, vayu::RunType::Design);
+
+    db.prune_runs (1, 0, nullptr, 1);
+
+    EXPECT_EQ (run_ids (db), (std::set<std::string>{ "scenario_new", "send" }));
+}
+
+// A 0 design cap is unlimited, the same reading every other cap gives 0, and
+// it leaves the load cap working on its own.
+TEST_F (DatabaseTest, PruneRunsZeroDesignCapKeepsEverySend) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (db, "load_old", 1000);
+    seed_run_with_children (db, "load_new", 2000);
+    for (int i = 1; i <= 4; ++i) {
+        seed_run_with_children (db, "send_" + std::to_string (i), 3000 + i,
+        vayu::RunStatus::Completed, vayu::RunType::Design);
+    }
+
+    db.prune_runs (1, 0, nullptr, 0);
+
+    EXPECT_EQ (run_ids (db),
+    (std::set<std::string>{ "load_new", "send_1", "send_2", "send_3", "send_4" }));
+}
+
+// The pin exemption holds under the design cap too, and a pinned Send does not
+// take one of the cap's places.
+TEST_F (DatabaseTest, PruneRunsSkipsAPinnedSendUnderTheDesignCap) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    seed_run_with_children (
+    db, "pinned", 1000, vayu::RunStatus::Completed, vayu::RunType::Design);
+    seed_run_with_children (
+    db, "old", 2000, vayu::RunStatus::Completed, vayu::RunType::Design);
+    seed_run_with_children (
+    db, "recent", 3000, vayu::RunStatus::Completed, vayu::RunType::Design);
+    ASSERT_HAS_VALUE (db.set_run_baseline ("pinned", true));
+
+    db.prune_runs (0, 0, nullptr, 1);
+
+    EXPECT_EQ (run_ids (db), (std::set<std::string>{ "pinned", "recent" }));
+}
+
+// The configured pass reads the design cap from its own key, not from
+// `maxRunsRetained`.
+TEST_F (DatabaseTest, PruneRunsConfiguredReadsTheDesignCapFromItsOwnKey) {
+    // Recent start times: the configured pass also applies the 30-day age cap.
+    const int64_t recent = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                           .count ();
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    auto entry = db.get_config_entry ("maxDesignRunsRetained");
+    ASSERT_HAS_VALUE (entry) << "the design cap is not seeded";
+    EXPECT_EQ (entry->value, "100");
+    entry->value = "2";
+    db.save_config_entry (*entry);
+
+    seed_run_with_children (db, "load", recent);
+    for (int i = 1; i <= 4; ++i) {
+        seed_run_with_children (db, "send_" + std::to_string (i), recent + i,
+        vayu::RunStatus::Completed, vayu::RunType::Design);
+    }
+
+    db.prune_runs_configured ();
+
+    EXPECT_EQ (run_ids (db), (std::set<std::string>{ "load", "send_3", "send_4" }));
+
+    // 0 is unlimited through the configured pass as well.
+    entry->value = "0";
+    db.save_config_entry (*entry);
+    seed_run_with_children (
+    db, "send_5", recent + 5, vayu::RunStatus::Completed, vayu::RunType::Design);
+    seed_run_with_children (
+    db, "send_6", recent + 6, vayu::RunStatus::Completed, vayu::RunType::Design);
+    db.prune_runs_configured ();
+    EXPECT_EQ (run_ids (db).size (), 5u);
 }
 
 // ============================================================================
@@ -1717,9 +1860,9 @@ namespace {
 VAYU_IGNORE_FALSE_STRING_CONCAT_BOUNDS
 void seed_bulky_run (Database& db, const std::string& id, int64_t start_time, size_t body_bytes) {
     vayu::db::Run run;
-    run.id              = id;
-    run.type            = vayu::RunType::Design;
-    run.status          = vayu::RunStatus::Completed;
+    run.id     = id;
+    run.type   = vayu::RunType::Load; // the kind `prune_runs (keep, 0)` counts
+    run.status = vayu::RunStatus::Completed;
     run.start_time      = start_time;
     run.config_snapshot = "{}";
     db.create_run (run);

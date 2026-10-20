@@ -735,7 +735,9 @@ See [Database Schema](db-schema.md) for the full column list.
    statuses, so `GET /runs` reported them as running forever. They are marked
    `failed`; `end_time` is left as recorded, since when the process died is
    unknowable at restart.
-2. **Pruning**: run history is trimmed per `maxRunsRetained` / `runRetentionDays`.
+2. **Pruning**: run history is trimmed per kind - load and collection runs to
+   `maxRunsRetained`, design Sends to `maxDesignRunsRetained` (#2429) - and every
+   kind to `runRetentionDays`.
    Reconciliation runs first so an orphan is terminal, and therefore prunable, in the
    same startup.
 3. **Trash retention**: collections and requests deleted more than
@@ -1537,7 +1539,8 @@ record shape, the category list, the redaction rule and the file layout
   same rule (#1845). Beside them, `authNotice` says when an auth mode Vayu does
   not execute sent the request without authentication (#2474); it carries no
   credential and is not masked. What
-  bounds their lifetime is run retention (`maxRuns` / the prune pass), not the
+  bounds their lifetime is run retention (`maxRunsRetained` /
+  `maxDesignRunsRetained` and the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.
 
 ## Dependencies

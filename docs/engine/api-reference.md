@@ -935,7 +935,8 @@ governs what a run measures rather than what it keeps:
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
-| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
+| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
+| `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 | `trashRetentionDays` | `30`     | 0–3650       | Destroy collections and requests deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
@@ -1183,7 +1184,9 @@ proxy certificate that is refused is an `SSL_ERROR` whose message says the
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
-toward `maxRunsRetained`.
+toward `maxRunsRetained` or `maxDesignRunsRetained`. Each cap counts only its
+own kind: load and collection runs under `maxRunsRetained`, design Sends under
+`maxDesignRunsRetained`; `runRetentionDays` applies to every kind.
 
 ### GET /request-defaults
 
@@ -10369,10 +10372,11 @@ endpoint is new.
 
 Two things follow from a pin, and both are the point of it:
 
-- **Retention never expires it.** `prune_runs` skips a baseline under both the
-  count cap and the age cap, and a pinned run does not count toward
-  `maxRunsRetained` either - a pin the cap could expire is not a pin, and pins
-  crowding the cap would evict the recent history the cap exists to keep.
+- **Retention never expires it.** `prune_runs` skips a baseline under both
+  count caps and the age cap, and a pinned run does not count toward
+  `maxRunsRetained` or `maxDesignRunsRetained` either - a pin a cap could
+  expire is not a pin, and pins crowding a cap would evict the recent history
+  the cap exists to keep.
 - **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
 
 The engine's own meaning of the flag stops there - it holds no opinion about

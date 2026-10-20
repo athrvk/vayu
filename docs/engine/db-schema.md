@@ -1553,20 +1553,25 @@ the snapshot (`with_default_headers_snapshot`, `http/routes/execution.cpp`);
 absent on a design run and on any run recorded before this issue.
 
 **Retention** - runs are append-only in normal use (every design-mode click adds a `runs` row,
-every load run its `metric_ticks`/`results`), so `Database::prune_runs(max_runs, max_age_days)` trims
-the history. A run is a victim when it falls **beyond the `maxRunsRetained` most-recent runs**
-(ordered by `start_time`) **or** its `start_time` is older than **`runRetentionDays`** days;
-either knob is disabled by `0`. Runs still `running`/`pending` are never pruned and never count
-toward the cap, and neither are runs whose `baseline` is set: a pin that retention can expire is
-not a pin, and pins counting toward the cap would let a handful of them evict the recent history
-the cap exists to keep. Deletion goes through the `delete_run` cascade (runs + their `metric_ticks` +
+every load run its `metric_ticks`/`results`), so
+`Database::prune_runs(max_runs, max_age_days, after_selection, max_design_runs)` trims the
+history. The count caps are **per kind** (issue #2429): load and scenario runs are counted
+under **`maxRunsRetained`**, design Sends under **`maxDesignRunsRetained`**, and neither kind
+evicts the other, so an afternoon of Sends cannot push last week's load runs out. A run is a
+victim when it falls **beyond its kind's most-recent N** (ordered by `start_time`) **or** its
+`start_time` is older than **`runRetentionDays`** days, one age for every kind; each knob is
+disabled by `0`. Runs still `running`/`pending` are never pruned and never count
+toward either cap, and neither are runs whose `baseline` is set: a pin that retention can expire is
+not a pin, and pins counting toward a cap would let a handful of them evict the recent history
+the cap exists to keep. Deletion goes through the run cascade (runs + their `metric_ticks` +
 their `monitor_samples` + their `results`), batched inside transactions that release the DB mutex between batches so a large
 backlog cannot stall `/health`, SSE, or the runs poll. Because victims are chosen under an
 earlier acquisition, each batch re-reads its rows under its own lock and spares one that has
-since been pinned, gone back in flight or been deleted (issue #1906). The cascade itself lives in one function
-(`remove_run_cascade_locked`), which both `delete_run` and `prune_runs` call, so a new child table
-is wired into both at once. `prune_runs_configured()` reads the two
-knobs (config, `data_retention`, defaults 200 / 30) and runs at **startup** (`Database::init`) and
+since been pinned, gone back in flight or been deleted (issue #1906); that batch loop is
+`remove_unexempt_runs`. The cascade itself lives in one function
+(`remove_run_cascade_locked`), which both `delete_run` and `remove_unexempt_runs` call, so a new
+child table is wired into every delete at once. `prune_runs_configured()` reads the three
+knobs (config, `data_retention`, defaults 200 / 100 / 30) and runs at **startup** (`Database::init`) and
 after a run reaches a **terminal** status (design mode's `record_design_result`, and the load-run
 completion/failure paths in `run_manager.cpp`). What a prune frees is disk the file keeps until
 [Reclaiming freed pages](#reclaiming-freed-pages) gives it back.
@@ -1935,7 +1940,8 @@ or a bounded prefix that is not valid UTF-8 / contains a NUL.
 already store request headers as sent. A response `Set-Cookie` is captured along with everything
 else. The mitigation is the run's own marker - `sampling.response_bodies_captured` in
 `runs.summary` - which the Samples tab reads to warn, plus the run cascade below, which makes
-`maxRunsRetained` the expiry for anything credential-shaped a capture picked up.
+`maxRunsRetained` (the load and collection run cap) the expiry for anything credential-shaped a
+capture picked up.
 
 **Per-run request.** There is deliberately no per-sample request copy: a load run's request is
 constant across iterations and already lives in `runs.config_snapshot`, and the event-loop path

@@ -1241,8 +1241,14 @@ constexpr int BUSY_TIMEOUT_MS = 10000;
 /// checkpoint may be lost. FULL adds a sync per commit and loses nothing. OFF
 /// hands the file to the OS and can corrupt it on power loss or an OS crash.
 constexpr int SYNCHRONOUS = 1;
-/// Run retention: keep at most N most-recent runs (0 = unlimited).
+/// Run retention: keep at most N most-recent load and collection runs
+/// (0 = unlimited). Design Sends are counted apart, under the cap below.
 constexpr int MAX_RUNS_RETAINED = 200;
+/// Run retention: keep at most N most-recent single-request Sends
+/// (0 = unlimited, #2429). A separate count so an afternoon of Sends cannot
+/// evict the load and collection runs `MAX_RUNS_RETAINED` keeps; half that cap
+/// because a Send is cheap to repeat and a load run is not.
+constexpr int MAX_DESIGN_RUNS_RETAINED = 100;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
 /**
