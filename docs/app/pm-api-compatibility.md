@@ -223,9 +223,8 @@ same exception `iterationCount` makes above.
 Three divergences from Postman, each for a reason the sandbox forces.
 
 **No promise form.** Postman offers both a callback and a promise-returning
-overload. Vayu ships only the callback, for the same reason `pm.crypto` is not
-`crypto.subtle`: nothing drains the job queue, so the promise could only never
-resolve. The callback is honoured **synchronously** - the send blocks and the
+overload. Vayu ships only the callback for now (#2527); a call without one
+throws. The callback is honoured **synchronously** - the send blocks and the
 callback runs inline, before `pm.sendRequest` returns - so the call shape a
 Postman user writes is unchanged and the semantics are honest.
 
@@ -326,11 +325,9 @@ is the same silent wrong request the body modes are refused to prevent.
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
 
 Postman exposes **Web Crypto** globally (`crypto.subtle`), whose every method
-returns a Promise. Vayu's sandbox has no event loop and no `setTimeout`, so
-nothing drains the job queue: an `await crypto.subtle.digest(...)` would never
-resume and the script would report a timeout rather than a result. Rather than
-wear a familiar name with unfamiliar behaviour, the surface is `pm.crypto` and
-it returns its result directly.
+returns a Promise and which covers far more algorithms than Vayu's sandbox
+implements. Rather than wear a familiar name with unfamiliar behaviour, the
+surface is `pm.crypto` and it returns its result directly.
 
 ```javascript
 pm.crypto.sha256('abc');                        // hex, 64 chars
@@ -382,14 +379,21 @@ done-style form - so `pm.test(a, fn).test(b, fn)` runs both, and `done()` /
 form is untouched: it passes unless it throws.
 
 **The one divergence is what "asynchronous" can mean here.** Postman waits for
-a `done()` that arrives later; this sandbox is synchronous and drains no job
-queue, so one left for later would never run at all - the same reason
-[`pm.crypto` is not `crypto.subtle`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous).
-A callback that declares `done` and returns without calling it therefore
-**fails, naming the reason** - where the same script used to fail with
-`undefined is not a function`, which said nothing about why. Calling `done()`
-twice throws rather than overwriting the first verdict, and the throw fails the
-test.
+a `done()` that arrives later; Vayu judges a done-style test when its callback
+returns, and a `done()` left for a `.then` or an `await` runs only after the
+row is written. A callback that declares `done` and returns without calling it
+therefore **fails, naming the reason** - where the same script used to fail
+with `undefined is not a function`, which said nothing about why. Calling
+`done()` twice throws rather than overwriting the first verdict, and the throw
+fails the test.
+
+**An `async` callback with no `done` is recorded as passed, as in Postman**
+(#2531): postman-sandbox does not await the promise either. A rejection inside
+it is not lost: the job queue is drained before the script ends, and a
+rejection nothing handles is a **script error** on the step, `Unhandled promise
+rejection in test "<name>": <reason>`, the way Postman reports it on the run.
+A rejected promise outside any test reads `Unhandled promise rejection:
+<reason>`, and one the script catches is no error.
 
 ### Assertion chains (`pm.expect`)
 

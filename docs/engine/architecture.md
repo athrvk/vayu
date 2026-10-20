@@ -442,7 +442,7 @@ JavaScript execution engine for pre-request and test scripts:
   a pre-request script can sign the request it just rewrote. Backed by **libsodium**
   through `utils/sha256.hpp` (shared with PKCE) and `utils/encoding.hpp` - the engine
   hand-maintains no hash, HMAC or alphabet table, and OpenSSL is still not linked.
-  Synchronous, because the sandbox has no event loop to settle a Promise on
+  Synchronous: Web Crypto covers algorithms the sandbox does not implement, so the surface is `pm.crypto`, not `crypto.subtle`.
 - **Memory limit**: 64MB per script execution
 - **Timeout**: 5 seconds per script
 - **Sandboxed**: No filesystem access; the one way out to the network is

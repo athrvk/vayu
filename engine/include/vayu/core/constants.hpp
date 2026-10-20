@@ -543,6 +543,17 @@ constexpr bool ENABLE_CONSOLE = true;
  * where a sampled run stops looking finished.
  */
 constexpr int SEND_REQUEST_LIMIT = 10;
+/**
+ * @brief How many promise jobs one execution may run when it has no
+ *        wall-clock deadline (`scriptTimeout` 0).
+ *
+ * The queue a script leaves is drained inside its execution (#2531), and with
+ * a deadline the deadline bounds that drain. Without one, a runaway
+ * `while (true) await null;` would hold the thread forever, so the job count
+ * bounds it instead. Provisional until #2359 settles what `scriptTimeout` 0
+ * means; far above what a script awaiting a few sends queues.
+ */
+constexpr size_t MAX_PROMISE_JOBS_WITHOUT_TIMEOUT = 100000;
 } // namespace script_engine
 
 /**

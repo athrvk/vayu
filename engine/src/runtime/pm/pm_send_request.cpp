@@ -563,12 +563,10 @@ JSValue build_send_error (JSContext* ctx, ErrorCode code, const std::string& mes
  * pm.sendRequest(urlOrOptions, callback)
  *
  * Synchronous by construction, and callback-shaped rather than promise-shaped.
- * The sandbox has a Promise but nothing drains its job queue - no event loop,
- * no setTimeout - so an awaited value never resumes and the script reports a
- * timeout instead of a result. Postman's own signature is callback-based, and
- * a callback can be honoured honestly: block on the send, then invoke
- * callback(err, res) inline. The promise-returning overload Postman also
- * offers is deliberately absent; it could only never resolve.
+ * Postman's own signature is callback-based, and a callback can be honoured
+ * honestly: block on the send, then invoke callback(err, res) inline. The
+ * promise-returning overload Postman also offers is not implemented (#2527),
+ * so a call without a callback is refused rather than handed a promise.
  *
  * Four things are refused by throwing rather than by calling the callback,
  * because they are the script's mistakes and not the network's: the feature
@@ -601,7 +599,7 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!JS_IsFunction (ctx, argv[1])) {
         return JS_ThrowTypeError (ctx,
         "pm.sendRequest requires a callback function as its second argument - "
-        "it has no promise form, because this sandbox never resolves one");
+        "it has no promise form in this sandbox");
     }
 
     constexpr int limit = vayu::core::constants::script_engine::SEND_REQUEST_LIMIT;

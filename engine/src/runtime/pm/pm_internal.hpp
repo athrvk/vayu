@@ -80,6 +80,11 @@ struct RuntimeState {
     /// from a value the script threw: both arrive as a pending exception at the
     /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
     bool interrupted = false;
+    /// Promises rejected with no handler attached, in rejection order, each a
+    /// reference the rejection tracker took (#2531). Emptied, every reference
+    /// freed, before an execution releases its context: a held promise pins
+    /// the context exactly as a queued job does (#1823).
+    std::vector<JSValue> unhandled_rejections;
 };
 
 // Context data stored in JS runtime
@@ -168,6 +173,12 @@ struct ContextData {
     /// of the execution. Per-execution like the rest of this struct, so a
     /// pooled context cannot carry one script's jump into the next.
     ScriptControl control;
+
+    /// The promise each `pm.test` callback returned, with that test's name,
+    /// so a rejection can name its test and a promise that never settled can
+    /// be reported (#2531). Owned references, freed with the tracker's before
+    /// the context is released.
+    std::vector<std::pair<JSValue, std::string>> async_tests;
 };
 
 // Get context data from JS context

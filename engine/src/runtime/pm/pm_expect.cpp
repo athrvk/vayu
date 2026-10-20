@@ -2028,10 +2028,9 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
 // The three fields a done-style test reports its outcome through. They live on
 // a plain JS object rather than on a C++ struct on `js_pm_test`'s frame,
 // because nothing stops a script from keeping `done` and calling it after
-// `pm.test` has returned - the sandbox has no job queue to *resume* such a
-// script, but the call itself still runs. Bound to a stack pointer that is a
-// use-after-free; bound to an object the collector owns it is a write nobody
-// reads.
+// `pm.test` has returned - from later in the script, or from a promise job the
+// drain runs after it. Bound to a stack pointer that is a use-after-free;
+// bound to an object the collector owns it is a write nobody reads.
 constexpr const char* DONE_CALLED  = "called";
 constexpr const char* DONE_FAILED  = "failed";
 constexpr const char* DONE_MESSAGE = "message";
@@ -2110,15 +2109,16 @@ void apply_done_verdict (JSContext* ctx, JSValueConst state, TestResult& result)
     JS_FreeValue (ctx, called);
 
     if (!was_called) {
-        // Postman genuinely waits here; this sandbox cannot. It is synchronous
-        // and drains no job queue, so a `done()` the callback left for later
-        // would never run and the test would be reported on a verdict nothing
-        // ever gave. Saying so is the honest outcome - and a loud one, where
+        // Postman genuinely waits here; this sandbox does not. The verdict is
+        // taken when the callback returns, and a `done()` left for later - in
+        // a `.then`, after an `await` - only runs once the job queue drains,
+        // after the row was written. Saying so is the honest outcome, where
         // the same script used to fail with "undefined is not a function".
         result.passed = false;
         result.error_message =
-        "done() was never called. The script sandbox is synchronous and has no "
-        "job queue, so a test cannot complete asynchronously - call done() "
+        "done() was never called before the callback returned. A done-style "
+        "test is judged when its callback returns, so a done() left for later "
+        "(in a .then, or after an await) is not waited for - call done() "
         "before the callback returns.";
         return;
     }
@@ -2190,7 +2190,14 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 
     JS_FreeValue (ctx, done);
     JS_FreeValue (ctx, state);
-    JS_FreeValue (ctx, ret);
+    // An async callback's row is recorded passed without awaiting it, as
+    // postman-sandbox does; what its promise later does is reported as a
+    // script error after the job queue drains (#2531).
+    if (JS_PromiseState (ctx, ret) != JS_PROMISE_NOT_A_PROMISE) {
+        data->async_tests.emplace_back (ret, test_name);
+    } else {
+        JS_FreeValue (ctx, ret);
+    }
     data->tests.push_back (std::move (result));
 
     // Postman returns `pm` to make the call chainable ("make it chainable",

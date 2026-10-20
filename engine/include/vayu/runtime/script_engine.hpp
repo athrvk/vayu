@@ -517,6 +517,15 @@ class ScriptEngine {
      */
     [[nodiscard]] static std::string version ();
 
+    /**
+     * @brief How many runtimes this engine's pool holds idle.
+     *
+     * An execution returns its runtime to the pool unless it ended with a
+     * promise job still queued, when the runtime is discarded instead (#1823);
+     * this is how a test tells the two apart.
+     */
+    [[nodiscard]] size_t idle_runtime_count () const;
+
     private:
     class Impl;
     std::unique_ptr<Impl> impl_;

@@ -27,6 +27,7 @@
 #include <array>
 #include <chrono>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -140,15 +141,12 @@ void setup_console (JSContext* ctx) {
 //
 // Why this is synchronous, and why it is not called `crypto.subtle`.
 //
-// Web Crypto's SubtleCrypto returns Promises. `Promise` exists in this sandbox
-// but nothing drains the job queue - there is no event loop and no setTimeout
-// (see the timeout note on ScriptConfig) - so `await crypto.subtle.digest(...)`
-// would never resume and the script would report a timeout rather than a
-// result. Wearing the Web Crypto name while behaving differently is the exact
-// trap the sandbox-surface tests exist to catch, so the hashing surface takes a
-// name of its own, `pm.crypto`, and is honestly synchronous. `btoa` / `atob`
-// keep their standard names because they are synchronous on the web too, and
-// they keep their standard Latin-1 semantics with them.
+// Web Crypto's SubtleCrypto returns Promises and covers algorithms this sandbox
+// does not implement. Wearing the Web Crypto name while behaving differently is
+// the exact trap the sandbox-surface tests exist to catch, so the hashing
+// surface takes a name of its own, `pm.crypto`, and is honestly synchronous.
+// `btoa` / `atob` keep their standard names because they are synchronous on
+// the web too, and they keep their standard Latin-1 semantics with them.
 
 // A JS string reaches C++ as UTF-8. `btoa` is defined over code units, not code
 // points, so anything above U+00FF is a range error there; every other caller
@@ -550,6 +548,31 @@ extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
     return 1;
 }
 
+// QuickJS reports a promise rejected with no handler (`is_handled` false), and
+// reports it again if a handler is attached later (true). What is still listed
+// once the job queue has drained is a rejection the script never observed.
+extern "C" void script_rejection_tracker (JSContext* ctx,
+JSValueConst promise,
+JSValueConst /*reason*/,
+bool is_handled,
+void* opaque) {
+    auto* state = static_cast<RuntimeState*> (opaque);
+    if (!state)
+        return;
+    auto& rejections = state->unhandled_rejections;
+    if (!is_handled) {
+        rejections.push_back (JS_DupValue (ctx, promise));
+        return;
+    }
+    for (auto it = rejections.begin (); it != rejections.end (); ++it) {
+        if (JS_IsStrictEqual (ctx, *it, promise)) {
+            JS_FreeValue (ctx, *it);
+            rejections.erase (it);
+            return;
+        }
+    }
+}
+
 class ScriptEngine::Impl {
     public:
     ScriptConfig config;
@@ -596,6 +619,7 @@ class ScriptEngine::Impl {
         auto* rt_state = new RuntimeState ();
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
+        JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);
 
         // The four ids below are process-wide (see class_id_registration_mutex's
         // comment); this lock is what makes their first assignment, and the
@@ -668,9 +692,13 @@ class ScriptEngine::Impl {
     /// Unless a promise job is still queued (#1823): each job holds functions
     /// that pin their context, so `JS_FreeContext` would free nothing and the
     /// runtime would fill with dead contexts until its memory limit failed a
-    /// later script. Draining the queue is not the answer, because it would
-    /// run user code after the script ended, unbounded when `timeout_ms` is 0.
-    /// `JS_FreeRuntime` drops the queued jobs unrun, which releases the context.
+    /// later script. `drain_promise_jobs` empties the queue, so a job is left
+    /// only when the drain stopped at the deadline or the job cap, and that
+    /// job must never run: it is user code past its budget, against a context
+    /// whose `ContextData` is gone. `JS_FreeRuntime` drops it unrun, which
+    /// releases the context. Every value the execution itself held must be
+    /// freed before this call (`release_promise_references`), for the same
+    /// pinning reason.
     void release_context (ContextPair pair) {
         if (!pair.first || !pair.second)
             return;
@@ -703,6 +731,126 @@ class ScriptEngine::Impl {
         delete rt_state;
     }
 
+    [[nodiscard]] std::string timeout_message () const {
+        return "Script execution timed out after " +
+        std::to_string (config.timeout_ms) + "ms";
+    }
+
+    /// What the exception pending on @p ctx says, taken off the context.
+    [[nodiscard]] std::string take_exception_message (JSContext* ctx) const {
+        JSValue exc = JS_GetException (ctx);
+        // Whether the deadline stopped this script is the interrupt
+        // handler's to answer, not the clock's - the same question #1056
+        // settled one layer down. An error that merely *lands* past the
+        // deadline is still that error: a script's own throw at the buzzer,
+        // and `pm.sendRequest` refusing a spent budget from a blocking C
+        // function the handler never gets to interrupt. Comparing the clock
+        // here replaced the sentence naming the fault with a timeout line
+        // the user could not act on.
+        std::string message =
+        script_deadline_expired (ctx) ? timeout_message () : js_to_string (ctx, exc);
+        JS_FreeValue (ctx, exc);
+        return message;
+    }
+
+    /// Runs the promise jobs the script queued, so `.then` callbacks and the
+    /// code after an `await` run inside the execution (#2531). The deadline
+    /// is checked before each job as well as by the interrupt handler inside
+    /// one, because the handler polls only every few thousand bytecode
+    /// operations and a native job polls not at all: without the check, a
+    /// script the deadline already stopped would still run a short job. With
+    /// no deadline the job cap bounds the drain instead.
+    ///
+    /// @return why the drain stopped with jobs still queued, or nullopt once
+    ///         the queue is empty.
+    [[nodiscard]] std::optional<std::string>
+    drain_promise_jobs (JSRuntime* rt, const RuntimeState& state) const {
+        constexpr size_t job_cap =
+        vayu::core::constants::script_engine::MAX_PROMISE_JOBS_WITHOUT_TIMEOUT;
+        size_t jobs_run = 0;
+        while (JS_IsJobPending (rt)) {
+            if (state.enabled && std::chrono::steady_clock::now () > state.deadline) {
+                return timeout_message ();
+            }
+            if (!state.enabled && jobs_run == job_cap) {
+                return "Script stopped after running " + std::to_string (job_cap) +
+                " promise jobs: with no script timeout (scriptTimeout 0) that "
+                "is the limit on asynchronous work, and the rest were not run";
+            }
+            JSContext* job_ctx = nullptr;
+            ++jobs_run;
+            if (JS_ExecutePendingJob (rt, &job_ctx) < 0) {
+                return take_exception_message (job_ctx);
+            }
+        }
+        return std::nullopt;
+    }
+
+    /// The first promise the script left unobserved once the queue drained:
+    /// a rejection nothing handled, then a `pm.test` promise that never
+    /// settled. nullopt when there is none.
+    static std::optional<std::string> unobserved_promise_error (JSContext* js_ctx,
+    const RuntimeState& state,
+    const ContextData& data) {
+        if (!state.unhandled_rejections.empty ()) {
+            return unhandled_rejection_message (js_ctx, state.unhandled_rejections, data);
+        }
+        for (const auto& [promise, test_name] : data.async_tests) {
+            if (JS_PromiseState (js_ctx, promise) == JS_PROMISE_PENDING) {
+                return "A promise did not settle before the script ended "
+                       "(returned by test \"" +
+                test_name + "\")";
+            }
+        }
+        return std::nullopt;
+    }
+
+    static std::string unhandled_rejection_message (JSContext* js_ctx,
+    const std::vector<JSValue>& rejections,
+    const ContextData& data) {
+        JSValueConst first  = rejections.front ();
+        std::string message = "Unhandled promise rejection";
+        for (const auto& [promise, test_name] : data.async_tests) {
+            if (JS_IsStrictEqual (js_ctx, promise, first)) {
+                message += " in test \"" + test_name + "\"";
+                break;
+            }
+        }
+        // Read before the reason is rendered: a reason's own `toString` is
+        // script code, and can settle or handle more promises.
+        const size_t others = rejections.size () - 1;
+        JSValue reason      = JS_PromiseResult (js_ctx, first);
+        message += ": " + js_to_string (js_ctx, reason);
+        JS_FreeValue (js_ctx, reason);
+        if (others > 0) {
+            message += " (and " + std::to_string (others) + " more unhandled " +
+            (others == 1 ? "rejection" : "rejections") + ")";
+        }
+        return message;
+    }
+
+    /// Frees every promise the execution held a reference to, which
+    /// `release_context` needs first.
+    static void
+    release_promise_references (JSContext* js_ctx, RuntimeState& state, ContextData& data) {
+        for (JSValue promise : state.unhandled_rejections) {
+            JS_FreeValue (js_ctx, promise);
+        }
+        state.unhandled_rejections.clear ();
+        for (auto& entry : data.async_tests) {
+            JS_FreeValue (js_ctx, entry.first);
+        }
+        data.async_tests.clear ();
+    }
+
+    /// The first error an execution meets is the one it reports.
+    static void record_script_error (ScriptResult& result, std::string message) {
+        result.success = false;
+        if (result.error_message.empty ()) {
+            result.error_message = std::move (message);
+        }
+    }
+
     ScriptResult execute (const std::string& script, const ScriptContext& ctx) {
         ScriptResult result;
 
@@ -719,13 +867,13 @@ class ScriptEngine::Impl {
 
         // Refresh the per-execution deadline. A pooled context reused for the next
         // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
-        if (auto* rt_state = static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt))) {
-            rt_state->enabled     = config.timeout_ms != 0;
-            rt_state->interrupted = false;
-            if (rt_state->enabled) {
-                rt_state->deadline = std::chrono::steady_clock::now () +
-                std::chrono::milliseconds (config.timeout_ms);
-            }
+        // acquire_context sets the opaque on every runtime it hands out.
+        auto& rt_state = *static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
+        rt_state.enabled     = config.timeout_ms != 0;
+        rt_state.interrupted = false;
+        if (rt_state.enabled) {
+            rt_state.deadline = std::chrono::steady_clock::now () +
+            std::chrono::milliseconds (config.timeout_ms);
         }
 
         // Set up context data
@@ -782,29 +930,22 @@ class ScriptEngine::Impl {
         JSValue eval_result = JS_Eval (js_ctx, wrapped_script.c_str (),
         wrapped_script.size (), "<script>", JS_EVAL_TYPE_GLOBAL);
 
+        result.success = true;
         if (JS_IsException (eval_result)) {
-            JSValue exc    = JS_GetException (js_ctx);
-            result.success = false;
-            // Whether the deadline stopped this script is the interrupt
-            // handler's to answer, not the clock's - the same question #1056
-            // settled one layer down. An error that merely *lands* past the
-            // deadline is still that error: a script's own throw at the buzzer,
-            // and `pm.sendRequest` refusing a spent budget from a blocking C
-            // function the handler never gets to interrupt. Comparing the clock
-            // here replaced the sentence naming the fault with a timeout line
-            // the user could not act on.
-            if (script_deadline_expired (js_ctx)) {
-                result.error_message = "Script execution timed out after " +
-                std::to_string (config.timeout_ms) + "ms";
-            } else {
-                result.error_message = js_to_string (js_ctx, exc);
-            }
-            JS_FreeValue (js_ctx, exc);
-        } else {
-            result.success = true;
+            record_script_error (result, take_exception_message (js_ctx));
         }
-
         JS_FreeValue (js_ctx, eval_result);
+
+        // Drained even after a throw, as Postman's event loop would: a job the
+        // script queued before throwing still runs, and the throw stays the
+        // reported error. A script the deadline already stopped runs no job.
+        auto async_error = drain_promise_jobs (rt, rt_state);
+        if (!async_error) {
+            async_error = unobserved_promise_error (js_ctx, rt_state, ctx_data);
+        }
+        if (async_error) {
+            record_script_error (result, std::move (*async_error));
+        }
 
         // Apply the script's pm.request edits to the request that is about to
         // be sent. Deliberately runs even when the script threw: the edits it
@@ -835,7 +976,9 @@ class ScriptEngine::Impl {
             }
         }
 
-        // Return context to pool
+        // Last before the release: the write-back above reads script objects
+        // too, and a promise it caused to reject is tracked like any other.
+        release_promise_references (js_ctx, rt_state, ctx_data);
         release_context (pair);
         return result;
     }
@@ -873,6 +1016,11 @@ Environment& env) {
 
 bool ScriptEngine::is_available () {
     return true;
+}
+
+size_t ScriptEngine::idle_runtime_count () const {
+    std::lock_guard<std::mutex> lock (impl_->pool_mutex);
+    return impl_->context_pool.size ();
 }
 
 std::string ScriptEngine::version () {
@@ -925,6 +1073,10 @@ bool ScriptEngine::is_available () {
 
 std::string ScriptEngine::version () {
     return "";
+}
+
+size_t ScriptEngine::idle_runtime_count () const {
+    return 0;
 }
 
 #endif // VAYU_HAS_QUICKJS

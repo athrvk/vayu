@@ -806,8 +806,8 @@ TEST_F (SendRequestTest, AnUnknownMethodIsRejected) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
-// There is no promise form - the sandbox has a Promise but nothing drains its
-// job queue - so a missing callback has to say that rather than return one.
+// There is no promise form (#2527), so a missing callback has to say that
+// rather than return one.
 TEST_F (SendRequestTest, ACallbackIsRequired) {
     SendRequestServer server;
 

@@ -73,13 +73,27 @@ pm.test('the token came back', function(done) {
 ```
 
 **`done()` must be called before the callback returns, and this is a
-divergence: Postman genuinely waits.** The sandbox is synchronous and drains no
-job queue (see [Limitations](#limitations)), so a `done()` left for later would
-never run at all. A callback that declares `done` and returns without calling
+divergence: Postman genuinely waits.** Vayu judges a done-style test when its
+callback returns; a `done()` left for later (in a `.then`, or after an
+`await`) runs only when the job queue drains after the script, once the row is
+already written. A callback that declares `done` and returns without calling
 it therefore **fails**, saying so - rather than being reported on a verdict
 nothing ever gave. Calling `done()` twice is refused for the same reason the
 first verdict is kept: the second call throws, and the throw fails the test
 naming what happened.
+
+**An `async` callback's test passes when it returns, as in Postman** (issue
+#2531). postman-sandbox records the row without awaiting the promise, and so
+does Vayu. What the promise does afterwards is still reported: the job queue is
+drained before the script's results are read, so the code after an `await`
+runs, and a rejection nothing handles is a **script error** on the step,
+`Unhandled promise rejection in test "<name>": <reason>`, with the reason
+written as a thrown error would be (an `AssertionError`'s message included). A
+test's promise still pending after the drain can never settle, and is reported
+as `A promise did not settle before the script ended (returned by test
+"<name>")`. The same applies outside a test: `(async () => { throw new
+Error("x"); })();` ends as `Unhandled promise rejection: Error: x`, while a
+rejection the script catches, before or after it settles, is no error.
 
 ### pm.expect()
 
@@ -1577,11 +1591,9 @@ and must be a function.
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
-**Synchronous, and callback-shaped for that reason.** The send blocks and the
-callback runs inline, before `pm.sendRequest` returns. There is no promise
-overload: `Promise` exists in the sandbox but nothing drains its job queue, so
-one could only never resolve - the same reason hashing is `pm.crypto` rather
-than `crypto.subtle`.
+**Synchronous, and callback-shaped.** The send blocks and the callback runs
+inline, before `pm.sendRequest` returns. There is no promise overload yet
+(#2527): a call without a callback throws rather than returning a promise.
 
 **Which failures throw and which reach the callback.** Transport failures are
 the network's answer, so they arrive as the callback's `err` - an `Error` with
@@ -2471,9 +2483,10 @@ Globals it leaves behind (`globalThis.x = 1`, an implicit `x = 1`), a replaced
 `pm`, `pm.test` or `console.log`, and patches to `String.prototype`,
 `Array.prototype` or `Object.prototype` are gone before the next script on the
 thread starts, including one from another collection. Only the QuickJS runtime
-(memory limit, deadline, class registrations) is reused, and not even that
-when a script ends with a promise job still queued (a `.then` callback, the
-rest of an `async` function after an `await`): the job is discarded with the
+(memory limit, deadline, class registrations) is reused. A promise job the
+script queued (a `.then` callback, the rest of an `async` function after an
+`await`) runs before the script ends, inside its deadline; one still queued
+when the deadline or the job cap stops that drain is discarded with the
 runtime, never run, and the next script starts on a new one. State that should
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
@@ -2501,17 +2514,17 @@ silently falling back to hex.
 `URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
-other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and nothing
-asynchronous. There is no `fetch`, but there **is**
+other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host source
+of asynchronous work: `Promise` and `async`/`await` run, on a job queue drained
+before the script ends, but nothing (no timer, no I/O) settles a promise later.
+There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
 synchronous and bounded rather than a Promise-returning stand-in.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
-is Promise-based. `Promise` exists here, but nothing drains the job queue (jobs
-still queued when a script ends are discarded unrun) - there
-is no event loop and no `setTimeout` - so an `await crypto.subtle.digest(...)`
-would never resume and the script would report a timeout rather than a result.
-Vayu therefore takes a name of its own and is honestly synchronous. `btoa` and
+is Promise-based and covers algorithms this sandbox does not implement, so a
+script written against that name would meet a different surface. Vayu
+therefore takes a name of its own and is honestly synchronous. `btoa` and
 `atob` keep their standard names because they are synchronous on the web too,
 and they keep the rest of their semantics with them: they operate on **binary
 strings**, one byte per code unit, so `btoa` throws on a code point above U+00FF
@@ -2582,6 +2595,14 @@ The **language** is current; what is missing is the **host environment**:
   threw; outside one it ends the script. A later assertion in the same script is
   still judged on its own, and a stack overflow inside such a function is a
   `RangeError` the script could have caught, so that still counts as a throw.
+  **The deadline covers the promise jobs too** (#2531): the queue a script
+  leaves is drained inside the same budget, checked between jobs as well as
+  inside one, so a runaway `while (true) await null;` stops with the same
+  `Script execution timed out after <n>ms`. With `scriptTimeout` at `0` there
+  is no deadline to bound the drain, so it stops after 100,000 jobs instead
+  (`MAX_PROMISE_JOBS_WITHOUT_TIMEOUT`) with its own message, `Script stopped
+  after running 100000 promise jobs: ...`. That cap is provisional until #2359
+  settles what `0` means. A job left queued by either stop is never run.
 
 ## Script Execution Context
 
