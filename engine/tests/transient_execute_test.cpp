@@ -32,7 +32,9 @@
  * `read_persist_variables_flag` (#1904) is the sibling opt-out for what the
  * scripts and extractors set, read by the same rule, so its table sits here;
  * the route honouring it on both transports is driven end to end in
- * sse_stream_test.cpp's `StreamExecuteTest`.
+ * sse_stream_test.cpp's `StreamExecuteTest`. `read_include_parsed_body_flag`
+ * (#2544) is a third, for the answer's parsed `body`; the route honouring it
+ * is driven in execute_binary_body_test.cpp.
  *
  * What is NOT covered here: that the route skips `create_run` for a transient
  * payload. The suite has no in-process HTTP route harness (see
@@ -60,6 +62,7 @@
 namespace {
 
 using nlohmann::json;
+using vayu::http::routes::read_include_parsed_body_flag;
 using vayu::http::routes::read_persist_variables_flag;
 using vayu::http::routes::read_transient_flag;
 using vayu::http::routes::record_design_result;
@@ -140,6 +143,43 @@ TEST (PersistVariablesFlag, ANonBooleanIsRejectedAndNamesTheField) {
         auto flag = read_persist_variables_flag (json{ { "persistVariables", bad } });
         ASSERT_FALSE (flag.ok) << "expected rejection for " << bad.dump ();
         EXPECT_NE (flag.error.find ("persistVariables"), std::string::npos)
+        << "message should name the field, got: " << flag.error;
+    }
+}
+
+// `includeParsedBody` (#2544), the same rule again, defaulting to `true` so
+// every existing caller keeps its `body`. Mutation check: read it with a
+// fallback of `false` and the absent and null rows fail; read the wrong key
+// and the false row and the rejection below fail.
+constexpr auto INCLUDE_PARSED_BODY_FLAG_CASES = std::to_array<FlagCase> ({
+{ "AbsentMeansIncluded", R"({"method":"GET","url":"http://x/"})", true, true },
+{ "NullMeansIncluded", R"({"includeParsedBody":null})", true, true },
+{ "TrueIsExplicitlyIncluded", R"({"includeParsedBody":true})", true, true },
+{ "FalseOptsOut", R"({"includeParsedBody":false})", true, false },
+});
+
+class IncludeParsedBodyFlagAccepted : public ::testing::TestWithParam<FlagCase> {};
+
+TEST_P (IncludeParsedBodyFlagAccepted, ReadsTheExpectedValue) {
+    const auto& c = GetParam ();
+    auto flag     = read_include_parsed_body_flag (json::parse (c.payload));
+    EXPECT_EQ (flag.ok, c.expected_ok);
+    EXPECT_EQ (flag.value, c.expected_value);
+}
+
+INSTANTIATE_TEST_SUITE_P (IncludeParsedBodyFlag,
+IncludeParsedBodyFlagAccepted,
+::testing::ValuesIn (INCLUDE_PARSED_BODY_FLAG_CASES),
+[] (const ::testing::TestParamInfo<FlagCase>& info) {
+    return std::string (info.param.name);
+});
+
+TEST (IncludeParsedBodyFlag, ANonBooleanIsRejectedAndNamesTheField) {
+    for (const auto& bad :
+    { json ("false"), json (0), json (json::array ()), json (json::object ()) }) {
+        auto flag = read_include_parsed_body_flag (json{ { "includeParsedBody", bad } });
+        ASSERT_FALSE (flag.ok) << "expected rejection for " << bad.dump ();
+        EXPECT_NE (flag.error.find ("includeParsedBody"), std::string::npos)
         << "message should name the field, got: " << flag.error;
     }
 }

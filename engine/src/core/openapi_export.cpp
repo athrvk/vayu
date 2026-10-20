@@ -2045,7 +2045,7 @@ ExportNotes& notes) {
     }
     Json folders = Json::array ();
     for (const ExportFolder& folder : collection.folders) {
-        Json entry{ { "path", Json (folder.path) } };
+        Json entry{ { "path", Json (folder.path) }, { "order", folder.order } };
         if (!folder.description.empty ()) {
             entry["description"] = folder.description;
         }

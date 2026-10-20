@@ -279,7 +279,7 @@ export const scenarioRecursiveInput = z
 	.boolean()
 	.optional()
 	.describe(
-		"Descend into sub-collections (default false). The order is the sidebar's: at every level each sub-collection's whole subtree runs before that level's own requests."
+		"Descend into sub-collections (default false). The order is the sidebar's: at every level a collection's sub-collections and requests are one list, so a request runs where it sits and a sub-collection's whole subtree runs where the sub-collection sits."
 	);
 
 /**

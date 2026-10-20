@@ -14,16 +14,17 @@
  * answers "what is on screen, in what order, at what depth and position", which
  * is what a windowed list needs to ask before it mounts anything.
  *
- * Order is the one the nested render had: the roots, then under each expanded
- * folder its new-folder form when open, its sub-folders by `compareTreeOrder`,
- * the "Empty collection" line when it holds nothing, and its requests in the
- * order the query layer already sorted them into.
+ * Order: the roots, then under each expanded folder its new-folder form when
+ * open, the "Empty collection" line when it holds nothing, and its children -
+ * sub-folders and requests in one sibling list (`mergeSiblings`, #2535), so a
+ * request can sit above or between folders.
  */
 
 import type { Collection, Request } from "@/types";
 import { compareTreeOrder } from "@/types";
 import type { TreeModelRow } from "./tree-focus";
 import type { TreeEntity } from "./drop-position";
+import { mergeSiblings } from "./tree-children";
 
 interface RowBase {
 	/** Stable across renders and unique across kinds: the row's React key. */
@@ -44,7 +45,7 @@ interface RowBase {
 
 /**
  * A treeitem's place among its siblings. Folders and requests under one parent
- * are one set, so the requests continue the folders' numbering.
+ * are one set, numbered over the merged list they render in.
  */
 interface SetPosition {
 	posInSet: number;
@@ -162,6 +163,7 @@ function treeRoots(collections: readonly Collection[]): Collection[] {
 		.sort(compareTreeOrder);
 }
 
+/** Each parent's sub-folders, unsorted: `mergeSiblings` orders them with the requests. */
 function childFoldersByParent(collections: readonly Collection[]): Map<string, Collection[]> {
 	const byParent = new Map<string, Collection[]>();
 	for (const collection of collections) {
@@ -170,7 +172,6 @@ function childFoldersByParent(collections: readonly Collection[]): Map<string, C
 		if (siblings) siblings.push(collection);
 		else byParent.set(collection.parentId, [collection]);
 	}
-	for (const siblings of byParent.values()) siblings.sort(compareTreeOrder);
 	return byParent;
 }
 
@@ -192,10 +193,14 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 		position: SetPosition
 	) => {
 		const opens = expandedCollectionIds.has(collection.id) && !entered.has(collection.id);
-		const folders = opens ? (childFolders.get(collection.id) ?? []) : [];
-		const requests = opens ? getRequestsByCollection(collection.id) : [];
+		const children = opens
+			? mergeSiblings(
+					childFolders.get(collection.id) ?? [],
+					getRequestsByCollection(collection.id)
+				)
+			: [];
 		const hasForm = opens && creatingSubfolder === collection.id;
-		const isEmpty = opens && !hasForm && folders.length + requests.length === 0;
+		const isEmpty = opens && !hasForm && children.length === 0;
 
 		rows.push({
 			kind: "folder",
@@ -229,21 +234,22 @@ export function flattenVisibleRows(input: VisibleRowsInput): TreeRow[] {
 			});
 		}
 
-		const setSize = folders.length + requests.length;
-		folders.forEach((child, index) =>
-			appendFolder(child, childDepth, owner, { posInSet: index + 1, setSize })
-		);
-		requests.forEach((request, index) =>
+		const setSize = children.length;
+		children.forEach((child, index) => {
+			const position = { posInSet: index + 1, setSize };
+			if (child.kind === "collection") {
+				appendFolder(child.collection, childDepth, owner, position);
+				return;
+			}
 			rows.push({
 				kind: "request",
-				key: requestRowKey(request.id),
+				key: requestRowKey(child.id),
 				depth: childDepth,
 				parentId: owner,
-				posInSet: folders.length + index + 1,
-				setSize,
-				request,
-			})
-		);
+				...position,
+				request: child.request,
+			});
+		});
 	};
 
 	const roots = treeRoots(input.collections);

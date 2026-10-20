@@ -29,7 +29,7 @@ const [fixturePath] = ENGINE_READING_GUARDS.treeOrder.paths.map(fromRepoRoot);
 
 interface ConformanceCase {
 	name: string;
-	rows: Array<{ id: string; order: number; createdAt: number }>;
+	rows: Array<{ id: string; kind: "folder" | "request"; order: number; createdAt: number }>;
 	expected: string[];
 }
 
@@ -41,15 +41,26 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 /**
  * The renderer holds `createdAt` as the ISO string its transformers produce
  * from the engine's epoch-millisecond column, so the fixture is fed in through
- * that same conversion rather than compared in a shape the app never has.
+ * that same conversion rather than compared in a shape the app never has. The
+ * fixture's `folder` is the renderer's `collection` kind.
  */
 function toRow(row: ConformanceCase["rows"][number]): OrderedTreeRow {
-	return { id: row.id, order: row.order, createdAt: new Date(row.createdAt).toISOString() };
+	return {
+		id: row.id,
+		kind: row.kind === "folder" ? "collection" : "request",
+		order: row.order,
+		createdAt: new Date(row.createdAt).toISOString(),
+	};
 }
 
 describe("tree-order conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
 		expect(fixture.cases.length).toBeGreaterThanOrEqual(12);
+		// The cross-kind cases are the ones #2535 added; a fixture that lost them
+		// would leave the kind rank unpinned.
+		expect(
+			fixture.cases.filter((c) => new Set(c.rows.map((row) => row.kind)).size > 1).length
+		).toBeGreaterThanOrEqual(5);
 		for (const c of fixture.cases) {
 			expect(c.rows.length).toBeGreaterThan(1);
 			expect(c.expected).toHaveLength(c.rows.length);
@@ -76,6 +87,13 @@ describe("compareTreeOrder edge cases the fixture cannot express", () => {
 			{ id: "a" },
 		];
 		expect(rows.sort(compareTreeOrder).map((r) => r.id)).toEqual(["a", "b"]);
+	});
+
+	it("ranks a row with no kind as a folder, so a one-kind list needs none", () => {
+		const at = { order: 0, createdAt: "2026-01-01T00:00:00.000Z" };
+		const request: OrderedTreeRow = { ...at, id: "a", kind: "request" };
+		const unkinded: OrderedTreeRow = { ...at, id: "z" };
+		expect([request, unkinded].sort(compareTreeOrder).map((r) => r.id)).toEqual(["z", "a"]);
 	});
 
 	it("returns 0 for two rows that agree on every key", () => {

@@ -1587,7 +1587,7 @@ and must be a function.
 | `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
-| `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw. Sent as `text/plain` unless `header` names a Content-Type |
+| `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`), `urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`). Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`. A `type: 'file'` row and the `file` and `graphql` modes throw. A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
@@ -1681,7 +1681,8 @@ bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
 **`{{variables}}` resolve as the call is made** (#1001). The URL, each header
-name and value, a raw body and each credential of an `auth` block are resolved
+name and value, a raw body, a form body's field names and values and each
+credential of an `auth` block are resolved
 once, against the three scopes and the bound data row exactly as
 `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
@@ -1758,7 +1759,8 @@ block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
 misspelled, is refused rather than composed as the empty credential `basic`'s two
 optional halves would otherwise make of it. Dropping the option would send an
 unauthenticated request that looks like the script's own mistake, which is the
-reason the body modes are refused too.
+reason the body modes it cannot send whole (`file`, `graphql`, a file part) are
+refused too.
 
 ## The cookie jar (`pm.cookies`)
 

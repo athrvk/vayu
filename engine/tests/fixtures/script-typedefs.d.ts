@@ -1350,9 +1350,11 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
-	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
+	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a body's text or form fields and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
+	 * 
+	 * body takes a string, or Postman's { mode, <mode>: ... } for raw, urlencoded and formdata. A form body's rows are an array of { key, value, disabled? } or a plain object, and go out with the Content-Type the mode implies unless a header names one; a disabled row is skipped. A file part, and the file and graphql modes, are refused by name rather than sent without their payload.
 	 * 
 	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded. The response body is bounded too - at whatever the enclosing execution reads, maxDesignResponseBodyBytes for a send's scripts and maxResponseBodyBytes for a load run's - and a body past it is refused rather than cut: that one reaches the callback as err with .code RESPONSE_TOO_LARGE, because res carries no flag a script could read to learn its body was short.
 	 * 
@@ -1364,7 +1366,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 

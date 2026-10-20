@@ -273,29 +273,39 @@ see [GET /requests](#get-requests).
 ### Ordering
 
 Collections and requests both carry an `order` column that fixes their position
-among their siblings - a collection among the children of its `parentId`, a
-request among the requests of its `collectionId`.
+among their siblings. The siblings of a row are **every child of its parent, of
+both kinds** (#2535): a collection's sub-collections and its requests share one
+`order` space, so a request can sit between two folders.
 
-**Reading.** `GET /collections` and `GET /requests` sort by `order` ascending,
-then `createdAt` ascending, then `id` ascending. All three keys are load-bearing:
-`order` alone is not a total order (every request created before explicit orders
-existed sits at `0`), and rows are stored with `INSERT OR REPLACE` on a TEXT
-primary key, which hands the row a *new* rowid on every edit - so without an
-explicit tiebreak, renaming a request silently moved it among its ties. Clients
-must apply the same rule if they sort locally; the app's `compareTreeOrder` is
-pinned to this one by
-`engine/tests/fixtures/tree-order-conformance.json`, read by both test suites.
+**Reading.** `GET /collections` and `GET /requests` each sort by `order`
+ascending, then `createdAt` ascending, then `id` ascending. All three keys are
+load-bearing: `order` alone is not a total order (every request created before
+explicit orders existed sits at `0`), and rows are stored with `INSERT OR
+REPLACE` on a TEXT primary key, which hands the row a *new* rowid on every edit -
+so without an explicit tiebreak, renaming a request silently moved it among its
+ties.
 
-A collection's sub-collections and its requests are **two separate blocks**, so
-`order` never interleaves them - a request and a subfolder in one folder can hold
-the same value. Where the two blocks sit relative to each other is the tree's
-rule rather than the column's: subfolders first, which is also the order a
-recursive [collection run](#the-scenario-block-collection-runs) executes in,
-pinned across both consumers by
-`engine/tests/fixtures/recursive-run-order-conformance.json`.
+A client that lists a parent's children merges the two lists by `order`, and on
+an `order` tie ranks the **sub-collection before the request**, ahead of
+`createdAt` and `id`: the sibling order is `(order, kind, createdAt, id)`, which
+within one kind is the three-key rule above unchanged. The engine's copy is
+`engine/include/vayu/db/sibling_order.hpp`; the app's `compareTreeOrder` is
+pinned to it by `engine/tests/fixtures/tree-order-conformance.json`, read by
+both test suites. A recursive
+[collection run](#the-scenario-block-collection-runs) walks the same merged list
+depth-first, a request where it sits and a sub-collection's whole subtree where
+the sub-collection sits, pinned across both consumers by
+`engine/tests/fixtures/recursive-run-order-conformance.json`; a mock server's
+route table and `POST /specs/export` list a subtree in that order too.
+
+A workspace from before schema version 7 numbered the two kinds apart, each
+from `0`, and showed every sub-collection above every request. The version-7
+migration moves each collection's requests past its highest sub-collection
+`order`, so that display survives (`docs/engine/db-schema.md`, Schema versions);
+rows still tied at the legacy `0` keep it through the tie rule.
 
 **Writing.** `order` defaults to "append after the current siblings" - one past
-the highest `order` any sibling holds:
+the highest `order` any sibling of either kind holds:
 
 | Write | `order` |
 |---|---|
@@ -307,13 +317,16 @@ the highest `order` any sibling holds:
 | Update, `order` `null`, no move | appended among its current siblings |
 
 A move that states no order therefore lands at the end of the destination rather
-than at whatever slot its position in the *old* list happened to name. Ordering
-*within* a list is always the caller's to state.
+than at whatever slot its position in the *old* list happened to name, after its
+folders and its requests alike. Ordering *within* a list is always the caller's
+to state, and a stated `order` may put a request between two sub-collections.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
-payload's items consecutive slots starting from the append point - see
-[POST /import/apply](#post-importapply).
+payload's items consecutive slots per parent starting from the append point, one
+run across both kinds - the parent's sub-collections first, in payload order,
+then its requests - see [POST /import/apply](#post-importapply). `POST
+/specs/sync` numbers the folders and requests it creates the same way.
 
 **Any writer producing several sibling rows at once owes them distinct
 `order`s** - the import applier is the instance of a general rule, not a special
@@ -1589,8 +1602,8 @@ the null-vs-absent rule.
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
-  "order": 0,                        // Optional, appended after the collection's requests if
-                                      // omitted - see Ordering
+  "order": 0,                        // Optional, appended after the collection's sub-collections
+                                      // and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
@@ -2939,8 +2952,10 @@ the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
 `verifySSL`, `stream`), every saved example with its headers, and the mock mode
 with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
-folder (`path`, `description`, `variables`, `auth`, `elements`, empty folders
-included), and the `requests` no operation can hold - a URL with no path, or a
+folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
+folders included; `order` shares its parent's space with the requests'
+`x-vayu-request.order`, #2535, so a request between two folders imports
+there), and the `requests` no operation can hold - a URL with no path, or a
 second request on a method and path another already claimed - counted as
 `requestsOnlyInExtension` (and under `requestsWithoutPath` /
 `duplicateOperations`, which say why). Another tool ignores both keys; Vayu's
@@ -3196,7 +3211,7 @@ and what it wrote.
 ```json
 {
   "normalize": [
-    {"type": "request", "collectionId": "col_1234567890"}
+    {"parentId": "col_1234567890"}
   ],
   "moves": [
     {"type": "request",    "id": "req_1", "order": 0, "collectionId": "col_2"},
@@ -3221,18 +3236,26 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 A row may appear in `moves` at most once - two positions for one row is a `400`
 naming it, not a last-writer-wins accident of iteration order.
 
-**`normalize`** - each entry names a scope whose children are renumbered dense
-`0..n-1` in the [pinned display order](#ordering) **before** any move applies. A
-collection scope states `parentId` (`null` for the root collections) and a
-request scope states `collectionId`; the named collection must exist, and for a
-collection scope `parentId` must be *stated* rather than omitted, so a renumber
-can never land on a scope the caller did not mean.
+**`normalize`** - each entry names a **parent**, and its children are
+renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
+applies. The children are the parent's sub-collections and its requests as one
+list (#2535), so a tie across the two kinds comes out as distinct numbers with
+the sub-collection first. An entry is `{"parentId": <collection id>}`, or
+`{"parentId": null}` for the root collections (the roots hold collections
+only). The named collection must exist, and `parentId` must be *stated* rather
+than omitted, so a renumber can never land on a scope the caller did not mean.
+The per-kind shapes engines before #2535 took, `{"type": "collection",
+"parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`
+naming the shape above: renumbering one kind alone would leave it tied with the
+other kind's slots.
 
 Normalization exists for the first drop into a collection whose rows predate
 explicit orders: every row sits at `0`, so its displayed position lives only in
 the tiebreak and there are no slots to shift into. Materializing that order in
-the same batch is what keeps the other siblings from appearing to jump. It is
-idempotent - a scope already dense writes nothing at all.
+the same batch is what keeps the other siblings from appearing to jump; a
+parent with every row at `0` comes out with its sub-collections at `0..m-1` and
+its requests after them, the order the tie rule already showed. It is idempotent
+- a scope already dense writes nothing at all.
 
 Where a row is named by both lists, the move wins.
 
@@ -3267,8 +3290,9 @@ without waiting for a refetch.
 }
 ```
 
-**Errors:** `400` for any malformed entry, a row or owner that does not exist, a
-duplicate move, a cycle, or a batch over 10000 entries. `409` if a staged row is
+**Errors:** `400` for any malformed entry (a per-kind `normalize` entry
+included), a row or owner that does not exist, a duplicate move, a cycle, or a
+batch over 10000 entries. `409` if a staged row is
 gone by the time the batch commits. In every case nothing at all was written.
 Body that is not JSON or not an object is also a `400`.
 
@@ -3531,7 +3555,8 @@ members produced: the request's name, method, URL, rows, body, auth, settings
 and saved examples, and the collection's variables, auth, data contract and
 whole folder tree. With `x-vayu-collection` present the document states its own
 tree, so folders nest as it says, each request is filed under its
-`x-vayu-request.folder` in its stored order, a request with none stays on the
+`x-vayu-request.folder`, folders and requests take their stored order (below),
+a request with none stays on the
 root (no folder named after its path, and no `folderStrategy`), and the
 `requests` no operation could hold are created too. A document is a file anyone
 can edit, so none of it is trusted: every piece is checked against what the
@@ -3539,6 +3564,20 @@ write routes accept before it replaces anything, and a piece that fails is
 dropped, counted as `vayu_extension_invalid`, and leaves the standard reading in
 place - never a refused import. Neither key is read on the sync/diff path, for
 the reason `x-vayu-elements` is not.
+
+**A folder or request draft may state `order`**, its position among its
+parent's sub-folders and requests, which share one [order space](#ordering)
+(#2535). A Postman parse states it on every one: the item's position in its
+parent's `item[]`, so the collection keeps the order Postman runs it in. A
+Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
+each folder's `x-vayu-collection.folders[].order`; one written before folders
+carried an `order` states none, and its requests then follow its folders as
+they did. No other format states one. The flattening into
+[`POST /import/apply`](#post-importapply) (`POST /import`, and the app's apply
+of a previewed parse) numbers each parent's children `0..k-1` in one sequence:
+by stated `order`, a draft stating none placed as though its parent listed its
+folders first and its requests after them, and a folder first on a tie. The
+preview tree lists them in the same order.
 
 **Errors:**
 - `400` `Invalid 'content': must be the document's text`, and
@@ -3699,14 +3738,18 @@ accepted a client-supplied `id` - which they no longer do (see
   same defaults and the same null rule - the engine runs the same per-resource
   field appliers for both paths. `id` is **not** accepted here: the engine owns
   ID generation on this path.
-- `order` is optional. For collections, an omitted `order` appends after the
-  existing siblings and then in payload order (each sibling gets the next slot -
-  the per-item default cannot do this in bulk, because none of the payload's own
-  siblings are stored yet). For requests it defaults to `0` on this path only:
-  `POST /requests` appends by scanning the collection's stored rows, which a bulk
-  write cannot do for a collection it is creating in the same call, so a client
-  that cares about request order must state it here. The app's importer does -
-  and deliberately omits `order` on its **root** collections, so an import into a
+- `order` is optional, and a stated one is written as given. An omitted `order`
+  appends after the parent's existing children and then in payload order: each
+  row gets the next slot of its parent (the per-item default cannot do this in
+  bulk, because none of the payload's own siblings are stored yet). A parent's
+  sub-collections and requests share those slots (#2535): the sub-collections
+  that state no `order` take them first, in payload order, and then its
+  requests, so a request with no `order` lands after its folder's
+  sub-collections rather than tied with the first of them. The roots hold
+  collections only. The app's importer states every order below the roots, one
+  sequence per parent in the order the parse placed the drafts (see
+  [`POST /import/parse`](#post-importparse)), and deliberately omits it on its
+  **root** collections, so an import into a
   non-empty workspace lands after the roots already there instead of colliding
   with their `0, 1, 2...`.
 - A request may carry **`examples`**, an array of
@@ -3806,7 +3849,10 @@ document, written the way Postman's own "Export > Collection v2.1" writes one
 (`core/postman_export.hpp`). It is the inverse of the Postman importer: a
 collection imported from a Postman export and exported again gives back the
 same document, `_postman_id` aside, and exporting, importing and exporting
-again is byte-identical.
+again is byte-identical. Each `item[]` lists a collection's sub-folders and
+requests in its one [sibling order](#ordering) (#2535), so a request that sits
+before or between folders is written there, which is where Postman runs it;
+the Postman importer reads that order back.
 
 **Reads only.** Nothing is stored. The whole subtree is exported, with no stop
 at a collection bound to another OpenAPI document.
@@ -3919,8 +3965,8 @@ An auth a Postman import kept its original block for (`auth.postman`, see
 `docs/engine/db-schema.md`) is written as that block, while it still maps to
 the stored auth; everything below describes the rest.
 
-What maps where: folders are item groups (folders before requests, each in
-stored order); a request's `inherit` auth is an absent `auth` and its `none` is
+What maps where: folders are item groups (a folder's sub-folders and requests
+are written as one list in sibling order, a folder first on a tie); a request's `inherit` auth is an absent `auth` and its `none` is
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its
 `noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
 are `raw` with that `options.raw.language` (or the language a Postman import
@@ -6140,6 +6186,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
   "persistVariables": true,            // Optional, default true - see below
+  "includeParsedBody": true,           // Optional, default true - see below
   "origin": { "kind": "app" },         // Optional, who started the run - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
@@ -6603,6 +6650,16 @@ parsed convenience copy, whose member order is unspecified and in which a
 duplicate key collapses to the last value. A client that shows or re-saves the
 body should use `bodyRaw`, as the app does (issue #2459).
 
+`body` is also `null` on a `"utf8"` answer that is valid JSON in two cases
+(issue #2544): the request sent `includeParsedBody: false` (below), or the text
+is longer than 4 MiB (`MAX_PARSED_RESPONSE_BODY_BYTES`), whatever the request
+sent. Past that size the engine does not build the parsed copy at all, because
+a JSON tree costs several times its text and the answer is serialised from it
+once more; `bodyRaw` still carries the whole body, up to
+`maxDesignResponseBodyBytes` below. The key is always present. Scripts, the
+schema check and the stored trace read the body itself, so none of them is
+affected.
+
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.
 
@@ -6960,6 +7017,17 @@ row exists, for the reason `transient`'s is. It is independent of `transient`:
 that flag decides whether the *run* is recorded, this one whether the
 *variables* are. MCP's `run_request` sends `false` whenever write access is off
 ([MCP](mcp.md#safety-model)).
+
+**`includeParsedBody: false` leaves the parsed copy out** (#2544). The answer's
+`body` is `null` and the engine skips the parse that would build it; `bodyRaw`,
+`bodyEncoding`, `bodySize`, the scripts' `pm.response`, the `validation` node
+and the stored trace are what they would have been. It is for a client that
+reads `bodyRaw` only and should not pay for a second copy of every body. Absent
+and `null` mean `true`; a present non-boolean is a **400**
+(`'includeParsedBody' must be a boolean`) before any run row exists, by the
+rule `transient`'s follows. A body past 4 MiB is never parsed whatever this
+says (see the response section above). A streaming send has no `body` in its
+`202` and ignores the flag.
 
 **A run row the database cannot write is a `500`.** A recorded send whose run row
 cannot be stored (a busy or locked database, a full disk, an I/O error) answers
@@ -7590,13 +7658,12 @@ inside the block rather than through `mode` / `duration` / `iterations`:
 
 The collection is resolved into an ordered, fully composed plan **once, before
 anything is sent**, in the order the sidebar displays top to bottom: direct
-requests by `requests.order` and - with `recursive` - descendant collections by
-`collections.order`, depth-first, each sub-collection's whole subtree running
-**before** its parent's own requests, and each list under the tiebreak in
-[Ordering](#ordering). Subfolders ahead of own requests is the tree's rule, not
-the column's: a folder's sub-collections and its requests are separately ordered
-blocks, so the two `order` values are free to collide, and the run follows the
-render (issue #431). Each step is
+requests by `requests.order` and - with `recursive` - each collection's
+sub-collections and requests as one sibling list, depth-first, a request
+running where it sits and a sub-collection's whole subtree where the
+sub-collection sits, under the sibling order in [Ordering](#ordering) (a
+sub-collection first on an `order` tie). The run follows the render (issues
+#431, #2535). Each step is
 composed through the same path `POST /compose` uses, so a step's request and
 joined scripts are byte-identical to what a Send of that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath

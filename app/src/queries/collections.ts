@@ -25,6 +25,7 @@ import { useToastStore } from "@/stores/toast-store";
 import { useDataFileStore } from "@/stores/data-file-store";
 import { useSpecFileStore } from "@/stores/spec-file-store";
 import { walkAncestors } from "@/modules/collections/tree-utils";
+import { childrenOf } from "@/modules/collections/tree-children";
 import type {
 	Collection,
 	Request,
@@ -33,6 +34,7 @@ import type {
 	CreateRequestRequest,
 	UpdateRequestRequest,
 	ReorderRequest,
+	TreeRowKind,
 } from "@/types";
 import { compareTreeOrder } from "@/types";
 
@@ -520,19 +522,22 @@ export function useUpdateRequestMutation() {
 /**
  * Every cache key a plan can touch, worked out before anything is written.
  *
+ * A normalized parent touches two caches, not one: its sub-folders live in the
+ * collections list and its requests in its own list, and the renumber runs over
+ * both as one sibling list (#2535). The root holds collections only.
+ *
  * A request move that states no `collectionId` stays where it is, but the plan
  * does not say where that is - so the owner is read out of the list caches the
  * tree is already showing. An uncached one simply contributes no key: nothing
  * on screen is displaying it, so nothing on screen can go stale.
  */
 function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
-	let touchesCollections = false;
+	let touchesCollections = plan.normalize.length > 0;
 	const requestScopes = new Set<string>();
 	const movedRequestIds: string[] = [];
 
 	for (const scope of plan.normalize) {
-		if (scope.type === "collection") touchesCollections = true;
-		else requestScopes.add(scope.collectionId);
+		if (scope.parentId !== null) requestScopes.add(scope.parentId);
 	}
 	for (const move of plan.moves) {
 		if (move.type === "collection") {
@@ -547,18 +552,38 @@ function affectedKeys(queryClient: ReturnType<typeof useQueryClient>, plan: Reor
 	return { touchesCollections, requestScopes, movedRequestIds };
 }
 
-/** The collections of one scope, renumbered dense in display order. */
-function normalizeCollectionScope(list: Collection[], parentId: string | null): Collection[] {
+/**
+ * One parent's children - sub-folders in the collections list, requests in the
+ * parent's own list - renumbered dense in sibling order, the way the engine's
+ * `normalize` does it. Rows of other parents are left alone.
+ */
+function normalizeParentScope(
+	queryClient: ReturnType<typeof useQueryClient>,
+	parentId: string | null
+) {
+	const requestsOf = (collectionId: string) =>
+		queryClient.getQueryData<Request[]>(queryKeys.requests.listByCollection(collectionId)) ??
+		[];
+	const collections = queryClient.getQueryData<Collection[]>(queryKeys.collections.list()) ?? [];
 	const positions = new Map(
-		list
-			.filter((c) => (c.parentId ?? null) === parentId)
-			.sort(compareTreeOrder)
-			.map((c, index) => [c.id, index] as const)
+		childrenOf(parentId, collections, requestsOf).map(
+			(child, index) => [`${child.kind}:${child.id}`, index] as const
+		)
 	);
-	return list.map((c) => {
-		const order = positions.get(c.id);
-		return order === undefined || order === c.order ? c : { ...c, order };
-	});
+	const renumber =
+		<T extends { id: string; order: number }>(kind: TreeRowKind) =>
+		(row: T): T => {
+			const order = positions.get(`${kind}:${row.id}`);
+			return order === undefined || order === row.order ? row : { ...row, order };
+		};
+
+	queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
+		old?.map(renumber<Collection>("collection"))
+	);
+	if (parentId === null) return;
+	queryClient.setQueryData<Request[]>(queryKeys.requests.listByCollection(parentId), (old) =>
+		old?.map(renumber<Request>("request"))
+	);
 }
 
 /**
@@ -571,18 +596,7 @@ function normalizeCollectionScope(list: Collection[], parentId: string | null): 
  * place would move a row on screen without the tree ever noticing.
  */
 function drawPlan(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderRequest) {
-	for (const scope of plan.normalize) {
-		if (scope.type === "collection") {
-			queryClient.setQueryData<Collection[]>(queryKeys.collections.list(), (old) =>
-				old ? normalizeCollectionScope(old, scope.parentId) : old
-			);
-		} else {
-			queryClient.setQueryData<Request[]>(
-				queryKeys.requests.listByCollection(scope.collectionId),
-				(old) => old?.map((r, index) => ({ ...r, order: index }))
-			);
-		}
-	}
+	for (const scope of plan.normalize) normalizeParentScope(queryClient, scope.parentId);
 
 	for (const move of plan.moves) {
 		if (move.type === "collection") {

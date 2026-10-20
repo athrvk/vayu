@@ -248,9 +248,14 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 [`POST /import/apply`](../../engine/api-reference.md#post-importapply) call:
 
 - Collections are flattened depth-first - **collection → its requests → child
-  collections** - carrying `order` indices and `parentTempId` (`null` for a root);
-  each request carries `collectionTempId` and `bodyType = body.mode` (the engine never
-  derives this).
+  collections** - carrying `parentTempId` (`null` for a root) and, below a root,
+  an `order`: a parent's child collections and requests share one sequence
+  (issue [#2535](https://github.com/athrvk/vayu/issues/2535)), placed by each
+  draft's own `order` where the parse stated one (a Postman item's document
+  position, a Vayu-written document's stored order) and otherwise folders first,
+  then requests (`draft-siblings.ts`, the engine's `sibling_positions` the other
+  copy). Each request carries `collectionTempId` and `bodyType = body.mode` (the
+  engine never derives this).
 - Environments are included **only if `opts.importEnvironments`** is true.
 - The engine generates every real id and returns an `idMap` keyed by temp id. The
   orchestrator checks that map covers every item it sent and throws

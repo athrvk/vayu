@@ -226,6 +226,60 @@ TEST_F (ImportApplyRouteTest, AppendsAfterCollectionsThatAlreadyExist) {
     EXPECT_EQ (imported_row->order, 1);
 }
 
+// A parent's sub-folders and requests share one `order` space (#2535), so the
+// consecutive slots run across both kinds: the folders first, in payload
+// order, then the requests. Mutation check: give `build_request_rows` its own
+// slot space and the requests restart at 0, tied with the folders.
+TEST_F (ImportApplyRouteTest, ConsecutiveOrdersSpanBothKindsUnderOneParent) {
+    json first_folder             = collection_item ("c2", "first folder");
+    first_folder["parentTempId"]  = "c1";
+    json second_folder            = collection_item ("c3", "second folder");
+    second_folder["parentTempId"] = "c1";
+    auto [status, response]       = import_apply_response (*db_,
+          json{ { "requests",
+                json::array ({ request_item ("r1", "c1", "first request"),
+                request_item ("r2", "c1", "second request"),
+                request_item ("r3", "c2", "in the first folder") }) },
+          { "collections",
+          json::array ({ collection_item ("c1", "root"), first_folder, second_folder }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto order_of_collection = [&] (const char* temp) {
+        const auto row = db_->get_collection (response["idMap"][temp]);
+        return row ? row->order : -1;
+    };
+    const auto order_of_request = [&] (const char* temp) {
+        const auto row = db_->get_request (response["idMap"][temp]);
+        return row ? row->order : -1;
+    };
+    EXPECT_EQ (order_of_collection ("c2"), 0);
+    EXPECT_EQ (order_of_collection ("c3"), 1);
+    EXPECT_EQ (order_of_request ("r1"), 2);
+    EXPECT_EQ (order_of_request ("r2"), 3);
+    // Another parent, another space.
+    EXPECT_EQ (order_of_request ("r3"), 0);
+}
+
+// A stated `order` is written as given on either kind, and the rows that state
+// none still take the parent's consecutive slots.
+TEST_F (ImportApplyRouteTest, AStatedOrderIsHonouredBesideDefaultedSiblings) {
+    json folder             = collection_item ("c2", "folder");
+    folder["parentTempId"]  = "c1";
+    json stated             = request_item ("r1", "c1", "stated");
+    stated["order"]         = 9;
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root"), folder }) },
+    { "requests", json::array ({ stated, request_item ("r2", "c1", "defaulted") }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+
+    const auto stated_row = db_->get_request (response["idMap"]["r1"]);
+    ASSERT_HAS_VALUE (stated_row);
+    EXPECT_EQ (stated_row->order, 9);
+    const auto defaulted_row = db_->get_request (response["idMap"]["r2"]);
+    ASSERT_HAS_VALUE (defaulted_row);
+    EXPECT_EQ (defaulted_row->order, 1);
+}
+
 TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
     json bad_request = request_item ("r2", "c1", "no method");
     bad_request.erase ("method");

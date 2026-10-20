@@ -43,6 +43,7 @@
 #include "vayu/http/script_parts.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -279,6 +280,16 @@ ExecuteFlag read_transient_flag (const nlohmann::json& json) {
  */
 ExecuteFlag read_persist_variables_flag (const nlohmann::json& json) {
     return read_execute_flag (json, "persistVariables", true);
+}
+
+/**
+ * @brief Read `POST /execute`'s `includeParsedBody` flag (issue #2544).
+ *
+ * Absent and `null` mean `true`, so every existing caller keeps its `body`. A
+ * non-boolean is a 400 by the rule the two flags above share.
+ */
+ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json) {
+    return read_execute_flag (json, "includeParsedBody", true);
 }
 
 /**
@@ -846,10 +857,11 @@ const std::vector<vayu::core::ElementOutcome>& outcomes) {
 
 // Build the final response JSON with script results
 nlohmann::json build_response_json (const vayu::Response& response,
+bool include_parsed_body,
 const nlohmann::json& scripts,
 const std::optional<vayu::core::ValidationVerdict>& validation,
 const nlohmann::json& elements = nlohmann::json::array ()) {
-    nlohmann::json response_json = vayu::json::serialize (response);
+    nlohmann::json response_json = vayu::json::serialize (response, include_parsed_body);
     // The schema verdict (#628), on the same terms as the script keys below:
     // one builder, and the stored trace gets the *same* object, so a restored
     // response cannot show a different verdict than the live one did. Absent
@@ -1454,6 +1466,8 @@ struct ExecutePayload {
     bool transient = false;
     /// What the scripts and extractors set is written back to disk (#1904).
     bool persist_variables = true;
+    /// The answer carries `body`, the parsed copy of `bodyRaw` (#2544).
+    bool include_parsed_body = true;
     StreamFlag stream;
     RunOrigin origin;
     /// The row this send binds, if the caller named one (issue #601).
@@ -1485,6 +1499,8 @@ struct DesignSend {
     StreamFlag stream;
     /// Copied from the payload; both paths hand it to `persist_send_variables`.
     bool persist_variables = true;
+    /// Copied from the payload; only the buffered answer has a `body` to omit.
+    bool include_parsed_body = true;
     /// What the build waited on an OAuth 2.0 provider for; `engine_cost_ms`
     /// leaves it out of Vayu's own cost.
     double auth_fetch_ms = 0.0;
@@ -1527,6 +1543,12 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (!persist_variables.ok) {
         vayu::utils::log_warning ("http", "POST /execute - " + persist_variables.error);
         return persist_variables.error;
+    }
+    const auto include_parsed_body = read_include_parsed_body_flag (json);
+    if (!include_parsed_body.ok) {
+        vayu::utils::log_warning (
+        "http", "POST /execute - " + include_parsed_body.error);
+        return include_parsed_body.error;
     }
 
     // Beside the transient flag and for the same reason: `stream` changes
@@ -1651,13 +1673,14 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     if (row_auth.after_scripts) {
         out.late_auth = std::move (row_auth.auth);
     }
-    out.json              = std::move (json);
-    out.transient         = transient.value;
-    out.persist_variables = persist_variables.value;
-    out.stream            = std::move (stream);
-    out.origin            = std::move (*origin);
-    out.data_row          = std::move (data_row.value);
-    out.built             = std::move (built);
+    out.json                = std::move (json);
+    out.transient           = transient.value;
+    out.persist_variables   = persist_variables.value;
+    out.include_parsed_body = include_parsed_body.value;
+    out.stream              = std::move (stream);
+    out.origin              = std::move (*origin);
+    out.data_row            = std::move (data_row.value);
+    out.built               = std::move (built);
     return std::nullopt;
 }
 
@@ -1756,9 +1779,10 @@ DesignSend& send) {
     // no - see ScriptConfig::allow_send_request.
     send.script_config.allow_send_request = vayu::http::read_allow_script_requests (json);
 
-    send.data_row          = payload.data_row;
-    send.stream            = payload.stream;
-    send.persist_variables = payload.persist_variables;
+    send.data_row            = payload.data_row;
+    send.stream              = payload.stream;
+    send.persist_variables   = payload.persist_variables;
+    send.include_parsed_body = payload.include_parsed_body;
     return std::nullopt;
 }
 
@@ -2167,8 +2191,11 @@ double auth_fetch_ms) {
  * The buffered half of a design send: pre-request script, send, test script -
  * the sequence a scenario step performs too, which is why it lives in
  * request_exchange.cpp rather than here (issue #353).
+ *
+ * @return the bytes of response body the exchange held, which decide whether
+ *         the caller hands the freed heap back (#2544).
  */
-void run_buffered_execution (RouteContext& ctx,
+[[nodiscard]] std::size_t run_buffered_execution (RouteContext& ctx,
 httplib::Response& res,
 DesignSend& send,
 std::chrono::steady_clock::time_point handler_start) {
@@ -2248,9 +2275,9 @@ std::chrono::steady_clock::time_point handler_start) {
 
     // Build and send response
     // Engine returns 200 - the server's status is in the response body
-    res.status = 200;
-    nlohmann::json body =
-    build_response_json (exchange.response, scripts, validation, elements);
+    res.status          = 200;
+    nlohmann::json body = build_response_json (
+    exchange.response, send.include_parsed_body, scripts, validation, elements);
     body["timing"]["engineMs"] = engine_ms;
     if (auto file = body_file_node (exchange.request)) {
         body["bodyFile"] = std::move (*file);
@@ -2262,6 +2289,7 @@ std::chrono::steady_clock::time_point handler_start) {
     // the wire can still carry a byte that is not (#2458).
     res.set_content (body.dump (2, ' ', false, nlohmann::json::error_handler_t::replace),
     "application/json");
+    return exchange.response.body.size ();
 }
 
 /**
@@ -2299,7 +2327,12 @@ std::chrono::steady_clock::time_point handler_start) {
         run_streaming_execution (ctx, res, send);
         return;
     }
-    run_buffered_execution (ctx, res, send, handler_start);
+    const std::size_t body_bytes = run_buffered_execution (ctx, res, send, handler_start);
+    // Out here, where the exchange, its body and the answer's parsed tree are
+    // already freed and only the dumped answer is still held (#2544).
+    if (body_bytes > vayu::core::constants::server::RELEASE_HEAP_AFTER_BODY_BYTES) {
+        vayu::platform::release_free_heap ();
+    }
 }
 
 /**

@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -36,6 +37,12 @@ get_request_response (vayu::db::Database& db, const std::string& id);
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id);
 // Defined in requests.cpp; the GET /requests body with no `collectionId`.
 std::string list_all_requests_body (vayu::db::Database& db);
+// Defined in requests.cpp; each returns {http_status, json_body}.
+std::pair<int, nlohmann::json>
+create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -76,6 +83,31 @@ class RequestsRouteTest : public ::testing::Test {
         r.updated_at    = 2;
         db_->save_request (r);
         return r.id;
+    }
+
+    void seed_collection_at (const std::string& id, const std::string& parent_id, int order) {
+        vayu::db::Collection col;
+        col.id   = id;
+        col.name = id;
+        col.parent_id = parent_id.empty () ? std::nullopt : std::optional (parent_id);
+        col.order = order;
+        db_->create_collection (col);
+    }
+
+    void seed_request_at (const std::string& id, const std::string& collection_id, int order) {
+        vayu::db::Request r;
+        r.id            = id;
+        r.collection_id = collection_id;
+        r.name          = id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = "https://example.test/";
+        r.order         = order;
+        db_->save_request (r);
+    }
+
+    static json new_request (const std::string& collection_id) {
+        return json{ { "collectionId", collection_id }, { "name", "new" },
+            { "method", "GET" }, { "url", "https://example.test/" } };
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -200,6 +232,66 @@ TEST_F (RequestsRouteTest, PresentRequestIs200WithSerializedShape) {
     EXPECT_EQ (body["url"], "https://example.test/user");
     EXPECT_TRUE (body["params"].is_array ());
     EXPECT_TRUE (body["headers"].is_array ());
+}
+
+// -- The append rule across kinds (#2535) -----------------------------------
+//
+// A request that states no `order` lands after every sibling of either kind.
+// Mutation check: drop the sub-folder scan from `Database::next_sibling_order`
+// and each of these lands among the folders instead.
+
+TEST_F (RequestsRouteTest, ACreatedRequestAppendsAfterFoldersAndRequests) {
+    seed_collection_at ("col_p", "", 0);
+    seed_collection_at ("col_f", "col_p", 3);
+    seed_request_at ("req_a", "col_p", 1);
+
+    auto [status, body] =
+    vayu::http::routes::create_request_response (*db_, new_request ("col_p"));
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 4);
+}
+
+TEST_F (RequestsRouteTest, AMoveWithNoOrderAppendsPastBothKindsOfTheDestination) {
+    seed_collection_at ("col_s", "", 0);
+    seed_collection_at ("col_d", "", 1);
+    seed_collection_at ("col_f", "col_d", 2);
+    seed_request_at ("req_d", "col_d", 0);
+    seed_request_at ("req_moving", "col_s", 7);
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req_moving", json{ { "collectionId", "col_d" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 3);
+}
+
+// An explicit null is "reset to the default", which is the append; the request
+// itself holds the highest slot and is left out of the scan.
+TEST_F (RequestsRouteTest, AnExplicitNullOrderLandsAfterTheOtherSiblings) {
+    seed_collection_at ("col_p", "", 0);
+    seed_collection_at ("col_f", "col_p", 2);
+    seed_request_at ("req_a", "col_p", 1);
+    seed_request_at ("req_reset", "col_p", 8);
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req_reset", json{ { "order", nullptr } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 3);
+}
+
+// An update that names neither an owner nor an `order` keeps the position.
+TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
+    seed_collection_at ("col_p", "", 0);
+    seed_collection_at ("col_f", "col_p", 2);
+    seed_request_at ("req_a", "col_p", 1);
+
+    auto [status, body] = vayu::http::routes::update_request_response (
+    *db_, "req_a", json{ { "name", "renamed" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 1);
 }
 
 } // namespace

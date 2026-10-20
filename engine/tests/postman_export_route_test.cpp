@@ -4,8 +4,10 @@
  *        the round trip of each through the importer.
  *
  * `fixtures/postman-export-roundtrip.json` is written in Postman's own export
- * shape and exercises every field the importer reads; importing it and
- * exporting the collection gives back the same bytes, `_postman_id` aside.
+ * shape and exercises every field the importer reads, with requests listed
+ * before and between sub-folders (#2535); importing it and exporting the
+ * collection gives back the same bytes, item order included, `_postman_id`
+ * aside.
  * The Postman documents of the import corpus (`fixtures/import-conformance.json`,
  * byte-identical to the renderer's old fixtures) come back equal after the
  * normalisation `normalise` documents, and for every one of them import ->
@@ -785,7 +787,9 @@ TEST_F (PostmanExportRouteTest, ExportsTheNamedSubtreeOnly) {
     ordered doc = ordered::parse (body["text"].get<std::string> ());
     EXPECT_EQ (doc["info"]["name"], "Admin");
     EXPECT_EQ (doc["info"]["description"], "Admin-only endpoints.");
-    EXPECT_EQ (doc["item"][0]["name"], "Deep");
+    // A request before the sub-folder, as the fixture lists them (#2535).
+    EXPECT_EQ (doc["item"][0]["name"], "Delete me");
+    EXPECT_EQ (doc["item"][1]["name"], "Deep");
     EXPECT_EQ (body["notes"]["requestsExported"], 3);
     EXPECT_EQ (body["notes"]["foldersExported"], 1);
 }
@@ -794,14 +798,16 @@ TEST_F (PostmanExportRouteTest, ExportsTheNamedSubtreeOnly) {
 
 /// The Postman collection documents of `fixtures/import-conformance.json` -
 /// the renderer's retired fixtures, byte-identical to
-/// `app/src/services/importers/__fixtures__/postman-v2{0,1}.json`.
+/// `app/src/services/importers/__fixtures__/postman-v2{0,1}.json` - and the
+/// interleaved one #2535 added, whose requests sit before and between folders.
 std::vector<std::pair<std::string, std::string>> corpus_documents () {
     json fixture =
     json::parse (read_text (fixture_path ("import-conformance.json")));
     std::vector<std::pair<std::string, std::string>> out;
     for (const json& entry : fixture.at ("cases")) {
         const std::string name = entry.at ("name").get<std::string> ();
-        if (name == "postman-v21" || name == "postman-v20" || name == "postman-bodies") {
+        if (name == "postman-v21" || name == "postman-v20" ||
+        name == "postman-bodies" || name == "postman-interleaved") {
             out.emplace_back (name, entry.at ("document").get<std::string> ());
         }
     }

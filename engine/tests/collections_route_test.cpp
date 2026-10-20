@@ -40,6 +40,12 @@ namespace vayu::http::routes {
 RouteResult validate_parent_assignment (vayu::db::Database& db,
 const std::string& id,
 const std::optional<std::string>& parent_id);
+// Defined in collections.cpp; each returns {http_status, json_body}.
+std::pair<int, nlohmann::json>
+create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -65,23 +71,24 @@ class CollectionsRouteTest : public ::testing::Test {
     // can build shapes (including corrupt cycles) the route would reject.
     void seed_collection (const std::string& id,
     const std::string& name,
-    std::optional<std::string> parent = std::nullopt) {
+    std::optional<std::string> parent = std::nullopt,
+    int order                         = 0) {
         vayu::db::Collection col;
         col.id        = id;
         col.name      = name;
         col.parent_id = std::move (parent);
-        col.order     = 0;
+        col.order     = order;
         db_->create_collection (col);
     }
 
-    void seed_request (const std::string& id, const std::string& collection_id) {
+    void seed_request (const std::string& id, const std::string& collection_id, int order = 0) {
         vayu::db::Request r;
         r.id            = id;
         r.collection_id = collection_id;
         r.name          = "req";
         r.method        = vayu::HttpMethod::GET;
         r.url           = "https://example.test/";
-        r.order         = 0;
+        r.order         = order;
         r.created_at    = 1;
         r.updated_at    = 2;
         db_->save_request (r);
@@ -206,6 +213,66 @@ TEST_F (CollectionsRouteTest, NestedCascadeDeletesChildrenAndRequests) {
     // Sibling tree survives.
     EXPECT_TRUE (db_->get_collection ("col_other").has_value ());
     EXPECT_TRUE (db_->get_request ("req_other").has_value ());
+}
+
+// -- The append rule across kinds (#2535) -----------------------------------
+//
+// A collection's children are its sub-folders and its requests in one `order`
+// space, so a folder that states no `order` lands after both kinds. Mutation
+// check: drop the request scan from `Database::next_sibling_order` and each of
+// these lands among the parent's requests instead.
+
+TEST_F (CollectionsRouteTest, ACreatedFolderAppendsAfterItsParentsRequests) {
+    seed_collection ("col_p", "P");
+    seed_collection ("col_f", "F", "col_p", 1);
+    seed_request ("req_a", "col_p", 4);
+
+    auto [status, body] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "new" }, { "parentId", "col_p" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 5);
+}
+
+TEST_F (CollectionsRouteTest, AReparentWithNoOrderAppendsPastBothKindsOfTheDestination) {
+    seed_collection ("col_moving", "Moving", std::nullopt, 9);
+    seed_collection ("col_d", "Destination");
+    seed_collection ("col_f", "F", "col_d", 1);
+    seed_request ("req_a", "col_d", 3);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_moving", json{ { "parentId", "col_d" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 4);
+}
+
+// The folder itself holds the highest slot, so a reset that counted it would
+// land one past itself rather than after its siblings.
+TEST_F (CollectionsRouteTest, AnExplicitNullOrderLandsAfterTheOtherSiblingsOfBothKinds) {
+    seed_collection ("col_p", "P");
+    seed_collection ("col_x", "X", "col_p", 9);
+    seed_collection ("col_y", "Y", "col_p", 1);
+    seed_request ("req_a", "col_p", 6);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_x", json{ { "order", nullptr } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 7);
+}
+
+// The roots are the collections with no parent; a nested folder's higher
+// `order` is a position in another list.
+TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
+    seed_collection ("col_a", "A", std::nullopt, 2);
+    seed_collection ("col_nested", "Nested", "col_a", 8);
+
+    auto [status, body] =
+    vayu::http::routes::create_collection_response (*db_, json{ { "name", "root" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["order"], 3);
 }
 
 } // namespace

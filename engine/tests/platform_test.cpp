@@ -501,6 +501,20 @@ TEST (DaemonStartup, PreparesTheDataDirectoryThroughOnePlatformCall) {
     tests::strip_comments ("// prepare_data_directory (x);\n"), "prepare_data_directory"));
 }
 
+// The same reason (#2544): a daemon that never fixes the threshold passes every
+// test and keeps a large send's memory resident per worker thread, which only
+// an RSS reading shows. `names_call` is pinned both ways above. Mutation check:
+// delete the call in daemon.cpp and this fails.
+TEST (DaemonStartup, ReturnsLargeFreesToTheOs) {
+    const std::filesystem::path daemon =
+    std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) / "src" / "daemon.cpp";
+    const std::string code = tests::strip_comments (tests::read_source (daemon));
+
+    ASSERT_GT (code.size (), 1000u) << "read " << daemon.string () << " as empty";
+    EXPECT_TRUE (tests::names_call (code, "return_large_frees_to_os"))
+    << "daemon.cpp must call return_large_frees_to_os before any worker thread";
+}
+
 /// Whether, inside @p code's `run_daemon`, the instance lock is declared
 /// before the database and nothing there releases it by hand - so locals
 /// destroyed in reverse order close the database first (issue #2420).
