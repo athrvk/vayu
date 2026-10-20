@@ -13,7 +13,7 @@
  * one helper (`throw_expect_failure`) and a matcher that threw around it would
  * be invisible to a test that only checked one matcher. Mutation-check: make
  * that helper ignore `state->message` and `EveryMatcherCarriesTheMessage`
- * fails for all 26 chains, while the boundary tests below stay green.
+ * fails for every chain, while the boundary tests below stay green.
  */
 
 #include <gtest/gtest.h>
@@ -117,6 +117,38 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
     { R"(pm.expect(1, "M").to.be.closeTo(5, 0.1))", "to be within" },
     { R"(pm.expect(1, "M").to.satisfy(function (v) { return v > 2; }))", "satisfy the predicate" },
     { R"(pm.expect("abc", "M").to.have.string("z"))", "to contain" },
+    { R"(pm.expect(1, "M").to.eq(2))", "to equal" },
+    { R"(pm.expect(1, "M").to.equals(2))", "to equal" },
+    { R"(pm.expect([1], "M").to.includes(2))", "to include" },
+    { R"(pm.expect([1], "M").to.contains(2))", "to include" },
+    { R"(pm.expect("abc", "M").to.matches(/z/))", "to match the pattern" },
+    { R"(pm.expect({}, "M").to.be.instanceof(Array))", "instance of" },
+    { R"(pm.expect(1, "M").to.satisfies(function (v) { return v > 2; }))", "satisfy the predicate" },
+    { R"(pm.expect(1, "M").to.be.approximately(5, 0.1))", "to be within" },
+    { R"(pm.expect(1, "M").to.be.gt(2))", "to be above" },
+    { R"(pm.expect(1, "M").to.be.greaterThan(2))", "to be above" },
+    { R"(pm.expect(2, "M").to.be.lt(1))", "to be below" },
+    { R"(pm.expect(2, "M").to.be.lessThan(1))", "to be below" },
+    { R"(pm.expect(1, "M").to.be.gte(2))", "at least" },
+    { R"(pm.expect(3, "M").to.be.lte(2))", "at most" },
+    { R"(pm.expect(5, "M").to.be.within(1, 3))", "to be within 1..3" },
+    { R"(pm.expect([1], "M").to.have.length.above(2))", "Expected length 1 to be above 2" },
+    { R"(pm.expect([1], "M").to.have.lengthOf.at.least(2))", "Expected length 1 to be at least 2" },
+    { R"(pm.expect([1], "M").to.have.length.within(2, 3))", "Expected length 1 to be within 2..3" },
+    { R"(pm.expect(1, "M").to.be.a("date"))", "Expected type number" },
+    { R"(pm.expect({ a: 1 }, "M").to.have.any.keys("b", "c"))", "any of the keys" },
+    { R"(pm.expect({ a: 1 }, "M").to.include.keys("b"))", "contain the keys" },
+    { R"(pm.expect([1], "M").to.include.members([2]))", "to be a superset of" },
+    { R"(pm.expect([1, 2], "M").to.have.ordered.members([2, 1]))", "ordered members" },
+    { R"(pm.expect([1, 2], "M").to.include.ordered.members([2]))", "ordered superset of" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.own.property("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.ownProperty("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.haveOwnProperty("a"))", "own property" },
+    { R"(pm.expect(Object.create({ a: 1 }), "M").to.have.own.include({ a: 1 }))", "own properties" },
+    { R"(pm.expect({ a: { b: 1 } }, "M").to.nested.include({ "a.b": 2 }))", "nested properties" },
+    { R"(pm.expect("1", "M").to.be.finite)", "finite number" },
+    { R"(pm.expect([1], "M").to.contain.oneOf([2]))", "contain one of" },
+    { R"(pm.expect(1, "M").to.have.jsonSchema({ type: "string" }))", "satisfy the schema" },
     });
 
     for (const auto& c : cases) {

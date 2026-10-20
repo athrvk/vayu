@@ -10,9 +10,11 @@
  * @brief Scripting API routes - provides script engine capabilities for UI autocomplete
  */
 
+#include <algorithm>
 #include <array>
 #include <format>
 #include <string>
+#include <vector>
 
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -359,6 +361,13 @@ nlohmann::json get_script_completions () {
     "parsed headers, so it is not a wire-exact figure." },
     { "sortText", "1_pm_response_size" } });
 
+    completions.push_back ({ { "label", "pm.response.responseSize" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.responseSize" }, { "detail", "number" },
+    { "documentation",
+    "The body's size in bytes - pm.response.size().body, under the name "
+    "Postman scripts read it by." },
+    { "sortText", "1_pm_response_responseSize" } });
+
     completions.push_back ({ { "label", "pm.response.json" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.json()" }, { "detail", "pm.response.json(): any" },
     { "documentation",
@@ -398,15 +407,46 @@ nlohmann::json get_script_completions () {
     "response.to.have.header('Content-Type', 'application/json');" },
     { "sortText", "1_pm_response_to_have_header" } });
 
+    completions.push_back ({ { "label", "pm.response.to.have.statusCode" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusCode(${1:200})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusCode(code: number | string)" },
+    { "documentation",
+    "Assert the response's status code. Unlike status(), a numeric string is "
+    "the code it spells, as in chai-postman.\n\nExample:\n"
+    "pm.response.to.have.statusCode(201);" },
+    { "sortText", "1_pm_response_to_have_statusCode" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.statusReason" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusReason(\"${1:OK}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusReason(reason: string)" },
+    { "documentation",
+    "Assert the reason phrase pm.response.reason() answers, compared "
+    "exactly.\n\nExample:\npm.response.to.have.statusReason('Created');" },
+    { "sortText", "1_pm_response_to_have_statusReason" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.statusCodeClass" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusCodeClass(${1:2})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusCodeClass(digit: number)" },
+    { "documentation",
+    "Assert the status code's hundreds digit: 2 for any 2xx. The digit is a "
+    "number; a string is refused.\n\nExample:\n"
+    "pm.response.to.have.statusCodeClass(2);" },
+    { "sortText", "1_pm_response_to_have_statusCodeClass" } });
+
     completions.push_back ({ { "label", "pm.response.to.have.body" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.body(\"${1:body}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.response.to.have.body(expected: string | RegExp | object)" },
+    { "detail", "pm.response.to.have.body(expected?: string | RegExp | object)" },
     { "documentation",
     "Assert what the response body is. A string must equal the body exactly, a "
     "regular expression must match it, and an object must deeply equal the "
-    "parsed JSON.\n\nExample:\npm.response.to.have.body('pong');\npm.response."
-    "to.have.body(/^\\{\"ok\"/);\npm.response.to.have.body({ ok: true });" },
+    "parsed JSON. With no argument, that there is a body at "
+    "all.\n\nExample:\npm.response.to.have.body('pong');\npm.response."
+    "to.have.body(/^\\{\"ok\"/);\npm.response.to.have.body({ ok: true "
+    "});\npm.response.to.have.body();" },
     { "sortText", "1_pm_response_to_have_body" } });
 
     completions.push_back ({ { "label", "pm.response.to.have.jsonBody" },
@@ -415,9 +455,53 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Assert that the response has a valid JSON body; with a path, that the "
     "body holds that property; with a value, that the property deeply equals "
-    "it.\n\nExample:\npm.response.to.have.jsonBody();\npm.response.to.have."
-    "jsonBody('data.id');\npm.response.to.have.jsonBody('data.id', 42);" },
+    "it. The path is read as lodash's _.get reads it, so brackets index and an "
+    "array body is a root like any other.\n\nExample:\n"
+    "pm.response.to.have.jsonBody();\npm.response.to.have.jsonBody('data.id');"
+    "\n"
+    "pm.response.to.have.jsonBody('data.items[0].id', 42);\n"
+    "pm.response.to.have.jsonBody('[0].id', 1);" },
     { "sortText", "1_pm_response_to_have_jsonBody" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.jsonSchema" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.jsonSchema(${1:schema})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.jsonSchema(schema: object, options?: object)" },
+    { "documentation",
+    "Assert the JSON body satisfies a JSON Schema (draft-07). A failure names "
+    "the first path that broke the schema. A keyword the draft-07 validator "
+    "does not evaluate (unevaluatedProperties, prefixItems and the other "
+    "2019-09 / 2020-12 additions) fails the assertion naming it, rather than "
+    "passing on a schema that was only partly read. `options` is ajv's and is "
+    "not read.\n\nExample:\npm.response.to.have.jsonSchema({ type: 'object', "
+    "required: ['id'] });" },
+    { "sortText", "1_pm_response_to_have_jsonSchema" } });
+
+    // chai-postman's chainable methods: a call, and the start of a pm.expect
+    // chain on the number. The detail's `VayuExpectation` return is what the
+    // generated declarations read as "the call and the chain".
+    completions.push_back ({ { "label", "pm.response.to.have.responseTime" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.responseTime.below(${1:500})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.responseTime(value?: number): VayuExpectation" },
+    { "documentation",
+    "The start of a pm.expect chain on pm.response.responseTime, and the call "
+    "responseTime(ms), which asserts it equals ms.\n\nExample:\n"
+    "pm.response.to.have.responseTime.below(500);\n"
+    "pm.response.to.have.responseTime.within(0, 1000);" },
+    { "sortText", "1_pm_response_to_have_responseTime" } });
+
+    completions.push_back (
+    { { "label", "pm.response.to.have.responseSize" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.to.have.responseSize.below(${1:1024})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.responseSize(value?: number): VayuExpectation" },
+    { "documentation",
+    "The start of a pm.expect chain on the response's size in bytes - "
+    "pm.response.size().body plus .header, as chai-postman adds them - and the "
+    "call responseSize(n), which asserts it equals n.\n\nExample:\n"
+    "pm.response.to.have.responseSize.below(1024);" },
+    { "sortText", "1_pm_response_to_have_responseSize" } });
 
     // ========================================
     // pm.response.to.be - Status-class assertions
@@ -439,10 +523,13 @@ nlohmann::json get_script_completions () {
     { "serverError", "a 5xx status code" },
     { "error", "a 4xx or 5xx status code" },
     { "accepted", "status 202" },
+    { "withoutContent", "status 204" },
     { "badRequest", "status 400" },
     { "unauthorized", "status 401" },
+    { "unauthorised", "status 401" },
     { "forbidden", "status 403" },
     { "notFound", "status 404" },
+    { "notAcceptable", "status 406" },
     { "rateLimited", "status 429" },
     { "json", "a body that parses as JSON" },
     { "withBody", "a non-empty body" },
@@ -459,6 +546,47 @@ nlohmann::json get_script_completions () {
         "assertion.\n\nExample:\n" +
         label + ";" },
         { "sortText", std::string ("1_pm_response_to_be_") + status_class.name } });
+    }
+
+    // ========================================
+    // pm.response.to.not - every member above, negated (#2528)
+    // ========================================
+    // Derived from the entries above rather than written twice, so a matcher
+    // added there is offered negated too. The declarations are read off the
+    // labels, so without these `pm.response.to.not.have.status(500)` would be
+    // an editor error on a script that runs.
+    const auto replace_all = [] (std::string text, const std::string& from,
+                             const std::string& to) {
+        for (size_t at = text.find (from); at != std::string::npos;
+        at             = text.find (from, at + to.size ())) {
+            text.replace (at, from.size (), to);
+        }
+        return text;
+    };
+    const std::string positive_chain = "pm.response.to.";
+    const std::string negated_chain  = "pm.response.to.not.";
+    std::vector<nlohmann::json> negated_members;
+    for (const auto& item : completions) {
+        if (item.value ("label", std::string{}).rfind (positive_chain, 0) != 0) {
+            continue;
+        }
+        nlohmann::json twin = item;
+        for (const char* field : { "label", "insertText", "detail" }) {
+            twin[field] = replace_all (
+            item.value (field, std::string{}), positive_chain, negated_chain);
+        }
+        twin["sortText"] = replace_all (item.value ("sortText", std::string{}),
+        "1_pm_response_to_", "1_pm_response_to_not_");
+        twin["documentation"] =
+        "Negated. Each check the assertion makes is negated on its own, in "
+        "chai-postman's order, so a form that checks two things - a header "
+        "and its value, a path and its value - fails once the first one "
+        "holds.\n\n" +
+        replace_all (item.value ("documentation", std::string{}), positive_chain, negated_chain);
+        negated_members.push_back (std::move (twin));
+    }
+    for (auto& twin : negated_members) {
+        completions.push_back (std::move (twin));
     }
 
     // ========================================
@@ -2010,13 +2138,20 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "to.have.length" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.length(${1:n})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.length(n: number)" },
-    { "documentation", "Assert array or string length.\n\nExample:\npm.expect(items).to.have.length(5);" },
+    { "documentation",
+    "Assert array or string length (a Map's or Set's size). It is also a "
+    "chain: the ordering matchers that follow compare the length instead of "
+    "the value.\n\nExample:\npm.expect(items).to.have.length(5);\n"
+    "pm.expect(items).to.have.length.above(2);" },
     { "sortText", "2_to_have_length" }, { "filterText", ".to.have.length" } });
 
     completions.push_back ({ { "label", "to.have.lengthOf" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.lengthOf(${1:n})" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.lengthOf(n: number)" },
-    { "documentation", "Assert array or string length (alias for .to.have.length)." },
+    { "documentation",
+    "Assert array or string length (alias for .to.have.length), and the start "
+    "of the same "
+    "chain.\n\nExample:\npm.expect(items).to.have.lengthOf.at.least(1);" },
     { "sortText", "2_to_have_lengthOf" }, { "filterText", ".to.have.lengthOf" } });
 
     completions.push_back ({ { "label", "to.include" },
@@ -2025,7 +2160,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Assert an array includes the value, a string contains the substring, or - "
     "given an object - that the target holds every one of its keys with an "
-    "equal value.\n\nExample:\npm.expect(tags).to.include('featured');\n"
+    "equal value. It is also a chain: .include.keys and .include.members "
+    "accept a superset.\n\nExample:\npm.expect(tags).to.include('featured');\n"
     "pm.expect(body).to.include({status: 'ok'});" },
     { "sortText", "2_to_include" }, { "filterText", ".to.include" } });
 
@@ -2039,9 +2175,10 @@ nlohmann::json get_script_completions () {
     { "insertText", "to.be.a(\"${1:type}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.be.a(type: string)" },
     { "documentation",
-    "Assert the value is of a specific "
-    "type.\n\nExample:\npm.expect(name).to.be.a('string');\npm.expect("
-    "count).to.be.a('number');" },
+    "Assert the value is of a specific type, named as chai's type-detect names "
+    "it: string, number, boolean, null, undefined, array, object, function, "
+    "date, regexp, map, set, error, promise, symbol, bigint.\n\nExample:\n"
+    "pm.expect(name).to.be.a('string');\npm.expect(count).to.be.a('number');" },
     { "sortText", "2_to_be_a" }, { "filterText", ".to.be.a" } });
 
     completions.push_back ({ { "label", "to.be.an" }, { "kind", KIND_FUNCTION },
@@ -2052,6 +2189,27 @@ nlohmann::json get_script_completions () {
     "vowels).\n\nExample:\npm.expect(items).to.be.an('array');\npm.expect("
     "data).to.be.an('object');" },
     { "sortText", "2_to_be_an" }, { "filterText", ".to.be.an" } });
+
+    // `a` and `an` are chainable methods: read without a call they are
+    // language words that hand the chain on.
+    completions.push_back ({ { "label", "to.be.an.instanceof" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.be.an.instanceof(${1:Array})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.an.instanceof(constructor: Function)" },
+    { "documentation",
+    "Assert the value is an instance of the constructor; .an and .a read as "
+    "words here, as well as being the type check when called.\n\nExample:\n"
+    "pm.expect(json.items).to.be.an.instanceof(Array);" },
+    { "sortText", "2_to_be_an_instanceof" }, { "filterText", ".to.be.an.instanceof" } });
+
+    completions.push_back ({ { "label", "to.be.a.instanceOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.be.a.instanceOf(${1:Date})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.a.instanceOf(constructor: Function)" },
+    { "documentation",
+    "Assert the value is an instance of the constructor, with .a read as a "
+    "word.\n\nExample:\npm.expect(created).to.be.a.instanceOf(Date);" },
+    { "sortText", "2_to_be_a_instanceOf" }, { "filterText", ".to.be.a.instanceOf" } });
 
     completions.push_back ({ { "label", "to.match" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.match(/${1:pattern}/)" },
@@ -2092,15 +2250,17 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.keys(...keys: string[])" },
     { "documentation",
     "Assert the object has exactly these keys - not a subset. Accepts names or "
-    "one array.\n\nExample:\npm.expect(json).to.have.keys(\"id\", \"name\");" },
+    "one array. Use .include.keys for at least these keys and .any.keys for at "
+    "least one of them.\n\nExample:\npm.expect(json).to.have.keys(\"id\", "
+    "\"name\");" },
     { "sortText", "2_to_have_keys" }, { "filterText", ".to.have.keys" } });
 
     completions.push_back ({ { "label", "to.have.all.keys" },
     { "kind", KIND_FUNCTION }, { "insertText", "to.have.all.keys(\"${1:key}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.have.all.keys(...keys: string[])" },
     { "documentation",
-    "Assert the object has exactly these keys. `all` is chai's default and "
-    "changes nothing; `any` is not supported." },
+    "Assert the object has exactly these keys. `all` is chai's default "
+    "quantifier; after .include it asks for at least these keys." },
     { "sortText", "2_to_have_all_keys" }, { "filterText", ".to.have.all.keys" } });
 
     completions.push_back ({ { "label", "to.have.key" },
@@ -2184,6 +2344,252 @@ nlohmann::json get_script_completions () {
     "target.\n\nExample:\npm.expect(n).to.satisfy(function(v) { return v % 2 "
     "=== 0; });" },
     { "sortText", "2_to_satisfy" }, { "filterText", ".to.satisfy" } });
+
+    // chai's other spellings of matchers listed above. Each is the same function
+    // under a second name, so an entry says which one and carries the same
+    // shape the full entries do.
+    const auto push_matcher = [&] (const std::string& label, const std::string& signature,
+                              const std::string& snippet_args,
+                              const std::string& documentation) {
+        std::string sort_key = "2_" + label;
+        std::replace (sort_key.begin (), sort_key.end (), '.', '_');
+        completions.push_back ({ { "label", label }, { "kind", KIND_FUNCTION },
+        { "insertText", label + "(" + snippet_args + ")" }, { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", "." + label + "(" + signature + ")" }, { "documentation", documentation },
+        { "sortText", sort_key }, { "filterText", "." + label } });
+    };
+
+    push_matcher ("to.eq", "expected: any", "${1:expected}",
+    "Assert strict equality (alias for .to.equal).");
+    push_matcher ("to.equals", "expected: any", "${1:expected}",
+    "Assert strict equality (alias for .to.equal).");
+    push_matcher ("to.includes", "value: any", "${1:value}",
+    "Assert an array includes the value or a string contains the substring "
+    "(alias for .to.include).");
+    push_matcher ("to.contains", "value: any", "${1:value}",
+    "Assert an array includes the value or a string contains the substring "
+    "(alias for .to.include).");
+    push_matcher ("to.matches", "regex: RegExp", "/${1:pattern}/",
+    "Assert the string matches a regular expression (alias for .to.match).");
+    push_matcher ("to.satisfies", "predicate: (value: any) => boolean",
+    "function(value) { return ${1:true}; }",
+    "Assert the predicate returns a truthy value for the target (alias for "
+    ".to.satisfy).");
+    push_matcher ("to.Throw",
+    "error?: ErrorConstructor | string | RegExp, message?: string | RegExp", "",
+    "Assert the function throws (alias for .to.throw).");
+    push_matcher ("to.be.instanceof", "constructor: Function", "${1:Array}",
+    "Assert the value is an instance of a constructor (alias for "
+    ".to.be.instanceOf).");
+    push_matcher ("to.be.approximately", "expected: number, delta: number",
+    "${1:expected}, ${2:delta}",
+    "Assert the number is within delta of expected (alias for .to.be.closeTo). "
+    "The delta is required.");
+
+    const std::string ordering_note =
+    "Both sides must be a number or a Date, as in chai: a string is refused "
+    "rather than coerced.";
+    push_matcher ("to.be.gt", "n: number | Date", "${1:n}",
+    "Assert the number is greater than n (alias for .to.be.above). " + ordering_note);
+    push_matcher ("to.be.greaterThan", "n: number | Date", "${1:n}",
+    "Assert the number is greater than n (alias for .to.be.above). " + ordering_note);
+    push_matcher ("to.be.lt", "n: number | Date", "${1:n}",
+    "Assert the number is less than n (alias for .to.be.below). " + ordering_note);
+    push_matcher ("to.be.lessThan", "n: number | Date", "${1:n}",
+    "Assert the number is less than n (alias for .to.be.below). " + ordering_note);
+    push_matcher ("to.be.gte", "n: number | Date", "${1:n}",
+    "Assert the number is greater than or equal to n (alias for "
+    ".to.be.at.least). " +
+    ordering_note);
+    push_matcher ("to.be.lte", "n: number | Date", "${1:n}",
+    "Assert the number is less than or equal to n (alias for "
+    ".to.be.at.most). " +
+    ordering_note);
+    push_matcher ("to.be.greaterThanOrEqual", "n: number | Date", "${1:n}",
+    "Assert the number is greater than or equal to n (alias for "
+    ".to.be.at.least). " +
+    ordering_note);
+    push_matcher ("to.be.lessThanOrEqual", "n: number | Date", "${1:n}",
+    "Assert the number is less than or equal to n (alias for "
+    ".to.be.at.most). " +
+    ordering_note);
+    push_matcher ("to.be.within", "start: number | Date, finish: number | Date",
+    "${1:start}, ${2:finish}",
+    "Assert the number lies between start and finish, both inclusive. " + ordering_note +
+    "\n\nExample:\npm.expect(pm.response.code).to.be.within(200, 299);");
+
+    // `length` and `lengthOf` are chains as well as calls: reading one makes the
+    // ordering matchers compare the target's length (a Map's or Set's size).
+    const std::string length_note =
+    "After .length the ordering matchers (above, below, least, most, within "
+    "and "
+    "their aliases) compare the length instead of the value.";
+    push_matcher ("to.have.length.within", "start: number, finish: number",
+    "${1:start}, ${2:finish}",
+    "Assert the length lies between start and finish, both inclusive. " +
+    length_note + "\n\nExample:\npm.expect(items).to.have.length.within(1, 10);");
+    push_matcher ("to.have.lengthOf.within", "start: number, finish: number",
+    "${1:start}, ${2:finish}",
+    "Assert the length lies between start and finish, both inclusive. " +
+    length_note + "\n\nExample:\npm.expect(items).to.have.lengthOf.within(1, 10);");
+
+    // The flag-dependent forms: `any`, `own` and `ordered` are flags a later
+    // matcher reads, and `include` / `contain` are a call and a flag at once,
+    // so `.include.keys` asks for a superset where `.have.keys` asks for
+    // exactly these.
+    push_matcher ("to.have.any.keys", "...keys: string[]", "\"${1:key}\"",
+    "Assert the object has at least one of these keys.\n\nExample:\n"
+    "pm.expect(json).to.have.any.keys(\"id\", \"uuid\");");
+    push_matcher ("to.include.keys", "...keys: string[]", "\"${1:key}\"",
+    "Assert the object has at least these keys; others may be present too "
+    "(also "
+    ".contain.keys).\n\nExample:\npm.expect(json).to.include.keys(\"id\");");
+    push_matcher ("to.include.members", "values: any[]", "[${1:values}]",
+    "Assert the array holds every one of these values, in any order; other "
+    "members may be present "
+    "too.\n\nExample:\npm.expect(ids).to.include.members([1, 2]);");
+    push_matcher ("to.have.ordered.members", "values: any[]", "[${1:values}]",
+    "Assert the array has exactly these members in this order.\n\nExample:\n"
+    "pm.expect(ids).to.have.ordered.members([1, 2, 3]);");
+    push_matcher ("to.include.ordered.members", "values: any[]", "[${1:values}]",
+    "Assert the array starts with these members, in this order.\n\nExample:\n"
+    "pm.expect(ids).to.include.ordered.members([1, 2]);");
+    push_matcher ("to.contain.oneOf", "values: any[]", "[${1:values}]",
+    "Assert the string contains one of these substrings, or the array one of "
+    "these values.\n\nExample:\npm.expect(tags).to.contain.oneOf(['new', "
+    "'sale']);");
+
+    const std::string own_note =
+    "Only the object's own properties count; an inherited one does not.";
+    push_matcher ("to.have.own.property", "name: string, value?: any", "\"${1:name}\"",
+    "Assert the object has an own property, and optionally that it equals a "
+    "value. " +
+    own_note + "\n\nExample:\npm.expect(json).to.have.own.property('id');");
+    push_matcher ("to.have.ownProperty", "name: string, value?: any",
+    "\"${1:name}\"", "Assert the object has an own property (alias for .to.have.own.property). " + own_note);
+    push_matcher ("to.haveOwnProperty", "name: string, value?: any",
+    "\"${1:name}\"", "Assert the object has an own property (alias for .to.have.own.property). " + own_note);
+    push_matcher ("to.have.own.include", "value: object", "{${1}}",
+    "Assert the object holds every key of the given object as an own property "
+    "with an equal value. " +
+    own_note + "\n\nExample:\npm.expect(json).to.have.own.include({status: 'ok'});");
+    push_matcher ("to.nested.include", "value: object", "{${1}}",
+    "Assert the object holds every path of the given object with an equal "
+    "value, each key read as a dotted or indexed path.\n\nExample:\n"
+    "pm.expect(json).to.nested.include({'data.items[0].id': 1});");
+    push_matcher ("to.have.ownPropertyDescriptor",
+    "name: string, descriptor?: PropertyDescriptor", "\"${1:name}\"",
+    "Assert the object has an own property of that name and, given a "
+    "descriptor, "
+    "that its descriptor deeply equals it. With the name alone the chain moves "
+    "on to the descriptor.\n\nExample:\n"
+    "pm.expect(json).to.have.ownPropertyDescriptor('id').that.has.property("
+    "'writable', true);");
+    push_matcher ("to.haveOwnPropertyDescriptor",
+    "name: string, descriptor?: PropertyDescriptor", "\"${1:name}\"",
+    "Assert the object has an own property descriptor (alias for "
+    ".to.have.ownPropertyDescriptor).");
+    push_matcher ("to.respondTo", "method: string", "\"${1:method}\"",
+    "Assert the object has a method of that name. A function is asked about "
+    "its prototype's methods - what its instances respond to - unless "
+    ".itself comes "
+    "first.\n\nExample:\npm.expect(client).to.respondTo('send');");
+    push_matcher ("to.respondsTo", "method: string", "\"${1:method}\"",
+    "Assert the object has a method of that name (alias for .to.respondTo).");
+    push_matcher ("to.itself.respondTo", "method: string", "\"${1:method}\"",
+    "Assert the function itself, not its prototype, has a method of that "
+    "name.\n\nExample:\npm.expect(Client).itself.to.respondTo('create');");
+
+    // `change`, `increase` and `decrease` call the target once and compare what
+    // a function - or an object's property - answers before and after; `by`
+    // then asks how far it moved.
+    const std::string delta_note =
+    "The target is called once. The subject is a function, or an object and "
+    "the name of one of its properties.";
+    push_matcher ("to.change", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function changes the subject. " +
+    delta_note + "\n\nExample:\npm.expect(function () { counter.n++; }).to.change(counter, 'n');");
+    push_matcher ("to.changes", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function changes the subject (alias for .to.change). " + delta_note);
+    push_matcher ("to.increase", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a greater number. " + delta_note +
+    "\n\nExample:\npm.expect(add).to.increase(counter, 'n').by(2);");
+    push_matcher ("to.increases", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a greater number (alias for "
+    ".to.increase). " +
+    delta_note);
+    push_matcher ("to.decrease", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a lesser number. " + delta_note +
+    "\n\nExample:\npm.expect(drain).to.decrease(counter, 'n').by(2);");
+    push_matcher ("to.decreases", "subject: Function | object, property?: string",
+    "${1:object}, \"${2:property}\"",
+    "Assert the function makes the subject a lesser number (alias for "
+    ".to.decrease). " +
+    delta_note);
+    push_matcher ("and.by", "delta: number", "${1:delta}",
+    "After .change, .increase or .decrease: assert the subject moved by this "
+    "much. .change counts the size of the move in either direction; the other "
+    "two count the move in their own.\n\nExample:\n"
+    "pm.expect(add).to.increase(counter, 'n').and.by(2);");
+    push_matcher ("to.have.jsonSchema", "schema: object, options?: object", "${1:schema}",
+    "Assert the value satisfies a JSON Schema (draft-07). A failure names the "
+    "first path that broke the schema. A keyword the draft-07 validator does "
+    "not evaluate fails the assertion naming it rather than passing on a "
+    "schema that was only partly read. `options` is ajv's and is not "
+    "read.\n\nExample:\npm.expect(pm.response.json()).to.have.jsonSchema({ "
+    "type: 'array', items: { required: ['id'] } });");
+
+    completions.push_back ({ { "label", "to.be.finite" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.finite" }, { "detail", ".to.be.finite" },
+    { "documentation",
+    "Assert the value is a finite number. The type is checked, not coerced: a "
+    "numeric string, NaN and the infinities are not finite." },
+    { "sortText", "2_to_be_finite" }, { "filterText", ".to.be.finite" } });
+
+    completions.push_back ({ { "label", "to.exists" }, { "kind", KIND_FIELD },
+    { "insertText", "to.exists" }, { "detail", ".to.exists" },
+    { "documentation", "Assert the value is not null or undefined (alias for .to.exist)." },
+    { "sortText", "2_to_exists" }, { "filterText", ".to.exists" } });
+
+    completions.push_back ({ { "label", "to.be.arguments" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.arguments" }, { "detail", ".to.be.arguments" },
+    { "documentation",
+    "Assert the value is a function's own `arguments` object (also "
+    ".to.be.Arguments)." },
+    { "sortText", "2_to_be_arguments" }, { "filterText", ".to.be.arguments" } });
+
+    completions.push_back ({ { "label", "to.be.Arguments" }, { "kind", KIND_FIELD },
+    { "insertText", "to.be.Arguments" }, { "detail", ".to.be.Arguments" },
+    { "documentation", "Assert the value is a function's own `arguments` object (alias for .to.be.arguments)." },
+    { "sortText", "2_to_be_Arguments" }, { "filterText", ".to.be.Arguments" } });
+
+    // What `Object.isExtensible`, `Object.isSealed` and `Object.isFrozen` answer.
+    // A primitive is sealed and frozen and is not extensible, as in chai.
+    struct ObjectStateCompletion {
+        const char* name;
+        const char* question;
+    };
+    constexpr auto object_states = std::to_array<ObjectStateCompletion> ({
+    { "extensible", "can still have properties added (Object.isExtensible)" },
+    { "sealed", "is sealed (Object.isSealed)" },
+    { "frozen", "is frozen (Object.isFrozen)" },
+    });
+    for (const auto& state : object_states) {
+        const std::string name (state.name);
+        completions.push_back ({ { "label", "to.be." + name }, { "kind", KIND_FIELD },
+        { "insertText", "to.be." + name }, { "detail", ".to.be." + name },
+        { "documentation",
+        std::string ("Assert the object ") + state.question +
+        ". A primitive is sealed and frozen and is not extensible, as the "
+        "language answers it.\n\nExample:\npm.expect(config).to.be." +
+        name + ";" },
+        { "sortText", "2_to_be_" + name }, { "filterText", ".to.be." + name } });
+    }
 
     completions.push_back ({ { "label", "and" }, { "kind", KIND_FIELD },
     { "insertText", "and" }, { "detail", ".and" },

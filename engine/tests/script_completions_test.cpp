@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "chai_conformance_table.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 
@@ -153,7 +154,8 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
     int offered = 0;
     for (const auto& item : completions) {
         const std::string label = item.value ("label", std::string{});
-        if (label.rfind ("pm.response.to.be.", 0) != 0) {
+        if (label.rfind ("pm.response.to.be.", 0) != 0 &&
+        label.rfind ("pm.response.to.not.be.", 0) != 0) {
             continue;
         }
         offered++;
@@ -174,6 +176,57 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
 
     EXPECT_GE (offered, 10)
     << "the pm.response.to.be matchers are missing from the completion list";
+}
+
+// The whole chain, both polarities (#2528): every offered member under
+// `pm.response.to.` - `have.*` and `be.*` and their `not.` twins - is bound
+// where its label says. Looked up rather than run, as the pm.expect guard
+// below does: a `be` getter asserts on access, so reading it would report a
+// verdict about this response instead of whether the member exists.
+TEST (ScriptCompletions, EveryOfferedResponseAssertionExistsInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    int offered = 0, offered_have = 0, offered_not = 0;
+    std::string probe;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("pm.response.to.", 0) != 0) {
+            continue;
+        }
+        offered++;
+        offered_have += label.rfind ("pm.response.to.have.", 0) == 0 ? 1 : 0;
+        offered_not += label.rfind ("pm.response.to.not.", 0) == 0 ? 1 : 0;
+
+        const size_t split         = label.rfind ('.');
+        const std::string parent   = label.substr (0, split);
+        const std::string member   = label.substr (split + 1);
+        const std::string question = item.value ("kind", 0) == KIND_FUNCTION ?
+        std::format ("typeof {}[\"{}\"] === \"function\"", parent, member) :
+        std::format ("!!Object.getOwnPropertyDescriptor({}, \"{}\")", parent, member);
+        probe += std::format ("if (!({})) missing.push(\"{}\");\n", question, label);
+    }
+    ASSERT_GT (offered, 0)
+    << "no pm.response.to completions at all - the probe proves nothing";
+    EXPECT_GE (offered_have, 10)
+    << "the pm.response.to.have matchers are missing";
+    EXPECT_EQ (offered_not * 2, offered)
+    << "every pm.response.to member is offered negated as well";
+
+    auto result = engine.execute_test ("var missing = [];\n" + probe +
+    "pm.environment.set('missing', missing.join(', '));",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "offered by the completion list, absent from the runtime";
 }
 
 // Same drift risk one level down: `pm.response.headers.get` is offered as a
@@ -482,6 +535,84 @@ TEST (ScriptCompletions, EveryExpectMemberTheRuntimeBindsIsOffered) {
     EXPECT_TRUE (result.tests[0].passed)
     << "pm.expect binds names the completion list never offers: "
     << result.tests[0].error_message;
+}
+
+// The table of members chai and chai-postman define is what the runtime is held
+// to (`script_chai_conformance_test.cpp`); this is the editor's half of the same
+// promise. A row the runtime answers and the list never offers is a capability
+// nobody finds, which is the "written but never read" shape: the runtime and its
+// tests agree and no author is ever told.
+//
+// A matcher, a property or a chainable method has to be the *last* word of some
+// offered chain (`.to.be.above`), because that is the entry that carries its
+// signature; a language chain or a flag (`deep`, `itself`) is only ever offered
+// inside a longer chain, so any word of one will do.
+TEST (ScriptCompletions, EverySupportedConformanceRowIsOffered) {
+    const auto completions = get_script_completions ();
+    const auto& table      = vayu::tests::chai_conformance_table ();
+    ASSERT_TRUE (table.contains ("expect"))
+    << "the conformance table did not load";
+
+    std::set<std::string> labels, chain_words, chain_last_words;
+    for (const auto& item : completions) {
+        labels.insert (item.value ("label", std::string{}));
+        const std::string match = match_text (item);
+        if (match.empty () || match[0] != '.') {
+            continue;
+        }
+        size_t start = 1;
+        while (start <= match.size ()) {
+            const size_t dot       = match.find ('.', start);
+            const std::string word = match.substr (
+            start, dot == std::string::npos ? std::string::npos : dot - start);
+            chain_words.insert (word);
+            if (dot == std::string::npos) {
+                chain_last_words.insert (word);
+                break;
+            }
+            start = dot + 1;
+        }
+    }
+    ASSERT_FALSE (chain_words.empty ())
+    << "no assertion chains found to compare against";
+
+    size_t checked_expect = 0;
+    for (const auto& row : table.at ("expect")) {
+        if (row.value ("status", std::string{}) == "unsupported") {
+            continue;
+        }
+        const std::string member = row.at ("member");
+        const std::string kind   = row.at ("kind");
+        checked_expect++;
+        if (member == "fail") {
+            EXPECT_TRUE (labels.contains ("pm.expect.fail"));
+        } else if (kind == "language" || kind == "flag") {
+            EXPECT_TRUE (chain_words.contains (member))
+            << "." << member << " is supported but no completion offers it";
+        } else {
+            EXPECT_TRUE (chain_last_words.contains (member))
+            << "." << member << " is supported but no completion ends in it";
+        }
+    }
+    EXPECT_GE (checked_expect, 90u) << "the conformance table is nearly empty";
+
+    // pm.response.to: the label each row names, and its negated twin.
+    size_t checked_response = 0;
+    for (const auto& row : table.at ("response")) {
+        if (row.value ("status", std::string{}) == "unsupported") {
+            continue;
+        }
+        const std::string label = row.at ("completion");
+        checked_response++;
+        EXPECT_TRUE (labels.contains (label)) << label << " is supported but not offered";
+        const std::string positive = "pm.response.to.";
+        if (label.rfind (positive + "not.", 0) == 0) {
+            continue;
+        }
+        const std::string twin = positive + "not." + label.substr (positive.size ());
+        EXPECT_TRUE (labels.contains (twin)) << twin << " is supported but not offered";
+    }
+    EXPECT_GE (checked_response, 25u) << "the response rows are nearly empty";
 }
 
 // The signing surface (#187). Same drift risk as the matchers above, with a

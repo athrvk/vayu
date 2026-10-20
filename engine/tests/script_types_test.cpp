@@ -408,6 +408,48 @@ TEST (ScriptTypesTest, ObjectFieldsStayIndexable) {
     EXPECT_TRUE (contains (dts, "[key: string]: any;"));
 }
 
+// `length` is a call and a chain at run time (`length(3)`, `length.above(2)`),
+// and the table says so by listing `to.have.length.within` under the call's own
+// entry. Declared as a method alone, `.length.above(2)` would be an editor error
+// for a script that runs; and a member that is only a call must stay one, so the
+// rule is read off the table rather than applied to every function.
+TEST (ScriptTypesTest, ACallTheTableContinuesIsDeclaredAsCallAndChain) {
+    const std::string dts = generate_script_typedefs ();
+    EXPECT_TRUE (contains (dts, "\tlength: ((n: number) => VayuExpectation) & VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tlengthOf: ((n: number) => VayuExpectation) & VayuExpectation;"));
+    // `include` and `contain` are chainable the same way (`.include.keys`,
+    // `.contain.oneOf`), and the flag words they are followed by are chain
+    // members like any other word.
+    EXPECT_TRUE (contains (dts, "\tinclude: ((value: any) => VayuExpectation) & VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tcontain: ((value: any) => VayuExpectation) & VayuExpectation;"));
+    for (const char* word : { "\tany: VayuExpectation;", "\town: VayuExpectation;",
+         "\tordered: VayuExpectation;", "\tfinite: VayuExpectation;" }) {
+        EXPECT_TRUE (contains (dts, word)) << word;
+    }
+    EXPECT_TRUE (contains (dts, "\townProperty(name: string, value?: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "\tabove(n: number | Date): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts,
+    "\twithin(start: number | Date, finish: number | Date): VayuExpectation;"));
+}
+
+// `pm.response.to.have.responseTime` is a call and a pm.expect chain on the
+// time (`responseTime(120)`, `responseTime.below(200)`), and the table says so
+// with a detail returning `VayuExpectation` (#2528). Declared as a method that
+// returns the chain, `.responseTime.below(200)` would be an editor error for a
+// script that runs; a pm.* call that returns anything else stays a method.
+TEST (ScriptTypesTest, ACallThatAnswersTheChainIsDeclaredAsCallAndChain) {
+    const std::string dts = generate_script_typedefs ();
+    // `pm.response.to.have.*` sits four tabs in; `pm.response.to.not.have.*`,
+    // the negated twin, five. The newline pins the depth.
+    for (const char* member : { "responseTime", "responseSize" }) {
+        const std::string declared = std::string (member) +
+        ": ((value?: number) => VayuExpectation) & VayuExpectation;";
+        EXPECT_TRUE (contains (dts, "\n\t\t\t\t" + declared)) << member;
+        EXPECT_TRUE (contains (dts, "\n\t\t\t\t\t" + declared)) << member;
+    }
+    EXPECT_TRUE (contains (dts, "\n\t\t\t\tstatus(code: number | string): void;"));
+}
+
 // Two entries document an overload in prose TypeScript cannot parse
 // (`upsert({ key, value }) | (name, value)`). Emitting that verbatim would
 // produce a file that does not compile, taking every other declaration with it,
@@ -551,7 +593,7 @@ TEST (ScriptTypesTest, AStringLiteralUnionIsAType) {
 TEST (ScriptTypesTest, TheChainDeclaresWhatTheDocsClaimAndTheRuntimeAnswers) {
     const std::string dts = generate_script_typedefs ();
     EXPECT_TRUE (contains (dts, "property(name: string, value?: any): VayuExpectation;"));
-    EXPECT_TRUE (contains (dts, "include(value: any): VayuExpectation;"));
+    EXPECT_TRUE (contains (dts, "include: ((value: any) => VayuExpectation) & VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "members(values: any[]): VayuExpectation;"));
     EXPECT_TRUE (contains (dts, "oneOf(values: any[]): VayuExpectation;"));
 }

@@ -3,17 +3,25 @@
 
 interface VayuExpectation {
 	/**
+	 * Assert the value is a function's own `arguments` object (alias for .to.be.arguments).
+	 */
+	Arguments: VayuExpectation;
+	/**
 	 * Assert the value is NaN. chai's rule is `value !== value`, so only the number NaN passes - a string that would read as NaN does not.
 	 */
 	NaN: VayuExpectation;
 	/**
-	 * Assert the value is of a specific type.
+	 * Assert the function throws (alias for .to.throw).
+	 */
+	Throw(error?: ErrorConstructor | string | RegExp, message?: string | RegExp): VayuExpectation;
+	/**
+	 * Assert the value is of a specific type, named as chai's type-detect names it: string, number, boolean, null, undefined, array, object, function, date, regexp, map, set, error, promise, symbol, bigint.
 	 * 
 	 * Example:
 	 * pm.expect(name).to.be.a('string');
 	 * pm.expect(count).to.be.a('number');
 	 */
-	a(type: string): VayuExpectation;
+	a: ((type: string) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Assert the number is greater than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 * 
@@ -36,7 +44,7 @@ interface VayuExpectation {
 	 * pm.expect(items).to.be.an('array');
 	 * pm.expect(data).to.be.an('object');
 	 */
-	an(type: string): VayuExpectation;
+	an: ((type: string) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Continue an assertion chain. Flags already set (including `not`) carry over.
 	 * 
@@ -44,6 +52,15 @@ interface VayuExpectation {
 	 * pm.expect(n).to.be.above(0).and.to.be.below(10);
 	 */
 	and: VayuExpectation;
+	any: VayuExpectation;
+	/**
+	 * Assert the number is within delta of expected (alias for .to.be.closeTo). The delta is required.
+	 */
+	approximately(expected: number, delta: number): VayuExpectation;
+	/**
+	 * Assert the value is a function's own `arguments` object (also .to.be.Arguments).
+	 */
+	arguments: VayuExpectation;
 	at: VayuExpectation;
 	be: VayuExpectation;
 	/**
@@ -68,6 +85,24 @@ interface VayuExpectation {
 	 */
 	but: VayuExpectation;
 	/**
+	 * After .change, .increase or .decrease: assert the subject moved by this much. .change counts the size of the move in either direction; the other two count the move in their own.
+	 * 
+	 * Example:
+	 * pm.expect(add).to.increase(counter, 'n').and.by(2);
+	 */
+	by(delta: number): VayuExpectation;
+	/**
+	 * Assert the function changes the subject. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(function () { counter.n++; }).to.change(counter, 'n');
+	 */
+	change(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function changes the subject (alias for .to.change). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	changes(subject: Function | object, property?: string): VayuExpectation;
+	/**
 	 * Assert the number is within delta of expected. The delta is required.
 	 * 
 	 * Example:
@@ -77,7 +112,22 @@ interface VayuExpectation {
 	/**
 	 * Assert array includes value (alias for .to.include).
 	 */
-	contain(value: any): VayuExpectation;
+	contain: ((value: any) => VayuExpectation) & VayuExpectation;
+	/**
+	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
+	 */
+	contains(value: any): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a lesser number. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(drain).to.decrease(counter, 'n').by(2);
+	 */
+	decrease(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a lesser number (alias for .to.decrease). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	decreases(subject: Function | object, property?: string): VayuExpectation;
 	deep: VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
@@ -90,6 +140,10 @@ interface VayuExpectation {
 	 * Assert the array/string/object is empty.
 	 */
 	empty: VayuExpectation;
+	/**
+	 * Assert strict equality (alias for .to.equal).
+	 */
+	eq(expected: any): VayuExpectation;
 	/**
 	 * Assert deep equality (for objects/arrays). Key order does not matter.
 	 * 
@@ -115,13 +169,55 @@ interface VayuExpectation {
 	 */
 	equal(expected: any): VayuExpectation;
 	/**
+	 * Assert strict equality (alias for .to.equal).
+	 */
+	equals(expected: any): VayuExpectation;
+	/**
 	 * Assert the value is not null or undefined.
 	 */
 	exist: VayuExpectation;
 	/**
+	 * Assert the value is not null or undefined (alias for .to.exist).
+	 */
+	exists: VayuExpectation;
+	/**
+	 * Assert the object can still have properties added (Object.isExtensible). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.extensible;
+	 */
+	extensible: VayuExpectation;
+	/**
 	 * Assert the value is false.
 	 */
 	false: VayuExpectation;
+	/**
+	 * Assert the value is a finite number. The type is checked, not coerced: a numeric string, NaN and the infinities are not finite.
+	 */
+	finite: VayuExpectation;
+	/**
+	 * Assert the object is frozen (Object.isFrozen). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.frozen;
+	 */
+	frozen: VayuExpectation;
+	/**
+	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	greaterThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than or equal to n (alias for .to.be.at.least). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	greaterThanOrEqual(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than n (alias for .to.be.above). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	gt(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is greater than or equal to n (alias for .to.be.at.least). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	gte(n: number | Date): VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -131,7 +227,15 @@ interface VayuExpectation {
 	has: VayuExpectation;
 	have: VayuExpectation;
 	/**
-	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value.
+	 * Assert the object has an own property (alias for .to.have.own.property). Only the object's own properties count; an inherited one does not.
+	 */
+	haveOwnProperty(name: string, value?: any): VayuExpectation;
+	/**
+	 * Assert the object has an own property descriptor (alias for .to.have.ownPropertyDescriptor).
+	 */
+	haveOwnPropertyDescriptor(name: string, descriptor?: PropertyDescriptor): VayuExpectation;
+	/**
+	 * Assert an array includes the value, a string contains the substring, or - given an object - that the target holds every one of its keys with an equal value. It is also a chain: .include.keys and .include.members accept a superset.
 	 * 
 	 * Example:
 	 * pm.expect(tags).to.include('featured');
@@ -142,15 +246,58 @@ interface VayuExpectation {
 	 * 
 	 * Example:
 	 * pm.expect(items).to.deep.include({id: 1});
+	 * 
+	 * `to.nested.include`:
+	 * Assert the object holds every path of the given object with an equal value, each key read as a dotted or indexed path.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.nested.include({'data.items[0].id': 1});
+	 * 
+	 * `to.have.own.include`:
+	 * Assert the object holds every key of the given object as an own property with an equal value. Only the object's own properties count; an inherited one does not.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.own.include({status: 'ok'});
 	 */
-	include(value: any): VayuExpectation;
+	include: ((value: any) => VayuExpectation) & VayuExpectation;
+	/**
+	 * Assert an array includes the value or a string contains the substring (alias for .to.include).
+	 */
+	includes(value: any): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a greater number. The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 * 
+	 * Example:
+	 * pm.expect(add).to.increase(counter, 'n').by(2);
+	 */
+	increase(subject: Function | object, property?: string): VayuExpectation;
+	/**
+	 * Assert the function makes the subject a greater number (alias for .to.increase). The target is called once. The subject is a function, or an object and the name of one of its properties.
+	 */
+	increases(subject: Function | object, property?: string): VayuExpectation;
 	/**
 	 * Assert the value is an instance of a constructor.
 	 * 
 	 * Example:
 	 * pm.expect(json.items).to.be.instanceOf(Array);
+	 * 
+	 * `to.be.a.instanceOf`:
+	 * Assert the value is an instance of the constructor, with .a read as a word.
+	 * 
+	 * Example:
+	 * pm.expect(created).to.be.a.instanceOf(Date);
 	 */
 	instanceOf(constructor: Function): VayuExpectation;
+	/**
+	 * Assert the value is an instance of a constructor (alias for .to.be.instanceOf).
+	 * 
+	 * `to.be.an.instanceof`:
+	 * Assert the value is an instance of the constructor; .an and .a read as words here, as well as being the type check when called.
+	 * 
+	 * Example:
+	 * pm.expect(json.items).to.be.an.instanceof(Array);
+	 */
+	instanceof(constructor: Function): VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -158,18 +305,38 @@ interface VayuExpectation {
 	 * pm.expect(rows).to.be.an('array').that.is.not.empty;
 	 */
 	is: VayuExpectation;
+	itself: VayuExpectation;
+	/**
+	 * Assert the value satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate fails the assertion naming it rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+	 * 
+	 * Example:
+	 * pm.expect(pm.response.json()).to.have.jsonSchema({ type: 'array', items: { required: ['id'] } });
+	 */
+	jsonSchema(schema: object, options?: object): VayuExpectation;
 	/**
 	 * Assert the object has exactly this key (alias for .to.have.keys).
 	 */
 	key(key: string): VayuExpectation;
 	/**
-	 * Assert the object has exactly these keys - not a subset. Accepts names or one array.
+	 * Assert the object has exactly these keys - not a subset. Accepts names or one array. Use .include.keys for at least these keys and .any.keys for at least one of them.
 	 * 
 	 * Example:
 	 * pm.expect(json).to.have.keys("id", "name");
 	 * 
+	 * `to.include.keys`:
+	 * Assert the object has at least these keys; others may be present too (also .contain.keys).
+	 * 
+	 * Example:
+	 * pm.expect(json).to.include.keys("id");
+	 * 
 	 * `to.have.all.keys`:
-	 * Assert the object has exactly these keys. `all` is chai's default and changes nothing; `any` is not supported.
+	 * Assert the object has exactly these keys. `all` is chai's default quantifier; after .include it asks for at least these keys.
+	 * 
+	 * `to.have.any.keys`:
+	 * Assert the object has at least one of these keys.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.any.keys("id", "uuid");
 	 */
 	keys(...keys: string[]): VayuExpectation;
 	/**
@@ -177,16 +344,36 @@ interface VayuExpectation {
 	 */
 	least(n: number | Date): VayuExpectation;
 	/**
-	 * Assert array or string length.
+	 * Assert array or string length (a Map's or Set's size). It is also a chain: the ordering matchers that follow compare the length instead of the value.
 	 * 
 	 * Example:
 	 * pm.expect(items).to.have.length(5);
+	 * pm.expect(items).to.have.length.above(2);
 	 */
-	length(n: number): VayuExpectation;
+	length: ((n: number) => VayuExpectation) & VayuExpectation;
 	/**
-	 * Assert array or string length (alias for .to.have.length).
+	 * Assert array or string length (alias for .to.have.length), and the start of the same chain.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.lengthOf.at.least(1);
 	 */
-	lengthOf(n: number): VayuExpectation;
+	lengthOf: ((n: number) => VayuExpectation) & VayuExpectation;
+	/**
+	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lessThan(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than or equal to n (alias for .to.be.at.most). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lessThanOrEqual(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than n (alias for .to.be.below). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lt(n: number | Date): VayuExpectation;
+	/**
+	 * Assert the number is less than or equal to n (alias for .to.be.at.most). Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 */
+	lte(n: number | Date): VayuExpectation;
 	/**
 	 * Assert the string matches a regular expression.
 	 * 
@@ -195,16 +382,38 @@ interface VayuExpectation {
 	 */
 	match(regex: RegExp): VayuExpectation;
 	/**
+	 * Assert the string matches a regular expression (alias for .to.match).
+	 */
+	matches(regex: RegExp): VayuExpectation;
+	/**
 	 * Assert the array has the same members in any order. Prefix with `deep` to compare object members by value.
 	 * 
 	 * Example:
 	 * pm.expect(ids).to.have.members([3, 1, 2]);
+	 * 
+	 * `to.include.members`:
+	 * Assert the array holds every one of these values, in any order; other members may be present too.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.include.members([1, 2]);
 	 * 
 	 * `to.have.deep.members`:
 	 * Assert the array has the same members in any order, comparing them by value.
 	 * 
 	 * Example:
 	 * pm.expect(rows).to.have.deep.members([{id: 1}, {id: 2}]);
+	 * 
+	 * `to.have.ordered.members`:
+	 * Assert the array has exactly these members in this order.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.have.ordered.members([1, 2, 3]);
+	 * 
+	 * `to.include.ordered.members`:
+	 * Assert the array starts with these members, in this order.
+	 * 
+	 * Example:
+	 * pm.expect(ids).to.include.ordered.members([1, 2]);
 	 */
 	members(values: any[]): VayuExpectation;
 	/**
@@ -240,6 +449,12 @@ interface VayuExpectation {
 	 * Example:
 	 * pm.expect(pm.response.code).to.be.oneOf([200, 201]);
 	 * 
+	 * `to.contain.oneOf`:
+	 * Assert the string contains one of these substrings, or the array one of these values.
+	 * 
+	 * Example:
+	 * pm.expect(tags).to.contain.oneOf(['new', 'sale']);
+	 * 
 	 * `to.be.deep.oneOf`:
 	 * Assert the value deeply equals one of the candidates.
 	 * 
@@ -247,6 +462,19 @@ interface VayuExpectation {
 	 * pm.expect(body.status).to.be.deep.oneOf([{code: 1}, {code: 2}]);
 	 */
 	oneOf(values: any[]): VayuExpectation;
+	ordered: VayuExpectation;
+	own: VayuExpectation;
+	/**
+	 * Assert the object has an own property (alias for .to.have.own.property). Only the object's own properties count; an inherited one does not.
+	 */
+	ownProperty(name: string, value?: any): VayuExpectation;
+	/**
+	 * Assert the object has an own property of that name and, given a descriptor, that its descriptor deeply equals it. With the name alone the chain moves on to the descriptor.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.ownPropertyDescriptor('id').that.has.property('writable', true);
+	 */
+	ownPropertyDescriptor(name: string, descriptor?: PropertyDescriptor): VayuExpectation;
 	/**
 	 * Assert the object has a property, and optionally that it equals a value. The value is compared strictly unless the chain is `deep`.
 	 * 
@@ -265,8 +493,31 @@ interface VayuExpectation {
 	 * 
 	 * Example:
 	 * pm.expect(json).to.have.nested.property("data.items[0].id");
+	 * 
+	 * `to.have.own.property`:
+	 * Assert the object has an own property, and optionally that it equals a value. Only the object's own properties count; an inherited one does not.
+	 * 
+	 * Example:
+	 * pm.expect(json).to.have.own.property('id');
 	 */
 	property(name: string, value?: any): VayuExpectation;
+	/**
+	 * Assert the object has a method of that name. A function is asked about its prototype's methods - what its instances respond to - unless .itself comes first.
+	 * 
+	 * Example:
+	 * pm.expect(client).to.respondTo('send');
+	 * 
+	 * `to.itself.respondTo`:
+	 * Assert the function itself, not its prototype, has a method of that name.
+	 * 
+	 * Example:
+	 * pm.expect(Client).itself.to.respondTo('create');
+	 */
+	respondTo(method: string): VayuExpectation;
+	/**
+	 * Assert the object has a method of that name (alias for .to.respondTo).
+	 */
+	respondsTo(method: string): VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -275,12 +526,23 @@ interface VayuExpectation {
 	 */
 	same: VayuExpectation;
 	/**
+	 * Assert the predicate returns a truthy value for the target (alias for .to.satisfy).
+	 */
+	satisfies(predicate: (value: any) => boolean): VayuExpectation;
+	/**
 	 * Assert the predicate returns a truthy value for the target.
 	 * 
 	 * Example:
 	 * pm.expect(n).to.satisfy(function(v) { return v % 2 === 0; });
 	 */
 	satisfy(predicate: (value: any) => boolean): VayuExpectation;
+	/**
+	 * Assert the object is sealed (Object.isSealed). A primitive is sealed and frozen and is not extensible, as the language answers it.
+	 * 
+	 * Example:
+	 * pm.expect(config).to.be.sealed;
+	 */
+	sealed: VayuExpectation;
 	/**
 	 * Reads as English and asserts nothing - one of chai's language chains. Flags already set (including `not`) carry over.
 	 * 
@@ -337,6 +599,25 @@ interface VayuExpectation {
 	 * pm.expect(json).to.be.an('object').with.property('id');
 	 */
 	with: VayuExpectation;
+	/**
+	 * Assert the number lies between start and finish, both inclusive. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
+	 * 
+	 * Example:
+	 * pm.expect(pm.response.code).to.be.within(200, 299);
+	 * 
+	 * `to.have.length.within`:
+	 * Assert the length lies between start and finish, both inclusive. After .length the ordering matchers (above, below, least, most, within and their aliases) compare the length instead of the value.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.length.within(1, 10);
+	 * 
+	 * `to.have.lengthOf.within`:
+	 * Assert the length lies between start and finish, both inclusive. After .length the ordering matchers (above, below, least, most, within and their aliases) compare the length instead of the value.
+	 * 
+	 * Example:
+	 * pm.expect(items).to.have.lengthOf.within(1, 10);
+	 */
+	within(start: number | Date, finish: number | Date): VayuExpectation;
 }
 
 /**
@@ -1140,6 +1421,10 @@ declare const pm: {
 		 */
 		reason(): string;
 		/**
+		 * The body's size in bytes - pm.response.size().body, under the name Postman scripts read it by.
+		 */
+		responseSize: number;
+		/**
 		 * Perceived response time in milliseconds (submit → completion). Use responseTimeWire for server-only timing.
 		 */
 		responseTime: number;
@@ -1229,6 +1514,15 @@ declare const pm: {
 				 */
 				json: void;
 				/**
+				 * Assert that the response has status 406.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
+				 * pm.response.to.be.notAcceptable;
+				 */
+				notAcceptable: void;
+				/**
 				 * Assert that the response has status 404.
 				 * 
 				 * Written without parentheses - the property access is the assertion.
@@ -1288,6 +1582,15 @@ declare const pm: {
 				 * Written without parentheses - the property access is the assertion.
 				 * 
 				 * Example:
+				 * pm.response.to.be.unauthorised;
+				 */
+				unauthorised: void;
+				/**
+				 * Assert that the response has status 401.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
 				 * pm.response.to.be.unauthorized;
 				 */
 				unauthorized: void;
@@ -1300,17 +1603,27 @@ declare const pm: {
 				 * pm.response.to.be.withBody;
 				 */
 				withBody: void;
+				/**
+				 * Assert that the response has status 204.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
+				 * pm.response.to.be.withoutContent;
+				 */
+				withoutContent: void;
 			};
 			have: {
 				/**
-				 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON.
+				 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON. With no argument, that there is a body at all.
 				 * 
 				 * Example:
 				 * pm.response.to.have.body('pong');
 				 * pm.response.to.have.body(/^\{"ok"/);
 				 * pm.response.to.have.body({ ok: true });
+				 * pm.response.to.have.body();
 				 */
-				body(expected: string | RegExp | object): void;
+				body(expected?: string | RegExp | object): void;
 				/**
 				 * Assert that a specific header exists in the response, and - with a second argument - that it holds that exact value. The value comparison is strict, so a number never matches the wire's string.
 				 * 
@@ -1320,14 +1633,37 @@ declare const pm: {
 				 */
 				header(name: string, value?: string): void;
 				/**
-				 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it.
+				 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it. The path is read as lodash's _.get reads it, so brackets index and an array body is a root like any other.
 				 * 
 				 * Example:
 				 * pm.response.to.have.jsonBody();
 				 * pm.response.to.have.jsonBody('data.id');
-				 * pm.response.to.have.jsonBody('data.id', 42);
+				 * pm.response.to.have.jsonBody('data.items[0].id', 42);
+				 * pm.response.to.have.jsonBody('[0].id', 1);
 				 */
 				jsonBody(path?: string, value?: unknown): void;
+				/**
+				 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+				 * 
+				 * Example:
+				 * pm.response.to.have.jsonSchema({ type: 'object', required: ['id'] });
+				 */
+				jsonSchema(schema: object, options?: object): void;
+				/**
+				 * The start of a pm.expect chain on the response's size in bytes - pm.response.size().body plus .header, as chai-postman adds them - and the call responseSize(n), which asserts it equals n.
+				 * 
+				 * Example:
+				 * pm.response.to.have.responseSize.below(1024);
+				 */
+				responseSize: ((value?: number) => VayuExpectation) & VayuExpectation;
+				/**
+				 * The start of a pm.expect chain on pm.response.responseTime, and the call responseTime(ms), which asserts it equals ms.
+				 * 
+				 * Example:
+				 * pm.response.to.have.responseTime.below(500);
+				 * pm.response.to.have.responseTime.within(0, 1000);
+				 */
+				responseTime: ((value?: number) => VayuExpectation) & VayuExpectation;
 				/**
 				 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers. A number that is not a whole finite code is refused rather than truncated.
 				 * 
@@ -1336,6 +1672,330 @@ declare const pm: {
 				 * pm.response.to.have.status('OK');
 				 */
 				status(code: number | string): void;
+				/**
+				 * Assert the response's status code. Unlike status(), a numeric string is the code it spells, as in chai-postman.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusCode(201);
+				 */
+				statusCode(code: number | string): void;
+				/**
+				 * Assert the status code's hundreds digit: 2 for any 2xx. The digit is a number; a string is refused.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusCodeClass(2);
+				 */
+				statusCodeClass(digit: number): void;
+				/**
+				 * Assert the reason phrase pm.response.reason() answers, compared exactly.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusReason('Created');
+				 */
+				statusReason(reason: string): void;
+			};
+			not: {
+				be: {
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 202.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.accepted;
+					 */
+					accepted: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 400.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.badRequest;
+					 */
+					badRequest: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 4xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.clientError;
+					 */
+					clientError: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 4xx or 5xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.error;
+					 */
+					error: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 403.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.forbidden;
+					 */
+					forbidden: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 1xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.info;
+					 */
+					info: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a body that parses as JSON.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.json;
+					 */
+					json: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 406.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.notAcceptable;
+					 */
+					notAcceptable: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 404.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.notFound;
+					 */
+					notFound: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 200.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.ok;
+					 */
+					ok: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 429.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.rateLimited;
+					 */
+					rateLimited: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 3xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.redirection;
+					 */
+					redirection: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 5xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.serverError;
+					 */
+					serverError: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 2xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.success;
+					 */
+					success: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 401.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.unauthorised;
+					 */
+					unauthorised: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 401.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.unauthorized;
+					 */
+					unauthorized: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a non-empty body.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.withBody;
+					 */
+					withBody: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 204.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.withoutContent;
+					 */
+					withoutContent: void;
+				};
+				have: {
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON. With no argument, that there is a body at all.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.body('pong');
+					 * pm.response.to.not.have.body(/^\{"ok"/);
+					 * pm.response.to.not.have.body({ ok: true });
+					 * pm.response.to.not.have.body();
+					 */
+					body(expected?: string | RegExp | object): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that a specific header exists in the response, and - with a second argument - that it holds that exact value. The value comparison is strict, so a number never matches the wire's string.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.header('Content-Type');
+					 * pm.response.to.not.have.header('Content-Type', 'application/json');
+					 */
+					header(name: string, value?: string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it. The path is read as lodash's _.get reads it, so brackets index and an array body is a root like any other.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.jsonBody();
+					 * pm.response.to.not.have.jsonBody('data.id');
+					 * pm.response.to.not.have.jsonBody('data.items[0].id', 42);
+					 * pm.response.to.not.have.jsonBody('[0].id', 1);
+					 */
+					jsonBody(path?: string, value?: unknown): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.jsonSchema({ type: 'object', required: ['id'] });
+					 */
+					jsonSchema(schema: object, options?: object): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * The start of a pm.expect chain on the response's size in bytes - pm.response.size().body plus .header, as chai-postman adds them - and the call responseSize(n), which asserts it equals n.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.responseSize.below(1024);
+					 */
+					responseSize: ((value?: number) => VayuExpectation) & VayuExpectation;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * The start of a pm.expect chain on pm.response.responseTime, and the call responseTime(ms), which asserts it equals ms.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.responseTime.below(500);
+					 * pm.response.to.not.have.responseTime.within(0, 1000);
+					 */
+					responseTime: ((value?: number) => VayuExpectation) & VayuExpectation;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers. A number that is not a whole finite code is refused rather than truncated.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.status(200);
+					 * pm.response.to.not.have.status('OK');
+					 */
+					status(code: number | string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the response's status code. Unlike status(), a numeric string is the code it spells, as in chai-postman.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusCode(201);
+					 */
+					statusCode(code: number | string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the status code's hundreds digit: 2 for any 2xx. The digit is a number; a string is refused.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusCodeClass(2);
+					 */
+					statusCodeClass(digit: number): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the reason phrase pm.response.reason() answers, compared exactly.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusReason('Created');
+					 */
+					statusReason(reason: string): void;
+				};
 			};
 		};
 		/**
