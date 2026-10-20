@@ -919,7 +919,9 @@ json graphql_body (const std::string& content) {
     // importer keeps every key it does not rewrite.
     for (auto member = parsed.begin (); member != parsed.end (); ++member) {
         if (member.key () != "query" && member.key () != "variables") {
-            graphql[member.key ()] = member.value ();
+            // The envelope's keys are distinct and neither is `query` or
+            // `variables`, which are already in `graphql`.
+            vayu::utils::append_unique_member (graphql, member.key (), member.value ());
         }
     }
     return json{ { "mode", "graphql" }, { "graphql", std::move (graphql) } };

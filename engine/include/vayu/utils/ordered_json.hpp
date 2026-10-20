@@ -25,6 +25,7 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace vayu::utils {
@@ -44,5 +45,18 @@ inline constexpr size_t ORDERED_JSON_UNBOUNDED = std::numeric_limits<size_t>::ma
  */
 [[nodiscard]] std::optional<nlohmann::ordered_json>
 parse_ordered_json (std::string_view text, size_t max_depth);
+
+/**
+ * Appends @p key -> @p value to @p object without the scan `operator[]` and
+ * `emplace` make of every member before it (issue #2552). The parse is linear
+ * but copying n members one by one into a new object is still O(n^2); a loop
+ * that copies from an object whose keys are already distinct uses this.
+ *
+ * @p object must be a JSON object and must not hold @p key yet: nothing here
+ * checks, and a repeated key would be written twice.
+ */
+void append_unique_member (nlohmann::ordered_json& object,
+std::string key,
+nlohmann::ordered_json value);
 
 } // namespace vayu::utils

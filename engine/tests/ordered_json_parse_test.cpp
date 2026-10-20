@@ -233,4 +233,16 @@ TEST (OrderedJsonParse, EveryKeyRepeatedStillParsesInLinearTime) {
     EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
 }
 
+// `append_unique_member` places a member after the ones already there, in
+// order, and the object dumps and reads back as one built the ordinary way.
+TEST (AppendUniqueMember, KeepsInsertionOrderAndReadsBackLikeAnOrdinaryObject) {
+    auto object = nlohmann::ordered_json::object ();
+    vayu::utils::append_unique_member (object, "b", 1);
+    vayu::utils::append_unique_member (
+    object, "a", nlohmann::ordered_json::array ({ 1, 2 }));
+    EXPECT_EQ (object.dump (), R"({"b":1,"a":[1,2]})");
+    EXPECT_EQ (object.at ("a").size (), 2u);
+    EXPECT_EQ (object["b"], 1);
+}
+
 } // namespace
