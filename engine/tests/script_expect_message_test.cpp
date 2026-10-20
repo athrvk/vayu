@@ -148,6 +148,7 @@ TEST_F (ExpectMessageTest, EveryMatcherCarriesTheMessage) {
     { R"(pm.expect({ a: { b: 1 } }, "M").to.nested.include({ "a.b": 2 }))", "nested properties" },
     { R"(pm.expect("1", "M").to.be.finite)", "finite number" },
     { R"(pm.expect([1], "M").to.contain.oneOf([2]))", "contain one of" },
+    { R"(pm.expect(1, "M").to.have.jsonSchema({ type: "string" }))", "satisfy the schema" },
     });
 
     for (const auto& c : cases) {

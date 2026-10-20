@@ -432,6 +432,24 @@ TEST (ScriptTypesTest, ACallTheTableContinuesIsDeclaredAsCallAndChain) {
     "\twithin(start: number | Date, finish: number | Date): VayuExpectation;"));
 }
 
+// `pm.response.to.have.responseTime` is a call and a pm.expect chain on the
+// time (`responseTime(120)`, `responseTime.below(200)`), and the table says so
+// with a detail returning `VayuExpectation` (#2528). Declared as a method that
+// returns the chain, `.responseTime.below(200)` would be an editor error for a
+// script that runs; a pm.* call that returns anything else stays a method.
+TEST (ScriptTypesTest, ACallThatAnswersTheChainIsDeclaredAsCallAndChain) {
+    const std::string dts = generate_script_typedefs ();
+    // `pm.response.to.have.*` sits four tabs in; `pm.response.to.not.have.*`,
+    // the negated twin, five. The newline pins the depth.
+    for (const char* member : { "responseTime", "responseSize" }) {
+        const std::string declared = std::string (member) +
+        ": ((value?: number) => VayuExpectation) & VayuExpectation;";
+        EXPECT_TRUE (contains (dts, "\n\t\t\t\t" + declared)) << member;
+        EXPECT_TRUE (contains (dts, "\n\t\t\t\t\t" + declared)) << member;
+    }
+    EXPECT_TRUE (contains (dts, "\n\t\t\t\tstatus(code: number | string): void;"));
+}
+
 // Two entries document an overload in prose TypeScript cannot parse
 // (`upsert({ key, value }) | (name, value)`). Emitting that verbatim would
 // produce a file that does not compile, taking every other declaration with it,

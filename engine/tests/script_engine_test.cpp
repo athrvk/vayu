@@ -2803,8 +2803,9 @@ TEST_F (ScriptEngineTest, ResponseToChainRejectsUnknownAssertions) {
     R"(pm.test("t", function() { pm.response.to.be.definitelyNotAMatcher; });)",
     R"(pm.test("t", function() { pm.response.to.have.definitelyNotAMatcher; });)",
     R"(pm.test("t", function() { pm.response.to.definitelyNotAMatcher; });)",
-    // The negated form is not implemented; it must throw, not pass.
-    R"(pm.test("t", function() { pm.response.to.not.be.ok; });)",
+    // The negated chain is armed the same way (#2528).
+    R"(pm.test("t", function() { pm.response.to.not.definitelyNotAMatcher; });)",
+    R"(pm.test("t", function() { pm.response.to.not.be.definitelyNotAMatcher; });)",
     });
 
     for (const char* script : scripts) {

@@ -300,6 +300,22 @@ enum class ZeroRule { SameValueZero, Signed };
 
 int js_deep_equal (JSContext* ctx, JSValueConst a, JSValueConst b, int depth, DeepEqualPath& path, ZeroRule zeros);
 
+// The two numbers chai-postman's `responseTime` / `responseSize` chainables
+// retarget an assertion at (#2528).
+enum class ResponseMeasure { Time, Size };
+
+// `pm.response.to.have.responseTime` / `.responseSize`: a `pm.expect` chain
+// on @p measured, negated when @p negated (the `not` read before it), that is
+// also the call `responseTime(value)` chai-postman defines (pm_expect.cpp).
+JSValue response_measure_chain (JSContext* ctx, double measured, bool negated, ResponseMeasure which);
+
+// `jsonSchema`'s verdict on @p document, shared by `pm.expect(...)` and
+// `pm.response.to.have` (pm_expect.cpp): the failure message when the
+// assertion fails under @p negated, empty when it holds, nullopt with an
+// exception pending when @p schema is not a schema or a value has no JSON form.
+std::optional<std::string>
+json_schema_failure (JSContext* ctx, JSValueConst document, JSValueConst schema, bool negated);
+
 // `pm.test`, `pm.expect` and `pm.expect.fail` (pm_expect.cpp), which
 // `setup_pm_object` installs.
 JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);

@@ -216,6 +216,13 @@ interface VayuExpectation {
 	 */
 	is: VayuExpectation;
 	/**
+	 * Assert the value satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate fails the assertion naming it rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+	 * 
+	 * Example:
+	 * pm.expect(pm.response.json()).to.have.jsonSchema({ type: 'array', items: { required: ['id'] } });
+	 */
+	jsonSchema(schema: object, options?: object): VayuExpectation;
+	/**
 	 * Assert the object has exactly this key (alias for .to.have.keys).
 	 */
 	key(key: string): VayuExpectation;
@@ -1288,6 +1295,10 @@ declare const pm: {
 		 */
 		reason(): string;
 		/**
+		 * The body's size in bytes - pm.response.size().body, under the name Postman scripts read it by.
+		 */
+		responseSize: number;
+		/**
 		 * Perceived response time in milliseconds (submit → completion). Use responseTimeWire for server-only timing.
 		 */
 		responseTime: number;
@@ -1377,6 +1388,15 @@ declare const pm: {
 				 */
 				json: void;
 				/**
+				 * Assert that the response has status 406.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
+				 * pm.response.to.be.notAcceptable;
+				 */
+				notAcceptable: void;
+				/**
 				 * Assert that the response has status 404.
 				 * 
 				 * Written without parentheses - the property access is the assertion.
@@ -1436,6 +1456,15 @@ declare const pm: {
 				 * Written without parentheses - the property access is the assertion.
 				 * 
 				 * Example:
+				 * pm.response.to.be.unauthorised;
+				 */
+				unauthorised: void;
+				/**
+				 * Assert that the response has status 401.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
 				 * pm.response.to.be.unauthorized;
 				 */
 				unauthorized: void;
@@ -1448,17 +1477,27 @@ declare const pm: {
 				 * pm.response.to.be.withBody;
 				 */
 				withBody: void;
+				/**
+				 * Assert that the response has status 204.
+				 * 
+				 * Written without parentheses - the property access is the assertion.
+				 * 
+				 * Example:
+				 * pm.response.to.be.withoutContent;
+				 */
+				withoutContent: void;
 			};
 			have: {
 				/**
-				 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON.
+				 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON. With no argument, that there is a body at all.
 				 * 
 				 * Example:
 				 * pm.response.to.have.body('pong');
 				 * pm.response.to.have.body(/^\{"ok"/);
 				 * pm.response.to.have.body({ ok: true });
+				 * pm.response.to.have.body();
 				 */
-				body(expected: string | RegExp | object): void;
+				body(expected?: string | RegExp | object): void;
 				/**
 				 * Assert that a specific header exists in the response, and - with a second argument - that it holds that exact value. The value comparison is strict, so a number never matches the wire's string.
 				 * 
@@ -1468,14 +1507,37 @@ declare const pm: {
 				 */
 				header(name: string, value?: string): void;
 				/**
-				 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it.
+				 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it. The path is read as lodash's _.get reads it, so brackets index and an array body is a root like any other.
 				 * 
 				 * Example:
 				 * pm.response.to.have.jsonBody();
 				 * pm.response.to.have.jsonBody('data.id');
-				 * pm.response.to.have.jsonBody('data.id', 42);
+				 * pm.response.to.have.jsonBody('data.items[0].id', 42);
+				 * pm.response.to.have.jsonBody('[0].id', 1);
 				 */
 				jsonBody(path?: string, value?: unknown): void;
+				/**
+				 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+				 * 
+				 * Example:
+				 * pm.response.to.have.jsonSchema({ type: 'object', required: ['id'] });
+				 */
+				jsonSchema(schema: object, options?: object): void;
+				/**
+				 * The start of a pm.expect chain on the response's size in bytes - pm.response.size().body plus .header, as chai-postman adds them - and the call responseSize(n), which asserts it equals n.
+				 * 
+				 * Example:
+				 * pm.response.to.have.responseSize.below(1024);
+				 */
+				responseSize: ((value?: number) => VayuExpectation) & VayuExpectation;
+				/**
+				 * The start of a pm.expect chain on pm.response.responseTime, and the call responseTime(ms), which asserts it equals ms.
+				 * 
+				 * Example:
+				 * pm.response.to.have.responseTime.below(500);
+				 * pm.response.to.have.responseTime.within(0, 1000);
+				 */
+				responseTime: ((value?: number) => VayuExpectation) & VayuExpectation;
 				/**
 				 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers. A number that is not a whole finite code is refused rather than truncated.
 				 * 
@@ -1484,6 +1546,330 @@ declare const pm: {
 				 * pm.response.to.have.status('OK');
 				 */
 				status(code: number | string): void;
+				/**
+				 * Assert the response's status code. Unlike status(), a numeric string is the code it spells, as in chai-postman.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusCode(201);
+				 */
+				statusCode(code: number | string): void;
+				/**
+				 * Assert the status code's hundreds digit: 2 for any 2xx. The digit is a number; a string is refused.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusCodeClass(2);
+				 */
+				statusCodeClass(digit: number): void;
+				/**
+				 * Assert the reason phrase pm.response.reason() answers, compared exactly.
+				 * 
+				 * Example:
+				 * pm.response.to.have.statusReason('Created');
+				 */
+				statusReason(reason: string): void;
+			};
+			not: {
+				be: {
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 202.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.accepted;
+					 */
+					accepted: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 400.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.badRequest;
+					 */
+					badRequest: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 4xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.clientError;
+					 */
+					clientError: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 4xx or 5xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.error;
+					 */
+					error: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 403.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.forbidden;
+					 */
+					forbidden: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 1xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.info;
+					 */
+					info: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a body that parses as JSON.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.json;
+					 */
+					json: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 406.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.notAcceptable;
+					 */
+					notAcceptable: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 404.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.notFound;
+					 */
+					notFound: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 200.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.ok;
+					 */
+					ok: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 429.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.rateLimited;
+					 */
+					rateLimited: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 3xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.redirection;
+					 */
+					redirection: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 5xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.serverError;
+					 */
+					serverError: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a 2xx status code.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.success;
+					 */
+					success: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 401.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.unauthorised;
+					 */
+					unauthorised: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 401.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.unauthorized;
+					 */
+					unauthorized: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a non-empty body.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.withBody;
+					 */
+					withBody: void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has status 204.
+					 * 
+					 * Written without parentheses - the property access is the assertion.
+					 * 
+					 * Example:
+					 * pm.response.to.not.be.withoutContent;
+					 */
+					withoutContent: void;
+				};
+				have: {
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert what the response body is. A string must equal the body exactly, a regular expression must match it, and an object must deeply equal the parsed JSON. With no argument, that there is a body at all.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.body('pong');
+					 * pm.response.to.not.have.body(/^\{"ok"/);
+					 * pm.response.to.not.have.body({ ok: true });
+					 * pm.response.to.not.have.body();
+					 */
+					body(expected?: string | RegExp | object): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that a specific header exists in the response, and - with a second argument - that it holds that exact value. The value comparison is strict, so a number never matches the wire's string.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.header('Content-Type');
+					 * pm.response.to.not.have.header('Content-Type', 'application/json');
+					 */
+					header(name: string, value?: string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a valid JSON body; with a path, that the body holds that property; with a value, that the property deeply equals it. The path is read as lodash's _.get reads it, so brackets index and an array body is a root like any other.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.jsonBody();
+					 * pm.response.to.not.have.jsonBody('data.id');
+					 * pm.response.to.not.have.jsonBody('data.items[0].id', 42);
+					 * pm.response.to.not.have.jsonBody('[0].id', 1);
+					 */
+					jsonBody(path?: string, value?: unknown): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the JSON body satisfies a JSON Schema (draft-07). A failure names the first path that broke the schema. A keyword the draft-07 validator does not evaluate (unevaluatedProperties, prefixItems and the other 2019-09 / 2020-12 additions) fails the assertion naming it, rather than passing on a schema that was only partly read. `options` is ajv's and is not read.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.jsonSchema({ type: 'object', required: ['id'] });
+					 */
+					jsonSchema(schema: object, options?: object): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * The start of a pm.expect chain on the response's size in bytes - pm.response.size().body plus .header, as chai-postman adds them - and the call responseSize(n), which asserts it equals n.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.responseSize.below(1024);
+					 */
+					responseSize: ((value?: number) => VayuExpectation) & VayuExpectation;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * The start of a pm.expect chain on pm.response.responseTime, and the call responseTime(ms), which asserts it equals ms.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.responseTime.below(500);
+					 * pm.response.to.not.have.responseTime.within(0, 1000);
+					 */
+					responseTime: ((value?: number) => VayuExpectation) & VayuExpectation;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert that the response has a specific HTTP status code, or - given a string - the reason phrase pm.response.reason() answers. A number that is not a whole finite code is refused rather than truncated.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.status(200);
+					 * pm.response.to.not.have.status('OK');
+					 */
+					status(code: number | string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the response's status code. Unlike status(), a numeric string is the code it spells, as in chai-postman.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusCode(201);
+					 */
+					statusCode(code: number | string): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the status code's hundreds digit: 2 for any 2xx. The digit is a number; a string is refused.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusCodeClass(2);
+					 */
+					statusCodeClass(digit: number): void;
+					/**
+					 * Negated. Each check the assertion makes is negated on its own, in chai-postman's order, so a form that checks two things - a header and its value, a path and its value - fails once the first one holds.
+					 * 
+					 * Assert the reason phrase pm.response.reason() answers, compared exactly.
+					 * 
+					 * Example:
+					 * pm.response.to.not.have.statusReason('Created');
+					 */
+					statusReason(reason: string): void;
+				};
 			};
 		};
 		/**

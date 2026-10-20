@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -22,6 +23,9 @@
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "vayu/core/schema_validation.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::runtime::pm_detail {
@@ -1706,13 +1710,14 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
  * Its own `length` (the arity every function has) is deleted, so
  * `.include.length` reaches the expectation's `length` as any other word does.
  */
-JSValue chainable_method (JSContext* ctx, JSValueConst this_val, JSCFunctionData* call) {
+JSValue
+chainable_method (JSContext* ctx, JSValueConst this_val, JSCFunctionData* call, int magic = 0) {
     ScopedValue expectation (ctx, expectation_object (ctx, this_val));
     if (JS_IsUndefined (expectation.get ())) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
     JSValue data  = expectation.get ();
-    JSValue chain = JS_NewCFunctionData (ctx, call, 1, 0, 1, &data);
+    JSValue chain = JS_NewCFunctionData (ctx, call, 1, magic, 1, &data);
     if (JS_IsException (chain)) {
         return chain;
     }
@@ -2429,6 +2434,70 @@ JSValue expect_string (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     return expect_chained (ctx, this_val);
 }
 
+// chai-postman's `jsonSchema(schema, options)`. `options` is ajv's and is not
+// read: the validator here is valijson (see `json_schema_failure`).
+JSValue expect_json_schema (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "jsonSchema() requires a schema");
+    }
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    const auto failure = json_schema_failure (ctx, state->actual, argv[0], state->negated);
+    if (!failure) {
+        return JS_EXCEPTION;
+    }
+    if (!failure->empty ()) {
+        return throw_expect_failure (ctx, state, *failure);
+    }
+    return expect_chained (ctx, this_val);
+}
+
+// What `response_measure_chain` measures, indexed by `ResponseMeasure`.
+constexpr auto response_measure_nouns =
+std::to_array<const char*> ({ "response time", "response size" });
+
+/**
+ * The call half of `responseTime` / `responseSize`, chai-postman's two checks
+ * in its order: the measure is a number, then it equals the argument. The
+ * first always holds here, so under `not` the call fails whatever it is given
+ * - Postman's verdict, kept rather than read as "not equal", which would pass
+ * an assertion Postman fails.
+ */
+JSValue response_measure_call (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic,
+JSValue* func_data) {
+    (void)this_val;
+    auto* state = expectation_state (ctx, func_data[0]);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    const char* noun = response_measure_nouns.at (static_cast<size_t> (magic));
+    if (state->negated) {
+        return throw_expect_failure (ctx, state,
+        std::format ("Expected response to not have a valid {}", noun));
+    }
+    if (argc < 1) {
+        return expect_chained (ctx, func_data[0]);
+    }
+    DeepEqualPath path;
+    const int same =
+    js_deep_equal (ctx, state->actual, argv[0], 0, path, ZeroRule::SameValueZero);
+    if (same < 0) {
+        return JS_EXCEPTION;
+    }
+    if (same == 0) {
+        return throw_expect_failure (ctx, state,
+        std::format ("Expected {} {} to equal {}", noun,
+        js_describe (ctx, state->actual), js_describe (ctx, argv[0])));
+    }
+    return expect_chained (ctx, func_data[0]);
+}
+
 JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message) {
     JSValue obj = JS_NewObjectClass (ctx, expect_class_id);
     if (JS_IsException (obj)) {
@@ -2591,6 +2660,8 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
     JS_NewCFunction (ctx, expect_own_property, "ownProperty", 2));
     JS_SetPropertyStr (ctx, obj, "haveOwnProperty",
     JS_NewCFunction (ctx, expect_own_property, "haveOwnProperty", 2));
+    JS_SetPropertyStr (ctx, obj, "jsonSchema",
+    JS_NewCFunction (ctx, expect_json_schema, "jsonSchema", 1));
 
     // Last, once every member above is in place: from here a name this object
     // does not carry is a throw rather than `undefined`.
@@ -2844,6 +2915,128 @@ JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     }
 
     return throw_assertion_failure (ctx, message);
+}
+
+// ============================================================================
+// jsonSchema and the response measures, which pm.response.to shares (#2528)
+// ============================================================================
+
+namespace {
+
+/**
+ * A script value as the JSON the validator reads: what `JSON.stringify` makes
+ * of it, which is the value ajv sees in Postman. That is why a response body
+ * comes through here too rather than as its text: JSON.parse reads `1.0` as the
+ * integer 1, and nlohmann reading the text would keep a float that
+ * `type: "integer"` refuses. nullopt with an exception pending when the value
+ * has no JSON form; @p what names the argument in the refusal.
+ */
+std::optional<nlohmann::json>
+script_value_as_json (JSContext* ctx, JSValueConst value, const char* what) {
+    ScopedValue text (ctx, JS_JSONStringify (ctx, value, JS_UNDEFINED, JS_UNDEFINED));
+    if (JS_IsException (text.get ())) {
+        // A cycle, a throwing toJSON, a BigInt: the script's own error, which
+        // QuickJS has already named.
+        return std::nullopt;
+    }
+    if (JS_IsString (text.get ())) {
+        try {
+            return std::optional<nlohmann::json> (std::in_place,
+            nlohmann::json::parse (js_to_string (ctx, text.get ())));
+        } catch (const nlohmann::json::exception&) {
+            // @deliberate - a lone surrogate survives JSON.stringify as an
+            // escape nlohmann refuses; it is refused below as no JSON form.
+        }
+    }
+    JS_ThrowTypeError (ctx, "jsonSchema() needs %s JSON can represent, got %s",
+    what, js_type_name (ctx, value));
+    return std::nullopt;
+}
+
+std::string unevaluated_keyword_list (const vayu::core::ValidationVerdict& verdict) {
+    std::string out;
+    for (const auto& [keyword, count] : verdict.unevaluated_keywords) {
+        out += (out.empty () ? "" : ", ") + std::format ("{} ({})", keyword, count);
+    }
+    return out;
+}
+
+// The first failure, by the path the validator names, and how many follow it.
+std::string first_schema_failure (const vayu::core::ValidationVerdict& verdict) {
+    if (verdict.failures.empty ()) {
+        return "the schema";
+    }
+    const auto& first = verdict.failures.front ();
+    std::string out   = std::format (
+    "at {}: {}", first.path.empty () ? "the root" : first.path, first.message);
+    if (verdict.failures_total > 1) {
+        out += std::format (" (and {} more)", verdict.failures_total - 1);
+    }
+    return out;
+}
+
+} // namespace
+
+std::optional<std::string>
+json_schema_failure (JSContext* ctx, JSValueConst document, JSValueConst schema, bool negated) {
+    // chai-postman's own first check, `expect(schema).to.be.an('object')`: an
+    // array, a function or a boolean schema is refused there too.
+    if (!JS_IsObject (schema) || JS_IsArray (schema) || JS_IsFunction (ctx, schema)) {
+        JS_ThrowTypeError (ctx, "jsonSchema() expects a schema object, got %s",
+        js_type_name (ctx, schema));
+        return std::nullopt;
+    }
+    const auto schema_json = script_value_as_json (ctx, schema, "a schema");
+    if (!schema_json) {
+        return std::nullopt;
+    }
+    const auto document_json = script_value_as_json (ctx, document, "a target");
+    if (!document_json) {
+        return std::nullopt;
+    }
+    const auto verdict =
+    vayu::core::validate_document_against_schema (*schema_json, *document_json);
+    if (!verdict) {
+        JS_ThrowTypeError (ctx, "jsonSchema() could not read the schema: %s",
+        verdict.error ().c_str ());
+        return std::nullopt;
+    }
+
+    const std::string expected = negated ?
+    "Expected data to not satisfy the schema" :
+    "Expected data to satisfy the schema";
+    // A keyword the validator cannot evaluate leaves the verdict unknown in
+    // both directions - ignored inside `not` it makes the schema stricter,
+    // anywhere else looser - so neither polarity may pass on it.
+    if (!verdict->unevaluated_keywords.empty ()) {
+        std::string msg = expected +
+        ", but it uses keywords the draft-07 validator does not evaluate, so "
+        "they were not checked: " +
+        unevaluated_keyword_list (*verdict);
+        if (!verdict->valid) {
+            msg += "; of what was checked, the data fails " +
+            first_schema_failure (*verdict);
+        }
+        return msg;
+    }
+    if (verdict->valid != negated) {
+        return std::string{};
+    }
+    return negated ? expected :
+                     expected + ", but it fails " + first_schema_failure (*verdict);
+}
+
+JSValue response_measure_chain (JSContext* ctx, double measured, bool negated, ResponseMeasure which) {
+    ScopedValue number (ctx, JS_NewFloat64 (ctx, measured));
+    ScopedValue expectation (ctx, create_expectation (ctx, number.get (), std::string{}));
+    if (JS_IsException (expectation.get ())) {
+        return JS_EXCEPTION;
+    }
+    if (auto* state = expectation_state (ctx, expectation.get ())) {
+        state->negated = negated;
+    }
+    return chainable_method (
+    ctx, expectation.get (), response_measure_call, static_cast<int> (which));
 }
 
 } // namespace vayu::runtime::pm_detail

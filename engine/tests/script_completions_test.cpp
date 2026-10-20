@@ -153,7 +153,8 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
     int offered = 0;
     for (const auto& item : completions) {
         const std::string label = item.value ("label", std::string{});
-        if (label.rfind ("pm.response.to.be.", 0) != 0) {
+        if (label.rfind ("pm.response.to.be.", 0) != 0 &&
+        label.rfind ("pm.response.to.not.be.", 0) != 0) {
             continue;
         }
         offered++;
@@ -174,6 +175,57 @@ TEST (ScriptCompletions, EveryOfferedResponseStatusClassExistsInTheRuntime) {
 
     EXPECT_GE (offered, 10)
     << "the pm.response.to.be matchers are missing from the completion list";
+}
+
+// The whole chain, both polarities (#2528): every offered member under
+// `pm.response.to.` - `have.*` and `be.*` and their `not.` twins - is bound
+// where its label says. Looked up rather than run, as the pm.expect guard
+// below does: a `be` getter asserts on access, so reading it would report a
+// verdict about this response instead of whether the member exists.
+TEST (ScriptCompletions, EveryOfferedResponseAssertionExistsInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = "https://api.example.com/users";
+    response.status_code = 200;
+    response.body        = R"({"ok": true})";
+
+    int offered = 0, offered_have = 0, offered_not = 0;
+    std::string probe;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.rfind ("pm.response.to.", 0) != 0) {
+            continue;
+        }
+        offered++;
+        offered_have += label.rfind ("pm.response.to.have.", 0) == 0 ? 1 : 0;
+        offered_not += label.rfind ("pm.response.to.not.", 0) == 0 ? 1 : 0;
+
+        const size_t split         = label.rfind ('.');
+        const std::string parent   = label.substr (0, split);
+        const std::string member   = label.substr (split + 1);
+        const std::string question = item.value ("kind", 0) == KIND_FUNCTION ?
+        std::format ("typeof {}[\"{}\"] === \"function\"", parent, member) :
+        std::format ("!!Object.getOwnPropertyDescriptor({}, \"{}\")", parent, member);
+        probe += std::format ("if (!({})) missing.push(\"{}\");\n", question, label);
+    }
+    ASSERT_GT (offered, 0)
+    << "no pm.response.to completions at all - the probe proves nothing";
+    EXPECT_GE (offered_have, 10)
+    << "the pm.response.to.have matchers are missing";
+    EXPECT_EQ (offered_not * 2, offered)
+    << "every pm.response.to member is offered negated as well";
+
+    auto result = engine.execute_test ("var missing = [];\n" + probe +
+    "pm.environment.set('missing', missing.join(', '));",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["missing"].value, "")
+    << "offered by the completion list, absent from the runtime";
 }
 
 // Same drift risk one level down: `pm.response.headers.get` is offered as a

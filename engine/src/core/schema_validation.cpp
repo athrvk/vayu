@@ -417,7 +417,15 @@ collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json
     return { counts.begin (), counts.end () };
 }
 
-ValidationVerdict validate_body_against_schema (const nlohmann::json& schema,
+namespace {
+
+/**
+ * One validator run, shared by both public entry points: the verdict, or the
+ * validator's own reason when it refused the schema (at parse time, or at
+ * validation time for a constraint it only reads then, such as a `pattern`).
+ * What a refusal means is the caller's to decide - see the two below.
+ */
+std::expected<ValidationVerdict, std::string> run_validator (const nlohmann::json& schema,
 const nlohmann::json& ref_roots,
 const nlohmann::json& body) {
     ValidationVerdict verdict;
@@ -425,33 +433,16 @@ const nlohmann::json& body) {
 
     const nlohmann::json root = validation_root (schema, ref_roots);
     valijson::Schema parsed;
+    valijson::ValidationResults results;
     try {
         valijson::SchemaParser parser;
         const valijson::adapters::NlohmannJsonAdapter adapter (root);
         parser.populateSchema (adapter, parsed);
-    } catch (const std::exception& e) {
-        // A schema the validator refuses is not a body that failed: the
-        // contract could not be read, so nothing was checked. Reported as
-        // `no_index` - the index is there but unusable - with the reason in the
-        // log, because the fix belongs to whoever wrote the index.
-        vayu::utils::log_warning ("http",
-        "Response schema rejected by the validator: " + std::string (e.what ()));
-        verdict.checked = false;
-        verdict.reason  = UncheckedReason::NoIndex;
-        return verdict;
-    }
-
-    valijson::ValidationResults results;
-    try {
         valijson::Validator validator;
         const valijson::adapters::NlohmannJsonAdapter target (body);
         validator.validate (parsed, target, &results);
     } catch (const std::exception& e) {
-        vayu::utils::log_warning (
-        "http", "Response schema validation failed: " + std::string (e.what ()));
-        verdict.checked = false;
-        verdict.reason  = UncheckedReason::NoIndex;
-        return verdict;
+        return std::unexpected (std::string (e.what ()));
     }
 
     std::vector<SchemaFailure> structural;
@@ -487,6 +478,31 @@ const nlohmann::json& body) {
     verdict.checked = true;
     verdict.valid   = verdict.failures_total == 0;
     return verdict;
+}
+
+} // namespace
+
+ValidationVerdict validate_body_against_schema (const nlohmann::json& schema,
+const nlohmann::json& ref_roots,
+const nlohmann::json& body) {
+    auto verdict = run_validator (schema, ref_roots, body);
+    if (verdict) {
+        return std::move (*verdict);
+    }
+    // A schema the validator refuses is not a body that failed: the contract
+    // could not be read, so nothing was checked. Reported as `no_index` - the
+    // index is there but unusable - with the reason in the log, because the
+    // fix belongs to whoever wrote the index.
+    vayu::utils::log_warning (
+    "http", "Response schema rejected by the validator: " + verdict.error ());
+    ValidationVerdict unchecked;
+    unchecked.reason = UncheckedReason::NoIndex;
+    return unchecked;
+}
+
+std::expected<ValidationVerdict, std::string>
+validate_document_against_schema (const nlohmann::json& schema, const nlohmann::json& document) {
+    return run_validator (schema, nlohmann::json::object (), document);
 }
 
 /**

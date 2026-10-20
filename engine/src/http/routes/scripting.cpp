@@ -14,6 +14,7 @@
 #include <array>
 #include <format>
 #include <string>
+#include <vector>
 
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
@@ -360,6 +361,13 @@ nlohmann::json get_script_completions () {
     "parsed headers, so it is not a wire-exact figure." },
     { "sortText", "1_pm_response_size" } });
 
+    completions.push_back ({ { "label", "pm.response.responseSize" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.response.responseSize" }, { "detail", "number" },
+    { "documentation",
+    "The body's size in bytes - pm.response.size().body, under the name "
+    "Postman scripts read it by." },
+    { "sortText", "1_pm_response_responseSize" } });
+
     completions.push_back ({ { "label", "pm.response.json" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.response.json()" }, { "detail", "pm.response.json(): any" },
     { "documentation",
@@ -399,15 +407,46 @@ nlohmann::json get_script_completions () {
     "response.to.have.header('Content-Type', 'application/json');" },
     { "sortText", "1_pm_response_to_have_header" } });
 
+    completions.push_back ({ { "label", "pm.response.to.have.statusCode" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusCode(${1:200})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusCode(code: number | string)" },
+    { "documentation",
+    "Assert the response's status code. Unlike status(), a numeric string is "
+    "the code it spells, as in chai-postman.\n\nExample:\n"
+    "pm.response.to.have.statusCode(201);" },
+    { "sortText", "1_pm_response_to_have_statusCode" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.statusReason" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusReason(\"${1:OK}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusReason(reason: string)" },
+    { "documentation",
+    "Assert the reason phrase pm.response.reason() answers, compared "
+    "exactly.\n\nExample:\npm.response.to.have.statusReason('Created');" },
+    { "sortText", "1_pm_response_to_have_statusReason" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.statusCodeClass" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.statusCodeClass(${1:2})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.statusCodeClass(digit: number)" },
+    { "documentation",
+    "Assert the status code's hundreds digit: 2 for any 2xx. The digit is a "
+    "number; a string is refused.\n\nExample:\n"
+    "pm.response.to.have.statusCodeClass(2);" },
+    { "sortText", "1_pm_response_to_have_statusCodeClass" } });
+
     completions.push_back ({ { "label", "pm.response.to.have.body" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.body(\"${1:body}\")" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.response.to.have.body(expected: string | RegExp | object)" },
+    { "detail", "pm.response.to.have.body(expected?: string | RegExp | object)" },
     { "documentation",
     "Assert what the response body is. A string must equal the body exactly, a "
     "regular expression must match it, and an object must deeply equal the "
-    "parsed JSON.\n\nExample:\npm.response.to.have.body('pong');\npm.response."
-    "to.have.body(/^\\{\"ok\"/);\npm.response.to.have.body({ ok: true });" },
+    "parsed JSON. With no argument, that there is a body at "
+    "all.\n\nExample:\npm.response.to.have.body('pong');\npm.response."
+    "to.have.body(/^\\{\"ok\"/);\npm.response.to.have.body({ ok: true "
+    "});\npm.response.to.have.body();" },
     { "sortText", "1_pm_response_to_have_body" } });
 
     completions.push_back ({ { "label", "pm.response.to.have.jsonBody" },
@@ -416,9 +455,53 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "Assert that the response has a valid JSON body; with a path, that the "
     "body holds that property; with a value, that the property deeply equals "
-    "it.\n\nExample:\npm.response.to.have.jsonBody();\npm.response.to.have."
-    "jsonBody('data.id');\npm.response.to.have.jsonBody('data.id', 42);" },
+    "it. The path is read as lodash's _.get reads it, so brackets index and an "
+    "array body is a root like any other.\n\nExample:\n"
+    "pm.response.to.have.jsonBody();\npm.response.to.have.jsonBody('data.id');"
+    "\n"
+    "pm.response.to.have.jsonBody('data.items[0].id', 42);\n"
+    "pm.response.to.have.jsonBody('[0].id', 1);" },
     { "sortText", "1_pm_response_to_have_jsonBody" } });
+
+    completions.push_back ({ { "label", "pm.response.to.have.jsonSchema" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.jsonSchema(${1:schema})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.jsonSchema(schema: object, options?: object)" },
+    { "documentation",
+    "Assert the JSON body satisfies a JSON Schema (draft-07). A failure names "
+    "the first path that broke the schema. A keyword the draft-07 validator "
+    "does not evaluate (unevaluatedProperties, prefixItems and the other "
+    "2019-09 / 2020-12 additions) fails the assertion naming it, rather than "
+    "passing on a schema that was only partly read. `options` is ajv's and is "
+    "not read.\n\nExample:\npm.response.to.have.jsonSchema({ type: 'object', "
+    "required: ['id'] });" },
+    { "sortText", "1_pm_response_to_have_jsonSchema" } });
+
+    // chai-postman's chainable methods: a call, and the start of a pm.expect
+    // chain on the number. The detail's `VayuExpectation` return is what the
+    // generated declarations read as "the call and the chain".
+    completions.push_back ({ { "label", "pm.response.to.have.responseTime" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.response.to.have.responseTime.below(${1:500})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.responseTime(value?: number): VayuExpectation" },
+    { "documentation",
+    "The start of a pm.expect chain on pm.response.responseTime, and the call "
+    "responseTime(ms), which asserts it equals ms.\n\nExample:\n"
+    "pm.response.to.have.responseTime.below(500);\n"
+    "pm.response.to.have.responseTime.within(0, 1000);" },
+    { "sortText", "1_pm_response_to_have_responseTime" } });
+
+    completions.push_back (
+    { { "label", "pm.response.to.have.responseSize" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.response.to.have.responseSize.below(${1:1024})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.response.to.have.responseSize(value?: number): VayuExpectation" },
+    { "documentation",
+    "The start of a pm.expect chain on the response's size in bytes - "
+    "pm.response.size().body plus .header, as chai-postman adds them - and the "
+    "call responseSize(n), which asserts it equals n.\n\nExample:\n"
+    "pm.response.to.have.responseSize.below(1024);" },
+    { "sortText", "1_pm_response_to_have_responseSize" } });
 
     // ========================================
     // pm.response.to.be - Status-class assertions
@@ -440,10 +523,13 @@ nlohmann::json get_script_completions () {
     { "serverError", "a 5xx status code" },
     { "error", "a 4xx or 5xx status code" },
     { "accepted", "status 202" },
+    { "withoutContent", "status 204" },
     { "badRequest", "status 400" },
     { "unauthorized", "status 401" },
+    { "unauthorised", "status 401" },
     { "forbidden", "status 403" },
     { "notFound", "status 404" },
+    { "notAcceptable", "status 406" },
     { "rateLimited", "status 429" },
     { "json", "a body that parses as JSON" },
     { "withBody", "a non-empty body" },
@@ -460,6 +546,47 @@ nlohmann::json get_script_completions () {
         "assertion.\n\nExample:\n" +
         label + ";" },
         { "sortText", std::string ("1_pm_response_to_be_") + status_class.name } });
+    }
+
+    // ========================================
+    // pm.response.to.not - every member above, negated (#2528)
+    // ========================================
+    // Derived from the entries above rather than written twice, so a matcher
+    // added there is offered negated too. The declarations are read off the
+    // labels, so without these `pm.response.to.not.have.status(500)` would be
+    // an editor error on a script that runs.
+    const auto replace_all = [] (std::string text, const std::string& from,
+                             const std::string& to) {
+        for (size_t at = text.find (from); at != std::string::npos;
+        at             = text.find (from, at + to.size ())) {
+            text.replace (at, from.size (), to);
+        }
+        return text;
+    };
+    const std::string positive_chain = "pm.response.to.";
+    const std::string negated_chain  = "pm.response.to.not.";
+    std::vector<nlohmann::json> negated_members;
+    for (const auto& item : completions) {
+        if (item.value ("label", std::string{}).rfind (positive_chain, 0) != 0) {
+            continue;
+        }
+        nlohmann::json twin = item;
+        for (const char* field : { "label", "insertText", "detail" }) {
+            twin[field] = replace_all (
+            item.value (field, std::string{}), positive_chain, negated_chain);
+        }
+        twin["sortText"] = replace_all (item.value ("sortText", std::string{}),
+        "1_pm_response_to_", "1_pm_response_to_not_");
+        twin["documentation"] =
+        "Negated. Each check the assertion makes is negated on its own, in "
+        "chai-postman's order, so a form that checks two things - a header "
+        "and its value, a path and its value - fails once the first one "
+        "holds.\n\n" +
+        replace_all (item.value ("documentation", std::string{}), positive_chain, negated_chain);
+        negated_members.push_back (std::move (twin));
+    }
+    for (auto& twin : negated_members) {
+        completions.push_back (std::move (twin));
     }
 
     // ========================================
@@ -2299,6 +2426,13 @@ nlohmann::json get_script_completions () {
     "Assert the object holds every path of the given object with an equal "
     "value, each key read as a dotted or indexed path.\n\nExample:\n"
     "pm.expect(json).to.nested.include({'data.items[0].id': 1});");
+    push_matcher ("to.have.jsonSchema", "schema: object, options?: object", "${1:schema}",
+    "Assert the value satisfies a JSON Schema (draft-07). A failure names the "
+    "first path that broke the schema. A keyword the draft-07 validator does "
+    "not evaluate fails the assertion naming it rather than passing on a "
+    "schema that was only partly read. `options` is ajv's and is not "
+    "read.\n\nExample:\npm.expect(pm.response.json()).to.have.jsonSchema({ "
+    "type: 'array', items: { required: ['id'] } });");
 
     completions.push_back ({ { "label", "to.be.finite" }, { "kind", KIND_FIELD },
     { "insertText", "to.be.finite" }, { "detail", ".to.be.finite" },

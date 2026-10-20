@@ -12,12 +12,14 @@
 
 #include "pm_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -142,14 +144,158 @@ std::string describe_number (double value) {
     return std::format ("{}", value);
 }
 
-JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// `size()`'s two halves. `header` is the serialised block - "Name: Value\r\n"
+// each - reconstructed from the parsed headers rather than measured off the
+// wire, so it will not match a Content-Length-derived figure to the byte.
+struct ResponseSizeBytes {
+    size_t body   = 0;
+    size_t header = 0;
+};
+
+ResponseSizeBytes response_size_bytes (const Response& response) {
+    constexpr size_t separator_and_crlf = 4; // ": " + "\r\n"
+    ResponseSizeBytes size;
+    for (const auto& [key, value] : response.headers) {
+        size.header += key.size () + value.size () + separator_and_crlf;
+    }
+    size.body = response.body.size ();
+    return size;
+}
+
+// ----------------------------------------------------------------------------
+// Polarity. `pm.response.to.not` is a second chain whose matchers are functions
+// of their own, so the `not` is bound into each function rather than read off
+// `this`: a matcher detached from `to.not.have` keeps the polarity of the
+// chain it was read from instead of silently asserting the opposite.
+// ----------------------------------------------------------------------------
+
+// A response matcher's magic: a table row above the low bit, the chain's
+// polarity in it.
+constexpr int matcher_magic (size_t row, bool negated) {
+    return static_cast<int> (row << 1U) | (negated ? 1 : 0);
+}
+constexpr bool magic_negated (int magic) {
+    return (static_cast<unsigned> (magic) & 1U) != 0;
+}
+constexpr size_t magic_row (int magic) {
+    return static_cast<size_t> (magic) >> 1U;
+}
+
+/**
+ * chai's `this.assert (condition, message, negatedMessage)`, the shape of every
+ * check chai-postman makes: under `not` the condition must be false.
+ *
+ * A matcher that checks two things checks them in chai-postman's order, each
+ * negated on its own, so `to.not.have.header("X", "v")` fails whenever X is
+ * present - Postman's verdict, which inverting the whole assertion would turn
+ * into a pass for any other value.
+ *
+ * A message is a string, or a callable that builds one. A message quoting a
+ * script value is the callable: `js_describe` runs the value's `toJSON`, which
+ * a passing check has no reason to call.
+ *
+ * @return whether the check held; when it did not, the AssertionError is
+ *         pending.
+ */
+template <typename Message> std::string message_text (const Message& message) {
+    if constexpr (std::is_invocable_v<const Message&>) {
+        return message ();
+    } else {
+        return std::string (message);
+    }
+}
+
+template <typename Message, typename NegatedMessage>
+bool check_holds (JSContext* ctx,
+bool negated,
+bool condition,
+const Message& message,
+const NegatedMessage& negated_message) {
+    if (condition != negated) {
+        return true;
+    }
+    throw_assertion_failure (
+    ctx, negated ? message_text (negated_message) : message_text (message));
+    return false;
+}
+
+JSValue check_result (bool held) {
+    return held ? JS_UNDEFINED : JS_EXCEPTION;
+}
+
+// The body as `pm.response.json()` reads it, or `undefined` when it is not
+// JSON - a value JSON.parse never produces, so it cannot be mistaken for a
+// body. The parse error is cleared: each caller reports an unparsable body in
+// its own words, and under `not` it is no failure at all.
+JSValue parse_body_json (JSContext* ctx, const std::string& body) {
+    JSValue json = JS_ParseJSON (ctx, body.c_str (), body.size (), "<response>");
+    if (JS_IsException (json)) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return JS_UNDEFINED;
+    }
+    return json;
+}
+
+// A status code as the script wrote it. `JS_ToInt32` truncated toward zero, so
+// `status(200.5)` compared as 200 and passed against a 200. No response can
+// carry a fractional or non-finite code, so an assertion written that way is
+// not a statement about the response at all; it is refused the way `body(5)`
+// is rather than reported as a verdict, which would name the status the author
+// got and leave the mistake in their own text unmentioned. nullopt with the
+// exception pending.
+std::optional<double>
+read_status_code_arg (JSContext* ctx, JSValueConst value, const char* matcher) {
+    double code = 0;
+    if (JS_ToFloat64 (ctx, &code, value) < 0) {
+        // The conversion's own error - a Symbol, a `valueOf` that throws - is
+        // the script's, and QuickJS has already named it.
+        return std::nullopt;
+    }
+    if (!std::isfinite (code) || std::trunc (code) != code) {
+        JS_ThrowTypeError (ctx, "%s() expects an integer status code, got %s",
+        matcher, describe_number (code).c_str ());
+        return std::nullopt;
+    }
+    return code;
+}
+
+JSValue check_status_code (JSContext* ctx, bool negated, int actual, double expected) {
+    return check_result (check_holds (ctx, negated, static_cast<double> (actual) == expected,
+    "Expected status code " + describe_number (expected) + " but got " + std::to_string (actual),
+    "Expected status code to not be " + std::to_string (actual)));
+}
+
+JSValue check_status_reason (JSContext* ctx,
+bool negated,
+const Response& response,
+const std::string& expected) {
+    const std::string actual = response_reason_phrase (response);
+    return check_result (check_holds (ctx, negated, actual == expected,
+    "Expected status reason '" + expected + "' but got '" + actual + "'",
+    "Expected status reason to not be '" + actual + "'"));
+}
+
+const Response* require_response (JSContext* ctx) {
+    auto* data = get_context_data (ctx);
+    if (!data || !data->response) {
+        JS_ThrowInternalError (ctx, "No response available");
+        return nullptr;
+    }
+    return data->response;
+}
+
+JSValue js_response_have_status (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "status() requires an expected status code");
     }
-
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
 
     // Postman takes either form and decides by type, never by coercion:
@@ -157,53 +303,103 @@ JSValue js_response_have_status (JSContext* ctx, JSValueConst this_val, int argc
     // the code. Coercing both through `JS_ToInt32` read "OK" as 0 - failing an
     // assertion Postman passes - and "200" as 200 - passing one Postman fails.
     if (JS_IsString (argv[0])) {
-        const std::string expected_reason = js_to_string (ctx, argv[0]);
-        const std::string actual_reason = response_reason_phrase (*data->response);
-        if (actual_reason != expected_reason) {
-            std::string msg = "Expected status reason '" + expected_reason +
-            "' but got '" + actual_reason + "'";
-            return throw_assertion_failure (ctx, msg);
-        }
-        return JS_UNDEFINED;
+        return check_status_reason (
+        ctx, magic_negated (magic), *response, js_to_string (ctx, argv[0]));
     }
-
-    // A code is compared as the script wrote it. `JS_ToInt32` truncated toward
-    // zero, so `status(200.5)` compared as 200 and passed against a 200 - the
-    // same coercion the string arm above stopped making. No response can carry
-    // a fractional or non-finite code, so an assertion written that way is not
-    // a statement about the response at all; it is refused the way `body(5)` is
-    // rather than reported as a verdict, which would name the status the author
-    // got and leave the mistake in their own text unmentioned.
-    double expected_code = 0;
-    if (JS_ToFloat64 (ctx, &expected_code, argv[0]) < 0) {
-        // The conversion's own error - a Symbol, a `valueOf` that throws - is
-        // the script's, and QuickJS has already named it. A message of ours
-        // here would discard what the author actually wrote.
+    const auto expected = read_status_code_arg (ctx, argv[0], "status");
+    if (!expected) {
         return JS_EXCEPTION;
     }
-    if (!std::isfinite (expected_code) || std::trunc (expected_code) != expected_code) {
-        return JS_ThrowTypeError (ctx, "status() expects an integer status code, got %s",
-        describe_number (expected_code).c_str ());
-    }
-
-    if (static_cast<double> (data->response->status_code) != expected_code) {
-        std::string msg = "Expected status code " + describe_number (expected_code) +
-        " but got " + std::to_string (data->response->status_code);
-        return throw_assertion_failure (ctx, msg);
-    }
-
-    return JS_UNDEFINED;
+    return check_status_code (ctx, magic_negated (magic), response->status_code, *expected);
 }
 
-JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// chai-postman's `statusCode(code)` is `code === Number(code)`, so unlike
+// `status` a numeric string is the code it spells.
+JSValue js_response_have_status_code (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "statusCode() requires an expected status code");
+    }
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const auto expected = read_status_code_arg (ctx, argv[0], "statusCode");
+    if (!expected) {
+        return JS_EXCEPTION;
+    }
+    return check_status_code (ctx, magic_negated (magic), response->status_code, *expected);
+}
+
+// chai-postman's `statusReason(reason)` compares `String(reason)`.
+JSValue js_response_have_status_reason (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "statusReason() requires an expected reason phrase");
+    }
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const char* expected = JS_ToCString (ctx, argv[0]);
+    if (!expected) {
+        return JS_EXCEPTION;
+    }
+    const std::string reason (expected);
+    JS_FreeCString (ctx, expected);
+    return check_status_reason (ctx, magic_negated (magic), *response, reason);
+}
+
+// `statusCodeClass(2)` - the code's hundreds digit. chai-postman compares with
+// `===`, so a class written as a string matches nothing there; it is refused
+// here instead, as a mistake in the script rather than a verdict.
+JSValue js_response_have_status_code_class (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    double digit = 0;
+    if (argc < 1 || !JS_IsNumber (argv[0]) || JS_ToFloat64 (ctx, &digit, argv[0]) < 0 ||
+    !std::isfinite (digit) || std::trunc (digit) != digit) {
+        return JS_ThrowTypeError (ctx,
+        "statusCodeClass() expects a status class digit such as 2, got %s",
+        argc < 1 ? "no argument" : js_type_name (ctx, argv[0]));
+    }
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const int code                 = response->status_code;
+    const std::string status_class = describe_number (digit) + "xx";
+    return check_result (check_holds (ctx, magic_negated (magic), code / 100 == digit,
+    "Expected response to have a " + status_class + " status code but got " + std::to_string (code),
+    "Expected response to not have a " + status_class +
+    " status code but got " + std::to_string (code)));
+}
+
+JSValue js_response_have_header (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "header() requires a header name");
     }
-
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
+    const bool negated = magic_negated (magic);
 
     std::string header_name = js_to_string (ctx, argv[0]);
 
@@ -211,43 +407,107 @@ JSValue js_response_have_header (JSContext* ctx, JSValueConst this_val, int argc
     // case-insensitive match HTTP header names take - a script may ask for
     // `content-type` against a `Content-Type` the wire sent. The map holds one
     // value per name, so there is no earlier duplicate this could shadow.
-    const auto& headers = data->response->headers;
-    const auto found    = headers.find (header_name);
-    if (found == headers.end ()) {
-        std::string msg = "Expected response to have header '" + header_name + "'";
-        return throw_assertion_failure (ctx, msg);
+    const auto found   = response->headers.find (header_name);
+    const bool present = found != response->headers.end ();
+    if (!check_holds (ctx, negated, present,
+        "Expected response to have header '" + header_name + "'",
+        "Expected response to not have header '" + header_name + "'")) {
+        return JS_EXCEPTION;
     }
-    const std::string& found_value = found->second;
+    if (argc < 2) {
+        return JS_UNDEFINED;
+    }
 
     // A header value is a string on the wire, and chai-postman compares the
     // expected value against it strictly. Coercing the expectation instead let
     // `header("X-Count", 5)` pass against the string "5" - a verdict Postman
     // does not give - so a non-string expectation fails the assertion here
-    // rather than being stringified into agreement with the wire.
-    if (argc >= 2) {
-        const bool matches =
-        JS_IsString (argv[1]) && js_to_string (ctx, argv[1]) == found_value;
-        if (!matches) {
-            std::string msg = "Expected header '" + header_name + "' to be " +
-            js_describe (ctx, argv[1]) + " but got '" + found_value + "'";
-            return throw_assertion_failure (ctx, msg);
-        }
-    }
-
-    return JS_UNDEFINED;
+    // rather than being stringified into agreement with the wire. Reached
+    // without the header only under `not`, where chai-postman reads the value
+    // of a header that is not there and throws; no value is what that means.
+    const std::string actual = present ? found->second : std::string{};
+    const bool matches =
+    present && JS_IsString (argv[1]) && js_to_string (ctx, argv[1]) == actual;
+    const JSValueConst expected = argv[1];
+    return check_result (check_holds (
+    ctx, negated, matches,
+    [&] {
+        return "Expected header '" + header_name + "' to be " +
+        js_describe (ctx, expected) + " but got '" + actual + "'";
+    },
+    [&] {
+        return "Expected header '" + header_name + "' to not be " +
+        js_describe (ctx, expected);
+    }));
 }
 
-JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+// A pattern is whatever carries a callable `test`, which is how
+// `expect(...).to.match` reads one: a regular expression literal is a real
+// RegExp here and satisfies it, and a matcher object a script built itself is
+// run rather than silently deep-equalled against the body. 1 when it is one
+// and matched, 0 when it is one and did not match, 2 when it is not a pattern,
+// -1 with an exception pending.
+int body_pattern_match (JSContext* ctx, JSValueConst pattern, const std::string& body) {
+    ScopedValue test_fn (ctx, JS_GetPropertyStr (ctx, pattern, "test"));
+    // Reading `test` runs a getter if the script defined one, and a getter that
+    // throws leaves the exception pending. Falling through to the deep-equal
+    // branch there would report a mismatch and drop the script's own error -
+    // the shape of silent wrongness this assertion was fixed for.
+    if (JS_IsException (test_fn.get ())) {
+        return -1;
+    }
+    if (!JS_IsFunction (ctx, test_fn.get ())) {
+        return 2;
+    }
+    ScopedValue subject (ctx, JS_NewStringLen (ctx, body.data (), body.size ()));
+    JSValueConst args[1]{ subject.get () };
+    ScopedValue result (ctx, JS_Call (ctx, test_fn.get (), pattern, 1, args));
+    if (JS_IsException (result.get ())) {
+        return -1;
+    }
+    return JS_ToBool (ctx, result.get ()) == 1 ? 1 : 0;
+}
+
+JSValue check_body_deep_equal (JSContext* ctx, bool negated, const std::string& body, JSValueConst expected) {
+    ScopedValue json (ctx, parse_body_json (ctx, body));
+    int same = 0;
+    if (!JS_IsUndefined (json.get ())) {
+        DeepEqualPath path;
+        same = js_deep_equal (ctx, json.get (), expected, 0, path, ZeroRule::SameValueZero);
+        if (same < 0) {
+            return JS_EXCEPTION;
+        }
+    }
+    // An unparsable body equals no object, which under `not` is a pass, as
+    // chai-postman's `_.isEqual(undefined, content)` is.
+    return check_result (check_holds (
+    ctx, negated, same == 1,
+    [&] {
+        return JS_IsUndefined (json.get ()) ?
+        std::string ("Response body is not valid JSON") :
+        "Expected response body to deeply equal " +
+        js_describe (ctx, expected) + " but got " + describe_body (body);
+    },
+    [&] {
+        return "Expected response body to not deeply equal " + js_describe (ctx, expected);
+    }));
+}
+
+JSValue
+js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const bool negated      = magic_negated (magic);
+    const std::string& body = response->body;
+
+    // chai-postman's zero-argument form asserts only that there is a body.
     if (argc < 1) {
-        return JS_ThrowTypeError (ctx, "body() requires expected content");
+        return check_result (check_holds (ctx, negated, !body.empty (),
+        "Expected response to have a body", "Expected response to not have a body"));
     }
-
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
-    }
-
-    const std::string& body = data->response->body;
 
     // chai-postman decides by the argument's type, and each form is a
     // different comparison: a string is exact, a regular expression is
@@ -258,12 +518,9 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
     // where Postman passes.
     if (JS_IsString (argv[0])) {
         const std::string expected = js_to_string (ctx, argv[0]);
-        if (body != expected) {
-            std::string msg = "Expected response body to be '" + expected +
-            "' but got " + describe_body (body);
-            return throw_assertion_failure (ctx, msg);
-        }
-        return JS_UNDEFINED;
+        return check_result (check_holds (ctx, negated, body == expected,
+        "Expected response body to be '" + expected + "' but got " + describe_body (body),
+        "Expected response body to not be '" + expected + "'"));
     }
 
     if (!JS_IsObject (argv[0])) {
@@ -272,110 +529,253 @@ JSValue js_response_have_body (JSContext* ctx, JSValueConst this_val, int argc, 
         js_type_name (ctx, argv[0]));
     }
 
-    // A pattern is whatever carries a callable `test`, which is how
-    // `expect(...).to.match` reads one: a regular expression literal is a real
-    // RegExp here and satisfies it, and a matcher object a script built itself
-    // is run rather than silently deep-equalled against the body.
-    JSValue test_fn = JS_GetPropertyStr (ctx, argv[0], "test");
-    // Reading `test` runs a getter if the script defined one, and a getter that
-    // throws leaves the exception pending. Falling through to the deep-equal
-    // branch there would report a mismatch and drop the script's own error -
-    // the shape of silent wrongness this assertion was fixed for.
-    if (JS_IsException (test_fn)) {
+    const int matched = body_pattern_match (ctx, argv[0], body);
+    if (matched < 0) {
         return JS_EXCEPTION;
     }
-    if (JS_IsFunction (ctx, test_fn)) {
-        JSValue subject = JS_NewString (ctx, body.c_str ());
-        JSValue result  = JS_Call (ctx, test_fn, argv[0], 1, &subject);
-        JS_FreeValue (ctx, subject);
-        JS_FreeValue (ctx, test_fn);
-        if (JS_IsException (result)) {
-            JS_FreeValue (ctx, result);
-            return JS_EXCEPTION;
-        }
-        const bool matched = JS_ToBool (ctx, result) == 1;
-        JS_FreeValue (ctx, result);
-        if (!matched) {
-            std::string msg =
-            "Expected response body to match the pattern but got " + describe_body (body);
-            return throw_assertion_failure (ctx, msg);
-        }
-        return JS_UNDEFINED;
+    if (matched == 2) {
+        return check_body_deep_equal (ctx, negated, body, argv[0]);
     }
-    JS_FreeValue (ctx, test_fn);
-
-    JSValue json = JS_ParseJSON (ctx, body.c_str (), body.size (), "<response>");
-    if (JS_IsException (json)) {
-        // Swallow the parse exception so we report a clean assertion failure.
-        JS_FreeValue (ctx, JS_GetException (ctx));
-        return throw_assertion_failure (ctx, "Response body is not valid JSON");
-    }
-
-    DeepEqualPath path;
-    const int same = js_deep_equal (ctx, json, argv[0], 0, path, ZeroRule::SameValueZero);
-    JS_FreeValue (ctx, json);
-    if (same < 0) {
-        return JS_EXCEPTION;
-    }
-    if (same == 0) {
-        std::string msg = "Expected response body to deeply equal " +
-        js_describe (ctx, argv[0]) + " but got " + describe_body (body);
-        return throw_assertion_failure (ctx, msg);
-    }
-
-    return JS_UNDEFINED;
+    return check_result (check_holds (ctx, negated, matched == 1,
+    "Expected response body to match the pattern but got " + describe_body (body),
+    "Expected response body to not match the pattern"));
 }
 
-JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    auto* data = get_context_data (ctx);
-    if (!data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
-    }
+// ----------------------------------------------------------------------------
+// jsonBody's path, read the way chai-postman reads it: lodash `_.has` and
+// `_.get`, so `[0].id` on an array root, `a.b[2].c` and `a['b'].c` all name
+// what they name there (#2528). Vayu split on `.` and nothing else, so a
+// bracket was part of a property name and an array root held no path at all.
+// ----------------------------------------------------------------------------
 
-    // Parse body as JSON
-    JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
-    data->response->body.size (), "<response>");
-    if (JS_IsException (json)) {
-        // Swallow the parse exception so we report a clean assertion failure.
-        JS_FreeValue (ctx, JS_GetException (ctx));
-        return throw_assertion_failure (ctx, "Response body is not valid JSON");
+// What lodash's `reIsDeepProp` asks: a `.`, or a `[` closed later. A path with
+// neither is one key, whatever characters it holds.
+bool reads_as_deep_path (const std::string& path) {
+    const auto open = path.find ('[');
+    return path.find ('.') != std::string::npos ||
+    (open != std::string::npos && path.find (']', open + 1) != std::string::npos);
+}
+
+// lodash unescapes a quoted key by dropping each backslash and keeping the
+// character it escaped: `\'` is `'`, `\\` is `\`.
+std::string unescape_quoted_key (const std::string& raw) {
+    std::string out;
+    for (size_t i = 0; i < raw.size (); i++) {
+        if (raw[i] != '\\') {
+            out += raw[i];
+        } else if (i + 1 < raw.size () && raw[i + 1] == '\\') {
+            out += '\\';
+            i++;
+        }
     }
+    return out;
+}
+
+// A bracketed segment and the index just past its `]`.
+using BracketSegment = std::optional<std::pair<std::string, size_t>>;
+
+// `['key']` / `["key"]` from the quote at @p quote_at. The key ends at the
+// first unescaped quote, which must be followed by `]`; anything else is not a
+// quoted segment, as in lodash's pattern.
+BracketSegment read_quoted_segment (const std::string& path, size_t quote_at) {
+    const char quote = path[quote_at];
+    std::string raw;
+    for (size_t i = quote_at + 1; i < path.size (); i++) {
+        if (path[i] == quote) {
+            if (i + 1 < path.size () && path[i + 1] == ']') {
+                return std::make_pair (unescape_quoted_key (raw), i + 2);
+            }
+            return std::nullopt;
+        }
+        if (path[i] == '\\') {
+            if (i + 1 >= path.size ()) {
+                return std::nullopt;
+            }
+            raw += path[i++];
+        }
+        raw += path[i];
+    }
+    return std::nullopt;
+}
+
+bool is_digit (char c) {
+    return c >= '0' && c <= '9';
+}
+
+// `[0]`, `[-1]`, `[1.5]` from the character after the `[`: lodash's
+// `-?\d+(?:\.\d+)?` followed by `]`.
+BracketSegment read_numeric_segment (const std::string& path, size_t start) {
+    size_t at = start;
+    if (at < path.size () && path[at] == '-') {
+        at++;
+    }
+    const size_t digits = at;
+    while (at < path.size () && is_digit (path[at])) {
+        at++;
+    }
+    if (at == digits) {
+        return std::nullopt;
+    }
+    if (at + 1 < path.size () && path[at] == '.' && is_digit (path[at + 1])) {
+        at++;
+        while (at < path.size () && is_digit (path[at])) {
+            at++;
+        }
+    }
+    if (at >= path.size () || path[at] != ']') {
+        return std::nullopt;
+    }
+    return std::make_pair (path.substr (start, at - start), at + 1);
+}
+
+BracketSegment read_bracket_segment (const std::string& path, size_t open) {
+    const size_t inner = open + 1;
+    if (inner >= path.size ()) {
+        return std::nullopt;
+    }
+    if (path[inner] == '"' || path[inner] == '\'') {
+        return read_quoted_segment (path, inner);
+    }
+    return read_numeric_segment (path, inner);
+}
+
+// lodash's empty-segment rule: a `.` or `[]` followed by another, or by the
+// end, holds an empty key between them (`a..b` is `a`, ``, `b`).
+bool opens_empty_segment (const std::string& path, size_t at) {
+    size_t after = 0;
+    if (path[at] == '.') {
+        after = at + 1;
+    } else if (path.compare (at, 2, "[]") == 0) {
+        after = at + 2;
+    } else {
+        return false;
+    }
+    return after == path.size () || path[after] == '.' ||
+    path.compare (after, 2, "[]") == 0;
+}
+
+/**
+ * lodash's `stringToPath`. Its pattern, tried in order at each position: a run
+ * of anything but `.`, `[` and `]` is a key; a bracket holding a number or a
+ * quoted string is that key; an empty segment is an empty key; anything else
+ * is skipped, which is how `[name]` reads as the key `name`.
+ */
+std::vector<std::string> lodash_path_segments (const std::string& path) {
+    std::vector<std::string> segments;
+    if (!path.empty () && path.front () == '.') {
+        segments.emplace_back ();
+    }
+    size_t at = 0;
+    while (at < path.size ()) {
+        const char c = path[at];
+        if (c != '.' && c != '[' && c != ']') {
+            const size_t end = std::min (path.find_first_of (".[]", at), path.size ());
+            segments.push_back (path.substr (at, end - at));
+            at = end;
+            continue;
+        }
+        if (c == '[') {
+            if (auto bracket = read_bracket_segment (path, at)) {
+                segments.push_back (std::move (bracket->first));
+                at = bracket->second;
+                continue;
+            }
+        }
+        if (opens_empty_segment (path, at)) {
+            segments.emplace_back ();
+        }
+        at++;
+    }
+    return segments;
+}
+
+/**
+ * `_.has (root, path)` and `_.get (root, path)` at once: 1 with the value in
+ * @p out when every segment is an own property of the value before it, 0 when
+ * one is not, -1 with an exception pending.
+ *
+ * Own, as `_.has` asks: a JSON array's `length` is one, its `map` is not. The
+ * path is one key when lodash would read it as one - no `.` or `[...]` in it,
+ * or a key the root itself holds, so `{"a.b": 1}` answers `a.b` whole.
+ */
+int read_json_path (JSContext* ctx, JSValueConst root, const std::string& path, JSValue& out) {
+    bool one_key = !reads_as_deep_path (path);
+    if (!one_key && JS_IsObject (root)) {
+        JSAtom whole    = JS_NewAtomLen (ctx, path.data (), path.size ());
+        const int found = JS_HasProperty (ctx, root, whole);
+        JS_FreeAtom (ctx, whole);
+        if (found < 0) {
+            return -1;
+        }
+        one_key = found == 1;
+    }
+    const std::vector<std::string> segments =
+    one_key ? std::vector<std::string>{ path } : lodash_path_segments (path);
+
+    JSValue current = JS_DupValue (ctx, root);
+    for (const auto& key : segments) {
+        if (!JS_IsObject (current)) {
+            JS_FreeValue (ctx, current);
+            return 0;
+        }
+        JSAtom atom   = JS_NewAtomLen (ctx, key.data (), key.size ());
+        const int own = JS_GetOwnProperty (ctx, nullptr, current, atom);
+        JSValue next = own > 0 ? JS_GetProperty (ctx, current, atom) : JS_UNDEFINED;
+        JS_FreeAtom (ctx, atom);
+        JS_FreeValue (ctx, current);
+        if (own <= 0) {
+            return own;
+        }
+        if (JS_IsException (next)) {
+            return -1;
+        }
+        current = next;
+    }
+    out = current;
+    return 1;
+}
+
+JSValue js_response_have_jsonBody (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const bool negated = magic_negated (magic);
+    ScopedValue json (ctx, parse_body_json (ctx, response->body));
+    const bool valid = !JS_IsUndefined (json.get ());
 
     // No-arg form asserts only that the body is valid JSON (Postman semantics).
     if (argc < 1) {
-        JS_FreeValue (ctx, json);
-        return JS_UNDEFINED;
+        return check_result (check_holds (ctx, negated, valid, "Response body is not valid JSON",
+        "Expected response body to not be valid JSON"));
+    }
+    // chai-postman reads a non-string path as no assertion at all, a silent
+    // pass; a path is refused here instead.
+    if (!JS_IsString (argv[0])) {
+        return JS_ThrowTypeError (ctx, "jsonBody() expects a property path string, got %s",
+        js_type_name (ctx, argv[0]));
+    }
+    const std::string prop_path = js_to_string (ctx, argv[0]);
+    // An unparsable body holds no path, which is said as what it is.
+    if (!valid && !negated) {
+        return throw_assertion_failure (ctx, "Response body is not valid JSON");
     }
 
-    std::string prop_path = js_to_string (ctx, argv[0]);
-
-    // Navigate to the property
-    JSValue current              = JS_DupValue (ctx, json);
-    std::string::size_type start = 0;
-    std::string::size_type end;
-
-    while ((end = prop_path.find ('.', start)) != std::string::npos ||
-    start < prop_path.size ()) {
-        std::string key = (end != std::string::npos) ?
-        prop_path.substr (start, end - start) :
-        prop_path.substr (start);
-
-        if (key.empty ())
-            break;
-
-        JSValue next = JS_GetPropertyStr (ctx, current, key.c_str ());
-        JS_FreeValue (ctx, current);
-        current = next;
-
-        if (JS_IsUndefined (current)) {
-            JS_FreeValue (ctx, json);
-            std::string msg = "Expected response body to have property '" + prop_path + "'";
-            return throw_assertion_failure (ctx, msg);
-        }
-
-        if (end == std::string::npos)
-            break;
-        start = end + 1;
+    JSValue found = JS_UNDEFINED;
+    const int has = valid ? read_json_path (ctx, json.get (), prop_path, found) : 0;
+    if (has < 0) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue value (ctx, found);
+    if (!check_holds (ctx, negated, has == 1,
+        "Expected response body to have property '" + prop_path + "'",
+        "Expected response body to not have property '" + prop_path + "'")) {
+        return JS_EXCEPTION;
     }
 
     // chai-postman's two-argument form is `_.has(json, path)` and then
@@ -383,28 +783,85 @@ JSValue js_response_have_jsonBody (JSContext* ctx, JSValueConst this_val, int ar
     // never reading the expected value at all, so every value-checking
     // assertion in an imported suite passed on any value the path held - the
     // silent false pass #998 was filed for.
-    if (argc >= 2) {
-        DeepEqualPath path;
-        const int same =
-        js_deep_equal (ctx, current, argv[1], 0, path, ZeroRule::SameValueZero);
-        if (same < 0) {
-            JS_FreeValue (ctx, current);
-            JS_FreeValue (ctx, json);
-            return JS_EXCEPTION;
-        }
-        if (same == 0) {
-            std::string msg = "Expected response body property '" + prop_path +
-            "' to deeply equal " + js_describe (ctx, argv[1]) + " but got " +
-            js_describe (ctx, current);
-            JS_FreeValue (ctx, current);
-            JS_FreeValue (ctx, json);
-            return throw_assertion_failure (ctx, msg);
-        }
+    if (argc < 2) {
+        return JS_UNDEFINED;
     }
+    DeepEqualPath path;
+    const int same =
+    js_deep_equal (ctx, value.get (), argv[1], 0, path, ZeroRule::SameValueZero);
+    if (same < 0) {
+        return JS_EXCEPTION;
+    }
+    const JSValueConst expected = argv[1];
+    return check_result (check_holds (
+    ctx, negated, same == 1,
+    [&] {
+        return "Expected response body property '" + prop_path + "' to deeply equal " +
+        js_describe (ctx, expected) + " but got " + js_describe (ctx, value.get ());
+    },
+    [&] {
+        return "Expected response body property '" + prop_path +
+        "' to not deeply equal " + js_describe (ctx, expected);
+    }));
+}
 
-    JS_FreeValue (ctx, current);
-    JS_FreeValue (ctx, json);
+// chai-postman's `jsonSchema(schema, options)`, against the body as
+// `pm.response.json()` reads it. `options` is ajv's and is not read: the
+// validator is the engine's draft-07 one (`json_schema_failure`).
+JSValue js_response_have_json_schema (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "jsonSchema() requires a schema");
+    }
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue json (ctx, parse_body_json (ctx, response->body));
+    // `json()` throws in chai-postman on a body that is not JSON, so this
+    // fails under `not` as well: there is no document to judge either way.
+    if (JS_IsUndefined (json.get ())) {
+        return throw_assertion_failure (ctx, "Response body is not valid JSON");
+    }
+    const auto failure =
+    json_schema_failure (ctx, json.get (), argv[0], magic_negated (magic));
+    if (!failure) {
+        return JS_EXCEPTION;
+    }
+    if (!failure->empty ()) {
+        return throw_assertion_failure (ctx, *failure);
+    }
     return JS_UNDEFINED;
+}
+
+// `to.have.responseTime` / `to.have.responseSize` - chai-postman's chainable
+// methods, which retarget the assertion at a number: `.responseTime.below(200)`
+// is pm.expect's `below` on the time, and `responseTime(n)` asserts it equals
+// n. The time is `pm.response.responseTime`; the size is `size()`'s body and
+// header together, which is what chai-postman adds up. The row is the
+// `ResponseMeasure`.
+JSValue js_response_have_measure (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
+    }
+    const auto which = static_cast<ResponseMeasure> (magic_row (magic));
+    const ResponseSizeBytes size = response_size_bytes (*response);
+    const double measured        = which == ResponseMeasure::Time ?
+           response->timing.total_ms :
+           static_cast<double> (size.body + size.header);
+    return response_measure_chain (ctx, measured, magic_negated (magic), which);
 }
 
 // ============================================================================
@@ -422,28 +879,37 @@ struct StatusClassMatcher {
 
 // Status ranges only. The body-shape assertions (`json`, `withBody`) are not
 // ranges, so they get their own getters below.
-constexpr StatusClassMatcher status_class_matchers[] = {
-    { "info", 100, 199, "a 1xx status code" },
-    // `ok` is a named code in chai-postman, not a class: it asserts 200, so a
-    // 204 passes here and fails in Postman while the two ranges agree. Vayu
-    // scripts that meant the class have `success`, which is the 2xx one in
-    // both - the migration note is in docs/app/pm-api-compatibility.md.
-    { "ok", 200, 200, "status 200" },
-    { "success", 200, 299, "a 2xx status code" },
-    { "accepted", 202, 202, "status 202" },
-    { "redirection", 300, 399, "a 3xx status code" },
-    { "clientError", 400, 499, "a 4xx status code" },
-    { "badRequest", 400, 400, "status 400" },
-    { "unauthorized", 401, 401, "status 401" },
-    { "forbidden", 403, 403, "status 403" },
-    { "notFound", 404, 404, "status 404" },
-    { "rateLimited", 429, 429, "status 429" },
-    { "serverError", 500, 599, "a 5xx status code" },
-    { "error", 400, 599, "a 4xx or 5xx status code" },
-};
+//
+// The named codes compare the code alone, where chai-postman compares the
+// reason phrase as well. The phrase is the server's to choose, and two of
+// chai-postman's rows want one no standard server sends ("Unauthorised" for
+// `unauthorised`, "Acceptable" for `notAcceptable`), so comparing it fails a
+// correct code; the difference is in docs/app/pm-api-compatibility.md.
+constexpr auto status_class_matchers = std::to_array<StatusClassMatcher> ({
+{ "info", 100, 199, "a 1xx status code" },
+// `ok` is a named code in chai-postman, not a class: it asserts 200, so a
+// 204 passes here and fails in Postman while the two ranges agree. Vayu
+// scripts that meant the class have `success`, which is the 2xx one in
+// both - the migration note is in docs/app/pm-api-compatibility.md.
+{ "ok", 200, 200, "status 200" },
+{ "success", 200, 299, "a 2xx status code" },
+{ "accepted", 202, 202, "status 202" },
+{ "withoutContent", 204, 204, "status 204" },
+{ "redirection", 300, 399, "a 3xx status code" },
+{ "clientError", 400, 499, "a 4xx status code" },
+{ "badRequest", 400, 400, "status 400" },
+{ "unauthorized", 401, 401, "status 401" },
+{ "unauthorised", 401, 401, "status 401" },
+{ "forbidden", 403, 403, "status 403" },
+{ "notFound", 404, 404, "status 404" },
+{ "notAcceptable", 406, 406, "status 406" },
+{ "rateLimited", 429, 429, "status 429" },
+{ "serverError", 500, 599, "a 5xx status code" },
+{ "error", 400, 599, "a 4xx or 5xx status code" },
+});
 
-// `magic` indexes status_class_matchers. Registered as a getter, never a plain
-// property: `pm.response.to.be.ok` is written without parentheses, so a
+// `magic` carries the status_class_matchers row. Registered as a getter, never
+// a plain property: `pm.response.to.be.ok` is written without parentheses, so a
 // function-valued property would be a discarded reference that asserts nothing
 // (the defect ExpectTrueFalseAssertsOnAccess pins for pm.expect).
 JSValue js_response_be_status_class (JSContext* ctx,
@@ -454,55 +920,50 @@ int magic) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    auto* data = get_context_data (ctx);
-    if (!data || !data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
 
-    const StatusClassMatcher& matcher = status_class_matchers[magic];
-    const int code                    = data->response->status_code;
-    if (code < matcher.lo || code > matcher.hi) {
-        std::string msg = std::string ("Expected response to have ") +
-        matcher.expectation + " but got " + std::to_string (code);
-        return throw_assertion_failure (ctx, msg);
-    }
-
-    return JS_UNDEFINED;
+    const StatusClassMatcher& matcher = status_class_matchers.at (magic_row (magic));
+    const int code        = response->status_code;
+    const std::string got = " but got " + std::to_string (code);
+    return check_result (check_holds (ctx, magic_negated (magic),
+    code >= matcher.lo && code <= matcher.hi,
+    std::string ("Expected response to have ") + matcher.expectation + got,
+    std::string ("Expected response to not have ") + matcher.expectation + got));
 }
 
-JSValue js_response_be_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+JSValue
+js_response_be_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    auto* data = get_context_data (ctx);
-    if (!data || !data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
-
-    JSValue json = JS_ParseJSON (ctx, data->response->body.c_str (),
-    data->response->body.size (), "<response>");
-    if (JS_IsException (json)) {
-        return throw_assertion_failure (ctx, "Expected response body to be valid JSON");
-    }
-    JS_FreeValue (ctx, json);
-
-    return JS_UNDEFINED;
+    ScopedValue json (ctx, parse_body_json (ctx, response->body));
+    return check_result (check_holds (ctx, magic_negated (magic),
+    !JS_IsUndefined (json.get ()), "Expected response body to be valid JSON",
+    "Expected response body to not be valid JSON"));
 }
 
-JSValue js_response_be_with_body (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+JSValue js_response_be_with_body (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    auto* data = get_context_data (ctx);
-    if (!data || !data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
-
-    if (data->response->body.empty ()) {
-        return throw_assertion_failure (ctx, "Expected response to have a body");
-    }
-
-    return JS_UNDEFINED;
+    return check_result (
+    check_holds (ctx, magic_negated (magic), !response->body.empty (),
+    "Expected response to have a body", "Expected response to not have a body"));
 }
 
 } // namespace
@@ -572,65 +1033,107 @@ void arm_response_chain_object (JSValue obj, const char* path) {
     (void)JS_SetOpaque (obj, const_cast<char*> (path));
 }
 
+// One polarity of the chain: the paths its three links name in an error, and
+// whether its matchers are negated.
+struct ResponseChainLinks {
+    const char* to;
+    const char* have;
+    const char* be;
+    bool negated;
+};
+constexpr ResponseChainLinks POSITIVE_CHAIN{ "pm.response.to",
+    "pm.response.to.have", "pm.response.to.be", false };
+constexpr ResponseChainLinks NEGATED_CHAIN{ "pm.response.to.not",
+    "pm.response.to.not.have", "pm.response.to.not.be", true };
+
+// `to.have`'s calls. The row is unused; the magic carries the polarity.
+struct ResponseMatcher {
+    const char* name;
+    JSCFunctionMagic* fn;
+    int length;
+};
+constexpr auto have_matchers = std::to_array<ResponseMatcher> ({
+{ "status", js_response_have_status, 1 },
+{ "statusCode", js_response_have_status_code, 1 },
+{ "statusReason", js_response_have_status_reason, 1 },
+{ "statusCodeClass", js_response_have_status_code_class, 1 },
+{ "header", js_response_have_header, 2 },
+{ "body", js_response_have_body, 1 },
+{ "jsonBody", js_response_have_jsonBody, 1 },
+{ "jsonSchema", js_response_have_json_schema, 2 },
+});
+
+// A getter with @p magic, so the member asserts (or retargets) on access.
+void define_magic_getter (JSContext* ctx, JSValue obj, const char* name, JSCFunctionMagic* fn, int magic) {
+    JSAtom atom = JS_NewAtom (ctx, name);
+    JS_DefinePropertyGetSet (ctx, obj, atom,
+    JS_NewCFunctionMagic (ctx, fn, name, 0, JS_CFUNC_generic_magic, magic),
+    JS_UNDEFINED, 0);
+    JS_FreeAtom (ctx, atom);
+}
+
 // Create the pm.response.to.have chain object
-JSValue create_response_have_object (JSContext* ctx) {
+JSValue create_response_have_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue have = create_response_chain_object (ctx);
     if (JS_IsException (have)) {
         return have;
     }
-    JS_SetPropertyStr (ctx, have, "status",
-    JS_NewCFunction (ctx, js_response_have_status, "status", 1));
-    JS_SetPropertyStr (ctx, have, "header",
-    JS_NewCFunction (ctx, js_response_have_header, "header", 2));
-    JS_SetPropertyStr (
-    ctx, have, "body", JS_NewCFunction (ctx, js_response_have_body, "body", 1));
-    JS_SetPropertyStr (ctx, have, "jsonBody",
-    JS_NewCFunction (ctx, js_response_have_jsonBody, "jsonBody", 1));
-    arm_response_chain_object (have, "pm.response.to.have");
+    const int polarity = matcher_magic (0, links.negated);
+    for (const auto& matcher : have_matchers) {
+        JS_SetPropertyStr (ctx, have, matcher.name,
+        JS_NewCFunctionMagic (ctx, matcher.fn, matcher.name, matcher.length,
+        JS_CFUNC_generic_magic, polarity));
+    }
+    define_magic_getter (ctx, have, "responseTime", js_response_have_measure,
+    matcher_magic (static_cast<size_t> (ResponseMeasure::Time), links.negated));
+    define_magic_getter (ctx, have, "responseSize", js_response_have_measure,
+    matcher_magic (static_cast<size_t> (ResponseMeasure::Size), links.negated));
+    arm_response_chain_object (have, links.have);
     return have;
 }
 
 // Create the pm.response.to.be chain object
-JSValue create_response_be_object (JSContext* ctx) {
+JSValue create_response_be_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue be = create_response_chain_object (ctx);
     if (JS_IsException (be)) {
         return be;
     }
-
-    int magic = 0;
-    for (const auto& matcher : status_class_matchers) {
-        JSAtom atom = JS_NewAtom (ctx, matcher.name);
-        JS_DefinePropertyGetSet (ctx, be, atom,
-        JS_NewCFunctionMagic (ctx, js_response_be_status_class, matcher.name, 0,
-        JS_CFUNC_generic_magic, magic),
-        JS_UNDEFINED, 0);
-        JS_FreeAtom (ctx, atom);
-        magic++;
+    for (size_t row = 0; row < status_class_matchers.size (); row++) {
+        define_magic_getter (ctx, be, status_class_matchers.at (row).name,
+        js_response_be_status_class, matcher_magic (row, links.negated));
     }
-
-    JSAtom json_atom = JS_NewAtom (ctx, "json");
-    JS_DefinePropertyGetSet (ctx, be, json_atom,
-    JS_NewCFunction (ctx, js_response_be_json, "json", 0), JS_UNDEFINED, 0);
-    JS_FreeAtom (ctx, json_atom);
-
-    JSAtom with_body_atom = JS_NewAtom (ctx, "withBody");
-    JS_DefinePropertyGetSet (ctx, be, with_body_atom,
-    JS_NewCFunction (ctx, js_response_be_with_body, "withBody", 0), JS_UNDEFINED, 0);
-    JS_FreeAtom (ctx, with_body_atom);
-
-    arm_response_chain_object (be, "pm.response.to.be");
+    const int polarity = matcher_magic (0, links.negated);
+    define_magic_getter (ctx, be, "json", js_response_be_json, polarity);
+    define_magic_getter (ctx, be, "withBody", js_response_be_with_body, polarity);
+    arm_response_chain_object (be, links.be);
     return be;
 }
 
-// Create the pm.response.to chain object
-JSValue create_response_to_object (JSContext* ctx) {
+JSValue js_response_chain_self (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    return JS_DupValue (ctx, this_val);
+}
+
+// Create the pm.response.to chain object, and through `not` its negated twin.
+JSValue create_response_to_object (JSContext* ctx, const ResponseChainLinks& links) {
     JSValue to = create_response_chain_object (ctx);
     if (JS_IsException (to)) {
         return to;
     }
-    JS_SetPropertyStr (ctx, to, "have", create_response_have_object (ctx));
-    JS_SetPropertyStr (ctx, to, "be", create_response_be_object (ctx));
-    arm_response_chain_object (to, "pm.response.to");
+    JS_SetPropertyStr (ctx, to, "have", create_response_have_object (ctx, links));
+    JS_SetPropertyStr (ctx, to, "be", create_response_be_object (ctx, links));
+    if (links.negated) {
+        // `not` sets, it never toggles - pm.expect's rule (#883) - so
+        // `to.not.not` is still the negated chain.
+        JSAtom atom = JS_NewAtom (ctx, "not");
+        JS_DefinePropertyGetSet (ctx, to, atom,
+        JS_NewCFunction (ctx, js_response_chain_self, "not", 0), JS_UNDEFINED, 0);
+        JS_FreeAtom (ctx, atom);
+    } else {
+        JS_SetPropertyStr (ctx, to, "not", create_response_to_object (ctx, NEGATED_CHAIN));
+    }
+    arm_response_chain_object (to, links.to);
     return to;
 }
 
@@ -1185,33 +1688,25 @@ JSValue js_response_reason (JSContext* ctx, JSValueConst this_val, int argc, JSV
 // pm.response.size() -> { body, header, total }, in bytes.
 //
 // `body` is the body the script can actually read through text(), so
-// size().body and text().length agree for an ASCII body. `header` is the
-// serialised block - "Name: Value\r\n" each - reconstructed from the parsed
-// headers rather than measured off the wire, so it will not match a
-// Content-Length-derived figure to the byte.
+// size().body and text().length agree for an ASCII body. `header` is
+// reconstructed, see `response_size_bytes`.
 JSValue js_response_size (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    auto* data = get_context_data (ctx);
-    if (!data || !data->response) {
-        return JS_ThrowInternalError (ctx, "No response available");
+    const Response* response = require_response (ctx);
+    if (!response) {
+        return JS_EXCEPTION;
     }
-
-    constexpr size_t separator_and_crlf = 4; // ": " + "\r\n"
-    size_t header_bytes                 = 0;
-    for (const auto& [key, value] : data->response->headers) {
-        header_bytes += key.size () + value.size () + separator_and_crlf;
-    }
-    const size_t body_bytes = data->response->body.size ();
+    const ResponseSizeBytes bytes = response_size_bytes (*response);
 
     JSValue size = JS_NewObject (ctx);
     JS_SetPropertyStr (
-    ctx, size, "body", JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes)));
+    ctx, size, "body", JS_NewInt64 (ctx, static_cast<int64_t> (bytes.body)));
     JS_SetPropertyStr (
-    ctx, size, "header", JS_NewInt64 (ctx, static_cast<int64_t> (header_bytes)));
+    ctx, size, "header", JS_NewInt64 (ctx, static_cast<int64_t> (bytes.header)));
     JS_SetPropertyStr (ctx, size, "total",
-    JS_NewInt64 (ctx, static_cast<int64_t> (body_bytes + header_bytes)));
+    JS_NewInt64 (ctx, static_cast<int64_t> (bytes.body + bytes.header)));
     return size;
 }
 
@@ -1334,6 +1829,11 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         JS_SetPropertyStr (ctx, response, "size",
         JS_NewCFunction (ctx, js_response_size, "size", 0));
 
+        // pm.response.responseSize - `size().body`, under the name Postman
+        // scripts read it by.
+        JS_SetPropertyStr (ctx, response, "responseSize",
+        JS_NewInt64 (ctx, static_cast<int64_t> (data->response->body.size ())));
+
         // pm.response.headers - a plain object with get()/has() over it. No
         // mutators: the response has already arrived, so a header method that
         // appeared to change it would be a lie.
@@ -1363,7 +1863,8 @@ void setup_pm_response (JSContext* ctx, JSValue pm) {
         install_response_events (ctx, response, data->response_events);
 
         // pm.response.to.have chain for Postman-compatible assertions
-        JS_SetPropertyStr (ctx, response, "to", create_response_to_object (ctx));
+        JS_SetPropertyStr (
+        ctx, response, "to", create_response_to_object (ctx, POSITIVE_CHAIN));
     }
 
     JS_SetPropertyStr (ctx, pm, "response", response);
