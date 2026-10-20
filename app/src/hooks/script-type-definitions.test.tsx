@@ -133,6 +133,21 @@ describe("useScriptTypeDefinitions", () => {
 		expect(options.strictNullChecks).toBe(false);
 	});
 
+	/*
+	 * Each script is a module, as the engine's function wrapper makes it one:
+	 * without it a script's own `const data` redeclares the global the engine
+	 * declares absent. What that does to a real script is held by
+	 * `script-typedefs.docs-compile.test.ts`; this holds that the option reaches
+	 * the worker, as the number Monaco's untyped options bag takes.
+	 */
+	it("compiles each script as a module (ModuleDetectionKind.Force)", async () => {
+		renderHook(() => useScriptTypeDefinitions(), { wrapper });
+		await waitFor(() => expect(setCompilerOptions).toHaveBeenCalled());
+
+		const options = setCompilerOptions.mock.calls[0][0] as { moduleDetection?: number };
+		expect(options.moduleDetection).toBe(3);
+	});
+
 	it("turns semantic validation on - that is what squiggles a typo", async () => {
 		renderHook(() => useScriptTypeDefinitions(), { wrapper });
 		await waitFor(() => expect(setDiagnosticsOptions).toHaveBeenCalled());
@@ -143,10 +158,10 @@ describe("useScriptTypeDefinitions", () => {
 	});
 
 	/*
-	 * The two diagnostics a *correct* script produces here, both because the
-	 * editor holds a fragment while the engine runs something larger: a
-	 * top-level `return` (the engine wraps the script in an IIFE) and a name
-	 * declared in the collection-level part (joined before the engine runs it).
+	 * The two diagnostics a *correct* script produces here: a top-level
+	 * `return` (the engine wraps the script in an IIFE) and an assignment to an
+	 * undeclared name, or a quickjs-ng global `lib.es2022` lacks (see
+	 * SUPPRESSED_DIAGNOSTICS).
 	 *
 	 * The exact list matters in both directions. Too narrow and correct scripts
 	 * squiggle; too wide and real mistakes go unreported - so assert the codes,

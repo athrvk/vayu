@@ -36,21 +36,31 @@ export const SCRIPT_LIB = ["es2022"];
 
 /**
  * The diagnostics a *correct* script in this editor produces, which must
- * therefore not be shown. Both follow from the editor holding a fragment while
- * the engine runs something larger.
+ * therefore not be shown.
  *
  * - **1108** - "A 'return' statement can only be used within a function body."
  *   The engine wraps every script in an IIFE before running it, so a top-level
  *   `return` to bail out early is legal and is a documented pattern.
- * - **2304** - "Cannot find name 'x'." A collection-level script part is joined
- *   to the request's (with `\n\n`) before the engine runs the result, so a name
- *   declared up there is genuinely undeclared as far as this model can see.
+ * - **2304** - "Cannot find name 'x'." Two things make it fire on a script the
+ *   engine runs:
+ *   - an assignment to an undeclared name (`jsonData = pm.response.json()`)
+ *     creates a global in the sloppy-mode IIFE, which the engine permits and
+ *     `docs/engine/scripting.md` names under "Isolation between scripts";
+ *   - quickjs-ng provides nine globals `lib.es2022` does not declare
+ *     (`queueMicrotask`, `performance`, `DOMException`, `Float16Array`,
+ *     `Iterator`, `DisposableStack`, `AsyncDisposableStack`, `SuppressedError`,
+ *     `InternalError`), each of which would need declaring and holding to the
+ *     runtime.
+ *   The collection-level part of a script is not one of them: each script
+ *   element runs in a context of its own, so a name declared there is not
+ *   visible here at run time, and only the deferred load-test replay still
+ *   joins `script.post` parts.
  *
- * Suppressing 2304 would normally cost the best diagnostic of all - `fetch` and
- * `setTimeout`, which the sandbox does not have. It does not, because the
- * engine *declares* those as `never` (see ABSENT_GLOBALS in
- * `script_types.cpp`), so calling one is "not callable" rather than "cannot
- * find name", and hover explains why.
+ * What suppressing 2304 costs is every undeclared name drawing nothing. The
+ * engine keeps the names a script is likeliest to reach for by declaring them
+ * as `never` or `void` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`,
+ * `setTimeout`, Postman's `responseBody` and `CryptoJS`), so using one is a
+ * type error with the replacement on hover.
  *
  * Narrow this list rather than widening it: every code here is a real mistake
  * going unreported in exchange for not crying wolf on correct code.
@@ -75,6 +85,25 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	// and signature help both need.
 	checkJs: true,
 	noEmit: true,
+	/*
+	 * 3 is `ModuleDetectionKind.Force`, which Monaco's bundled enum does not
+	 * export: every script is a module, not a script file in the global scope.
+	 *
+	 * The engine runs a script inside a function, so a top-level
+	 * `const data = pm.response.json()` is local to it and shadows any global of
+	 * that name. As a script file, the editor saw the same line as a second
+	 * declaration of the global `data` that the engine declares absent
+	 * (`ABSENT_GLOBALS`) and reported "Cannot redeclare block-scoped variable"
+	 * (2451) on correct code - and would have for `const URL` or `function fetch`
+	 * already. The declarations the engine registers are a `.d.ts`, which stays
+	 * a global script whatever this says.
+	 *
+	 * The price is TypeScript's strict-mode diagnostics on a script that runs
+	 * sloppy: `with`, `delete name`, an octal literal, `yield` or `let` as a
+	 * name, and a top-level `this`, which a module types as `undefined`. A
+	 * top-level `await` was an error before and still is.
+	 */
+	moduleDetection: 3,
 	/*
 	 * Off deliberately, and *set* rather than left to Monaco's default: the
 	 * default is what it is today, and a `getCompilerOptions()` that ever
@@ -137,14 +166,10 @@ export function useScriptTypeDefinitions() {
 
 		/*
 		 * Semantic validation is on, minus exactly the two diagnostics that a
-		 * *correct* script in this editor produces. Both come from the same
-		 * fact: the editor holds a fragment, and the engine runs something
-		 * larger than what is on screen.
-		 *
-		 * They were found by compiling a realistic script with `tsc --checkJs`
-		 * rather than guessed - see SUPPRESSED below. Everything else the worker
-		 * reports is a real mistake, including the whole `pm.*` surface, so
-		 * `pm.response.staus` now squiggles with a did-you-mean.
+		 * *correct* script in this editor produces - see SUPPRESSED_DIAGNOSTICS
+		 * for which and why. Everything else the worker reports is a real
+		 * mistake, including the whole `pm.*` surface, so `pm.response.staus`
+		 * squiggles with a did-you-mean.
 		 */
 		defaults.setDiagnosticsOptions({
 			noSemanticValidation: false,

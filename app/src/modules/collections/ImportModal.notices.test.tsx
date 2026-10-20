@@ -94,6 +94,7 @@ function severityOf(text: RegExp): string {
 describe("the import preview's notices", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
 		useImportModalStore.setState({ isOpen: true });
 	});
 
@@ -201,6 +202,34 @@ describe("the import preview's notices", () => {
 		);
 		// Vayu generates its own state; nothing the user sends changed.
 		expect(screen.queryByText(/state/i)).not.toBeInTheDocument();
+	});
+
+	it("warns that a Postman script uses an API Vayu does not run, without blocking the import (#2576)", async () => {
+		const openAppLink = vi.fn();
+		vi.stubGlobal("electronAPI", { openAppLink });
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Sign in" })] }),
+				],
+				meta: {
+					format: "Postman Collection v2.1",
+					requestCount: 1,
+					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]", "CryptoJS"] }],
+				},
+			})
+		);
+		preview();
+
+		const link = await screen.findByRole("button", { name: "See what Vayu supports" });
+		const line = link.closest("span.flex");
+		expect(line?.textContent).toContain(
+			"Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)"
+		);
+		expect(line?.className).toContain("text-warning-text");
+		fireEvent.click(link);
+		expect(openAppLink).toHaveBeenCalledExactlyOnceWith("pmApiCompatibility");
+		expect(screen.getByRole("button", { name: /^Import\b/i })).toBeEnabled();
 	});
 
 	it("announces the preview through one status region and no alert (#2291)", async () => {

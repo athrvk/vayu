@@ -122,7 +122,41 @@ dropped without a count) and a level that lists `test` before `prerequest`
 exports back that way. An event marked `disabled: true` is one Postman's
 runtime skips, so it imports as an element with `enabled: false` rather than
 a script that runs. A blank script contributes nothing, and a `listen` other
-than those two has no phase in Vayu.
+than those two has no phase in Vayu. A `script` that is itself a string is the
+script's text, as in Postman's SDK (it used to import as nothing).
+
+**Scripts that use an API Vayu does not run.** The scripts that will run are
+also read for a fixed list of Postman script APIs Vayu has no implementation
+of, and each request, folder or collection that uses any is named in
+[`meta.unsupportedScriptApis`](#options--lossy-behavior). The list is a table in
+`engine/src/core/script_api_scan.cpp` (`API_RULES`): the pre-`pm.*` globals
+(`tests[...]`, `responseBody`, `responseCode`, `responseHeaders`,
+`responseCookies`, `responseTime`, `postman.*`, `globals.*`, `environment.*`,
+`data`), `require(...)` and `pm.require`, a non-empty `script.packages`, the
+libraries Postman bundles (`CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
+`moment`, `Backbone`), `setTimeout`, `setInterval`, `Buffer`, a top-level
+`await` (named `top-level await`; `await` inside an `async` function runs, and
+an `async` arrow function with an expression body is still named), `pm.visualizer`,
+`pm.variables.set`, `pm.test.skip`, and the one chai family `pm.expect` still refuses,
+chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrResponse`
+(named as one row). Every other chai and chai-postman member runs, so none is named
+(`engine/tests/fixtures/chai-conformance.json` is the authority, and
+`script_api_scan_test.cpp` holds the table to it). A row is retired in the commit
+that makes Vayu run the API.
+
+The scan reads tokens, not text: comments, string and template-literal text and
+regular-expression bodies are blanked first, so a name that only appears in a
+comment or a string is not named, while the expressions inside a template's
+`${ }` still are. A property (`pm.response.responseTime`) is not the global of
+that name, and a script that declares the name itself (`const data = ...`, a
+parameter named `data`) is not reading the global. It is a notice, so it errs
+toward naming too much - an object with a property bare-called `tests[...]` is
+named - and never toward missing a listed name. A disabled event runs nothing
+and names nothing; with `importScripts` off nothing is read. The scripts are
+imported either way: this never blocks or alters the import. The import
+preview shows it as one amber line naming the requests and the APIs (`Sign in:
+script uses APIs Vayu does not run yet (tests[], CryptoJS)`), and the
+import-scripts toggle is untouched.
 
 ### Saved responses
 
@@ -377,9 +411,11 @@ Postman **collection** files do not embed environments, so this parser always re
 
 ## Options & lossy behavior
 
-**`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
+**`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`; a `script` that is itself a string is used as the text). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
 **`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+
+**`meta.unsupportedScriptApis`** - `[{request, names}]`, present **only when non-empty** (no other importer sends it, and it is not a `meta.skipped` kind: it carries a list per subject, which `ImportTally` cannot hold). `request` is the request's name, or the folder's or collection's (`info.name`) for a script declared there; `names` are the table's spellings (`tests[]`, `postman.*`, `require()`, `script.packages`, `pm.visualizer`, ...), deduplicated and in table order, across all of that subject's scripts. Entries follow the walk: a folder's requests, then the folder, then the collection last, as with `nonExecutableAuthRequests`. A request name used twice is listed twice - they are different requests. See [Scripts](#scripts).
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request, folder or collection** whose own mapped auth mode is one of `CONFIG_AUTH_TYPES` (`aws`, `digest`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), and each is named in `meta.nonExecutableAuthRequests`. A folder's or collection's is counted once where it is declared, not once per request inheriting it. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is mapped to an executable config and does **not** count.
 

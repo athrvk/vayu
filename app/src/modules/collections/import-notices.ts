@@ -29,6 +29,7 @@ import type {
 	ImportResult,
 	RequestDraft,
 	SkippedItem,
+	UnsupportedScriptApis,
 } from "@/services/importers/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { containsVariableToken } from "@/constants/variables";
@@ -38,9 +39,14 @@ import { parentFolder } from "@/lib/file-path";
 
 export type NoticeTier = "action" | "note";
 
+/** A key `window.electronAPI.openAppLink` accepts; the main process owns the URL behind it. */
+export type AppLinkKey = Parameters<NonNullable<Window["electronAPI"]>["openAppLink"]>[0];
+
 export interface ImportNotice {
 	tier: NoticeTier;
 	text: string;
+	/** Where the user reads more, opened in the system browser through the keyed channel. */
+	link?: { label: string; key: AppLinkKey };
 }
 
 interface Copy {
@@ -59,6 +65,9 @@ interface Copy {
 
 /** How many request names a line spells out before "+N more". */
 const NAMES_SHOWN = 3;
+
+/** How many script API names a line spells out before "+N more". */
+const API_NAMES_SHOWN = 4;
 
 const HIDDEN: Copy = { tier: "hidden", one: "", many: "" };
 
@@ -315,13 +324,17 @@ function quoted(name: string): string {
 	return name.replace(/\.+$/, "");
 }
 
+/** "A, B, C, +2 more": the first @p limit items, then how many were left out. */
+function listed(items: readonly string[], limit: number): string {
+	const rest = items.length - limit;
+	return `${items.slice(0, limit).join(", ")}${rest > 0 ? `, +${rest} more` : ""}`;
+}
+
 /** "Find pet by ID: ..." or "3 requests: ... - A, B, C, +2 more". */
 function named(phrase: string, requests: readonly string[]): string {
 	const names = requests.map(quoted);
 	if (names.length === 1) return `${names[0]}: ${phrase}`;
-	const shown = names.slice(0, NAMES_SHOWN).join(", ");
-	const rest = names.length - NAMES_SHOWN;
-	return `${names.length} requests: ${phrase} - ${shown}${rest > 0 ? `, +${rest} more` : ""}`;
+	return `${names.length} requests: ${phrase} - ${listed(names, NAMES_SHOWN)}`;
 }
 
 function skippedNotice(item: SkippedItem): ImportNotice | null {
@@ -349,6 +362,28 @@ function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 		notices.push({ tier: "note", text: `Fetched from: ${report.fetched.join(", ")}` });
 	}
 	return notices;
+}
+
+/**
+ * The scripts that import but throw at first run (#2576): one amber line naming
+ * the requests and, as a union, the APIs. The import is not blocked, and the
+ * engine names only scripts it imported, so the import-scripts option needs no
+ * handling here.
+ */
+function unsupportedScriptApiNotice(
+	entries: readonly UnsupportedScriptApis[] | undefined
+): ImportNotice | null {
+	if (!entries || entries.length === 0) return null;
+	const apis = [...new Set(entries.flatMap((entry) => entry.names))];
+	const phrase = `script uses APIs Vayu does not run yet${apis.length > 0 ? ` (${listed(apis, API_NAMES_SHOWN)})` : ""}`;
+	return {
+		tier: "action",
+		text: named(
+			phrase,
+			entries.map((entry) => entry.request)
+		),
+		link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
+	};
 }
 
 /**
@@ -409,6 +444,8 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 					: `${meta.nonExecutableAuth} ${pluralize(meta.nonExecutableAuth, "request's", "requests'")} ${phrase}`,
 		});
 	}
+	const scriptApis = unsupportedScriptApiNotice(meta.unsupportedScriptApis);
+	if (scriptApis) notices.push(scriptApis);
 	// Path grouping builds a tree the document never spelled out (#710); a
 	// mixed tree is visible above and needs no rule stated.
 	if (meta.folderStrategy === "paths") {

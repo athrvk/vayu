@@ -301,8 +301,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
 	// Open one of the app's own doc links in the system browser. Keyed, not
 	// URL-taking - see the handler in main.ts.
-	openAppLink: (key: "docs" | "scripting" | "mcp" | "issues"): Promise<void> =>
-		ipcRenderer.invoke("shell:openAppLink", key),
+	openAppLink: (
+		key: "docs" | "scripting" | "mcp" | "pmApiCompatibility" | "issues"
+	): Promise<void> => ipcRenderer.invoke("shell:openAppLink", key),
 
 	// Open an arbitrary http(s) URL in the system browser. The main handler
 	// validates the scheme and refuses everything else, so this does not hand the

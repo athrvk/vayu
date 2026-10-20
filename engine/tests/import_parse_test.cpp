@@ -22,7 +22,9 @@
  *   counter list is a set of counters and nothing reads its order. The request
  *   names beside a count (`requests`, and `meta.nonExecutableAuthRequests`)
  *   are the engine's addition, never the renderer's, and are pinned by
- *   `NamesTheRequestsACountIsAbout` instead.
+ *   `NamesTheRequestsACountIsAbout` instead. So is
+ *   `meta.unsupportedScriptApis` (#2576), by
+ *   `ScriptThatUsesALegacyGlobalIsNamed`.
  * - **A request's `examples` are compared sorted by status.** A JavaScript
  *   object orders integer-like keys numerically ahead of the rest, so a
  *   document writing `responses: {404, 200}` reached the renderer as
@@ -199,6 +201,7 @@ json comparable (const nlohmann::ordered_json& result) {
     json out               = json::parse (result.dump ());
     out["meta"]["skipped"] = skip_counts (out.at ("meta").at ("skipped"));
     out["meta"].erase ("nonExecutableAuthRequests");
+    out["meta"].erase ("unsupportedScriptApis");
     sort_examples (out.at ("collections"));
     return out;
 }
@@ -2145,6 +2148,159 @@ TEST (PostmanImport, CountsADataOnlyAuthOnACollectionOrFolder) {
     EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
     EXPECT_EQ (meta.at ("nonExecutableAuthRequests").get<Names> (),
     (Names{ "Reports", "Signed API" }));
+}
+
+/// One Postman request with a single `prerequest` script whose lines are
+/// @p exec, an already-JSON array.
+std::string request_with_script (const std::string& name, const std::string& exec) {
+    return R"j({"name":")j" + name + R"j(","event":[{"listen":"prerequest","script":{"exec":)j" +
+    exec + R"j(}}],"request":{"method":"GET","url":"https://x.com"}})j";
+}
+
+ImportParse parse_postman_items (const std::string& items,
+const ImportOptions& options = {}) {
+    return parse_import (R"({"info":{"name":"Legacy API","schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"item":[)" + items + "]}",
+    options, {});
+}
+
+/**
+ * A script that uses a Postman API Vayu does not run is named, so the preview
+ * can say which request to finish by hand (#2576): the request's name and the
+ * names it uses, in table order. One request per family of the table here; the
+ * scan's own cases are `script_api_scan_test.cpp`. Mutation check: remove a row
+ * of the table in `script_api_scan.cpp` and the request using it drops out of
+ * the list.
+ */
+TEST (PostmanImport, ScriptThatUsesALegacyGlobalIsNamed) {
+    const std::string items = request_with_script ("Legacy tests",
+                              R"j(["tests[\"ok\"] = responseCode.code === 200;"])j") +
+    "," + request_with_script ("Library", R"j(["const h = CryptoJS.MD5('x');"])j") + "," +
+    request_with_script ("Module", R"j(["const c = require('crypto-js');"])j") + "," +
+    request_with_script ("Host", R"j(["setTimeout(next, 10);","Buffer.from('x');"])j") +
+    "," + request_with_script ("Chai", R"j(["pm.expect(pm.response).to.be.postmanResponse;"])j") +
+    "," +
+    request_with_script ("Plain",
+    R"j(["const j = pm.response.json();","pm.test('ok', () => pm.expect(j.id).to.be.within(1, 5));"])j") +
+    "," +
+    request_with_script ("Mentions only",
+    R"j(["// CryptoJS.MD5(x); tests[0]","const s = 'require(x) postman.x';"])j");
+    const ImportParse parsed = parse_postman_items (items);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([
+        {"request":"Legacy tests","names":["tests[]","responseCode"]},
+        {"request":"Library","names":["CryptoJS"]},
+        {"request":"Module","names":["require()"]},
+        {"request":"Host","names":["setTimeout","Buffer"]},
+        {"request":"Chai","names":[".postmanRequest / .postmanResponse / .postmanRequestOrResponse"]}
+    ])j"));
+    // A notice, not a drop: the scripts still import verbatim.
+    EXPECT_EQ (parsed.result.at ("collections")[0]
+               .at ("requests")[0]
+               .at ("elements")[0]
+               .at ("config")
+               .at ("script"),
+    "tests[\"ok\"] = responseCode.code === 200;");
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_script_api"));
+}
+
+/// A string-valued `event.script` is the script's text (Postman's SDK reads one
+/// as `{exec: [text]}`), where it used to import as nothing and so was never
+/// seen: it is stored, and read for the same names. Mutation check: reading it
+/// as before leaves no element and no name.
+TEST (PostmanImport, ReadsAStringValuedEventScriptAsItsText) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"Old","event":[{"listen":"prerequest","script":"postman.setNextRequest(null);"}],
+         "request":{"method":"GET","url":"https://x.com"}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& element =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("elements")[0];
+    EXPECT_EQ (element.at ("kind"), "script.pre");
+    EXPECT_EQ (element.at ("config").at ("script"), "postman.setNextRequest(null);");
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([{"request":"Old","names":["postman.*"]}])j"));
+}
+
+/// A non-empty `script.packages` is a use of Postman's package library, which
+/// Vayu cannot load, even when the script text itself is plain `pm.*`; an empty
+/// one is not.
+TEST (PostmanImport, ScriptPackagesAreNamed) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"Uses a package","event":[{"listen":"test","script":{
+            "exec":["pm.test('x', () => {});"],
+            "packages":{"abc":{"id":"abc","type":"collection","name":"shared"}}}}],
+         "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"No packages","event":[{"listen":"test","script":{
+            "exec":["pm.test('x', () => {});"],"packages":{}}}],
+         "request":{"method":"GET","url":"https://x.com"}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (
+    R"j([{"request":"Uses a package","names":["script.packages"]}])j"));
+}
+
+/// A folder's or the collection's script is read as a request's is, and named
+/// by its own name; the collection comes after what it holds, as with
+/// `nonExecutableAuthRequests`. A request's pre and test scripts are one entry.
+TEST (PostmanImport, NamesAFolderAndACollectionWhoseScriptsUseThem) {
+    const ImportParse parsed = parse_import (
+    R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
+        "event":[{"listen":"prerequest","script":{"exec":["setInterval(f, 1);"]}}],
+        "item":[
+        {"name":"Reports","event":[{"listen":"test","script":{"exec":["var n = data.name;"]}}],
+         "item":[{"name":"R","event":[
+             {"listen":"prerequest","script":{"exec":["postman.clearGlobalVariable('a');"]}},
+             {"listen":"test","script":{"exec":["tests['a'] = true;","postman.x();"]}}],
+             "request":{"method":"GET","url":"https://x.com/r"}}]},
+        {"name":"A","request":{"method":"GET","url":"https://x.com/a"}}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([
+        {"request":"R","names":["tests[]","postman.*"]},
+        {"request":"Reports","names":["data"]},
+        {"request":"Signed API","names":["setInterval"]}
+    ])j"));
+}
+
+/// A disabled event runs nothing, so it names nothing; with the scripts option
+/// off nothing is imported and nothing is read. Absent, not empty, when no
+/// script qualifies. Mutation check: scanning before the option gate, or
+/// emitting an empty list, reds one of these.
+TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
+    const std::string legacy = request_with_script ("Legacy", R"j(["tests['a'] = true;"])j");
+    ImportOptions off;
+    off.import_scripts      = false;
+    const ImportParse gated = parse_postman_items (legacy, off);
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_FALSE (gated.result.at ("meta").contains ("unsupportedScriptApis"));
+    EXPECT_FALSE (gated.result.at ("collections")[0].at ("requests")[0].contains ("elements"));
+
+    const ImportParse disabled = parse_postman_items (
+    R"j({"name":"Off","event":[{"listen":"test","disabled":true,
+            "script":{"exec":["tests['a'] = true;"]}}],
+         "request":{"method":"GET","url":"https://x.com"}})j");
+    ASSERT_TRUE (disabled.ok ()) << disabled.error;
+    EXPECT_FALSE (
+    disabled.result.at ("meta").contains ("unsupportedScriptApis"));
+    EXPECT_EQ (
+    disabled.result.at ("collections")[0].at ("requests")[0].at ("elements")[0].at ("enabled"),
+    false);
+
+    const ImportParse plain = parse_postman_items (
+    request_with_script ("Plain", R"j(["pm.test('ok', () => {});"])j"));
+    ASSERT_TRUE (plain.ok ()) << plain.error;
+    EXPECT_FALSE (plain.result.at ("meta").contains ("unsupportedScriptApis"));
+
+    // The other importers leave the member absent.
+    const ImportParse spec =
+    parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},"paths":{}})", {}, {});
+    ASSERT_TRUE (spec.ok ()) << spec.error;
+    EXPECT_FALSE (spec.result.at ("meta").contains ("unsupportedScriptApis"));
 }
 
 /**

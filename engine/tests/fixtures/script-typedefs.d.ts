@@ -2203,3 +2203,181 @@ declare const document: never;
  * Not a browser. Use console.log, shown in the response pane's Console tab.
  */
 declare const alert: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* assertion object, written tests["name"] = bool. Use pm.test("name", function () { ... }).
+ */
+declare const tests: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* global for the response body. Use pm.response.text() for the text, or pm.response.json() for the parsed body.
+ */
+declare const responseBody: void;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* global for the status, read as responseCode.code. Use pm.response.code for the number and pm.response.reason() for the reason phrase.
+ */
+declare const responseCode: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* global for the response headers. Use pm.response.headers.get(name), which is case-insensitive, or pm.response.headers.toObject().
+ */
+declare const responseHeaders: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* global for the response cookies. Use pm.response.cookies for the cookies this response set, or pm.cookies.get(name) for the stored session.
+ */
+declare const responseCookies: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* global for the response time in milliseconds. Use pm.response.responseTime.
+ */
+declare const responseTime: void;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* environment object. Use pm.environment.get(name) and pm.environment.set(name, value).
+ */
+declare const environment: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* globals object. Use pm.globals.get(name) and pm.globals.set(name, value).
+ */
+declare const globals: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* iteration data. Use pm.iterationData.get(name), or pm.iterationData.toObject() for the whole row; it is undefined outside a data-driven run.
+ */
+declare const data: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* iteration index. Use pm.info.iteration, which is undefined outside a run.
+ */
+declare const iteration: void;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* request object. Use pm.request - its url, method, headers and body.
+ */
+declare const request: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's pre-pm.* helper object. Every method it had has a pm.* replacement; hover the method.
+ */
+declare const postman: {
+	/**
+	 * Postman's pre-pm.* call. Use pm.environment.set(name, value).
+	 */
+	setEnvironmentVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.environment.get(name).
+	 */
+	getEnvironmentVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.environment.unset(name).
+	 */
+	clearEnvironmentVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.environment.clear().
+	 */
+	clearEnvironmentVariables: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.globals.set(name, value).
+	 */
+	setGlobalVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.globals.get(name).
+	 */
+	getGlobalVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.globals.unset(name).
+	 */
+	clearGlobalVariable: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.globals.clear().
+	 */
+	clearGlobalVariables: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.execution.setNextRequest(name), in a collection run.
+	 */
+	setNextRequest: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.response.headers.get(name).
+	 */
+	getResponseHeader: never;
+	/**
+	 * Postman's pre-pm.* call. Use pm.cookies.get(name).
+	 */
+	getResponseCookie: never;
+};
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled lodash. Its replacement is require('lodash'); Vayu has neither. The Array and Object built-ins (map, filter, flatMap, Object.entries, Object.fromEntries) cover most uses.
+ */
+declare const _: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled crypto-js; its replacement is the global crypto object. Vayu has pm.crypto.sha256(data) and pm.crypto.hmacSha256(key, data), and no other hash or cipher.
+ */
+declare const CryptoJS: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled JSON Schema validator. Its replacement is require('ajv'); Vayu has neither.
+ */
+declare const tv4: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled XML parser. Its replacement is require('xml2js'); Vayu has neither.
+ */
+declare const xml2Json: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled HTML parser. Its replacement is require('cheerio'); Vayu has neither.
+ */
+declare const cheerio: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled moment. Its replacement is require('moment'); Vayu has neither. The Date built-in is what a script has.
+ */
+declare const moment: never;
+
+/**
+ * Not available in the Vayu script sandbox.
+ *
+ * Postman's bundled Backbone, which it names no replacement for. Vayu has no Backbone.
+ */
+declare const Backbone: never;

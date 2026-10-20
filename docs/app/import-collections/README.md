@@ -409,7 +409,13 @@ stored order - a mock server answers with the first example of a matched request
 
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
 `folderStrategy?`, `environmentCount`, `globalCount`, `exampleCount`,
-`skipped: SkippedItem[]`, `nonExecutableAuth: number`, `unattachedFileParts: number`.
+`skipped: SkippedItem[]`, `nonExecutableAuth: number`, `nonExecutableAuthRequests?: string[]`,
+`unattachedFileParts: number`, `refReport?` (set app-side by the `$ref` bundling, never by the
+engine), `unsupportedScriptApis?: {request, names}[]`.
+
+`unsupportedScriptApis` is set by the Postman parser only, and only when a script uses a
+Postman API Vayu does not run: the request, folder or collection and the names it uses (see
+[postman.md](./postman.md#scripts)). Absent otherwise, and not a `skipped` kind.
 
 `folderStrategy` (`"tags" | "paths" | "mixed"`) says which rule an OpenAPI import grouped its
 folders by, and the Preview states it whenever paths were involved - a folder tree the

@@ -7,6 +7,7 @@
 
 import { AlertTriangle, Info } from "lucide-react";
 import type { ReactNode } from "react";
+import { Button } from "@/components/ui";
 import type { ImportNotice, NoticeTier } from "./import-notices";
 
 /**
@@ -28,10 +29,34 @@ export function NoticeList({
 		<Tag role="status" className="block space-y-0.5">
 			{notices.map((notice, i) => (
 				<NoticeLine key={i} tier={notice.tier}>
-					{notice.text}
+					{notice.link ? (
+						<span>
+							{notice.text} <NoticeLink link={notice.link} />
+						</span>
+					) : (
+						notice.text
+					)}
 				</NoticeLine>
 			))}
 		</Tag>
+	);
+}
+
+/**
+ * The line's way to read more. A button, not an anchor: the renderer cannot
+ * open a URL, only ask the main process for one of its keyed links (a plain
+ * `<a target="_blank">` would spawn an unmanaged Electron window).
+ */
+function NoticeLink({ link }: { link: NonNullable<ImportNotice["link"]> }) {
+	return (
+		<Button
+			variant="link"
+			size="sm"
+			className="h-auto p-0 text-xs align-baseline"
+			onClick={() => window.electronAPI?.openAppLink(link.key)}
+		>
+			{link.label}
+		</Button>
 	);
 }
 

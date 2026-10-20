@@ -425,7 +425,12 @@ Notes:
   set and must not run in front of a write that can still fail. The caveat
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
   an import that dropped a WebSocket request, an unsupported body or an operation's
-  `default` response looks exactly like one that had none. **External `$ref`s are
+  `default` response looks exactly like one that had none. A Postman script that
+  calls an API Vayu does not run (`tests[]`, `require()`, a bundled library) imports
+  and throws at first run, so `meta.unsupportedScriptApis` (issue
+  [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
+  when empty) names those requests in both tools' result, `meta` riding whole.
+  **External `$ref`s are
   not followed** - resolving one means fetching a URL or reading a file beside
   the document, which is the import dialog's business (a URL proxy and a gated
   IPC), so a multi-file spec imports whole and says nothing about the files it
