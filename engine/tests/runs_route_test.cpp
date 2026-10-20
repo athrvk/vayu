@@ -559,7 +559,7 @@ TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
 // #2526) reach the report's `scenario` section, and a summary that recorded
 // neither - a scenario load run's, or one written before the issue - grows
 // neither rather than a `0` and a `false` nobody measured.
-// Mutation check: drop the `stepsNotRun` write in `add_optional_report_sections`
+// Mutation check: drop the `stepsNotRun` write in `build_scenario_report_section`
 // and the first half fails.
 TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenStored) {
     seed ({ .id = "run_design_seq", .type = vayu::RunType::Scenario });

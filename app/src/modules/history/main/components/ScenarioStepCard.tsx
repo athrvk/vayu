@@ -146,7 +146,7 @@ function ScenarioStepCard({
 	const tests = tallyTests(testResults) ?? step.tests;
 
 	// The step's own failure text: a test assertion that did not hold, or the
-	// error that ended the iteration. A live row has none until its stored row
+	// error that stopped the step. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
 	const error = step.result?.error;
 	const notRun = stepsNotRunText(step.stepsNotRun);
