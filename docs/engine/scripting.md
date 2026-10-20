@@ -316,13 +316,19 @@ Notes on the edges:
   and the failure message carry over to the new subject. The value is read
   once, so a getter runs once. Two forms keep the chain they were called on:
   `property(name, value)` (the value was already compared) and
-  `.not.have.property(name)` (absence has no value to move to).
+  `.not.have.property(name)` (absence has no value to move to). A primitive is
+  read through its wrapper, as chai reads it (#2582), so
+  `expect('abc').to.have.ownProperty('length')` passes; `null` and `undefined`
+  have no property.
 - **`keys` means exactly these keys**, as in chai's `have.keys`. `include.keys`
   (alias `contain.keys`) asks for at least these, and `any.keys` for at least one
   of them whether or not `include` came first; `all` is the default quantifier
-  and the later of `any` and `all` wins. Names may be listed or given as one
-  array, and an empty list is a `TypeError`, because `include.keys([])` would
-  hold for every target having compared nothing (#2528).
+  and the later of `any` and `all` wins. Names may be listed, given as one
+  array, or given as one plain object standing for its own keys (chai's
+  `Object.keys`), and an empty list is a `TypeError`, because `include.keys([])`
+  would hold for every target having compared nothing (#2528). A `Map`'s keys
+  are its keys and a `Set`'s its members, compared as values rather than names
+  (`new Map([[1, 1]])` has the key `1`, not `'1'`), deeply under `deep` (#2582).
 - **`include`, `own`, `ordered` and `itself` are flags the matcher after them
   reads** (#2528). Reading `include` or `contain` - as `include(x)` or as a chain
   word - sets chai's `contains`: `keys` and `members` then accept a superset, and
@@ -331,9 +337,12 @@ Notes on the edges:
   makes `property` and `include({...})` look at own properties only, and
   `nested` together with `own` is refused. `.length` and `.lengthOf` are a call
   and a chain: after one, `above`, `below`, `least`, `most` and `within` compare
-  the length (a Map's or Set's `size`). `length` directly after a chainable
-  method (`include`, `a`, `length` itself, `responseTime`) is a `TypeError`, as
-  chai's length guard makes it; `lengthOf` is the spelling there. The ordering matchers are chai's whole
+  the length (a Map's or Set's `size`). A target with no length fails as chai's
+  `to.have.property('length')` does, an `AssertionError` in both polarities, so
+  `expect(3).to.not.have.length.within(1, 2)` fails. `length` directly after a
+  chainable method (`include`, `a`, `length` itself, `responseTime`) is a
+  `TypeError`, as chai's length guard makes it; `lengthOf` is the spelling
+  there. The ordering matchers are chai's whole
   family, `gt` / `gte` / `lt` / `lte` and the `greaterThan...` spellings
   included, and `within` takes both bounds in.
 - **`.a()` and `.an()` use chai's type names**: `string`, `number`, `boolean`,
@@ -385,12 +394,15 @@ Notes on the edges:
   chai-postman compares them with lodash `_.isEqual` and lodash says equal.
 - **`NaN` is chai's `value !== value`**, so only the number `NaN` satisfies it -
   `expect('foo').to.be.NaN` fails rather than reading the string as a number.
-- **`include` on an object target is subset matching**, as in chai: every key of
-  the argument must be present on the target holding an equal value, strictly
-  unless the chain says `deep`. Any target other than a string or an array takes
-  an *object* argument, so `expect({a:1}).to.include('a')` and
-  `expect(5).to.include('x')` are both a `TypeError` - a combination chai
-  refuses rather than a verdict. Three edges are Vayu's own:
+- **`include` answers by the target's type**, as in chai: a substring of a
+  string (a boxed `String` too), an element of an array, a member of a `Set`, a
+  value (not a key) of a `Map`, and on any other object subset matching, every
+  key of the argument present on the target holding an equal value. Comparison
+  is strict unless the chain says `deep`; for a `Set` or a `Map` strict is
+  SameValueZero, what `Set.prototype.has` answers. Any other pair is a
+  combination chai refuses, as an `AssertionError` in both polarities, so
+  `expect({a:1}).to.include('a')` and `expect(5).to.include('x')` fail with or
+  without `.not` (#2582). Two edges are Vayu's own:
     - **An expectation with no own enumerable keys is refused**, where chai
       passes it in both directions. `expect(body).to.include({})` compares
       nothing, so a computed subset that came out empty would report green
@@ -399,10 +411,6 @@ Notes on the edges:
     - **A getter that throws is reported, not compared.** The exception reaches
       the test rather than being read as "these differ", which under `.not`
       would have been a pass.
-    - **A `Map`, a `Set` or a boxed `String` target is refused** rather than
-      answered: chai has membership rules for the first two that deep equality
-      here deliberately does not (see the `eql` note above), and a quiet
-      `false` was the previous answer.
 - **The failure message names the argument.** `.to.throw(TypeError)` that caught
   a `RangeError` says so, rather than reporting that a function which threw did
   not throw.
@@ -418,12 +426,16 @@ Notes on the edges:
   is accepted as the first argument (`instanceof`), with an optional message
   matcher after it. A thrown string is its own message and anything else has
   none, which is chai's rule: `.to.throw('4')` does not pass on `throw 42`.
-- **A wrong-typed value is a `TypeError` here where chai raises an
-  `AssertionError`** - `expect('5').to.be.above(3)`, `expect(5).to.include('x')`.
-  Deliberate: this file's rule is that a mistake in the script text stays a
-  `TypeError` because nothing was asserted, and the response assertions refuse
-  a wrong-typed argument the same way (#998). Both throw, so a test fails
-  either way; what differs is `e.name`.
+- **A type check chai makes as an assertion is an `AssertionError`**, in both
+  polarities (#2582): a `members` target that is not an array, a `length` read
+  off a target with none, an `include` pair chai has no rule for. **A malformed
+  call stays a `TypeError`** where chai raises an `AssertionError`: a missing or
+  wrong-typed argument (`members(1)`, `above()`), `keys()` with no names,
+  `nested` with `own`, and the ordering matchers' refusal of a value that is
+  not a number or a `Date` (`expect('5').to.be.above(3)`). Deliberate: nothing
+  was asserted, and the response assertions refuse a wrong-typed argument the
+  same way (#998). Both throw, so a test fails either way; what differs is
+  `e.name`.
 - **`.and` carries the chain's flags**, `not` included, exactly as in chai. It
   is a language chain like `.that`, not a return to the start of one: a matcher
   may follow it directly (`.and.match(/x/)`), and so may `not`.

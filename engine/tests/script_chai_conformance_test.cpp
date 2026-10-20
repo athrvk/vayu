@@ -746,6 +746,138 @@ TEST_F (ChaiConformanceTest, TheDeltaMatchersRefuseWhatTheyCannotMeasure) {
 }
 
 // ----------------------------------------------------------------------------
+// The edges #2582 measured against chai 4.4.1
+// ----------------------------------------------------------------------------
+
+// A Map's keys are its keys and a Set's are its members, compared as values:
+// neither is a property list, and a non-string key is not its string.
+TEST_F (ChaiConformanceTest, KeysOnAMapOrSetComparesTheKeysThemselves) {
+    expect_pass ("pm.expect(new Map([['a', 1]])).to.have.keys('a')");
+    expect_pass ("pm.expect(new Map([['a', 1]])).to.include.keys('a')");
+    expect_pass ("pm.expect(new Map([['a', 1]])).to.have.any.keys('a', 'z')");
+    expect_pass ("pm.expect(new Set(['a'])).to.have.all.keys('a')");
+    expect_pass ("pm.expect(new Set(['a', 'b'])).to.include.keys(['a'])");
+    expect_pass ("pm.expect(new Map([[1, 1]])).to.have.keys(1)");
+    expect_pass (
+    "pm.expect(new Map([[{ a: 1 }, 1]])).to.have.deep.keys({ a: 1 })");
+    expect_pass (
+    "pm.expect(new Set([{ a: 1 }])).to.have.deep.keys([{ a: 1 }])");
+    expect_pass ("pm.expect(new Set(['a'])).to.not.have.keys('b')");
+
+    expect_assertion_failure (
+    "pm.expect(new Set(['a', 'b'])).to.have.keys('a')", "exactly the keys 'a'");
+    expect_assertion_failure (
+    "pm.expect(new Map([[1, 1]])).to.have.keys('1')", "exactly the keys '1'");
+    expect_assertion_failure (
+    "pm.expect(new Map([[{ a: 1 }, 1]])).to.have.keys({ a: 1 })", "exactly the keys");
+    expect_assertion_failure (
+    "pm.expect(new Map([['a', 1]])).to.have.any.keys('y', 'z')", "any of the keys 'y', 'z'");
+    expect_assertion_failure (
+    "pm.expect(new Map([['a', 1]])).to.not.have.keys('a')", "not have exactly the keys 'a'");
+    expect_type_error ("pm.expect(new Set(['a'])).to.include.keys([])", "at least one key");
+}
+
+// One plain-object argument stands for its own keys, chai's `Object.keys`.
+TEST_F (ChaiConformanceTest, KeysReadsAnObjectArgumentAsItsOwnKeys) {
+    expect_pass ("pm.expect({ a: 1 }).to.have.keys({ a: 1 })");
+    expect_pass ("pm.expect({ a: 1, b: 2 }).to.have.keys({ a: 0, b: 0 })");
+    expect_pass ("pm.expect({ a: 1, b: 2 }).to.include.keys({ b: 0 })");
+    expect_assertion_failure (
+    "pm.expect({ a: 1, b: 2 }).to.have.keys({ a: 1 })", "exactly the keys 'a'");
+    expect_assertion_failure (
+    "pm.expect({ a: 1 }).to.include.keys({ z: 1 })", "contain the keys 'z'");
+    expect_type_error ("pm.expect({ a: 1 }).to.have.keys({})", "at least one key");
+}
+
+// chai's `include` asks a Set for a member and a Map for a value, never a key.
+TEST_F (ChaiConformanceTest, IncludeOnASetAsksForAMemberAndOnAMapForAValue) {
+    expect_pass ("pm.expect(new Set([1])).to.include(1)");
+    expect_pass ("pm.expect(new Set([1])).to.not.include(2)");
+    expect_pass ("pm.expect(new Map([['a', 1]])).to.include(1)");
+    expect_pass ("pm.expect(new Set([{ a: 1 }])).to.deep.include({ a: 1 })");
+    expect_pass (
+    "pm.expect(new Map([['k', { a: 1 }]])).to.deep.include({ a: 1 })");
+    // SameValueZero, which is what `Set.prototype.has` answers.
+    expect_pass ("pm.expect(new Set([NaN])).to.include(NaN)");
+
+    expect_assertion_failure ("pm.expect(new Set([1])).to.include(2)", "to include 2");
+    expect_assertion_failure ("pm.expect(new Map([['a', 1]])).to.include('a')", "to include 'a'");
+    expect_assertion_failure (
+    "pm.expect(new Set([{ a: 1 }])).to.include({ a: 1 })", "to include");
+    expect_assertion_failure ("pm.expect(new Set([1])).to.not.include(1)", "to not include 1");
+}
+
+// A boxed String is a string to chai's type-detect, so `include` is a
+// substring match on it too.
+TEST_F (ChaiConformanceTest, IncludeOnABoxedStringIsASubstringMatch) {
+    expect_pass ("pm.expect(new String('abc')).to.include('b')");
+    expect_assertion_failure ("pm.expect(new String('abc')).to.include('z')", "to include 'z'");
+}
+
+// chai raises these type checks as assertions of their own, in both
+// polarities, so a `.not` cannot turn the wrong target into a pass.
+TEST_F (ChaiConformanceTest, TheTypeChecksChaiAssertsAreAssertionErrors) {
+    for (const char* chain : { "to", "to.not" }) {
+        const std::string c (chain);
+        SCOPED_TRACE (c);
+        expect_assertion_failure ("pm.expect('foo')." + c + ".include.members(['f'])",
+        "Expected 'foo' to be an array");
+        expect_assertion_failure ("pm.expect({ a: 1 })." + c + ".include(1)",
+        "the given combination of arguments (object and number) is invalid for "
+        "this assertion");
+        expect_assertion_failure ("pm.expect(5)." + c + ".include('x')",
+        "the given combination of arguments (number and string)");
+        expect_assertion_failure ("pm.expect(3)." + c + ".have.length.within(1, 2)",
+        "Expected 3 to have property 'length'");
+        expect_assertion_failure ("pm.expect(3)." + c + ".have.lengthOf(1)",
+        "Expected 3 to have property 'length'");
+    }
+    // They carry the expectation's message, as every assertion does.
+    expect_assertion_failure (
+    "pm.expect('foo', 'ctx').to.include.members(['f'])", "ctx: Expected 'foo' to be an array");
+
+    // A malformed call still asserted nothing.
+    expect_type_error ("pm.expect([1]).to.have.members(1)", "requires an array");
+    expect_type_error ("pm.expect('5').to.be.above(3)", "expects the target to be a number");
+    expect_type_error ("pm.expect({ a: 1 }).to.have.keys([])", "at least one key");
+}
+
+// chai 4.4.1's type-detect names an async or a generator function `function`;
+// `asyncfunction` and `generatorfunction` are not types it answers.
+TEST_F (ChaiConformanceTest, AnAsyncOrGeneratorFunctionIsTypedFunction) {
+    expect_pass ("pm.expect(async function () {}).to.be.a('function')");
+    expect_pass ("pm.expect(function* () {}).to.be.a('function')");
+    expect_assertion_failure (
+    "pm.expect(async function () {}).to.be.a('asyncfunction')",
+    "Expected type function to be asyncfunction");
+    expect_assertion_failure (
+    "pm.expect(function* () {}).to.be.a('generatorfunction')",
+    "Expected type function to be generatorfunction");
+}
+
+// chai reads a primitive's properties through its wrapper, so a string has an
+// own `length` and an own index; `null` and `undefined` have nothing to read.
+TEST_F (ChaiConformanceTest, AStringPrimitiveHasItsWrappersOwnProperties) {
+    expect_pass ("pm.expect('abc').to.have.ownProperty('length')");
+    expect_pass ("pm.expect('abc').to.have.ownProperty('0')");
+    expect_pass ("pm.expect('abc').to.have.property('length', 3)");
+    expect_pass ("pm.expect('abc').to.have.property('length').that.equals(3)");
+    expect_pass (
+    "pm.expect({ a: 'xyz' }).to.have.nested.property('a.length', 3)");
+    // A primitive part-way along a path is walked through, not stopped at.
+    expect_pass ("pm.expect('abc').to.have.nested.property('0.length', 1)");
+    expect_pass ("pm.expect(5).to.not.have.ownProperty('x')");
+
+    expect_assertion_failure ("pm.expect(5).to.have.ownProperty('x')", "own property 'x'");
+    expect_assertion_failure (
+    "pm.expect('abc').to.have.ownProperty('toUpperCase')", "own property 'toUpperCase'");
+    expect_assertion_failure ("pm.expect('abc').to.have.property('length', 4)",
+    "property 'length' equal to 4");
+    expect_assertion_failure ("pm.expect(null).to.have.property('a')", "property 'a'");
+    expect_assertion_failure ("pm.expect(undefined).to.have.ownProperty('a')", "own property 'a'");
+}
+
+// ----------------------------------------------------------------------------
 // What a matcher or a chainable method answers when read rather than called
 // ----------------------------------------------------------------------------
 
