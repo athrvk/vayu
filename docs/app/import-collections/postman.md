@@ -135,10 +135,9 @@ of, and each request, folder or collection that uses any is named in
 `data`), `require(...)` and `pm.require`, a non-empty `script.packages`, the
 libraries Postman bundles (`CryptoJS`, `_`, `tv4`, `xml2Json`, `cheerio`,
 `moment`, `Backbone`), `setTimeout`, `setInterval`, `Buffer`, `await`,
-`pm.visualizer`, `pm.variables.set`, `pm.test.skip`, a `pm.sendRequest` with an
-`urlencoded` or `formdata` body, and the chai spellings `pm.expect` refuses
-(`.within()`, `.include.keys`, `jsonSchema`, and the rest of the table). A row
-is retired in the commit that makes Vayu run the API.
+`pm.visualizer`, `pm.variables.set`, `pm.test.skip`, and the chai spellings
+`pm.expect` refuses (`.within()`, `.include.keys`, `jsonSchema`, and the rest of
+the table). A row is retired in the commit that makes Vayu run the API.
 
 The scan reads tokens, not text: comments, string and template-literal text and
 regular-expression bodies are blanked first, so a name that only appears in a

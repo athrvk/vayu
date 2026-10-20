@@ -39,28 +39,17 @@
 namespace vayu::core {
 
 /**
- * A script with the parts that are not code taken out, each byte replaced by a
- * space (newlines kept) so a position in one view is the same position in the
- * other.
- */
-struct StrippedScript {
-    /// Comments, string and template-literal text and regular-expression
-    /// bodies blanked; the quotes stay. Code inside a template's `${ }` stays.
-    std::string code;
-    /// Only the comments blanked, so a string's contents can still be read.
-    std::string text;
-};
-
-/**
- * @brief @p source with comments and literal text blanked (see
- *        `StrippedScript`).
+ * @brief @p source with comments, string and template-literal text and
+ *        regular-expression bodies blanked: each byte becomes a space (newlines
+ *        kept) so a position in the result is the same position in @p source.
+ *        The quotes stay, and so does code inside a template's `${ }`.
  *
  * Not a JavaScript parser. A `/` is a regular expression only after a
  * character that cannot end an operand, and an unterminated string or regular
  * expression ends at its line, so a stray quote costs one line of scanning and
  * never the rest of the script.
  */
-[[nodiscard]] StrippedScript strip_comments_and_literals (std::string_view source);
+[[nodiscard]] std::string strip_comments_and_literals (std::string_view source);
 
 /// The names one request, folder or collection uses across all its scripts.
 class UnsupportedScriptApis {

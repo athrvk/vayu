@@ -27,24 +27,23 @@ constexpr std::string_view WHITESPACE = " \t\r\n";
 /// they are absent.
 constexpr std::string_view REGEX_PRECEDERS = "(,=:[!&|?{};+-*%<>~^";
 
-/// One pass over a script, blanking what is not code. See `StrippedScript`.
+/// One pass over a script; see `strip_comments_and_literals`.
 class Stripper {
     public:
     explicit Stripper (std::string_view source)
-    : src_ (source), code_ (source), text_ (source) {
+    : src_ (source), code_ (source) {
     }
 
-    StrippedScript run () {
+    std::string run () {
         while (at_ < src_.size ()) {
             step ();
         }
-        return { std::move (code_), std::move (text_) };
+        return std::move (code_);
     }
 
     private:
     std::string_view src_;
     std::string code_;
-    std::string text_;
     std::size_t at_ = 0;
     /// The last character that was neither whitespace nor inside a literal;
     /// what decides whether a `/` opens a regular expression.
@@ -113,7 +112,6 @@ class Stripper {
 
     void comment (std::size_t end) {
         blank (code_, at_, end);
-        blank (text_, at_, end);
         at_ = end;
     }
 
@@ -478,7 +476,6 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "pm.visualizer", Anchor::Bare, "pm.visualizer", "" },
 { "pm.variables.set", Anchor::Bare, "pm.variables.set", "" },
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
-{ "pm.sendRequest urlencoded/formdata body", Anchor::Elsewhere, "", "" },
 // Chai spellings `pm.expect` refuses by name (#2528).
 { ".within()", Anchor::Member, "within", "" },
 { ".greaterThan() / .lessThan()", Anchor::Member, "greaterThan|lessThan", "" },
@@ -509,9 +506,7 @@ constexpr std::size_t rule_index (std::string_view name) {
 }
 
 constexpr std::size_t PACKAGES_RULE = rule_index ("script.packages");
-constexpr std::size_t FORM_BODY_RULE =
-rule_index ("pm.sendRequest urlencoded/formdata body");
-static_assert (PACKAGES_RULE < API_RULES.size () && FORM_BODY_RULE < API_RULES.size (),
+static_assert (PACKAGES_RULE < API_RULES.size (),
 "a row the scan sets directly is missing from the table");
 
 /// The next dotted word of @p path, removed from it.
@@ -577,59 +572,26 @@ bool is_declared_global (const ApiRule& rule, const Declarations& declared) {
     rule.path.find ('.') == std::string_view::npos && declared.contains (rule.path);
 }
 
-/// `mode: 'urlencoded'` or `mode: 'formdata'`, with the key and the value
-/// optionally quoted, anywhere in @p text.
-bool has_form_body_mode (std::string_view text) {
-    constexpr std::string_view QUOTES = "'\"`";
-    for (std::size_t at = text.find ("mode"); at != std::string_view::npos;
-    at                  = text.find ("mode", at + 1)) {
-        std::string_view rest = text.substr (at + 4);
-        if (!rest.empty () && QUOTES.find (rest.front ()) != std::string_view::npos) {
-            rest.remove_prefix (1);
-        }
-        rest.remove_prefix (std::min (rest.find_first_not_of (WHITESPACE), rest.size ()));
-        if (rest.empty () || rest.front () != ':') {
-            continue;
-        }
-        rest.remove_prefix (1);
-        rest.remove_prefix (std::min (rest.find_first_not_of (WHITESPACE), rest.size ()));
-        if (rest.empty () || QUOTES.find (rest.front ()) == std::string_view::npos) {
-            continue;
-        }
-        rest.remove_prefix (1);
-        if (rest.starts_with ("urlencoded") || rest.starts_with ("formdata")) {
-            return true;
-        }
-    }
-    return false;
-}
-
 } // namespace
 
-StrippedScript strip_comments_and_literals (std::string_view source) {
+std::string strip_comments_and_literals (std::string_view source) {
     return Stripper (source).run ();
 }
 
 void UnsupportedScriptApis::scan (std::string_view script) {
-    const StrippedScript stripped   = strip_comments_and_literals (script);
-    const std::vector<Token> tokens = tokenize (stripped.code);
-    const Declarations declared (stripped.code, tokens);
+    const std::string code          = strip_comments_and_literals (script);
+    const std::vector<Token> tokens = tokenize (code);
+    const Declarations declared (code, tokens);
 
-    bool sends_request = false;
     for (std::size_t first = 0; first < tokens.size (); ++first) {
-        sends_request = sends_request ||
-        word_of (stripped.code, tokens.at (first)) == "sendRequest";
         for (std::size_t row = 0; row < API_RULES.size (); ++row) {
             const ApiRule& rule = API_RULES.at (row);
             if (!used_.contains (row) && !tokens.at (first).number &&
-            path_matches (stripped.code, tokens, first, rule) &&
+            path_matches (code, tokens, first, rule) &&
             !is_declared_global (rule, declared)) {
                 used_.insert (row);
             }
         }
-    }
-    if (sends_request && has_form_body_mode (stripped.text)) {
-        used_.insert (FORM_BODY_RULE);
     }
 }
 

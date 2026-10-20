@@ -42,70 +42,56 @@ Names names_in (const std::string& script) {
 // Stripping
 // ---------------------------------------------------------------------------
 
-TEST (ScriptApiStrip, BlanksCommentsInBothViewsAndKeepsTheLines) {
+TEST (ScriptApiStrip, BlanksCommentsAndKeepsTheLines) {
     const std::string source = "a // tail\nb /* one\ntwo */ c";
-    const auto stripped      = strip_comments_and_literals (source);
-    EXPECT_EQ (stripped.code, "a        \nb       \n       c");
-    EXPECT_EQ (stripped.text, stripped.code);
+    EXPECT_EQ (strip_comments_and_literals (source), "a        \nb       \n       c");
 }
 
-TEST (ScriptApiStrip, BlanksAStringInTheCodeViewOnly) {
-    const auto stripped =
-    strip_comments_and_literals ("x = 'CryptoJS' + \"_\";");
-    EXPECT_EQ (stripped.code, "x = '        ' + \" \";");
-    EXPECT_EQ (stripped.text, "x = 'CryptoJS' + \"_\";");
+TEST (ScriptApiStrip, BlanksAStringKeepingItsQuotes) {
+    EXPECT_EQ (strip_comments_and_literals ("x = 'CryptoJS' + \"_\";"), "x = '        ' + \" \";");
 }
 
 TEST (ScriptApiStrip, ASlashSlashInsideAStringIsNotAComment) {
-    const auto stripped =
-    strip_comments_and_literals ("u = 'http://x.test'; tests[0]");
-    EXPECT_EQ (stripped.text, "u = 'http://x.test'; tests[0]");
-    EXPECT_NE (stripped.code.find ("tests[0]"), std::string::npos);
+    EXPECT_EQ (strip_comments_and_literals ("u = 'http://x.test'; tests[0]"),
+    "u = '             '; tests[0]");
 }
 
 TEST (ScriptApiStrip, AnEscapedQuoteDoesNotEndTheString) {
-    const auto stripped = strip_comments_and_literals (R"(a = 'it\'s'; b)");
-    EXPECT_EQ (stripped.code, "a = '     '; b");
+    EXPECT_EQ (strip_comments_and_literals (R"(a = 'it\'s'; b)"), "a = '     '; b");
 }
 
 TEST (ScriptApiStrip, AnUnterminatedStringEndsAtItsLine) {
-    const auto stripped = strip_comments_and_literals ("a = 'oops\nCryptoJS");
-    EXPECT_NE (stripped.code.find ("CryptoJS"), std::string::npos);
+    EXPECT_NE (strip_comments_and_literals ("a = 'oops\nCryptoJS").find ("CryptoJS"),
+    std::string::npos);
 }
 
 TEST (ScriptApiStrip, KeepsTheExpressionsOfATemplateAsCode) {
-    const auto stripped =
-    strip_comments_and_literals ("`id ${CryptoJS.MD5(x)} end`; tail");
-    EXPECT_EQ (stripped.code, "`   ${CryptoJS.MD5(x)}    `; tail");
-    EXPECT_EQ (strip_comments_and_literals ("`${ {a: 1}.a } _`; z").code, "`${ {a: 1}.a }  `; z");
+    EXPECT_EQ (
+    strip_comments_and_literals ("`id ${CryptoJS.MD5(x)} end`; tail"),
+    "`   ${CryptoJS.MD5(x)}    `; tail");
+    EXPECT_EQ (strip_comments_and_literals ("`${ {a: 1}.a } _`; z"), "`${ {a: 1}.a }  `; z");
 }
 
 TEST (ScriptApiStrip, ReadsNestedTemplates) {
-    const auto stripped =
-    strip_comments_and_literals ("`a ${ `b ${x} c` } d` ; tail");
-    EXPECT_EQ (stripped.code, "`  ${ `  ${x}  ` }  ` ; tail");
+    EXPECT_EQ (strip_comments_and_literals ("`a ${ `b ${x} c` } d` ; tail"),
+    "`  ${ `  ${x}  ` }  ` ; tail");
 }
 
 TEST (ScriptApiStrip, BlanksARegularExpressionButNotADivision) {
-    const auto regex =
-    strip_comments_and_literals ("ok = /['\"]_/.test(s); tail");
-    EXPECT_EQ (regex.code, "ok = /     /.test(s); tail");
-    const auto division =
-    strip_comments_and_literals ("a = b / c; d = 'x' / 2; tail");
-    EXPECT_EQ (division.code, "a = b / c; d = ' ' / 2; tail");
+    EXPECT_EQ (strip_comments_and_literals ("ok = /['\"]_/.test(s); tail"),
+    "ok = /     /.test(s); tail");
+    EXPECT_EQ (strip_comments_and_literals ("a = b / c; d = 'x' / 2; tail"),
+    "a = b / c; d = ' ' / 2; tail");
 }
 
 TEST (ScriptApiStrip, ASlashInsideACharacterClassDoesNotEndTheRegularExpression) {
-    const auto stripped = strip_comments_and_literals ("x = /[/]_/; tail");
-    EXPECT_EQ (stripped.code, "x = /    /; tail");
+    EXPECT_EQ (strip_comments_and_literals ("x = /[/]_/; tail"), "x = /    /; tail");
 }
 
-TEST (ScriptApiStrip, BothViewsKeepTheSourceLength) {
+TEST (ScriptApiStrip, KeepsTheSourceLength) {
     for (const std::string source : { "", "/", "//", "/*", "'", "`${", "`${}`",
          "a = /[", "`\\", "'\\", "/* x */ /* y" }) {
-        const auto stripped = strip_comments_and_literals (source);
-        EXPECT_EQ (stripped.code.size (), source.size ()) << source;
-        EXPECT_EQ (stripped.text.size (), source.size ()) << source;
+        EXPECT_EQ (strip_comments_and_literals (source).size (), source.size ()) << source;
     }
 }
 
@@ -207,18 +193,14 @@ TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
     EXPECT_EQ (names_in ("pm.variables.get('a'); pm.test('t', f);"), Names{});
 }
 
-TEST (ScriptApiScan, NamesAFormBodyOnlyBesideSendRequest) {
-    const std::string form_body = "pm.sendRequest urlencoded/formdata body";
-    EXPECT_EQ (names_in ("pm.sendRequest({url: u, method: 'POST', body: {mode: "
-                         "'urlencoded',"
-                         " urlencoded: [{key: 'a', value: 'b'}]}}, cb);"),
-    Names{ form_body });
-    EXPECT_EQ (names_in (R"(const req = { "mode": "formdata" }; pm.sendRequest(req, cb);)"),
-    Names{ form_body });
-    EXPECT_EQ (names_in ("pm.sendRequest({body: {mode: 'raw', raw: ''}}, cb);"), Names{});
-    // The mode is read but nothing is sent: no `sendRequest`, no name.
-    EXPECT_EQ (names_in ("const b = { mode: 'urlencoded' };"), Names{});
-    EXPECT_EQ (names_in ("pm.sendRequest(r, cb); // mode: 'formdata'"), Names{});
+TEST (ScriptApiScan, ASendRequestFormBodyIsNotNamed) {
+    EXPECT_EQ (
+    names_in ("pm.sendRequest({url: u, method: 'POST', body: {mode: "
+              "'urlencoded', urlencoded: [{key: 'a', value: 'b'}]}}, cb);"),
+    Names{});
+    EXPECT_EQ (names_in (R"(pm.sendRequest({ url: u, body: { mode: "formdata",
+        formdata: [{ key: "f", type: "file", src: "a.txt" }] } }, cb);)"),
+    Names{});
 }
 
 TEST (ScriptApiScan, NamesTheChaiSpellingsPmExpectRefuses) {
