@@ -51,6 +51,32 @@
     "expected": [{ "name": "X-Kept", "value": "1" }]
   },
   {
+    "name": "a key of only spaces and tabs is no key at all, enabled or not",
+    "rows": [
+      { "key": "   ", "value": "orphan", "enabled": true },
+      { "key": " \t ", "value": "orphan", "enabled": true },
+      { "key": "X-Kept", "value": "1", "enabled": true },
+      { "key": "  ", "value": "", "enabled": false }
+    ],
+    "expected": [{ "name": "X-Kept", "value": "1" }]
+  },
+  {
+    "name": "the spaces and tabs around a key are trimmed, the value is left as it is",
+    "rows": [
+      { "key": " X-A ", "value": " keeps its padding ", "enabled": true },
+      { "key": "Authorization\t", "value": "Bearer abc", "enabled": true }
+    ],
+    "expected": [
+      { "name": "X-A", "value": " keeps its padding " },
+      { "name": "Authorization", "value": "Bearer abc" }
+    ]
+  },
+  {
+    "name": "a padded body-mode Content-Type row is the Content-Type line",
+    "rows": [{ "key": " Content-Type ", "value": "application/json", "enabled": true, "source": "body-mode" }],
+    "expected": [{ "name": "Content-Type", "value": "application/json" }]
+  },
+  {
     "name": "an empty value is still a row",
     "rows": [
       { "key": "X-Blank", "value": "", "enabled": true },

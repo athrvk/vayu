@@ -1121,7 +1121,13 @@ These back the OAuth 2.0 auth editor. TanStack Query wraps the non-interactive
 ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 `useFetchOAuth2TokenMutation`, `useClearOAuth2TokenMutation`). The token
 `cacheKey` is computed client-side by `services/oauth/cache-key.ts`, byte-identical
-to the engine so the app and engine agree on cache slots without a round-trip.
+to the engine so the app and engine agree on cache slots without a round-trip. The key
+reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
+#2536) beside the token URL, client id, credentials id and password-grant username, so
+two audiences sent as rows are two cached tokens; a row whose key names a credential
+(`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its
+key alone, so the key never carries the secret. `scope`, `audience` and `resource`
+themselves are still not in it.
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine).
 
@@ -1392,11 +1398,21 @@ the request builder surfaces a toast pointing the user at the Auth tab.
 
 `headers` is an ordered array of `{ name, value }` lines (issue #2466): the
 Headers table's enabled rows with a key, in row order, a repeated name repeated
-and each row in the spelling typed (`toHeaderRows`), and `POST /compose` answers
-the same shape, so a repeat survives compose to execute. The older single-valued
+and each row in the case typed with the spaces and tabs around its name trimmed
+(`toHeaderRows`), and `POST /compose` answers the same shape, so a repeat
+survives compose to execute. The older single-valued
 record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
 longer sends it: a record keeps one value per key and sends a different header
 from the one its table shows. The same holds for `POST /runs`.
+
+The engine trims the spaces and tabs around every header name (`Authorization `
+goes out as `Authorization`, never as a wire line with a space before its colon)
+and then requires a token: a name with an interior space, a colon or a
+non-ASCII byte is a `400` with code `invalid_header_name`, quoting the name, from
+`POST /compose`, `POST /execute` and `POST /runs` alike. A name of only spaces
+and tabs is no name (`empty_header_name`). A bearer token and an API key's name
+and value are trimmed the same way when auth is resolved; see the
+[API reference](../engine/api-reference.md#post-compose).
 
 **Example Request:**
 ```typescript

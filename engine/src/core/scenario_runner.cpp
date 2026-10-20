@@ -13,6 +13,7 @@
 #include <cmath>
 #include <deque>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -498,6 +499,17 @@ std::string describe_schema_failure (const ValidationVerdict& verdict) {
     return described;
 }
 
+LatencySummary summarize_latencies (std::vector<double> latencies) {
+    LatencySummary summary;
+    if (latencies.empty ()) {
+        return summary;
+    }
+    summary.avg_ms = std::accumulate (latencies.begin (), latencies.end (), 0.0) /
+    static_cast<double> (latencies.size ());
+    summary.percentiles = percentiles_from_latencies (std::move (latencies));
+    return summary;
+}
+
 nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inputs) {
     nlohmann::json summary;
     // The three keys `apply_run_summary` reads. Without `total_requests` the
@@ -508,6 +520,20 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     summary["rps"]            = inputs.duration_s > 0 ?
                static_cast<double> (inputs.steps_executed) / inputs.duration_s :
                0.0;
+
+    // The steps that sent, the same sample a latency budget judges. A run in
+    // which none did stores only `count: 0`: a block of zeros would read as
+    // steps that answered instantly, and the report route leaves the section
+    // out on this marker.
+    const auto& percentiles = inputs.latency.percentiles;
+    summary["latency"]      = { { "count", percentiles.count } };
+    if (percentiles.count > 0) {
+        summary["latency"].update ({ { "min", percentiles.min },
+        { "max", percentiles.max }, { "avg", inputs.latency.avg_ms },
+        { "p50", percentiles.p50 }, { "p75", percentiles.p75 },
+        { "p90", percentiles.p90 }, { "p95", percentiles.p95 },
+        { "p99", percentiles.p99 }, { "p999", percentiles.p999 } });
+    }
 
     summary["scenario"] = { { "iterations", inputs.iterations_requested },
         { "iterations_completed", inputs.iterations_completed },
@@ -1477,16 +1503,17 @@ RunManager& manager) {
     // exists elsewhere in the engine, and most of `RunSummaryInputs`'
     // fields (peak concurrency, dropped requests, a load run's queue wait)
     // describe a concurrent load run this run mode has no counterpart for.
+    summary.latency = summarize_latencies (summary.latencies);
     RunSummaryInputs threshold_inputs;
     // Off the status tally, not the latencies: a step refused before the wire
     // is a request with no duration.
     threshold_inputs.total_requests =
     vayu::count_status_failures (summary.status_codes).total;
     threshold_inputs.status_codes = summary.status_codes;
-    threshold_inputs.latency = percentiles_from_latencies (summary.latencies);
-    threshold_inputs.throughput = summary.duration_s > 0 ?
-    static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
-    0.0;
+    threshold_inputs.latency      = summary.latency.percentiles;
+    threshold_inputs.throughput   = summary.duration_s > 0 ?
+      static_cast<double> (threshold_inputs.total_requests) / summary.duration_s :
+      0.0;
     if (summary.assertions.passed + summary.assertions.failed > 0) {
         threshold_inputs.assertions = summary.assertions;
     }

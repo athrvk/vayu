@@ -8,6 +8,7 @@
 #include "vayu/http/request_builder.hpp"
 
 #include "vayu/http/auth_resolver.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/utils/json.hpp"
 
 namespace vayu::http {
@@ -23,6 +24,9 @@ AuthResolution auth_resolution) {
         out.ok            = false;
         out.parse_failed  = true;
         out.error_message = parsed.error ().message;
+        if (parsed.error ().code == vayu::ErrorCode::InvalidHeaderName) {
+            out.detail_code = std::string (INVALID_HEADER_NAME_CODE);
+        }
         return out;
     }
 

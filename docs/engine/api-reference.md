@@ -2973,8 +2973,14 @@ nothing else, which names where the secret lives without being one. The auth
 modes kept as a `config` bag (AWS, digest, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT,
 OAuth 2.0's own config) are blanked by an allowlist of the members known to
 describe the auth, so a member no list has heard of (Insomnia's IAM
-`secretAccessKey`) leaves blank too. A credential outside an auth block is
-blanked by name wherever it is written:
+`secretAccessKey`) leaves blank too. OAuth 2.0's extra request parameter lists
+(`tokenParams`, `authorizationParams`, `refreshParams`) are redacted per row: a
+row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
+names a credential (`client_secret`, `client_assertion`, `password`,
+`Authorization`, `X-Api-Key`, the other names below), so an `audience` row
+leaves intact; a row with no non-empty string `key`, and any member of a row
+beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
+it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
   `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, the other
@@ -3492,7 +3498,10 @@ kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters, and Insomnia's file bodies and
 the resources it cannot import. A count that belongs to the document (a second
-server URL, a malformed section) has none.
+server URL, a malformed section) has none. **`names`**, when present, names
+what the count dropped, never its value: today only `oauth2_unmapped_param`,
+whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
+did not carry.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
@@ -3514,6 +3523,7 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
 `unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
+`oauth2_dropped_field`, `oauth2_state_regenerated`, `oauth2_unmapped_param`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
 loss: `default_response` and `url_without_raw` count a mapping
@@ -3563,7 +3573,14 @@ the reason `x-vayu-elements` is not.
 parent's sub-folders and requests, which share one [order space](#ordering)
 (#2535). A Postman parse states it on every one: the item's position in its
 parent's `item[]`, so the collection keeps the order Postman runs it in. A
-Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
+JMeter parse (#2573) states it the same way on every sampler and controller
+folder: its position among the parent's enabled elements in the plan's tree,
+one count across both kinds, which a `ThreadGroup` shares with the parent it
+flattens into. An Insomnia parse, v4 or v5 (#2573), states it as each folder's and
+request's rank, `0..k-1`, among the parent's siblings that import, ordered by
+ascending `metaSortKey` (v5's `meta.sortKey`) with ties in document order; a
+parent where any such sibling has no numeric key states none, so its folders
+come first. A Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
 each folder's `x-vayu-collection.folders[].order`; one written before folders
 carried an `order` states none, and its requests then follow its folders as
 they did. No other format states one. The flattening into
@@ -3866,6 +3883,10 @@ a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
 NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
 allowlist of the members known to describe the auth, not by credential name, so
 a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
+OAuth 2.0's extra request parameter rows, in its config and in a kept Postman
+block alike, keep their keys; a row's value is blanked when its key names a
+credential (`client_secret`, `client_assertion`, `password`, `Authorization`,
+`X-Api-Key`, the other names a header or query parameter is blanked by).
 A credential outside an auth block is blanked too, by name, wherever the
 document writes a value as typed or as recorded:
 
@@ -3937,7 +3958,7 @@ was before these rules.
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
-| `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
+| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
@@ -5403,9 +5424,9 @@ hits the wire:
 | `auth.mode` | Effect |
 |-------------|--------|
 | `none` / `inherit` | No-op (`inherit` is resolved by [`POST /compose`](#post-compose) before it reaches an execution endpoint; one arriving unresolved is a warning in the logs) |
-| `bearer` | `Authorization: Bearer <token>` |
-| `basic` | `Authorization: Basic <base64(user:pass)>` |
-| `apikey` | Header `key: value`, or `?key=value` when `in: "query"` |
+| `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467) |
+| `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
+| `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467) |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
@@ -5435,6 +5456,12 @@ build encodes the name as written. Under load a name nothing answers is never a
 refusal: it is sent as written and counted like any other unresolved token
 (#1503), except inside a basic pair's base64, where it never was countable.
 
+An `apikey` with `in: "header"` whose key is not a header name once trimmed
+(`X Key`) is refused, with nothing written: the failure is `AUTH_FAILED` with an
+`authErrorCode` of `invalid_header_name` (an `apikey` with a key of only
+padding writes nothing, as an empty key always did). A `bearer` token with
+spaces *inside* it keeps them: only the ends are trimmed.
+
 A user-supplied header always wins over the one auth would write: `Authorization`
 over `bearer`/`basic`/`oauth2`, and a header named like the API key's `key` over
 `apikey` (`in: "header"`; the key name is matched against the request's own
@@ -5458,7 +5485,22 @@ sent to; the app says this beside the API Key fields.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
+username-if-password-grant`, then one segment per extra parameter list that has
+a row the engine would send, in the order `authorizationParams`, `tokenParams`,
+`refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
+the pairs sorted by key, then value, byte-wise). A row whose key names a
+credential (`client_assertion`, `assertion`, an `X-Api-Key` or `Authorization`
+header, the names an export blanks: `core::vayu_ext::names_param_credential`)
+is written as `<key>=` with its value left out, because the key is returned as
+`cacheKey`, stored as the cache row's primary key and can reach a log; a
+rotated assertion therefore keeps the token it was cached under. Row order and
+`sendAs` do not change the key; a config with no such row keys exactly as it
+did before the lists existed. `scope`, `audience` and `resource` are not read, so a distinct
+`credentialsId` (or an extra parameter row) is what separates two tokens that
+differ only in those. The recipe is `oauth::cache_key`
+(`engine/include/vayu/http/oauth_client.hpp`), and the app's
+`computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
+`engine/tests/oauth_client_test.cpp`. Expiry uses a 45s skew; a missing `expires_in`
 means non-expiring. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row
@@ -5499,6 +5541,24 @@ holding `+`, `/` or `=` travels as `%2B`, `%2F`, `%3D`. A provider that expects
 them raw (as Postman and `curl -u` send them) needs `credentialsPlacement:
 "body"`, which puts `client_id` and `client_secret` in the form instead. The
 default is `basic_auth_header`.
+
+`scope`, `audience` and `resource` are sent in the form of a fresh grant when
+set; a refresh sends none of them. Three optional config lists add parameters
+of the user's own (issue #2536), each an array of `{key, value, enabled,
+sendAs?}`: `tokenParams` on a fresh grant, `refreshParams` on a refresh, and
+`authorizationParams` in the authorize URL's query (below). `sendAs` puts a
+row in the form (`body`, the default), the token URL's query (`url`) or a
+request header (`header`). A row is not sent when it is `enabled: false`, has
+no string `key`, has an unknown `sendAs`, or is named like a parameter the
+engine writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
+`redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
+`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`);
+a body or url row naming a form parameter already written (an `audience` the
+config sends) and a header row naming a header already set (`Authorization`,
+`Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
+value wins and no name is sent twice. A malformed list or row is skipped, never
+refused. Values are resolved with the rest of the config by `POST /compose`, and
+a `{{data.*}}` token in one is refused like one anywhere else in the config.
 
 **Response (`200`):**
 ```json
@@ -5546,6 +5606,12 @@ hands it back.
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
+
+The authorize URL carries `response_type`, `client_id`, `redirect_uri`,
+`state`, `scope`, `audience`, `resource` and the PKCE pair, then each
+`authorizationParams` row under the rules above, whatever its `sendAs` (a
+navigation has no body or headers); a row naming a parameter already in the URL
+is skipped.
 
 Attempts time out after 5 minutes; on success the token is written to the cache
 and `cacheKey` is returned. A completion (the loopback callback and `POST
@@ -6045,7 +6111,9 @@ with specific codes:
   name resolved to the empty string, so the line would go out under no name at
   all. `{{blank}}: acme` with `blank` holding `""` is not a header the caller
   can see: the name is empty, and what libcurl is handed is the line
-  `": acme"`. Nothing further down refuses it - the pre-send gate
+  `": acme"`. A name of nothing but spaces and tabs counts as empty: it is
+  trimmed to nothing first (see `invalid_header_name`, below). Nothing further
+  down refuses it - the pre-send gate
   reads a header's text for the bytes that end a line early, and an absent name
   ends nothing - so composition is where it is caught. The message names the
   name as written, which is all there is to name; what it produced is nothing.
@@ -6067,6 +6135,36 @@ with specific codes:
   began resolving, with the call named in front of the same wording, and a data
   row that binds a name away is refused at bind time with the row in front of it
   (see [Scenario runs](#scenario-runs)).
+- `400` `{"error": {"code": "invalid_header_name", "message": "..."}}` - a
+  header name that is not an RFC 9110 `token` once the spaces and tabs around
+  it are trimmed (issue #2467): `X Bad` (an interior space), `X:Bad` (a colon),
+  `X-é` (a byte outside ASCII). The message quotes the name and says which
+  character cannot appear in one. Nothing is rewritten into a different
+  header: the trim below is for padding, which has one reading, and this
+  refusal is for what has none. The same refusal, under the same code, answers
+  a `headers` name posted to `POST /execute` or `POST /runs` and the
+  execute-time residual pass (a buffered send answers `statusCode: 0` with
+  `INTERNAL_ERROR`, a streaming send a `400`, as above), which is where a name
+  a pre-request script defined, or one a script's variable completes, is
+  judged; a script's `pm.sendRequest` and a data cell bound into a name refuse
+  the same way, with the call or the row in front of the wording. A `{{token}}`
+  nothing answered is not judged, since like every unanswered token it is sent
+  as written, but the text around it is: `X-{{a}}-b` passes, `X Bad {{x}}` and
+  `Evil: injected{{` (a `{{` that closes no token is ordinary text) are refused,
+  quoted as written.
+
+  **Header names are trimmed, then checked.** A name loses the spaces and tabs
+  (SP and HTAB, nothing else) at either end before it is checked or sent,
+  wherever it enters: a stored
+  request's header rows, a composed or resolved name, and the `headers` of
+  `POST /execute` and `POST /runs`. `Authorization ` therefore goes out as
+  `Authorization`, not as the line `Authorization : Bearer x` with a space before
+  its colon. A row whose key is only padding is no row, as an empty key always
+  was. A value is not trimmed. Two lines written `X-A` and ` X-A` are a repeat
+  the caller typed, sent as two lines, not a collision. In the object form of
+  `headers` two keys that differ only by padding or case fold to one line (the
+  last value wins), because an object has one slot per key; the array form
+  sends both.
 
 ### POST /execute
 
@@ -6160,7 +6258,15 @@ given and in its own spelling, so a name may repeat (`Link`, `Forwarded`, two
 order. The older object form (`{"Accept": "application/json"}`) is still
 accepted and behaves as it always did: one line per key, so it cannot repeat a
 name. A line without a string `name` and a string `value`, or `headers` of any
-other type, is a `400`. `POST /runs` reads the same field the same way. What
+other type, is a `400`. A name is **trimmed of the spaces and tabs around it**
+and what is left must be an RFC 9110 token: one that is not (`X Bad`, `X:Bad`,
+`X-é`) is a `400` with code `invalid_header_name` quoting the name, in either
+shape and before any run row exists (a name still holding a `{{token}}` waits
+for the residual pass below, which judges it once resolved); a name of only
+padding is the empty name the residual pass refuses (`empty_header_name`). The
+refusal and the trim are the ones [`POST /compose`](#post-compose) documents.
+`POST /runs` reads the same field the same way, and refuses a single-request
+run's bad name with the same `400` before the run row exists. What
 the engine adds (an auth header, the body-implied `Content-Type`, the
 [defaults](#default-request-headers)) is added only under a name no line
 already carries, compared without case; a typed `Authorization` sent twice is
@@ -8661,6 +8767,11 @@ stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
 
+The sequential collection runner follows the same population, with two differences:
+its `latency` block is computed **exact nearest-rank** over every sent step's duration
+rather than from an HDR histogram, and a run in which no step sent stores a count of `0`
+and the report omits the block (issue #2389).
+
 ### GET /runs/:runId/metrics
 
 Paginated **historical time-series** (JSON) for a run's charts. The response is
@@ -8907,6 +9018,8 @@ and show an indeterminate bar the way it would against an older engine that
 never sent this frame at all. One frame ahead of the work rather than a number
 on every tick, because this run publishes no ticks to carry one: the load
 path's total rides its `metrics` events precisely because that path has them.
+(A collection run's report likewise reads its `latency` from the stored summary, not from
+ticks: see [the report](#get-runsrunidreport).)
 
 **A run with a [`monitor` block](#the-monitor-block-server-vitals) also streams
 `monitor` events**, one per successful scrape, interleaved with its `metrics`
@@ -9960,9 +10073,20 @@ never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
-`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
-per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
-**perceived** latency.
+`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
+`summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
+latency.
+
+**A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
+over the [latency population](#latency-population) of the sequential path: every step whose
+transfer ran, answered or not, and not a step the plan skipped or one refused before the wire.
+That is the sample the run's `latency*Ms` [budgets](#the-thresholds-block-passfail-budgets)
+judge, from one computation, so `latency.p99` equals the `actual` of a `latencyP99Ms` check.
+Unlike the HDR histogram the load paths read, the figures are **exact nearest-rank** over the
+full sample (`avg` is its mean), and they are not read from the `results[]` rows, which can
+include a skipped step's `0` ms and are thinned past `maxScenarioStoredSteps`. A collection run
+in which no step sent has **no `latency` block** rather than zeros. A summary written before
+this existed carries no `latency` and reports from the stored rows as before.
 
 `summary.failedRequests` and `summary.errorRate` are the
 [one error definition](#what-counts-as-an-error), recounted from the run's

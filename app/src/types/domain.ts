@@ -186,6 +186,24 @@ export type RequestBody =
  */
 export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
 
+/** Where a token or refresh request carries an {@link OAuth2ParamRow}. */
+export type OAuth2ParamSendAs = "body" | "url" | "header";
+
+/**
+ * One extra request parameter of an OAuth 2.0 config (issue #2536): an Auth0
+ * `audience`, an Azure AD `resource`, an `acr_values`. Absent `enabled` means
+ * enabled and absent `sendAs` means `body`; the authorize request reads
+ * neither, every row of `authorizationParams` rides its URL query. The engine
+ * sends the rows and keys the token cache by them
+ * (`engine/include/vayu/http/oauth_client.hpp`).
+ */
+export interface OAuth2ParamRow {
+	key: string;
+	value: string;
+	enabled?: boolean;
+	sendAs?: OAuth2ParamSendAs;
+}
+
 /**
  * OAuth 2.0 configuration. Every string field may contain {{variables}},
  * resolved app-side before the config is sent to the engine. `state` is
@@ -213,6 +231,12 @@ export interface OAuth2Config {
 	autoRefreshToken?: boolean; // default true
 	useEmbeddedBrowser?: boolean; // default false
 	credentialsId?: string; // default "default"
+	/** Appended to the authorize URL's query (authorization_code). Absent when empty. */
+	authorizationParams?: OAuth2ParamRow[];
+	/** Appended to a fresh grant's token request. Absent when empty. */
+	tokenParams?: OAuth2ParamRow[];
+	/** Appended to a refresh request. Absent when empty. */
+	refreshParams?: OAuth2ParamRow[];
 }
 
 /**

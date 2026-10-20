@@ -24,6 +24,7 @@
 
 #include "vayu/core/path_template.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/request_composer.hpp"
@@ -537,10 +538,18 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
     return targets;
 }
 
+/// A name that goes out as it stands: a token with no padding. Anything else
+/// is the walk's to trim or refuse (issue #2467).
+bool is_sendable_header_name (const std::string& name) {
+    return vayu::http::trim_optional_whitespace (name).size () == name.size () &&
+    !vayu::http::invalid_header_token (name);
+}
+
 /**
  * Whether the names have to be read at all: a name still holding a token,
- * which the walk below resolves, or a name that is already nothing, which it
- * refuses.
+ * which the walk below resolves, a name that is already nothing, which it
+ * refuses, or one that is not a token or carries padding (issue #2467), which
+ * it trims or refuses - a pre-request script can set any string as a name.
  *
  * The second half is what widens this pass past the tokens (issue #1095). The
  * gate exists so an ordinary request pays one search per field and no more, and
@@ -557,7 +566,8 @@ std::vector<std::string*> resolvable_strings (vayu::Request& request) {
  */
 bool a_header_name_needs_reading (const vayu::HeaderList& headers) {
     return std::any_of (headers.begin (), headers.end (), [] (const vayu::HeaderLine& line) {
-        return line.name.empty () || holds_a_token (line.name);
+        return line.name.empty () || holds_a_token (line.name) ||
+        !is_sendable_header_name (line.name);
     });
 }
 
@@ -587,8 +597,13 @@ ResidualRefusal refusal_of (std::string reason, std::string_view code) {
  * token for the gate to find - see `a_header_name_needs_reading` for why this
  * rule widened there and the collision rule did not.
  *
+ * A name that is not a token once trimmed is refused too (issue #2467), in that
+ * rule's one wording: composition judged every name it could see, and this is
+ * where one a script defined, or one composition left written for a variable
+ * the script then defined, is read. A token nothing answered stays as written.
+ *
  * @return the first refusal, the headers left as they were; nothing, and the
- *         lines rebuilt, when no name collides or comes out empty.
+ *         lines rebuilt, when no name collides, comes out empty or is invalid.
  */
 std::optional<ResidualRefusal> resolve_header_names (vayu::HeaderList& headers,
 const vayu::http::VariableValues& vars) {
@@ -599,13 +614,18 @@ const vayu::http::VariableValues& vars) {
     // Kept beside `resolved` so a refusal can name both spellings.
     vayu::http::HeaderNameOrigins produced;
     for (const auto& [name, value] : headers) {
-        std::string resolved_name = vayu::http::resolve_template (name, vars);
+        std::string resolved_name = std::string (vayu::http::trim_optional_whitespace (
+        vayu::http::resolve_template (name, vars)));
         if (resolved_name.empty ()) {
             return refusal_of (vayu::http::describe_empty_header_name (name),
             vayu::http::EMPTY_HEADER_NAME_CODE);
         }
-        if (auto collision =
-            vayu::http::record_produced_name (produced, resolved_name, name)) {
+        if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
+            return refusal_of (std::move (*invalid), vayu::http::INVALID_HEADER_NAME_CODE);
+        }
+        // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.
+        if (auto collision = vayu::http::record_produced_name (produced, resolved_name,
+            std::string (vayu::http::trim_optional_whitespace (name)))) {
             return refusal_of (vayu::http::describe_header_name_collision (*collision),
             vayu::http::COLLIDING_HEADER_NAMES_CODE);
         }

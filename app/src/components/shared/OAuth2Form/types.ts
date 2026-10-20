@@ -6,7 +6,7 @@
  */
 
 import type { ComponentType } from "react";
-import type { OAuth2Config } from "@/types";
+import type { OAuth2Config, VariableSupport } from "@/types";
 
 /**
  * Text input the form renders for every string field. Injected so the request
@@ -37,4 +37,10 @@ export interface OAuth2FormProps {
 	resolveKey?: string;
 	/** Variable-aware text input; falls back to a plain input when omitted. */
 	TextInput?: OAuth2TextInput;
+	/**
+	 * The variable scope the extra-parameter tables edit inside (the key/value
+	 * table's own prop). Omitted, they resolve nothing and offer no `{{`
+	 * autocomplete, like the collection editor's plain fields.
+	 */
+	variables?: VariableSupport;
 }

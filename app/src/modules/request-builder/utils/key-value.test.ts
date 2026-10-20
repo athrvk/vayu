@@ -60,6 +60,35 @@ describe("toHeaderRows", () => {
 		expect(toHeaderRows(rows)).toEqual([{ name: "B", value: "" }]);
 	});
 
+	it("trims the spaces and tabs around a name, and only those", () => {
+		// Mutation check: emit item.key as typed and the padded names keep their
+		// padding, which the engine would read as a different header.
+		const rows = [
+			row(" X-A ", { value: " keeps its padding " }),
+			row("Authorization\t"),
+			row(" \tX-B"),
+			row("X C"),
+		];
+		expect(toHeaderRows(rows)).toEqual([
+			{ name: "X-A", value: " keeps its padding " },
+			{ name: "Authorization", value: "v" },
+			{ name: "X-B", value: "v" },
+			{ name: "X C", value: "v" },
+		]);
+	});
+
+	it("skips a key of only spaces and tabs, and leaves other whitespace to the engine", () => {
+		expect(toHeaderRows([row("   "), row("\t"), row(" \t "), row("X-Kept")])).toEqual([
+			{ name: "X-Kept", value: "v" },
+		]);
+		// String.prototype.trim would drop these; the engine trims neither and
+		// refuses the name (invalid_header_name), so they are sent on.
+		expect(toHeaderRows([row("\n"), row("\u00a0")]).map((l) => l.name)).toEqual([
+			"\n",
+			"\u00a0",
+		]);
+	});
+
 	it("reads a stored row with no flag as enabled, as the engine does", () => {
 		expect(toHeaderRows([{ key: "A", value: "1" }])).toEqual([{ name: "A", value: "1" }]);
 	});
@@ -103,5 +132,18 @@ describe("bodyModeHeaders", () => {
 		];
 		// Listed under the spelling the first row used, the engine's map key.
 		expect(bodyModeHeaders(bodyModeLast)).toEqual({ bodyModeHeaders: ["content-type"] });
+	});
+
+	it("matches a padded name by its trimmed spelling, and lists it trimmed", () => {
+		// Mutation check: key the map by the padded name and the typed row stays
+		// a different header from the body mode's, so the body mode's is reported.
+		const typedPadded = [
+			row("Content-Type", { source: "body-mode" }),
+			row(" content-type\t", { value: "text/csv" }),
+		];
+		expect(bodyModeHeaders(typedPadded)).toEqual({});
+		const bodyModePadded = [row(" Content-Type ", { source: "body-mode" })];
+		expect(bodyModeHeaders(bodyModePadded)).toEqual({ bodyModeHeaders: ["Content-Type"] });
+		expect(bodyModeHeaders([row("  ", { source: "body-mode" })])).toEqual({});
 	});
 });

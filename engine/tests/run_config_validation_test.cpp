@@ -1083,6 +1083,35 @@ TEST_F (RunConfigValidationRouteTest, AnExecuteTimeoutInRangeSends) {
     EXPECT_EQ (status, 200) << body.dump ();
 }
 
+// A header name that is not a token is a `400` naming the rule's code, before any
+// row exists and with nothing sent, on both routes (#2467). Mutation check: drop
+// the `invalid_header_name_refusal` call in `stored_header_name`
+// (`utils/json.cpp`), or the `detail_code` copy in `build_request`, and the
+// first case answers 200 or loses its code; drop `refuse_invalid_header_name`
+// from `validate_load_request` and the second answers 202.
+TEST_F (RunConfigValidationRouteTest, AHeaderNameThatIsNotATokenIsRefusedOnBothRoutes) {
+    const vayu::tests::EchoServer echo;
+    const json bad_lines = json::array ({ { { "name", "X Bad" }, { "value", "v" } } });
+
+    json execute{ { "method", "GET" }, { "url", echo.url () }, { "headers", bad_lines } };
+    const auto [execute_status, execute_body] = post ("/execute", execute);
+    EXPECT_EQ (execute_status, 400) << execute_body.dump ();
+    EXPECT_EQ (execute_body["error"]["code"], "invalid_header_name")
+    << execute_body.dump ();
+    EXPECT_NE (vayu::http::routes::error_message_of (execute_body).find ("'X Bad'"),
+    std::string::npos)
+    << execute_body.dump ();
+
+    json run                          = iterations_run (echo);
+    run["headers"]                    = { { "X:Bad", "v" } };
+    const auto [run_status, run_body] = post_run (run);
+    EXPECT_EQ (run_status, 400) << run_body.dump ();
+    EXPECT_EQ (run_body["error"]["code"], "invalid_header_name") << run_body.dump ();
+
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the request was sent";
+}
+
 // A collection run (a scenario with a missing, empty or non-string `mode`)
 // scrapes nothing, so a `monitor` block beside it used to be accepted and never
 // read (#1939). Mutation check: drop the `refuse_monitor_on_collection_run`

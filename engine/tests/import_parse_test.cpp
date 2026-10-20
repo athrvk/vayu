@@ -56,6 +56,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/oauth_client.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "wide_json.hpp"
 
@@ -304,8 +305,7 @@ nlohmann::ordered_json bare_request (const std::string& name) {
 }
 
 // A parent's folders and requests share one `order` space (#2535). A draft
-// that states no `order` - every importer but Postman's and a Vayu-written
-// OpenAPI document - keeps the display it always had, its folders first and
+// that states no `order` keeps the display it always had, its folders first and
 // its requests after them, and a draft that states one is placed by it.
 TEST (ImportApplyPayload, NumbersFoldersAndRequestsInOneSpace) {
     nlohmann::ordered_json root = bare_draft ("root");
@@ -2332,8 +2332,12 @@ TEST (PostmanImport, CountsAPreFetchedOAuth2TokenDroppedAlongsideAGrantConfig) {
     // the general shape always fetches through `accessTokenUrl` instead.
     EXPECT_FALSE (auth.at ("config").contains ("accessToken"));
     EXPECT_FALSE (auth.at ("config").contains ("token"));
+    // The visible kind means the saved token alone, named per request.
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+    EXPECT_EQ (skipped_named (parsed, "oauth2_dropped_field"), Names{ "R" });
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_state_regenerated"));
 }
 
 TEST (PostmanImport, CountsAnOAuth2StateThatVayuNeverStores) {
@@ -2355,8 +2359,11 @@ TEST (PostmanImport, CountsAnOAuth2StateThatVayuNeverStores) {
     // Vayu generates and validates its own CSRF state per authorization
     // attempt; a fixed imported value has no field to sit in.
     EXPECT_FALSE (config.contains ("state"));
-    EXPECT_EQ (
-    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_dropped_field"), 1);
+    // Counted apart from the saved-token kind (issue #2536): a regenerated
+    // state changes nothing sent, so the preview can leave it out.
+    const json counts = skip_counts (parsed.result.at ("meta").at ("skipped"));
+    EXPECT_EQ (counts.at ("oauth2_state_regenerated"), 1);
+    EXPECT_FALSE (counts.contains ("oauth2_dropped_field"));
 }
 
 TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
@@ -2380,6 +2387,154 @@ TEST (PostmanImport, StoresOAuth2TokenNameAsCredentialsId) {
     // Stored, not dropped: `tokenName` alone must not tally as a loss.
     EXPECT_FALSE (
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("oauth2_dropped_field"));
+}
+
+/// The `names` a count carries (issue #2536), `[]` when it has none.
+Names skipped_dropped_names (const ImportParse& parsed, const std::string& kind) {
+    for (const auto& item : parsed.result.at ("meta").at ("skipped")) {
+        if (item.at ("kind") == kind) {
+            return item.contains ("names") ? item.at ("names").get<Names> () : Names{};
+        }
+    }
+    ADD_FAILURE () << "no " << kind << " counted";
+    return {};
+}
+
+/**
+ * Postman's extra token, authorization and refresh request parameters
+ * (issue #2536). An `audience` or `resource` sent in a token or authorization
+ * request's body is the config field the engine already sends; every other
+ * enabled row is carried in its list; a row with no key, a `send_as` with no
+ * Vayu target, or a name the engine writes itself is counted by key alone.
+ * Mutation checks: stop reading `tokenRequestParams` and the config
+ * assertions fail; drop the `credentialsId` assignment and its assertion
+ * fails.
+ */
+TEST (PostmanImport, ReadsOAuth2ExtraRequestParameters) {
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"Auth0","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"authorization_code"},
+                {"key":"authUrl","value":"https://auth.example.com/authorize"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"tokenRequestParams","value":[
+                    {"key":"audience","value":"https://off.example","enabled":false,"send_as":"request_body"},
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"resource","value":"{{ resource }}","enabled":true},
+                    {"key":"tenant","value":"t1","enabled":true,"send_as":"request_url"},
+                    {"key":"acr_values","value":"mfa","enabled":true,"send_as":"request_body"},
+                    {"key":"x-trace","value":"1","enabled":true,"send_as":"request_header"},
+                    {"key":"client_secret","value":"s3cr3t-param","enabled":true,"send_as":"request_body"},
+                    {"key":"","value":"orphan","enabled":true},
+                    {"key":"nonce","value":"n","enabled":true,"send_as":"request_cookie"}
+                ],"type":"any"},
+                {"key":"authRequestParams","value":[
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"prompt","value":"consent","enabled":true,"send_as":"request_url"},
+                    {"key":"audience","value":"https://other.example","enabled":true,"send_as":"request_body"}
+                ],"type":"any"},
+                {"key":"refreshRequestParams","value":[
+                    {"key":"audience","value":"https://api.example","enabled":true,"send_as":"request_body"},
+                    {"key":"refresh_token","value":"rt-1","enabled":true}
+                ],"type":"any"}
+            ]}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // The disabled row ahead of it is not read, so the enabled one is promoted.
+    EXPECT_EQ (config.at ("audience"), "https://api.example");
+    EXPECT_EQ (config.at ("resource"), "{{resource}}");
+    // No `tokenName`: the audience separates this config's cached token.
+    EXPECT_EQ (config.at ("credentialsId"), "https://api.example");
+    EXPECT_EQ (config.at ("tokenParams"), json::parse (R"([
+        {"key":"tenant","value":"t1","enabled":true,"sendAs":"url"},
+        {"key":"acr_values","value":"mfa","enabled":true,"sendAs":"body"},
+        {"key":"x-trace","value":"1","enabled":true,"sendAs":"header"}])"));
+    // The repeated audience is already sent; a different one is carried
+    // rather than contradicting it. No target: it rides in the authorize URL.
+    EXPECT_EQ (config.at ("authorizationParams"), json::parse (R"([
+        {"key":"prompt","value":"consent","enabled":true},
+        {"key":"audience","value":"https://other.example","enabled":true}])"));
+    // A refresh does not send the config's audience, so it stays a row.
+    EXPECT_EQ (config.at ("refreshParams"), json::parse (R"([
+        {"key":"audience","value":"https://api.example","enabled":true,"sendAs":"body"}])"));
+
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("oauth2_unmapped_param"), 4);
+    EXPECT_EQ (skipped_named (parsed, "oauth2_unmapped_param"), Names{ "Auth0" });
+    EXPECT_EQ (skipped_dropped_names (parsed, "oauth2_unmapped_param"),
+    (Names{ "client_secret", "nonce", "refresh_token" }));
+    // A key is named, a value never: either can be a credential.
+    const std::string skipped = parsed.result.at ("meta").at ("skipped").dump ();
+    for (const char* value : { "s3cr3t-param", "rt-1", "orphan" }) {
+        EXPECT_EQ (skipped.find (value), std::string::npos) << value;
+    }
+}
+
+TEST (PostmanImport, ReadsOAuth2ExtraRequestParametersFromAV20DetailObject) {
+    const ImportParse parsed = parse_import (R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},"item":[
+        {"name":"V2","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":{
+                "grant_type":"client_credentials",
+                "accessTokenUrl":"https://auth.example.com/token",
+                "tokenRequestParams":[
+                    {"key":"resource","value":"https://graph.example"},
+                    {"key":"scope","value":"read"},
+                    {"key":"acr_values","value":"mfa","enabled":false}],
+                "authRequestParams":[{"key":"prompt","value":"login","send_as":"request_url"}],
+                "refreshRequestParams":[{"key":"tenant","value":"t1","send_as":"request_url"}]
+            }}}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& config =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("auth").at (
+    "config");
+    // A row with no `enabled` is on, and with no `send_as` is sent in the body.
+    EXPECT_EQ (config.at ("resource"), "https://graph.example");
+    EXPECT_FALSE (config.contains ("audience"));
+    EXPECT_EQ (config.at ("credentialsId"), "https://graph.example");
+    EXPECT_FALSE (config.contains ("tokenParams"));
+    EXPECT_EQ (config.at ("authorizationParams"),
+    json::parse (R"([{"key":"prompt","value":"login","enabled":true}])"));
+    EXPECT_EQ (config.at ("refreshParams"), json::parse (R"([
+        {"key":"tenant","value":"t1","enabled":true,"sendAs":"url"}])"));
+    EXPECT_EQ (skipped_dropped_names (parsed, "oauth2_unmapped_param"), Names{ "scope" });
+}
+
+/// Two imports differing only in their audience must not share one cached
+/// token: the cache key reads `credentialsId` and not `audience`, so the
+/// audience fills it when Postman named no token. A `tokenName` still wins.
+TEST (PostmanImport, SeparatesTheCachedTokensOfTwoImportedAudiences) {
+    const auto request = [] (const std::string& name, const std::string& extra) {
+        return R"({"name":")" + name + R"(","request":{"method":"GET","url":"https://api.example.com/x",
+            "auth":{"type":"oauth2","oauth2":[
+                {"key":"grant_type","value":"client_credentials"},
+                {"key":"accessTokenUrl","value":"https://auth.example.com/token"},
+                {"key":"clientId","value":"abc"})" +
+        extra + R"(]}}})";
+    };
+    const auto audience = [] (const std::string& value) {
+        return R"(,{"key":"tokenRequestParams","value":[{"key":"audience","value":")" +
+        value + R"(","enabled":true,"send_as":"request_body"}]})";
+    };
+    const ImportParse parsed =
+    parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) +
+    R"("},"item":[)" + request ("A", audience ("https://a.example")) + "," +
+    request ("B", audience ("https://b.example")) + "," +
+    request ("Named", audience ("https://a.example") + R"(,{"key":"tokenName","value":"Prod"})") + "]}",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    const auto key_of    = [&requests] (size_t at) {
+        return vayu::http::oauth::cache_key (requests.at (at).at ("auth").at ("config"));
+    };
+    EXPECT_NE (key_of (0), key_of (1));
+    EXPECT_EQ (requests.at (2).at ("auth").at ("config").at ("credentialsId"), "Prod");
 }
 
 // Issue #1771: a query row holds raw query text, as Postman's
@@ -2952,6 +3107,191 @@ TEST_F (ImportParseRoute, APostmanCollectionOfFoldersOnlyIsUnchanged) {
         ASSERT_HAS_VALUE (row) << temp;
         EXPECT_EQ (row->order, temp == std::string ("c2") ? 0 : 1);
     }
+}
+
+/// A plan whose samplers sit before, between and after controllers, three
+/// levels deep, with a disabled sampler and a second ThreadGroup in the way.
+const char* INTERLEAVED_JMETER_PLAN = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan jmeter="5.6.3"><hashTree>
+  <TestPlan testname="P"/><hashTree>
+    <ThreadGroup testname="G1"/><hashTree>
+      <HTTPSamplerProxy testname="A"><stringProp name="HTTPSampler.path">/a</stringProp></HTTPSamplerProxy><hashTree/>
+      <LoopController testname="Loop"/><hashTree>
+        <HTTPSamplerProxy testname="X"><stringProp name="HTTPSampler.path">/x</stringProp></HTTPSamplerProxy><hashTree/>
+        <TransactionController testname="Inner"/><hashTree>
+          <HTTPSamplerProxy testname="Y"><stringProp name="HTTPSampler.path">/y</stringProp></HTTPSamplerProxy><hashTree/>
+        </hashTree>
+        <HTTPSamplerProxy testname="Z"><stringProp name="HTTPSampler.path">/z</stringProp></HTTPSamplerProxy><hashTree/>
+      </hashTree>
+      <HTTPSamplerProxy testname="Off" enabled="false"><stringProp name="HTTPSampler.path">/off</stringProp></HTTPSamplerProxy><hashTree/>
+      <HTTPSamplerProxy testname="B"><stringProp name="HTTPSampler.path">/b</stringProp></HTTPSamplerProxy><hashTree/>
+    </hashTree>
+    <ThreadGroup testname="G2"/><hashTree>
+      <HTTPSamplerProxy testname="C"><stringProp name="HTTPSampler.path">/c</stringProp></HTTPSamplerProxy><hashTree/>
+    </hashTree>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+
+// A JMeter plan runs its elements in tree order, a controller where it sits
+// (#2573); the import keeps that order, so the sidebar lists it and a
+// recursive run visits it the same way. Mutation check: stop stamping `order`
+// in jmeter_import.cpp's `Sink` and this reds.
+TEST_F (ImportParseRoute, AJmeterPlanKeepsItsTreeOrder) {
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", INTERLEAVED_JMETER_PLAN } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+
+    using vayu::tests::listed_children;
+    EXPECT_EQ (listed_children (*db_, root),
+    (std::vector<std::string>{ "request:A", "folder:Loop", "request:B", "request:C" }));
+    const std::string loop = vayu::tests::child_folder_id (*db_, root, "Loop");
+    EXPECT_EQ (listed_children (*db_, loop),
+    (std::vector<std::string>{ "request:X", "folder:Inner", "request:Z" }));
+
+    std::vector<std::string> run;
+    for (const auto& request : db_->get_requests_in_subtree (root)) {
+        run.push_back (request.name);
+    }
+    EXPECT_EQ (run, (std::vector<std::string>{ "A", "X", "Y", "Z", "B", "C" }));
+}
+
+// A plan of controllers only lists them as the document does, numbered from 0
+// as before #2573.
+TEST_F (ImportParseRoute, AJmeterPlanOfControllersOnlyIsUnchanged) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"(<?xml version="1.0"?><jmeterTestPlan jmeter="5.6.3"><hashTree>
+        <TestPlan testname="P"/><hashTree>
+          <LoopController testname="B"/><hashTree/>
+          <IfController testname="A"/><hashTree/>
+        </hashTree></hashTree></jmeterTestPlan>)" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    EXPECT_EQ (vayu::tests::listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:B", "folder:A" }));
+    for (const char* temp : { "c2", "c3" }) {
+        const auto row = db_->get_collection (body.at ("idMap").at (temp));
+        ASSERT_HAS_VALUE (row) << temp;
+        EXPECT_EQ (row->order, temp == std::string ("c2") ? 0 : 1);
+    }
+}
+
+/// An Insomnia v4 export whose resource list is not in sort-key order: sparse
+/// and negative keys, a tie, and a gRPC request with no key that takes no
+/// position. By key the root lists A, Mid, Tie, C.
+const char* INTERLEAVED_INSOMNIA_V4 = R"json({"_type":"export","__export_format":4,"resources":[
+  {"_id":"wrk_1","_type":"workspace","name":"W"},
+  {"_id":"fld_c","_type":"request_group","parentId":"wrk_1","name":"C","metaSortKey":5},
+  {"_id":"req_mid","_type":"request","parentId":"wrk_1","name":"Mid","method":"GET","url":"https://x.test/mid","metaSortKey":-20},
+  {"_id":"fld_a","_type":"request_group","parentId":"wrk_1","name":"A","metaSortKey":-1000.5},
+  {"_id":"greq_1","_type":"grpc_request","parentId":"wrk_1","name":"G"},
+  {"_id":"req_tie","_type":"request","parentId":"wrk_1","name":"Tie","method":"GET","url":"https://x.test/tie","metaSortKey":-20},
+  {"_id":"req_in_c","_type":"request","parentId":"fld_c","name":"InC","method":"GET","url":"https://x.test/c","metaSortKey":1},
+  {"_id":"req_in_a","_type":"request","parentId":"fld_a","name":"InA","method":"GET","url":"https://x.test/a","metaSortKey":1}
+]})json";
+
+/// The same tree as a v5 YAML export, which sorts by `meta.sortKey`.
+const char* INTERLEAVED_INSOMNIA_V5 = R"yaml(type: collection.insomnia.rest/5.0
+name: W
+collection:
+  - name: C
+    meta: { id: fld_c, sortKey: 5 }
+    children:
+      - name: InC
+        url: https://x.test/c
+        method: GET
+        meta: { id: req_in_c, sortKey: 1 }
+  - name: Mid
+    url: https://x.test/mid
+    method: GET
+    meta: { id: req_mid, sortKey: -20 }
+  - name: A
+    meta: { id: fld_a, sortKey: -1000.5 }
+    children:
+      - name: InA
+        url: https://x.test/a
+        method: GET
+        meta: { id: req_in_a, sortKey: 1 }
+  - name: G
+    url: grpcb.in:9000
+    protoFileId: pf_1
+    meta: { id: greq_1 }
+  - name: Tie
+    url: https://x.test/tie
+    method: GET
+    meta: { id: req_tie, sortKey: -20 }
+)yaml";
+
+// Insomnia lists a folder's requests and sub-folders together by ascending sort
+// key and runs them in that order (#2573). Each draft states its dense rank
+// among the siblings that import: the gRPC request takes none, so C is 3 and not
+// 4, and the raw keys are never written. v4 and v5 share the rule, so both
+// documents answer alike. Mutation checks: stop stamping `order` in
+// `InsomniaTree::build_collection` and this reds; stop carrying `meta.sortKey`
+// in `InsomniaV5Flattener::add_item` and the v5 half reds.
+TEST_F (ImportParseRoute, AnInsomniaExportKeepsItsSortKeyOrder) {
+    for (const char* document : { INTERLEAVED_INSOMNIA_V4, INTERLEAVED_INSOMNIA_V5 }) {
+        SCOPED_TRACE (document);
+        auto [status, body] =
+        vayu::http::routes::import_response (*db_, json{ { "content", document } });
+        ASSERT_EQ (status, 200) << body.dump ();
+        const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+
+        using vayu::tests::listed_children;
+        EXPECT_EQ (listed_children (*db_, root),
+        (std::vector<std::string>{ "folder:A", "request:Mid", "request:Tie", "folder:C" }));
+        const std::string folder_c = vayu::tests::child_folder_id (*db_, root, "C");
+        const auto row = db_->get_collection (folder_c);
+        ASSERT_HAS_VALUE (row);
+        EXPECT_EQ (row->order, 3);
+
+        std::vector<std::string> run;
+        for (const auto& request : db_->get_requests_in_subtree (root)) {
+            run.push_back (request.name);
+        }
+        EXPECT_EQ (run, (std::vector<std::string>{ "InA", "Mid", "Tie", "InC" }));
+    }
+}
+
+// One keyless request that becomes a draft keeps its whole parent in the
+// listing every unordered import has, folders first (#2573); a sibling parent
+// whose children are all keyed is still sorted, and an unsupported resource
+// without a key blocks neither.
+TEST_F (ImportParseRoute, AnInsomniaParentWithAMissingKeyStaysFoldersFirst) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"json({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk_1","_type":"workspace","name":"W"},
+        {"_id":"req_r1","_type":"request","parentId":"wrk_1","name":"R1","method":"GET","url":"https://x.test/1","metaSortKey":-9},
+        {"_id":"req_r2","_type":"request","parentId":"wrk_1","name":"R2","method":"GET","url":"https://x.test/2"},
+        {"_id":"fld_f","_type":"request_group","parentId":"wrk_1","name":"F","metaSortKey":100},
+        {"_id":"req_x","_type":"request","parentId":"fld_f","name":"X","method":"GET","url":"https://x.test/x","metaSortKey":9},
+        {"_id":"req_y","_type":"request","parentId":"fld_f","name":"Y","method":"GET","url":"https://x.test/y","metaSortKey":1},
+        {"_id":"ws_1","_type":"websocket_request","parentId":"fld_f","name":"WS"}
+      ]})json" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    using vayu::tests::listed_children;
+    EXPECT_EQ (listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:F", "request:R1", "request:R2" }));
+    EXPECT_EQ (listed_children (*db_, vayu::tests::child_folder_id (*db_, root, "F")),
+    (std::vector<std::string>{ "request:Y", "request:X" }));
+}
+
+// An export that carries no sort keys, or a workspace of folders only, lists as
+// it did before #2573.
+TEST_F (ImportParseRoute, AnInsomniaExportWithoutSortKeysIsUnchanged) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"json({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk_1","_type":"workspace","name":"W"},
+        {"_id":"req_r","_type":"request","parentId":"wrk_1","name":"R","method":"GET","url":"https://x.test/r"},
+        {"_id":"fld_b","_type":"request_group","parentId":"wrk_1","name":"B"},
+        {"_id":"fld_a","_type":"request_group","parentId":"wrk_1","name":"A"}
+      ]})json" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    EXPECT_EQ (vayu::tests::listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:B", "folder:A", "request:R" }));
 }
 
 /// What an import writes is what the write routes accept: a binary body
