@@ -177,6 +177,7 @@ add_executable(vayu_tests
     url_scheme_test.cpp
     openapi_document_test.cpp
     import_parse_test.cpp
+    script_api_scan_test.cpp
     jmeter_import_test.cpp
     openapi_drafts_test.cpp
     spec_diff_test.cpp

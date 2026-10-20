@@ -3482,10 +3482,21 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "format": "Postman Collection v2.1", "requestCount": 2, "folderCount": 1,
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
-    "nonExecutableAuth": 0, "unattachedFileParts": 0
+    "nonExecutableAuth": 0, "unattachedFileParts": 0,
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["tests[]", "CryptoJS"] } ]
   }
 }
 ```
+
+**`meta.unsupportedScriptApis`** (Postman only, issue
+[#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
+each request, folder or collection (by its name) whose imported scripts use a
+Postman script API Vayu does not run, and which ones - `tests[]`,
+`responseBody`, `postman.*`, `require()`, `script.packages`, a bundled library
+such as `CryptoJS`, and the other rows of the table in
+`engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
+other format, is not a `meta.skipped` kind, and never changes what is imported;
+`docs/app/import-collections/postman.md#scripts` has the rules.
 
 **`meta.skipped`** is one `{kind, count}` per kind the parse counted, in a fixed
 kind order. **`requests`**, when present, names the requests the count applies

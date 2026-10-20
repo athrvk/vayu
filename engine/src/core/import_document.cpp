@@ -30,6 +30,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/core/script_api_scan.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -418,9 +419,15 @@ json with_required_content_type (json headers, const json& body, bool refused = 
     return headers;
 }
 
-/// `joinExec(event)`: a Postman `event` entry's script lines, joined.
+/**
+ * `joinExec(event)`: a Postman `event` entry's script lines, joined. A `script`
+ * that is itself a string is the script's text - Postman's SDK reads one as
+ * `{exec: [text]}` - and used to import as nothing at all.
+ */
 std::string join_exec (const json* event) {
-    const json* exec = prop (prop (event, "script"), "exec");
+    const json* script = prop (event, "script");
+    const json* exec =
+    script != nullptr && script->is_string () ? script : prop (script, "exec");
     if (exec != nullptr && exec->is_array ()) {
         std::string out;
         for (size_t at = 0; at < exec->size (); ++at) {
@@ -957,6 +964,11 @@ struct PostmanCounts {
     // The requests each per-request counter grew on, by tally kind - see
     // `pm_request_named`.
     std::map<std::string, std::vector<std::string>> named;
+    // `{request, names}` for each request, folder or collection whose scripts
+    // use a Postman API Vayu does not run (`core/script_api_scan.hpp`), in the
+    // order they were met. Not in `named`: that records which requests a
+    // counter grew on, and this carries a list of its own per subject.
+    json unsupported_script_apis = json::array ();
 };
 
 /**
@@ -1307,6 +1319,14 @@ const char* script_kind_of (const std::string* listen) {
     return nullptr;
 }
 
+/// Whether an event's `script.packages` names any package: Postman's package
+/// library, which Vayu has no way to load.
+bool declares_packages (const json* event) {
+    const json* packages = prop (prop (event, "script"), "packages");
+    return packages != nullptr &&
+    (packages->is_object () || packages->is_array ()) && !packages->empty ();
+}
+
 /**
  * @p events as `script.pre` / `script.post` elements on @p item, one element
  * per event and in the order the document lists them - Postman runs every
@@ -1315,9 +1335,14 @@ const char* script_kind_of (const std::string* listen) {
  * its runtime skips, so it imports turned off rather than running; a blank
  * script contributes nothing, and a `listen` other than the two Vayu runs
  * is not a script Vayu has a phase for.
+ *
+ * The scripts that will run are read for the Postman APIs Vayu does not run
+ * (#2576) and @p item is named in @p counts if it uses any; a disabled event
+ * runs nothing, so it names nothing.
  */
-void set_event_elements (json& item, const std::vector<const json*>& events) {
+void set_event_elements (json& item, const std::vector<const json*>& events, PostmanCounts& counts) {
     json elements = json::array ();
+    UnsupportedScriptApis unsupported;
     for (const json* event : events) {
         const char* kind = script_kind_of (as_str (prop (event, "listen")));
         const std::string script = join_exec (event);
@@ -1328,11 +1353,20 @@ void set_event_elements (json& item, const std::vector<const json*>& events) {
         if (const json* disabled = prop (event, "disabled");
         disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ()) {
             element["enabled"] = false;
+        } else {
+            unsupported.scan (script);
+            if (declares_packages (event)) {
+                unsupported.note_packages ();
+            }
         }
         elements.push_back (std::move (element));
     }
     if (!elements.empty ()) {
         item["elements"] = std::move (elements);
+    }
+    if (!unsupported.empty ()) {
+        counts.unsupported_script_apis.push_back (
+        { { "request", item.at ("name") }, { "names", unsupported.names () } });
     }
 }
 
@@ -1721,7 +1755,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {
-        set_event_elements (request, events);
+        set_event_elements (request, events, counts);
     }
     pm_redirects (item, request, counts.skipped_protocol_behavior);
     if (!examples.empty ()) {
@@ -1803,7 +1837,7 @@ json pm_folder (const json* node, PostmanCounts& counts) {
         collection["name"].get<std::string> ());
     }
     if (counts.options.import_scripts) {
-        set_event_elements (collection, events);
+        set_event_elements (collection, events, counts);
     }
     collection["children"] = std::move (children);
     collection["requests"] = std::move (requests);
@@ -1846,6 +1880,10 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     if (const auto named = counts.named.find ("non_executable_auth");
     named != counts.named.end ()) {
         meta["nonExecutableAuthRequests"] = named->second;
+    }
+    // Absent, not empty, when no script uses one: the member is for a notice.
+    if (!counts.unsupported_script_apis.empty ()) {
+        meta["unsupportedScriptApis"] = std::move (counts.unsupported_script_apis);
     }
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
