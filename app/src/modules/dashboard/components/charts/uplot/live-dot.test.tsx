@@ -41,6 +41,9 @@ function series(n: number): LoadTestMetrics[] {
 		send_rate: 110 + i * 10,
 		throughput: 100 + i * 9,
 		avg_queue_wait_ms: i * 0.5,
+		current_send_rate: 115 + i * 10,
+		window_avg_latency_ms: 25 + i,
+		window_avg_queue_wait_ms: i * 0.5,
 		status_codes: { "200": i * 90, "404": i * 5, "500": i * 3 },
 	}));
 }
