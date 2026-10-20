@@ -264,6 +264,7 @@ inline std::string js_to_string (JSContext* ctx, JSValue val) {
 extern JSClassID request_url_class_id;
 extern JSClassID request_body_class_id;
 extern JSClassID expect_class_id;
+extern JSClassID expect_member_class_id;
 extern JSClassID response_chain_class_id;
 
 // The definitions `ScriptEngine::Impl` registers those ids with. Each stays in
@@ -271,6 +272,7 @@ extern JSClassID response_chain_class_id;
 extern JSClassDef request_url_class;
 extern JSClassDef request_body_class;
 extern JSClassDef expect_class;
+extern JSClassDef expect_member_class;
 extern JSClassDef response_chain_class;
 
 // Name a rejected value the way the script author wrote it, so the error says

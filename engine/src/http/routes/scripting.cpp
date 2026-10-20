@@ -2171,6 +2171,27 @@ nlohmann::json get_script_completions () {
     "data).to.be.an('object');" },
     { "sortText", "2_to_be_an" }, { "filterText", ".to.be.an" } });
 
+    // `a` and `an` are chainable methods: read without a call they are
+    // language words that hand the chain on.
+    completions.push_back ({ { "label", "to.be.an.instanceof" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.be.an.instanceof(${1:Array})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.an.instanceof(constructor: Function)" },
+    { "documentation",
+    "Assert the value is an instance of the constructor; .an and .a read as "
+    "words here, as well as being the type check when called.\n\nExample:\n"
+    "pm.expect(json.items).to.be.an.instanceof(Array);" },
+    { "sortText", "2_to_be_an_instanceof" }, { "filterText", ".to.be.an.instanceof" } });
+
+    completions.push_back ({ { "label", "to.be.a.instanceOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "to.be.a.instanceOf(${1:Date})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", ".to.be.a.instanceOf(constructor: Function)" },
+    { "documentation",
+    "Assert the value is an instance of the constructor, with .a read as a "
+    "word.\n\nExample:\npm.expect(created).to.be.a.instanceOf(Date);" },
+    { "sortText", "2_to_be_a_instanceOf" }, { "filterText", ".to.be.a.instanceOf" } });
+
     completions.push_back ({ { "label", "to.match" }, { "kind", KIND_FUNCTION },
     { "insertText", "to.match(/${1:pattern}/)" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", ".to.match(regex: RegExp)" },

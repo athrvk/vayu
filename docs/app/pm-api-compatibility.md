@@ -428,6 +428,7 @@ classes below, not to these:
                    within takes both bounds in)
 .to.be.closeTo(v, delta) / .approximately(v, delta)          .to.be.oneOf([…])
 .to.be.a(type)    .to.be.an(type)   .to.be.instanceOf(Ctor) / .instanceof(Ctor)
+                  (.a / .an are also words: .to.be.an.instanceof(Ctor))
 .to.have.property(name[, v])        .to.have.nested.property('a.b[0].c'[, v])
 .to.have.own.property(name[, v]) / .ownProperty(name[, v]) / .haveOwnProperty(name[, v])
 .to.have.ownPropertyDescriptor(name[, d]) / .haveOwnPropertyDescriptor(name[, d])
@@ -471,7 +472,11 @@ classes below, not to these:
 ```
 
 The table holds a row for each of chai's 96 members of `Assertion.prototype`
-and for `expect.fail`, and the test fails if it is ever shorter than that.
+and for `expect.fail`, and for nothing else: the test holds the rows to the
+names read off the package in both directions, so a row deleted, renamed or
+added for a member chai does not have fails by name. The `pm.response.to` rows
+are held to chai-postman's names the same way, and to the response assertions
+and status classes this page lists.
 
 **The chain words above are a vocabulary, not a route.** The dotted spellings
 in that table are how the completion popup offers each matcher, not the only
@@ -534,12 +539,17 @@ reads each key as a path, and `nested` together with `own` is a `TypeError`, as
 chai refuses it. `.keys()` with no names is a `TypeError` too: `include.keys([])`
 would pass for every target having compared nothing. `.length` and `.lengthOf`
 are a call (`length(3)`) and a chain (`length.above(2)`), and the ordering
-matchers after one compare the length - a Map's or Set's `size`.
+matchers after one compare the length - a Map's or Set's `size`. `length`
+directly after a chainable method (`include`, `a`, `length` itself,
+`responseTime`) is a `TypeError`, as chai's length guard makes it; write
+`lengthOf` there.
 
 **`.a()` and `.an()` name a value the way chai's `type-detect` does**: `string`,
 `number`, `boolean`, `null`, `undefined`, `array`, `object` and `function`, and
 for anything else the lower-cased tag - `date`, `regexp`, `map`, `set`, `error`,
-`promise`, `symbol`, `bigint`.
+`promise`, `symbol`, `bigint`. Both are chai's chainable methods: read without a
+call they hand the chain on, so `.to.be.an.instanceof(Array)` runs, and the call
+returns the chain, so `.an('array').that.includes(1)` does too.
 
 **`change`, `increase` and `decrease` call the target exactly once**, reading
 the subject before and after, and a `.by(n)` that follows judges that same
@@ -620,8 +630,12 @@ because nothing was asserted, the call itself was wrong. That covers
 **property-style members too** (issue #999): `pm.expect(x).to.be.NaN` is an
 expression statement, so an unimplemented name used to evaluate to `undefined`
 and report PASS whatever the value was. Every name the chain does not carry -
-a typo, or a chai matcher Vayu lacks (`.finite`, `.sealed`, `.frozen`,
-`.extensible`) - now raises a `TypeError` naming itself.
+a typo, or one of the chai-postman members Vayu lacks (`.postmanRequest`,
+`.postmanResponse`, `.postmanRequestOrResponse`) - now raises a `TypeError`
+naming itself. So does a name read off a matcher or a chainable method
+(#2528): a matcher is a call, so `.within.foo` and `.equal.name` are refused,
+and after `include`, `length` or `a` only the chain's own members resolve, so
+`.include.name` is refused rather than answering the function's own name.
 
 **`pm.expect.fail([message])` throws that same `AssertionError` on demand**
 (issue #1004), defaulting to chai's own `expect.fail()` text. Inside a
@@ -754,7 +768,9 @@ failure here too, so no assertion that passes there fails here.
 
 **`responseTime` and `responseSize` are a call and a chain** (#2528), as in
 chai-postman: `pm.response.to.have.responseTime.below(200)` is `pm.expect`'s
-`below` on the time, and `responseTime(120)` asserts it equals 120.
+`below` on the time, and `responseTime(120)` asserts it equals 120. A name
+the chain does not carry is refused naming `pm.response.to.have.responseTime`,
+the chain the script wrote, not `pm.expect(...)`.
 `responseSize` is the body and the header together, which is what chai-postman
 adds up; `pm.response.responseSize`, the property, is the body alone. Under
 `not` the call form fails whatever it is given - chai-postman's own first check,

@@ -18,6 +18,7 @@
 #include <format>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -84,6 +85,9 @@ struct ExpectState {
     // The last `change` / `increase` / `decrease` this chain made, which `.by`
     // reads.
     std::optional<DeltaRecord> delta{};
+    // How an unknown member names the chain it was read on. A string literal:
+    // `pm.response.to.have.responseTime` starts a chain of its own here.
+    const char* path = "pm.expect(...)";
     // Whether the unknown-member hook is live. `create_expectation` installs
     // every member first and sets this last, because defining a property looks
     // up the existing own property, so a hook armed from the moment the object
@@ -108,10 +112,10 @@ constexpr const char* chain_passthrough_members[] = { "toJSON", "then" };
  * arbitrary value goes on resolving. Answers QuickJS's `get_own_property`
  * convention: 0 to continue the normal lookup, -1 with a pending exception.
  *
- * One copy for both chains rather than two: `pm.response.to` and
- * `pm.expect(...)` differ only in how each says it is armed and in the path it
- * names, and a second copy of the passthrough rules would be the one that
- * misses the next fix.
+ * One copy for both chains and an expectation's matchers: `pm.response.to`,
+ * `pm.expect(...)` and `.within` differ only in how each says it is armed and
+ * in the path it names, and a second copy of the passthrough rules would be
+ * the one that misses the next fix.
  */
 int report_unknown_chain_member (JSContext* ctx, JSValueConst obj, JSAtom prop, const char* path) {
     // Symbol keys (Symbol.toPrimitive, Symbol.toStringTag) are plumbing too.
@@ -187,7 +191,7 @@ int expect_unknown_member (JSContext* ctx, JSPropertyDescriptor* desc, JSValueCo
     if (!state || !state->armed) {
         return 0;
     }
-    return report_unknown_chain_member (ctx, obj, prop, "pm.expect(...)");
+    return report_unknown_chain_member (ctx, obj, prop, state->path);
 }
 
 // Value-initialized and then assigned rather than written as a designated
@@ -208,22 +212,145 @@ JSClassDef expect_class = { .class_name = "Expectation",
     .call                               = nullptr,
     .exotic                             = &expect_exotic };
 
+// ----------------------------------------------------------------------------
+// The callable members of an expectation (#2528).
+//
+// A matcher (`equal`, `within`) and a chainable method (`include`, `length`,
+// `a`) are objects of one callable class rather than C functions: a function
+// carries `name`, `length` and Function.prototype's `call` / `apply` / `bind`,
+// so `.include.name` or `.within.foo` evaluated to a value and a paren-less
+// chain reported PASS having asserted nothing (#999). This class has no own
+// properties, and its hook decides every name read off it.
+// ----------------------------------------------------------------------------
+
+JSClassID expect_member_class_id = 0;
+
+namespace {
+
+enum class MemberShape {
+    // A matcher call. Nothing is read off it, so every name but the plumbing
+    // `report_unknown_chain_member` lets through is refused.
+    Method,
+    // chai's chainable method: a call and the rest of the chain. Its prototype
+    // is the expectation, which answers or refuses every name but `length`,
+    // which is refused as chai's length guard refuses it: `.include.length`
+    // reads as the matcher `length` and is almost always a mistake.
+    Chainable,
+};
+
+// One member, static for the life of the process: the object's opaque points
+// here, so the class needs no finalizer.
+struct ExpectMember {
+    // How an error names the member after its chain's path. Empty for
+    // `responseTime` / `responseSize`, whose expectation's path ends with it.
+    const char* name       = "";
+    JSCFunctionMagic* call = nullptr;
+    int magic              = 0;
+    // The arity a C function would have: QuickJS pads `argv` to it, and the
+    // matchers read their optional arguments on that promise.
+    int length        = 0;
+    MemberShape shape = MemberShape::Method;
+};
+
+constexpr int MEMBER_ARITY_LIMIT = 2;
+
+const ExpectMember* member_row (JSValueConst obj) {
+    return static_cast<const ExpectMember*> (JS_GetOpaque (obj, expect_member_class_id));
+}
+
+bool is_length_atom (JSContext* ctx, JSAtom prop) {
+    JSAtom length   = JS_NewAtom (ctx, "length");
+    const bool same = prop == length;
+    JS_FreeAtom (ctx, length);
+    return same;
+}
+
+int expect_member_unknown_member (JSContext* ctx,
+JSPropertyDescriptor* desc,
+JSValueConst obj,
+JSAtom prop) {
+    (void)desc;
+    const ExpectMember* member = member_row (obj);
+    if (member == nullptr) {
+        return 0;
+    }
+    if (member->shape == MemberShape::Method) {
+        const std::string path = std::string ("pm.expect(...).") + member->name;
+        return report_unknown_chain_member (ctx, obj, prop, path.c_str ());
+    }
+    if (!is_length_atom (ctx, prop)) {
+        return 0;
+    }
+    ScopedValue expectation (ctx, JS_GetPrototype (ctx, obj));
+    const auto* state = static_cast<const ExpectState*> (
+    JS_GetOpaque (expectation.get (), expect_class_id));
+    const std::string path = std::string (state ? state->path : "pm.expect(...)") +
+    (*member->name != '\0' ? "." : "") + member->name;
+    JS_ThrowTypeError (ctx, "%s.length is not a supported assertion; after a chainable method write lengthOf",
+    path.c_str ());
+    return -1;
+}
+
+/**
+ * @brief A member's call. A matcher keeps the `this` it was called on, which is
+ * the expectation or a chainable method standing in for it; a chainable method
+ * calls on its prototype, the expectation it was read from.
+ */
+JSValue expect_member_call (JSContext* ctx,
+JSValueConst func_obj,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int flags) {
+    (void)flags;
+    const ExpectMember* member = member_row (func_obj);
+    if (member == nullptr) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation member");
+    }
+    std::array<JSValueConst, MEMBER_ARITY_LIMIT> padded{};
+    if (argc < member->length) {
+        padded.fill (JS_UNDEFINED);
+        std::copy_n (argv, argc, padded.begin ());
+        argv = padded.data ();
+    }
+    if (member->shape == MemberShape::Method) {
+        return member->call (ctx, this_val, argc, argv, member->magic);
+    }
+    ScopedValue expectation (ctx, JS_GetPrototype (ctx, func_obj));
+    return member->call (ctx, expectation.get (), argc, argv, member->magic);
+}
+
+JSClassExoticMethods expect_member_exotic = [] {
+    JSClassExoticMethods exotic{};
+    exotic.get_own_property = expect_member_unknown_member;
+    return exotic;
+}();
+
+} // namespace
+
+JSClassDef expect_member_class = { .class_name = "ExpectationMember",
+    .finalizer                                 = nullptr,
+    .gc_mark                                   = nullptr,
+    .call                                      = expect_member_call,
+    .exotic                                    = &expect_member_exotic };
+
 namespace {
 
 /**
  * @brief The expectation a member was reached on, as a new reference, or
  * `undefined`.
  *
- * `this` is the expectation itself, or the function a chainable method such as
- * `.include` or `.length` returned, whose prototype is the expectation (see
+ * `this` is the expectation itself, or a chainable method such as `.include`
+ * or `.length` read off it, whose prototype is the expectation (see
  * `chainable_method`): `.include.keys(...)` finds `keys` through that prototype
- * and calls it with the function as `this`.
+ * and calls it with the chainable method as `this`.
  */
 JSValue expectation_object (JSContext* ctx, JSValueConst this_val) {
     if (JS_GetOpaque (this_val, expect_class_id) != nullptr) {
         return JS_DupValue (ctx, this_val);
     }
-    if (!JS_IsFunction (ctx, this_val)) {
+    const ExpectMember* member = member_row (this_val);
+    if (member == nullptr || member->shape != MemberShape::Chainable) {
         return JS_UNDEFINED;
     }
     JSValue proto = JS_GetPrototype (ctx, this_val);
@@ -240,6 +367,15 @@ JSValue expectation_object (JSContext* ctx, JSValueConst this_val) {
 ExpectState* expectation_state (JSContext* ctx, JSValueConst this_val) {
     ScopedValue expectation (ctx, expectation_object (ctx, this_val));
     return static_cast<ExpectState*> (JS_GetOpaque (expectation.get (), expect_class_id));
+}
+
+// Every callable matcher returns the expectation rather than `undefined`, which
+// is what makes `.and` work: it is a plain passthrough, and the flags a chain
+// has set (`not` included) persist across it exactly as they do in chai. The
+// expectation, never the chainable method `this` may be: `.include.keys('a')`
+// answers the chain, not a function that would call `include` again.
+JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
+    return expectation_object (ctx, this_val);
 }
 
 } // namespace
@@ -713,8 +849,7 @@ int array_holds (JSContext* ctx, JSValueConst target, JSValueConst needle, bool 
 JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
     (void)argv;
-    // "to" just returns this for chaining
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 /**
@@ -736,13 +871,13 @@ JSValue expect_not_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVa
     if (state) {
         state->negated = true;
     }
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_be_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
     (void)argv;
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 // The flag-setting chainers: each changes what the matcher at the end of the
@@ -772,14 +907,7 @@ expect_flag_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     if (auto* state = expectation_state (ctx, this_val)) {
         state->*chainer.flag = chainer.value;
     }
-    return JS_DupValue (ctx, this_val);
-}
-
-// Every callable matcher returns the expectation rather than `undefined`, which
-// is what makes `.and` work: it is a plain passthrough, and the flags a chain
-// has set (`not` included) persist across it exactly as they do in chai.
-JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 // Shared body of `equal` and `eql`. `always_deep` is what separates them: `eql`
@@ -1630,7 +1758,7 @@ JSValue expect_null_getter (JSContext* ctx, JSValueConst this_val, int argc, JSV
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_undefined_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1651,7 +1779,7 @@ JSValue expect_undefined_getter (JSContext* ctx, JSValueConst this_val, int argc
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_ok_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1671,7 +1799,7 @@ JSValue expect_ok_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVal
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -1716,7 +1844,7 @@ JSValue expect_empty_getter (JSContext* ctx, JSValueConst this_val, int argc, JS
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 /**
@@ -1747,7 +1875,7 @@ JSValue expect_nan_getter (JSContext* ctx, JSValueConst this_val, int argc, JSVa
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 /**
@@ -1774,7 +1902,7 @@ JSValue expect_finite_getter (JSContext* ctx, JSValueConst this_val, int argc, J
         return throw_expect_failure (ctx, state, msg);
     }
 
-    return JS_DupValue (ctx, this_val);
+    return expect_chained (ctx, this_val);
 }
 
 // The verdict of a getter that asks one yes/no question of the target: the
@@ -1890,100 +2018,28 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
  * @brief What reading a chainable method answers: its call, standing in for the
  * expectation.
  *
- * chai's chainable methods (`length`, `include` and their spellings) are a call
- * *and* the rest of the chain: `.to.have.length(3)` and
+ * chai's chainable methods (`length`, `include`, `a` and their spellings) are a
+ * call *and* the rest of the chain: `.to.have.length(3)` and
  * `.to.have.length.above(2)` are one member, as are `.to.include(1)` and
- * `.to.include.members([1])`. The function returned here calls @p call on the
- * expectation, and its prototype is the expectation, so every other member -
- * a matcher, a flag, a language word, the unknown-member hook - is found
- * through it and `expectation_state` resolves `this` back to the state. A
- * fixed list of forwarded members would be a second copy of the chain that
- * misses each member added later.
- *
- * Its own `length` (the arity every function has) is deleted, so
- * `.include.length` reaches the expectation's `length` as any other word does.
+ * `.to.include.members([1])`, and `.to.be.an('array')` and
+ * `.to.be.an.instanceof(Array)`. The member returned here calls
+ * @p member on the expectation, and its prototype is the expectation, so every
+ * other member - a matcher, a flag, a language word, the unknown-member hook -
+ * is found through it and `expectation_state` resolves `this` back to the
+ * state. A fixed list of forwarded members would be a second copy of the chain
+ * that misses each member added later.
  */
-JSValue
-chainable_method (JSContext* ctx, JSValueConst this_val, JSCFunctionData* call, int magic = 0) {
+JSValue chainable_method (JSContext* ctx, JSValueConst this_val, const ExpectMember& member) {
     ScopedValue expectation (ctx, expectation_object (ctx, this_val));
     if (JS_IsUndefined (expectation.get ())) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
-    JSValue data  = expectation.get ();
-    JSValue chain = JS_NewCFunctionData (ctx, call, 1, magic, 1, &data);
+    JSValue chain = JS_NewObjectProtoClass (ctx, expectation.get (), expect_member_class_id);
     if (JS_IsException (chain)) {
         return chain;
     }
-    JSAtom length_atom = JS_NewAtom (ctx, "length");
-    const bool shaped = JS_SetPrototype (ctx, chain, expectation.get ()) >= 0 &&
-    JS_DeleteProperty (ctx, chain, length_atom, 0) >= 0;
-    JS_FreeAtom (ctx, length_atom);
-    if (!shaped) {
-        JS_FreeValue (ctx, chain);
-        return JS_EXCEPTION;
-    }
+    JS_SetOpaque (chain, const_cast<ExpectMember*> (&member));
     return chain;
-}
-
-JSValue length_chain_call (JSContext* ctx,
-JSValueConst this_val,
-int argc,
-JSValueConst* argv,
-int magic,
-JSValue* func_data) {
-    (void)this_val;
-    (void)magic;
-    return expect_length (ctx, func_data[0], argc, argv);
-}
-
-/**
- * `.length` / `.lengthOf` - both the call `length(n)` and the start of a chain
- * (#2528), see `chainable_method`.
- *
- * Reading it sets chai's `doLength`, which makes the ordering matchers compare
- * the length. The flag is set on the read, not by a matcher, so it stays set
- * for the rest of the chain exactly as it does in chai.
- */
-JSValue expect_length_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)argc;
-    (void)argv;
-    auto* state = expectation_state (ctx, this_val);
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-    state->do_length = true;
-    return chainable_method (ctx, this_val, length_chain_call);
-}
-
-JSValue include_chain_call (JSContext* ctx,
-JSValueConst this_val,
-int argc,
-JSValueConst* argv,
-int magic,
-JSValue* func_data) {
-    (void)this_val;
-    (void)magic;
-    return expect_include (ctx, func_data[0], argc, argv);
-}
-
-/**
- * `.include` / `.contain` / `.includes` / `.contains` - the call `include(x)`
- * and the start of a chain, see `chainable_method`.
- *
- * Reading one sets chai's `contains`: `.include.keys` and `.include.members`
- * accept a superset and `.contain.oneOf` asks whether the target contains a
- * candidate. As in chai the flag is set by the read, so it also holds for a
- * `.keys` later in a chain that called `include(x)`.
- */
-JSValue expect_include_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)argc;
-    (void)argv;
-    auto* state = expectation_state (ctx, this_val);
-    if (!state) {
-        return JS_ThrowInternalError (ctx, "Invalid expectation state");
-    }
-    state->contains = true;
-    return chainable_method (ctx, this_val, include_chain_call);
 }
 
 /**
@@ -2895,14 +2951,9 @@ std::to_array<const char*> ({ "response time", "response size" });
  * - Postman's verdict, kept rather than read as "not equal", which would pass
  * an assertion Postman fails.
  */
-JSValue response_measure_call (JSContext* ctx,
-JSValueConst this_val,
-int argc,
-JSValueConst* argv,
-int magic,
-JSValue* func_data) {
-    (void)this_val;
-    auto* state = expectation_state (ctx, func_data[0]);
+JSValue
+response_measure_call (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    auto* state = expectation_state (ctx, this_val);
     if (!state) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
@@ -2912,7 +2963,7 @@ JSValue* func_data) {
         std::format ("Expected response to not have a valid {}", noun));
     }
     if (argc < 1) {
-        return expect_chained (ctx, func_data[0]);
+        return expect_chained (ctx, this_val);
     }
     DeepEqualPath path;
     const int same =
@@ -2925,7 +2976,152 @@ JSValue* func_data) {
         std::format ("Expected {} {} to equal {}", noun,
         js_describe (ctx, state->actual), js_describe (ctx, argv[0])));
     }
-    return expect_chained (ctx, func_data[0]);
+    return expect_chained (ctx, this_val);
+}
+
+// `responseTime` / `responseSize` as chainable methods, indexed by
+// `ResponseMeasure`. Unnamed: the expectation's path already ends with them.
+constexpr auto response_measure_members = std::to_array<ExpectMember> ({
+{ "", response_measure_call, static_cast<int> (ResponseMeasure::Time), 1, MemberShape::Chainable },
+{ "", response_measure_call, static_cast<int> (ResponseMeasure::Size), 1, MemberShape::Chainable },
+});
+
+// The chain each measure starts, by `ResponseMeasure` and then polarity, so an
+// unknown member after one names `pm.response.to.have.responseTime`.
+constexpr std::array<std::array<const char*, 2>, 2> response_measure_paths = { {
+{ "pm.response.to.have.responseTime", "pm.response.to.not.have.responseTime" },
+{ "pm.response.to.have.responseSize", "pm.response.to.not.have.responseSize" },
+} };
+
+// A matcher written without a magic, as a member's call.
+template <JSCFunction* matcher>
+JSValue
+without_magic (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)magic;
+    return matcher (ctx, this_val, argc, argv);
+}
+
+template <JSCFunction* matcher>
+constexpr ExpectMember matcher_member (const char* name, int length) {
+    return { name, without_magic<matcher>, 0, length, MemberShape::Method };
+}
+
+// The rows of a magic-indexed matcher table (`ordering_matchers`,
+// `delta_matchers`) as members, each calling @p call with its row's index.
+template <typename Row, size_t N>
+constexpr std::array<ExpectMember, N>
+magic_matchers (const std::array<Row, N>& rows, JSCFunctionMagic* call, int length) {
+    std::array<ExpectMember, N> members{};
+    for (size_t row = 0; row < N; row++) {
+        members.at (row) = { rows.at (row).name, call, static_cast<int> (row),
+            length, MemberShape::Method };
+    }
+    return members;
+}
+
+// The matchers called as `.equal(v)`. `equal` and `eql` are separate functions
+// on purpose: chai's `equal` is `===` (reference identity for objects) and
+// `eql` is deep, so aliasing them passes assertions Postman fails.
+constexpr auto matcher_members = std::to_array<ExpectMember> ({
+matcher_member<expect_equal> ("equal", 1),
+matcher_member<expect_equal> ("eq", 1),
+matcher_member<expect_equal> ("equals", 1),
+matcher_member<expect_eql> ("eql", 1),
+matcher_member<expect_eql> ("eqls", 1),
+matcher_member<expect_one_of> ("oneOf", 1),
+matcher_member<expect_keys> ("keys", 1),
+matcher_member<expect_keys> ("key", 1),
+matcher_member<expect_members> ("members", 1),
+matcher_member<expect_throw> ("throw", 1),
+matcher_member<expect_throw> ("throws", 1),
+matcher_member<expect_throw> ("Throw", 1),
+matcher_member<expect_instance_of> ("instanceOf", 1),
+matcher_member<expect_instance_of> ("instanceof", 1),
+matcher_member<expect_close_to> ("closeTo", 2),
+matcher_member<expect_close_to> ("approximately", 2),
+matcher_member<expect_satisfy> ("satisfy", 1),
+matcher_member<expect_satisfy> ("satisfies", 1),
+matcher_member<expect_string> ("string", 1),
+matcher_member<expect_match> ("match", 1),
+matcher_member<expect_match> ("matches", 1),
+matcher_member<expect_have_property> ("property", 2),
+matcher_member<expect_own_property> ("ownProperty", 2),
+matcher_member<expect_own_property> ("haveOwnProperty", 2),
+matcher_member<expect_own_property_descriptor> ("ownPropertyDescriptor", 2),
+matcher_member<expect_own_property_descriptor> ("haveOwnPropertyDescriptor", 2),
+matcher_member<expect_respond_to> ("respondTo", 1),
+matcher_member<expect_respond_to> ("respondsTo", 1),
+matcher_member<expect_by> ("by", 1),
+matcher_member<expect_json_schema> ("jsonSchema", 1),
+});
+constexpr auto ordering_members = magic_matchers (ordering_matchers, expect_ordering, 1);
+constexpr auto delta_members = magic_matchers (delta_matchers, expect_delta, 2);
+
+// chai's chainable methods, and the flag reading one sets (none for `a`).
+//
+// `length` / `lengthOf` set chai's `doLength`, which makes the ordering
+// matchers compare the length. `include` / `contain` / `includes` /
+// `contains` set chai's `contains`: `.include.keys` and `.include.members`
+// accept a superset and `.contain.oneOf` asks whether the target contains a
+// candidate. Each flag is set by the read, not by the call, so it holds for
+// the rest of the chain exactly as it does in chai.
+struct ChainableMember {
+    ExpectMember member;
+    bool ExpectState::* flag;
+};
+constexpr auto chainable_members = std::to_array<ChainableMember> ({
+{ { "length", without_magic<expect_length>, 0, 1, MemberShape::Chainable }, &ExpectState::do_length },
+{ { "lengthOf", without_magic<expect_length>, 0, 1, MemberShape::Chainable }, &ExpectState::do_length },
+{ { "include", without_magic<expect_include>, 0, 1, MemberShape::Chainable }, &ExpectState::contains },
+{ { "contain", without_magic<expect_include>, 0, 1, MemberShape::Chainable }, &ExpectState::contains },
+{ { "includes", without_magic<expect_include>, 0, 1, MemberShape::Chainable }, &ExpectState::contains },
+{ { "contains", without_magic<expect_include>, 0, 1, MemberShape::Chainable }, &ExpectState::contains },
+{ { "a", without_magic<expect_a>, 0, 1, MemberShape::Chainable }, nullptr },
+{ { "an", without_magic<expect_a>, 0, 1, MemberShape::Chainable }, nullptr },
+});
+
+constexpr bool within_arity_limit (const ExpectMember& member) {
+    return member.length <= MEMBER_ARITY_LIMIT;
+}
+static_assert (std::ranges::all_of (matcher_members, within_arity_limit) &&
+std::ranges::all_of (ordering_members, within_arity_limit) &&
+std::ranges::all_of (delta_members, within_arity_limit) &&
+std::ranges::all_of (response_measure_members, within_arity_limit) &&
+std::ranges::all_of (chainable_members,
+[] (const ChainableMember& row) { return within_arity_limit (row.member); }),
+"expect_member_call pads argv into MEMBER_ARITY_LIMIT slots");
+
+// The getter of a chainable method; the magic is its row.
+JSValue expect_chainable_getter (JSContext* ctx,
+JSValueConst this_val,
+int argc,
+JSValueConst* argv,
+int magic) {
+    (void)argc;
+    (void)argv;
+    const ChainableMember& row = chainable_members.at (static_cast<size_t> (magic));
+    auto* state = expectation_state (ctx, this_val);
+    if (!state) {
+        return JS_ThrowInternalError (ctx, "Invalid expectation state");
+    }
+    if (row.flag != nullptr) {
+        state->*row.flag = true;
+    }
+    return chainable_method (ctx, this_val, row.member);
+}
+
+bool install_matchers (JSContext* ctx, JSValueConst obj, std::span<const ExpectMember> members) {
+    for (const ExpectMember& member : members) {
+        JSValue matcher = JS_NewObjectClass (ctx, expect_member_class_id);
+        if (JS_IsException (matcher)) {
+            return false;
+        }
+        JS_SetOpaque (matcher, const_cast<ExpectMember*> (&member));
+        if (JS_DefinePropertyValueStr (ctx, obj, member.name, matcher, JS_PROP_C_W_E) < 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message) {
@@ -3003,20 +3199,15 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
         flag_magic++;
     }
 
-    // chai's chainable methods: reading one sets a flag and answers both the
+    // chai's chainable methods: reading one sets its flag and answers both the
     // call and the start of the chain. See `chainable_method`.
-    struct ChainableGetter {
-        const char* name;
-        JSCFunction* fn;
-    };
-    const ChainableGetter chainables[] = { { "length", expect_length_getter },
-        { "lengthOf", expect_length_getter }, { "include", expect_include_getter },
-        { "contain", expect_include_getter }, { "includes", expect_include_getter },
-        { "contains", expect_include_getter } };
-    for (const auto& chainable : chainables) {
-        JSAtom atom = JS_NewAtom (ctx, chainable.name);
+    for (size_t row = 0; row < chainable_members.size (); row++) {
+        const char* name = chainable_members.at (row).member.name;
+        JSAtom atom      = JS_NewAtom (ctx, name);
         JS_DefinePropertyGetSet (ctx, obj, atom,
-        JS_NewCFunction (ctx, chainable.fn, chainable.name, 0), JS_UNDEFINED, 0);
+        JS_NewCFunctionMagic (ctx, expect_chainable_getter, name, 0,
+        JS_CFUNC_generic_magic, static_cast<int> (row)),
+        JS_UNDEFINED, 0);
         JS_FreeAtom (ctx, atom);
     }
 
@@ -3051,74 +3242,12 @@ JSValue create_expectation (JSContext* ctx, JSValue actual, std::string message)
         JS_FreeAtom (ctx, atom);
     }
 
-    // Add callable assertion methods. `equal` and `eql` are separate functions
-    // on purpose: chai's `equal` is `===` (reference identity for objects) and
-    // `eql` is deep, so aliasing them passes assertions Postman fails.
-    JS_SetPropertyStr (ctx, obj, "equal", JS_NewCFunction (ctx, expect_equal, "equal", 1));
-    JS_SetPropertyStr (ctx, obj, "eq", JS_NewCFunction (ctx, expect_equal, "eq", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "equals", JS_NewCFunction (ctx, expect_equal, "equals", 1));
-    JS_SetPropertyStr (ctx, obj, "eql", JS_NewCFunction (ctx, expect_eql, "eql", 1));
-    JS_SetPropertyStr (ctx, obj, "eqls", JS_NewCFunction (ctx, expect_eql, "eqls", 1));
-    JS_SetPropertyStr (ctx, obj, "oneOf", JS_NewCFunction (ctx, expect_one_of, "oneOf", 1));
-    JS_SetPropertyStr (ctx, obj, "keys", JS_NewCFunction (ctx, expect_keys, "keys", 1));
-    JS_SetPropertyStr (ctx, obj, "key", JS_NewCFunction (ctx, expect_keys, "key", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "members", JS_NewCFunction (ctx, expect_members, "members", 1));
-    JS_SetPropertyStr (ctx, obj, "throw", JS_NewCFunction (ctx, expect_throw, "throw", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "throws", JS_NewCFunction (ctx, expect_throw, "throws", 1));
-    JS_SetPropertyStr (ctx, obj, "Throw", JS_NewCFunction (ctx, expect_throw, "Throw", 1));
-    JS_SetPropertyStr (ctx, obj, "instanceOf",
-    JS_NewCFunction (ctx, expect_instance_of, "instanceOf", 1));
-    JS_SetPropertyStr (ctx, obj, "instanceof",
-    JS_NewCFunction (ctx, expect_instance_of, "instanceof", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "closeTo", JS_NewCFunction (ctx, expect_close_to, "closeTo", 2));
-    JS_SetPropertyStr (ctx, obj, "approximately",
-    JS_NewCFunction (ctx, expect_close_to, "approximately", 2));
-    JS_SetPropertyStr (
-    ctx, obj, "satisfy", JS_NewCFunction (ctx, expect_satisfy, "satisfy", 1));
-    JS_SetPropertyStr (ctx, obj, "satisfies",
-    JS_NewCFunction (ctx, expect_satisfy, "satisfies", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "string", JS_NewCFunction (ctx, expect_string, "string", 1));
-    int ordering_magic = 0;
-    for (const auto& matcher : ordering_matchers) {
-        JS_SetPropertyStr (ctx, obj, matcher.name,
-        JS_NewCFunctionMagic (ctx, expect_ordering, matcher.name, 1,
-        JS_CFUNC_generic_magic, ordering_magic));
-        ordering_magic++;
+    if (!install_matchers (ctx, obj, matcher_members) ||
+    !install_matchers (ctx, obj, ordering_members) ||
+    !install_matchers (ctx, obj, delta_members)) {
+        JS_FreeValue (ctx, obj);
+        return JS_EXCEPTION;
     }
-    JS_SetPropertyStr (ctx, obj, "a", JS_NewCFunction (ctx, expect_a, "a", 1));
-    JS_SetPropertyStr (ctx, obj, "an", JS_NewCFunction (ctx, expect_a, "an", 1));
-    JS_SetPropertyStr (ctx, obj, "match", JS_NewCFunction (ctx, expect_match, "match", 1));
-    JS_SetPropertyStr (
-    ctx, obj, "matches", JS_NewCFunction (ctx, expect_match, "matches", 1));
-    JS_SetPropertyStr (ctx, obj, "property",
-    JS_NewCFunction (ctx, expect_have_property, "property", 2));
-    JS_SetPropertyStr (ctx, obj, "ownProperty",
-    JS_NewCFunction (ctx, expect_own_property, "ownProperty", 2));
-    JS_SetPropertyStr (ctx, obj, "haveOwnProperty",
-    JS_NewCFunction (ctx, expect_own_property, "haveOwnProperty", 2));
-    JS_SetPropertyStr (ctx, obj, "ownPropertyDescriptor",
-    JS_NewCFunction (ctx, expect_own_property_descriptor, "ownPropertyDescriptor", 2));
-    JS_SetPropertyStr (ctx, obj, "haveOwnPropertyDescriptor",
-    JS_NewCFunction (ctx, expect_own_property_descriptor, "haveOwnPropertyDescriptor", 2));
-    JS_SetPropertyStr (ctx, obj, "respondTo",
-    JS_NewCFunction (ctx, expect_respond_to, "respondTo", 1));
-    JS_SetPropertyStr (ctx, obj, "respondsTo",
-    JS_NewCFunction (ctx, expect_respond_to, "respondsTo", 1));
-    int delta_magic = 0;
-    for (const auto& matcher : delta_matchers) {
-        JS_SetPropertyStr (ctx, obj, matcher.name,
-        JS_NewCFunctionMagic (ctx, expect_delta, matcher.name, 2,
-        JS_CFUNC_generic_magic, delta_magic));
-        delta_magic++;
-    }
-    JS_SetPropertyStr (ctx, obj, "by", JS_NewCFunction (ctx, expect_by, "by", 1));
-    JS_SetPropertyStr (ctx, obj, "jsonSchema",
-    JS_NewCFunction (ctx, expect_json_schema, "jsonSchema", 1));
 
     // Last, once every member above is in place: from here a name this object
     // does not carry is a throw rather than `undefined`.
@@ -3489,11 +3618,12 @@ JSValue response_measure_chain (JSContext* ctx, double measured, bool negated, R
     if (JS_IsException (expectation.get ())) {
         return JS_EXCEPTION;
     }
+    const auto row = static_cast<size_t> (which);
     if (auto* state = expectation_state (ctx, expectation.get ())) {
         state->negated = negated;
+        state->path    = response_measure_paths.at (row).at (negated ? 1 : 0);
     }
-    return chainable_method (
-    ctx, expectation.get (), response_measure_call, static_cast<int> (which));
+    return chainable_method (ctx, expectation.get (), response_measure_members.at (row));
 }
 
 } // namespace vayu::runtime::pm_detail

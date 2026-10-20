@@ -651,7 +651,7 @@ render_member (const TypeNode& node, const std::string& name, const std::string&
         const std::string ret    = function_return_type (node, sig);
         // A member documented as answering the chain is reached as the chain
         // too: the runtime builds each one (`pm.response.to.have.responseTime`)
-        // with `chainable_method`, a function whose prototype is the
+        // with `chainable_method`, a callable whose prototype is the
         // expectation, so `.responseTime.below(200)` runs (#2528).
         if (ret == CHAIN) {
             out += indent + name + ": ((" + params + ") => " + CHAIN + ") & " + CHAIN + ";\n";

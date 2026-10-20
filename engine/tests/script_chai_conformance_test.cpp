@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -25,6 +26,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "chai_conformance_table.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -36,13 +38,41 @@ using nlohmann::json;
 
 namespace {
 
-// What chai 4.4.1 and chai-postman 2.0.1 publish, as counted from the
-// packages: 96 members on `Assertion.prototype` (language chains and aliases
-// included) plus `expect.fail`, and the 31 `addProperty` / `addMethod` /
-// `addChainableMethod` names chai-postman installs. The table may hold more
-// (`not` on `pm.response.to` is chai's own), never fewer.
-constexpr size_t CHAI_EXPECT_MEMBER_COUNT  = 97;
-constexpr size_t CHAI_POSTMAN_MEMBER_COUNT = 31;
+// What chai 4.4.1 and chai-postman 2.0.1 publish, read off the packages:
+// `Object.getOwnPropertyNames (chai.Assertion.prototype)` without
+// `constructor`, `assert` and the `_`-prefixed internals (language chains and
+// aliases included), plus `expect.fail`; and the names chai-postman's plugin
+// adds to that prototype, plus `ok`, which it redefines. The table holds a row
+// for each name and for nothing else, so a row deleted, renamed or swapped for
+// another member fails by name rather than by a count.
+constexpr auto CHAI_EXPECT_MEMBERS = std::to_array<std::string_view> (
+{ "Arguments", "NaN", "Throw", "a", "above", "all", "also", "an", "and", "any",
+"approximately", "arguments", "at", "be", "been", "below", "but", "by", "change",
+"changes", "closeTo", "contain", "contains", "decrease", "decreases", "deep", "does",
+"empty", "eq", "eql", "eqls", "equal", "equals", "exist", "exists", "extensible",
+"false", "finite", "frozen", "greaterThan", "greaterThanOrEqual", "gt", "gte",
+"has", "have", "haveOwnProperty", "haveOwnPropertyDescriptor", "include", "includes",
+"increase", "increases", "instanceOf", "instanceof", "is", "itself", "key",
+"keys", "least", "length", "lengthOf", "lessThan", "lessThanOrEqual", "lt", "lte",
+"match", "matches", "members", "most", "nested", "not", "null", "of", "ok", "oneOf",
+"ordered", "own", "ownProperty", "ownPropertyDescriptor", "property", "respondTo",
+"respondsTo", "same", "satisfies", "satisfy", "sealed", "still", "string", "that",
+"throw", "throws", "to", "true", "undefined", "which", "with", "within", "fail" });
+static_assert (CHAI_EXPECT_MEMBERS.size () == 97,
+"96 Assertion.prototype members and expect.fail");
+
+constexpr auto CHAI_POSTMAN_MEMBERS =
+std::to_array<std::string_view> ({ "accepted", "badRequest", "body", "clientError",
+"error", "forbidden", "header", "info", "json", "jsonBody", "jsonSchema",
+"notAcceptable", "notFound", "ok", "postmanRequest", "postmanRequestOrResponse",
+"postmanResponse", "rateLimited", "redirection", "responseSize", "responseTime",
+"serverError", "status", "statusCode", "statusCodeClass", "statusReason",
+"success", "unauthorised", "unauthorized", "withBody", "withoutContent" });
+static_assert (CHAI_POSTMAN_MEMBERS.size () == 31, "what chai-postman 2.0.1 installs");
+
+// `pm.response.to.not` is chai's own `not`, which the response chain answers
+// beside chai-postman's members.
+constexpr std::string_view RESPONSE_CHAIN_NOT = "not";
 
 // The words a row's `kind` may take; the completion check reads it.
 bool is_known_kind (const std::string& kind) {
@@ -165,18 +195,51 @@ class ChaiConformanceTest : public ::testing::Test {
 // The table
 // ----------------------------------------------------------------------------
 
-// A table that lost rows would still pass every row it kept, so the count is
-// the guard: it is what chai and chai-postman publish, not what was written.
-TEST_F (ChaiConformanceTest, TheTableCoversEveryPublicMemberOfBothPackages) {
+std::set<std::string> row_members (const json& rows) {
+    std::set<std::string> members;
+    for (const auto& row : rows) {
+        members.insert (row.at ("member").get<std::string> ());
+    }
+    return members;
+}
+
+/// @p rows name exactly @p published, each once: a member with no row and a
+/// row for no member both fail by name.
+void expect_rows_name_exactly (const json& rows, const std::set<std::string>& published) {
+    const std::set<std::string> listed = row_members (rows);
+    EXPECT_EQ (listed.size (), rows.size ()) << "a member has two rows";
+    for (const auto& member : published) {
+        EXPECT_TRUE (listed.contains (member))
+        << "no row for the published member `" << member << "`";
+    }
+    for (const auto& member : listed) {
+        EXPECT_TRUE (published.contains (member))
+        << "the row `" << member << "` is not a member the package publishes";
+    }
+}
+
+// A table that lost a row would still pass every row it kept, so the rows are
+// held to what chai and chai-postman publish, by name and in both directions.
+TEST_F (ChaiConformanceTest, TheTableHoldsExactlyThePublicMembersOfBothPackages) {
+    const json& table = vayu::tests::chai_conformance_table ();
+    ASSERT_TRUE (table.contains ("expect")) << "the table did not load";
+    ASSERT_TRUE (table.contains ("response")) << "the table did not load";
+
+    expect_rows_name_exactly (table.at ("expect"),
+    std::set<std::string> (CHAI_EXPECT_MEMBERS.begin (), CHAI_EXPECT_MEMBERS.end ()));
+    std::set<std::string> response (
+    CHAI_POSTMAN_MEMBERS.begin (), CHAI_POSTMAN_MEMBERS.end ());
+    response.emplace (RESPONSE_CHAIN_NOT);
+    expect_rows_name_exactly (table.at ("response"), response);
+}
+
+TEST_F (ChaiConformanceTest, EveryRowIsComplete) {
     const json& table = vayu::tests::chai_conformance_table ();
     ASSERT_TRUE (table.contains ("expect")) << "the table did not load";
     ASSERT_TRUE (table.contains ("response")) << "the table did not load";
 
     const json& expect   = table.at ("expect");
     const json& response = table.at ("response");
-    EXPECT_GE (expect.size (), CHAI_EXPECT_MEMBER_COUNT);
-    EXPECT_GE (response.size (), CHAI_POSTMAN_MEMBER_COUNT);
-
     for (const json* section : { &expect, &response }) {
         std::set<std::string> members;
         size_t supported = 0;
@@ -311,6 +374,65 @@ TEST_F (ChaiConformanceTest, EveryMemberTheTableSupportsIsInTheDocsList) {
         }
         EXPECT_TRUE (documented.contains (member))
         << "`." << member << "` is supported but the docs vocabulary list omits it";
+    }
+}
+
+// The `pm.response.to` members the page names: each member a span of the
+// "Response assertions" row ends on (`pm.response.to.have.status(code)`,
+// `.jsonBody(path)`, `pm.response.to.not`; `pm.response.to.be.*` names none),
+// and each `.to.be.<word>` of the status-class block.
+std::set<std::string> documented_response_members (const std::string& page) {
+    std::set<std::string> words;
+    const size_t row = page.find ("\n| Response assertions |");
+    if (row != std::string::npos) {
+        const std::string line =
+        page.substr (row + 1, page.find ('\n', row + 1) - row - 1);
+        static const std::regex span (
+        R"(`(?:pm\.response\.to)?(?:\.[A-Za-z]+)*\.([A-Za-z]+)(?:\(|`))");
+        for (std::sregex_iterator it (line.begin (), line.end (), span), end;
+        it != end; ++it) {
+            words.insert ((*it)[1].str ());
+        }
+    }
+    const size_t heading =
+    page.find ("### Response status classes (`pm.response.to.be`)");
+    const size_t open =
+    heading == std::string::npos ? heading : page.find ("```\n", heading);
+    const size_t close = open == std::string::npos ? open : page.find ("\n```", open + 4);
+    if (close != std::string::npos) {
+        const std::string block = page.substr (open, close - open);
+        static const std::regex getter (R"(\.to\.be\.([A-Za-z]+))");
+        for (std::sregex_iterator it (block.begin (), block.end (), getter), end;
+        it != end; ++it) {
+            words.insert ((*it)[1].str ());
+        }
+    }
+    return words;
+}
+
+// The same promise for `pm.response.to`, in both directions: a member the page
+// says works has a supported row, and a supported row is on the page.
+TEST_F (ChaiConformanceTest, TheDocsNameEveryResponseMemberTheTableSupportsAndNoOther) {
+    const std::set<std::string> documented =
+    documented_response_members (read_docs_page ());
+    ASSERT_GT (documented.size (), 20u)
+    << "the response assertions row or the status-class block was not found";
+
+    std::set<std::string> supported;
+    for (const auto& row :
+    vayu::tests::chai_conformance_table ().at ("response")) {
+        if (!is_unsupported (row)) {
+            supported.insert (row.at ("member"));
+        }
+    }
+    for (const auto& word : documented) {
+        EXPECT_TRUE (supported.contains (word))
+        << "docs/app/pm-api-compatibility.md documents pm.response.to's `" << word
+        << "` but chai-conformance.json has no supported response row for it";
+    }
+    for (const auto& member : supported) {
+        EXPECT_TRUE (documented.contains (member))
+        << "pm.response.to's `" << member << "` is supported but the docs never name it";
     }
 }
 
@@ -621,6 +743,114 @@ TEST_F (ChaiConformanceTest, TheDeltaMatchersRefuseWhatTheyCannotMeasure) {
     expect_type_error ("pm.expect(function () {}).to.change({}, 'n')", "with a 'n' property");
     expect_type_error (
     "var o = { n: 'x' }; pm.expect(function () {}).to.increase(o, 'n')", "to be a number");
+}
+
+// ----------------------------------------------------------------------------
+// What a matcher or a chainable method answers when read rather than called
+// ----------------------------------------------------------------------------
+
+// `.a` and `.an` are chai's chainable methods: the type check when called, and
+// a language word that hands the chain on when read (#2528).
+TEST_F (ChaiConformanceTest, AAndAnAreACallAndAChain) {
+    expect_pass ("pm.expect([]).to.be.an.instanceof(Array)");
+    expect_pass ("pm.expect(new Date()).to.be.a.instanceOf(Date)");
+    expect_pass ("pm.expect([1]).to.be.an('array').that.includes(1)");
+    expect_pass ("pm.expect('x').to.be.a.not.instanceOf(Array)");
+    expect_pass (
+    "pm.expect(typeof pm.expect(1).to.be.an).to.equal('function')");
+    expect_assertion_failure ("pm.expect({}).to.be.an.instanceof(Array)", "an instance of Array");
+    expect_assertion_failure (
+    "pm.expect([2]).to.be.an('array').that.includes(1)", "to include 1");
+    // The call keeps its own wording.
+    expect_assertion_failure (
+    "pm.expect('x').to.be.a('number')", "Expected type string to be number");
+    expect_assertion_failure ("pm.expect([]).to.not.be.an('array')",
+    "Expected type array to not be array");
+    expect_type_error ("pm.expect(1).to.be.a()", "a() requires a type name");
+}
+
+// A name read off a chainable method or a matcher that nothing implements
+// throws naming itself (#999), never evaluates to a value: a paren-less chain
+// whose last word read as `undefined` or a function's own `name` would report
+// PASS having asserted nothing. The listing does not come from the table, so
+// it holds whatever the table says.
+TEST_F (ChaiConformanceTest, ANameReadOffAMemberThatNothingImplementsThrowsByName) {
+    struct Case {
+        const char* snippet;
+        const char* named;
+    };
+    const auto cases = std::to_array<Case> ({
+    // After a chainable method, the expectation answers or refuses the name;
+    // a function's own `name`, `call`, `apply`, `bind` and `prototype` are not
+    // chain members.
+    { "pm.expect([1]).to.include.name", "pm.expect(...).name" },
+    { "pm.expect([1]).to.include.foo", "pm.expect(...).foo" },
+    { "pm.expect([1]).to.contain.call", "pm.expect(...).call" },
+    { "pm.expect([1]).to.includes.apply", "pm.expect(...).apply" },
+    { "pm.expect([1]).to.contains.bind", "pm.expect(...).bind" },
+    { "pm.expect([1]).to.have.lengthOf.prototype", "pm.expect(...).prototype" },
+    { "pm.expect(1).to.be.a.foo", "pm.expect(...).foo" },
+    { "pm.expect(1).to.be.an.name", "pm.expect(...).name" },
+    // `length` directly after one is refused, as chai's length guard does.
+    { "pm.expect([1]).to.include.length", "pm.expect(...).include.length" },
+    { "pm.expect([1]).to.have.length.length", "pm.expect(...).length.length" },
+    { "pm.expect([1]).to.be.an.length", "pm.expect(...).an.length" },
+    { "pm.response.to.have.responseTime.length", "pm.response.to.have.responseTime.length" },
+    { "pm.response.to.not.have.responseSize.length", "pm.response.to.not.have.responseSize.length" },
+    { "pm.response.to.have.responseTime.name", "pm.response.to.have.responseTime.name" },
+    // After a matcher, which is a call and not a chain, every name is refused.
+    { "pm.expect(1).to.be.within.foo", "pm.expect(...).within.foo" },
+    { "pm.expect(1).to.be.within.length", "pm.expect(...).within.length" },
+    { "pm.expect(1).to.equal.name", "pm.expect(...).equal.name" },
+    { "pm.expect(1).to.equal.to", "pm.expect(...).equal.to" },
+    { "pm.expect({a:1}).to.have.keys.foo", "pm.expect(...).keys.foo" },
+    { "pm.expect(1).to.be.above.call", "pm.expect(...).above.call" },
+    { "pm.expect(function () {}).to.change.by", "pm.expect(...).change.by" },
+    });
+    for (const auto& [snippet, named] : cases) {
+        expect_type_error (snippet, std::string (named) + " is not a supported assertion");
+    }
+
+    // What a runtime probes on any value still resolves.
+    expect_pass ("pm.expect(typeof "
+                 "pm.expect([1]).to.include.toString).to.equal('function')");
+    expect_pass ("pm.expect(typeof "
+                 "pm.expect(1).to.equal.hasOwnProperty).to.equal('function')");
+    expect_pass ("pm.expect(pm.expect(1).to.equal.then).to.equal(undefined)");
+    expect_pass (
+    "pm.expect(JSON.stringify({ m: pm.expect(1).to.equal })).to.equal('{}')");
+}
+
+// A matcher reached through a chainable method hands back the expectation, not
+// the chainable method it was read off (#2528): `.include.keys('a')` answers
+// the chain, and calling what it answered is not a second `include`.
+TEST_F (ChaiConformanceTest, AMatcherAfterAChainableMethodAnswersTheExpectation) {
+    expect_pass ("var r = pm.expect({ a: 1 }).to.include.keys('a'); "
+                 "pm.expect(typeof r).to.equal('object')");
+    expect_pass (
+    "pm.expect({ a: 1, b: 2 }).to.include.keys('a').and.have.property('b', 2)");
+    expect_pass (
+    "pm.expect([1, 2]).to.include.members([1]).and.have.lengthOf(2)");
+    expect_assertion_failure (
+    "pm.expect([1, 2]).to.include.members([1]).and.have.lengthOf(3)", "length 2 to equal 3");
+    // A flag or language word read off one hands back the expectation too.
+    expect_type_error ("pm.expect([1]).to.include.not(1)", "not a function");
+    expect_type_error ("pm.expect([1]).to.include.that(1)", "not a function");
+    expect_pass ("var r = pm.response.to.have.responseTime.below(100000); "
+                 "pm.expect(typeof r).to.equal('object')");
+}
+
+// An unknown member of the chain a response measure starts names that chain,
+// not `pm.expect(...)`, which the script never wrote.
+TEST_F (ChaiConformanceTest, AnUnknownMemberAfterAResponseMeasureNamesItsChain) {
+    expect_type_error ("pm.response.to.have.responseTime.belw(5)",
+    "pm.response.to.have.responseTime.belw is not a supported assertion");
+    expect_type_error ("pm.response.to.not.have.responseSize.abov(5)",
+    "pm.response.to.not.have.responseSize.abov is not a supported assertion");
+    expect_type_error ("pm.response.to.have.responseTime.to.be.belw(5)",
+    "pm.response.to.have.responseTime.belw is not a supported assertion");
+    expect_type_error ("pm.expect(1).to.belw(5)",
+    "pm.expect(...).belw is not a supported assertion");
 }
 
 } // namespace

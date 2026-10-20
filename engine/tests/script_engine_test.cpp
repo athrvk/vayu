@@ -1923,7 +1923,7 @@ TEST_F (ExpectFlagFormTest, ContainOneOfAsksWhetherTheTargetContainsOne) {
 }
 
 // `include` and `length` are a call and the rest of the chain at once: the
-// function a read answers finds every other member through the expectation,
+// member a read answers finds every other member through the expectation,
 // so flags set after it reach the matcher that ends the chain.
 TEST_F (ExpectFlagFormTest, AChainableMethodIsTheCallAndTheChain) {
     expect_verdicts (
@@ -1931,10 +1931,12 @@ TEST_F (ExpectFlagFormTest, AChainableMethodIsTheCallAndTheChain) {
     "pm.expect([1, 2]).to.include(1).and.include(2)", "pm.expect([1, 2, 3]).to.include.not.members([4])",
     "pm.expect([1, 2, 3]).to.include.deep.ordered.members([1, 2])",
     "pm.expect({a: 1, b: 2}).to.include.any.keys('a', 'z')",
-    // A function's own `length` would shadow the matcher.
-    "pm.expect('abc').to.include.length(3)", "pm.expect([1, 2]).to.have.length.which.is.above(1)" },
+    // `length` directly after a chainable method is refused, as chai refuses
+    // it; `lengthOf` is the spelling that reaches the matcher there.
+    "pm.expect('abc').to.include.lengthOf(3)",
+    "pm.expect([1, 2]).to.have.length.which.is.above(1)" },
     { "pm.expect([1, 2, 3]).to.include.not.members([1])",
-    "pm.expect('abc').to.include.length(4)" });
+    "pm.expect('abc').to.include.lengthOf(4)" });
 }
 
 // `String(err)` is "Error: boom", so `.to.throw("Error")` passed for every

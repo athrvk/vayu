@@ -171,7 +171,11 @@ armed a member nothing implemented evaluated to `undefined` and the test
 reported PASS whatever the value was - a typo (`.to.be.trueish`) and a chai
 member Vayu does not have (chai-postman's `.postmanResponse`)
 were equally silent. Every unimplemented name now raises a `TypeError` naming
-itself, the way `pm.response.to` has since #487.
+itself, the way `pm.response.to` has since #487. That holds for a name read off
+a matcher or a chainable method too (#2528): a matcher is a call, so
+`.within.foo` and `.equal.name` are refused, and after `include`, `length` or
+`a` only the chain's own members resolve, so `.include.name` and `.a.foo` are
+refused rather than answering a function's own `name` or `undefined`.
 
 **`equal` is strict, `eql` is deep.** `equal` is `===`, so two objects with the
 same contents are *not* equal - only the same reference is. `eql` (and its alias
@@ -220,6 +224,7 @@ pm.expect(value).to.be.within(start, finish); // both bounds are in
 // Types
 pm.expect(value).to.be.a('string');
 pm.expect(value).to.be.an('array');          // also 'date', 'regexp', 'map', 'set', 'error', ...
+pm.expect(value).to.be.an.instanceof(Array); // .a / .an also read as words
 pm.expect(value).to.be.instanceOf(Array);    // alias .instanceof
 
 // Strings, collections and objects
@@ -326,13 +331,17 @@ Notes on the edges:
   makes `property` and `include({...})` look at own properties only, and
   `nested` together with `own` is refused. `.length` and `.lengthOf` are a call
   and a chain: after one, `above`, `below`, `least`, `most` and `within` compare
-  the length (a Map's or Set's `size`). The ordering matchers are chai's whole
+  the length (a Map's or Set's `size`). `length` directly after a chainable
+  method (`include`, `a`, `length` itself, `responseTime`) is a `TypeError`, as
+  chai's length guard makes it; `lengthOf` is the spelling there. The ordering matchers are chai's whole
   family, `gt` / `gte` / `lt` / `lte` and the `greaterThan...` spellings
   included, and `within` takes both bounds in.
 - **`.a()` and `.an()` use chai's type names**: `string`, `number`, `boolean`,
   `null`, `undefined`, `array`, `object`, `function`, and for anything else the
   lower-cased tag (`date`, `regexp`, `map`, `set`, `error`, `promise`, `symbol`,
-  `bigint`).
+  `bigint`). Both are chai's chainable methods: read without a call they hand
+  the chain on, so `.to.be.an.instanceof(Array)` runs, and called they return
+  it, so `.an('array').that.includes(1)` does too.
 - **`jsonSchema(schema[, options])` is draft-07** and runs on the engine's
   validator rather than ajv. A failure names the first path that broke the
   schema. A keyword it cannot evaluate - one from JSON Schema 2019-09 or 2020-12
@@ -344,9 +353,10 @@ Notes on the edges:
   pass any string, where ajv would reject some of them.
 - **Every public member of chai 4.4.1's `expect` API has a row** in
   `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
-  one that fails, each checked against the real package, and the suite fails if
-  the table is shorter than chai's list or a member the docs claim is missing
-  from it. The members that differ from chai are named in
+  one that fails, each checked against the real package. The suite holds the
+  rows to the member names read off chai and chai-postman in both directions, so
+  a row deleted, renamed or added for a member neither publishes fails by name,
+  and it fails on a member the docs claim is missing from the table. The members that differ from chai are named in
   [pm-api-compatibility.md](../app/pm-api-compatibility.md#assertion-chains-pmexpect).
 - **`eql` refuses containers it cannot inspect.** `Map`, `Set` and typed arrays
   keep their contents outside the property list, so two distinct ones report
@@ -792,7 +802,8 @@ is checked only for `date`, `time`, `date-time` and `ipv4`.
 `have.responseTime` and `have.responseSize` are a call and a chain, as in
 chai-postman: `responseTime(120)` asserts the time equals 120, and
 `responseTime.below(200)` / `.within(100, 150)` are `pm.expect`'s matchers on
-the number. The size is the body and the header bytes added up;
+the number; an unknown name after one is refused naming
+`pm.response.to.have.responseTime`, the chain the script wrote. The size is the body and the header bytes added up;
 `pm.response.responseSize` is the body alone.
 
 `pm.response.to.not` negates every one of these, and as in chai-postman it

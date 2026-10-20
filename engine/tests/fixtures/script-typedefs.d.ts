@@ -21,7 +21,7 @@ interface VayuExpectation {
 	 * pm.expect(name).to.be.a('string');
 	 * pm.expect(count).to.be.a('number');
 	 */
-	a(type: string): VayuExpectation;
+	a: ((type: string) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Assert the number is greater than n. Both sides must be a number or a Date, as in chai: a string is refused rather than coerced.
 	 * 
@@ -44,7 +44,7 @@ interface VayuExpectation {
 	 * pm.expect(items).to.be.an('array');
 	 * pm.expect(data).to.be.an('object');
 	 */
-	an(type: string): VayuExpectation;
+	an: ((type: string) => VayuExpectation) & VayuExpectation;
 	/**
 	 * Continue an assertion chain. Flags already set (including `not`) carry over.
 	 * 
@@ -280,10 +280,22 @@ interface VayuExpectation {
 	 * 
 	 * Example:
 	 * pm.expect(json.items).to.be.instanceOf(Array);
+	 * 
+	 * `to.be.a.instanceOf`:
+	 * Assert the value is an instance of the constructor, with .a read as a word.
+	 * 
+	 * Example:
+	 * pm.expect(created).to.be.a.instanceOf(Date);
 	 */
 	instanceOf(constructor: Function): VayuExpectation;
 	/**
 	 * Assert the value is an instance of a constructor (alias for .to.be.instanceOf).
+	 * 
+	 * `to.be.an.instanceof`:
+	 * Assert the value is an instance of the constructor; .an and .a read as words here, as well as being the type check when called.
+	 * 
+	 * Example:
+	 * pm.expect(json.items).to.be.an.instanceof(Array);
 	 */
 	instanceof(constructor: Function): VayuExpectation;
 	/**
