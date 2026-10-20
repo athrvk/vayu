@@ -1396,7 +1396,8 @@ nlohmann::json get_script_completions () {
     "a bound data row, then environment, collection and global - the same "
     "order {{name}} uses. set, unset and clear write the local scope: it "
     "lasts for the run (one send, a collection run, one virtual user's "
-    "iteration under load) and is never stored." },
+    "iteration in a scenario load run, one submission in a single-request "
+    "load run with requestElements) and is never stored." },
     { "sortText", "0_pm_variables" } });
 
     completions.push_back ({ { "label", "pm.variables.get" },

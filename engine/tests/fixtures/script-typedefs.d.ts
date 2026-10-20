@@ -1383,7 +1383,7 @@ declare const pm: {
 	 */
 	test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm;
 	/**
-	 * Read a variable without naming its scope. Resolves the local scope, then a bound data row, then environment, collection and global - the same order {{name}} uses. set, unset and clear write the local scope: it lasts for the run (one send, a collection run, one virtual user's iteration under load) and is never stored.
+	 * Read a variable without naming its scope. Resolves the local scope, then a bound data row, then environment, collection and global - the same order {{name}} uses. set, unset and clear write the local scope: it lasts for the run (one send, a collection run, one virtual user's iteration in a scenario load run, one submission in a single-request load run with requestElements) and is never stored.
 	 */
 	variables: {
 		/**

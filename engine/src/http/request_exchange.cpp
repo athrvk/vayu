@@ -616,6 +616,17 @@ const vayu::http::VariableValues& vars) {
     return std::nullopt;
 }
 
+/// One scope's enabled variables, the text each substitutes.
+vayu::http::VariableValues enabled_values (const vayu::Environment& scope) {
+    vayu::http::VariableValues values;
+    for (const auto& [name, variable] : scope) {
+        if (variable.enabled) {
+            values[name] = variable.value;
+        }
+    }
+    return values;
+}
+
 /// The scopes as one map, with composition's precedence - environment over the
 /// collection chain over globals - and the run-local scope over all of them, so
 /// a name resolves in the request exactly as `pm.variables.get` answers it in
@@ -625,10 +636,8 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
     chain.push_back (scopes.collection); // leaf last
     auto values =
     vayu::http::build_variable_values (scopes.globals, chain, scopes.environment);
-    for (const auto& [name, variable] : scopes.local) {
-        if (variable.enabled) {
-            values[name] = variable.value;
-        }
+    for (auto& [name, value] : enabled_values (scopes.local)) {
+        values[name] = std::move (value);
     }
     return values;
 }
@@ -766,6 +775,10 @@ void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars) const {
     for (const auto& [name, variable] : local_) {
         vars[name] = variable.value;
     }
+}
+
+vayu::http::VariableValues ScopeOverlay::local_values () const {
+    return enabled_values (local_);
 }
 
 ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base) const {
@@ -917,12 +930,14 @@ ExchangeInputs inputs) {
         // already reads @p scopes through; a controller kind's condition or
         // dispatch variable resolves against the same view, plus this
         // iteration's bound row under its `data.*` namespace when the run
-        // has one (issue #1515) - the same precedence a script's own
-        // `pm.variables.replaceIn` already gives it.
+        // has one (issue #1515), the local scope above the row (#2564) -
+        // the same precedence a script's own `pm.variables.replaceIn`
+        // already gives it.
         .resolve_template =
         [&] (const std::string& text) {
-            return vayu::http::resolve_template_with_optional_row (
-            text, values_from_scopes (scopes), inputs.iteration_data);
+            return vayu::http::resolve_template_with_optional_row (text,
+            values_from_scopes (scopes), inputs.iteration_data,
+            enabled_values (scopes.local));
         },
         .iteration        = inputs.iteration.value_or (0),
         .step_position    = inputs.step_position,

@@ -1551,7 +1551,7 @@ How long it lives is the run that owns it:
 | A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
 | A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary with the user's other writes |
 | A single-request load run with `requestElements` | one submission, starting empty |
-| A load run's deferred `tests` replay | the replay pass, shared by every replayed sample the way the replay's other writes are |
+| A load run's deferred `tests` replay | the replay pass: one scope, empty at the start and shared by every replayed sample of every step, as the replay's other writes are; never stored |
 
 Under load, `script.setup` and `script.teardown` belong to no virtual user,
 so what they set with `pm.variables.set` ends with them: setup's local scope is

@@ -93,24 +93,26 @@ JSON cannot write at all (a function, a cycle, a `BigInt`) reads back as its str
 variables editor is invisible to a script until a script sets it; `unset` and `clear`
 remove it regardless.
 
-`pm.variables` resolves a name across the scopes - environment, then collection, then
-global - the same order `{{name}}` uses. **While a data row is bound, that row's bare
-column names answer first, above all three scopes** (issue #1007): `get`, `has` and
-`toObject` check the row before the environment, so `pm.variables.get("username")` reads
+`pm.variables` resolves a name across every tier: the run-local scope `pm.variables.set`
+writes (below), then a bound data row's bare column names, then environment, collection and
+global - below the local scope, the same order `{{name}}` uses. **While a data row is
+bound, its bare column names answer above all three named scopes** (issue #1007): `get`,
+`has` and `toObject` check the row before the environment, so `pm.variables.get("username")` reads
 the current iteration's `username` cell rather than a same-named environment variable -
 Postman's own precedence for a dataset's columns. `get` and `toObject` hand back the
 row's value **typed**, exactly as `pm.iterationData.get` does (a number column reads as a
 number); a column the row does not carry falls through to the three scopes as an ordinary
 name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before.
 
-**`pm.variables.set(name, value)` writes Postman's *local* scope** (issue #2564), the one
-tier above the row: every read above answers from it first, `replaceIn` and
+**`pm.variables.set(name, value)` writes Postman's *local* scope** (issue #2564), the top
+tier, above the row: every read above answers from it first, `replaceIn` and
 `pm.sendRequest` substitute it, and a `{{name}}` composition could not answer goes out
 carrying it, so a pre-request `pm.variables.set("sig", …)` reaches a `{{sig}}` header. It
 keeps the value's type as the scoped setters do. `unset(name)` and `clear()` remove local
 names only. The local scope is never stored and never shown in the Variables panel; it
 lives for one send (pre-request script through test script), for the whole of a
-collection run, and for one virtual user's iteration in a load run. See
+collection run, for one virtual user's iteration in a scenario load run, and for one
+submission in a single-request load run with `requestElements`. See
 [scripting.md](../engine/scripting.md#the-local-scope-pmvariablesset) for every run
 shape.
 

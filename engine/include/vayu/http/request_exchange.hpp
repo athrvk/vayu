@@ -351,6 +351,13 @@ class ScopeOverlay {
     /// `values_from_scopes` built @p vars in to begin with.
     void apply_onto (vayu::http::VariableValues& vars) const;
 
+    /// This VU's local scope as text (#2564), for the one reader that must
+    /// tell it apart from the flattened map: a controller template, where a
+    /// local beats a bound row's column (`resolve_template_with_optional_row`).
+    /// The overlay alone is the whole local scope, because a load run's base
+    /// scopes hold none.
+    [[nodiscard]] vayu::http::VariableValues local_values () const;
+
     /**
      * A full `ScriptVariableScopes` an inline script can run against: @p
      * base's read-only ancestor chain verbatim, and its environment /
