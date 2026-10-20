@@ -2276,8 +2276,7 @@ TEST (PostmanImport, ACollectionShapedLikeTwitterReportsEveryRequestThatLosesOAu
     EXPECT_EQ (meta.at ("nonExecutableAuth"), 23);
     const Names lost = names_in (meta, "nonExecutableAuthRequests");
     EXPECT_EQ (lost.size (), 23U);
-    for (const std::string& folder :
-    { "Tweets", "Blocks", "Manage Tweets", "Mutes", "Lists" }) {
+    for (const char* folder : { "Tweets", "Blocks", "Manage Tweets", "Mutes", "Lists" }) {
         EXPECT_EQ (std::ranges::count (lost, folder), 0) << folder << " is not a request";
     }
     const auto inherits = [&lost] (const std::string& name) {
