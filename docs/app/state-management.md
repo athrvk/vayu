@@ -1752,10 +1752,12 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 **Sorting:** every tree list - roots, a collection's children, a collection's
 requests - sorts with the single exported `compareTreeOrder` (`types/domain.ts`):
-`order`, then `createdAt`, then `id` byte-wise. There were two comparators with
-two different tie rules and neither matched the engine's, so "run this folder"
-could execute in an order the sidebar had never shown. The rule is pinned to the
-engine's SQL by `engine/tests/fixtures/tree-order-conformance.json`, read by
+`order`, then kind (a sub-collection before a request), then `createdAt`, then
+`id` byte-wise. There were two comparators with two different tie rules and
+neither matched the engine's, so "run this folder" could execute in an order the
+sidebar had never shown. The rule is pinned to the engine's comparator
+(`engine/include/vayu/db/sibling_order.hpp`) by
+`engine/tests/fixtures/tree-order-conformance.json`, read by
 `types/tree-order.conformance.test.ts` and by the engine's `tree_order_test.cpp`
 - change one side and the other suite fails.
 

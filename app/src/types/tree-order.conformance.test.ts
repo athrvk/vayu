@@ -39,40 +39,41 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
 };
 
 /**
- * The cases whose rows are all one kind. `compareTreeOrder` does not rank a
- * folder against a request yet, so the cross-kind cases join this suite with
- * the renderer's half of #2535.
- */
-const singleKindCases = fixture.cases.filter((c) =>
-	c.rows.every((row) => row.kind === c.rows[0]?.kind)
-);
-
-/**
  * The renderer holds `createdAt` as the ISO string its transformers produce
  * from the engine's epoch-millisecond column, so the fixture is fed in through
- * that same conversion rather than compared in a shape the app never has.
+ * that same conversion rather than compared in a shape the app never has. The
+ * fixture's `folder` is the renderer's `collection` kind.
  */
 function toRow(row: ConformanceCase["rows"][number]): OrderedTreeRow {
-	return { id: row.id, order: row.order, createdAt: new Date(row.createdAt).toISOString() };
+	return {
+		id: row.id,
+		kind: row.kind === "folder" ? "collection" : "request",
+		order: row.order,
+		createdAt: new Date(row.createdAt).toISOString(),
+	};
 }
 
 describe("tree-order conformance fixture", () => {
 	it("scanned a non-empty fixture (guards the scan itself)", () => {
 		expect(fixture.cases.length).toBeGreaterThanOrEqual(12);
-		expect(singleKindCases.length).toBeGreaterThanOrEqual(12);
+		// The cross-kind cases are the ones #2535 added; a fixture that lost them
+		// would leave the kind rank unpinned.
+		expect(
+			fixture.cases.filter((c) => new Set(c.rows.map((row) => row.kind)).size > 1).length
+		).toBeGreaterThanOrEqual(5);
 		for (const c of fixture.cases) {
 			expect(c.rows.length).toBeGreaterThan(1);
 			expect(c.expected).toHaveLength(c.rows.length);
 		}
 	});
 
-	it.each(singleKindCases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+	it.each(fixture.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
 		const sorted = c.rows.map(toRow).sort(compareTreeOrder);
 		expect(sorted.map((r) => r.id)).toEqual(c.expected);
 	});
 
 	it("sorts the same regardless of the input order", () => {
-		for (const c of singleKindCases) {
+		for (const c of fixture.cases) {
 			const reversed = [...c.rows].reverse().map(toRow).sort(compareTreeOrder);
 			expect(reversed.map((r) => r.id)).toEqual(c.expected);
 		}
@@ -86,6 +87,13 @@ describe("compareTreeOrder edge cases the fixture cannot express", () => {
 			{ id: "a" },
 		];
 		expect(rows.sort(compareTreeOrder).map((r) => r.id)).toEqual(["a", "b"]);
+	});
+
+	it("ranks a row with no kind as a folder, so a one-kind list needs none", () => {
+		const at = { order: 0, createdAt: "2026-01-01T00:00:00.000Z" };
+		const request: OrderedTreeRow = { ...at, id: "a", kind: "request" };
+		const unkinded: OrderedTreeRow = { ...at, id: "z" };
+		expect([request, unkinded].sort(compareTreeOrder).map((r) => r.id)).toEqual(["z", "a"]);
 	});
 
 	it("returns 0 for two rows that agree on every key", () => {

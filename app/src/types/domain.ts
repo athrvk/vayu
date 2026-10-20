@@ -602,16 +602,33 @@ export interface DataContractScope {
 	columns: string[];
 }
 
+/** Which kind of row a tree sibling is: a sub-folder or a request. */
+export type TreeRowKind = "collection" | "request";
+
 /** A row the sidebar places in a tree - a {@link Collection} or a {@link Request}. */
 export interface OrderedTreeRow {
+	/**
+	 * Read only to rank an `order` tie across kinds, so a list of one kind (the
+	 * collections list, one request list) sorts the same without it. A list that
+	 * mixes the two states it on every row - `childrenOf` in
+	 * `modules/collections/tree-children.ts` is the one place that builds one.
+	 */
+	kind?: TreeRowKind;
 	order?: number;
 	createdAt?: string;
 	id?: string;
 }
 
+/** Rank on an `order` tie: a sub-folder sorts before a request. */
+const KIND_RANK: Record<TreeRowKind, number> = { collection: 0, request: 1 };
+
 /**
  * The one ordering rule for collections and requests alike: `order` ascending,
- * ties by creation time, remaining ties by id.
+ * then kind (a sub-folder before a request), then creation time, remaining ties
+ * by id. A collection's sub-folders and requests share one `order` space
+ * (#2535), so this sorts the merged sibling list the sidebar renders and a
+ * recursive run walks; within one kind it is the `order, createdAt, id` rule
+ * unchanged.
  *
  * There used to be two comparators with two different tie rules - collections
  * tiebroke by id, requests by `createdAt` - while the engine tiebroke by
@@ -620,9 +637,13 @@ export interface OrderedTreeRow {
  * sidebar showed, and either order could change after an unrelated rename.
  *
  * The rule is now identical on both sides, pinned by
- * `engine/tests/fixtures/tree-order-conformance.json` (issue #360). Two details
- * are load-bearing rather than incidental:
+ * `engine/tests/fixtures/tree-order-conformance.json` (issues #360, #2535;
+ * the engine's copy is `engine/include/vayu/db/sibling_order.hpp`). Three
+ * details are load-bearing rather than incidental:
  *
+ *  - **Kind before `createdAt`.** A workspace from before the shared space has
+ *    rows of both kinds tied at `0`; ranking the folder first keeps the
+ *    folders-first display they were created under.
  *  - **`createdAt` before `id`.** Every request created before explicit orders
  *    existed sits at `order: 0`, so creation time is what the user has been
  *    seeing; making the id primary would visibly reshuffle their tree.
@@ -634,6 +655,9 @@ export interface OrderedTreeRow {
 export function compareTreeOrder(a: OrderedTreeRow, b: OrderedTreeRow): number {
 	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
 	if (orderDiff !== 0) return orderDiff;
+
+	const kindDiff = KIND_RANK[a.kind ?? "collection"] - KIND_RANK[b.kind ?? "collection"];
+	if (kindDiff !== 0) return kindDiff;
 
 	const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
 	const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
