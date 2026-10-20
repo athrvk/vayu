@@ -5410,7 +5410,17 @@ sent to; the app says this beside the API Key fields.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
+username-if-password-grant`, then one segment per extra parameter list that has
+a row the engine would send, in the order `authorizationParams`, `tokenParams`,
+`refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
+the pairs sorted by key, then value, byte-wise). Row order and `sendAs` do not
+change the key; a config with no such row keys exactly as it did before the
+lists existed. `scope`, `audience` and `resource` are not read, so a distinct
+`credentialsId` (or an extra parameter row) is what separates two tokens that
+differ only in those. The recipe is `oauth::cache_key`
+(`engine/include/vayu/http/oauth_client.hpp`), and the app's
+`computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
+`engine/tests/oauth_client_test.cpp`. Expiry uses a 45s skew; a missing `expires_in`
 means non-expiring. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row
@@ -5451,6 +5461,24 @@ holding `+`, `/` or `=` travels as `%2B`, `%2F`, `%3D`. A provider that expects
 them raw (as Postman and `curl -u` send them) needs `credentialsPlacement:
 "body"`, which puts `client_id` and `client_secret` in the form instead. The
 default is `basic_auth_header`.
+
+`scope`, `audience` and `resource` are sent in the form of a fresh grant when
+set; a refresh sends none of them. Three optional config lists add parameters
+of the user's own (issue #2536), each an array of `{key, value, enabled,
+sendAs?}`: `tokenParams` on a fresh grant, `refreshParams` on a refresh, and
+`authorizationParams` in the authorize URL's query (below). `sendAs` puts a
+row in the form (`body`, the default), the token URL's query (`url`) or a
+request header (`header`). A row is not sent when it is `enabled: false`, has
+no string `key`, has an unknown `sendAs`, or is named like a parameter the
+engine writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
+`redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
+`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`);
+a body or url row naming a form parameter already written (an `audience` the
+config sends) and a header row naming a header already set (`Authorization`,
+`Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
+value wins and no name is sent twice. A malformed list or row is skipped, never
+refused. Values are resolved with the rest of the config by `POST /compose`, and
+a `{{data.*}}` token in one is refused like one anywhere else in the config.
 
 **Response (`200`):**
 ```json
@@ -5498,6 +5526,12 @@ hands it back.
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
+
+The authorize URL carries `response_type`, `client_id`, `redirect_uri`,
+`state`, `scope`, `audience`, `resource` and the PKCE pair, then each
+`authorizationParams` row under the rules above, whatever its `sendAs` (a
+navigation has no body or headers); a row naming a parameter already in the URL
+is skipped.
 
 Attempts time out after 5 minutes; on success the token is written to the cache
 and `cacheKey` is returned. A completion (the loopback callback and `POST

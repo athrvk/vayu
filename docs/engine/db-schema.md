@@ -641,7 +641,9 @@ placement options, etc. Three optional lists hold extra request parameters
 an array of `{key, value, enabled, sendAs?}` rows. `sendAs` is `body`, `url` or
 `header` and, when absent, `body`; an `authorizationParams` row stores none,
 because the authorization request carries its parameters in the authorize
-URL's query. A config with no extra parameters omits the lists. A Postman
+URL's query. A config with no extra parameters omits the lists. What the
+engine sends from them, and how they enter the token cache key, is in
+[api-reference.md](api-reference.md#post-oauth2token). A Postman
 import fills them from the block's `tokenRequestParams`, `authRequestParams`
 and `refreshRequestParams`
 ([postman.md](../app/import-collections/postman.md#oauth-20-extra-request-parameters)).
@@ -1526,7 +1528,7 @@ Auto-created by `sync_schema()`.
 
 | Column          | Type    | Notes                                                             |
 |-----------------|---------|-------------------------------------------------------------------|
-| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?` - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
+| `cache_key`     | TEXT PK | `accessTokenUrl \x1f clientId \x1f credentialsId \x1f username?`, then one `\x1f <list>:<key>=<value>(\x1e ...)` segment per extra parameter list with a sendable row ([recipe](api-reference.md#oauth-20-token-cache)) - byte-identical to the app's `computeOAuth2CacheKey` (omits scope/audience/resource) |
 | `access_token`  | TEXT    | Bearer token (plaintext at rest)                                  |
 | `token_type`    | TEXT    | Defaults to `"Bearer"` when the provider omits it                 |
 | `refresh_token` | TEXT    | `""` when none                                                    |

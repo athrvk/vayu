@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace vayu::http::oauth {
 
@@ -25,12 +26,42 @@ namespace vayu::http::oauth {
  * from the config's own fields or the flow's state. An extra parameter row
  * (`tokenParams`, `authorizationParams`, `refreshParams`, issue #2536) of one
  * of these names would contradict or repeat one of them, so an import does
- * not carry it.
+ * not carry it and the engine does not send it.
  */
 constexpr auto RESERVED_PARAM_NAMES =
 std::to_array<std::string_view> ({ "grant_type", "client_id", "client_secret",
 "code", "redirect_uri", "code_verifier", "refresh_token", "username", "password",
 "scope", "state", "code_challenge", "code_challenge_method", "response_type" });
+
+/// The config lists of extra request parameters, in the order the cache key
+/// reads them (`cache_key`).
+constexpr std::string_view AUTHORIZATION_PARAMS = "authorizationParams";
+constexpr std::string_view TOKEN_PARAMS         = "tokenParams";
+constexpr std::string_view REFRESH_PARAMS       = "refreshParams";
+constexpr auto EXTRA_PARAM_LISTS = std::to_array<std::string_view> (
+{ AUTHORIZATION_PARAMS, TOKEN_PARAMS, REFRESH_PARAMS });
+
+/// Where an extra parameter row is sent (its `sendAs`). The authorize URL
+/// reads none of this: every row of `authorizationParams` rides its query.
+enum class ParamTarget : std::uint8_t { Body, Url, Header };
+
+/// One extra parameter row the engine may send.
+struct ExtraParam {
+    std::string key;
+    std::string value;
+    ParamTarget target = ParamTarget::Body;
+};
+
+/**
+ * The rows of @p config's @p list the engine may send, in list order: each an
+ * object not `enabled: false` (absent or non-boolean is enabled), with a
+ * non-empty string `key` outside `RESERVED_PARAM_NAMES`, and a `sendAs` that
+ * is absent, `body`, `url` or `header`. A non-string `value` reads as "", as
+ * `field` reads one; a malformed list or row is skipped, never refused. A
+ * sender may still skip an eligible row whose name the engine itself wrote,
+ * so the engine's value wins; the cache key reads every eligible row.
+ */
+std::vector<ExtraParam> extra_params (const nlohmann::json& config, std::string_view list);
 
 /**
  * @brief Structured token-acquisition failure.
@@ -73,6 +104,12 @@ struct InteractiveExchange {
  * TypeScript (computeOAuth2CacheKey) for the GET/DELETE status endpoints:
  *   accessTokenUrl \x1f clientId \x1f (credentialsId|"default")
  *   \x1f (grantType == "password" ? username : "")
+ * then, for each of `EXTRA_PARAM_LISTS` in order with at least one
+ * `extra_params` row (issue #2536):
+ *   \x1f listName ":" key "=" value ( \x1e key "=" value )*
+ * the rows' (key, value) pairs sorted by key, then value, comparing bytes, so
+ * row order and `sendAs` do not change the key. A config with no eligible row
+ * keys exactly as it did before the lists existed.
  */
 std::string cache_key (const nlohmann::json& config);
 

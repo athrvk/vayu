@@ -895,9 +895,9 @@ Notes:
   and whether it has expired, and `clear_oauth2_token` drops one. The config is
   the same block a saved request's `auth` carries, so it can be copied out of
   `list_requests` verbatim; the **cache key is the engine's**
-  (`accessTokenUrl` + `clientId` + `credentialsId` + username), so configs
-  differing only in scope share an entry and a distinct `credentialsId` is what
-  separates them.
+  (`accessTokenUrl` + `clientId` + `credentialsId` + username + the extra
+  parameter rows the engine would send), so configs differing only in scope
+  share an entry and a distinct `credentialsId` is what separates them.
   Two rules here are security decisions rather than plumbing, and both are
   stated in the tool descriptions so an agent reads them before it reads a
   refusal. **No tool returns access-token bytes.** The engine is what applies a

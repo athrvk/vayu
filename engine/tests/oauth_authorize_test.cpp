@@ -114,6 +114,33 @@ TEST (BuildAuthorizeUrl, OmitsPkceWhenDisabled) {
     EXPECT_NE (url.find ("?foo=1&"), std::string::npos);
 }
 
+// authorizationParams ride the query whatever their sendAs (issue #2536); one
+// naming a parameter the engine writes is skipped, so the config's audience
+// appears once and the flow's own state is never replaced.
+TEST (BuildAuthorizeUrl, AppendsAuthorizationParamsTheEngineDidNotWrite) {
+    const json config = { { "authorizationUrl", "https://idp.example/auth" },
+        { "clientId", "cid" }, { "audience", "aud-1" },
+        { "authorizationParams",
+        json::array ({ { { "key", "prompt" }, { "value", "login" } },
+        { { "key", "organization" }, { "value", "o 1" }, { "sendAs", "header" } },
+        { { "key", "audience" }, { "value", "aud-2" } }, { { "key", "state" }, { "value", "FORGED" } },
+        { { "key", "off" }, { "value", "1" }, { "enabled", false } } }) } };
+    const auto url = vayu::http::build_authorize_url (config, "STATE1", "C", "rt", true);
+    auto q = parse_q (query_of (url));
+    EXPECT_EQ (q["prompt"], "login");
+    EXPECT_EQ (q["organization"], "o%201");
+    EXPECT_EQ (q["audience"], "aud-1");
+    EXPECT_EQ (q["state"], "STATE1");
+    EXPECT_EQ (q.count ("off"), 0u);
+    size_t audiences = 0;
+    for (size_t at = url.find ("audience="); at != std::string::npos;
+    at             = url.find ("audience=", at + 1)) {
+        ++audiences;
+    }
+    EXPECT_EQ (audiences, 1u) << url;
+    EXPECT_EQ (url.find ("FORGED"), std::string::npos) << url;
+}
+
 TEST_F (OAuthAuthorizeTest, StartRejectsIncompleteConfig) {
     vayu::http::OAuth2AuthorizeManager mgr;
     auto r = mgr.start (*db_, json{ { "clientId", "c" } }, "loopback");
