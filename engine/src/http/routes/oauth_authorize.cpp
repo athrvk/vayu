@@ -199,9 +199,8 @@ struct OAuth2AuthorizeManager::Attempt {
     int64_t created_at = 0;
 
     std::atomic<int> result_state{ kPending };
-    // Written once, by the claim winner (or by complete() under mutex_, for an
-    // embedded attempt, which has no handler thread), and read only once
-    // result_state is settled.
+    // Written once, by the claim winner (the callback handler, the reaper or
+    // complete()), and read only once result_state is settled.
     std::string error;
     std::string cache_key;
 
@@ -383,9 +382,17 @@ const std::string& callback_url) {
             return { "not_found", "", "" };
         }
         Attempt& attempt = *it->second;
-        if (const int s = attempt.result_state.load (); s != 0) {
-            // Already resolved (e.g. a duplicate complete) - return as-is.
-            return { s == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
+        if (const int s = attempt.result_state.load (); s != kPending) {
+            // Settled (e.g. a duplicate complete) - return as-is; a claim held
+            // by a loopback callback mid-exchange is still pending.
+            if (!is_settled (s)) {
+                return { "pending", "", "" };
+            }
+            return { s == kCompleted ? "completed" : "failed", attempt.error,
+                attempt.cache_key };
+        }
+        if (!attempt.claim ()) {
+            return { "pending", "", "" };
         }
         state         = attempt.state;
         code_verifier = attempt.code_verifier;
@@ -397,7 +404,7 @@ const std::string& callback_url) {
     const auto params =
     parse_query (qpos == std::string::npos ? "" : callback_url.substr (qpos + 1));
 
-    int result_state = 2;
+    int result_state = kFailed;
     std::string error;
     std::string cache_key;
     if (const auto err = params.find ("error"); err != params.end ()) {
@@ -409,7 +416,7 @@ const std::string& callback_url) {
         oauth::InteractiveExchange ex{ code, code_verifier, redirect_uri };
         auto result = oauth::acquire_token (db, config, false, ex); // no lock held
         if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
-            result_state = 1;
+            result_state = kCompleted;
             cache_key    = oauth::cache_key (config);
         } else {
             error = std::get<oauth::TokenError> (result).message;
@@ -424,10 +431,9 @@ const std::string& callback_url) {
         return { "not_found", "", "" };
     }
     Attempt& attempt = *it->second;
-    attempt.result_state.store (result_state);
-    attempt.error     = error;
-    attempt.cache_key = cache_key;
-    return { result_state == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
+    attempt.publish (result_state, error, cache_key);
+    return { result_state == kCompleted ? "completed" : "failed", attempt.error,
+        attempt.cache_key };
 }
 
 AuthorizeStatus OAuth2AuthorizeManager::status (const std::string& attempt_id) {

@@ -320,6 +320,22 @@ TEST_F (OAuthAuthorizeTest, LoopbackSettlesOnce) {
     expect_exchanged_token_stored (config, idp);
 }
 
+TEST_F (OAuthAuthorizeTest, CompleteDoesNotOverwriteASettledLoopbackAttempt) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    const json config = loopback_config (idp);
+    auto start        = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok);
+    httplib::Client cli (callback_origin (start));
+    auto first = cli.Get ("/callback?code=AUTHCODE&state=" + state_of (start));
+    ASSERT_TRUE (first != nullptr);
+    ASSERT_EQ (first->status, 200);
+
+    const auto again = mgr.complete (*db_, start.attempt_id, "http://x/cb?error=denied");
+    EXPECT_EQ (again.state, "completed");
+    EXPECT_EQ (mgr.status (start.attempt_id).error, "");
+}
+
 TEST_F (OAuthAuthorizeTest, StatusNotFoundForUnknownAttempt) {
     vayu::http::OAuth2AuthorizeManager mgr;
     EXPECT_EQ (mgr.status ("nope").state, "not_found");
