@@ -7,6 +7,7 @@
 
 #include "vayu/http/oauth_client.hpp"
 
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -269,10 +270,17 @@ std::optional<ExtraParam> extra_param (const nlohmann::json& row) {
     return ExtraParam{ std::move (key), field (row, "value"), *target };
 }
 
-/// The cache key's segment for @p list, or "" when it has no eligible row.
+/// The cache key's segment for @p list, or "" when it has no eligible row. A
+/// row whose key names a credential is keyed by name alone: the key is a
+/// token's address, returned to clients and stored as a primary key, so it
+/// must not carry the secret, and a rotated one-shot assertion is still the
+/// same token.
 std::string extra_params_key_segment (const nlohmann::json& config, std::string_view list) {
     std::vector<std::pair<std::string, std::string>> pairs;
     for (ExtraParam& row : extra_params (config, list)) {
+        if (vayu::core::vayu_ext::names_param_credential (row.key)) {
+            row.value.clear ();
+        }
         pairs.emplace_back (std::move (row.key), std::move (row.value));
     }
     if (pairs.empty ()) {

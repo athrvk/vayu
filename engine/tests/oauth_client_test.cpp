@@ -168,6 +168,46 @@ TEST (OAuthCacheKey, SharedVectors) {
     "default\x1f"
     "\x1f"
     "authorizationParams:n=");
+    // Vector 6: a row whose key names a credential - a parameter's name or a
+    // header's, matched as the export's redaction matches it - is keyed by its
+    // name with an empty value, sorted among the rest as that.
+    EXPECT_EQ (
+    oauth::cache_key (json{ { "grantType", "client_credentials" },
+    { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" },
+    { "tokenParams",
+    json::array ({ { { "key", "client_assertion" }, { "value", "eyJhbGciOi.e30.sig" } },
+    { { "key", "X-Api-Key" }, { "value", "k-123" }, { "sendAs", "header" } },
+    { { "key", "audience" }, { "value", "api" } } }) } }),
+    "https://idp/token\x1f"
+    "cid\x1f"
+    "default\x1f"
+    "\x1f"
+    "tokenParams:X-Api-Key=\x1e"
+    "audience=api\x1e"
+    "client_assertion=");
+}
+
+// The cache key is handed to clients (`cacheKey`) and stored as the token
+// row's primary key, so a credential row contributes its name alone: two
+// configs differing only in a client assertion share one token, while an
+// ordinary row's value still separates two.
+// Mutation-check: key a credential row by its value in
+// `extra_params_key_segment` and the first two expectations fail.
+TEST (OAuthCacheKey, CredentialRowsAreKeyedByNameAlone) {
+    const json base = { { "grantType", "client_credentials" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    const auto with_rows = [&base] (const std::string& assertion, const std::string& audience) {
+        json config = base;
+        config["tokenParams"] =
+        json::array ({ { { "key", "client_assertion" }, { "value", assertion } },
+        { { "key", "audience" }, { "value", audience } } });
+        return oauth::cache_key (config);
+    };
+
+    const std::string key = with_rows ("jwt-1", "api");
+    EXPECT_EQ (key, with_rows ("jwt-2", "api"));
+    EXPECT_EQ (key.find ("jwt-1"), std::string::npos) << key;
+    EXPECT_NE (key, with_rows ("jwt-1", "other-api"));
 }
 
 // Row order is not part of the key: two configs listing the same rows in a

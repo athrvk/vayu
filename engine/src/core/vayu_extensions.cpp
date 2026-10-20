@@ -188,16 +188,6 @@ bool is_string_member (const Json& node, const char* key) {
     return found != node.end () && found->is_string ();
 }
 
-bool is_secret_param_name (std::string_view name, const std::vector<std::string>& extra);
-
-/// Whether an OAuth 2.0 extra request parameter named @p name carries a
-/// credential. A row can be sent as a header too, so a credential header's
-/// name counts as well as a parameter's.
-bool names_param_credential (std::string_view name) {
-    return one_of (SECRET_AUTH_KEYS, name) ||
-    one_of (SECRET_PARAM_KEYS, name) || is_secret_param_name (name, {});
-}
-
 /// An OAuth 2.0 block's extra request parameters (`tokenRequestParams`, ...).
 void redact_param_rows (Json& rows, int& omitted) {
     blank_rows_where (rows, omitted, names_param_credential);
@@ -288,9 +278,9 @@ std::to_array<std::string_view> ({ "key", "enabled", "sendAs" });
 /**
  * A stored config's extra parameter list, redacted per row: its key,
  * `enabled` and `sendAs` stay, its value is blanked when the key names a
- * credential, and anything else - a row with no string key, a member no row
- * has, a list that is not one - is treated as a credential, as an unlisted
- * bag member is.
+ * credential, and anything else - a row with no non-empty string key, a
+ * member no row has, a list that is not one - is treated as a credential, as
+ * an unlisted bag member is.
  */
 void redact_config_param_rows (Json& rows, int& omitted) {
     if (!rows.is_array ()) {
@@ -298,12 +288,13 @@ void redact_config_param_rows (Json& rows, int& omitted) {
         return;
     }
     for (Json& row : rows) {
-        if (!is_string_member (row, "key")) {
+        if (!is_string_member (row, "key") ||
+        row.at ("key").get_ref<const std::string&> ().empty ()) {
             blank_unlisted_value (row, omitted);
             continue;
         }
         const bool credential =
-        names_param_credential (row.at ("key").get<std::string> ());
+        names_param_credential (row.at ("key").get_ref<const std::string&> ());
         for (auto member = row.begin (); member != row.end (); ++member) {
             const bool secret = member.key () == "value" ?
             credential :
@@ -565,6 +556,11 @@ int& omitted) {
     blank_rows_where (rows, omitted, [&extra_param_names] (std::string_view name) {
         return is_secret_param_name (name, extra_param_names);
     });
+}
+
+bool names_param_credential (std::string_view name) {
+    return one_of (SECRET_AUTH_KEYS, name) ||
+    one_of (SECRET_PARAM_KEYS, name) || is_secret_param_name (name, {});
 }
 
 void blank_cookie_values (Json& cookies, int& omitted) {

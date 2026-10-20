@@ -2959,7 +2959,8 @@ describe the auth, so a member no list has heard of (Insomnia's IAM
 row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
 names a credential (`client_secret`, `client_assertion`, `password`,
 `Authorization`, `X-Api-Key`, the other names below), so an `audience` row
-leaves intact. A credential outside an auth block is blanked by name wherever
+leaves intact; a row with no non-empty string `key`, and any member of a row
+beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
 it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
@@ -5422,9 +5423,14 @@ deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
 username-if-password-grant`, then one segment per extra parameter list that has
 a row the engine would send, in the order `authorizationParams`, `tokenParams`,
 `refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
-the pairs sorted by key, then value, byte-wise). Row order and `sendAs` do not
-change the key; a config with no such row keys exactly as it did before the
-lists existed. `scope`, `audience` and `resource` are not read, so a distinct
+the pairs sorted by key, then value, byte-wise). A row whose key names a
+credential (`client_assertion`, `assertion`, an `X-Api-Key` or `Authorization`
+header, the names an export blanks: `core::vayu_ext::names_param_credential`)
+is written as `<key>=` with its value left out, because the key is returned as
+`cacheKey`, stored as the cache row's primary key and can reach a log; a
+rotated assertion therefore keeps the token it was cached under. Row order and
+`sendAs` do not change the key; a config with no such row keys exactly as it
+did before the lists existed. `scope`, `audience` and `resource` are not read, so a distinct
 `credentialsId` (or an extra parameter row) is what separates two tokens that
 differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's

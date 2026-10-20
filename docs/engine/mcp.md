@@ -896,7 +896,9 @@ Notes:
   the same block a saved request's `auth` carries, so it can be copied out of
   `list_requests` verbatim; the **cache key is the engine's**
   (`accessTokenUrl` + `clientId` + `credentialsId` + username + the extra
-  parameter rows the engine would send), so configs differing only in scope
+  parameter rows the engine would send, a credential-named row such as
+  `client_assertion` by its name alone, so the key never carries a secret),
+  so configs differing only in scope
   share an entry and a distinct `credentialsId` is what separates them.
   Two rules here are security decisions rather than plumbing, and both are
   stated in the tool descriptions so an agent reads them before it reads a

@@ -108,7 +108,10 @@ struct InteractiveExchange {
  * `extra_params` row (issue #2536):
  *   \x1f listName ":" key "=" value ( \x1e key "=" value )*
  * the rows' (key, value) pairs sorted by key, then value, comparing bytes, so
- * row order and `sendAs` do not change the key. A config with no eligible row
+ * row order and `sendAs` do not change the key. A row whose key names a
+ * credential (`core::vayu_ext::names_param_credential`: `client_assertion`,
+ * `X-Api-Key`, ...) writes its key with an empty value, so the key, which
+ * clients are handed, never carries the secret. A config with no eligible row
  * keys exactly as it did before the lists existed.
  */
 std::string cache_key (const nlohmann::json& config);
