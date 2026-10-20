@@ -5540,8 +5540,6 @@ TEST_F (ScriptEngineTest, AnAsyncTestThatNeverSettlesIsReported) {
     R"(A promise did not settle before the script ended (returned by test "stuck"))");
 }
 
-// A chain of short jobs never runs long enough inside one job for the
-// interrupt handler to poll, so the drain checks the deadline between jobs.
 TEST_F (ScriptEngineTest, PendingJobsRunWithinTheDeadline) {
     ScriptConfig cfg;
     cfg.timeout_ms = 100;
@@ -5556,6 +5554,27 @@ TEST_F (ScriptEngineTest, PendingJobsRunWithinTheDeadline) {
     EXPECT_FALSE (result.success);
     EXPECT_EQ (result.error_message, "Script execution timed out after 100ms");
     EXPECT_LT (elapsed, std::chrono::seconds (5));
+}
+
+// The interrupt handler polls only every few thousand bytecode operations, so a
+// job short enough would slip in after the deadline stopped the script; the
+// drain checks the clock before each job so that none does.
+TEST_F (ScriptEngineTest, AScriptTheDeadlineStoppedRunsNoneOfItsJobs) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 100;
+    ScriptEngine bounded (cfg);
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+
+    auto result = bounded.execute (R"JS(
+        Promise.resolve().then(() => pm.environment.set("late", "1"));
+        for (;;) {}
+    )JS",
+    ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 100ms");
+    EXPECT_EQ (env.count ("late"), 0U);
 }
 
 // A job that itself runs past the deadline is stopped by the interrupt handler,

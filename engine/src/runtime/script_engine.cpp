@@ -755,9 +755,11 @@ class ScriptEngine::Impl {
 
     /// Runs the promise jobs the script queued, so `.then` callbacks and the
     /// code after an `await` run inside the execution (#2531). The deadline
-    /// is checked between jobs as well as inside one, because a chain of
-    /// short jobs never runs long enough for the interrupt handler to poll;
-    /// with no deadline the job cap bounds the drain instead.
+    /// is checked before each job as well as by the interrupt handler inside
+    /// one, because the handler polls only every few thousand bytecode
+    /// operations and a native job polls not at all: without the check, a
+    /// script the deadline already stopped would still run a short job. With
+    /// no deadline the job cap bounds the drain instead.
     ///
     /// @return why the drain stopped with jobs still queued, or nullopt once
     ///         the queue is empty.
