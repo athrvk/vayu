@@ -3566,7 +3566,11 @@ parent's `item[]`, so the collection keeps the order Postman runs it in. A
 JMeter parse (#2573) states it the same way on every sampler and controller
 folder: its position among the parent's enabled elements in the plan's tree,
 one count across both kinds, which a `ThreadGroup` shares with the parent it
-flattens into. A Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
+flattens into. An Insomnia parse, v4 or v5 (#2573), states it as each folder's and
+request's rank, `0..k-1`, among the parent's siblings that import, ordered by
+ascending `metaSortKey` (v5's `meta.sortKey`) with ties in document order; a
+parent where any such sibling has no numeric key states none, so its folders
+come first. A Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
 each folder's `x-vayu-collection.folders[].order`; one written before folders
 carried an `order` states none, and its requests then follow its folders as
 they did. No other format states one. The flattening into

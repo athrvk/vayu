@@ -3021,6 +3021,123 @@ TEST_F (ImportParseRoute, AJmeterPlanOfControllersOnlyIsUnchanged) {
     }
 }
 
+/// An Insomnia v4 export whose resource list is not in sort-key order: sparse
+/// and negative keys, a tie, and a gRPC request with no key that takes no
+/// position. By key the root lists A, Mid, Tie, C.
+const char* INTERLEAVED_INSOMNIA_V4 = R"json({"_type":"export","__export_format":4,"resources":[
+  {"_id":"wrk_1","_type":"workspace","name":"W"},
+  {"_id":"fld_c","_type":"request_group","parentId":"wrk_1","name":"C","metaSortKey":5},
+  {"_id":"req_mid","_type":"request","parentId":"wrk_1","name":"Mid","method":"GET","url":"https://x.test/mid","metaSortKey":-20},
+  {"_id":"fld_a","_type":"request_group","parentId":"wrk_1","name":"A","metaSortKey":-1000.5},
+  {"_id":"greq_1","_type":"grpc_request","parentId":"wrk_1","name":"G"},
+  {"_id":"req_tie","_type":"request","parentId":"wrk_1","name":"Tie","method":"GET","url":"https://x.test/tie","metaSortKey":-20},
+  {"_id":"req_in_c","_type":"request","parentId":"fld_c","name":"InC","method":"GET","url":"https://x.test/c","metaSortKey":1},
+  {"_id":"req_in_a","_type":"request","parentId":"fld_a","name":"InA","method":"GET","url":"https://x.test/a","metaSortKey":1}
+]})json";
+
+/// The same tree as a v5 YAML export, which sorts by `meta.sortKey`.
+const char* INTERLEAVED_INSOMNIA_V5 = R"yaml(type: collection.insomnia.rest/5.0
+name: W
+collection:
+  - name: C
+    meta: { id: fld_c, sortKey: 5 }
+    children:
+      - name: InC
+        url: https://x.test/c
+        method: GET
+        meta: { id: req_in_c, sortKey: 1 }
+  - name: Mid
+    url: https://x.test/mid
+    method: GET
+    meta: { id: req_mid, sortKey: -20 }
+  - name: A
+    meta: { id: fld_a, sortKey: -1000.5 }
+    children:
+      - name: InA
+        url: https://x.test/a
+        method: GET
+        meta: { id: req_in_a, sortKey: 1 }
+  - name: G
+    url: grpcb.in:9000
+    protoFileId: pf_1
+    meta: { id: greq_1 }
+  - name: Tie
+    url: https://x.test/tie
+    method: GET
+    meta: { id: req_tie, sortKey: -20 }
+)yaml";
+
+// Insomnia lists a folder's requests and sub-folders together by ascending sort
+// key and runs them in that order (#2573). Each draft states its dense rank
+// among the siblings that import: the gRPC request takes none, so C is 3 and not
+// 4, and the raw keys are never written. v4 and v5 share the rule, so both
+// documents answer alike. Mutation checks: stop stamping `order` in
+// `InsomniaTree::build_collection` and this reds; stop carrying `meta.sortKey`
+// in `InsomniaV5Flattener::add_item` and the v5 half reds.
+TEST_F (ImportParseRoute, AnInsomniaExportKeepsItsSortKeyOrder) {
+    for (const char* document : { INTERLEAVED_INSOMNIA_V4, INTERLEAVED_INSOMNIA_V5 }) {
+        SCOPED_TRACE (document);
+        auto [status, body] =
+        vayu::http::routes::import_response (*db_, json{ { "content", document } });
+        ASSERT_EQ (status, 200) << body.dump ();
+        const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+
+        using vayu::tests::listed_children;
+        EXPECT_EQ (listed_children (*db_, root),
+        (std::vector<std::string>{ "folder:A", "request:Mid", "request:Tie", "folder:C" }));
+        const std::string folder_c = vayu::tests::child_folder_id (*db_, root, "C");
+        const auto row = db_->get_collection (folder_c);
+        ASSERT_HAS_VALUE (row);
+        EXPECT_EQ (row->order, 3);
+
+        std::vector<std::string> run;
+        for (const auto& request : db_->get_requests_in_subtree (root)) {
+            run.push_back (request.name);
+        }
+        EXPECT_EQ (run, (std::vector<std::string>{ "InA", "Mid", "Tie", "InC" }));
+    }
+}
+
+// One keyless request that becomes a draft keeps its whole parent in the
+// listing every unordered import has, folders first (#2573); a sibling parent
+// whose children are all keyed is still sorted, and an unsupported resource
+// without a key blocks neither.
+TEST_F (ImportParseRoute, AnInsomniaParentWithAMissingKeyStaysFoldersFirst) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"json({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk_1","_type":"workspace","name":"W"},
+        {"_id":"req_r1","_type":"request","parentId":"wrk_1","name":"R1","method":"GET","url":"https://x.test/1","metaSortKey":-9},
+        {"_id":"req_r2","_type":"request","parentId":"wrk_1","name":"R2","method":"GET","url":"https://x.test/2"},
+        {"_id":"fld_f","_type":"request_group","parentId":"wrk_1","name":"F","metaSortKey":100},
+        {"_id":"req_x","_type":"request","parentId":"fld_f","name":"X","method":"GET","url":"https://x.test/x","metaSortKey":9},
+        {"_id":"req_y","_type":"request","parentId":"fld_f","name":"Y","method":"GET","url":"https://x.test/y","metaSortKey":1},
+        {"_id":"ws_1","_type":"websocket_request","parentId":"fld_f","name":"WS"}
+      ]})json" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    using vayu::tests::listed_children;
+    EXPECT_EQ (listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:F", "request:R1", "request:R2" }));
+    EXPECT_EQ (listed_children (*db_, vayu::tests::child_folder_id (*db_, root, "F")),
+    (std::vector<std::string>{ "request:Y", "request:X" }));
+}
+
+// An export that carries no sort keys, or a workspace of folders only, lists as
+// it did before #2573.
+TEST_F (ImportParseRoute, AnInsomniaExportWithoutSortKeysIsUnchanged) {
+    auto [status, body] = vayu::http::routes::import_response (*db_,
+    json{ { "content", R"json({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk_1","_type":"workspace","name":"W"},
+        {"_id":"req_r","_type":"request","parentId":"wrk_1","name":"R","method":"GET","url":"https://x.test/r"},
+        {"_id":"fld_b","_type":"request_group","parentId":"wrk_1","name":"B"},
+        {"_id":"fld_a","_type":"request_group","parentId":"wrk_1","name":"A"}
+      ]})json" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    const std::string root = body.at ("idMap").at ("c1").get<std::string> ();
+    EXPECT_EQ (vayu::tests::listed_children (*db_, root),
+    (std::vector<std::string>{ "folder:B", "folder:A", "request:R" }));
+}
+
 /// What an import writes is what the write routes accept: a binary body
 /// persists through `POST /import` with its file reference intact.
 TEST_F (ImportParseRoute, PersistsAnImportedBinaryBody) {

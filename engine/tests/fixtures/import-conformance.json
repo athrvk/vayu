@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535). Since #2535 a Postman draft states its document position as `order`, and every payload numbers a parent's folders and requests in one space.",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535; insomnia-v4-interleaved and insomnia-v5-interleaved, issue #2573). Since #2535 a Postman draft states its document position as `order`; since #2573 an Insomnia draft states its rank by sort key (`insomnia-v5` was re-recorded for it: its `Users` folder carries `meta.sortKey`). Every payload numbers a parent's folders and requests in one space.",
   "cases": [
     {
       "name": "postman-v21",
@@ -2522,9 +2522,11 @@
                         "auth": {
                           "mode": "inherit"
                         },
-                        "followRedirects": false
+                        "followRedirects": false,
+                        "order": 0
                       }
-                    ]
+                    ],
+                    "order": 1
                   }
                 ],
                 "requests": [
@@ -2564,7 +2566,8 @@
                         }
                       }
                     ],
-                    "followRedirects": true
+                    "followRedirects": true,
+                    "order": 0
                   }
                 ]
               }
@@ -2773,7 +2776,7 @@
             "parentTempId": "c2",
             "name": "Admin",
             "description": "",
-            "order": 0,
+            "order": 1,
             "variables": {},
             "auth": {
               "mode": "none"
@@ -2956,7 +2959,7 @@
                 }
               }
             ],
-            "order": 1
+            "order": 0
           },
           {
             "tempId": "r7",
@@ -3084,6 +3087,490 @@
             }
           }
         ],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v4-interleaved",
+      "document": "{\"_type\":\"export\",\"__export_format\":4,\"resources\":[\n  {\"_id\":\"wrk_1\",\"_type\":\"workspace\",\"name\":\"W\"},\n  {\"_id\":\"fld_c\",\"_type\":\"request_group\",\"parentId\":\"wrk_1\",\"name\":\"C\",\"metaSortKey\":5},\n  {\"_id\":\"req_mid\",\"_type\":\"request\",\"parentId\":\"wrk_1\",\"name\":\"Mid\",\"method\":\"GET\",\"url\":\"https://x.test/mid\",\"metaSortKey\":-20},\n  {\"_id\":\"fld_a\",\"_type\":\"request_group\",\"parentId\":\"wrk_1\",\"name\":\"A\",\"metaSortKey\":-1000.5},\n  {\"_id\":\"greq_1\",\"_type\":\"grpc_request\",\"parentId\":\"wrk_1\",\"name\":\"G\"},\n  {\"_id\":\"req_tie\",\"_type\":\"request\",\"parentId\":\"wrk_1\",\"name\":\"Tie\",\"method\":\"GET\",\"url\":\"https://x.test/tie\",\"metaSortKey\":-20},\n  {\"_id\":\"req_in_c\",\"_type\":\"request\",\"parentId\":\"fld_c\",\"name\":\"InC\",\"method\":\"GET\",\"url\":\"https://x.test/c\",\"metaSortKey\":1},\n  {\"_id\":\"req_in_a\",\"_type\":\"request\",\"parentId\":\"fld_a\",\"name\":\"InA\",\"method\":\"GET\",\"url\":\"https://x.test/a\",\"metaSortKey\":1}\n]}",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "A",
+                "order": 0,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InA",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/a"
+                  }
+                ],
+                "variables": {}
+              },
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "C",
+                "order": 3,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InC",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/c"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "W",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Mid",
+                "order": 1,
+                "params": [],
+                "url": "https://x.test/mid"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Tie",
+                "order": 2,
+                "params": [],
+                "url": "https://x.test/tie"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "Insomnia Export v4",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 4,
+          "skipped": [
+            {
+              "count": 1,
+              "kind": "grpc",
+              "requests": [
+                "G"
+              ]
+            }
+          ],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "W",
+            "description": "",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "A",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c1",
+            "name": "C",
+            "description": "",
+            "order": 3,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Mid",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/mid",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 1
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c1",
+            "name": "Tie",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/tie",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 2
+          },
+          {
+            "tempId": "r3",
+            "collectionTempId": "c2",
+            "name": "InA",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/a",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          },
+          {
+            "tempId": "r4",
+            "collectionTempId": "c3",
+            "name": "InC",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/c",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          }
+        ],
+        "environments": [],
+        "specs": [],
+        "clientCertificates": []
+      }
+    },
+    {
+      "name": "insomnia-v5-interleaved",
+      "document": "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n  - name: C\n    meta: { id: fld_c, sortKey: 5 }\n    children:\n      - name: InC\n        url: https://x.test/c\n        method: GET\n        meta: { id: req_in_c, sortKey: 1 }\n  - name: Mid\n    url: https://x.test/mid\n    method: GET\n    meta: { id: req_mid, sortKey: -20 }\n  - name: A\n    meta: { id: fld_a, sortKey: -1000.5 }\n    children:\n      - name: InA\n        url: https://x.test/a\n        method: GET\n        meta: { id: req_in_a, sortKey: 1 }\n  - name: G\n    url: grpcb.in:9000\n    protoFileId: pf_1\n    meta: { id: greq_1 }\n  - name: Tie\n    url: https://x.test/tie\n    method: GET\n    meta: { id: req_tie, sortKey: -20 }\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "A",
+                "order": 0,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InA",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/a"
+                  }
+                ],
+                "variables": {}
+              },
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [],
+                "description": "",
+                "name": "C",
+                "order": 3,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "InC",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://x.test/c"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "W",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Mid",
+                "order": 1,
+                "params": [],
+                "url": "https://x.test/mid"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Tie",
+                "order": 2,
+                "params": [],
+                "url": "https://x.test/tie"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 2,
+          "format": "Insomnia Export v5",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 4,
+          "skipped": [
+            {
+              "count": 1,
+              "kind": "grpc",
+              "requests": [
+                "G"
+              ]
+            }
+          ],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "collections": [
+          {
+            "tempId": "c1",
+            "parentTempId": null,
+            "name": "W",
+            "description": "",
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c2",
+            "parentTempId": "c1",
+            "name": "A",
+            "description": "",
+            "order": 0,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          },
+          {
+            "tempId": "c3",
+            "parentTempId": "c1",
+            "name": "C",
+            "description": "",
+            "order": 3,
+            "variables": {},
+            "auth": {
+              "mode": "none"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "tempId": "r1",
+            "collectionTempId": "c1",
+            "name": "Mid",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/mid",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 1
+          },
+          {
+            "tempId": "r2",
+            "collectionTempId": "c1",
+            "name": "Tie",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/tie",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 2
+          },
+          {
+            "tempId": "r3",
+            "collectionTempId": "c2",
+            "name": "InA",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/a",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          },
+          {
+            "tempId": "r4",
+            "collectionTempId": "c3",
+            "name": "InC",
+            "description": "",
+            "method": "GET",
+            "url": "https://x.test/c",
+            "params": [],
+            "headers": [],
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "auth": {
+              "mode": "inherit"
+            },
+            "order": 0
+          }
+        ],
+        "environments": [],
         "specs": [],
         "clientCertificates": []
       }
