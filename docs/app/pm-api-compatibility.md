@@ -84,8 +84,7 @@ string form, which is also Postman's: `1`, `true`, `1,2,3`, `[object Object]`, `
 loaded is read from that stored text.
 
 The exception is a row whose `type` is declared `number`, `boolean` or `json`: it keeps
-casting its stored text by that type, whatever the script set, as Postman casts a declared
-type. Vayu's default `"string"` stands for Postman's `any` as well, so a set on a row of
+casting its stored text by that type, whatever the script set. Vayu's default `"string"` stands for Postman's `any` as well, so a set on a row of
 that type is read back as set. Objects and arrays keep what `JSON.parse(JSON.stringify(value))`
 keeps (a `Date` reads back as its ISO string, a nested `NaN` as `null`), and a value
 JSON cannot write at all (a function, a cycle, a `BigInt`) reads back as its string form.

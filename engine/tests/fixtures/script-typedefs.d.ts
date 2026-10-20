@@ -525,7 +525,7 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get an environment variable value by name - what a script set this run, as it was set, or else the stored text cast by its declared type.
+		 * Get an environment variable value by name - what a script set this run (on a row of the default type), or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const token = pm.environment.get('auth_token');
@@ -621,7 +621,7 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get a global variable value by name - what a script set this run, as it was set, or else the stored text cast by its declared type.
+		 * Get a global variable value by name - what a script set this run (on a row of the default type), or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const apiKey = pm.globals.get('api_key');

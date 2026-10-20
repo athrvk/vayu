@@ -1246,9 +1246,9 @@ nlohmann::json get_script_completions () {
     { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.environment.get(name: string): any | undefined" },
     { "documentation",
-    "Get an environment variable value by name - what a script set this run, "
-    "as it was set, or else the stored text cast by its declared "
-    "type.\n\nExample:\nconst token = "
+    "Get an environment variable value by name - what a script set this run "
+    "(on a row of the default type), or else the stored text cast by its "
+    "declared type.\n\nExample:\nconst token = "
     "pm.environment.get('auth_token');" },
     { "sortText", "1_pm_environment_get" } });
 
@@ -1275,8 +1275,8 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.globals.get(\"${1:variable}\")" }, { "insertTextRules", INSERT_AS_SNIPPET },
     { "detail", "pm.globals.get(name: string): any | undefined" },
     { "documentation",
-    "Get a global variable value by name - what a script set this run, as it "
-    "was set, or else the stored text cast by its declared "
+    "Get a global variable value by name - what a script set this run (on a "
+    "row of the default type), or else the stored text cast by its declared "
     "type.\n\nExample:\nconst apiKey = "
     "pm.globals.get('api_key');" },
     { "sortText", "1_pm_globals_get" } });

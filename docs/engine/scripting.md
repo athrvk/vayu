@@ -1399,16 +1399,17 @@ number `5` on a row that holds `"5"` leaves the row unwritten.
 Two limits:
 
 - **A declared type wins.** A row whose `type` is `number`, `boolean` or
-  `json` casts its stored text by that type, whatever was set, as Postman casts
-  a declared type. Vayu's default `"string"` doubles as Postman's `any`, so a
-  row of that type answers what was set.
+  `json` casts its stored text by that type, whatever was set. Vayu's default
+  `"string"` doubles as Postman's `any`, so a row of that type answers what was
+  set. (On a `json` row, `set` still stores the object's string form, so an
+  object set there reads back as that text, not as an object.)
 - **An object travels as JSON.** Each read is a fresh copy, as
   `JSON.parse(JSON.stringify(value))` would make it: a `Date` reads back as its
   ISO string and a nested `NaN` as `null`. A number on its own keeps every
   value, `NaN`, the infinities and `-0` included. What JSON cannot write at all
-  (a function, a symbol, a `BigInt`, a cycle) reads back as its string form.
-  An `extract.*` element writes a whole new variable, so its text replaces a
-  value a script set earlier.
+  (a function, a `BigInt`, a cycle) reads back as its string form.
+- **A later write replaces it.** An `extract.*` element writes a whole new
+  variable, so its text replaces a value a script set earlier.
 
 ### The six methods every scope has
 

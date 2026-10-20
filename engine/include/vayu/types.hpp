@@ -1283,7 +1283,7 @@ struct ScriptResult {
  * A string carries nothing, because the text already is the value. A nested
  * value travels as its JSON text, so it reads back as
  * `JSON.parse(JSON.stringify(value))` would; what JSON cannot write (a
- * function, a symbol, a BigInt, a cycle) carries nothing and reads as text.
+ * function, a BigInt, a cycle) carries nothing and reads as text.
  */
 struct ScriptValue {
     enum class Kind : std::uint8_t {
@@ -1294,9 +1294,7 @@ struct ScriptValue {
     };
     Kind kind     = Kind::None;
     double number = 0;
-    // `{}` for the trailing-field reason `Variable::created_at` gives.
-    // NOLINTNEXTLINE(readability-redundant-member-init)
-    std::string json{};
+    std::string json;
 
     bool operator== (const ScriptValue& /*other*/) const {
         return true;
