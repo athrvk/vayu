@@ -5,10 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "mock_server.hpp"
@@ -782,6 +784,102 @@ TEST (LoadClock, SendRateAndRateFidelityLeaveOutTheDrain) {
         EXPECT_NEAR (achievement,
         static_cast<double> (sent) * 100.0 / static_cast<double> (expected), 0.1);
         EXPECT_GT (achievement, 95.0) << "the drain is back in the denominator";
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #2385: a stored row is its whole second, not the last 100 ms window of it,
+// and the gate frame of the same tick carries the same figures as `second*`.
+// At 20 rps a second holds about 20 completions, so its p99 is its slowest and
+// the one stalled request shows up in exactly the row of its second.
+// Mutation checks: persist the last window again in `persist_metric_tick` and
+// the row/frame equality fails (and, nine times in ten, the stall row); drop
+// the `add_window` into the second's histogram and the sample sum fails.
+TEST (LoadClock, StoredRowsCarryTheWholeSecondsPercentiles) {
+    const std::string db_path = "test_load_clock_seconds.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.stall_once_url () }, { "mode", "constant_rps" },
+            { "duration", "3s" }, { "targetRps", 20.0 }, { "timeout", 5000 },
+            { "workers", 1 } };
+        const std::string run_id = "run_load_seconds";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto run = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (run);
+        ASSERT_EQ (run->status, vayu::RunStatus::Completed) << run->summary;
+
+        std::map<int64_t, nlohmann::json> rows;
+        double slowest_row_p99 = 0.0;
+        for (const auto& tick : db.get_metric_ticks_paginated (run_id, 1000, 0)) {
+            auto payload = nlohmann::json::parse (tick.payload);
+            slowest_row_p99 =
+            std::max (slowest_row_p99, payload.at ("latency_p99_ms").get<double> ());
+            rows.emplace (tick.timestamp, std::move (payload));
+        }
+        ASSERT_GE (rows.size (), 2u);
+        EXPECT_GE (slowest_row_p99, static_cast<double> (vayu::tests::SlowMockServer::STALL_MS))
+        << "no stored second holds the stall";
+
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+        std::vector<nlohmann::json> frames;
+        for (const auto& payload : context->ticks_since (0).payloads) {
+            frames.push_back (live_frame_json (payload));
+        }
+        ASSERT_FALSE (frames.empty ());
+
+        size_t gate_frames    = 0;
+        size_t second_samples = 0;
+        for (size_t i = 0; i < frames.size (); ++i) {
+            const auto& frame = frames[i];
+            for (const auto* key :
+            { "cumulativeP50Ms", "cumulativeP95Ms", "cumulativeP99Ms" }) {
+                ASSERT_TRUE (frame.contains (key))
+                << key << " missing: " << frame.dump ();
+                EXPECT_TRUE (frame.at (key).is_null () || frame.at (key).is_number ())
+                << frame.dump ();
+            }
+            if (!frame.contains ("secondSamples")) {
+                EXPECT_FALSE (frame.contains ("secondP99Ms")) << frame.dump ();
+                continue;
+            }
+            second_samples += frame.at ("secondSamples").get<size_t> ();
+            // The final frame closes the partial second and stores no row.
+            if (i + 1 == frames.size ()) {
+                continue;
+            }
+            ++gate_frames;
+            const auto row = rows.find (frame.at ("timestamp").get<int64_t> ());
+            ASSERT_NE (row, rows.end ())
+            << "a gate frame with no stored row: " << frame.dump ();
+            for (const auto& [live, stored] : { std::pair{ "secondP50Ms", "latency_p50_ms" },
+                 std::pair{ "secondP95Ms", "latency_p95_ms" },
+                 std::pair{ "secondP99Ms", "latency_p99_ms" } }) {
+                const double expected =
+                frame.at (live).is_null () ? 0.0 : frame.at (live).get<double> ();
+                EXPECT_DOUBLE_EQ (row->second.at (stored).get<double> (), expected)
+                << stored << " at " << row->first;
+            }
+        }
+        EXPECT_EQ (gate_frames, rows.size ());
+        EXPECT_TRUE (frames.back ().contains ("secondSamples"))
+        << "the final frame did not close the partial second";
+        const auto completed = frames.back ().at ("totalRequests").get<size_t> ();
+        EXPECT_GT (completed, static_cast<size_t> (vayu::tests::SlowMockServer::STALL_AT));
+        EXPECT_EQ (second_samples, completed)
+        << "a completion landed in no second, or in two";
 
         manager.shutdown ();
     }

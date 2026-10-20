@@ -37,6 +37,14 @@ class SlowMockServer {
         svr.Get ("/fast", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("{}", "application/json");
         });
+        // Fast, except that its STALL_AT-th request waits STALL_MS: one known
+        // stall inside an otherwise quick run.
+        svr.Get ("/stall-once", [this] (const httplib::Request&, httplib::Response& res) {
+            if (++stall_hits == STALL_AT) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (STALL_MS));
+            }
+            res.set_content ("{}", "application/json");
+        });
         // A Prometheus-style exposition endpoint, for the server-vitals
         // monitor. The counter climbs by one per scrape so a test can assert
         // the loop actually ran; `cpu` is exported as a labelled family, which
@@ -119,6 +127,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/fast";
     }
 
+    std::string stall_once_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/stall-once";
+    }
+
     std::string hang_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
     }
@@ -143,6 +155,10 @@ class SlowMockServer {
     static constexpr int VITALS_SLOW_INTERVAL_MS = 2000;
     static constexpr int VITALS_SLOW_DELAY_MS    = 1700;
 
+    /// Which request to `/stall-once` stalls, and for how long.
+    static constexpr int STALL_AT = 10;
+    static constexpr int STALL_MS = 300;
+
     /// How many times either vitals endpoint has been scraped.
     int scrape_count () const {
         return scrapes.load ();
@@ -161,6 +177,7 @@ class SlowMockServer {
     int port = 0;
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
+    std::atomic<int> stall_hits{ 0 };
     /// Read through `live_connection_count()`. Shared with the task queue
     /// httplib owns, which is why it is not a plain member.
     std::shared_ptr<std::atomic<int>> live_connections =

@@ -937,10 +937,30 @@ class MetricsCollector {
      * recent window, so the live percentile chart tracks the current load instead of
      * the all-time distribution.
      *
+     * Each sampled window is also added into two reader-owned histograms
+     * before the recorder can recycle it: the open second, which
+     * take_second_percentiles() reads and resets, and the run so far, behind
+     * get_current_stats()'s `cumulativeP*Ms`.
+     *
      * @note Mutating (samples and resets the window). Call once per metrics tick
      *       from the producer thread only. Returns zeros when the window is empty.
      */
     [[nodiscard]] Percentiles sample_window_percentiles ();
+
+    /**
+     * @brief Percentiles of every window sampled since the previous call, then
+     *        reset (#2385).
+     *
+     * The 1 Hz stored row is this, not the last 100 ms window: percentiles do
+     * not merge after the fact, so the windows are merged as histograms here.
+     * Only what sample_window_percentiles() has already folded in is counted;
+     * the caller samples first. `count` is zero when nothing completed.
+     *
+     * @note Mutating, and on the same single reader thread as
+     *       sample_window_percentiles(), which is why the histogram behind it
+     *       needs no atomics. Call it once per stored row.
+     */
+    [[nodiscard]] Percentiles take_second_percentiles ();
 
     /**
      * @brief Get status code distribution
@@ -1053,7 +1073,11 @@ class MetricsCollector {
      *        sample_window_percentiles). When null the fields fall back to the
      *        cumulative-from-start histogram - kept for callers/tests that don't
      *        drive the interval recorder.
-     * @return JSON object with current metrics
+     * @return JSON object with current metrics. `cumulativeP50Ms` /
+     *         `cumulativeP95Ms` / `cumulativeP99Ms` are every window sampled so
+     *         far (null before any completion was sampled), read from the
+     *         reader-owned run-so-far histogram, so call this on the thread that
+     *         samples the windows.
      */
     [[nodiscard]] nlohmann::json get_current_stats (size_t current_active,
     double elapsed_seconds,
@@ -1096,14 +1120,28 @@ class MetricsCollector {
     // and total_count and loses increments under concurrency.
     struct hdr_histogram* latency_histogram_{ nullptr };
 
-    // Phaser-based interval recorder for the windowed (rolling) percentiles that
-    // the live/history per-tick series consume. record_latency_sample records
-    // here in parallel with the cumulative histogram; the producer thread
-    // sample-and-recycles it once per tick (sample_window_percentiles). The
-    // phaser orders the reader's swap against writers - it is not mutual
-    // exclusion between writers, so the write itself must be the atomic variant.
+    // Phaser-based interval recorder for the windowed (rolling) percentiles of
+    // the live tick. record_latency_sample records here in parallel with the
+    // cumulative histogram; the producer thread sample-and-recycles it once per
+    // tick (sample_window_percentiles). The phaser orders the reader's swap
+    // against writers - it is not mutual exclusion between writers, so the
+    // write itself must be the atomic variant.
     struct hdr_interval_recorder interval_recorder_{};
     bool interval_recorder_ready_{ false };
+
+    // Every sampled window is added into both of these, and only the producer
+    // thread touches them, so plain (non-atomic) histogram calls are correct.
+    // Reading latency_histogram_ live instead would be a plain read racing the
+    // workers' atomic writes. Owned, so a constructor that throws after
+    // building them does not leak them.
+    struct CloseHistogram {
+        void operator() (struct hdr_histogram* histogram) const noexcept {
+            hdr_close (histogram);
+        }
+    };
+    using OwnedHistogram = std::unique_ptr<struct hdr_histogram, CloseHistogram>;
+    OwnedHistogram second_histogram_;     // take_second_percentiles
+    OwnedHistogram run_so_far_histogram_; // cumulativeP*Ms
 
     // One cumulative histogram per network phase, indexed by TimingPhase. Same
     // range and precision as latency_histogram_, so a phase's p99 and the

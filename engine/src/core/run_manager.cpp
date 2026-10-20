@@ -2522,12 +2522,25 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     return summary;
 }
 
-/** The rolling window a live tick published, reused by the persisted row. */
-struct TickWindow {
-    double p50 = 0.0;
-    double p95 = 0.0;
-    double p99 = 0.0;
-};
+/**
+ * A gate frame's `second*` keys (#2385): the percentiles of every window since
+ * the previous gate, which the stored row of the same tick also carries. Null
+ * rather than 0 when nothing completed, so an idle second never reads as an
+ * instant answer.
+ */
+void put_second_percentiles (nlohmann::json& stats,
+const MetricsCollector::Percentiles& second) {
+    stats["secondSamples"] = second.count;
+    if (second.count == 0) {
+        stats["secondP50Ms"] = nullptr;
+        stats["secondP95Ms"] = nullptr;
+        stats["secondP99Ms"] = nullptr;
+        return;
+    }
+    stats["secondP50Ms"] = second.p50;
+    stats["secondP95Ms"] = second.p95;
+    stats["secondP99Ms"] = second.p99;
+}
 
 /**
  * One persisted metric tick: the 1 Hz row every chart is drawn from.
@@ -2544,7 +2557,7 @@ int64_t tick_wall_ms,
 int64_t tick_steady_ms,
 double elapsed,
 const std::map<int, size_t>& status_snapshot,
-const TickWindow& window,
+const MetricsCollector::Percentiles& second,
 size_t& last_total,
 int64_t& first_tick_steady_ms) {
     size_t current_total = context->total_requests ();
@@ -2625,14 +2638,14 @@ int64_t& first_tick_steady_ms) {
         sample.bytes_received      = mc.total_bytes_received ();
         // Reuse the snapshot already taken for the live tick above.
         sample.status_codes = status_snapshot;
-        // Windowed (rolling) percentiles from the interval recorder -
-        // these power the history percentile chart, the
-        // response-time-vs-concurrency scatter, and the capacity
-        // breakpoint / saturation derivations. Reuses the window
-        // sampled by emit_live_tick this tick (do not re-sample).
-        sample.latency_p50_ms = window.p50;
-        sample.latency_p95_ms = window.p95;
-        sample.latency_p99_ms = window.p99;
+        // The whole second's percentiles, every window since the previous
+        // row merged (#2385): the history percentile chart, the
+        // response-time-vs-concurrency scatter and the breakpoint /
+        // saturation derivations read these. The gate frame of this tick
+        // carries the same figures as `second*`.
+        sample.latency_p50_ms = second.p50;
+        sample.latency_p95_ms = second.p95;
+        sample.latency_p99_ms = second.p99;
         sample.custom_metrics = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
@@ -2671,34 +2684,38 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // tick's elapsed_seconds is relative to. 0 until the first DB-gated tick.
     int64_t first_tick_steady_ms = 0;
 
-    // Windowed (rolling) percentiles sampled by emit_live_tick each tick. Captured
-    // here so the 1 Hz DB-gated block below can persist the same window it just
-    // published - sample_window_percentiles() resets the window, so it must only be
-    // called once per tick (inside emit_live_tick) and reused, not re-sampled.
-    double win_p50 = 0.0, win_p95 = 0.0, win_p99 = 0.0;
-
     // Build and append one SSE "metrics" event to the in-memory tick topic.
     // Fields match the SSE handler (metrics.cpp) field-for-field. The wall-clock
     // timestamp is passed in by the caller so that the SSE tick and any
     // persisted enrichment for the same logical tick share one timestamp -
     // re-sampling now_ms() inside drifts them into adjacent ms buckets and the
     // dashboard sees status-codes shift left vs throughput on the same x-axis.
+    //
+    // A tick that `closes_second` is a gate: it takes the second's merged
+    // percentiles, puts them on its own frame and returns them for the stored
+    // row, so the frame and the row of one tick cannot disagree. Every other
+    // tick returns nullopt and leaves the second open.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
-                          int64_t now_wall_ms, int64_t now_steady_ms) {
+                          int64_t now_wall_ms, int64_t now_steady_ms,
+                          bool closes_second) -> std::optional<MetricsCollector::Percentiles> {
+        auto& mc                 = *context->metrics_collector;
         size_t active_count      = context->active_transfer_count ();
         size_t requests_sent     = context->requests_sent.load ();
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds = context->seconds_since_load_start (now_steady_ms);
 
-        // Sample the rolling window exactly once per tick (it resets on read) and
-        // carry the values out for the 1 Hz persistence below.
-        auto window = context->metrics_collector->sample_window_percentiles ();
-        win_p50     = window.p50;
-        win_p95     = window.p95;
-        win_p99     = window.p99;
+        // Exactly once per tick: it resets the window on read, and folds the
+        // window into the open second before that.
+        auto window = mc.sample_window_percentiles ();
 
-        auto stats = context->metrics_collector->get_current_stats (active_count,
-        elapsed_seconds, requests_sent, requests_expected, status_snapshot, &window);
+        auto stats = mc.get_current_stats (active_count, elapsed_seconds,
+        requests_sent, requests_expected, status_snapshot, &window);
+
+        std::optional<MetricsCollector::Percentiles> second;
+        if (closes_second) {
+            second = mc.take_second_percentiles ();
+            put_second_percentiles (stats, *second);
+        }
 
         // Instantaneous RPS: delta-based, updated every ≥100 ms.
         auto now_steady      = std::chrono::steady_clock::now ();
@@ -2733,13 +2750,14 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every
         // tick, and the serialize-and-append below is the slower half.
-        context->publish_live_tick ({ 0, win_p50, win_p95, win_p99,
+        context->publish_live_tick ({ 0, window.p50, window.p95, window.p99,
         live_current_rps, backpressure, window.count });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the
         // offset here would race that thread for the same id.
         context->append_event ("metrics", stats.dump ());
+        return second;
     };
 
     // Guard the entire body so that any exception (std::bad_alloc, json error,
@@ -2763,7 +2781,7 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         static_cast<int> (vayu::core::constants::server::DEFAULT_MAX_LIVE_TICKS)))));
 
         // Tick 0: emit immediately so consumers see data before the first sleep.
-        emit_live_tick (nullptr, now_ms (), steady_now_ms ());
+        (void)emit_live_tick (nullptr, now_ms (), steady_now_ms (), false);
 
         // Loop on is_running alone. should_stop is only the *request* to stop:
         // the worker acts on it, then blocks in event_loop->stop (cancelling on
@@ -2789,24 +2807,27 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             // enrichment builder - avoids scanning/copying the map twice.
             auto status_snapshot = context->metrics_collector->status_code_distribution ();
 
-            // Emit a live tick every iteration regardless of the 1 Hz DB gate.
-            emit_live_tick (&status_snapshot, tick_wall_ms, tick_steady_ms);
-
+            // The 1 Hz DB gate is decided before the live tick, so the gate
+            // tick's frame carries the same second the stored row does.
             auto now = std::chrono::steady_clock::now ();
             auto elapsed = std::chrono::duration<double> (now - last_update).count ();
 
-            if (elapsed >= 1.0) // Update every second
-            {
+            // Emit a live tick every iteration; a gate tick also closes the
+            // second, whether or not the row below then persists.
+            const auto second = emit_live_tick (
+            &status_snapshot, tick_wall_ms, tick_steady_ms, elapsed >= 1.0);
+            if (second) {
                 persist_metric_tick (context, db, tick_wall_ms, tick_steady_ms,
-                elapsed, status_snapshot, TickWindow{ win_p50, win_p95, win_p99 },
-                last_total, first_tick_steady_ms);
+                elapsed, status_snapshot, *second, last_total, first_tick_steady_ms);
                 last_update = now;
             }
         }
 
         // Final settled tick before signalling closed - consumers use this ordering
-        // as the termination contract (last data before closed==true).
-        emit_live_tick (nullptr, now_ms (), steady_now_ms ());
+        // as the termination contract (last data before closed==true). It closes
+        // the partial second since the last gate on the live frame only: no
+        // row is stored for it, so the stored series keeps whole seconds.
+        (void)emit_live_tick (nullptr, now_ms (), steady_now_ms (), true);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "collect_metrics: " + std::string (e.what ()),
         { { "runId", context->run_id } });
