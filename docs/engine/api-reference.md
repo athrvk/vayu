@@ -3349,6 +3349,48 @@ still ends. What bounds a transfer that never ends at all is `maxBytes` above,
 which is the bound that was always meant. Both forms of the route get this: a
 document must not arrive on one and time out on the other.
 
+**`reference: true` marks a fetch a document asked for, not a person** (issue
+[#2364](https://github.com/athrvk/vayu/issues/2364)): `$ref` bundling sends
+it, with `sourceUrl` set to the URL of the document the reference was found
+in. A URL typed into the import dialog or a spec re-fetch sends neither field
+and is fetched exactly as before, loopback and redirects included.
+
+```json
+{ "url": "http://localhost:3000/schemas/pet.json", "maxBytes": 10485760,
+  "reference": true, "sourceUrl": "http://localhost:3000/openapi.yaml" }
+```
+
+- `reference` is a boolean, default `false`; `sourceUrl` is an `http` or
+  `https` URL. Absent or `null` means the default for either; any other shape
+  is a `400`, and a malformed `sourceUrl` is refused even without `reference`.
+- **No redirect is followed.** A `3xx` is the upstream's answer and is refused
+  as every non-`2xx` one is (`502` `The server answered HTTP 302`): a hop is a
+  target the document never named.
+- **A loopback or link-local peer is refused unless it is the source's own.**
+  Judged on the address libcurl connected to, so a name that resolves there
+  (`localhost`, `*.localhost`, a DNS record pointing at `127.0.0.1`) is caught
+  as surely as a literal. Refused: `127.0.0.0/8`, `::1`, `::ffff:127.0.0.0/104`,
+  the unspecified `0.0.0.0` and `::`, `169.254.0.0/16` (cloud metadata lives
+  there), `::ffff:169.254.0.0/112` and `fe80::/10`. Allowed: a peer on
+  `sourceUrl`'s port (its scheme default when it names none) when either the
+  source host is itself loopback (`localhost`, `*.localhost` or a loopback
+  address) and the peer is loopback, or the source host is the peer's address
+  written as a literal - the only way a link-local peer is ever the source's.
+  A source named by a host name that resolves to loopback earns nothing: that
+  is what a rebinding DNS answer looks like. With no `sourceUrl`, every
+  loopback and link-local peer is refused.
+- The refusal is `502` `Failed to fetch: Cannot send this request: Vayu does
+  not fetch a reference from a loopback or link-local address other than its
+  source document's own host and port - not when the URL names one and not
+  when a host name resolves to one`, on both forms of the route.
+- **With a proxy in force the connected peer is the proxy**, so the rule judges
+  the proxy's address and the proxy decides where the request goes next. A
+  proxy listening on loopback is therefore refused for a reference unless it
+  is the source's host and port.
+- Vayu's own engine and MCP ports stay refused whatever the source
+  ([Reserved local ports](#reserved-local-ports)); this rule is added to that
+  one, never in place of it.
+
 **Response:** `200`
 ```json
 {
@@ -3368,11 +3410,15 @@ never turn into a `500`.
 - `400` `Invalid URL: scheme '<scheme>' is not supported - only http and
   https URLs can be sent` - `url` names any other scheme (`ftp`, `file`, ...).
 - `400` `Invalid 'maxBytes': must be a positive integer`.
+- `400` `Invalid 'reference': must be a boolean`.
+- `400` `Invalid 'sourceUrl': must be an http or https URL` - also a URL that
+  names no host.
 - `413` `Refused to fetch: <detail>` - the response was over the bound in force.
   The detail names the bound that was applied (the clamped one, not the one
   asked for) and the size when the upstream declared one.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
-  (connection error, transport failure).
+  (connection error, transport failure), or a reference's peer was refused
+  (see `reference` above).
 - `502` `The server answered HTTP <status>` - the upstream answered, but with a
   status outside `2xx`. Its body is not the document, so it is not returned as
   `content`: handed on, a `404` or `500` page would reach the format reader and
@@ -6016,6 +6062,13 @@ rule is applied twice:
   proxy in force the connected address is the proxy's, so this half cannot see
   the origin behind it; the URL check above still applies, and where a proxy
   you configured forwards to is your choice.
+
+A `$ref` fetched through `POST /import/fetch` with `reference: true` runs a
+wider rule on the same connected-address check: every loopback and link-local
+peer is refused unless it is the source document's own host and port (issue
+[#2364](https://github.com/athrvk/vayu/issues/2364), see
+[POST /import/fetch](#post-importfetch)). It is added to the reserved ports,
+so a source on one of them does not open it.
 
 #### Path variables
 

@@ -18,6 +18,7 @@
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/file_access_policy.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/id.hpp"
@@ -82,27 +83,105 @@ using ImportFetchEmitter =
 std::function<bool (const std::string& event, const nlohmann::json& data)>;
 
 /**
- * @brief The client config both fetch forms build, for the wiring test.
+ * @brief The client config both fetch forms build for @p request_body, for
+ *        the wiring test; nullopt when the body is refused.
  *
  * The bounds a fetch runs under are not observable from its result on any test
  * short enough to keep - a stall window is 30 seconds - so the assertion is on
  * the config itself. What that catches is the line going missing: drop the stall
  * bound and every behavioural test stays green while a 10 MB import goes back to
- * failing at 30 seconds.
+ * failing at 30 seconds. Taking the body rather than its parts is what lets
+ * the same test see a `reference` reach the client (#2364).
  */
-vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
 const vayu::http::TransportPolicy& transport);
 
 namespace {
 
-/** A validated fetch: what to get, and the bound to get it under. */
+/**
+ * A validated fetch: what to get, the bound to get it under, and for a
+ * reference (#2364) the connect-time rule it runs under. A reference is also
+ * sent with redirects off: a hop is a target its document never named.
+ */
 struct FetchTarget {
     std::string url;
     size_t max_bytes = 0;
+    std::optional<vayu::http::LocalPeerRule> reference;
 };
 
 /** The `{status, body}` answer a route sends instead of fetching anything. */
 using FetchRefusal = std::pair<int, nlohmann::json>;
+
+/// The member @p name of @p req, or null when it is absent or `null`: the
+/// two spellings of "use the default".
+const nlohmann::json* stated_field (const nlohmann::json& req, const char* name) {
+    if (!req.is_object ()) {
+        return nullptr;
+    }
+    const auto found = req.find (name);
+    return found == req.end () || found->is_null () ? nullptr : &*found;
+}
+
+/// Whether @p url is one a fetch can be sent to: an http or https scheme,
+/// stated rather than guessed.
+bool names_sendable_scheme (const std::string& url) {
+    return !vayu::http::unsendable_scheme (url) && !vayu::http::url_scheme (url).empty ();
+}
+
+/**
+ * The caller's bound, clamped to the transport ceiling. Absent or null is the
+ * ceiling; anything that is not a positive integer is refused rather than
+ * rounded into one, because a client that sent `0` or `-1` meant something,
+ * and guessing which would be the silent bound this whole change exists to
+ * remove.
+ */
+std::variant<size_t, FetchRefusal> read_max_bytes (const nlohmann::json& req) {
+    const size_t ceiling = vayu::core::constants::import_fetch::MAX_BYTES;
+    const nlohmann::json* stated = stated_field (req, "maxBytes");
+    if (stated == nullptr) {
+        return ceiling;
+    }
+    if (!stated->is_number_unsigned () || stated->get<uint64_t> () == 0) {
+        return FetchRefusal{ 400,
+            error_body (400, "Invalid 'maxBytes': must be a positive integer") };
+    }
+    return static_cast<size_t> (
+    std::min (stated->get<uint64_t> (), static_cast<uint64_t> (ceiling)));
+}
+
+/**
+ * `reference` (a boolean, default false) and `sourceUrl` (the http or https
+ * URL of the document the reference was found in), as the rule a reference
+ * runs under, or nullopt for a fetch a person asked for. A reference with no
+ * source refuses every loopback and link-local peer. `sourceUrl` is validated
+ * whether or not `reference` is set, so a malformed one is never silently
+ * ignored.
+ */
+using ReferenceRule = std::optional<vayu::http::LocalPeerRule>;
+std::variant<ReferenceRule, FetchRefusal> read_reference (const nlohmann::json& req) {
+    const nlohmann::json* reference = stated_field (req, "reference");
+    if (reference != nullptr && !reference->is_boolean ()) {
+        return FetchRefusal{ 400, error_body (400, "Invalid 'reference': must be a boolean") };
+    }
+
+    vayu::http::LocalPeerRule rule;
+    if (const nlohmann::json* source = stated_field (req, "sourceUrl")) {
+        const std::string text = source->is_string () ? source->get<std::string> () : "";
+        auto stated = names_sendable_scheme (text) ?
+        vayu::http::local_peer_rule_for_source (text) :
+        std::nullopt;
+        if (!stated) {
+            return FetchRefusal{ 400,
+                error_body (400, "Invalid 'sourceUrl': must be an http or https URL") };
+        }
+        rule = std::move (*stated);
+    }
+
+    if (reference == nullptr || !reference->get<bool> ()) {
+        return ReferenceRule{};
+    }
+    return ReferenceRule{ std::move (rule) };
+}
 
 /**
  * Read and validate the body both fetch routes share.
@@ -136,23 +215,16 @@ std::variant<FetchTarget, FetchRefusal> read_fetch_target (const std::string& re
         return FetchRefusal{ 400, error_body (400, "Invalid URL") };
     }
 
-    // The caller's bound, clamped to the transport ceiling. Absent or null is
-    // the ceiling; anything that is not a positive integer is refused rather
-    // than rounded into one, because a client that sent `0` or `-1` meant
-    // something, and guessing which would be the silent bound this whole change
-    // exists to remove.
-    size_t max_bytes = vayu::core::constants::import_fetch::MAX_BYTES;
-    if (req.contains ("maxBytes") && !req["maxBytes"].is_null ()) {
-        const auto& stated = req["maxBytes"];
-        if (!stated.is_number_unsigned () || stated.get<uint64_t> () == 0) {
-            return FetchRefusal{ 400,
-                error_body (400, "Invalid 'maxBytes': must be a positive integer") };
-        }
-        max_bytes = static_cast<size_t> (
-        std::min (stated.get<uint64_t> (), static_cast<uint64_t> (max_bytes)));
+    auto max_bytes = read_max_bytes (req);
+    if (auto* refusal = std::get_if<FetchRefusal> (&max_bytes)) {
+        return std::move (*refusal);
     }
-
-    return FetchTarget{ url, max_bytes };
+    auto reference = read_reference (req);
+    if (auto* refusal = std::get_if<FetchRefusal> (&reference)) {
+        return std::move (*refusal);
+    }
+    return FetchTarget{ url, std::get<size_t> (max_bytes),
+        std::move (std::get<ReferenceRule> (reference)) };
 }
 
 /**
@@ -209,11 +281,12 @@ const Result<Response>& result) {
  * document that arrives on one and times out on the other would be the same
  * import succeeding or failing depending on which surface asked for it.
  */
-vayu::http::ClientConfig fetch_client_config (size_t max_bytes,
+vayu::http::ClientConfig fetch_client_config (const FetchTarget& fetch,
 const vayu::http::TransportPolicy& transport) {
     vayu::http::ClientConfig config;
     config.transport          = transport;
-    config.max_response_bytes = max_bytes;
+    config.max_response_bytes = fetch.max_bytes;
+    config.local_peer_rule    = fetch.reference;
     // A stall bound in place of the total (issue #882). This route inherited
     // `Request::timeout_ms` - 30 seconds for the whole transfer - which bounds a
     // download's size rather than its health: 10 MB needed better than 340 KB/s
@@ -223,6 +296,15 @@ const vayu::http::TransportPolicy& transport) {
     // just above.
     config.stall_timeout_ms = vayu::core::constants::import_fetch::STALL_TIMEOUT_MS;
     return config;
+}
+
+/// The GET both fetch routes send. A reference follows no redirect (#2364).
+vayu::Request fetch_request (const FetchTarget& fetch) {
+    vayu::Request request;
+    request.method           = vayu::HttpMethod::GET;
+    request.url              = fetch.url;
+    request.follow_redirects = !fetch.reference.has_value ();
+    return request;
 }
 
 /**
@@ -242,13 +324,19 @@ std::optional<FetchRefusal> import_fetch_refusal (const std::string& request_bod
 
 } // namespace
 
-vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
 const vayu::http::TransportPolicy& transport) {
-    return fetch_client_config (max_bytes, transport);
+    const auto target = read_fetch_target (request_body);
+    const auto* fetch = std::get_if<FetchTarget> (&target);
+    if (fetch == nullptr) {
+        return std::nullopt;
+    }
+    return fetch_client_config (*fetch, transport);
 }
 
 /**
- * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345}) via libcurl.
+ * Fetch the URL in `request_body` ({"url": "...", "maxBytes": 12345,
+ * "reference": true, "sourceUrl": "..."}) via libcurl.
  *
  * The caller states the bound (issue #784). This route is one shared proxy for
  * every URL import - a Postman or Insomnia export comes through it exactly as an
@@ -260,6 +348,11 @@ const vayu::http::TransportPolicy& transport) {
  * that ceiling, because a bound the caller chooses is not a bound against a
  * hostile URL. An over-bound response is a `413` naming what was refused,
  * without the whole body ever being buffered - see `ClientConfig::max_response_bytes`.
+ *
+ * `reference: true` marks a fetch a document asked for (a `$ref`, #2364): it
+ * follows no redirect, so a 3xx is the 502 every non-2xx answer gets, and it
+ * refuses a loopback or link-local peer that is not `sourceUrl`'s own host and
+ * port (`vayu::http::LocalPeerRule`) with a 502 naming that rule.
  *
  * @param transport How to reach the network. Passed in rather than resolved
  *                  here because this function is deliberately `Database`-free
@@ -278,8 +371,8 @@ const vayu::http::TransportPolicy& transport) {
     }
     const auto& fetch = std::get<FetchTarget> (target);
 
-    vayu::http::Client client (fetch_client_config (fetch.max_bytes, transport));
-    return fetch_outcome (client, client.get (fetch.url));
+    vayu::http::Client client (fetch_client_config (fetch, transport));
+    return fetch_outcome (client, client.send (fetch_request (fetch)));
 }
 
 /**
@@ -320,8 +413,7 @@ const ImportFetchEmitter& emit) {
     uint64_t reported_at_bytes = 0;
     auto reported_at           = std::chrono::steady_clock::now ();
 
-    vayu::http::ClientConfig client_config =
-    fetch_client_config (fetch.max_bytes, transport);
+    vayu::http::ClientConfig client_config = fetch_client_config (fetch, transport);
     client_config.on_body_progress = [&] (uint64_t received,
                                      std::optional<uint64_t> declared_total) {
         const auto now = std::chrono::steady_clock::now ();
@@ -347,7 +439,8 @@ const ImportFetchEmitter& emit) {
     };
 
     vayu::http::Client client (client_config);
-    const auto [status, body] = fetch_outcome (client, client.get (fetch.url));
+    const auto [status, body] =
+    fetch_outcome (client, client.send (fetch_request (fetch)));
 
     // Nothing is said to a listener that has already gone - which includes the
     // failure its own departure caused, since the client reports an abandoned
@@ -1451,7 +1544,7 @@ void handle_import_fetch (RouteContext& ctx, const httplib::Request& req, httpli
     // available to answer with: `set_content_provider` commits a 200, and a
     // client that sent a malformed body should read the same 400 on both
     // forms of this route. `import_fetch_stream` reads the body again for
-    // itself - one parse of a two-field object - rather than the two of them
+    // itself - one parse of a four-field object - rather than the two of them
     // holding separate opinions about what a valid request is.
     if (const auto refusal = import_fetch_refusal (req.body)) {
         res.status = refusal->first;
@@ -1618,9 +1711,14 @@ void register_import_routes (RouteContext& ctx) {
      * import format alike.
      * Body params: url (required, http/https), maxBytes (optional - the largest
      * response this fetch may read, clamped to the engine's transport ceiling;
-     * absent means that ceiling).
-     * Returns: 200 `{"content", "contentType"}`, 400 on a bad url or maxBytes,
-     * 413 when the response is over the bound, 502 when the fetch itself failed.
+     * absent means that ceiling), reference (optional boolean, default false -
+     * a `$ref` fetch, #2364: no redirect is followed and a loopback or
+     * link-local peer other than sourceUrl's own host and port is refused),
+     * sourceUrl (optional http/https URL of the document the reference was
+     * found in).
+     * Returns: 200 `{"content", "contentType"}`, 400 on a bad url, maxBytes,
+     * reference or sourceUrl, 413 when the response is over the bound, 502
+     * when the fetch itself failed or a reference's peer was refused.
      *
      * With `Accept: text/event-stream` the same fetch answers as a stream
      * instead (issue #882), reporting the download as it arrives so a client
