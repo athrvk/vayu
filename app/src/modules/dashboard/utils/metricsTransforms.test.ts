@@ -179,12 +179,54 @@ describe("buildPercentileChartData", () => {
 		expect(data[1]).toMatchObject({ time: 2, p50: 12, p95: 60, p99: 150 });
 	});
 
-	it("zeroes percentiles for older runs that lack them", () => {
+	it("plots the 0 an older engine stored for an empty second as the number it is", () => {
 		const all = buildPercentileChartData([
 			tick({ elapsed_seconds: 1 }),
 			tick({ elapsed_seconds: 2 }),
 		]);
+		expect(all).toHaveLength(2);
 		expect(all.every((d) => d.p50 === 0 && d.p95 === 0 && d.p99 === 0)).toBe(true);
+	});
+
+	it("breaks the line at a stored second with no completion (#2386)", () => {
+		// The engine writes no percentile keys for it. Skipping the tick would let
+		// uPlot join seconds 1 and 3 straight across the stall; 0 would draw the
+		// stall as the fastest second of the run.
+		const empty = tick({ elapsed_seconds: 2 });
+		delete empty.latency_p50_ms;
+		delete empty.latency_p95_ms;
+		delete empty.latency_p99_ms;
+		const data = buildPercentileChartData([
+			tick({
+				elapsed_seconds: 1,
+				latency_p50_ms: 10,
+				latency_p95_ms: 40,
+				latency_p99_ms: 80,
+			}),
+			empty,
+			tick({
+				elapsed_seconds: 3,
+				latency_p50_ms: 12,
+				latency_p95_ms: 60,
+				latency_p99_ms: 150,
+			}),
+		]);
+		expect(data).toEqual([
+			{ time: 1, p50: 10, p95: 40, p99: 80 },
+			{ time: 2, p50: null, p95: null, p99: null },
+			{ time: 3, p50: 12, p95: 60, p99: 150 },
+		]);
+	});
+
+	it("keeps the measured second when an empty one shares its bucket", () => {
+		const empty = tick({ elapsed_seconds: 1.1 });
+		delete empty.latency_p99_ms;
+		const data = buildPercentileChartData([
+			tick({ elapsed_seconds: 1, latency_p99_ms: 80 }),
+			empty,
+		]);
+		expect(data).toHaveLength(1);
+		expect(data[0].p99).toBe(80);
 	});
 
 	it("buckets to 0.5s, last-write-wins, sorted", () => {
@@ -241,9 +283,10 @@ describe("buildPercentileChartData on a live series (issue #2385)", () => {
 		expect(data[0]).toMatchObject({ time: 1, p50: 10, p95: 20, p99: 40 });
 	});
 
-	it("leaves a gap for an idle second", () => {
+	it("leaves a gap for an idle second, as a null point rather than a skipped one (#2386)", () => {
 		const data = buildPercentileChartData([gate(1, 40), gate(2, null), gate(3, 50)]);
-		expect(data.map((d) => d.time)).toEqual([1, 3]);
+		expect(data.map((d) => d.time)).toEqual([1, 2, 3]);
+		expect(data.map((d) => d.p99)).toEqual([40, null, 50]);
 	});
 
 	it("keeps the worst of two ticks sharing a bucket, not the last", () => {
@@ -442,7 +485,7 @@ describe("hasPercentileSignal", () => {
 		let sawFalse = 0;
 		for (let run = 0; run < 200; run++) {
 			const history = randomHistory(rng);
-			const built = buildPercentileChartData(history).some((p) => p.p99 > 0);
+			const built = buildPercentileChartData(history).some((p) => (p.p99 ?? 0) > 0);
 			expect(hasPercentileSignal(history)).toBe(built);
 			if (built) sawTrue++;
 			else sawFalse++;
@@ -643,9 +686,11 @@ function randomHistory(rng: () => number): LoadTestMetrics[] {
 	let elapsed = rng() * 2;
 	return Array.from({ length: n }, () => {
 		elapsed += rng() * 0.4; // often the same bucket, sometimes the next
+		const p99 = rng();
 		return tick({
 			elapsed_seconds: Math.round(elapsed * 100) / 100,
-			latency_p99_ms: rng() < 0.4 ? 0 : Math.round(rng() * 200),
+			// Absent is a second with no completion (#2386), 0 an older engine's row.
+			latency_p99_ms: p99 < 0.2 ? undefined : p99 < 0.4 ? 0 : Math.round(rng() * 200),
 			status_codes: rng() < 0.5 ? undefined : { "200": Math.floor(rng() * 100) },
 		});
 	});

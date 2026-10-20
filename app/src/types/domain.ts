@@ -2357,10 +2357,13 @@ export interface LoadTestMetrics {
 	 * merged (issue #2385). A live frame's are only the last ~100 ms window, so
 	 * a chart or a threshold must read them through `utils/tickPercentiles.ts`
 	 * (`secondPercentiles`, `cumulativePercentiles`) and never off these keys.
+	 * An interval with no completion has none (issue #2386): `null` on a live
+	 * frame, absent from a stored tick. A tick stored by an older engine holds
+	 * `0` there instead.
 	 */
-	latency_p50_ms: number;
-	latency_p95_ms: number;
-	latency_p99_ms: number;
+	latency_p50_ms?: number | null;
+	latency_p95_ms?: number | null;
+	latency_p99_ms?: number | null;
 	/**
 	 * Set by `mapSseMetrics` on every frame that came off the live stream and
 	 * absent on a stored tick. It is what tells a live frame with no

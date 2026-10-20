@@ -78,7 +78,7 @@ describe("detectAnomalies - a clean run", () => {
 		 * factor is loosened to 1. A flat series would pass either way and so
 		 * could not tell a working threshold from a broken one.
 		 */
-		const p99 = healthyRun(60).map((m) => m.latency_p99_ms);
+		const p99 = healthyRun(60).map((m) => m.latency_p99_ms ?? 0);
 		const trailingMedian = (i: number) =>
 			[...p99.slice(i - BASELINE_TICKS, i)].sort((a, b) => a - b)[BASELINE_TICKS >> 1];
 

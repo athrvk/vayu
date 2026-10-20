@@ -12,7 +12,7 @@
  */
 
 import type { LoadTestMetrics } from "@/types";
-import { secondPercentiles } from "./tickPercentiles";
+import { coversSecond, secondPercentiles, worstReading } from "./tickPercentiles";
 
 /**
  * The bucket every series transform here rounds a tick's elapsed time to before
@@ -180,35 +180,39 @@ export interface RampParams {
 	targetConcurrency?: number;
 }
 
+/** One bucket of the percentile chart; `null` percentiles are an empty second. */
 export interface PercentilePoint {
 	time: number;
-	p50: number;
-	p95: number;
-	p99: number;
+	p50: number | null;
+	p95: number | null;
+	p99: number | null;
 }
 
 /**
  * Bucket per-second latency percentiles to 0.5s.
  *
- * Only a tick that holds a whole second's figures contributes a point
- * ({@link secondPercentiles}): a live frame between gates carries a ~100 ms
- * window and adds nothing, so the live series has one point a second like the
- * stored one. Ticks sharing a bucket keep the worst value of each percentile -
- * the final frame closing a partial second can land beside the last gate - and
- * never an average, which would hide the stall the percentile exists to show.
+ * Only a tick that stands for a whole second contributes a point
+ * ({@link coversSecond}): a live frame between gates carries a ~100 ms window
+ * and adds nothing, so the live series has one point a second like the stored
+ * one. A second with no completion is a `null` point, which uPlot draws as a
+ * break in the line (issue #2386); skipping it instead would join its
+ * neighbours straight across the stall. Ticks sharing a bucket keep the worst
+ * reading of each percentile ({@link worstReading}) - the final frame closing
+ * a partial second can land beside the last gate - and never an average, which
+ * would hide the stall the percentile exists to show.
  */
 export function buildPercentileChartData(history: LoadTestMetrics[]): PercentilePoint[] {
 	const byBucket = new Map<number, PercentilePoint>();
 	for (const m of history) {
+		if (!coversSecond(m)) continue;
 		const second = secondPercentiles(m);
-		if (!second) continue;
 		const t = halfSecondBucket(m.elapsed_seconds);
 		const prev = byBucket.get(t);
 		byBucket.set(t, {
 			time: t,
-			p50: Math.max(prev?.p50 ?? 0, second.p50),
-			p95: Math.max(prev?.p95 ?? 0, second.p95),
-			p99: Math.max(prev?.p99 ?? 0, second.p99),
+			p50: worstReading(prev?.p50 ?? null, second?.p50 ?? null),
+			p95: worstReading(prev?.p95 ?? null, second?.p95 ?? null),
+			p99: worstReading(prev?.p99 ?? null, second?.p99 ?? null),
 		});
 	}
 	return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);

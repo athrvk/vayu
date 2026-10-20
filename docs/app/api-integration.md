@@ -1170,7 +1170,10 @@ collection run's per-step progress.
   `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map). It
   marks the tick `live`, maps a gate frame's `secondSamples` / `secondP50Ms` / `secondP95Ms` /
   `secondP99Ms` and every frame's `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms`, and
-  leaves an absent key `undefined` and a `null` as `null`, never a `0` (issue #2385)
+  leaves an absent key `undefined` and a `null` as `null`, never a `0` (issue #2385). The window's
+  own `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` follow the same rule: the engine sends them
+  `null` for a window with no completion, and they stay `null` (issue #2386). `latencySamples` is
+  not mapped; nothing in the app reads it
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row

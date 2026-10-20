@@ -14,7 +14,11 @@
 
 import type { LoadTestMetrics } from "@/types";
 import { DEFAULT_CHART_BUCKET_SECONDS } from "@/constants/client-settings";
-import { hasSecondPercentiles, secondPercentiles } from "../../../utils/tickPercentiles";
+import {
+	hasSecondPercentiles,
+	secondPercentiles,
+	worstReading,
+} from "../../../utils/tickPercentiles";
 
 /** Bucket several fields at once; returns a shared time axis + one column each. */
 export function bucketColumns(
@@ -53,25 +57,27 @@ export type BucketMerge = "last" | "max";
  * {@link bucketColumns}, or the largest per column. A percentile series takes
  * `"max"`: a 5 s bucket holding five per-second p99s shows the worst second,
  * where "last" would hide a stall in the first four and an average of
- * percentiles is not a percentile of anything.
+ * percentiles is not a percentile of anything. A `null` is no reading
+ * ({@link worstReading}): it loses to any number and survives only a bucket
+ * that held nothing else, so an empty second stays a gap (issue #2386).
  */
 export function rebucket(
 	times: number[],
-	cols: number[][],
+	cols: (number | null)[][],
 	bucketSeconds: number = DEFAULT_CHART_BUCKET_SECONDS,
 	merge: BucketMerge = "last"
-): { times: number[]; cols: number[][] } {
+): { times: number[]; cols: (number | null)[][] } {
 	const bucket = bucketSeconds > 0 ? bucketSeconds : DEFAULT_CHART_BUCKET_SECONDS;
 	const bucketTime = (elapsed: number) => Math.round(elapsed / bucket) * bucket;
-	const map = new Map<number, number[]>();
+	const map = new Map<number, (number | null)[]>();
 	for (let i = 0; i < times.length; i++) {
 		const t = bucketTime(times[i]);
 		const row = cols.map((c) => c[i]);
 		const prev = map.get(t);
-		map.set(t, merge === "max" && prev ? row.map((v, k) => Math.max(prev[k], v)) : row);
+		map.set(t, merge === "max" && prev ? row.map((v, k) => worstReading(prev[k], v)) : row);
 	}
 	const outTimes = Array.from(map.keys()).sort((a, b) => a - b);
-	const outCols: number[][] = cols.map(() => []);
+	const outCols: (number | null)[][] = cols.map(() => []);
 	for (const t of outTimes) {
 		const row = map.get(t)!;
 		row.forEach((v, i) => outCols[i].push(v));

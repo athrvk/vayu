@@ -100,16 +100,27 @@ consumes it.
   tick's `latency_p*_ms` are its whole second's. A live frame's are only the
   last ~100 ms window, so the per-second readers use `secondPercentiles`: a
   gate frame (about one a second, the final one included) contributes its
-  `second_p*_ms`, an idle second and every frame between gates contribute
-  nothing, and a stored tick contributes its own. The percentile chart, the
-  response-time scatter and the breakpoint (`breakpointAt`, shared by the store
-  and `computeBreakpoint`) all read it; at a chart interval wider than a second
+  `second_p*_ms`, every frame between gates contributes nothing, and a stored
+  tick contributes its own. The percentile chart, the response-time scatter
+  and the breakpoint (`breakpointAt`, shared by the store and
+  `computeBreakpoint`) all read it; at a chart interval wider than a second
   the percentile chart keeps the worst second per bucket (`rebucket(..., "max")`),
   never an average. `mapSseMetrics` marks a live frame (`live`) because that
   flag is what tells a frame between gates from a stored tick. The hero card
   reads `cumulativePercentiles` instead, the run so far, which is the span its
   mean covers. The anomaly detector reads `secondPercentiles` too, over the
   gate frames alone (below).
+- **A second with no completion is a gap, never 0 ms** (#2386). The engine
+  sends it as a gate with `second_samples` `0` and stores it with no
+  `latency_p*_ms` keys (a live window with nothing in it has `null` ones), and
+  `mapSseMetrics` passes every percentile through as sent. `coversSecond` says a
+  tick stands for a second at all; one that does with no `secondPercentiles` is
+  that empty second. The percentile chart plots it as a `null` point, which
+  uPlot draws as a break in the line - skipping it would join its neighbours
+  straight across the stall - and `worstReading`, the merge both
+  `buildPercentileChartData` and `rebucket(..., "max")` use, keeps a bucket
+  null only when every second in it was empty. A row an older engine stored
+  holds `0` for such a second and still reads as `0`: nothing rewrites it.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 
