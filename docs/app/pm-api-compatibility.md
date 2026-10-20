@@ -401,6 +401,9 @@ these:
 ```
 .to.equal(v)      .to.eql(v) / .to.eqls(v)             .to.deep.equal(v)
 .to.exist         .to.be.true       .to.be.false
+                  (.true / .false are strict, `=== true` / `=== false`: `1`, `'true'`
+                   and `{}` are not `.true`, `0`, `''` and `null` are not `.false`;
+                   `.ok` is the truthy check)
 .to.be.null       .to.be.undefined  .to.be.ok          .to.be.empty
 .to.be.NaN
 .to.be.above(n)   .to.be.below(n)   .to.be.at.least(n) .to.be.at.most(n)
@@ -477,7 +480,7 @@ that runs more than once says which value it was about:
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// user 42: Expected value to be truthy
+// user 42: Expected false to be true
 ```
 
 Non-strings are coerced and `undefined` / `null` mean no message, both as in

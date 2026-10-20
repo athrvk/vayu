@@ -97,7 +97,7 @@ item in a loop, the request that came from the MCP path rather than the app.
 
 ```javascript
 pm.expect(user.active, 'user ' + user.id).to.be.true;
-// fails with: user 42: Expected value to be truthy
+// fails with: user 42: Expected false to be true
 ```
 
 The message is coerced like chai's, and `undefined` / `null` mean "no message",
@@ -181,12 +181,12 @@ pm.expect(value).to.deep.equal(expected);    // same as .eql
 pm.expect(value).to.be.oneOf([a, b]);
 pm.expect(value).to.be.closeTo(expected, delta);
 
-// Truthiness and existence (paren-less: accessing them asserts)
-pm.expect(value).to.be.true;
-pm.expect(value).to.be.false;
+// Booleans and existence (paren-less: accessing them asserts)
+pm.expect(value).to.be.true;                 // strict: the boolean true, not 1 or 'true'
+pm.expect(value).to.be.false;                // strict: the boolean false, not 0, '' or null
 pm.expect(value).to.be.null;
 pm.expect(value).to.be.undefined;
-pm.expect(value).to.be.ok;
+pm.expect(value).to.be.ok;                   // truthy (any value JavaScript reads as true)
 pm.expect(value).to.be.empty;
 pm.expect(value).to.exist;
 pm.expect(value).to.be.NaN;

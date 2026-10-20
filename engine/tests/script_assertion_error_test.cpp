@@ -162,9 +162,9 @@ TEST_F (AssertionErrorTest, ANegatedChainFailsWithTheAssertionErrorName) {
  */
 TEST_F (AssertionErrorTest, TheCustomMessagePrefixSurvivesTheRename) {
     EXPECT_EQ (failure_of (R"(pm.expect(false, "user 42").to.be.true)"),
-    "AssertionError: user 42: Expected value to be truthy");
+    "AssertionError: user 42: Expected false to be true");
     EXPECT_EQ (caught_shape_of (R"(pm.expect(false, "user 42").to.be.true)"),
-    "AssertionError|true|user 42: Expected value to be truthy");
+    "AssertionError|true|user 42: Expected false to be true");
 }
 
 // ----------------------------------------------------------------------------
