@@ -136,9 +136,11 @@ function withholdVariableBag(bag: unknown): unknown {
  * The auth members that hold a credential rather than describe one, across
  * every mode Vayu stores. The engine's `SECRET_AUTH_KEYS`
  * (`engine/src/core/vayu_extensions.cpp`), which blanks the same set when a
- * collection is exported.
+ * collection is exported. The renderer's token cache key holds its own copy
+ * (`src/services/oauth/credential-params.ts`), held equal to this one by
+ * `withhold.conformance.test.ts`.
  */
-const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
+export const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
 	"token",
 	"password",
 	"value",
@@ -163,9 +165,9 @@ const CREDENTIAL_AUTH_MEMBERS: ReadonlySet<string> = new Set([
  * row - a Postman block's `tokenRequestParams`, `authRequestParams` and
  * `refreshRequestParams`, or a config's `tokenParams`, `authorizationParams` and
  * `refreshParams` - beside the members above. The engine's `SECRET_PARAM_KEYS`,
- * beside `SECRET_AUTH_KEYS`.
+ * beside `SECRET_AUTH_KEYS`; the renderer's copy as above.
  */
-const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
+export const CREDENTIAL_PARAM_KEYS: ReadonlySet<string> = new Set([
 	"client_secret",
 	"client_assertion",
 	"code_verifier",
@@ -220,9 +222,11 @@ function withholdRowValue(row: Record<string, unknown>): Record<string, unknown>
  * credential: the engine's `names_param_credential`
  * (`engine/src/core/vayu_extensions.cpp`). A row can be sent as a header as
  * well as in a body or a query, so a credential header's or query parameter's
- * name counts beside the auth members and {@link CREDENTIAL_PARAM_KEYS}.
+ * name counts beside the auth members and {@link CREDENTIAL_PARAM_KEYS}. The
+ * renderer's token cache key reads the same predicate
+ * (`src/services/oauth/credential-params.ts`).
  */
-function namesCredentialParam(key: unknown): boolean {
+export function namesCredentialParam(key: unknown): boolean {
 	return (
 		typeof key === "string" &&
 		(CREDENTIAL_AUTH_MEMBERS.has(key) ||
@@ -280,19 +284,67 @@ function withholdPostmanAuth(source: unknown): unknown {
 }
 
 /** The lists of extra request parameter rows an OAuth 2.0 `config` carries (issue #2536). */
-const OAUTH2_PARAM_LISTS = ["authorizationParams", "tokenParams", "refreshParams"] as const;
+const OAUTH2_PARAM_LISTS: readonly string[] = [
+	"authorizationParams",
+	"tokenParams",
+	"refreshParams",
+];
+
+/** The members of an extra parameter row that say how it is sent; its `value` is judged by its key. */
+const PARAM_ROW_SHAPE_MEMBERS: ReadonlySet<string> = new Set(["key", "enabled", "sendAs"]);
+
+/** Whether @p value holds a credential anywhere it nests: what the engine's `blank_unlisted_value` blanks. */
+function holdsCredentialWithin(value: unknown): boolean {
+	if (Array.isArray(value)) return value.some(holdsCredentialWithin);
+	if (isRecord(value)) return Object.values(value).some(holdsCredentialWithin);
+	return holdsCredential(value);
+}
+
+/** An extra parameter row's key, when it has a non-empty one. */
+function paramRowKey(row: unknown): string | undefined {
+	return isRecord(row) && typeof row.key === "string" && row.key !== "" ? row.key : undefined;
+}
 
 /**
- * An auth `config` bag with its credential members withheld and, per row, the
- * value of each extra request parameter whose key names a credential - the key,
- * `enabled` and `sendAs` stay. The engine's `redact_config_bag`.
+ * One row of a config's extra parameter list, the engine's
+ * `redact_config_param_rows`: `key`, `enabled` and `sendAs` stay, `value` is
+ * withheld when the key names a credential, and any other member holding a
+ * string is withheld as `<member>Withheld`. A row with no non-empty string key
+ * names nothing it could be judged by, so one holding a string anywhere is
+ * withheld whole, as `{valueWithheld: true}`.
  */
-function withholdConfig(config: Record<string, unknown>): Record<string, unknown> {
-	const out = withholdCredentialMembers(config);
-	for (const list of OAUTH2_PARAM_LISTS) {
-		if (list in out) out[list] = withholdParamRows(out[list]);
+function withholdConfigParamRow(row: unknown): unknown {
+	const key = paramRowKey(row);
+	if (key === undefined || !isRecord(row)) {
+		return holdsCredentialWithin(row) ? { [withheldMarker("value")]: true } : row;
+	}
+	const credential = namesCredentialParam(key);
+	const out: Record<string, unknown> = {};
+	for (const [member, value] of Object.entries(row)) {
+		const judged = member === "value" ? credential : !PARAM_ROW_SHAPE_MEMBERS.has(member);
+		if (judged && holdsCredentialWithin(value)) out[withheldMarker(member)] = true;
+		else out[member] = value;
 	}
 	return out;
+}
+
+/** One member of a config: an extra parameter list withheld row by row, or whole when it is not a list. */
+function withholdConfigMember(member: string, value: unknown): [string, unknown] {
+	if (!OAUTH2_PARAM_LISTS.includes(member)) return [member, value];
+	if (Array.isArray(value)) return [member, value.map(withholdConfigParamRow)];
+	return holdsCredentialWithin(value) ? [withheldMarker(member), true] : [member, value];
+}
+
+/**
+ * An auth `config` bag with its credential members withheld and its extra
+ * request parameter lists withheld row by row. The engine's `redact_config_bag`.
+ */
+function withholdConfig(config: Record<string, unknown>): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.entries(withholdCredentialMembers(config)).map(([member, value]) =>
+			withholdConfigMember(member, value)
+		)
+	);
 }
 
 /**
@@ -357,9 +409,32 @@ function rowMarkers(rows: unknown, path: string): string[] {
 	});
 }
 
-/** `valueWithheld` rows of an auth `config`'s extra parameter lists (issue #2536). */
+/** Every `...Withheld` member of one extra parameter row, named under @p at. */
+function paramRowMarkers(row: unknown, at: string): string[] {
+	if (!isRecord(row)) return [];
+	return Object.keys(row)
+		.filter((member) => member.endsWith(WITHHELD_SUFFIX))
+		.map((member) => `${at}.${member}`);
+}
+
+/**
+ * The withheld markers of an auth `config`'s extra parameter lists (issue
+ * #2536): a list withheld whole, and each marker on a row, the row named by its
+ * key or, when it has none, by its position.
+ */
 function configParamMarkers(config: Record<string, unknown>): string[] {
-	return OAUTH2_PARAM_LISTS.flatMap((list) => rowMarkers(config[list], `config.${list}`));
+	return OAUTH2_PARAM_LISTS.flatMap((list) => {
+		const path = `config.${list}`;
+		const whole = config[withheldMarker(list)] === undefined ? [] : [withheldMarker(path)];
+		const rows = config[list];
+		if (!Array.isArray(rows)) return whole;
+		return [
+			...whole,
+			...rows.flatMap((row: unknown, at) =>
+				paramRowMarkers(row, `${path}[${paramRowKey(row) ?? at}]`)
+			),
+		];
+	});
 }
 
 function postmanMarkers(source: unknown): string[] {

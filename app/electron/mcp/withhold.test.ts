@@ -10,7 +10,8 @@
  * @brief The shapes `withholdDiagnoseCredentials` leaves alone (#1805): an
  *        answer with nothing to strip is returned as it came; the header rows,
  *        URL and Params rows `withholdRowSecrets` masks (#1837) and the lists
- *        `withholdReorderRows` walks;
+ *        `withholdReorderRows` walks; an OAuth 2.0 config's extra parameter
+ *        rows (#2536);
  *        and the run-output mask: its forms, its header rule and how it reads
  *        the workspace (#1809).
  */
@@ -29,6 +30,7 @@ import {
 	withholdRunOutput,
 	specDiffRequestsToRead,
 	withholdSpecDiffChanges,
+	withheldAuthMembers,
 	type RunOutputRule,
 } from "./withhold.js";
 
@@ -210,6 +212,112 @@ describe("withholdRowSecrets url and params", () => {
 		],
 	])("params that are %s pass through", (_name, params) => {
 		expect(withholdRowSecrets({ params })).toEqual({ params });
+	});
+});
+
+// The engine's `redact_config_param_rows`, row for row: a row with no key names
+// nothing it could be judged by, and a member no row has is not vouched for.
+// Mutation check: withhold only a credential-named row's `value` (the shape
+// before this rule) and every case here but the first reds.
+describe("withholdRowSecrets OAuth 2.0 config parameter rows (#2536)", () => {
+	const configOf = (tokenParams: unknown) =>
+		(
+			withholdRowSecrets({ auth: { mode: "oauth2", config: { tokenParams } } }) as {
+				auth: { config: Record<string, unknown> };
+			}
+		).auth.config;
+
+	test("keeps an ordinary row and withholds a credential row's value", () => {
+		expect(
+			configOf([
+				{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+				{ key: "client_assertion", value: "jwt", sendAs: "body" },
+			])
+		).toEqual({
+			tokenParams: [
+				{ key: "audience", value: "api", enabled: true, sendAs: "url" },
+				{ key: "client_assertion", sendAs: "body", valueWithheld: true },
+			],
+		});
+	});
+
+	test("withholds whole a row with no non-empty string key that holds a string", () => {
+		expect(
+			configOf([
+				{ value: "s3cret" },
+				{ keyy: "client_secret", value: "x" },
+				{ key: "", value: "pasted" },
+				{ key: 7, value: "odd" },
+				"client_secret=raw",
+			])
+		).toEqual({
+			tokenParams: [
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+			],
+		});
+	});
+
+	test("leaves a keyless row alone when it holds nothing to withhold", () => {
+		const rows = [{ enabled: true }, { value: "" }, { value: "{{assertion}}" }, 3, null];
+		expect(configOf(rows)).toEqual({ tokenParams: rows });
+	});
+
+	test("withholds a member no row has, nested strings included", () => {
+		expect(
+			configOf([
+				{
+					key: "audience",
+					value: "api",
+					note: "s3cret",
+					extra: { nested: ["s3cret"] },
+					blank: "",
+				},
+			])
+		).toEqual({
+			tokenParams: [
+				{
+					key: "audience",
+					value: "api",
+					noteWithheld: true,
+					extraWithheld: true,
+					blank: "",
+				},
+			],
+		});
+	});
+
+	test("withholds a list that is not one", () => {
+		expect(configOf("refresh_token=rt")).toEqual({ tokenParamsWithheld: true });
+		expect(configOf({ key: "audience", value: "api" })).toEqual({ tokenParamsWithheld: true });
+		expect(configOf(7)).toEqual({ tokenParams: 7 });
+	});
+
+	test("names every marker it writes, so a block passed back is refused", () => {
+		const withheld = (
+			withholdRowSecrets({
+				auth: {
+					mode: "oauth2",
+					config: {
+						tokenParams: [
+							{ value: "s3cret" },
+							{ key: "audience", value: "api", note: "s3cret" },
+							{ key: "client_secret", value: "raw" },
+						],
+						refreshParams: "refresh_token=rt",
+					},
+				},
+			}) as { auth: Record<string, unknown> }
+		).auth;
+		expect(withheldAuthMembers(withheld)).toEqual([
+			"config.tokenParams[0].valueWithheld",
+			"config.tokenParams[audience].noteWithheld",
+			"config.tokenParams[client_secret].valueWithheld",
+			"config.refreshParamsWithheld",
+		]);
 	});
 });
 

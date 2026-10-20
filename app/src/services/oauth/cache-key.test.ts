@@ -79,6 +79,23 @@ describe("computeOAuth2CacheKey - shared vectors", () => {
 			"https://idp/token\x1fcid\x1fdefault\x1f\x1fauthorizationParams:n="
 		);
 	});
+
+	it("vector 6: a credential-named row is keyed by its name alone", () => {
+		expect(
+			computeOAuth2CacheKey(
+				base({
+					tokenParams: [
+						{ key: "client_assertion", value: "eyJhbGciOi.e30.sig" },
+						{ key: "X-Api-Key", value: "k-123", sendAs: "header" },
+						{ key: "audience", value: "api" },
+					],
+				})
+			)
+		).toBe(
+			"https://idp/token\x1fcid\x1fdefault\x1f" +
+				"\x1ftokenParams:X-Api-Key=\x1eaudience=api\x1eclient_assertion="
+		);
+	});
 });
 
 describe("computeOAuth2CacheKey - extra parameter rows", () => {
@@ -92,6 +109,22 @@ describe("computeOAuth2CacheKey - extra parameter rows", () => {
 		expect(keyOf([audience, tenant])).not.toBe(
 			keyOf([{ ...audience, value: "api-2" }, tenant])
 		);
+	});
+
+	// The key is handed to clients and stored as the token row's primary key, so
+	// a credential row contributes its name alone (OAuthCacheKey.
+	// CredentialRowsAreKeyedByNameAlone). Mutation check: key a credential row by
+	// its value in `keyedPair` and the first two expectations fail.
+	it("keys a credential row by its name, an ordinary row by its value too", () => {
+		const withRows = (assertion: string, audience: string) =>
+			keyOf([
+				{ key: "client_assertion", value: assertion },
+				{ key: "audience", value: audience },
+			]);
+		const key = withRows("jwt-1", "api");
+		expect(key).toBe(withRows("jwt-2", "api"));
+		expect(key).not.toContain("jwt-1");
+		expect(key).not.toBe(withRows("jwt-1", "other-api"));
 	});
 
 	it("keys a config with only disabled rows as one with none", () => {

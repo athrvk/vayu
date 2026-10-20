@@ -6,6 +6,7 @@
  */
 
 import type { OAuth2Config } from "@/types";
+import { namesCredentialParam } from "./credential-params";
 
 const US = "\x1f"; // unit separator: between fields and segments
 const RS = "\x1e"; // record separator: between the rows of a segment
@@ -59,6 +60,11 @@ function eligiblePair(row: unknown): [string, string] | null {
 	return [key, text(value)];
 }
 
+/** The pair a row is keyed by: a credential by its key alone, so the cache key never carries it. */
+function keyedPair([key, value]: [string, string]): [string, string] {
+	return [key, namesCredentialParam(key) ? "" : value];
+}
+
 /** One list's segment, or "" when it has no eligible row. */
 function extraParamsSegment(
 	config: OAuth2Config,
@@ -66,7 +72,10 @@ function extraParamsSegment(
 ): string {
 	const rows: unknown = config[list];
 	if (!Array.isArray(rows)) return "";
-	const pairs = rows.map(eligiblePair).filter((pair) => pair !== null);
+	const pairs = rows
+		.map(eligiblePair)
+		.filter((pair) => pair !== null)
+		.map(keyedPair);
 	if (pairs.length === 0) return "";
 	pairs.sort(([ka, va], [kb, vb]) => compareBytes(ka, kb) || compareBytes(va, vb));
 	return `${US}${list}:${pairs.map(([k, v]) => `${k}=${v}`).join(RS)}`;
@@ -89,8 +98,11 @@ function extraParamsSegment(
  *   \x1f listName ":" key "=" value ( \x1e key "=" value )*
  *
  * the rows' (key, value) pairs sorted by key, then value, in UTF-8 byte order,
- * so row order and `sendAs` do not change the key. A config with no such row
- * keys exactly as it did before the lists existed.
+ * so row order and `sendAs` do not change the key. A row whose key names a
+ * credential (`namesCredentialParam`: `client_assertion`, `X-Api-Key`, ...)
+ * writes its key with an empty value, so the key never carries the secret. A
+ * config with no row the engine would send keys exactly as it did before the
+ * lists existed.
  *
  * Note: `scope`/`audience`/`resource` are intentionally omitted (matches
  * Postman's keying). Configs differing only in scope share a cached token; set a

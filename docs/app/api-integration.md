@@ -1107,7 +1107,9 @@ ones in `queries/oauth.ts` (`useOAuth2TokenStatusQuery` - polls status ~30s;
 to the engine so the app and engine agree on cache slots without a round-trip. The key
 reads the config's `authorizationParams`, `tokenParams` and `refreshParams` rows (issue
 #2536) beside the token URL, client id, credentials id and password-grant username, so
-two audiences sent as rows are two cached tokens; `scope`, `audience` and `resource`
+two audiences sent as rows are two cached tokens; a row whose key names a credential
+(`client_assertion`, `X-Api-Key`; `services/oauth/credential-params.ts`) is keyed by its
+key alone, so the key never carries the secret. `scope`, `audience` and `resource`
 themselves are still not in it.
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
 system browser or an embedded Electron window, then polls the engine).

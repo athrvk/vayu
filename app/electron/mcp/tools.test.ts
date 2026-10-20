@@ -12499,6 +12499,74 @@ describe("secret withholding", () => {
 		expect(client.updateRequest).not.toHaveBeenCalled();
 	});
 
+	// A row the engine's export would blank whole - no key, or a member no row
+	// has - is withheld here too, not passed through because its key names no
+	// credential. Mutation check: withhold only a credential-named row's
+	// `value` and the secrets below reach the agent.
+	test("list_requests withholds an extra parameter row with no key, or a member no row has", async () => {
+		const client = fakeClient({
+			listRequests: vi.fn().mockResolvedValue([
+				{
+					id: "req_odd",
+					auth: {
+						mode: "oauth2",
+						config: {
+							tokenParams: [
+								{ value: "odd-keyless-raw" },
+								{ keyy: "client_secret", value: "odd-misspelt-raw" },
+								{ key: "audience", value: "api", note: "odd-note-raw" },
+							],
+							refreshParams: "refresh_token=odd-list-raw",
+						},
+					},
+				},
+			]),
+		});
+		const { text, body } = await read("list_requests", client, undefined, {
+			collectionId: "c1",
+		});
+		for (const secret of [
+			"odd-keyless-raw",
+			"odd-misspelt-raw",
+			"odd-note-raw",
+			"odd-list-raw",
+		]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body[0].auth.config).toEqual({
+			tokenParams: [
+				{ valueWithheld: true },
+				{ valueWithheld: true },
+				{ key: "audience", value: "api", noteWithheld: true },
+			],
+			refreshParamsWithheld: true,
+		});
+	});
+
+	test.each([
+		[
+			"a keyless row",
+			{ tokenParams: [{ valueWithheld: true }] },
+			"config.tokenParams[0].valueWithheld",
+		],
+		[
+			"a row's other member",
+			{ tokenParams: [{ key: "audience", value: "api", noteWithheld: true }] },
+			"config.tokenParams[audience].noteWithheld",
+		],
+		["a whole list", { refreshParamsWithheld: true }, "config.refreshParamsWithheld"],
+	])("an auth argument carrying %s read withheld is refused", async (_, config, marker) => {
+		const client = fakeClient();
+		const res = await dispatchTool(
+			"update_request",
+			{ requestId: "req_cfg", auth: { mode: "oauth2", config } },
+			ctxWith(client, { allowWrites: true })
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain(marker);
+		expect(client.updateRequest).not.toHaveBeenCalled();
+	});
+
 	// A header typed straight into the Headers tab is no variable: its name is
 	// the only signal, and the shared list plus the request's API-key header
 	// decide (#1809).
