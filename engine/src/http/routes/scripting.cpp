@@ -1612,13 +1612,16 @@ nlohmann::json get_script_completions () {
     "string }[] }; auth?: { type: string; basic?: object; bearer?: object; "
     "apikey?: "
     "object }; timeout?: "
-    "number }, callback: (err: Error | null, res: any) => void): void" },
+    "number }, callback?: (err: Error | null, res: any) => void): "
+    "Promise<any>" },
     { "documentation",
     "Send an auxiliary request - fetching a token in a pre-request script is "
-    "what it is for.\n\nSynchronous despite the callback: the send blocks and "
-    "the callback runs inline before sendRequest returns. Postman's "
-    "promise-returning overload is not implemented, so a callback is "
-    "required.\n\nThe callback gets (err, res). "
+    "what it is for.\n\nSynchronous in both of Postman's forms: the send "
+    "blocks, then the callback runs inline before sendRequest returns, or, "
+    "with no callback, the call returns a promise already settled - resolved "
+    "with res, or rejected with err - so `const res = await "
+    "pm.sendRequest(url)` works. With a callback it returns "
+    "undefined.\n\nThe callback gets (err, res). "
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
     "res is null then. res carries code, status (the reason phrase, as on "
     "pm.response - the number is code), responseTime, headers.get() "

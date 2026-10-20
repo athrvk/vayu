@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Send from script    | `pm.sendRequest(urlOrOptions, callback)` - synchronous, callback only, refused for agent-started runs, see below |
+| Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
@@ -247,15 +247,17 @@ sample, exactly as the bound data row does. An **ordinary** Send reads
 `undefined` for both; a send that bound a row reports iteration `0` of `1`, the
 same exception `iterationCount` makes above.
 
-### `pm.sendRequest` is synchronous, callback-only, and not available to agents
+### `pm.sendRequest` is synchronous, bounded, and not available to agents
 
 Three divergences from Postman, each for a reason the sandbox forces.
 
-**No promise form.** Postman offers both a callback and a promise-returning
-overload. Vayu ships only the callback for now (#2527); a call without one
-throws. The callback is honoured **synchronously** - the send blocks and the
-callback runs inline, before `pm.sendRequest` returns - so the call shape a
-Postman user writes is unchanged and the semantics are honest.
+**It blocks, in both of Postman's forms.** The send blocks and the callback
+runs inline, before `pm.sendRequest` returns, so the call shape a Postman user
+writes is unchanged and the semantics are honest. Called without a callback it
+returns a promise instead, as Postman's does (#2577), already settled when it
+comes back: resolved with `res`, or rejected with the `err` the callback would
+have been given. So `const res = await pm.sendRequest(url)` works, at the top
+level of a script or inside an `async` test.
 
 ```javascript
 // Pre-request: fetch a token and put it where the request will find it.
@@ -414,7 +416,7 @@ script's deadline stops it, which fails the script. The rules are in
 
 Postman's does, and so does Vayu's: a pre-request script may assert, and the
 usual reason is a
-[`pm.sendRequest`](#pmsendrequest-is-synchronous-callback-only-and-not-available-to-agents)
+[`pm.sendRequest`](#pmsendrequest-is-synchronous-bounded-and-not-available-to-agents)
 it just made - a token fetch that answered `401`, a fixture that is not there -
 which is worth catching before the request goes out.
 

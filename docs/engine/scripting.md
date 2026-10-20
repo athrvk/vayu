@@ -1769,8 +1769,8 @@ pm.sendRequest(
 );
 ```
 
-The first argument is a URL string or an options object; the second is required
-and must be a function.
+The first argument is a URL string or an options object; the second, when
+given, must be a function.
 
 | Option | Shape |
 | ------ | ----- |
@@ -1781,16 +1781,24 @@ and must be a function.
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
-**Synchronous, and callback-shaped.** The send blocks and the callback runs
-inline, before `pm.sendRequest` returns. There is no promise overload yet
-(#2527): a call without a callback throws rather than returning a promise.
+**Synchronous, in both forms.** The send blocks and the callback runs inline,
+before `pm.sendRequest` returns. Called without a callback, it returns a
+promise instead (#2577), already settled when it comes back: resolved with
+`res`, or rejected with the `err` the callback would have been given, so the
+code after an `await` runs with the answer.
+
+```javascript
+const res = await pm.sendRequest("https://auth.example.com/token");
+pm.environment.set("token", res.json().access_token);
+```
 
 **Which failures throw and which reach the callback.** Transport failures are
 the network's answer, so they arrive as the callback's `err` - an `Error` with
 a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, `TOO_MANY_REDIRECTS`, …)
-and `res` null. The script's own mistakes throw out of the call instead: an
-unusable argument, an unsupported body mode, exceeding the request cap, and the
-capability being off.
+and `res` null - or, without a callback, as the promise's rejection with that
+`Error`. The script's own mistakes throw out of the call instead, in both
+forms: an unusable argument, an unsupported body mode, exceeding the request
+cap, and the capability being off.
 A response over the byte bound below is the network's answer too, not a
 mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`. So does a URL
 whose scheme is not `http` or `https` once its variables resolve
@@ -2696,7 +2704,7 @@ and the rest of the ES2020 built-ins, plus:
 | ---- | ----- |
 | `pm.crypto.sha256(data, encoding?)` | SHA-256; `data` is a string (UTF-8) or `Uint8Array` |
 | `pm.crypto.hmacSha256(key, data, encoding?)` | HMAC-SHA256; key and data take the same types |
-| `pm.sendRequest(urlOrOptions, callback)` | Send an auxiliary request, synchronously - see [above](#sending-a-request-from-a-script-pmsendrequest) |
+| `pm.sendRequest(urlOrOptions, callback?)` | Send an auxiliary request, synchronously; a promise without the callback - see [above](#sending-a-request-from-a-script-pmsendrequest) |
 | `btoa(binaryString)` | base64-encode one byte per code unit |
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
@@ -2716,7 +2724,8 @@ and the timers run, on queues drained before the script ends, but nothing
 settles a promise after it has.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
-synchronous and bounded rather than a Promise-returning stand-in.
+synchronous and bounded; without a callback it returns a promise that is
+already settled, not one waiting on a transfer in flight.
 
 Postman's pre-`pm.*` globals (`responseBody`, `tests[...]`, `postman.*`, ...) and
 the libraries it bundles (`CryptoJS`, `_`, `moment`, ...) are absent too. The

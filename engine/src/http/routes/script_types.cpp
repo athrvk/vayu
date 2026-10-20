@@ -137,9 +137,9 @@ struct AbsentGlobal {
 };
 constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "fetch",
-"No fetch in the sandbox. Use pm.sendRequest(request, callback), "
-"which is synchronous and allowed only when the run's "
-"allowScriptRequests setting is on." },
+"No fetch in the sandbox. Use pm.sendRequest(request, callback), or "
+"await pm.sendRequest(request), which is synchronous and allowed only when "
+"the run's allowScriptRequests setting is on." },
 { "XMLHttpRequest", "No XMLHttpRequest in the sandbox. Use pm.sendRequest." },
 { "require",
 "No module system - QuickJS here has no loader, and there is "

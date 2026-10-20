@@ -2016,7 +2016,7 @@ declare const pm: {
 	/**
 	 * Send an auxiliary request - fetching a token in a pre-request script is what it is for.
 	 * 
-	 * Synchronous despite the callback: the send blocks and the callback runs inline before sendRequest returns. Postman's promise-returning overload is not implemented, so a callback is required.
+	 * Synchronous in both of Postman's forms: the send blocks, then the callback runs inline before sendRequest returns, or, with no callback, the call returns a promise already settled - resolved with res, or rejected with err - so `const res = await pm.sendRequest(url)` works. With a callback it returns undefined.
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
@@ -2036,7 +2036,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback?: (err: Error | null, res: any) => void): Promise<any>;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 
@@ -2116,7 +2116,7 @@ declare function setTimeout(callback: (...args: any[]) => void, delay?: number, 
 /**
  * Not available in the Vayu script sandbox.
  *
- * No fetch in the sandbox. Use pm.sendRequest(request, callback), which is synchronous and allowed only when the run's allowScriptRequests setting is on.
+ * No fetch in the sandbox. Use pm.sendRequest(request, callback), or await pm.sendRequest(request), which is synchronous and allowed only when the run's allowScriptRequests setting is on.
  */
 declare const fetch: never;
 
