@@ -167,4 +167,6 @@ while the breakpoint still marks it, and an error burst is a share of its
 bucket's completions, diluted by the rest of the bucket. The Performance tab
 says so in a note above the charts. A run of at most 2,000 ticks arrives raw and
 behaves exactly as it always has; `utils/downsampled-series.test.ts` holds the
-two paths to each other.
+two paths to each other. The status chart rates each point per second over the
+time it closes (`buildStatusOverTime`), so a bucket is not drawn
+`ticksPerBucket` times taller than the second it stands for.
