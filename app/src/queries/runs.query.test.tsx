@@ -774,12 +774,6 @@ describe("runsPollInterval", () => {
 	});
 });
 
-/**
- * The engine answers a run's report and series for a live run too, so what a
- * pane read mid-run must not be cached as the final copy (#1934). Every case
- * runs both branches - a run in progress and a terminal one - because a policy
- * that was "always stale" or "always fresh" would pass either half alone.
- */
 /*
  * The History charts' series is one downsampled read (#2547), not a paged walk
  * of every stored tick.
@@ -836,6 +830,12 @@ describe("useRunTimeSeriesQuery", () => {
 	});
 });
 
+/**
+ * The engine answers a run's report and series for a live run too, so what a
+ * pane read mid-run must not be cached as the final copy (#1934). Every case
+ * runs both branches - a run in progress and a terminal one - because a policy
+ * that was "always stale" or "always fresh" would pass either half alone.
+ */
 describe("a run's data while it is in progress", () => {
 	const REPORT_POLL_MS = 3000;
 	const seconds = (n: number) => n * 1000;
