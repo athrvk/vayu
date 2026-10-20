@@ -9004,11 +9004,12 @@ no `status` at all.
 `script.setup` has run, immediately before the first submission (issue #2395).
 Until then the run is still setting up, and every frame carries
 `elapsedSeconds: 0` with `sendRate` and `throughput` at `0`, because both divide
-by it. `currentRps` and `currentSendRate` do not: they divide by the trailing
-window's own span on the monotonic clock (issue #2393), so they read `0` while
-nothing is sent, and a window that reaches back before load start counts that
-idle time in its span. The last frame, published just after load ends, therefore reads within
-a fraction of a second of the report's `testDuration`. An engine older than that issue
+by it. The last frame, published just after load ends, therefore reads within
+a fraction of a second of the report's `testDuration`. `currentRps` and
+`currentSendRate` do not divide by it: they divide by the trailing window's own
+span on the monotonic clock (issue #2393), so they read `0` while nothing is
+sent, and a window that reaches back before load start counts that idle time in
+its span. An engine older than that issue
 counted from when the run was registered, so a slow setup ran its live clock
 ahead of the report and dragged the rates down. The last frame's `sendRate` is
 still not the report's: the report divides requests sent by the sending

@@ -311,7 +311,7 @@ describe("buildConcurrencyScatter", () => {
  * the anomaly detector reads `current_rps`, and the engine's HTML export draws
  * `current_rps` from the same stored ticks (`tick_points (ticks, "current_rps")`
  * in `engine/src/core/run_export_html.cpp`, a C++ file this suite cannot call,
- * so the field name is pinned here instead). A chart and a detector reading
+ * so the name is recorded here, not enforced). A chart and a detector reading
  * different quantities is how a shaded window ended up over a line that showed
  * no drop.
  */
