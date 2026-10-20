@@ -385,7 +385,7 @@ TEST (ControlTransactionSum, OnlyTheClosingOutcomeCarriesADuration) {
 
     // `duration_us` is not part of the trace; the close shows as `waitedMs`.
     const json trace = pass.outcomes.back ().to_json ();
-    EXPECT_EQ (trace.value ("waitedMs", -1), 3) << trace.dump ();
+    EXPECT_EQ (trace.at ("waitedMs").get<int64_t> (), 3) << trace.dump ();
     EXPECT_EQ (trace.size (), 6u) << "an unexpected member: " << trace.dump ();
 }
 
