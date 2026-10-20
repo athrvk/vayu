@@ -5,7 +5,19 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+// MSVC's /Od build (the Windows ASan leg alone; /O2 folds the code away) reports
+// nlohmann's `binary_reader::byte_swap` as C4702, which /WX makes fatal. `sax_parse`
+// instantiates every input format's reader, so the template is compiled here though
+// no binary format is parsed. The warning is attributed to the line of the
+// definition, so the suppression has to cover the include that holds it.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4702)
+#endif
 #include "vayu/utils/ordered_json.hpp"
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 #include <algorithm>
 #include <string>

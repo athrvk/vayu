@@ -348,9 +348,10 @@ Notes on the edges:
   such as `unevaluatedProperties`, or OpenAPI's `nullable` - fails the assertion
   in **both** polarities and is named, because ignoring it would make the schema
   looser (or, under `not`, stricter) and neither verdict could be trusted.
-  `options` is ajv's and is accepted and not read. `format` is checked only for
-  `date`, `time`, `date-time` and `ipv4`; `email`, `uri`, `uuid` and the rest
-  pass any string, where ajv would reject some of them.
+  `options` is ajv's and is accepted and not read. `format` is checked for
+  `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`, `hostname` and
+  `ipv6`; any other name (`uri-reference`, `int64`, ...) is an annotation and
+  passes any string, where ajv would reject some of them.
 - **Every public member of chai 4.4.1's `expect` API has a row** in
   `engine/tests/fixtures/chai-conformance.json`, with a snippet that passes and
   one that fails, each checked against the real package. The suite holds the
@@ -797,7 +798,10 @@ the engine's validator, the same call `pm.expect(value).to.have.jsonSchema`
 makes: the body is read as `JSON.parse` reads it, a failure names the first
 failing path, and a keyword the validator cannot evaluate fails the assertion
 naming it, in both polarities. `options` is ajv's and is not read, and `format`
-is checked only for `date`, `time`, `date-time` and `ipv4`.
+is checked for `date`, `time`, `date-time`, `ipv4`, `email`, `uri`, `uuid`,
+`hostname` and `ipv6` (see
+[pm-api-compatibility.md](../app/pm-api-compatibility.md#assertion-chains-pmexpect)
+for where the engine's checks differ from ajv's).
 
 `have.responseTime` and `have.responseSize` are a call and a chain, as in
 chai-postman: `responseTime(120)` asserts the time equals 120, and

@@ -725,7 +725,13 @@ logged as a warning: it means a client skipped composition.
     type and validates with **valijson**. Three rules the shape enforces: an
     unbound collection gets no `validation` node at all; `checked: false`
     carries a reason code and no validity; keywords the draft-07 validator
-    cannot evaluate are named and counted on the verdict. `POST /execute`
+    cannot evaluate are named and counted on the verdict. `format` is
+    asserted for valijson's four (`date`, `time`, `date-time`, `ipv4`) and for
+    `email`, `uri`, `uuid`, `hostname` and `ipv6` through the
+    `schema_format.hpp` table (#2581): valijson has no format hook, so
+    `run_validator` adds a custom constraint under the same `format` key, and a
+    name in neither place stays an annotation. A name added to the table must
+    not be one valijson checks, or each failure is counted twice. `POST /execute`
     returns the node and `record_design_result` stores the *same object* on the
     trace. `match_status_pattern` is shared with coverage. Under load the check
     is deferred to run end (#682, `validate_sampled_responses` over the sample

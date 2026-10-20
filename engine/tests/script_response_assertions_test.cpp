@@ -359,6 +359,39 @@ TEST_F (ResponseAssertionTest, JsonSchemaNamesTheKeywordsItCouldNotEvaluate) {
     "unevaluatedProperties (1)");
 }
 
+// `format` is asserted for the names ajv checks, so a schema written for
+// Postman fails the value it would fail there (#2581).
+TEST_F (ResponseAssertionTest, JsonSchemaChecksTheFormatsOfEmailUriUuidHostnameAndIpv6) {
+    const std::string schema = R"({ type: "object", properties: {
+        email: { type: "string", format: "email" } } })";
+
+    response.body = R"({"email": "not-an-email"})";
+    expect_assertion_failure ("pm.response.to.have.jsonSchema(" + schema + ")",
+    "at /email: String should be a valid email address");
+    expect_pass ("pm.response.to.not.have.jsonSchema(" + schema + ")");
+
+    response.body = R"({"email": "a@b.co"})";
+    expect_pass ("pm.response.to.have.jsonSchema(" + schema + ")");
+
+    expect_pass (R"(pm.expect("a@b.co").to.have.jsonSchema({ format: "email" }))");
+    expect_assertion_failure (R"(pm.expect("not-an-email").to.have.jsonSchema({ format: "email" }))",
+    "String should be a valid email address");
+    expect_assertion_failure (R"(pm.expect("nope").to.have.jsonSchema({ format: "uri" }))",
+    "String should be a valid URI");
+    expect_assertion_failure (R"(pm.expect("nope").to.have.jsonSchema({ format: "uuid" }))",
+    "String should be a valid UUID");
+    expect_assertion_failure (R"(pm.expect("not_a_host").to.have.jsonSchema({ format: "hostname" }))",
+    "String should be a valid hostname");
+    expect_assertion_failure (R"(pm.expect("1.2.3.4").to.have.jsonSchema({ format: "ipv6" }))",
+    "String should be a valid IPv6 address");
+    expect_pass (R"(pm.expect("::1").to.have.jsonSchema({ format: "ipv6" }))");
+}
+
+TEST_F (ResponseAssertionTest, JsonSchemaTreatsAnUnknownFormatAsAnAnnotation) {
+    expect_pass (R"(pm.expect("12").to.have.jsonSchema({ type: "string", format: "int64" }))");
+    expect_pass (R"(pm.expect("x").to.have.jsonSchema({ format: "uri-reference" }))");
+}
+
 TEST_F (ResponseAssertionTest, JsonSchemaRefusesWhatIsNotASchema) {
     expect_type_error ("pm.response.to.have.jsonSchema([])", "schema object, got array");
     expect_type_error ("pm.response.to.have.jsonSchema('{}')", "schema object, got string");
