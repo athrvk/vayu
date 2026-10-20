@@ -50,7 +50,8 @@ import {
 } from "@/services/openapi/bound-spec-match";
 import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
-import { type ImportResult } from "@/services/importers/types";
+import { type CollectionDraft, type ImportResult } from "@/services/importers/types";
+import { draftSiblings } from "@/services/importers/draft-siblings";
 import { describeCarriedOver, describeCounts, importNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
 import { announceImport, buildImportReport } from "./import-report";
@@ -1223,7 +1224,7 @@ function PreviewView({
 			</div>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{collections.map((c, i) => (
-					<TreeNode key={i} name={c.name} requests={c.requests} children={c.children} />
+					<TreeNode key={i} collection={c} />
 				))}
 				{/*
 				 * Environments were parsed but never shown. For a Postman environment
@@ -1406,34 +1407,36 @@ function varCountLabel(n: number): string {
 	return `${n} ${pluralize(n, "variable")}`;
 }
 
-function TreeNode({
-	name,
-	requests,
-	children,
-}: {
-	name: string;
-	requests: ImportResult["collections"][number]["requests"];
-	children: ImportResult["collections"][number]["children"];
-}) {
+/**
+ * One collection of the preview and everything beneath it, its sub-folders and
+ * requests in the one order the sidebar will list them (issue #2535): a
+ * Postman collection's document order, every other format's folders first.
+ */
+function TreeNode({ collection }: { collection: CollectionDraft }) {
 	return (
 		<div className="pl-1">
 			<div className="flex items-center gap-1.5 py-0.5 text-xs font-medium">
 				<Folder className="size-icon-sm text-primary" />
-				{name}
+				{collection.name}
 			</div>
 			<div className="pl-5">
-				{requests.map((r, i) => (
-					<div
-						key={i}
-						className="flex items-center gap-2 py-0.5 text-label text-muted-foreground"
-					>
-						<MethodBadge method={r.method} variant="text" className="w-10" />
-						<span>{r.name}</span>
-					</div>
-				))}
-				{children.map((c, i) => (
-					<TreeNode key={i} name={c.name} requests={c.requests} children={c.children} />
-				))}
+				{draftSiblings(collection).map((sibling, i) =>
+					sibling.kind === "folder" ? (
+						<TreeNode key={i} collection={sibling.draft} />
+					) : (
+						<div
+							key={i}
+							className="flex items-center gap-2 py-0.5 text-label text-muted-foreground"
+						>
+							<MethodBadge
+								method={sibling.draft.method}
+								variant="text"
+								className="w-10"
+							/>
+							<span>{sibling.draft.name}</span>
+						</div>
+					)
+				)}
 			</div>
 		</div>
 	);
