@@ -129,6 +129,9 @@ export interface VariableValue {
  * engine opens it at send time, so nothing here (and nothing in storage) holds
  * the contents. `fileName` and `contentType` override what the part declares
  * about itself; absent means the engine lets libcurl derive them from the path.
+ * A text part may carry `contentType` as well (a Postman import keeps the one
+ * the source declared, #2539): the part is sent with that type and none
+ * otherwise. `src` and `fileName` stay file-only.
  *
  * `unresolved` is read-only: the engine's answer, on a read, to whether it
  * would refuse the path on this machine, and what the editor's warning reads.
