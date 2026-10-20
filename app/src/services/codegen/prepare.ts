@@ -90,15 +90,19 @@ function asString(value: unknown): string {
 /**
  * A secret as it can appear in a URL: as written, as substituted into URL text
  * (`encodeAtUrlComponent`, the rule compose and the "Sends" line apply to a
- * `{{token}}` in a path or query, which leaves `&` and `=` raw), as a query
- * row's value (`encodeQueryComponent`) and as `encodeURIComponent` writes it.
- * The raw value alone would miss `a b&c` sitting there as `a%20b&c`.
+ * `{{token}}` in the host, the path, the query or the fragment, each by its own
+ * set, which leaves `&` and `=` raw), as a query row's value
+ * (`encodeQueryComponent`) and as `encodeURIComponent` writes it. The raw
+ * value alone would miss `a b&c` sitting there as `a%20b&c`, and a path
+ * writes `{` and a backtick where a query leaves them.
  */
 function secretForms(secret: string): string[] {
 	return [
 		secret,
 		encodeAtUrlComponent(secret, "head").written,
+		encodeAtUrlComponent(secret, "path").written,
 		encodeAtUrlComponent(secret, "query").written,
+		encodeAtUrlComponent(secret, "fragment").written,
 		encodeQueryComponent(secret, "value"),
 		encodeURIComponent(secret),
 	];

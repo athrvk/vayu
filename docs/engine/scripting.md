@@ -1681,6 +1681,13 @@ encode its braces in the path. A non-ASCII host is dialled by its punycode
 name (`bücher.example` as `xn--bcher-kva.example`), as it is on every send
 path; see [Non-ASCII hosts](api-reference.md#non-ascii-hosts).
 
+Send writes the same request line for a space, a control character, a
+non-ASCII byte or a value substituted into the path, query or fragment, but it
+changes only those bytes: a typed `"`, `{` or a backslash in the path goes
+out as typed from Send and as `%22`, `%7B` or `/` from a script, as Postman
+does. The difference is deliberate and listed under
+[Query encoding](api-reference.md#query-encoding).
+
 Header **names** resolve too (#1067), under the collision rule composition owns
 rather than a second one written here (#1051, `http/header_names.hpp`): two
 names that resolve to one name would send the request a header short, so the

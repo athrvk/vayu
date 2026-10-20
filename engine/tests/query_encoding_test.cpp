@@ -28,6 +28,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/event_loop.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -233,6 +234,79 @@ TEST_F (PostmanQueryOnTheWire, TheIssuesItemReachesTheServerAsStored) {
     auto result    = client_->send (request);
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
     EXPECT_EQ (server_->target (), "/echo?q=a|b&r=c%20d");
+}
+
+// ---------------------------------------------------------------------------
+// Literal URL text on the wire (issue #2465): a URL that reaches a driver
+// without passing through a substitution (a raw `POST /execute` or
+// `POST /runs` URL, one with no token) has its unsendable bytes encoded by
+// `wire_url`. Mutation check: drop the encoding call in `wire_url`
+// (form_body.cpp) and the first two tests fail: libcurl refuses the space and
+// nothing reaches the server.
+// ---------------------------------------------------------------------------
+
+vayu::Request wire_get (const std::string& url, bool disable_url_encoding = false) {
+    vayu::Request request;
+    request.method               = vayu::HttpMethod::GET;
+    request.url                  = url;
+    request.timeout_ms           = 5000;
+    request.disable_url_encoding = disable_url_encoding;
+    return request;
+}
+
+TEST_F (PostmanQueryOnTheWire, ALiteralSpaceAndNonAsciiByteReachTheServerEncoded) {
+    auto result = client_->send (wire_get (server_->url () + "/a b?q=é"));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (server_->target (), "/echo/a%20b?q=%C3%A9");
+}
+
+TEST_F (PostmanQueryOnTheWire, TheLoadDriverEncodesTheSameLiteralBytes) {
+    vayu::http::EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (wire_get (server_->url () + "/a b?q=é")).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (server_->target (), "/echo/a%20b?q=%C3%A9");
+}
+
+// Every byte libcurl already sends goes out exactly as before.
+TEST_F (PostmanQueryOnTheWire, AUrlThatSentBeforeIsSentByteForByte) {
+    for (const std::string suffix :
+    { "/a\"b?q=a\"b", "/{a}?q={}", "/a\\b?q=a\\b", "/%41?q=%41", "/a+b?q=a+b" }) {
+        auto result = client_->send (wire_get (server_->url () + suffix));
+        ASSERT_TRUE (result.is_ok ()) << suffix << ": " << result.error ().message;
+        EXPECT_EQ (server_->target (), "/echo" + suffix);
+    }
+}
+
+// The toggle sends the URL as typed, and libcurl refuses a raw space: the
+// refusal is the response's, status 0, and nothing reaches the server.
+TEST_F (PostmanQueryOnTheWire, DisableUrlEncodingSendsALiteralSpaceAsTyped) {
+    auto result = client_->send (wire_get (server_->url () + "/a b?q=c d", true));
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_EQ (result.value ().error_code, vayu::ErrorCode::InvalidUrl)
+    << result.value ().error_message;
+    // The message names the cause and the remedy, not libcurl's "Bad query".
+    EXPECT_EQ (result.value ().error_message,
+    "Cannot send this request: the URL contains a space or control character; "
+    "percent-encode it, or turn Send URL without encoding off");
+    EXPECT_EQ (server_->requests_seen (), 0);
+}
+
+// The load driver reports the same sentence.
+TEST_F (PostmanQueryOnTheWire, TheLoadDriverNamesTheSpaceTheToggleLeftInTheUrl) {
+    vayu::http::EventLoop loop;
+    loop.start ();
+    auto result =
+    loop.submit_async (wire_get (server_->url () + "/a b", true)).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().error_code, vayu::ErrorCode::InvalidUrl);
+    EXPECT_NE (
+    result.value ().error_message.find ("space or control character"), std::string::npos)
+    << result.value ().error_message;
 }
 
 // ---------------------------------------------------------------------------

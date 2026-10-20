@@ -799,7 +799,7 @@ Result<Response> Client::send (const Request& request) {
         Error error = sink.limit_exceeded ?
         Error{ ErrorCode::ResponseTooLarge,
             too_large_message (response.headers, sink.max_bytes) } :
-        detail::curl_to_error (curl, res, impl_->errors);
+        detail::curl_to_error (curl, res, impl_->errors, &request);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)

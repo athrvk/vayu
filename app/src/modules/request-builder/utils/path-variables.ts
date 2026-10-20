@@ -247,7 +247,9 @@ const encoder = new TextEncoder();
  */
 const PATH_ENCODE_ASCII = new Set([...' "<>`#?{}'].map((char) => char.charCodeAt(0)));
 
-const inPathEncodeSet = (byte: number) => byte < 0x20 || byte > 0x7e || PATH_ENCODE_ASCII.has(byte);
+/** Whether `byte` is in `PATH_ENCODE_SET`; `query-encoding.ts` writes a substituted path value by it. */
+export const inPathEncodeSet = (byte: number) =>
+	byte < 0x20 || byte > 0x7e || PATH_ENCODE_ASCII.has(byte);
 
 /** Each byte of `text` (UTF-8) in Postman's path encode set as `%XX` (uppercase). */
 function percentEncodePath(text: string): string {

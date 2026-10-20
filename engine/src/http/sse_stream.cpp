@@ -538,8 +538,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         // rather than a deadline on a healthy stream.
         reason = SseEndReason::Idle;
     } else if (result != CURLE_OK) {
-        reason                 = SseEndReason::Error;
-        const Error error      = detail::curl_to_error (curl, result, errors);
+        reason = SseEndReason::Error;
+        const Error error =
+        detail::curl_to_error (curl, result, errors, &request.request);
         response.status_code   = 0;
         response.status_text   = vayu::http::status_text (0);
         response.error_code    = error.code;

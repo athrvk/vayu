@@ -1600,7 +1600,7 @@ the null-vs-absent rule.
   "mockExampleId": null,             // Optional, the example id `mockResponseMode: "fixed"` targets
   "disableCookies": false,           // Optional, keep the cookie jar out of this request. Default false
   "disabledSystemHeaders": [],       // Optional, header names the engine does not add. Default []
-  "disableUrlEncoding": false,       // Optional, send path values and an api-key query as typed.
+  "disableUrlEncoding": false,       // Optional, send the URL as typed, with no percent-encoding.
                                       // Default false
   "postmanProtocolBehavior": null    // Optional, the imported Postman object - see below
 }
@@ -1690,12 +1690,15 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   user's and is always sent. Other names (`host`,
   `content-length`, `postman-token`, ...) are stored for the export and change
   nothing on the wire.
-- `disableUrlEncoding` writes a path variable's value and an api-key (or
-  OAuth 2.0 query-placed) credential into the URL as typed rather than
-  percent-encoded: a path value skips Postman's path encode set and a
-  credential skips its query rule ([Query encoding](#query-encoding))
-  entirely (`a"b` goes out as `a"b`, not `a%22b`), as Postman's
-  `toNodeUrl (url, disableEncoding)` sends it.
+- `disableUrlEncoding` writes the URL as typed rather than percent-encoded:
+  a path variable's value skips Postman's path encode set, an api-key (or
+  OAuth 2.0 query-placed) credential and a substituted `{{variable}}` skip
+  their rules, and the literal text keeps its spaces and non-ASCII bytes
+  ([Query encoding](#query-encoding)), so `a"b` goes out as `a"b`, not
+  `a%22b`, as Postman's `toNodeUrl (url, disableEncoding)` sends it. With
+  encoding on, a raw space is percent-encoded to `%20`; with the toggle on
+  it is refused, and the send fails with a message that names the space and
+  the toggle ([URL schemes](#url-schemes)).
 - `postmanProtocolBehavior` is the Postman item's `protocolProfileBehavior`,
   kept for [POST /export/postman](#post-exportpostman) and sent by nothing. It
   takes an object or a string holding a JSON object; the string is the
@@ -5671,9 +5674,25 @@ and is never re-resolved - see [POST /execute](#post-execute) and
 
 #### Query encoding
 
-A stored URL's query is sent exactly as stored: nothing re-encodes it, and the
-send hands `url` to libcurl untouched. Where the engine itself writes a query
-pair into a URL, it uses Postman's rule (issue #1771,
+A stored URL is sent as stored with one exception: with `disableUrlEncoding`
+off, the bytes no HTTP request target may carry raw are percent-encoded
+outside the scheme and the authority (issue #2465,
+`core::encode_literal_at_url_component`): space, the C0 controls, DEL and
+every byte above `~` (each UTF-8 byte). So `GET http://h/a b?q=é` goes out as
+`GET /a%20b?q=%C3%A9`, where libcurl would refuse the space and send the `é`
+raw. Every other byte is sent as typed (`"`, `{`, `}`, `\`, `+`, `|` and an
+escape such as `%41`), so a URL that sent before sends the same bytes, and a
+non-ASCII host is still dialled by its punycode name. The rule is applied
+where every driver takes its URL (`wire_url`) and by composition, so
+`POST /compose` answers the URL that will be sent. With `disableUrlEncoding`
+on the URL goes out exactly as typed, and libcurl refuses a raw space: the
+send fails with status `0` and error code `INVALID_URL`, and a message that
+names the space and the toggle
+(`Cannot send this request: the URL contains a space or control character; percent-encode it, or turn Send URL without encoding off`),
+derived from scanning the URL and not from libcurl's wording.
+
+Where the engine itself writes a query pair into a URL, it uses Postman's
+rule (issue #1771,
 `core::encode_query_component` in `core/query_encoding.hpp`, pinned to the
 app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`),
 read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
@@ -5699,16 +5718,25 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   pass after the pre-request script). Postman substitutes into the URL string,
   parses it again and then encodes it, so a value's `&` and `=` split pairs as
   they would typed, a `?` it brings into the head opens the query, and a `#`
-  opens the fragment. In the query only `QUERY_ENCODE_SET` above is encoded,
-  alike in a key and a value; the `&`/`=` step of a row never applies.
+  opens the fragment. Each component then encodes the value by its own
+  Postman set (issue #2465): the query by `QUERY_ENCODE_SET` above, alike in
+  a key and a value (the `&`/`=` step of a row never applies); the path by
+  `PATH_ENCODE_SET` (see [Path variables](#path-variables)), so
+  `http://h/users/{{name}}` with `name = "John Doe"` sends
+  `/users/John%20Doe`; the fragment by `FRAGMENT_ENCODE_SET` (the C0
+  controls, DEL, every byte above `~`, space, `"`, `<`, `>` and backtick).
   `GET {{base}}/?q={{term}}` with `term = "a b#c"` sends `/?q=a%20b`, with
   `#c` as the fragment (which is not sent), and `?{{qs}}` with
   `qs = "a=1&b=2 c"` sends `?a=1&b=2%20c`. Where a value lands is read left
-  to right from the URL written so far, substituted values included: the
-  first `?` in the head opens the query, `#` opens the fragment. A layered
-  value is resolved whole and encoded once. The head and the fragment take a
-  value as it stands, so a `{{base}}` holding `https://x/p?k=a b` has only its
-  query part encoded, and `disableUrlEncoding` writes every value as typed.
+  to right from the URL written so far, substituted values included: in the
+  scheme and authority a `/` opens the path unless it follows a `:` or a `/`
+  (so `://` is not a path), the first `?` opens the query, `#` opens the
+  fragment. A layered value is resolved whole and encoded once. The scheme
+  and the authority take a value as it stands (Postman does not
+  percent-encode a host, and a non-ASCII one is dialled by its punycode
+  name), so a `{{base}}` holding `https://x/p?k=a b` has its query part
+  encoded and nothing else changed. `disableUrlEncoding` writes every value
+  as typed.
 - A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
   and is written by the row rule above
   ([scripting](scripting.md#writing)).
@@ -5718,6 +5746,15 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   left as separators, its path by the path set under
   [Path variables](#path-variables). `disableUrlEncoding` does not apply to it
   ([scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
+  A script and Send write the same request line for a space, a control
+  character, a non-ASCII byte and a value substituted into the path, query or
+  fragment, because the literal pass above encodes a subset of what
+  `encode_url_as_postman` does (issue #2465). They differ on purpose where
+  Send keeps a byte as typed so that a URL that sends today still does: a
+  script also writes `"`, `<`, `>`, a backtick and, in the query, `'` as `%XX`,
+  `{` and `}` in the path, turns a backslash before the query into `/` and
+  lowercases the host. `tests/url_encoding_test.cpp`
+  (`PostmanUrlEncodingAgreement`) pins both halves.
 - OpenAPI, Insomnia and JMeter imports join with `encodeURIComponent` instead:
   the OpenAPI sync diff compares stored URLs against that form, and neither
   other source uses Postman's set.
@@ -5748,6 +5785,16 @@ status `0` with error code `INVALID_URL` and libcurl's own message
 and nothing is read. The libcurl the engine links carries every protocol curl
 builds by default, so these two options, set on every handle, are what restrict
 each transfer to `http` and `https`; the build does not.
+
+A URL libcurl cannot parse is also status `0` with error code `INVALID_URL`.
+When the URL the transfer was handed holds a space, a C0 control character or
+DEL, which is how one reaches libcurl once `disableUrlEncoding` is on (or a
+space sits in the host), the message says so instead of repeating libcurl's
+component wording (`URL rejected: Bad query`): `Cannot send this request: the
+URL contains a space or control character; percent-encode it, or turn Send URL
+without encoding off`. The last clause is left out when the toggle is already
+off, because it is no remedy. The scan is of the bytes, not of libcurl's text,
+and a malformed URL with none of them keeps libcurl's message.
 
 #### Non-ASCII hosts
 

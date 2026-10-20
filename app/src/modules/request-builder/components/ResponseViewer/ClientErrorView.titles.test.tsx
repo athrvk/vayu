@@ -56,12 +56,23 @@ describe("ClientErrorView heading for an engine that answered with an error", ()
 });
 
 // The engine answers INVALID_URL both for a URL it cannot parse and for one it
-// parsed and refused by scheme, so the heading has to be true of both.
+// parsed and refused by scheme, so the heading has to be true of both. The
+// engine also answers it for its own port, a host with no ASCII name and a
+// redirect to another scheme, so the tip says Vayu couldn't use the URL rather
+// than asserting that its scheme is the fault.
 // Mutation check: restore "Couldn't parse the URL" and the refused-scheme case
-// reads as a parse failure.
+// reads as a parse failure; restore the old tip, "The URL has to start with
+// http:// or https://.", and the hint assertion fails.
+const INVALID_URL_HINT =
+	"Vayu couldn't use that URL. It has to start with http:// or https://, and a space or other raw character has to be percent-encoded.";
+
 describe("ClientErrorView heading for INVALID_URL", () => {
 	it.each([
 		["a URL that does not parse", "URL using bad/illegal format or missing URL"],
+		[
+			"a URL the engine will not send to",
+			"Cannot send this request: Vayu does not send requests to its own engine port 9876 on this machine",
+		],
 		[
 			"a scheme the engine refuses",
 			"Cannot send this request: scheme 'file' is not supported - only http and https URLs can be sent",
@@ -71,6 +82,7 @@ describe("ClientErrorView heading for INVALID_URL", () => {
 
 		expect(screen.getByText("Couldn't send to this URL")).toBeInTheDocument();
 		expect(screen.getByText(message)).toBeInTheDocument();
+		expect(screen.getByText(INVALID_URL_HINT)).toBeInTheDocument();
 		expect(screen.queryByText("Couldn't parse the URL")).not.toBeInTheDocument();
 		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
 	});

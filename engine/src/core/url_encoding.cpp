@@ -10,6 +10,7 @@
 #include <cstddef>
 
 #include "vayu/core/path_template.hpp"
+#include "vayu/core/postman_encode_sets.hpp"
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -19,21 +20,6 @@ namespace vayu::core {
 namespace {
 
 constexpr std::size_t npos = std::string_view::npos;
-
-/// `FRAGMENT_ENCODE_SET` (`postman-url-encoder/encoder/encode-set.js`).
-bool in_postman_fragment_encode_set (unsigned char byte) {
-    if (byte < 0x20 || byte > 0x7E) {
-        return true;
-    }
-    switch (byte) {
-    case ' ':
-    case '"':
-    case '<':
-    case '>':
-    case '`': return true;
-    default: return false;
-    }
-}
 
 /// `USERINFO_ENCODE_SET`: `PATH_ENCODE_SET` extended with `/ : ; = @ [ \ ] ^ |`.
 bool in_postman_userinfo_encode_set (unsigned char byte) {

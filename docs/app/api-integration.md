@@ -1432,12 +1432,20 @@ decoding it (`parseQueryParams`, issue #1771), and with the flag on joins a row
 the URL does not already carry back as typed rather than with Postman's query
 rule, so editing one row rebuilds exactly the query the others held. Turning
 the flag on or off writes only the flag: the URL and the rows stay as they
-are. The Sends line and the code snippets substitute path values
-raw, the Sends line writes a value a `{{variable}}` brings into the query raw
-(otherwise as URL text whose query part takes `QUERY_ENCODE_SET`, issue #1773,
-`resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`), and a
-query-located API key is
-appended raw, all matching what the engine sends. The Sends line draws that
+are. With the flag on, the Sends line and the code snippets substitute path
+values raw, the Sends line writes a value a `{{variable}}` brings into the URL,
+and the literal text around it, as typed, and a query-located API key is
+appended raw, all matching what the engine sends. With the flag off the Sends
+line encodes a
+value by the part of the URL it lands in (issues #1773 and #2465): the path
+by `PATH_ENCODE_SET`, the query by `QUERY_ENCODE_SET`, the fragment by
+`FRAGMENT_ENCODE_SET`, and the scheme and authority as typed. Literal text
+outside the scheme and authority has only what a request target cannot carry
+raw encoded (space, controls, DEL and non-ASCII bytes, so `/a b` is
+`/a%20b`) and every other byte as typed, as the engine's `wire_url` does
+(`resolveUrlTemplate` in `request-builder/utils/query-encoding.ts`). A `:name`
+path value is already encoded by then and `%` is never encoded, so nothing is
+encoded twice. The Sends line draws that
 URL with every secret variable value and auth credential (each encoded
 spelling too) replaced by `••••`; the masking is at render, so what
 resolves and what is sent are unchanged (#1806). The imported

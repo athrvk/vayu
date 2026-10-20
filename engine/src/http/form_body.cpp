@@ -9,6 +9,11 @@
 
 #include <curl/curl.h>
 
+#include <algorithm>
+#include <string_view>
+
+#include "vayu/core/postman_encode_sets.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/graphql_body.hpp"
 #include "vayu/http/jsonrpc_body.hpp"
@@ -232,6 +237,12 @@ std::optional<std::string> graphql_url_transport (const Request& request) {
     return graphql_get_parameters (request.body.content);
 }
 
+bool has_unsendable_byte (std::string_view url) {
+    return std::ranges::any_of (url, [] (char ch) {
+        return vayu::core::is_unsendable_url_byte (static_cast<unsigned char> (ch));
+    });
+}
+
 } // namespace
 
 bool has_wire_body (const Request& request) {
@@ -266,7 +277,19 @@ std::string wire_url (const Request& request) {
     // any driver asks for this URL; a caller that did not ask that gate (the
     // raw-request view of a refused send) is shown the host as typed.
     (void)to_ascii_host (url);
-    return url;
+    if (request.disable_url_encoding) {
+        return url;
+    }
+    // Runs once per request on the load path, and almost every URL is already
+    // sendable: the literal set is a subset of the unsendable bytes, so a URL
+    // with none of them is returned as is, without the encoder's copy.
+    if (!has_unsendable_byte (url)) {
+        return url;
+    }
+    // Here and not only at composition: a raw `POST /execute` or `POST /runs`
+    // URL, and one with no token, never passes through a substitution.
+    auto where = vayu::core::UrlComponent::Head;
+    return vayu::core::encode_literal_at_url_component (url, where);
 }
 
 bool content_type_is_engine_owned (const Body& body) {
