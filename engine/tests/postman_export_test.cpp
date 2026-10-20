@@ -165,7 +165,8 @@ TEST (PostmanExport, FileNameFollowsPostmansConvention) {
 // Folders and ordering
 // ---------------------------------------------------------------------------
 
-TEST (PostmanExport, FoldersComeBeforeRequestsInStoredOrder) {
+// Every child here states `order` 0, so the tie rule decides: a folder first.
+TEST (PostmanExport, FoldersCarryTheirSubtreeAndWinATieWithARequest) {
     PostmanExportFolder root = collection ();
     root.requests.push_back (request ("r1", "u"));
     root.requests.push_back (request ("r2", "u"));
@@ -197,6 +198,40 @@ TEST (PostmanExport, FoldersComeBeforeRequestsInStoredOrder) {
     EXPECT_EQ (items[1]["item"][0]["item"][0]["name"], "deep");
     EXPECT_EQ (outcome.notes.folders_exported, 3);
     EXPECT_EQ (outcome.notes.requests_exported, 3);
+}
+
+// A parent's sub-folders and requests are one list (#2535): a request listed
+// before or between folders is written there, which is where Postman runs it.
+// Mutation check: write `postman_items` folders-first again and this reds.
+TEST (PostmanExport, RequestsAndFoldersAreWrittenInSiblingOrder) {
+    PostmanExportFolder root = collection ();
+    const auto add_request = [] (PostmanExportFolder& parent, const char* name, int order) {
+        parent.requests.push_back (request (name, "u"));
+        parent.requests.back ().order = order;
+    };
+    add_request (root, "log in", 0);
+    add_request (root, "log out", 3);
+    PostmanExportFolder users = collection ("users");
+    users.order               = 1;
+    add_request (users, "list", 1);
+    PostmanExportFolder nested = collection ("nested");
+    nested.order               = 0;
+    users.folders.push_back (nested);
+    root.folders.push_back (users);
+    PostmanExportFolder orders = collection ("orders");
+    orders.order               = 2;
+    root.folders.push_back (orders);
+
+    const ordered doc   = ordered::parse (run (root).text);
+    const ordered& item = doc.at ("item");
+    ASSERT_EQ (item.size (), 4U);
+    EXPECT_EQ (item[0]["name"], "log in");
+    EXPECT_EQ (item[1]["name"], "users");
+    EXPECT_EQ (item[2]["name"], "orders");
+    EXPECT_EQ (item[3]["name"], "log out");
+    ASSERT_EQ (item[1]["item"].size (), 2U);
+    EXPECT_EQ (item[1]["item"][0]["name"], "nested");
+    EXPECT_EQ (item[1]["item"][1]["name"], "list");
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +398,7 @@ TEST (PostmanExport, ARawLanguageAnImportKeptIsWrittenBackWhileItStillHolds) {
     EXPECT_EQ (
     body_of ({ { "mode", "json" }, { "content", "{}" }, { "rawLanguage", "" } }).dump (),
     R"({"mode":"raw","raw":"{}"})");
-    // A language Vayu has no mode for, sniffed into `text`.
+    // A language Vayu has no mode for, imported as `text`.
     EXPECT_EQ (body_of ({ { "mode", "text" }, { "content", "let a;" },
                         { "rawLanguage", "javascript" } })
                .dump (),
@@ -374,6 +409,63 @@ TEST (PostmanExport, ARawLanguageAnImportKeptIsWrittenBackWhileItStillHolds) {
     body_of ({ { "mode", "json" }, { "content", "not json" }, { "rawLanguage", "" } })
     .dump (),
     R"({"mode":"raw","raw":"not json","options":{"raw":{"language":"json"}}})");
+}
+
+/// The one request of a Postman collection whose single item is
+/// @p request_json, imported and handed to the exporter as the app would store
+/// and send it back.
+ordered reexported_request (const std::string& request_json) {
+    const auto parsed = vayu::core::parse_import (
+    R"({"info":{"schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"R","request":)" +
+    request_json + "}]}",
+    {}, {});
+    if (!parsed.ok ()) {
+        ADD_FAILURE () << parsed.error;
+        return ordered ();
+    }
+    const ordered& draft = parsed.result.at ("collections")[0].at ("requests")[0];
+    PostmanExportRequest entry = request ("R", draft.at ("url"));
+    entry.method               = draft.at ("method");
+    entry.headers              = draft.at ("headers");
+    entry.body                 = draft.at ("body");
+    return only_item (entry)["request"];
+}
+
+// Issue #2539: an imported `html` or `javascript` body carries a Content-Type
+// row marked as the body mode's, which Postman adds itself from the language, so
+// exporting it again writes the language and no stray header. A row the request
+// declared stays. Mutation check: drop `content_type_of_language` from
+// `postman_implied_content_type` and the html header reappears.
+TEST (PostmanExport, AnImportedHtmlOrJavascriptBodyRoundTripsItsLanguageWithoutAHeader) {
+    const ordered html = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"raw","raw":"{\"a\":1}","options":{"raw":{"language":"html"}}}})");
+    EXPECT_EQ (html.at ("header"), ordered::array ());
+    EXPECT_EQ (html.at ("body").dump (),
+    R"({"mode":"raw","raw":"{\"a\":1}","options":{"raw":{"language":"html"}}})");
+
+    const ordered javascript = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"raw","raw":"let a;","options":{"raw":{"language":"javascript"}}}})");
+    EXPECT_EQ (javascript.at ("header"), ordered::array ());
+    EXPECT_EQ (javascript.at ("body").at ("options").dump (),
+    R"({"raw":{"language":"javascript"}})");
+
+    const ordered declared = reexported_request (
+    R"({"method":"POST","url":"https://x.com","header":[{"key":"Content-Type","value":"text/html; charset=utf-8"}],"body":{"mode":"raw","raw":"<p/>","options":{"raw":{"language":"html"}}}})");
+    EXPECT_EQ (declared.at ("header").dump (),
+    R"([{"key":"Content-Type","value":"text/html; charset=utf-8","type":"text"}])");
+}
+
+// A form-data text part's own type is written back as Postman's `contentType`
+// on the text row. Mutation check: drop the `contentType` copy in `form_part`
+// and the part loses it.
+TEST (PostmanExport, AFormDataTextPartsContentTypeIsWrittenBack) {
+    const ordered body = reexported_request (
+    R"({"method":"POST","url":"https://x.com","body":{"mode":"formdata","formdata":[{"key":"meta","value":"{}","type":"text","contentType":"application/json"},{"key":"plain","value":"v","type":"text"}]}})")
+                         .at ("body");
+    const ordered& parts = body.at ("formdata");
+    EXPECT_EQ (parts[0].dump (),
+    R"({"key":"meta","value":"{}","type":"text","contentType":"application/json"})");
+    EXPECT_EQ (parts[1].dump (), R"({"key":"plain","value":"v","type":"text"})");
 }
 
 TEST (PostmanExport, NoBodyWritesNoBodyKey) {
@@ -720,8 +812,7 @@ TEST (PostmanExport, OAuth2GrantsAndSettings) {
 
 TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
     for (const ordered& extra :
-    { ordered{ { "audience", "a" } }, ordered{ { "resource", "r" } },
-    ordered{ { "autoFetchToken", false } }, ordered{ { "autoRefreshToken", false } },
+    { ordered{ { "autoFetchToken", false } }, ordered{ { "autoRefreshToken", false } },
     ordered{ { "queryParamName", "token" } }, ordered{ { "headerPrefix", "" } } }) {
         ordered config = { { "grantType", "client_credentials" } };
         config.update (extra);
@@ -732,12 +823,78 @@ TEST (PostmanExport, OAuth2SettingsPostmanCannotStateAreANote) {
         EXPECT_EQ (losses (run (root)), (json{ { "oauth2_settings", 1 } }))
         << extra.dump ();
     }
+    // An audience and a resource are token request parameters to Postman
+    // (issue #2536), so neither is a loss.
     PostmanExportRequest plain = request ("r", "u");
-    plain.auth               = oauth2 ({ { "grantType", "client_credentials" },
-                  { "queryParamName", "access_token" }, { "autoFetchToken", true } });
+    plain.auth                 = oauth2 (
+    { { "grantType", "client_credentials" }, { "queryParamName", "access_token" },
+                    { "autoFetchToken", true }, { "audience", "a" }, { "resource", "r" } });
     PostmanExportFolder root = collection ();
     root.requests.push_back (plain);
     EXPECT_TRUE (run (root).notes.not_carried.empty ());
+}
+
+// The extra request parameter lists are Postman's (issue #2536): each row in
+// its own list with Postman's `send_as`, an authorization row on the URL, and
+// the config's audience and resource opening the token request's list, where
+// an import reads them from. A row Postman has no `send_as` for, or no key,
+// is left out.
+TEST (PostmanExport, OAuth2ParamListsArePostmansRequestParams) {
+    const ordered auth = auth_of (oauth2 ({ { "grantType", "client_credentials" },
+    { "audience", "https://api" }, { "resource", "urn:r" },
+    { "tokenParams",
+    ordered::array ({ { { "key", "org" }, { "value", "o" } },
+    { { "key", "tenant" }, { "value", "t" }, { "sendAs", "url" }, { "enabled", false } },
+    { { "key", "X-Trace" }, { "value", "1" }, { "sendAs", "header" } },
+    { { "key", "odd" }, { "value", "1" }, { "sendAs", "cookie" } }, { { "value", "keyless" } } }) },
+    { "authorizationParams", ordered::array ({ { { "key", "prompt" }, { "value", "login" } } }) },
+    { "refreshParams",
+    ordered::array ({ { { "key", "audience" }, { "value", "r-aud" } } }) } }));
+    // Member order is part of the shape, so the attributes are read as written.
+    const auto written = [&auth] (const char* key) {
+        for (const ordered& entry : auth.at ("oauth2")) {
+            if (entry.at ("key") == key) {
+                return entry.at ("value").dump ();
+            }
+        }
+        return std::string ();
+    };
+    EXPECT_EQ (written ("tokenRequestParams"),
+    R"([{"key":"audience","value":"https://api","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"resource","value":"urn:r","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"org","value":"o","enabled":true,"send_as":"request_body"},)"
+    R"({"key":"tenant","value":"t","enabled":false,"send_as":"request_url"},)"
+    R"({"key":"X-Trace","value":"1","enabled":true,"send_as":"request_header"}])");
+    EXPECT_EQ (written ("authRequestParams"),
+    R"([{"key":"prompt","value":"login","enabled":true,"send_as":"request_url"}])");
+    EXPECT_EQ (written ("refreshRequestParams"),
+    R"([{"key":"audience","value":"r-aud","enabled":true,"send_as":"request_body"}])");
+    EXPECT_EQ (auth["oauth2"].back ()["key"], "refreshRequestParams");
+    EXPECT_EQ (auth["oauth2"].back ()["type"], "any");
+
+    const json bare =
+    attributes (auth_of (oauth2 ({ { "grantType", "client_credentials" } })));
+    EXPECT_FALSE (bare.contains ("tokenRequestParams"));
+    EXPECT_FALSE (bare.contains ("authRequestParams"));
+    EXPECT_FALSE (bare.contains ("refreshRequestParams"));
+}
+
+// An import with no `tokenName` fills `credentialsId` from the promoted
+// audience, else resource; written back as a `tokenName`, it would come back
+// as one the user chose. Any other credentialsId is the user's and is kept.
+// Mutation-check: drop the `import_derived_credentials_id` comparison and the
+// first two expectations red.
+TEST (PostmanExport, ACredentialsIdAnImportDerivedIsNoTokenName) {
+    const auto token_name = [] (const ordered& config) {
+        const json written = attributes (auth_of (oauth2 (config)));
+        return written.contains ("tokenName") ? written.at ("tokenName") : json ();
+    };
+    EXPECT_TRUE (token_name ({ { "audience", "a" }, { "credentialsId", "a" } }).is_null ());
+    EXPECT_TRUE (token_name ({ { "resource", "r" }, { "credentialsId", "r" } }).is_null ());
+    EXPECT_EQ (
+    token_name ({ { "audience", "a" }, { "resource", "r" }, { "credentialsId", "r" } }), "r");
+    EXPECT_EQ (token_name ({ { "audience", "a" }, { "credentialsId", "work" } }), "work");
+    EXPECT_EQ (token_name ({ { "credentialsId", "work" } }), "work");
 }
 
 // ---------------------------------------------------------------------------

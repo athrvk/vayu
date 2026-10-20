@@ -55,7 +55,8 @@ export type WireFileRef = Omit<FileRef, "unresolved">;
  * One form field on the wire payload. A file part sends its path and what the
  * part should declare about itself - never bytes: the engine opens the file, so
  * a renderer that read it would be copying the upload through two processes.
- * No trust flag: the engine decides from its allowed folders and grants
+ * A text part sends no more than `contentType`, the type it declares itself
+ * (#2539). No trust flag: the engine decides from its allowed folders and grants
  * (`lib/file-trust.ts`).
  */
 export interface ExecField {
@@ -151,15 +152,17 @@ export function buildExecBody(
 					value: resolveString(e.value),
 					enabled: e.enabled,
 				};
+				// A text part may declare its own type too (a Postman import keeps
+				// one), so the type is read before the file branch splits off.
+				if (e.contentType) field.contentType = resolveString(e.contentType);
 				if (e.type !== "file") return field;
-				// A file part's path, declared name and type are as templatable
-				// as its key - a fixture directory is what an environment
-				// variable holds - and the engine resolves the same three.
+				// A file part's path and declared name are as templatable as its
+				// key - a fixture directory is what an environment variable
+				// holds - and the engine resolves them with the type.
 				field.type = "file";
 				field.value = "";
 				field.src = resolveString(e.src ?? "");
 				if (e.fileName) field.fileName = resolveString(e.fileName);
-				if (e.contentType) field.contentType = resolveString(e.contentType);
 				return field;
 			}),
 		};
@@ -287,13 +290,19 @@ export function paneBody(bodyRaw: string): string {
  */
 export function responseFromExecuteResult(result: SanityResult): ResponseState {
 	/*
-	 * The engine always sends `bodyRaw` (`json["bodyRaw"] = response.body` in
-	 * `utils/json.cpp`), and it is the field whose entire job is to be what the
-	 * server actually sent, so it is never rebuilt from the parsed `body` while
-	 * it is there. The stringify below is only a guard against a producer that
-	 * sends no `bodyRaw`: the original bytes are already gone by then, and compact
-	 * is the closest honest reconstruction - indenting would invent formatting
-	 * the server never sent.
+	 * The engine always sends `bodyRaw` (`serialize (Response)` in
+	 * `utils/json.cpp`): the body's UTF-8 text, or its bytes in base64 with
+	 * `bodyEncoding: "base64"` when they are not text. It is the field whose
+	 * entire job is to be what the server actually sent, so it is never rebuilt
+	 * from the parsed `body` while it is there.
+	 *
+	 * `body` is the engine's JSON parse of that text, and may be `null`: this
+	 * renderer asks for `includeParsedBody: false` (`apiService.executeRequest`),
+	 * so it is `null` in every answer it receives, and the engine leaves it
+	 * `null` anyway for a non-JSON or base64 body and past 4 MiB. The stringify
+	 * below is only a guard against a producer that sends no `bodyRaw`: the
+	 * original bytes are already gone by then, and compact is the closest honest
+	 * reconstruction - indenting would invent formatting the server never sent.
 	 *
 	 * A base64 `bodyRaw` (issue #2458) is decoded first, so from here on
 	 * `bodyRaw` is text or nothing: the bytes ride `rawBytes`.

@@ -229,6 +229,23 @@ describe("parseCommand - curl", () => {
 		]);
 	});
 
+	test("-F reads a text part's type, quoted or bare", () => {
+		const r = parseCommand(
+			`curl https://x.com -F 'a=plain;type=application/json' -F 'b="@q;x";type=text/plain; charset=utf-8' -F 'c=no;type='`
+		)!;
+		expect(r.formData.map(({ id: _id, ...row }) => row)).toEqual([
+			{ key: "a", value: "plain", enabled: true, contentType: "application/json" },
+			{
+				key: "b",
+				value: "@q;x",
+				enabled: true,
+				contentType: "text/plain; charset=utf-8",
+			},
+			// No type to read: the word stays the literal text it always was.
+			{ key: "c", value: "no;type=", enabled: true },
+		]);
+	});
+
 	test("--form-string keeps a leading @ as text", () => {
 		// The flag exists precisely so `@` is not a file reference, and Vayu's own
 		// curl snippet emits it for every text part - so this is the round trip.

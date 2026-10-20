@@ -146,6 +146,40 @@ describe("run comparison mirror", () => {
 	});
 
 	/*
+	 * #2516: a run that let libcurl add `Expect: 100-continue` and one that did
+	 * not are not the same experiment. Pinned as a value on both sides, with an
+	 * absent key reading as "not allowed" and no effect on the compression flag.
+	 */
+	test("comparability names an Expect: 100-continue difference, an absent key reading as not allowed", () => {
+		const allowed = { metadata: { configuration: { expectContinue: true } } };
+		const refused = { metadata: { configuration: { expectContinue: false } } };
+		const preIssue = { metadata: { configuration: { mode: "once" } } };
+		const entry = (base: string, target: string) => [
+			{
+				code: "expect_continue",
+				message:
+					"Expect: 100-continue handling differs, so large-body latency figures are not directly comparable.",
+				base,
+				target,
+			},
+		];
+
+		for (const compare of [mainCompare, rendererCompare]) {
+			const refusedToAllowed = compare("a", "b", refused, allowed);
+			expect(refusedToAllowed.comparability).toEqual(entry("not allowed", "allowed"));
+			expect(refusedToAllowed.compressionNegotiationDiffers).toBe(false);
+			expect(compare("a", "b", allowed, refused).comparability).toEqual(
+				entry("allowed", "not allowed")
+			);
+			expect(compare("a", "b", preIssue, allowed).comparability).toEqual(
+				entry("not allowed", "allowed")
+			);
+			expect(compare("a", "b", preIssue, refused).comparability).toEqual([]);
+			expect(compare("a", "b", allowed, allowed).comparability).toEqual([]);
+		}
+	});
+
+	/*
 	 * Same reasoning as above: two implementations that both returned `[]` for
 	 * every pair would agree forever. The pair #2162 was filed for is pinned as
 	 * values, on both sides, in the order the strip renders them.

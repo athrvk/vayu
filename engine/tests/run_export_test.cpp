@@ -129,6 +129,18 @@ class RunExportTest : public ::testing::Test {
         }
     }
 
+    /// A finished load run whose snapshot recorded @p expect_continue as its
+    /// `defaultHeaders` decision, or none when it is null (a run from before
+    /// issue #2516).
+    void seed_expect_continue_run (const std::string& id, const json& expect_continue) {
+        json snapshot = { { "url", "https://x.test/a" }, { "method", "GET" } };
+        if (!expect_continue.is_null ()) {
+            snapshot["defaultHeaders"] = { { "expectContinue", expect_continue } };
+        }
+        seed_run (id, vayu::RunType::Load, vayu::RunStatus::Completed, snapshot,
+        json{ { "total_requests", 10 }, { "test_duration", 60.0 } });
+    }
+
     /// The leak fixture: credentials and payload in the snapshot, a trace
     /// carrying the sent `Authorization`, a captured `Set-Cookie`, and one
     /// metric tick.
@@ -337,6 +349,40 @@ TEST_F (RunExportTest, ComparesWithAFinishedLoadBase) {
         "delta":100.0,"pctChange":100.0,"direction":"neutral"})"));
     EXPECT_EQ (comparison["statusCodes"],
     json::parse (R"({"200":{"base":90,"target":200},"503":{"base":10,"target":0}})"));
+}
+
+// Two runs that differ only in sendExpectContinue are not the same experiment
+// (issue #2516), and an old run with no key reads as "not allowed".
+TEST_F (RunExportTest, ComparingRunsThatDifferOnlyInExpectContinueSaysSo) {
+    seed_expect_continue_run ("run_allowed", true);
+    seed_expect_continue_run ("run_refused", false);
+    seed_expect_continue_run ("run_allowed_again", true);
+    seed_expect_continue_run ("run_old", json ());
+
+    const auto differences = [this] (const char* run, const char* base) {
+        return export_ok (json{ { "runId", run }, { "baseRunId", base } }).second["comparison"]["differences"];
+    };
+    EXPECT_EQ (differences ("run_allowed", "run_refused"),
+    json::parse (R"([{"field":"expect_continue","base":"not allowed","target":"allowed"}])"));
+    EXPECT_EQ (differences ("run_refused", "run_allowed"),
+    json::parse (R"([{"field":"expect_continue","base":"allowed","target":"not allowed"}])"));
+    EXPECT_EQ (differences ("run_allowed", "run_old"),
+    json::parse (R"([{"field":"expect_continue","base":"not allowed","target":"allowed"}])"));
+    EXPECT_EQ (differences ("run_allowed_again", "run_allowed"), json::array ());
+    EXPECT_EQ (differences ("run_refused", "run_old"), json::array ());
+}
+
+TEST_F (RunExportTest, TheConfigurationNamesWhetherExpectContinueWasAllowed) {
+    seed_expect_continue_run ("run_allowed", true);
+    seed_expect_continue_run ("run_refused", false);
+    seed_expect_continue_run ("run_old", json ());
+
+    const auto configuration = [this] (const char* run) {
+        return export_ok (json{ { "runId", run } }).second["config"]["configuration"];
+    };
+    EXPECT_EQ (configuration ("run_allowed").at ("expectContinue"), true);
+    EXPECT_EQ (configuration ("run_refused").at ("expectContinue"), false);
+    EXPECT_FALSE (configuration ("run_old").contains ("expectContinue"));
 }
 
 TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {

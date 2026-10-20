@@ -140,7 +140,9 @@ function revealGateSentence(host: McpHost): string {
 		"Secret values are withheld in this session. Stored data: a secret variable or a " +
 		"cookie reads `valueWithheld: true`; an auth credential (a token, password, client " +
 		"secret or key) `<member>Withheld: true`, and a credential row in a Postman import's " +
-		"`postman` source `valueWithheld: true`; so does a header row named `Authorization`, " +
+		"`postman` source `valueWithheld: true`, as does one in an OAuth 2.0 config's " +
+		"`tokenParams`, `authorizationParams` or `refreshParams`; so does a header row " +
+		"named `Authorization`, " +
 		"`Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, " +
 		"`X-CSRF-Token` or the header the request's API-key auth names. A `url` (a saved " +
 		"request's; a smoke test row's, composed or else stored; a GraphQL schema read's " +

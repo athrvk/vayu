@@ -391,6 +391,17 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
     }
 }
 
+bool return_large_frees_to_os (std::size_t /*min_bytes*/) {
+    // The CRT's heap already gives a large block its own allocation, released
+    // when it is freed (see platform.hpp).
+    return true;
+}
+
+void release_free_heap () {
+    // The CRT heap decommits free pages past its own threshold, and there is
+    // no call that returns more (see platform.hpp).
+}
+
 } // namespace vayu::platform
 
 #endif // VAYU_PLATFORM_WINDOWS

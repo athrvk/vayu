@@ -1,5 +1,5 @@
 {
-  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119).",
+  "$comment": "Generated from app/src/services/importers/ at 8e1c566, the last commit that had those parsers. See engine/src/core/import_document.cpp. Cases added since are recorded from the engine and pin the app's orchestrator to it (postman-protocol-settings, issue #1765; insomnia-v5 and insomnia-v5-environment, issue #2119; postman-interleaved, issue #2535). Since #2535 a Postman draft states its document position as `order`, and every payload numbers a parent's folders and requests in one space.",
   "cases": [
     {
       "name": "postman-v21",
@@ -71,9 +71,11 @@
                     },
                     "auth": {
                       "mode": "inherit"
-                    }
+                    },
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 0
               }
             ],
             "requests": [
@@ -90,7 +92,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 1
               }
             ],
             "elements": [
@@ -183,7 +186,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -296,9 +299,11 @@
                     },
                     "auth": {
                       "mode": "inherit"
-                    }
+                    },
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 0
               }
             ],
             "requests": [
@@ -315,7 +320,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 1
               }
             ]
           }
@@ -392,7 +398,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -472,7 +478,8 @@
                 "auth": {
                   "mode": "bearer",
                   "token": "LEGACY"
-                }
+                },
+                "order": 0
               }
             ]
           }
@@ -801,9 +808,11 @@
                         "contentType": "application/xml",
                         "postmanResponse": "{\"name\":null,\"code\":200,\"header\":[{\"key\":\"Content-Type\",\"value\":\"application/xml\"}],\"body\":null}"
                       }
-                    ]
+                    ],
+                    "order": 0
                   }
-                ]
+                ],
+                "order": 2
               }
             ],
             "requests": [
@@ -827,7 +836,8 @@
                 },
                 "auth": {
                   "mode": "inherit"
-                }
+                },
+                "order": 0
               },
               {
                 "name": "Upload",
@@ -901,7 +911,8 @@
                     }
                   }
                 ],
-                "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}"
+                "postmanProtocolBehavior": "{\"followRedirects\":false,\"maxRedirects\":3}",
+                "order": 1
               }
             ]
           }
@@ -963,7 +974,7 @@
             "parentTempId": "c1",
             "name": "Folder",
             "description": "",
-            "order": 0,
+            "order": 2,
             "variables": {},
             "auth": {
               "mode": "noauth"
@@ -1184,7 +1195,8 @@
                   }
                 ],
                 "postmanProtocolBehavior": "{\"disableUrlEncoding\":true,\"disableCookies\":true,\"disabledSystemHeaders\":{\"User-Agent\":true,\"connection\":false,\"accept\":true},\"tlsDisabledProtocols\":[\"TLSv1\"]}",
-                "url": "https://api.example.com/users/:id?q=a|b"
+                "url": "https://api.example.com/users/:id?q=a|b",
+                "order": 0
               },
               {
                 "auth": {
@@ -1209,7 +1221,8 @@
                   }
                 ],
                 "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
-                "url": "https://api.example.com/plain?q=a|b"
+                "url": "https://api.example.com/plain?q=a|b",
+                "order": 1
               }
             ],
             "variables": {}
@@ -1318,6 +1331,420 @@
             "postmanProtocolBehavior": "{\"followRedirects\":true,\"disableUrlEncoding\":false,\"disableCookies\":false,\"disabledSystemHeaders\":{}}",
             "tempId": "r2",
             "url": "https://api.example.com/plain?q=a|b"
+          }
+        ],
+        "specs": []
+      }
+    },
+    {
+      "name": "postman-interleaved",
+      "document": "{\n\t\"info\": {\n\t\t\"name\": \"Interleaved\",\n\t\t\"schema\": \"https://schema.getpostman.com/json/collection/v2.1.0/collection.json\"\n\t},\n\t\"item\": [\n\t\t{\n\t\t\t\"name\": \"Log in\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"https://api.example.com/login\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Who am I\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\"url\": \"https://api.example.com/me\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"name\": \"This is a folder\",\n\t\t\t\"item\": [\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"First\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/one\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Second\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/two\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Third\",\n\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\"url\": \"https://api.example.com/three\"\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t\t{\n\t\t\t\t\t\"name\": \"Nested\",\n\t\t\t\t\t\"item\": [\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Users\",\n\t\t\t\t\t\t\t\"item\": [\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\"name\": \"List users\",\n\t\t\t\t\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\t\t\t\t\"url\": \"https://api.example.com/users\"\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t]\n\t\t\t\t\t\t},\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Between\",\n\t\t\t\t\t\t\t\"request\": {\n\t\t\t\t\t\t\t\t\"method\": \"GET\",\n\t\t\t\t\t\t\t\t\"url\": \"https://api.example.com/between\"\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t},\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"name\": \"Orders\",\n\t\t\t\t\t\t\t\"item\": []\n\t\t\t\t\t\t}\n\t\t\t\t\t]\n\t\t\t\t}\n\t\t\t]\n\t\t},\n\t\t{\n\t\t\t\"name\": \"Log out\",\n\t\t\t\"request\": {\n\t\t\t\t\"method\": \"POST\",\n\t\t\t\t\"url\": \"https://api.example.com/logout\"\n\t\t\t}\n\t\t}\n\t]\n}\n",
+      "options": {
+        "importEnvironments": true,
+        "importScripts": true
+      },
+      "expected": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "children": [
+              {
+                "auth": {
+                  "mode": "none"
+                },
+                "children": [
+                  {
+                    "auth": {
+                      "mode": "none"
+                    },
+                    "children": [
+                      {
+                        "auth": {
+                          "mode": "none"
+                        },
+                        "children": [],
+                        "description": "",
+                        "name": "Users",
+                        "order": 0,
+                        "requests": [
+                          {
+                            "auth": {
+                              "mode": "inherit"
+                            },
+                            "body": {
+                              "mode": "none"
+                            },
+                            "description": "",
+                            "headers": [],
+                            "method": "GET",
+                            "name": "List users",
+                            "order": 0,
+                            "params": [],
+                            "url": "https://api.example.com/users"
+                          }
+                        ],
+                        "variables": {}
+                      },
+                      {
+                        "auth": {
+                          "mode": "none"
+                        },
+                        "children": [],
+                        "description": "",
+                        "name": "Orders",
+                        "order": 2,
+                        "requests": [],
+                        "variables": {}
+                      }
+                    ],
+                    "description": "",
+                    "name": "Nested",
+                    "order": 3,
+                    "requests": [
+                      {
+                        "auth": {
+                          "mode": "inherit"
+                        },
+                        "body": {
+                          "mode": "none"
+                        },
+                        "description": "",
+                        "headers": [],
+                        "method": "GET",
+                        "name": "Between",
+                        "order": 1,
+                        "params": [],
+                        "url": "https://api.example.com/between"
+                      }
+                    ],
+                    "variables": {}
+                  }
+                ],
+                "description": "",
+                "name": "This is a folder",
+                "order": 2,
+                "requests": [
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "First",
+                    "order": 0,
+                    "params": [],
+                    "url": "https://api.example.com/one"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "Second",
+                    "order": 1,
+                    "params": [],
+                    "url": "https://api.example.com/two"
+                  },
+                  {
+                    "auth": {
+                      "mode": "inherit"
+                    },
+                    "body": {
+                      "mode": "none"
+                    },
+                    "description": "",
+                    "headers": [],
+                    "method": "GET",
+                    "name": "Third",
+                    "order": 2,
+                    "params": [],
+                    "url": "https://api.example.com/three"
+                  }
+                ],
+                "variables": {}
+              }
+            ],
+            "description": "",
+            "name": "Interleaved",
+            "requests": [
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "POST",
+                "name": "Log in",
+                "order": 0,
+                "params": [],
+                "url": "https://api.example.com/login"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "GET",
+                "name": "Who am I",
+                "order": 1,
+                "params": [],
+                "url": "https://api.example.com/me"
+              },
+              {
+                "auth": {
+                  "mode": "inherit"
+                },
+                "body": {
+                  "mode": "none"
+                },
+                "description": "",
+                "headers": [],
+                "method": "POST",
+                "name": "Log out",
+                "order": 3,
+                "params": [],
+                "url": "https://api.example.com/logout"
+              }
+            ],
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "globals": {},
+        "meta": {
+          "environmentCount": 0,
+          "exampleCount": 0,
+          "folderCount": 4,
+          "format": "Postman Collection v2.1",
+          "globalCount": 0,
+          "nonExecutableAuth": 0,
+          "requestCount": 8,
+          "skipped": [],
+          "unattachedFileParts": 0
+        }
+      },
+      "payload": {
+        "clientCertificates": [],
+        "collections": [
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Interleaved",
+            "parentTempId": null,
+            "tempId": "c1",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "This is a folder",
+            "order": 2,
+            "parentTempId": "c1",
+            "tempId": "c2",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Nested",
+            "order": 3,
+            "parentTempId": "c2",
+            "tempId": "c3",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Users",
+            "order": 0,
+            "parentTempId": "c3",
+            "tempId": "c4",
+            "variables": {}
+          },
+          {
+            "auth": {
+              "mode": "none"
+            },
+            "description": "",
+            "name": "Orders",
+            "order": 2,
+            "parentTempId": "c3",
+            "tempId": "c5",
+            "variables": {}
+          }
+        ],
+        "environments": [],
+        "requests": [
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "POST",
+            "name": "Log in",
+            "order": 0,
+            "params": [],
+            "tempId": "r1",
+            "url": "https://api.example.com/login"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Who am I",
+            "order": 1,
+            "params": [],
+            "tempId": "r2",
+            "url": "https://api.example.com/me"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c1",
+            "description": "",
+            "headers": [],
+            "method": "POST",
+            "name": "Log out",
+            "order": 3,
+            "params": [],
+            "tempId": "r3",
+            "url": "https://api.example.com/logout"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "First",
+            "order": 0,
+            "params": [],
+            "tempId": "r4",
+            "url": "https://api.example.com/one"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Second",
+            "order": 1,
+            "params": [],
+            "tempId": "r5",
+            "url": "https://api.example.com/two"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c2",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Third",
+            "order": 2,
+            "params": [],
+            "tempId": "r6",
+            "url": "https://api.example.com/three"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c3",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "Between",
+            "order": 1,
+            "params": [],
+            "tempId": "r7",
+            "url": "https://api.example.com/between"
+          },
+          {
+            "auth": {
+              "mode": "inherit"
+            },
+            "body": {
+              "mode": "none"
+            },
+            "bodyType": "none",
+            "collectionTempId": "c4",
+            "description": "",
+            "headers": [],
+            "method": "GET",
+            "name": "List users",
+            "order": 0,
+            "params": [],
+            "tempId": "r8",
+            "url": "https://api.example.com/users"
           }
         ],
         "specs": []
@@ -1479,7 +1906,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -1680,7 +2107,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -1939,7 +2366,7 @@
               "in": "header"
             },
             "followRedirects": false,
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -2371,7 +2798,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -2397,7 +2824,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 1
+            "order": 2
           },
           {
             "tempId": "r3",
@@ -2423,7 +2850,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 2
+            "order": 3
           },
           {
             "tempId": "r4",
@@ -2453,7 +2880,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 3
+            "order": 4
           },
           {
             "tempId": "r5",
@@ -2487,7 +2914,7 @@
             "auth": {
               "mode": "inherit"
             },
-            "order": 4
+            "order": 5
           },
           {
             "tempId": "r6",
@@ -2529,7 +2956,7 @@
                 }
               }
             ],
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r7",
@@ -4131,7 +4558,7 @@
               "mode": "inherit"
             },
             "mockResponseMode": "random",
-            "order": 0
+            "order": 1
           },
           {
             "tempId": "r2",
@@ -4194,7 +4621,7 @@
             },
             "mockResponseMode": "fixed",
             "mockExampleIndex": 1,
-            "order": 0
+            "order": 1
           }
         ],
         "environments": [],

@@ -384,12 +384,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get a collection variable value by name. Reads the whole collection chain - the nearest enabled definition wins, so a parent collection's variable resolves here too.
+		 * Get a collection variable value by name. Reads the whole collection chain - the nearest enabled definition wins, so a parent collection's variable resolves here too. A value a script set this run reads back as it was set; a stored one is cast by its declared type.
 		 * 
 		 * Example:
 		 * const baseUrl = pm.collectionVariables.get('base_url');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the collection variable exists and is enabled - the same rows pm.collectionVariables.get() can read.
 		 * 
@@ -398,14 +398,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. The value will be persisted.
+		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.collectionVariables.set('base_url', 'https://api.example.com');
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled collection variable, each value cast by its declared type.
+		 * A plain object of every enabled collection variable, each value read as pm.collectionVariables.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.collectionVariables.toObject());
@@ -525,12 +525,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get an environment variable value by name.
+		 * Get an environment variable value by name - what a script set this run (on a row of the default type), or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const token = pm.environment.get('auth_token');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the environment variable exists and is enabled - the same rows pm.environment.get() can read.
 		 * 
@@ -539,14 +539,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set an environment variable. The value will be persisted.
+		 * Set an environment variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.environment.set('auth_token', response.token);
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled environment variable, each value cast by its declared type.
+		 * A plain object of every enabled environment variable, each value read as pm.environment.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.environment.toObject());
@@ -621,12 +621,12 @@ declare const pm: {
 		 */
 		clear(): void;
 		/**
-		 * Get a global variable value by name.
+		 * Get a global variable value by name - what a script set this run (on a row of the default type), or else the stored text cast by its declared type.
 		 * 
 		 * Example:
 		 * const apiKey = pm.globals.get('api_key');
 		 */
-		get(name: string): string | undefined;
+		get(name: string): any | undefined;
 		/**
 		 * True when the global variable exists and is enabled - the same rows pm.globals.get() can read.
 		 * 
@@ -635,14 +635,14 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
-		 * Set a global variable. The value will be persisted.
+		 * Set a global variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * Example:
 		 * pm.globals.set('api_key', 'new_key');
 		 */
 		set(name: string, value: any): void;
 		/**
-		 * A plain object of every enabled global variable, each value cast by its declared type.
+		 * A plain object of every enabled global variable, each value read as pm.globals.get() would answer it.
 		 * 
 		 * Example:
 		 * console.log(pm.globals.toObject());
@@ -1350,9 +1350,11 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
-	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a raw body and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
+	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a body's text or form fields and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.
+	 * 
+	 * body takes a string, or Postman's { mode, <mode>: ... } for raw, urlencoded and formdata. A form body's rows are an array of { key, value, disabled? } or a plain object, and go out with the Content-Type the mode implies unless a header names one; a disabled row is skipped. A file part, and the file and graphql modes, are refused by name rather than sent without their payload.
 	 * 
 	 * Bounded on purpose: the request's timeout is capped at whatever is left of the script's own time budget, and one script may issue at most 10 requests. Both throw when exceeded. The response body is bounded too - at whatever the enclosing execution reads, maxDesignResponseBodyBytes for a send's scripts and maxResponseBodyBytes for a load run's - and a body past it is refused rather than cut: that one reaches the callback as err with .code RESPONSE_TOO_LARGE, because res carries no flag a script could read to learn its body was short.
 	 * 
@@ -1364,7 +1366,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 

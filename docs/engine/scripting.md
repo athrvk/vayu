@@ -1369,16 +1369,58 @@ was in flight survives it. A scope whose delta changes nothing is not written
 at all, so its `updated_at` does not move, and a row deleted meanwhile is not
 recreated.
 
+### A value keeps its type for the run
+
+`set()` keeps the JavaScript value it was given, and every later read in the
+same run answers it as set (issue #2529), as Postman does:
+
+```javascript
+pm.environment.set('count', 0);
+pm.environment.set('count', pm.environment.get('count') + 1);
+pm.environment.get('count'); // 1, a number - not "01"
+
+pm.collectionVariables.set('ids', [1, 2, 3]);
+Array.isArray(pm.collectionVariables.get('ids')); // true
+```
+
+`get`, `toObject`, `pm.variables.get` and `pm.variables.toObject` all read it.
+The run is the scripts of one send, the steps of a collection run, or one
+virtual user's steps in a load run (the value rides that user's own write
+layer, so one user's value never reaches another).
+
+What the variable *stores* is the value's string form, and that is all
+`{{name}}`, `pm.variables.replaceIn`, the wire and the persisted row ever see:
+`1`, `true`, `1,2,3`, `[object Object]`, `null`, and `""` for `undefined` -
+Postman's own substitution, so a `{{count}}` header goes out as `1`. A name the
+run only loaded reads from that stored text, cast by its declared type. The
+typed value is never written anywhere, and it is not an edit: setting the
+number `5` on a row that holds `"5"` leaves the row unwritten.
+
+Two limits:
+
+- **A declared type wins.** A row whose `type` is `number`, `boolean` or
+  `json` casts its stored text by that type, whatever was set. Vayu's default
+  `"string"` doubles as Postman's `any`, so a row of that type answers what was
+  set. (On a `json` row, `set` still stores the object's string form, so an
+  object set there reads back as that text, not as an object.)
+- **An object travels as JSON.** Each read is a fresh copy, as
+  `JSON.parse(JSON.stringify(value))` would make it: a `Date` reads back as its
+  ISO string and a nested `NaN` as `null`. A number on its own keeps every
+  value, `NaN`, the infinities and `-0` included. What JSON cannot write at all
+  (a function, a `BigInt`, a cycle) reads back as its string form.
+- **A later write replaces it.** An `extract.*` element writes a whole new
+  variable, so its text replaces a value a script set earlier.
+
 ### The six methods every scope has
 
 | Method | Returns | Notes |
 |---|---|---|
-| `get(name)` | the value, cast by its declared type, or `undefined` | a disabled variable reads as `undefined` |
-| `set(name, value)` | `undefined` | keeps `secret` / `type` / creation time; turns `enabled` on |
+| `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
+| `set(name, value)` | `undefined` | stores the value's string form (`undefined` as `""`); keeps `secret` / `type` / creation time; turns `enabled` on |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
-| `toObject()` | plain object | every enabled variable, values cast by type; a snapshot, not a live view |
+| `toObject()` | plain object | every enabled variable, each value as `get()` answers it; a snapshot, not a live view |
 
 ```javascript
 if (pm.environment.has('auth_token')) {
@@ -1587,7 +1629,7 @@ and must be a function.
 | `url` | string, required, or `pm.request.url` - the Url object, so `pm.sendRequest(pm.request.url, cb)` reads as "send this again". A hand-built `{ host, path }` object is still not accepted |
 | `method` | string, default `GET`; case-insensitive, an unknown verb throws |
 | `header` / `headers` | `{ name: value }` or Postman's `[{ key, value }]`. Both names read; sending both at once throws |
-| `body` | a string, or `{ mode: 'raw', raw }`. Only `raw` - other modes throw. Sent as `text/plain` unless `header` names a Content-Type |
+| `body` | a string, or `{ mode, <mode>: ... }` for `raw` (`raw` string, sent as `text/plain`), `urlencoded` (`urlencoded` rows, sent as `application/x-www-form-urlencoded`) or `formdata` (`formdata` rows, sent as `multipart/form-data`). Rows are Postman's `[{ key, value, disabled? }]` or a `{ name: value }` object; a `disabled` row is skipped, and a `formdata` row may carry a `contentType`. A `type: 'file'` row and the `file` and `graphql` modes throw. A `header` naming a Content-Type wins over the one the mode implies, except for `formdata`, whose type carries the boundary |
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
@@ -1681,7 +1723,8 @@ bit a buffered send's are (issue #653). Pressing Send with the **Event stream**
 setting on and off gives `pm.sendRequest` the same answer.
 
 **`{{variables}}` resolve as the call is made** (#1001). The URL, each header
-name and value, a raw body and each credential of an `auth` block are resolved
+name and value, a raw body, a form body's field names and values and each
+credential of an `auth` block are resolved
 once, against the three scopes and the bound data row exactly as
 `pm.variables.replaceIn` reads them - so a value this same script set two lines
 earlier is visible, which is Postman's rule and what makes an imported
@@ -1761,7 +1804,8 @@ block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
 misspelled, is refused rather than composed as the empty credential `basic`'s two
 optional halves would otherwise make of it. Dropping the option would send an
 unauthenticated request that looks like the script's own mistake, which is the
-reason the body modes are refused too.
+reason the body modes it cannot send whole (`file`, `graphql`, a file part) are
+refused too.
 
 ## The cookie jar (`pm.cookies`)
 

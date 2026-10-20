@@ -21,7 +21,7 @@
 
 import { shellQuote } from "./curl";
 import { fileBaseName as baseName } from "@/lib/file-path";
-import { prepareRequest } from "./prepare";
+import { prepareRequest, untypedTextPartNote } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /**
@@ -93,6 +93,8 @@ export function generateHttpie(
 		for (const [key, value] of prepared.body.fields) {
 			args.push(shellQuote(httpieItem(key, value)));
 		}
+		const untyped = untypedTextPartNote(prepared.body, "HTTPie");
+		if (untyped) notes.push(untyped);
 		if (prepared.body.kind === "form-data") {
 			for (const file of prepared.body.files) {
 				// `key@path` is HTTPie's file item - the separator this key is

@@ -273,29 +273,39 @@ see [GET /requests](#get-requests).
 ### Ordering
 
 Collections and requests both carry an `order` column that fixes their position
-among their siblings - a collection among the children of its `parentId`, a
-request among the requests of its `collectionId`.
+among their siblings. The siblings of a row are **every child of its parent, of
+both kinds** (#2535): a collection's sub-collections and its requests share one
+`order` space, so a request can sit between two folders.
 
-**Reading.** `GET /collections` and `GET /requests` sort by `order` ascending,
-then `createdAt` ascending, then `id` ascending. All three keys are load-bearing:
-`order` alone is not a total order (every request created before explicit orders
-existed sits at `0`), and rows are stored with `INSERT OR REPLACE` on a TEXT
-primary key, which hands the row a *new* rowid on every edit - so without an
-explicit tiebreak, renaming a request silently moved it among its ties. Clients
-must apply the same rule if they sort locally; the app's `compareTreeOrder` is
-pinned to this one by
-`engine/tests/fixtures/tree-order-conformance.json`, read by both test suites.
+**Reading.** `GET /collections` and `GET /requests` each sort by `order`
+ascending, then `createdAt` ascending, then `id` ascending. All three keys are
+load-bearing: `order` alone is not a total order (every request created before
+explicit orders existed sits at `0`), and rows are stored with `INSERT OR
+REPLACE` on a TEXT primary key, which hands the row a *new* rowid on every edit -
+so without an explicit tiebreak, renaming a request silently moved it among its
+ties.
 
-A collection's sub-collections and its requests are **two separate blocks**, so
-`order` never interleaves them - a request and a subfolder in one folder can hold
-the same value. Where the two blocks sit relative to each other is the tree's
-rule rather than the column's: subfolders first, which is also the order a
-recursive [collection run](#the-scenario-block-collection-runs) executes in,
-pinned across both consumers by
-`engine/tests/fixtures/recursive-run-order-conformance.json`.
+A client that lists a parent's children merges the two lists by `order`, and on
+an `order` tie ranks the **sub-collection before the request**, ahead of
+`createdAt` and `id`: the sibling order is `(order, kind, createdAt, id)`, which
+within one kind is the three-key rule above unchanged. The engine's copy is
+`engine/include/vayu/db/sibling_order.hpp`; the app's `compareTreeOrder` is
+pinned to it by `engine/tests/fixtures/tree-order-conformance.json`, read by
+both test suites. A recursive
+[collection run](#the-scenario-block-collection-runs) walks the same merged list
+depth-first, a request where it sits and a sub-collection's whole subtree where
+the sub-collection sits, pinned across both consumers by
+`engine/tests/fixtures/recursive-run-order-conformance.json`; a mock server's
+route table and `POST /specs/export` list a subtree in that order too.
+
+A workspace from before schema version 7 numbered the two kinds apart, each
+from `0`, and showed every sub-collection above every request. The version-7
+migration moves each collection's requests past its highest sub-collection
+`order`, so that display survives (`docs/engine/db-schema.md`, Schema versions);
+rows still tied at the legacy `0` keep it through the tie rule.
 
 **Writing.** `order` defaults to "append after the current siblings" - one past
-the highest `order` any sibling holds:
+the highest `order` any sibling of either kind holds:
 
 | Write | `order` |
 |---|---|
@@ -307,13 +317,16 @@ the highest `order` any sibling holds:
 | Update, `order` `null`, no move | appended among its current siblings |
 
 A move that states no order therefore lands at the end of the destination rather
-than at whatever slot its position in the *old* list happened to name. Ordering
-*within* a list is always the caller's to state.
+than at whatever slot its position in the *old* list happened to name, after its
+folders and its requests alike. Ordering *within* a list is always the caller's
+to state, and a stated `order` may put a request between two sub-collections.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
-payload's items consecutive slots starting from the append point - see
-[POST /import/apply](#post-importapply).
+payload's items consecutive slots per parent starting from the append point, one
+run across both kinds - the parent's sub-collections first, in payload order,
+then its requests - see [POST /import/apply](#post-importapply). `POST
+/specs/sync` numbers the folders and requests it creates the same way.
 
 **Any writer producing several sibling rows at once owes them distinct
 `order`s** - the import applier is the instance of a general rule, not a special
@@ -380,11 +393,15 @@ so a body that round-trips through storage sends the same bytes.
 `fields` is an array of `{key: string, value: string, enabled?: bool}` - the
 same row shape `params` and `headers` use. `key` is required and must be a
 string; `value` defaults to `""` and a non-boolean `enabled` reads as enabled.
+A `form-data` row may add `contentType`, the part's own Content-Type, on a text
+part as well as a file part (a Postman import writes it for a text row that
+carries one); a part without it sends none.
 A form mode carrying no `fields` array is a `400`, as is a `fields` on a mode
 whose content is a string. Rows with `enabled: false` are stored and returned
 but never sent, so switching one back on needs no re-compose; `{{variables}}`
-resolve inside `key`, `value`, and a file reference's `src` / `fileName` /
-`contentType` (a file part's, or a binary body's `file`) during composition.
+resolve inside `key`, `value`, `contentType` on a part, and a file reference's
+`src` / `fileName` / `contentType` (a file part's, or a binary body's `file`)
+during composition.
 
 The Content-Type rules follow from the encoding:
 
@@ -565,7 +582,7 @@ A **`form-data` file part** is a row with `"type": "file"`:
 | `type` | Form rows only: `"text"` (default) or `"file"`. Any other value is a `400`. |
 | `src` | Absolute path of the file. Required. |
 | `fileName` | The name the file goes by. Defaults to the basename of `src`. |
-| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. |
+| `contentType` | A binary body's Content-Type tier (above); a part's own Content-Type, else libcurl's guess. A text part takes it too (see above). |
 | `unresolved` | Read-only, derived by the engine on every read (below): `true` when `src` is a concrete path this machine would refuse. Accepted and ignored on input. |
 
 Shape refusals (`400`):
@@ -1589,8 +1606,8 @@ the null-vs-absent rule.
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
-  "order": 0,                        // Optional, appended after the collection's requests if
-                                      // omitted - see Ordering
+  "order": 0,                        // Optional, appended after the collection's sub-collections
+                                      // and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "httpVersion": "auto",             // Optional: "auto" | "http1.1" | "http2". Absent/null seeds
@@ -2939,8 +2956,10 @@ the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
 `verifySSL`, `stream`), every saved example with its headers, and the mock mode
 with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
-folder (`path`, `description`, `variables`, `auth`, `elements`, empty folders
-included), and the `requests` no operation can hold - a URL with no path, or a
+folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
+folders included; `order` shares its parent's space with the requests'
+`x-vayu-request.order`, #2535, so a request between two folders imports
+there), and the `requests` no operation can hold - a URL with no path, or a
 second request on a method and path another already claimed - counted as
 `requestsOnlyInExtension` (and under `requestsWithoutPath` /
 `duplicateOperations`, which say why). Another tool ignores both keys; Vayu's
@@ -2954,8 +2973,14 @@ nothing else, which names where the secret lives without being one. The auth
 modes kept as a `config` bag (AWS, digest, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT,
 OAuth 2.0's own config) are blanked by an allowlist of the members known to
 describe the auth, so a member no list has heard of (Insomnia's IAM
-`secretAccessKey`) leaves blank too. A credential outside an auth block is
-blanked by name wherever it is written:
+`secretAccessKey`) leaves blank too. OAuth 2.0's extra request parameter lists
+(`tokenParams`, `authorizationParams`, `refreshParams`) are redacted per row: a
+row's `key`, `enabled` and `sendAs` stay, and its value is blanked when the key
+names a credential (`client_secret`, `client_assertion`, `password`,
+`Authorization`, `X-Api-Key`, the other names below), so an `audience` row
+leaves intact; a row with no non-empty string `key`, and any member of a row
+beside those four, is blanked whole. A credential outside an auth block is blanked by name wherever
+it is written:
 
 - a header row whose name is sensitive (`Authorization`, `Proxy-Authorization`,
   `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, the other
@@ -3190,7 +3215,7 @@ and what it wrote.
 ```json
 {
   "normalize": [
-    {"type": "request", "collectionId": "col_1234567890"}
+    {"parentId": "col_1234567890"}
   ],
   "moves": [
     {"type": "request",    "id": "req_1", "order": 0, "collectionId": "col_2"},
@@ -3215,18 +3240,26 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 A row may appear in `moves` at most once - two positions for one row is a `400`
 naming it, not a last-writer-wins accident of iteration order.
 
-**`normalize`** - each entry names a scope whose children are renumbered dense
-`0..n-1` in the [pinned display order](#ordering) **before** any move applies. A
-collection scope states `parentId` (`null` for the root collections) and a
-request scope states `collectionId`; the named collection must exist, and for a
-collection scope `parentId` must be *stated* rather than omitted, so a renumber
-can never land on a scope the caller did not mean.
+**`normalize`** - each entry names a **parent**, and its children are
+renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
+applies. The children are the parent's sub-collections and its requests as one
+list (#2535), so a tie across the two kinds comes out as distinct numbers with
+the sub-collection first. An entry is `{"parentId": <collection id>}`, or
+`{"parentId": null}` for the root collections (the roots hold collections
+only). The named collection must exist, and `parentId` must be *stated* rather
+than omitted, so a renumber can never land on a scope the caller did not mean.
+The per-kind shapes engines before #2535 took, `{"type": "collection",
+"parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`
+naming the shape above: renumbering one kind alone would leave it tied with the
+other kind's slots.
 
 Normalization exists for the first drop into a collection whose rows predate
 explicit orders: every row sits at `0`, so its displayed position lives only in
 the tiebreak and there are no slots to shift into. Materializing that order in
-the same batch is what keeps the other siblings from appearing to jump. It is
-idempotent - a scope already dense writes nothing at all.
+the same batch is what keeps the other siblings from appearing to jump; a
+parent with every row at `0` comes out with its sub-collections at `0..m-1` and
+its requests after them, the order the tie rule already showed. It is idempotent
+- a scope already dense writes nothing at all.
 
 Where a row is named by both lists, the move wins.
 
@@ -3261,8 +3294,9 @@ without waiting for a refetch.
 }
 ```
 
-**Errors:** `400` for any malformed entry, a row or owner that does not exist, a
-duplicate move, a cycle, or a batch over 10000 entries. `409` if a staged row is
+**Errors:** `400` for any malformed entry (a per-kind `normalize` entry
+included), a row or owner that does not exist, a duplicate move, a cycle, or a
+batch over 10000 entries. `409` if a staged row is
 gone by the time the batch commits. In every case nothing at all was written.
 Body that is not JSON or not an object is also a `400`.
 
@@ -3464,7 +3498,10 @@ kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters, and Insomnia's file bodies and
 the resources it cannot import. A count that belongs to the document (a second
-server URL, a malformed section) has none.
+server URL, a malformed section) has none. **`names`**, when present, names
+what the count dropped, never its value: today only `oauth2_unmapped_param`,
+whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
+did not carry.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
@@ -3486,6 +3523,7 @@ per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
 `malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
 `default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
 `unmapped_body`, `unresolved_base_url`, `unsupported_auth`,
+`oauth2_dropped_field`, `oauth2_state_regenerated`, `oauth2_unmapped_param`,
 `url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
 `vayu_extension_invalid`. Not every kind is a
 loss: `default_response` and `url_without_raw` count a mapping
@@ -3521,7 +3559,8 @@ members produced: the request's name, method, URL, rows, body, auth, settings
 and saved examples, and the collection's variables, auth, data contract and
 whole folder tree. With `x-vayu-collection` present the document states its own
 tree, so folders nest as it says, each request is filed under its
-`x-vayu-request.folder` in its stored order, a request with none stays on the
+`x-vayu-request.folder`, folders and requests take their stored order (below),
+a request with none stays on the
 root (no folder named after its path, and no `folderStrategy`), and the
 `requests` no operation could hold are created too. A document is a file anyone
 can edit, so none of it is trusted: every piece is checked against what the
@@ -3529,6 +3568,20 @@ write routes accept before it replaces anything, and a piece that fails is
 dropped, counted as `vayu_extension_invalid`, and leaves the standard reading in
 place - never a refused import. Neither key is read on the sync/diff path, for
 the reason `x-vayu-elements` is not.
+
+**A folder or request draft may state `order`**, its position among its
+parent's sub-folders and requests, which share one [order space](#ordering)
+(#2535). A Postman parse states it on every one: the item's position in its
+parent's `item[]`, so the collection keeps the order Postman runs it in. A
+Vayu-written OpenAPI document states each request's `x-vayu-request.order` and
+each folder's `x-vayu-collection.folders[].order`; one written before folders
+carried an `order` states none, and its requests then follow its folders as
+they did. No other format states one. The flattening into
+[`POST /import/apply`](#post-importapply) (`POST /import`, and the app's apply
+of a previewed parse) numbers each parent's children `0..k-1` in one sequence:
+by stated `order`, a draft stating none placed as though its parent listed its
+folders first and its requests after them, and a folder first on a tie. The
+preview tree lists them in the same order.
 
 **Errors:**
 - `400` `Invalid 'content': must be the document's text`, and
@@ -3689,14 +3742,18 @@ accepted a client-supplied `id` - which they no longer do (see
   same defaults and the same null rule - the engine runs the same per-resource
   field appliers for both paths. `id` is **not** accepted here: the engine owns
   ID generation on this path.
-- `order` is optional. For collections, an omitted `order` appends after the
-  existing siblings and then in payload order (each sibling gets the next slot -
-  the per-item default cannot do this in bulk, because none of the payload's own
-  siblings are stored yet). For requests it defaults to `0` on this path only:
-  `POST /requests` appends by scanning the collection's stored rows, which a bulk
-  write cannot do for a collection it is creating in the same call, so a client
-  that cares about request order must state it here. The app's importer does -
-  and deliberately omits `order` on its **root** collections, so an import into a
+- `order` is optional, and a stated one is written as given. An omitted `order`
+  appends after the parent's existing children and then in payload order: each
+  row gets the next slot of its parent (the per-item default cannot do this in
+  bulk, because none of the payload's own siblings are stored yet). A parent's
+  sub-collections and requests share those slots (#2535): the sub-collections
+  that state no `order` take them first, in payload order, and then its
+  requests, so a request with no `order` lands after its folder's
+  sub-collections rather than tied with the first of them. The roots hold
+  collections only. The app's importer states every order below the roots, one
+  sequence per parent in the order the parse placed the drafts (see
+  [`POST /import/parse`](#post-importparse)), and deliberately omits it on its
+  **root** collections, so an import into a
   non-empty workspace lands after the roots already there instead of colliding
   with their `0, 1, 2...`.
 - A request may carry **`examples`**, an array of
@@ -3796,7 +3853,10 @@ document, written the way Postman's own "Export > Collection v2.1" writes one
 (`core/postman_export.hpp`). It is the inverse of the Postman importer: a
 collection imported from a Postman export and exported again gives back the
 same document, `_postman_id` aside, and exporting, importing and exporting
-again is byte-identical.
+again is byte-identical. Each `item[]` lists a collection's sub-folders and
+requests in its one [sibling order](#ordering) (#2535), so a request that sits
+before or between folders is written there, which is where Postman runs it;
+the Postman importer reads that order back.
 
 **Reads only.** Nothing is stored. The whole subtree is exported, with no stop
 at a collection bound to another OpenAPI document.
@@ -3816,6 +3876,10 @@ a variable marked secret. The auth modes kept as a `config` bag (AWS, digest,
 NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT, OAuth 2.0's own config) are blanked by an
 allowlist of the members known to describe the auth, not by credential name, so
 a member no list has heard of (Insomnia's IAM `secretAccessKey`) leaves blank.
+OAuth 2.0's extra request parameter rows, in its config and in a kept Postman
+block alike, keep their keys; a row's value is blanked when its key names a
+credential (`client_secret`, `client_assertion`, `password`, `Authorization`,
+`X-Api-Key`, the other names a header or query parameter is blanked by).
 A credential outside an auth block is blanked too, by name, wherever the
 document writes a value as typed or as recorded:
 
@@ -3887,7 +3951,7 @@ was before these rules.
 | `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
-| `oauth2_settings` | An OAuth 2.0 `audience`, `resource`, a turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix |
+| `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |
 | `form_file_names` | A form-data file part whose file name differs from its path's own |
 | `body_file_details` | A binary body whose file states its own `contentType`, or a file name that differs from its path's own - Postman's `file` mode carries only `src` |
 | `http_version` | A request's HTTP version other than `auto` |
@@ -3905,15 +3969,15 @@ An auth a Postman import kept its original block for (`auth.postman`, see
 `docs/engine/db-schema.md`) is written as that block, while it still maps to
 the stored auth; everything below describes the rest.
 
-What maps where: folders are item groups (folders before requests, each in
-stored order); a request's `inherit` auth is an absent `auth` and its `none` is
+What maps where: folders are item groups (a folder's sub-folders and requests
+are written as one list in sibling order, a folder first on a tie); a request's `inherit` auth is an absent `auth` and its `none` is
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its
 `noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
 are `raw` with that `options.raw.language` (or the language a Postman import
-kept as `rawLanguage`, none at all for `""`, while the body still sniffs to its
-mode), `graphql` is `graphql` with the
+kept as `rawLanguage`, none at all for `""`, while importing it again would still
+give its stored mode), `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
-`form-data` is `formdata` with a file part's `src`, `binary` is `file` with
+`form-data` is `formdata` with a file part's `src` and any part's `contentType`, `binary` is `file` with
 `file.src` (`file: {}` when no file is chosen); `script.pre` /
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
@@ -4166,8 +4230,10 @@ answers. Its members:
   a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
   `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
   the first 8 characters of its hash; none against one *is* a difference),
-  `request` (method and URL with the query, fragment and userinfo cut) and
-  `compression`. The two values are strings formatted as the app shows them.
+  `request` (method and URL with the query, fragment and userinfo cut),
+  `compression` and `expect_continue` (#2516; `allowed` against `not allowed`,
+  an absent key reading as `not allowed`). The two values are strings formatted
+  as the app shows them.
   Every report the export reads carries `metadata.runType`, so a `mode`,
   `concurrency` or `target_rps` only one run recorded is listed, its missing
   side `not recorded` (the shared rule leaves such a field unknown when either
@@ -5412,7 +5478,22 @@ sent to; the app says this beside the API Key fields.
 
 Tokens are acquired once and cached (SQLite `oauth_tokens`, keyed by a
 deterministic `cacheKey` = `accessTokenUrl \x1f clientId \x1f credentialsId \x1f
-username-if-password-grant`). Expiry uses a 45s skew; a missing `expires_in`
+username-if-password-grant`, then one segment per extra parameter list that has
+a row the engine would send, in the order `authorizationParams`, `tokenParams`,
+`refreshParams`: `\x1f <list>:<key>=<value>`, further rows joined by `\x1e`,
+the pairs sorted by key, then value, byte-wise). A row whose key names a
+credential (`client_assertion`, `assertion`, an `X-Api-Key` or `Authorization`
+header, the names an export blanks: `core::vayu_ext::names_param_credential`)
+is written as `<key>=` with its value left out, because the key is returned as
+`cacheKey`, stored as the cache row's primary key and can reach a log; a
+rotated assertion therefore keeps the token it was cached under. Row order and
+`sendAs` do not change the key; a config with no such row keys exactly as it
+did before the lists existed. `scope`, `audience` and `resource` are not read, so a distinct
+`credentialsId` (or an extra parameter row) is what separates two tokens that
+differ only in those. The recipe is `oauth::cache_key`
+(`engine/include/vayu/http/oauth_client.hpp`), and the app's
+`computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
+`engine/tests/oauth_client_test.cpp`. Expiry uses a 45s skew; a missing `expires_in`
 means non-expiring. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row
@@ -5453,6 +5534,24 @@ holding `+`, `/` or `=` travels as `%2B`, `%2F`, `%3D`. A provider that expects
 them raw (as Postman and `curl -u` send them) needs `credentialsPlacement:
 "body"`, which puts `client_id` and `client_secret` in the form instead. The
 default is `basic_auth_header`.
+
+`scope`, `audience` and `resource` are sent in the form of a fresh grant when
+set; a refresh sends none of them. Three optional config lists add parameters
+of the user's own (issue #2536), each an array of `{key, value, enabled,
+sendAs?}`: `tokenParams` on a fresh grant, `refreshParams` on a refresh, and
+`authorizationParams` in the authorize URL's query (below). `sendAs` puts a
+row in the form (`body`, the default), the token URL's query (`url`) or a
+request header (`header`). A row is not sent when it is `enabled: false`, has
+no string `key`, has an unknown `sendAs`, or is named like a parameter the
+engine writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
+`redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
+`scope`, `state`, `code_challenge`, `code_challenge_method`, `response_type`);
+a body or url row naming a form parameter already written (an `audience` the
+config sends) and a header row naming a header already set (`Authorization`,
+`Content-Type`, `Accept`, case-insensitively) are skipped too, so the engine's
+value wins and no name is sent twice. A malformed list or row is skipped, never
+refused. Values are resolved with the rest of the config by `POST /compose`, and
+a `{{data.*}}` token in one is refused like one anywhere else in the config.
 
 **Response (`200`):**
 ```json
@@ -5500,6 +5599,12 @@ hands it back.
 | `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
+
+The authorize URL carries `response_type`, `client_id`, `redirect_uri`,
+`state`, `scope`, `audience`, `resource` and the PKCE pair, then each
+`authorizationParams` row under the rules above, whatever its `sendAs` (a
+navigation has no body or headers); a row naming a parameter already in the URL
+is skipped.
 
 Attempts time out after 5 minutes; on success the token is written to the cache
 and `cacheKey` is returned. A completion (the loopback callback and `POST
@@ -6125,6 +6230,7 @@ to resolve against; see [Scenario load runs](#scenario-load-runs).
   "httpVersion": "auto",               // Optional: "auto" | "http1.1" | "http2", default "auto"
   "transient": false,                  // Optional, default false - see below
   "persistVariables": true,            // Optional, default true - see below
+  "includeParsedBody": true,           // Optional, default true - see below
   "origin": { "kind": "app" },         // Optional, who started the run - see below
   "stream": false,                     // Optional, default false - see below
   "maxStreamDurationMs": 600000,       // Optional, streaming only - see below
@@ -6596,6 +6702,16 @@ parsed convenience copy, whose member order is unspecified and in which a
 duplicate key collapses to the last value. A client that shows or re-saves the
 body should use `bodyRaw`, as the app does (issue #2459).
 
+`body` is also `null` on a `"utf8"` answer that is valid JSON in two cases
+(issue #2544): the request sent `includeParsedBody: false` (below), or the text
+is longer than 4 MiB (`MAX_PARSED_RESPONSE_BODY_BYTES`), whatever the request
+sent. Past that size the engine does not build the parsed copy at all, because
+a JSON tree costs several times its text and the answer is serialised from it
+once more; `bodyRaw` still carries the whole body, up to
+`maxDesignResponseBodyBytes` below. The key is always present. Scripts, the
+schema check and the stored trace read the body itself, so none of them is
+affected.
+
 So a response the server answered is a `200` whatever its bytes are; the end
 of this section has the `500` that remains.
 
@@ -6953,6 +7069,17 @@ row exists, for the reason `transient`'s is. It is independent of `transient`:
 that flag decides whether the *run* is recorded, this one whether the
 *variables* are. MCP's `run_request` sends `false` whenever write access is off
 ([MCP](mcp.md#safety-model)).
+
+**`includeParsedBody: false` leaves the parsed copy out** (#2544). The answer's
+`body` is `null` and the engine skips the parse that would build it; `bodyRaw`,
+`bodyEncoding`, `bodySize`, the scripts' `pm.response`, the `validation` node
+and the stored trace are what they would have been. It is for a client that
+reads `bodyRaw` only and should not pay for a second copy of every body. Absent
+and `null` mean `true`; a present non-boolean is a **400**
+(`'includeParsedBody' must be a boolean`) before any run row exists, by the
+rule `transient`'s follows. A body past 4 MiB is never parsed whatever this
+says (see the response section above). A streaming send has no `body` in its
+`202` and ignores the flag.
 
 **A run row the database cannot write is a `500`.** A recorded send whose run row
 cannot be stored (a busy or locked database, a full disk, an I/O error) answers
@@ -7583,13 +7710,12 @@ inside the block rather than through `mode` / `duration` / `iterations`:
 
 The collection is resolved into an ordered, fully composed plan **once, before
 anything is sent**, in the order the sidebar displays top to bottom: direct
-requests by `requests.order` and - with `recursive` - descendant collections by
-`collections.order`, depth-first, each sub-collection's whole subtree running
-**before** its parent's own requests, and each list under the tiebreak in
-[Ordering](#ordering). Subfolders ahead of own requests is the tree's rule, not
-the column's: a folder's sub-collections and its requests are separately ordered
-blocks, so the two `order` values are free to collide, and the run follows the
-render (issue #431). Each step is
+requests by `requests.order` and - with `recursive` - each collection's
+sub-collections and requests as one sibling list, depth-first, a request
+running where it sits and a sub-collection's whole subtree where the
+sub-collection sits, under the sibling order in [Ordering](#ordering) (a
+sub-collection first on an `order` tie). The run follows the render (issues
+#431, #2535). Each step is
 composed through the same path `POST /compose` uses, so a step's request and
 joined scripts are byte-identical to what a Send of that request would run. A
 collection edited mid-run therefore cannot change the sequence underneath
@@ -8634,6 +8760,11 @@ stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
 
+The sequential collection runner follows the same population, with two differences:
+its `latency` block is computed **exact nearest-rank** over every sent step's duration
+rather than from an HDR histogram, and a run in which no step sent stores a count of `0`
+and the report omits the block (issue #2389).
+
 ### GET /runs/:runId/metrics
 
 Paginated **historical time-series** (JSON) for a run's charts. The response is
@@ -8880,6 +9011,8 @@ and show an indeterminate bar the way it would against an older engine that
 never sent this frame at all. One frame ahead of the work rather than a number
 on every tick, because this run publishes no ticks to carry one: the load
 path's total rides its `metrics` events precisely because that path has them.
+(A collection run's report likewise reads its `latency` from the stored summary, not from
+ticks: see [the report](#get-runsrunidreport).)
 
 **A run with a [`monitor` block](#the-monitor-block-server-vitals) also streams
 `monitor` events**, one per successful scrape, interleaved with its `metrics`
@@ -9350,8 +9483,13 @@ so a later run's report can say whether the two measured under the same
 conditions:
 
 ```json
-"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true }
+"defaultHeaders": { "userAgent": "Vayu/0.26.0", "requestId": false, "acceptEncoding": true, "expectContinue": false }
 ```
+
+`expectContinue` (issue #2516) is whether `sendExpectContinue` let libcurl add
+`Expect: 100-continue` to a body over 1 MiB, which makes it wait up to a second
+for the server's answer before sending. A run recorded before it has no such
+key, and a comparison reads that as `false`, which is what the run sent.
 
 Absent on a design run (it carries no throughput to compare) and on any run
 recorded before this issue.
@@ -9586,7 +9724,8 @@ named it.
       "dataFileName": "users.csv",
       "dataFileHash": "<sha256>",
       "carriedBudgets": ["latencyP99Ms"],
-      "acceptEncoding": true
+      "acceptEncoding": true,
+      "expectContinue": false
     },
     "openapi": {
       "specId": "spec_3f2b1c9a-...",
@@ -9927,9 +10066,20 @@ never closed. One entry per declared name that closed at least once, in the
 same shape `scenario.transactions` documents elsewhere on this page.
 
 `latency.*` and the enriched `summary` fields (`peakConcurrency`, `droppedRequests`,
-`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the persisted
-per-tick `metrics` rows. `latency_ms` in `results` (and therefore these percentiles) is
-**perceived** latency.
+`avgQueueWaitMs`, `bytesSent/Received`, `throughputBytesPerSec`) come from the run's stored
+`summary`, not from the per-tick `metrics` rows. `latency_ms` in `results` is **perceived**
+latency.
+
+**A collection run's `latency` block** (issue #2389) is the stored `latency` its runner wrote,
+over the [latency population](#latency-population) of the sequential path: every step whose
+transfer ran, answered or not, and not a step the plan skipped or one refused before the wire.
+That is the sample the run's `latency*Ms` [budgets](#the-thresholds-block-passfail-budgets)
+judge, from one computation, so `latency.p99` equals the `actual` of a `latencyP99Ms` check.
+Unlike the HDR histogram the load paths read, the figures are **exact nearest-rank** over the
+full sample (`avg` is its mean), and they are not read from the `results[]` rows, which can
+include a skipped step's `0` ms and are thinned past `maxScenarioStoredSteps`. A collection run
+in which no step sent has **no `latency` block** rather than zeros. A summary written before
+this existed carries no `latency` and reports from the stored rows as before.
 
 `summary.failedRequests` and `summary.errorRate` are the
 [one error definition](#what-counts-as-an-error), recounted from the run's
@@ -10035,9 +10185,10 @@ snapshot (`mode`, `duration`, `concurrency`, `iterations`, `startConcurrency`,
 each omitted when absent, and recording what the run was sent, never a default
 the engine filled in; issue #2437) plus `httpVersion`, which is always present with the
 same `"auto"`-when-unknown normalization `GET /runs`'s `summary` uses (see
-above), and `acceptEncoding` (issue #1488), read out of the snapshot's
-`defaultHeaders` and omitted on the same terms as `GET /runs`'s `summary` key
-of the same name. `rps` in the raw snapshot is renamed to `targetRps` here,
+above), and `acceptEncoding` (issue #1488) and `expectContinue` (issue
+#2516), read out of the snapshot's `defaultHeaders` and omitted on the same
+terms as `GET /runs`'s `summary` key `acceptEncoding` (`expectContinue` is on
+the report only, not in the list row: only the comparison reads it). `rps` in the raw snapshot is renamed to `targetRps` here,
 and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
 null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /

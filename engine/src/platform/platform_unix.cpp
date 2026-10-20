@@ -31,6 +31,12 @@
 #include <sched.h>
 #endif
 
+// For glibc's `mallopt` and `malloc_trim`; musl ships <malloc.h> without them.
+// The headers above have defined `__GLIBC__` by now on a glibc system.
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -38,6 +44,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -530,6 +537,28 @@ void sleep_until_precise (std::chrono::steady_clock::time_point deadline) {
 }
 
 #endif // VAYU_PLATFORM_MACOS
+
+bool return_large_frees_to_os (std::size_t min_bytes) {
+#if defined(__GLIBC__)
+    if (min_bytes > static_cast<std::size_t> (std::numeric_limits<int>::max ())) {
+        return false;
+    }
+    // Called once before any thread exists (see the declaration), so no
+    // allocation can race the change.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    return mallopt (M_MMAP_THRESHOLD, static_cast<int> (min_bytes)) == 1;
+#else
+    static_cast<void> (min_bytes);
+    return true;
+#endif
+}
+
+void release_free_heap () {
+#if defined(__GLIBC__)
+    // The answer says only whether anything was released; either is fine.
+    static_cast<void> (malloc_trim (0));
+#endif
+}
 
 } // namespace vayu::platform
 

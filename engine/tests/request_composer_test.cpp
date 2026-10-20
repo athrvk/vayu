@@ -1043,6 +1043,26 @@ TEST_F (RequestComposerTest, OAuth2ConfigIsResolvedBeforeAnyCacheKeyCanBe) {
     EXPECT_EQ (pb["auth"]["config"]["accessTokenUrl"], "https://b.idp.test/token");
 }
 
+// The extra parameter lists are resolved with the rest of the config (issue
+// #2536), so a row's {{var}} reaches the token endpoint and the cache key as
+// its value, never as the template.
+TEST_F (RequestComposerTest, OAuth2ExtraParamRowsAreResolved) {
+    seed_collection ("col", "", "");
+    seed_environment ("env_a", R"({"aud":{"value":"https://api.test","enabled":true}})");
+    auto r = make_request ("req_1", "col");
+    r.url  = "https://example.test";
+    r.auth = R"({"mode":"oauth2","config":{"grantType":"client_credentials","accessTokenUrl":"https://idp.test/token","clientId":"cid","tokenParams":[{"key":"audience","value":"{{aud}}","enabled":true,"sendAs":"body"}],"authorizationParams":[{"key":"prompt","value":"{{aud}}/x"}]}})";
+    db_->save_request (r);
+
+    auto [status, payload] = vayu::http::compose_request_core (
+    *db_, json{ { "requestId", "req_1" }, { "environmentId", "env_a" } });
+    ASSERT_EQ (status, 200);
+    const json& config = payload["auth"]["config"];
+    EXPECT_EQ (config["tokenParams"][0]["value"], "https://api.test");
+    EXPECT_EQ (config["tokenParams"][0]["sendAs"], "body");
+    EXPECT_EQ (config["authorizationParams"][0]["value"], "https://api.test/x");
+}
+
 TEST_F (RequestComposerTest, ComposedOutputIsNeverInterpolatedTwice) {
     // A body whose *resolved* content legitimately contains {{...}} (posting a
     // Postman collection, a Handlebars template) must survive composition

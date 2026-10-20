@@ -487,6 +487,63 @@ TEST (BodyEncoding, ACappedBodyWithABadByteBeforeTheCutIsBase64) {
     EXPECT_EQ (response_body_bytes (serialize (capped)), capped.body);
 }
 
+// ============================================================================
+// `body` is the parsed copy, skipped on request or past a size (issue #2544).
+// Mutation check: make `parsed_body` in json.cpp ignore `include_parsed_body`,
+// or drop its size comparison, and the matching `body` assertion below fails;
+// turn `>` into `>=` and the at-the-threshold case fails.
+// ============================================================================
+
+namespace {
+
+/// A JSON document of exactly @p bytes: one string member padded out.
+std::string json_of_size (size_t bytes) {
+    const std::string open  = "{\"s\":\"";
+    const std::string close = "\"}";
+    return open + std::string (bytes - open.size () - close.size (), 'a') + close;
+}
+
+} // namespace
+
+TEST (ParsedBody, ByDefaultBodyIsTheParse) {
+    const auto json = serialize (response_with_body (R"({"id":1})"));
+
+    EXPECT_EQ (json["body"]["id"], 1);
+    EXPECT_EQ (json["bodyRaw"], R"({"id":1})");
+}
+
+TEST (ParsedBody, DeclinedBodyIsNullAndBodyRawIsUnchanged) {
+    const auto response = response_with_body (R"({"id":1})");
+    const auto parsed   = serialize (response);
+    const auto declined = serialize (response, /*include_parsed_body=*/false);
+
+    ASSERT_TRUE (declined.contains ("body"));
+    EXPECT_TRUE (declined["body"].is_null ());
+    EXPECT_EQ (declined["bodyRaw"], parsed["bodyRaw"]);
+    EXPECT_EQ (declined["bodyEncoding"], "utf8");
+    EXPECT_EQ (declined["bodySize"], parsed["bodySize"]);
+}
+
+TEST (ParsedBody, ABodyAtTheThresholdIsStillParsed) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES);
+    const auto json = serialize (response_with_body (text));
+
+    EXPECT_TRUE (json["body"].is_object ());
+    EXPECT_EQ (json["bodyRaw"].get_ref<const std::string&> ().size (), text.size ());
+}
+
+TEST (ParsedBody, ABodyPastTheThresholdIsNullWhateverTheCallerAsked) {
+    const auto text =
+    json_of_size (vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES + 1);
+    const auto json = serialize (response_with_body (text), /*include_parsed_body=*/true);
+
+    ASSERT_TRUE (json.contains ("body"));
+    EXPECT_TRUE (json["body"].is_null ());
+    EXPECT_EQ (json["bodyRaw"], text);
+    EXPECT_EQ (json["bodyEncoding"], "utf8");
+}
+
 TEST (BodyEncoding, AnAnswerWithNoEncodingReadsAsUtf8) {
     EXPECT_EQ (response_body_bytes (Json{ { "bodyRaw", "plain" } }), "plain");
 }
@@ -598,6 +655,32 @@ TEST (JsonRequest, SerializesHttpVersion) {
     req.url          = "https://x/y";
     req.http_version = vayu::HttpVersion::Http1_1;
     EXPECT_EQ (vayu::json::serialize (req)["httpVersion"], "http1.1");
+}
+
+// A form-data part's own `contentType` survives serialize -> deserialize on a
+// text part as it does on a file part, and a part without one writes no key
+// (#2539). Mutation check: put the `contentType` write back inside the file
+// branch of `serialize_form_fields` and the text part loses it.
+TEST (JsonRequest, ATextPartsContentTypeRoundTripsAndAnAbsentOneWritesNoKey) {
+    vayu::Request req;
+    req.method    = vayu::HttpMethod::POST;
+    req.url       = "https://x/y";
+    req.body.mode = vayu::BodyMode::FormData;
+    vayu::FormField typed ("meta", "{}");
+    typed.content_type = "application/json";
+    req.body.fields    = { typed, vayu::FormField ("plain", "v") };
+
+    const auto written = serialize (req).at ("body").at ("fields");
+    EXPECT_EQ (written[0].at ("contentType"), "application/json");
+    EXPECT_FALSE (written[0].contains ("type"));
+    EXPECT_FALSE (written[1].contains ("contentType"));
+
+    auto read = deserialize_request (serialize (req).dump ());
+    ASSERT_TRUE (read.is_ok ());
+    ASSERT_EQ (read.value ().body.fields.size (), 2U);
+    EXPECT_EQ (read.value ().body.fields[0].type, vayu::FormFieldType::Text);
+    EXPECT_EQ (read.value ().body.fields[0].content_type, "application/json");
+    EXPECT_TRUE (read.value ().body.fields[1].content_type.empty ());
 }
 
 // GET /runs/:id: the full configSnapshot, nested keys included, and no

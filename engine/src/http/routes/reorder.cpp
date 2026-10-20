@@ -11,6 +11,7 @@
  *        requests (issue #365).
  */
 
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -22,6 +23,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -48,32 +50,20 @@ RouteError body_error (const std::string& message) {
 enum class Kind : std::uint8_t { Collection, Request };
 
 /**
- * One scope whose children are renumbered dense before the moves apply: the
- * children of a collection (`parent` empty means the roots), or the requests of
- * a collection.
+ * One parent whose children are renumbered dense before the moves apply: its
+ * sub-folders and its requests as one list (#2535). `std::nullopt` is the
+ * roots, which hold collections only.
  */
 struct Scope {
-    // Defaulted because `read_scope` below fills this out-parameter and can
-    // refuse the entry before it gets there: an enum left indeterminate is read
-    // as one on any path that forgets to check the refusal first.
-    Kind kind = Kind::Collection;
-    std::optional<std::string> parent; // collection scope: nullopt = the roots
-    std::string collection;            // request scope
-
-    bool operator< (const Scope& other) const {
-        if (kind != other.kind) {
-            return kind < other.kind;
-        }
-        if (kind == Kind::Collection) {
-            return parent < other.parent;
-        }
-        return collection < other.collection;
-    }
+    std::optional<std::string> parent;
 };
 
 /** One row's new position, and - when it changes owner - its new owner. */
 struct Move {
-    Kind kind = Kind::Collection; // defaulted for the reason `Scope::kind` is
+    // Defaulted because `read_move` fills this out-parameter and can refuse
+    // the entry before it gets there: an enum left indeterminate is read as
+    // one on any path that forgets to check the refusal first.
+    Kind kind = Kind::Collection;
     std::string id;
     int order         = 0;
     bool states_owner = false; // parentId / collectionId present in the body
@@ -81,7 +71,7 @@ struct Move {
     std::string collection;            // request move
 };
 
-/** Reads and validates `type`, the one field both entry shapes share. */
+/** Reads and validates a move's `type`. */
 RouteResult read_kind (const nlohmann::json& entry, const std::string& at, Kind& out) {
     if (!entry.is_object ()) {
         return std::unexpected (body_error ("Invalid " + at + ": must be an object"));
@@ -102,52 +92,53 @@ RouteResult read_kind (const nlohmann::json& entry, const std::string& at, Kind&
     return std::unexpected (body_error ("Invalid " + at + ": unknown type '" + type + "'"));
 }
 
+/// What a `normalize` entry looks like, quoted by every refusal of one.
+constexpr std::string_view SCOPE_SHAPE =
+R"(a scope is {"parentId": <collection id, or null for the roots>} and covers )"
+"the parent's sub-folders and requests together";
+
 /**
  * Reads one `normalize` entry.
  *
- * A collection scope must *state* `parentId` (`null` for the roots) rather than
- * omitting it: absent would have to mean either "the roots" or "whatever parent
- * you infer", and a renumber that silently picked the wrong scope is a whole
- * folder reshuffled. A named parent or owning collection must exist - unlike the
- * single-row `PUT`, which tolerates an unresolvable parent because bulk import
- * writes rows that cannot see each other yet. Nothing here is bulk-created, so a
- * scope that resolves to no row is a client bug, not an ordering artifact.
+ * A scope must *state* `parentId` (`null` for the roots) rather than omitting
+ * it: absent would have to mean either "the roots" or "whatever parent you
+ * infer", and a renumber that silently picked the wrong scope is a whole folder
+ * reshuffled. A named parent must exist - unlike the single-row `PUT`, which
+ * tolerates an unresolvable parent because bulk import writes rows that cannot
+ * see each other yet. Nothing here is bulk-created, so a scope that resolves to
+ * no row is a client bug, not an ordering artifact.
+ *
+ * The per-kind shapes from before #2535 (`type` with `parentId` or
+ * `collectionId`) are refused rather than read: renumbering one kind alone
+ * would leave it tied with the other kind's slots.
  */
 RouteResult
 read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Scope& out) {
     const std::string at = "normalize entry at index " + std::to_string (index);
-    if (auto outcome = read_kind (entry, at, out.kind); !outcome) {
-        return outcome;
+    if (!entry.is_object ()) {
+        return std::unexpected (body_error ("Invalid " + at + ": must be an object"));
     }
-    if (out.kind == Kind::Collection) {
-        if (!entry.contains ("parentId")) {
-            return std::unexpected (body_error ("Invalid " +
-            at + ": 'parentId' must be stated (null normalizes the root collections)"));
-        }
-        const auto& parent = entry["parentId"];
-        if (parent.is_null ()) {
-            out.parent = std::nullopt;
-            return {};
-        }
-        if (!parent.is_string ()) {
-            return std::unexpected (
-            body_error ("Invalid " + at + ": 'parentId' must be a string or null"));
-        }
-        out.parent = parent.get<std::string> ();
-        if (!db.get_collection (*out.parent).has_value ()) {
-            return std::unexpected (
-            body_error ("Collection '" + *out.parent + "' does not exist"));
-        }
+    if (entry.contains ("type") || entry.contains ("collectionId")) {
+        return std::unexpected (body_error ("Invalid " + at +
+        ": 'type' and 'collectionId' are no longer accepted; " + std::string (SCOPE_SHAPE)));
+    }
+    if (!entry.contains ("parentId")) {
+        return std::unexpected (body_error ("Invalid " + at +
+        ": 'parentId' must be stated; " + std::string (SCOPE_SHAPE)));
+    }
+    const auto& parent = entry["parentId"];
+    if (parent.is_null ()) {
+        out.parent = std::nullopt;
         return {};
     }
-    if (!entry.contains ("collectionId") || !entry["collectionId"].is_string ()) {
+    if (!parent.is_string ()) {
         return std::unexpected (
-        body_error ("Invalid " + at + ": 'collectionId' must be a string"));
+        body_error ("Invalid " + at + ": 'parentId' must be a string or null"));
     }
-    out.collection = entry["collectionId"].get<std::string> ();
-    if (!db.get_collection (out.collection).has_value ()) {
+    out.parent = parent.get<std::string> ();
+    if (!db.get_collection (*out.parent).has_value ()) {
         return std::unexpected (
-        body_error ("Collection '" + out.collection + "' does not exist"));
+        body_error ("Collection '" + *out.parent + "' does not exist"));
     }
     return {};
 }
@@ -296,41 +287,49 @@ struct WriteSet {
     }
 };
 
+/** Stages @p row at @p index, unless that is where it already sits. */
+template <typename Row>
+void stage_position (const Row& row, int index, int64_t now, std::map<std::string, Row>& out) {
+    if (row.order == index) {
+        return;
+    }
+    Row moved        = row;
+    moved.order      = index;
+    moved.updated_at = now;
+    out[moved.id]    = std::move (moved);
+}
+
 /**
- * Renumbers one scope's children dense `0..n-1` in the pinned display order
- * (`order`, `createdAt`, `id` - the reads below already apply it).
+ * Renumbers one parent's children dense `0..n-1` in sibling order
+ * (`sibling_order.hpp`: `order`, folders before requests, `createdAt`, `id`),
+ * over its sub-folders and requests merged into one list, so a tie across the
+ * two kinds comes out as distinct numbers with the folder first.
  *
  * Only rows whose position actually changes are added, which is what makes the
  * operation observably idempotent: normalizing an already-dense scope writes
  * nothing at all. It is also the whole point of the `normalize` list - a
- * collection whose rows all sit at the legacy `0` has a display order that
- * exists nowhere but the sort, and the first drop into it has to materialize
- * that order before it can name a slot, or every sibling appears to jump.
+ * parent whose rows all sit at the legacy `0` has a display order that exists
+ * nowhere but the sort, and the first drop into it has to materialize that
+ * order before it can name a slot, or every sibling appears to jump.
  */
 void normalize_scope (vayu::db::Database& db, const Scope& scope, int64_t now, WriteSet& out) {
-    if (scope.kind == Kind::Collection) {
-        int index = 0;
-        for (const auto& c : db.get_collections ()) {
-            if (c.parent_id != scope.parent) {
-                continue;
-            }
-            if (c.order != index) {
-                vayu::db::Collection row = c;
-                row.order                = index;
-                row.updated_at           = now;
-                out.collections[row.id]  = std::move (row);
-            }
-            ++index;
+    const std::vector<vayu::db::Collection> collections = db.get_collections ();
+    std::vector<const vayu::db::Collection*> folders;
+    for (const auto& c : collections) {
+        if (c.parent_id == scope.parent) {
+            folders.push_back (&c);
         }
-        return;
     }
+    const std::vector<vayu::db::Request> requests = scope.parent ?
+    db.get_requests_in_collection (*scope.parent) :
+    std::vector<vayu::db::Request>{};
+
     int index = 0;
-    for (const auto& r : db.get_requests_in_collection (scope.collection)) {
-        if (r.order != index) {
-            vayu::db::Request row = r;
-            row.order             = index;
-            row.updated_at        = now;
-            out.requests[row.id]  = std::move (row);
+    for (const auto& slot : vayu::db::merge_siblings (folders, requests)) {
+        if (slot.kind == vayu::db::SiblingKind::Folder) {
+            stage_position (*folders.at (slot.index), index, now, out.collections);
+        } else {
+            stage_position (requests.at (slot.index), index, now, out.requests);
         }
         ++index;
     }
@@ -567,12 +566,12 @@ void register_reorder_routes (RouteContext& ctx) {
      * Repositions collections and requests in one atomic batch - the write path
      * behind a drag-and-drop reorder or a cross-folder move.
      * Body params: `moves` (array of {type, id, order, parentId? |
-     * collectionId?}) and `normalize` (array of {type, parentId |
-     * collectionId}); both optional, an empty batch is a no-op. Normalization
-     * renumbers a scope's children dense 0..n-1 in display order before the
-     * moves apply. Returns: 200 `{"collections": [...], "requests": [...]}` -
-     * the rows as written - or 400 naming the offending row, in which case
-     * nothing at all was written.
+     * collectionId?}) and `normalize` (array of {parentId}, null for the
+     * roots); both optional, an empty batch is a no-op. Normalization
+     * renumbers a parent's sub-folders and requests together dense 0..n-1 in
+     * sibling order before the moves apply. Returns: 200
+     * `{"collections": [...], "requests": [...]}` - the rows as written - or
+     * 400 naming the offending row, in which case nothing at all was written.
      */
     ctx.server.Post ("/reorder", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         nlohmann::json body;

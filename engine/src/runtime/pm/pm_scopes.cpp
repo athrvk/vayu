@@ -32,12 +32,46 @@ namespace {
 // Variable Type Casting
 // ============================================================================
 
-// Convert a stored Variable into a JSValue of its declared type. The on-disk
-// value is always a string - type drives the conversion (mirrors the frontend
-// castByType in app/src/lib/variable-cast.ts so reads are consistent across
-// both runtimes).
+// `json` parsed, or `text` as a string when `json` does not parse, so a script
+// author reading a malformed json row can see what is there.
+JSValue parse_json_or_text (JSContext* ctx, const std::string& json, const std::string& text) {
+    JSValue parsed = JS_ParseJSON (ctx, json.c_str (), json.size (), "<variable>");
+    if (JS_IsException (parsed)) {
+        JS_FreeValue (ctx, parsed);
+        // Clear the pending exception so it doesn't leak into the script
+        JSValue err = JS_GetException (ctx);
+        JS_FreeValue (ctx, err);
+        return JS_NewString (ctx, text.c_str ());
+    }
+    return parsed;
+}
+
+// The value a script set on `var` this run (#2529), rebuilt in this context.
+JSValue carried_to_jsvalue (JSContext* ctx, const Variable& var) {
+    const ScriptValue& carried = var.script_value;
+    switch (carried.kind) {
+    case ScriptValue::Kind::Undefined: return JS_UNDEFINED;
+    case ScriptValue::Kind::Number: return JS_NewFloat64 (ctx, carried.number);
+    case ScriptValue::Kind::Json:
+        return parse_json_or_text (ctx, carried.json, var.value);
+    case ScriptValue::Kind::None: break;
+    }
+    return JS_NewString (ctx, var.value.c_str ());
+}
+
+// Convert a Variable into the JSValue a script reads. A value a script set this
+// run answers as itself, but only on a row of the default type: Vayu's
+// "string" stands for Postman's `any` as well as a declared string, and
+// Postman passes an `any` value through while casting a declared type (#2529).
+// Otherwise the stored text is cast by the declared type, mirroring the
+// frontend's castByType (app/src/lib/variable-cast.ts) so a loaded row reads
+// the same in both runtimes.
 JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
     const std::string& type = var.type.empty () ? std::string{ "string" } : var.type;
+
+    if (type == "string" && var.script_value.kind != ScriptValue::Kind::None) {
+        return carried_to_jsvalue (ctx, var);
+    }
 
     if (type == "number") {
         if (var.value.empty ())
@@ -75,18 +109,7 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
     }
 
     if (type == "json") {
-        // JS_ParseJSON returns an exception JSValue on parse failure; fall
-        // back to the raw string so the script author can debug.
-        JSValue parsed =
-        JS_ParseJSON (ctx, var.value.c_str (), var.value.size (), "<variable>");
-        if (JS_IsException (parsed)) {
-            JS_FreeValue (ctx, parsed);
-            // Clear the pending exception so it doesn't leak into the script
-            JSValue err = JS_GetException (ctx);
-            JS_FreeValue (ctx, err);
-            return JS_NewString (ctx, var.value.c_str ());
-        }
-        return parsed;
+        return parse_json_or_text (ctx, var.value, var.value);
     }
 
     // Default / "string"
@@ -240,20 +263,57 @@ js_pm_scope_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
 // may invent a `created_at`, because it is the only place the engine creates a
 // variable - stamping an existing one would sort it below rows the user added
 // after it.
-void set_variable_preserving (Environment& map, const std::string& key, std::string value) {
+void set_variable_preserving (Environment& map, const std::string& key, std::string value, ScriptValue carried) {
     auto it = map.find (key);
     if (it != map.end ()) {
-        it->second.value   = std::move (value);
-        it->second.enabled = true; // keeps secret, type and created_at
+        it->second.value        = std::move (value);
+        it->second.script_value = std::move (carried);
+        it->second.enabled      = true; // keeps secret, type and created_at
     } else {
         Variable created{ std::move (value), false, true }; // new var: current defaults
         created.created_at = std::chrono::duration_cast<std::chrono::milliseconds> (
         std::chrono::system_clock::now ().time_since_epoch ())
                              .count ();
-        map[key] = std::move (created);
+        created.script_value = std::move (carried);
+        map[key]             = std::move (created);
     }
 }
 
+// What a later read of a variable set to `value` answers (#2529); see
+// `ScriptValue` for which values carry and how faithfully.
+ScriptValue script_value_of (JSContext* ctx, JSValueConst value) {
+    ScriptValue carried;
+    if (JS_IsString (value)) {
+        return carried;
+    }
+    if (JS_IsUndefined (value)) {
+        carried.kind = ScriptValue::Kind::Undefined;
+        return carried;
+    }
+    if (JS_IsNumber (value)) {
+        carried.kind = ScriptValue::Kind::Number;
+        JS_ToFloat64 (ctx, &carried.number, value); // cannot fail on a number
+        return carried;
+    }
+    JSValue json = JS_JSONStringify (ctx, value, JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException (json)) {
+        // A cycle, a BigInt or a throwing toJSON: the set still stores the
+        // text, so the read falls back to it rather than failing the script.
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return carried;
+    }
+    if (JS_IsString (json)) { // a function or a symbol stringifies to undefined
+        carried.kind = ScriptValue::Kind::Json;
+        carried.json = js_to_string (ctx, json);
+    }
+    JS_FreeValue (ctx, json);
+    return carried;
+}
+
+// The stored text is Postman's `Variable#toString`: JavaScript's string
+// conversion, except that `undefined` is "" rather than "undefined". So
+// `{{name}}`, the wire and storage read what Postman's would, and the value
+// itself rides beside the text for the run's own reads (#2529).
 JSValue
 js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -266,10 +326,12 @@ js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_UNDEFINED;
     }
 
-    std::string key   = js_to_string (ctx, argv[0]);
-    std::string value = js_to_string (ctx, argv[1]);
+    std::string key = js_to_string (ctx, argv[0]);
+    std::string text =
+    JS_IsUndefined (argv[1]) ? std::string{} : js_to_string (ctx, argv[1]);
 
-    set_variable_preserving (*variables, key, std::move (value));
+    set_variable_preserving (
+    *variables, key, std::move (text), script_value_of (ctx, argv[1]));
 
     return JS_UNDEFINED;
 }

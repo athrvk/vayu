@@ -66,9 +66,10 @@ std::optional<Json> try_parse_body (const std::string& body) {
 
 namespace {
 
-// A text field serializes exactly as it always did - the file members are
-// emitted only for a file part, so a stored body that has none round-trips
-// byte-identically through this.
+// A text field with no content type serializes exactly as it always did - the
+// file members are emitted only for a file part, `contentType` only when set
+// (a text part carries one too, #2539) - so a stored body that has neither
+// round-trips byte-identically through this.
 Json serialize_form_fields (const std::vector<FormField>& fields) {
     Json out = Json::array ();
     for (const auto& field : fields) {
@@ -80,9 +81,9 @@ Json serialize_form_fields (const std::vector<FormField>& fields) {
             if (!field.file_name.empty ()) {
                 entry["fileName"] = field.file_name;
             }
-            if (!field.content_type.empty ()) {
-                entry["contentType"] = field.content_type;
-            }
+        }
+        if (!field.content_type.empty ()) {
+            entry["contentType"] = field.content_type;
         }
         out.push_back (std::move (entry));
     }
@@ -1384,7 +1385,23 @@ Json serialize_redirects (const std::vector<RedirectHop>& hops) {
     return out;
 }
 
-Json serialize (const Response& response) {
+namespace {
+
+/// `serialize`'s `body` for a text body: its parse, or `null` when the caller
+/// declined one, the text is past `MAX_PARSED_RESPONSE_BODY_BYTES` (#2544), or
+/// it is not JSON. The size is checked first so a large body is never parsed.
+Json parsed_body (const std::string& text, bool include_parsed_body) {
+    if (!include_parsed_body ||
+    text.size () > vayu::core::constants::http::MAX_PARSED_RESPONSE_BODY_BYTES) {
+        return nullptr;
+    }
+    auto parsed = try_parse_body (text);
+    return parsed ? std::move (*parsed) : Json (nullptr);
+}
+
+} // namespace
+
+Json serialize (const Response& response, bool include_parsed_body) {
     Json json;
 
     json["status"]      = response.status_code;
@@ -1425,8 +1442,7 @@ Json serialize (const Response& response) {
     // a reader never has to guess which spelling `bodyRaw` is in.
     if (const auto text = response_body_text (response)) {
         std::string raw (*text);
-        auto parsed          = try_parse_body (raw);
-        json["body"]         = parsed ? std::move (*parsed) : Json (nullptr);
+        json["body"]         = parsed_body (raw, include_parsed_body);
         json["bodyRaw"]      = std::move (raw);
         json["bodyEncoding"] = BODY_ENCODING_UTF8;
     } else {

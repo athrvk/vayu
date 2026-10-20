@@ -139,7 +139,8 @@ collapse a cleared JSON/text/XML/GraphQL/JSON-RPC body to `none` on save (issue
 
 A `binary` body is stored as `{ "mode": "binary", "file": { "src", "fileName"?,
 "contentType"? } }`, and a `form-data` file part carries the same members on
-its row. `src` is the absolute path as written; the file itself is never
+its row; a text part may carry `contentType` alone, the type it declares for
+itself (#2539). `src` is the absolute path as written; the file itself is never
 stored, so a request moves between machines as a name plus a path to relink.
 No trust is stored either (#2356): a path is sent when it lies under an allowed
 folder (`file_roots`, Settings > Files) or is a file a person picked

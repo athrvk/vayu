@@ -330,6 +330,22 @@ TEST (SendWithRowAuth, Oauth2DataTokenIsRefusedByName) {
     EXPECT_NE (plan.error.find ("token endpoint"), std::string::npos);
 }
 
+/// The extra parameter lists are part of the config the token endpoint reads
+/// (issue #2536), so a data token in a row is refused the same way.
+TEST (SendWithRowAuth, AnOauth2DataTokenInAParamRowIsRefusedToo) {
+    const json payload{ { "auth",
+    { { "mode", "oauth2" },
+    { "config",
+    { { "grantType", "client_credentials" }, { "clientId", "static-client" },
+    { "tokenUrl", "https://issuer.example/token" },
+    { "tokenParams",
+    json::array ({ { { "key", "audience" }, { "value", "{{data.audience}}" } } }) } } } } } };
+
+    const auto plan = plan_send_row_auth (payload);
+    ASSERT_FALSE (plan.ok);
+    EXPECT_NE (plan.error.find ("{{data.audience}}"), std::string::npos) << plan.error;
+}
+
 /// The same refusal for a bare bound column (issue #1007). Without it the token
 /// is deferred by composition - it is a bound name - and then reaches the token
 /// endpoint as the literal text `{{client}}`, which is the silent wrong request

@@ -84,24 +84,25 @@ void add_http_version (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// Whether this run negotiated a compressed response, read out of the nested
-// `defaultHeaders` object issue #1488 added to the snapshot at run start.
-// Nested rather than flat so it cannot collide with a client-controlled
-// top-level key `add_if_present` would otherwise copy verbatim.
+// One run-scoped default-header decision (`acceptEncoding`, issue #1488, or
+// `expectContinue`, issue #2516), read out of the nested `defaultHeaders`
+// object the snapshot gains at run start. Nested rather than flat so it cannot
+// collide with a client-controlled top-level key `add_if_present` would
+// otherwise copy verbatim.
 //
-// Omitted, not defaulted, when the snapshot predates this field - unlike
+// Omitted, not defaulted, when the snapshot predates the field - unlike
 // httpVersion, an absent key here does not mean "the engine's own default
 // applied at read time", it means "no run-scoped decision was ever
 // recorded". The baseline comparison (app side) is the one place that reads
-// an absent key as false, because that is what every pre-0.26 run actually
+// an absent key as false, because that is what every earlier run actually
 // sent.
-void add_accept_encoding (nlohmann::json& dst, const nlohmann::json& src) {
+void add_default_header_flag (nlohmann::json& dst, const nlohmann::json& src, const char* key) {
     if (!src.contains ("defaultHeaders") || !src["defaultHeaders"].is_object ()) {
         return;
     }
     const auto& headers = src["defaultHeaders"];
-    if (headers.contains ("acceptEncoding") && headers["acceptEncoding"].is_boolean ()) {
-        dst["acceptEncoding"] = headers["acceptEncoding"];
+    if (headers.contains (key) && headers[key].is_boolean ()) {
+        dst[key] = headers[key];
     }
 }
 
@@ -176,7 +177,7 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
             }
             add_target_rps (summary, config);
             add_http_version (summary, config);
-            add_accept_encoding (summary, config);
+            add_default_header_flag (summary, config, "acceptEncoding");
             add_scenario (summary, config);
         }
     } catch (...) {
@@ -235,6 +236,12 @@ struct ReportExtras {
     // derived from the sampled results - only then are successful/failed
     // recounted from it (a run with neither keeps the sampled figures).
     bool status_codes_overridden = false;
+    // False when the stored summary says nothing was timed (`latency.count`
+    // of 0 - a collection run in which no step sent). The report then leaves
+    // `latency` out: its fields default to 0, which would read as steps that
+    // answered instantly. A summary with no `count` (every load run, and runs
+    // stored before collection runs wrote one) keeps the block.
+    bool latency_measured = true;
     // Script-validation tallies; `has_tests` false leaves the report's
     // testValidation section out entirely.
     bool has_tests    = false;
@@ -501,6 +508,29 @@ void read_capacity_section (const nlohmann::json& stored, ReportExtras& extras) 
     extras.capacity     = std::move (capacity);
 }
 
+/** The stored summary's whole-run `latency` block, or the marker that nothing was timed. */
+void apply_summary_latency (const nlohmann::json& summary,
+vayu::DetailedReport& report,
+ReportExtras& extras) {
+    if (!summary.contains ("latency") || !summary["latency"].is_object ()) {
+        return;
+    }
+    const auto& latency = summary["latency"];
+    if (latency.contains ("count") && latency["count"] == 0) {
+        extras.latency_measured = false;
+        return;
+    }
+    read_number (latency, "min", report.latency_min);
+    read_number (latency, "max", report.latency_max);
+    read_number (latency, "avg", report.latency_avg);
+    read_number (latency, "p50", report.latency_p50);
+    read_number (latency, "p75", report.latency_p75);
+    read_number (latency, "p90", report.latency_p90);
+    read_number (latency, "p95", report.latency_p95);
+    read_number (latency, "p99", report.latency_p99);
+    read_number (latency, "p999", report.latency_p999);
+}
+
 /** The whole-run totals and the latency distribution. */
 void apply_summary_totals (const nlohmann::json& summary,
 vayu::DetailedReport& report,
@@ -531,18 +561,7 @@ ReportExtras& extras) {
         extras.sending = sending;
     }
 
-    if (summary.contains ("latency") && summary["latency"].is_object ()) {
-        const auto& latency = summary["latency"];
-        read_number (latency, "min", report.latency_min);
-        read_number (latency, "max", report.latency_max);
-        read_number (latency, "avg", report.latency_avg);
-        read_number (latency, "p50", report.latency_p50);
-        read_number (latency, "p75", report.latency_p75);
-        read_number (latency, "p90", report.latency_p90);
-        read_number (latency, "p95", report.latency_p95);
-        read_number (latency, "p99", report.latency_p99);
-        read_number (latency, "p999", report.latency_p999);
-    }
+    apply_summary_latency (summary, report, extras);
 }
 
 /** A stored summary's `status_codes` object as the distribution it records. */
@@ -1051,10 +1070,11 @@ int64_t offset) {
  * The GET /runs/:runId/report `configuration` object: the load-test tuning
  * knobs, httpVersion/followRedirects/maxRedirects and what a data-driven run
  * bound and the budgets it carried (fifteen keys total) and, when the
- * snapshot carries one,
- * `acceptEncoding` (issue #1488), built from an already-parsed
- * config_snapshot. `rps`/`targetRps` is the one rename (add_target_rps), so the
- * caller applies it rather than this key list.
+ * snapshot carries them, `acceptEncoding` (issue #1488) and `expectContinue`
+ * (issue #2516), built from an already-parsed config_snapshot. `rps`/
+ * `targetRps` is the one rename (add_target_rps), so the caller applies it
+ * rather than this key list. `expectContinue` is not in the list-row summary
+ * (build_run_summary): only the report's comparison reads it.
  *
  * Extracted (like get_runs_response above) so this is covered directly - see
  * runs_route_test.cpp - without the full report handler's DB/metrics reads.
@@ -1078,7 +1098,8 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
         add_if_present (config_obj, config, key);
     }
     add_http_version (config_obj, config);
-    add_accept_encoding (config_obj, config);
+    add_default_header_flag (config_obj, config, "acceptEncoding");
+    add_default_header_flag (config_obj, config, "expectContinue");
     return config_obj;
 }
 
@@ -1516,11 +1537,14 @@ double target_rps) {
     if (const auto& sending = extras.sending) {
         json_report["summary"]["sendingDurationSeconds"] = sending->sending_duration_s;
     }
-    json_report["latency"] = { { "min", report.latency_min }, { "max", report.latency_max },
-        { "avg", report.latency_avg }, { "median", report.latency_p50 },
-        { "p50", report.latency_p50 }, { "p75", report.latency_p75 },
-        { "p90", report.latency_p90 }, { "p95", report.latency_p95 },
-        { "p99", report.latency_p99 }, { "p999", report.latency_p999 } };
+    if (extras.latency_measured) {
+        json_report["latency"] = { { "min", report.latency_min },
+            { "max", report.latency_max }, { "avg", report.latency_avg },
+            { "median", report.latency_p50 }, { "p50", report.latency_p50 },
+            { "p75", report.latency_p75 }, { "p90", report.latency_p90 },
+            { "p95", report.latency_p95 }, { "p99", report.latency_p99 },
+            { "p999", report.latency_p999 } };
+    }
     json_report["statusCodes"] = report.status_codes;
 
     if (target_rps > 0) {

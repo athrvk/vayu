@@ -248,9 +248,14 @@ create carrying an `id` is a `400`, on the single-resource routes and per item i
 [`POST /import/apply`](../../engine/api-reference.md#post-importapply) call:
 
 - Collections are flattened depth-first - **collection → its requests → child
-  collections** - carrying `order` indices and `parentTempId` (`null` for a root);
-  each request carries `collectionTempId` and `bodyType = body.mode` (the engine never
-  derives this).
+  collections** - carrying `parentTempId` (`null` for a root) and, below a root,
+  an `order`: a parent's child collections and requests share one sequence
+  (issue [#2535](https://github.com/athrvk/vayu/issues/2535)), placed by each
+  draft's own `order` where the parse stated one (a Postman item's document
+  position, a Vayu-written document's stored order) and otherwise folders first,
+  then requests (`draft-siblings.ts`, the engine's `sibling_positions` the other
+  copy). Each request carries `collectionTempId` and `bodyType = body.mode` (the
+  engine never derives this).
 - Environments are included **only if `opts.importEnvironments`** is true.
 - The engine generates every real id and returns an `idMap` keyed by temp id. The
   orchestrator checks that map covers every item it sent and throws
@@ -453,13 +458,16 @@ they already have their own segments in the count line.
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
 "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
-"unmapped_body" | "unresolved_base_url" | "unsupported_auth" |
-"url_without_raw" | "variable_metadata", count, requests? }`.
+"unmapped_body" | "unresolved_base_url" | "unsupported_auth" | "oauth2_dropped_field" |
+"oauth2_state_regenerated" | "oauth2_unmapped_param" |
+"url_without_raw" | "variable_metadata", count, requests?, names? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
 per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
 resources it cannot import), so the Preview can say which request to finish rather than only
-how many. How the Preview words and ranks each kind - amber for what the user must finish, muted
+how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
+parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
+[postman.md](./postman.md#oauth-20-extra-request-parameters)). How the Preview words and ranks each kind - amber for what the user must finish, muted
 for what the import decided, not shown for what changes nothing sent - is
 `app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose
@@ -522,7 +530,7 @@ Vayu's variable record has a field for the value and the secret flag only (see
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
-  rows are preserved.
+  rows are preserved. A `form-data` part also carries `contentType?`, its own `Content-Type`.
 - `VariableValue`: `{ value: string, enabled: boolean, secret? }` - all values are strings.
 - `RequestBody`: `{mode:"none"}` | `{mode:"json"|"text"|"graphql"|"jsonrpc"|"xml", content}` |
   `{mode:"form-data"|"x-www-form-urlencoded", fields: KeyValueEntry[]}`.
@@ -608,9 +616,10 @@ remain non-executable and are counted in `meta.nonExecutableAuth`.
 
 ### postman_raw_body
 `postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
-directly; with no explicit language it sniffs via `JSON.parse` (success → `json`, else
-`text`) and never guesses `xml`, keeping the declared language (or `""` for none) as
-`rawLanguage`. Public in `import_document.hpp`: the Postman exporter calls it to decide
+directly; any other declared language is `text` whatever the content looks like (as Postman
+sends it), kept as `rawLanguage`, and `html`/`javascript` also gain their `Content-Type` row
+(`with_required_content_type`). Only a body with no language sniffs via `JSON.parse` (success →
+`json`, else `text`), never guessing `xml`, with `rawLanguage: ""`. Public in `import_document.hpp`: the Postman exporter calls it to decide
 whether a kept `rawLanguage` still describes the stored body.
 
 ### join_exec

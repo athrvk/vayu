@@ -23,9 +23,12 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/utils/logger.hpp"
 
 using namespace sqlite_orm;
@@ -87,6 +90,67 @@ std::vector<Request> Database::get_requests_in_live_collections () {
     select (&Collection::id, where (is_null (&Collection::deleted_at))))),
     multi_order_by (order_by (&Request::collection_id), order_by (&Request::order),
     order_by (&Request::created_at), order_by (&Request::id)));
+}
+
+namespace {
+
+/// A step of the subtree walk: a collection still to open, or a request
+/// whose place in the run is already decided.
+using SubtreeEntry = std::variant<std::string, Request>;
+
+/// Pushes one collection's children so the stack pops them in sibling order.
+void push_children (std::vector<SubtreeEntry>& stack,
+const std::vector<const Collection*>& folders,
+std::vector<Request> requests) {
+    const auto slots = merge_siblings (folders, requests);
+    for (auto slot = slots.rbegin (); slot != slots.rend (); ++slot) {
+        if (slot->kind == SiblingKind::Folder) {
+            stack.emplace_back (
+            std::in_place_type<std::string>, folders.at (slot->index)->id);
+        } else {
+            stack.emplace_back (std::move (requests.at (slot->index)));
+        }
+    }
+}
+
+} // namespace
+
+std::vector<Request> Database::get_requests_in_subtree (const std::string& root_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // One read of the collection table, grouped by parent, instead of one
+    // query per node.
+    const std::vector<Collection> collections = get_collections ();
+    std::unordered_map<std::string, std::vector<const Collection*>> folders_of;
+    for (const auto& collection : collections) {
+        if (collection.parent_id && !collection.parent_id->empty ()) {
+            folders_of[*collection.parent_id].push_back (&collection);
+        }
+    }
+
+    const std::vector<const Collection*> no_folders;
+    std::vector<Request> ordered;
+    // The visited set is what makes a corrupted `parent_id` (a self-parent, or
+    // an A -> B -> A loop written before write-time validation existed)
+    // terminate rather than grow `ordered` forever under the mutex - the same
+    // guard `delete_collection`'s BFS carries.
+    std::unordered_set<std::string> visited;
+    std::vector<SubtreeEntry> stack{ SubtreeEntry{ root_id } };
+    while (!stack.empty ()) {
+        SubtreeEntry entry = std::move (stack.back ());
+        stack.pop_back ();
+        if (auto* request = std::get_if<Request> (&entry)) {
+            ordered.push_back (std::move (*request));
+            continue;
+        }
+        const auto* id = std::get_if<std::string> (&entry);
+        if (id == nullptr || !visited.insert (*id).second) {
+            continue;
+        }
+        const auto found = folders_of.find (*id);
+        push_children (stack, found == folders_of.end () ? no_folders : found->second,
+        get_requests_in_collection (*id));
+    }
+    return ordered;
 }
 
 // Soft delete (issue #988): the row is stamped, not removed. Its examples stay

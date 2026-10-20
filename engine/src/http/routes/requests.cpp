@@ -588,26 +588,21 @@ const std::string& collection_id) {
 }
 
 /**
- * The `order` a new request takes when the caller states none: one past the
- * highest among the collection's current requests, so a created or duplicated
- * request lands at the *end* of its collection.
+ * The `order` a request takes when the caller states none: one past the
+ * highest held by any sibling, sub-folders included (#2535), so a created or
+ * duplicated request lands at the *end* of its collection.
  *
  * It used to default to 0 (`apply_int_field`), which tied every UI-created
  * request with every other and meant the stored column encoded nothing. The
  * moment explicit orders existed - the first drag - every new request would
  * have jumped to the top.
  *
- * Mirrors the sibling scan `apply_collection_fields` already does for
- * collections, and sits here for the same reason `reject_missing_collection`
- * does: bulk import sends explicit orders and cannot scan rows it has yet to
- * write.
+ * Applied here rather than in `apply_request_fields` for the reason
+ * `reject_missing_collection` is: bulk import cannot scan rows it has yet to
+ * write, and hands out its own slots.
  */
-static int next_request_order (vayu::db::Database& db, const std::string& collection_id) {
-    int max_order = -1;
-    for (const auto& existing : db.get_requests_in_collection (collection_id)) {
-        max_order = std::max (max_order, existing.order);
-    }
-    return max_order + 1;
+static int append_order (vayu::db::Database& db, const vayu::db::Request& r) {
+    return db.next_sibling_order (r.collection_id, r.id);
 }
 
 /** True when the body leaves `order` to the engine - absent, or an explicit null. */
@@ -641,16 +636,24 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
     if (auto outcome = apply_request_fields (db, r, json, /*is_create=*/true); !outcome) {
         return as_response (outcome.error ());
     }
-    if (auto outcome = reject_missing_collection (db, r.collection_id); !outcome) {
-        return as_response (outcome.error ());
-    }
-    if (order_is_defaulted (json)) {
-        r.order = next_request_order (db, r.collection_id);
-    }
 
-    db.save_request (r);
-    return { 200,
-        vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
+    // The owner check, the append scan and the write are one lock scope
+    // (#386's rule): a sibling created between the scan and the write would
+    // take the same slot.
+    std::pair<int, nlohmann::json> result;
+    db.with_lock ([&] {
+        if (auto outcome = reject_missing_collection (db, r.collection_id); !outcome) {
+            result = as_response (outcome.error ());
+            return;
+        }
+        if (order_is_defaulted (json)) {
+            r.order = append_order (db, r);
+        }
+        db.save_request (r);
+        result = { 200,
+            vayu::json::serialize (r, vayu::http::FileAccessPolicy::from_database (db)) };
+    });
+    return result;
 }
 
 /** The read-merge-write of PUT /requests/:id, run under the caller's lock. */
@@ -680,10 +683,13 @@ const std::function<void ()>& before_write) {
     }
     // A move that states no `order` appends in the destination. Carrying the
     // source position across would drop the request into an arbitrary slot among
-    // its new siblings - the same defect a collection reparent had. Ordering
-    // *within* a collection is still the caller's to state.
-    if (r.collection_id != existing->collection_id && order_is_defaulted (json)) {
-        r.order = next_request_order (db, r.collection_id);
+    // its new siblings - the same defect a collection reparent had. An explicit
+    // null is "reset to the default", which is the same append, the rule
+    // `apply_collection_fields` applies to a collection. Ordering *within* a
+    // collection is still the caller's to state.
+    const bool moved = r.collection_id != existing->collection_id;
+    if (order_is_defaulted (json) && (moved || json.contains ("order"))) {
+        r.order = append_order (db, r);
     }
     r.updated_at = now_ms ();
 

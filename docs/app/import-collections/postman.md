@@ -42,34 +42,36 @@ The match is a substring check (`schema.includes(...)`), so the full schema URL 
 
 ## Parse flow
 
-`parse()` on either class delegates to the module-level `parsePostman(parsed, opts, formatName)`, which:
+`parse_postman(parsed, options, format)` serves both versions:
 
-1. Creates a mutable `Ctx` (`{ opts, requestCount, folderCount, nonExecutableAuth, skippedFileBody, skippedMalformed, skippedUnsupportedMethod, skippedUnsupportedAuth, skippedUrlWithoutRaw, skippedVariableMetadata }`) threaded through the whole walk to accumulate counters.
-2. Calls `pmFolder(parsed, ctx)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
-3. Builds `meta`, pushing a `SkippedItem` for each counter that is greater than zero.
+1. Creates one `PostmanCounts` (the options, the request, folder and non-executable-auth counts, a counter per skipped kind, the client-certificate candidates, and the request names each counter grew on) threaded through the whole walk.
+2. Calls `pm_folder(parsed, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
+3. Builds `meta`, adding a `SkippedItem` for each counter that is greater than zero.
 
-### Tree walk - `pmFolder`
+### Tree walk - `pm_folder`
 
-`pmFolder(node, ctx)` walks `node.item[]`. For each `child`:
+`pm_folder(node, counts)` walks `node.item[]`. For each `child`:
 
-- **Folder** (`Array.isArray(child.item)` is true) → `ctx.folderCount += 1`, recurse via `pmFolder(child, ctx)`, push into `children`.
-- **Request** (`child.request` is present) → `pmRequest(child, ctx)`, push into `requests`.
-- **Not an object at all** (`null`, a string, a number) → skipped, counting toward `ctx.skippedMalformed`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; dereferencing the entry used to throw a bare `TypeError: Cannot read properties of null` that failed the whole import naming neither the format nor an item. `event[]` entries are filtered the same way (`pmEvents`).
+- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, counts)`, push into `children`.
+- **Request** (`child.request` is truthy) → `pm_request_named(child, counts)`, push into `requests`.
+- **Not an object at all** (`null`, a string, a number) → skipped, counting toward `malformed_item`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; such an entry used to fail the whole import with an error naming neither the format nor an item. `event[]` entries are filtered the same way (`pm_events`).
 - Anything else (an object with no `item[]` and no `request`) is silently ignored.
 
 Folder vs request discrimination is purely structural: **presence of an `item` array makes a node a folder**, otherwise presence of a `request` makes it a request. Nesting is bounded by the engine's reader, not by the walk: `read_document` refuses a document nested past `MAX_READ_DEPTH` (100 levels, about 50 folders) before `pm_folder` runs, so a hostile file fails with a "nests deeper" error rather than overflowing the stack.
 
-The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth`, the two scripts, and its `children`/`requests`. The root and every folder are built by the same function - the root is simply the outermost `pmFolder` result and becomes `collections[0]` (the only root; `parentId = null`).
+**Document order is kept** (issue [#2535](https://github.com/athrvk/vayu/issues/2535)). Postman runs a folder's items in the order the file lists them and descends into a sub-folder where it sits, so a "Log in" request at the top of a collection runs before the folders after it. Each folder and request draft records its position among the items kept from its parent's `item[]` as `order`, and the apply numbers a parent's sub-folders and requests in that one sequence: the sidebar lists them, a recursive run visits them and an export writes them in the file's order. Postman's own `collection-v2.json` example, two requests then a folder at the root and three requests then a folder inside it, imports exactly so.
 
-### Request build - `pmRequest`
+The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth`, its script elements, and its `children`/`requests`. The root and every folder are built by the same function - the root is simply the outermost `pm_folder` result and becomes `collections[0]` (the only root; `parentId = null`, and no `order`, because it joins the roots already stored).
 
-`pmRequest(item, ctx)` reads `item.request`, derives `url`/`params` via `pmUrl`, maps auth via `map_postman_auth`, increments `ctx.requestCount`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `ctx.nonExecutableAuth`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)).
+### Request build - `pm_request`
+
+`pm_request(item, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, increments `counts.requests`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `counts.non_executable`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
 
 ## Field mapping
 
 ### Collection (root)
 
-The root is produced by `pmFolder(parsed, ctx)`; `parsed` is the whole collection object.
+The root is produced by `pm_folder(parsed, counts)`; `parsed` is the whole collection object.
 
 | Postman | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
@@ -80,10 +82,11 @@ The root is produced by `pmFolder(parsed, ctx)`; `parsed` is the whole collectio
 | `event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
 | nested `item[]` (folders) | `children` | recursion |
 | `item[]` (requests) | `requests` | |
+| an item's position in its parent's `item[]` | `order` on each folder and request draft | one count across both kinds, malformed entries skipped - see [Tree walk](#tree-walk---pm_folder) |
 
 ### Collection (folder)
 
-Same `pmFolder` mapping. A folder node has `name`/`description`/`variable`/`auth`/`event` at the top level (no `info` wrapper), but the code reads `node.info?.name ?? node.name` and `node.info?.description ?? node.description`, so both shapes work. Each nested folder increments `ctx.folderCount`.
+Same `pm_folder` mapping. A folder node has `name`/`description`/`variable`/`auth`/`event` at the top level (no `info` wrapper), but the code reads `node.info?.name ?? node.name` and `node.info?.description ?? node.description`, so both shapes work. Each nested folder increments `counts.folders`.
 
 ### Request
 
@@ -140,7 +143,7 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 
 `postmanResponse` keeps what no example field models - the request the response was recorded against (`originalRequest`, which usually differs per example: its own query values, headers, body and path variables), the status text as recorded, `_postman_previewlanguage` / `_postman_previewtype`, `cookie[]`, `responseTime`, and the header rows as written (`name` fields, number values) - so an export writes them back. It is stored in `request_examples.postman_response` and read only by the Postman export; nothing is lost, so nothing is counted in `meta.skipped`. An entry whose text would pass the cap is imported without it and its export regenerates those members.
 
-An entry that is not an object counts toward `malformed_item`, the same treatment `pmFolder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
+An entry that is not an object counts toward `malformed_item`, the same treatment `pm_folder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
 
 `meta.exampleCount` totals what survived, counted off the drafts by `count_examples` (the same read-the-result approach `unattached_file_parts` uses), and the import preview shows it.
 
@@ -207,7 +210,7 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 |---------------------|--------------------|-------|
 | `raw` | `postman_raw_body(body.raw, body.options.raw.language)` | see raw sniffing below |
 | `urlencoded` | `{ mode: "x-www-form-urlencoded", fields }` | `fields` = `mapKeyValues(body.urlencoded)`, a row's non-`"text"` `type` kept as on a header |
-| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`; a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), which the parse answer marks `unresolved` unless this machine already allows it. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
+| `formdata` | `{ mode: "form-data", fields }` | text entries via `map_key_values`, a non-empty `contentType` on one kept on the field (the engine sends it as that part's own `Content-Type`, issue #2539); a `type: "file"` entry becomes a **file row** per path in `src` (a string or an array - Postman allows several files per field), which the parse answer marks `unresolved` unless this machine already allows it. A file entry naming no path becomes one file row with `src: ""` (no file chosen), counted in `meta.unattachedFileParts`. |
 | `graphql` | `{ mode: "graphql", content }` | via `graphqlContent` - the graphql object is serialized to JSON with `variables` **parsed** (see below); `operationName` rides along, and the request gains a `Content-Type` (see below) |
 | `file` | `{ mode: "binary", file: { src, fileName } }` | `src` is `body.file.src` as written and `fileName` its base name; `src: null` or no `file` (Postman's shape before a file is chosen) imports as `{ src: "" }`, no file chosen. Counted as `file_body`, a file reference to relink |
 | anything else | `{ mode: "none" }` | |
@@ -218,27 +221,39 @@ framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 
 **GraphQL `Content-Type` (`with_required_content_type` in `import_document.cpp`):** a GraphQL body is a JSON envelope, so the request needs `Content-Type: application/json` - and Vayu's request builder adds that header only when you *pick* GraphQL, which an import never does. The header was therefore absent, and libcurl defaults to `application/x-www-form-urlencoded`, which most GraphQL servers answer with a `400`; nothing in the app said why. The header is now written at import, by the engine's port of the rule the mode picker uses (`contentTypeToAdd`): a Content-Type the collection declares wins (including a deliberate `application/graphql`), and a **disabled** row does not count as declaring one. The row is written as the body mode's own (`"source": "body-mode"`, the marker the Body panel writes), because Postman treats a body's Content-Type as a system header: a request whose `disabledSystemHeaders` refuses `content-type` gets no row at all, and a later opt-out in Vayu removes the marked row from the wire while a Content-Type the user typed is always sent (issue #1765). The export leaves the marked row out while Postman would add the same header on its own.
 
-**Raw language sniffing (`postman_raw_body` in `import_document.cpp`):**
+**Raw language (`postman_raw_body` in `import_document.cpp`):**
 
 | `options.raw.language` | Result |
 |------------------------|--------|
 | `"json"` | `{ mode: "json", content }` |
 | `"text"` | `{ mode: "text", content }` |
-| `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `with_required_content_type` rule GraphQL uses (below) |
-| absent / other | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` - with `rawLanguage` beside it: the declared language (`"javascript"`, `"html"`), or `""` when none was declared |
+| `"xml"` | `{ mode: "xml", content }` - and the request gains `Content-Type: application/xml` through the same `with_required_content_type` rule GraphQL uses (above) |
+| `"html"`, `"javascript"` | `{ mode: "text", content, rawLanguage }` - and the request gains `Content-Type: text/html` / `application/javascript` as the body mode's own row (`"source": "body-mode"`), whatever the content looks like (HTML that happens to parse as JSON is still `text/html`) |
+| any other declared language (`"yaml"`, ...) | `{ mode: "text", content, rawLanguage }`, no row: sent as `text/plain`, as Postman sends it, even when the content parses as JSON |
+| absent | tries `JSON.parse(content)`; success → `{ mode: "json" }`, failure → `{ mode: "text" }` - with `rawLanguage: ""` beside it |
 
-`rawLanguage` changes nothing about what is sent - the sniffed mode decides
-that, as before. It is what the Postman export reads to write the body's
-`options` back as the document had them: none at all for an unlabelled body
-(the common shape in generated collections), the declared language otherwise.
+The language-to-type table is `LANGUAGE_CONTENT_TYPES` in `postman_format.hpp`,
+beside `RAW_LANGUAGES`, and holds only the languages that need a row: `json`,
+`xml` and `text` are modes the engine already sends under their own type.
+The row follows the GraphQL rules: an enabled Content-Type the request
+declares wins, a disabled one does not count, and a request whose
+`disabledSystemHeaders` refuses `content-type` gets none.
+
+`rawLanguage` is what the Postman export reads to write the body's `options`
+back as the document had them: none at all for an unlabelled body (the common
+shape in generated collections), the declared language otherwise.
 `postman_raw_body` is the one mapping both directions call, so the exporter
 writes a kept `rawLanguage` only while importing the body again would still
-give its stored mode.
+give its stored mode. The export leaves the `html` / `javascript` row out for
+the same reason it leaves GraphQL's: Postman adds that header itself from the
+language.
 
-An unlabelled body is never sniffed into `xml`: without Postman's language, a
-`<`-shaped document is as likely to be HTML, and guessing would hand the request
-a Content-Type the server may disagree with. `"xml"` is the only new mapping -
-`"html"`, `"javascript"` and the rest still fall through to the sniff.
+**An unlabelled body still differs from Postman.** Postman sends a body with no
+declared language as `text/plain`; Vayu sniffs it, so JSON-looking content is
+sent as `application/json` and the rest as `text/plain`. That is the one
+place a body's wire type differs from Postman's. It is also never sniffed into `xml`:
+without Postman's language, a `<`-shaped document is as likely to be HTML, and
+guessing would hand the request a Content-Type the server may disagree with.
 
 **File references are imported, never dropped.** A `file` body and every
 `formdata` file entry keep the path the export named. A path names a file on
@@ -259,7 +274,7 @@ Auth is mapped by `mapPostmanAuth(auth)` (`import_document.cpp`). It reads `auth
 | `bearer` | `{ mode: "bearer", token }` | `token` normalized |
 | `basic` | `{ mode: "basic", username, password }` | both normalized |
 | `apikey` | `{ mode: "apikey", key, value, in }` | `in` = `"query"` only if detail `in === "query"`, else `"header"` |
-| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. A block holding only a seeded `accessToken` (no grant, token URL or auth URL - commercetools writes one on every request) is what Postman sends as is, so it imports as what sends the same bytes: a bearer token, or, when `addTokenTo` is `queryParams` or `headerPrefix` is not `Bearer`, an API key (`access_token` in the query, or `Authorization: <prefix> <token>`). `state` (Vayu generates and validates its own per authorization attempt) and a seeded `accessToken` beside an explicit grant (Vayu fetches through the grant) are not used when sending and are counted as `oauth2_dropped_field` (issue #1460); both are kept in the block's `postman` source below, so an export writes them back |
+| `oauth2` | `{ mode: "oauth2", config: OAuth2Config }` | mapped via `map_postman_oauth2` (`import_document.cpp`) - **executable**; grant normalized. `tokenName`, when present, is stored as `config.credentialsId` - Vayu's field for keeping otherwise-identical token-cache entries apart. A block holding only a seeded `accessToken` (no grant, token URL or auth URL - commercetools writes one on every request) is what Postman sends as is, so it imports as what sends the same bytes: a bearer token, or, when `addTokenTo` is `queryParams` or `headerPrefix` is not `Bearer`, an API key (`access_token` in the query, or `Authorization: <prefix> <token>`). A seeded `accessToken` beside an explicit grant (Vayu fetches a new one through the grant) is not used when sending and is counted as `oauth2_dropped_field`, named per request; `state` (Vayu generates and validates its own per authorization attempt) is counted apart as `oauth2_state_regenerated`, because it changes nothing sent (issues #1460, #2536). Both are kept in the block's `postman` source below, so an export writes them back. The extra request parameter lists are read as described [below](#oauth-20-extra-request-parameters) |
 | `awsv4` | `{ mode: "aws", config }` | `awsv4` is the schema's enum value for AWS Signature; Vayu's internal mode is `aws`, so the name is translated rather than passed through. Matching on `"aws"` here dropped every real SigV4 export to `{mode:"none"}` *and* suppressed the `nonExecutableAuth` warning. The mode is **not executed**: the request is sent without auth, and the send's `authNotice` says so ([api-reference](../../engine/api-reference.md#authentication)) |
 | `digest` / `ntlm` / `hawk` / `oauth1` / `edgegrid` / `jwt` | `{ mode: type, config }` | `config` is the raw flattened detail map; **not executed** by Vayu - the request is sent without auth, and the send's `authNotice` says so (counted as `nonExecutableAuth` on each request, folder or collection declaring it, as `aws` is). The table is `CONFIG_AUTH_TYPES` in `postman_format.hpp`, which the exporter reads too, so each exports back as its own type |
 | `inherit` | `{ mode: "inherit" }` | |
@@ -269,7 +284,7 @@ Auth is mapped by `mapPostmanAuth(auth)` (`import_document.cpp`). It reads `auth
 **The block itself, kept for the export (`with_postman_source`).** When the
 Postman exporter would not write a request's or collection's `auth` back
 exactly as the document had it - an attribute Vayu has no field for
-(`tokenType`, `state`, `authRequestParams`), a type stored as another mode
+(`tokenType`, `state`, a parameter row it does not carry), a type stored as another mode
 (the seeded-token `oauth2` above), a different attribute order or attribute
 `type`, `{{ x }}` spacing the importer tightened - the document's block is
 stored beside the mapped auth as `postman`, in v2.1 form (a v2.0 detail object
@@ -299,7 +314,53 @@ PKCE `code_verifier` and the credential rows (`client_secret`,
 
   Collections never inherit (`CollectionDraft.auth` excludes `inherit`), which is why `inherit` collapses to `none`. The explicit-`noauth` case must not collapse with it: the resolution walk steps over `none`, so a request set to Inherit inside a No Auth folder used to resolve to the *root* collection's credentials - sending a bearer token to the endpoints the user had marked unauthenticated. The terminal mode is read by `resolveAuthSource` (renderer) and `composeAuth` (MCP); see [variable resolution → auth inheritance](../variable-resolution.md#auth-inheritance).
 
-**`nonExecutableAuth` counting:** only **request** auth contributes (`pmRequest` increments the counter), and it keys off the *mapped* mode, so `awsv4` counts as `aws`. Collection/folder auth in the data-only family is stored but not counted. `oauth2` is executable and never counts.
+**`nonExecutableAuth` counting:** only **request** auth contributes (`pm_request` increments the counter), and it keys off the *mapped* mode, so `awsv4` counts as `aws`. Collection/folder auth in the data-only family is stored but not counted. `oauth2` is executable and never counts.
+
+### OAuth 2.0 extra request parameters
+
+Postman keeps an `oauth2` block's "Advanced" parameters as three attributes,
+`tokenRequestParams`, `authRequestParams` and `refreshRequestParams`, each an
+array of `{key, value, enabled, send_as}` rows (`send_as` is `request_body`,
+`request_url` or `request_header`; none means the body). `map_postman_oauth2`
+reads them from the raw detail block, in either schema shape, in that order
+(issue #2536):
+
+- A row Postman has switched off (`enabled: false`) is not read.
+- An `audience` or `resource` row of the token or authorization list sent in
+  the body becomes `config.audience` / `config.resource`, which the engine
+  already sends in both requests. The first such value wins; a later row of
+  the same name with a different value is carried in its own list instead.
+- Every other row is carried in the config list of its request, `tokenParams`,
+  `authorizationParams` or `refreshParams`, as `{key, value, enabled: true,
+  sendAs}` with `sendAs` `body`, `url` or `header`. An `authorizationParams`
+  row stores no `sendAs`: the authorization request is a browser navigation,
+  so its parameters ride in the authorize URL's query. A value is kept as
+  typed, `{{ x }}` tightened as every imported value is.
+- A row with no key, a `send_as` Vayu has no target for, or a key the engine
+  writes itself (`grant_type`, `client_id`, `client_secret`, `code`,
+  `redirect_uri`, `code_verifier`, `refresh_token`, `username`, `password`,
+  `scope`, `state`, `code_challenge`, `code_challenge_method`,
+  `response_type`: `RESERVED_PARAM_NAMES` in `oauth_client.hpp`) is not
+  carried and is counted as `oauth2_unmapped_param`. The count names its
+  requests and, under `names`, the parameter keys; a value is never recorded,
+  since it can be a credential. The Preview shows it as an amber line naming
+  the request and the keys. A saved `accessToken` (`oauth2_dropped_field`) is a
+  muted note that the grant fetches a new token, and a regenerated `state`
+  (`oauth2_state_regenerated`) is not shown: nothing sent changes.
+
+The token cache key reads `credentialsId` and not `audience` or `resource`, so
+two imported requests differing only in their audience would share one cached
+token. When a block names no `tokenName`, the promoted audience (else the
+resource) is stored as `config.credentialsId` to keep them apart. (A carried
+row is read by the key itself, so two audiences sent as rows are two tokens
+already.)
+
+The export writes the lists back as Postman's three attributes, each row with
+its `send_as` (an `authorizationParams` row as `request_url`), and
+`config.audience` / `config.resource` as `request_body` rows opening
+`tokenRequestParams`, where the next import promotes them from again. A
+`credentialsId` equal to what the import derived is not written as a
+`tokenName`, so import -> export -> import gives back the same config.
 
 ## Variables & environments
 
@@ -316,9 +377,9 @@ Postman **collection** files do not embed environments, so this parser always re
 
 ## Options & lossy behavior
 
-**`importScripts`** is honored: when `opts.importScripts` is false, `pmRequest` and `pmFolder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
+**`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (an oauth2 block's `state`, or a pre-fetched `accessToken` beside an explicit grant config - see [Auth mapping](#auth-mapping)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.nonExecutableAuth`** - populated: incremented once per **request, folder or collection** whose own mapped auth mode is one of `CONFIG_AUTH_TYPES` (`aws`, `digest`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), and each is named in `meta.nonExecutableAuthRequests`. A folder's or collection's is counted once where it is declared, not once per request inheriting it. These auths are stored on the draft (with their `config`) but Vayu has no execution path for them. `oauth2` is mapped to an executable config and does **not** count.
 
@@ -332,7 +393,7 @@ All defined in `engine/src/core/import_document.cpp` (except `normalize_template
 | [`to_var_record`](./README.md#to_var_record) | collection/folder `variable[]` → `CollectionDraft.variables` |
 | [`map_key_values`](./README.md#map_key_values) | `header[]`, `query[]`, `urlencoded[]`, `formdata[]` → `KeyValueEntry[]` (preserves disabled + duplicates) |
 | [`map_postman_auth`](./README.md#map_postman_auth) | `auth` object → `RequestAuth` (request and, via `collectionAuth`, collection/folder) |
-| `postman_raw_body` | raw-mode body → `RequestBody` with JSON/text language sniffing, keeping a declared language Vayu has no mode for (shared with the exporter) |
+| `postman_raw_body` | raw-mode body → `RequestBody`: a declared language maps to its mode or to `text` (kept as `rawLanguage`), an unlabelled body is sniffed for JSON (shared with the exporter) |
 | [`join_exec`](./README.md#join_exec) | `event.script.exec` → joined script string |
 | [`normalize_template_vars`](./README.md#normalize_template_vars--normalize_path_templates) | rewrite `{{ x }}` / `{{ _.x }}` template syntax to Vayu `{{x}}` (`path_template.cpp`); applied to URLs, values, vars, and auth fields. Called **without** `pathTemplates`, so a literal single-brace `{x}` is left alone - in Postman only `{{x}}` is a template, and rewriting `/tags/{beta}` or `fields=friends{name}` invented a variable that resolved to nothing |
 
@@ -389,6 +450,9 @@ the request as it is at export time.
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.
+
+A form-data part exports with its own `contentType` when it has one, a text
+part as well as a file part.
 
 A binary body exports as Postman's `file` mode naming the file's path
 (`file.src`), as a form-data file part names its own; a file's own content type

@@ -6,7 +6,8 @@
  */
 
 /**
- * Zone math and the folders-first block rule (#367).
+ * Zone math and where a drop lands (#367), over one sibling list per parent
+ * (#2535).
  *
  * Node environment: jsdom has no layout, so every row there measures 0px tall
  * and the boundaries this file pins would be untestable through a gesture.
@@ -55,29 +56,31 @@ describe("zoneAt", () => {
 });
 
 describe("resolving a folder drop", () => {
-	it("lands in the target's own folder block, beside it", () => {
+	it("lands beside the target folder, under the target's parent", () => {
 		expect(
 			resolveDrop({ dragged: folder("a"), target: folder("b", "p"), zone: "after" })
-		).toEqual({
-			block: "collections",
-			ownerId: "p",
-			anchorId: "b",
-			placement: "after",
-		});
+		).toEqual({ ownerId: "p", anchorId: "b", placement: "after" });
 	});
 
 	it("lands inside the folder when the pointer is in the middle band", () => {
 		expect(
 			resolveDrop({ dragged: folder("a"), target: folder("b", "p"), zone: "inside" })
-		).toEqual({ block: "collections", ownerId: "b", anchorId: null, placement: "after" });
+		).toEqual({ ownerId: "b", anchorId: null, placement: "after" });
 	});
 
-	it("refuses a request row - requests are the other block", () => {
-		for (const zone of ["before", "inside", "after"] as const) {
-			expect(resolveDrop({ dragged: folder("a"), target: request("r1", "c1"), zone })).toBe(
-				null
-			);
-		}
+	it("lands beside a request row - folders and requests share one list", () => {
+		expect(
+			resolveDrop({ dragged: folder("a"), target: request("r1", "c1"), zone: "before" })
+		).toEqual({ ownerId: "c1", anchorId: "r1", placement: "before" });
+		expect(
+			resolveDrop({ dragged: folder("a"), target: request("r1", "c1"), zone: "after" })
+		).toEqual({ ownerId: "c1", anchorId: "r1", placement: "after" });
+	});
+
+	it("lands beside a root folder, at the top level", () => {
+		expect(
+			resolveDrop({ dragged: folder("a", "p"), target: folder("b", null), zone: "before" })
+		).toEqual({ ownerId: null, anchorId: "b", placement: "before" });
 	});
 
 	it("refuses itself", () => {
@@ -95,29 +98,34 @@ describe("resolving a request drop", () => {
 				target: request("r2", "c2"),
 				zone: "before",
 			})
-		).toEqual({ block: "requests", ownerId: "c2", anchorId: "r2", placement: "before" });
+		).toEqual({ ownerId: "c2", anchorId: "r2", placement: "before" });
 	});
 
-	it("lands in a folder's requests when dropped on its middle", () => {
+	it("lands at the end of a folder when dropped on its middle", () => {
 		expect(
 			resolveDrop({ dragged: request("r1", "c1"), target: folder("c2"), zone: "inside" })
-		).toEqual({ block: "requests", ownerId: "c2", anchorId: null, placement: "after" });
+		).toEqual({ ownerId: "c2", anchorId: null, placement: "after" });
 	});
 
-	it("resolves 'between two folders' to the head of that parent's requests", () => {
-		// The two-block rule: the order column cannot put a request between two
-		// folders, so the nearest place it can actually sit is just below them.
+	it("lands between two folders, beside the one the pointer is on", () => {
 		expect(
 			resolveDrop({ dragged: request("r1", "c1"), target: folder("c2", "p"), zone: "after" })
-		).toEqual({ block: "requests", ownerId: "p", anchorId: null, placement: "before" });
+		).toEqual({ ownerId: "p", anchorId: "c2", placement: "after" });
 		expect(
 			resolveDrop({ dragged: request("r1", "c1"), target: folder("c2", "p"), zone: "before" })
-		).toEqual({ block: "requests", ownerId: "p", anchorId: null, placement: "before" });
+		).toEqual({ ownerId: "p", anchorId: "c2", placement: "before" });
 	});
 
-	it("refuses the edges of a root folder - the root holds no requests", () => {
+	it("refuses the edges of a root folder - the top level holds no requests", () => {
 		expect(
 			resolveDrop({ dragged: request("r1", "c1"), target: folder("c2", null), zone: "after" })
+		).toBe(null);
+		expect(
+			resolveDrop({
+				dragged: request("r1", "c1"),
+				target: folder("c2", null),
+				zone: "before",
+			})
 		).toBe(null);
 		// Its middle is still a folder to drop into.
 		expect(

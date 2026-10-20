@@ -129,6 +129,9 @@ export interface VariableValue {
  * engine opens it at send time, so nothing here (and nothing in storage) holds
  * the contents. `fileName` and `contentType` override what the part declares
  * about itself; absent means the engine lets libcurl derive them from the path.
+ * A text part may carry `contentType` as well (a Postman import keeps the one
+ * the source declared, #2539): the part is sent with that type and none
+ * otherwise. `src` and `fileName` stay file-only.
  *
  * `unresolved` is read-only: the engine's answer, on a read, to whether it
  * would refuse the path on this machine, and what the editor's warning reads.
@@ -183,6 +186,24 @@ export type RequestBody =
  */
 export type OAuth2GrantType = "authorization_code" | "client_credentials" | "password";
 
+/** Where a token or refresh request carries an {@link OAuth2ParamRow}. */
+export type OAuth2ParamSendAs = "body" | "url" | "header";
+
+/**
+ * One extra request parameter of an OAuth 2.0 config (issue #2536): an Auth0
+ * `audience`, an Azure AD `resource`, an `acr_values`. Absent `enabled` means
+ * enabled and absent `sendAs` means `body`; the authorize request reads
+ * neither, every row of `authorizationParams` rides its URL query. The engine
+ * sends the rows and keys the token cache by them
+ * (`engine/include/vayu/http/oauth_client.hpp`).
+ */
+export interface OAuth2ParamRow {
+	key: string;
+	value: string;
+	enabled?: boolean;
+	sendAs?: OAuth2ParamSendAs;
+}
+
 /**
  * OAuth 2.0 configuration. Every string field may contain {{variables}},
  * resolved app-side before the config is sent to the engine. `state` is
@@ -210,6 +231,12 @@ export interface OAuth2Config {
 	autoRefreshToken?: boolean; // default true
 	useEmbeddedBrowser?: boolean; // default false
 	credentialsId?: string; // default "default"
+	/** Appended to the authorize URL's query (authorization_code). Absent when empty. */
+	authorizationParams?: OAuth2ParamRow[];
+	/** Appended to a fresh grant's token request. Absent when empty. */
+	tokenParams?: OAuth2ParamRow[];
+	/** Appended to a refresh request. Absent when empty. */
+	refreshParams?: OAuth2ParamRow[];
 }
 
 /**
@@ -602,16 +629,33 @@ export interface DataContractScope {
 	columns: string[];
 }
 
+/** Which kind of row a tree sibling is: a sub-folder or a request. */
+export type TreeRowKind = "collection" | "request";
+
 /** A row the sidebar places in a tree - a {@link Collection} or a {@link Request}. */
 export interface OrderedTreeRow {
+	/**
+	 * Read only to rank an `order` tie across kinds, so a list of one kind (the
+	 * collections list, one request list) sorts the same without it. A list that
+	 * mixes the two states it on every row - `childrenOf` in
+	 * `modules/collections/tree-children.ts` is the one place that builds one.
+	 */
+	kind?: TreeRowKind;
 	order?: number;
 	createdAt?: string;
 	id?: string;
 }
 
+/** Rank on an `order` tie: a sub-folder sorts before a request. */
+const KIND_RANK: Record<TreeRowKind, number> = { collection: 0, request: 1 };
+
 /**
  * The one ordering rule for collections and requests alike: `order` ascending,
- * ties by creation time, remaining ties by id.
+ * then kind (a sub-folder before a request), then creation time, remaining ties
+ * by id. A collection's sub-folders and requests share one `order` space
+ * (#2535), so this sorts the merged sibling list the sidebar renders and a
+ * recursive run walks; within one kind it is the `order, createdAt, id` rule
+ * unchanged.
  *
  * There used to be two comparators with two different tie rules - collections
  * tiebroke by id, requests by `createdAt` - while the engine tiebroke by
@@ -620,9 +664,13 @@ export interface OrderedTreeRow {
  * sidebar showed, and either order could change after an unrelated rename.
  *
  * The rule is now identical on both sides, pinned by
- * `engine/tests/fixtures/tree-order-conformance.json` (issue #360). Two details
- * are load-bearing rather than incidental:
+ * `engine/tests/fixtures/tree-order-conformance.json` (issues #360, #2535;
+ * the engine's copy is `engine/include/vayu/db/sibling_order.hpp`). Three
+ * details are load-bearing rather than incidental:
  *
+ *  - **Kind before `createdAt`.** A workspace from before the shared space has
+ *    rows of both kinds tied at `0`; ranking the folder first keeps the
+ *    folders-first display they were created under.
  *  - **`createdAt` before `id`.** Every request created before explicit orders
  *    existed sits at `order: 0`, so creation time is what the user has been
  *    seeing; making the id primary would visibly reshuffle their tree.
@@ -634,6 +682,9 @@ export interface OrderedTreeRow {
 export function compareTreeOrder(a: OrderedTreeRow, b: OrderedTreeRow): number {
 	const orderDiff = (a.order ?? 0) - (b.order ?? 0);
 	if (orderDiff !== 0) return orderDiff;
+
+	const kindDiff = KIND_RANK[a.kind ?? "collection"] - KIND_RANK[b.kind ?? "collection"];
+	if (kindDiff !== 0) return kindDiff;
 
 	const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
 	const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -1110,15 +1161,18 @@ export interface RunConfigSnapshot {
 	/**
 	 * A load or collection run's resolved default-header decision at start
 	 * (issue #1488) - `userAgent` is the value verbatim, `requestId` and
-	 * `acceptEncoding` are whether each was negotiated at all. Absent on a
-	 * design run and on any run recorded before this field existed. Never
-	 * re-applied to a send; kept only so a baseline comparison can tell
+	 * `acceptEncoding` are whether each was negotiated at all, and
+	 * `expectContinue` (issue #2516) is whether libcurl was allowed to add
+	 * `Expect: 100-continue`. Absent on a design run and on any run recorded
+	 * before this field existed (a run before #2516 has no `expectContinue`).
+	 * Never re-applied to a send; kept only so a baseline comparison can tell
 	 * whether two runs measured under the same conditions.
 	 */
 	defaultHeaders?: {
 		userAgent: string;
 		requestId: boolean;
 		acceptEncoding: boolean;
+		expectContinue?: boolean;
 	};
 	[key: string]: unknown;
 }
@@ -2137,6 +2191,13 @@ export interface HttpResponse {
 	 */
 	requestHeaderLines?: HeaderLine[];
 	rawRequest?: string;
+	/**
+	 * The engine's JSON parse of `bodyRaw`, or `null` when it has none to give:
+	 * the request declined it (`includeParsedBody: false`, which the renderer
+	 * always sends), the body is not JSON, is base64, or is past 4 MiB. Nothing
+	 * in the renderer reads it but the guard in `responseFromExecuteResult`; the
+	 * pane is built from `bodyRaw`.
+	 */
 	body: unknown;
 	bodyRaw: string;
 	/**
@@ -2520,6 +2581,12 @@ export interface RunReport {
 			maxRedirects?: number;
 			/** See {@link RunSummary.acceptEncoding} (issue #1488). */
 			acceptEncoding?: boolean;
+			/**
+			 * Whether `Expect: 100-continue` was allowed (issue #2516). Read by the
+			 * baseline comparison only, which treats an absent key as `false`; the
+			 * list-row {@link RunSummary} does not carry it.
+			 */
+			expectContinue?: boolean;
 			/**
 			 * How many `data` rows the run bound (issue #993); the rows themselves
 			 * are never stored. Absent for a run without a data file.

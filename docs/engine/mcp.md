@@ -301,7 +301,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence) |
-| `move_item`            | write    | `GET /collections` or `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge) | write toggle; `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
@@ -610,10 +610,11 @@ Notes:
   statuses, such as `Stopped` against `Completed`), `http_version` (`auto`
   is unknown and never differs), `data_file` (by content hash; none against
   one counts), `request` (method or URL, the URL without userinfo, query or
-  fragment because the comparison is not masked the way `get_run_report` is)
-  and `compression` (the same fact as `compressionNegotiationDiffers`, which
-  stays). When both reports carry `metadata.runType`, a `mode`,
-  `concurrency` or `target_rps` only one of them recorded is a difference,
+  fragment because the comparison is not masked the way `get_run_report` is),
+  `compression` (the same fact as `compressionNegotiationDiffers`, which
+  stays) and `expect_continue` (#2516; `Expect: 100-continue` `allowed` or
+  `not allowed`, an absent key reading as `not allowed`). When both
+  reports carry `metadata.runType`, a `mode`, `concurrency` or `target_rps` only one of them recorded is a difference,
   its missing side `not recorded`; a report with no `runType` is from an
   engine that may not record them, and there a field a report does not carry
   is unknown, not a difference. The
@@ -787,11 +788,17 @@ Notes:
   `last` among its new siblings. Positions in between stay a UI gesture on
   purpose - naming one means reproducing the app's ordering arithmetic
   (`modules/collections/reorder-math.ts`) from outside it, and getting it wrong
-  is a folder that visibly reshuffles. The batch states the destination block's
-  whole arrangement rather than leaning on the engine's `normalize` pass, because
-  normalization runs *before* the moves and would leave a row moved to the end of
-  a block it is already in tied with the sibling it displaced; only the rows whose
-  stored `order` actually changes get an entry. A collection may move to the top
+  is a folder that visibly reshuffles. The siblings are the destination's
+  sub-collections **and** its requests, one `order` space (#2535,
+  [Ordering](api-reference.md#ordering)): the tool reads both lists and merges
+  them with the sibling comparator (`tools/sibling-order.ts`, pinned to the
+  engine's and the renderer's by `tree-order-conformance.json`), so `last` lands
+  past every child of either kind and `first` ahead of them all. The batch states
+  that list's whole arrangement, each row under its own `type`, rather than
+  leaning on the engine's `normalize` pass, because normalization runs *before*
+  the moves and would leave a row moved to the end of a list it is already in
+  tied with the sibling it displaced; only the rows whose stored `order` actually
+  changes get an entry. A collection may move to the top
   level (`parentId: null`) and a request always belongs to a collection. Moving a
   collection into itself or into its own subtree is refused here, walking the
   same tree the app's "Move to..." dialog walks, so the answer names the problem -
@@ -895,9 +902,11 @@ Notes:
   and whether it has expired, and `clear_oauth2_token` drops one. The config is
   the same block a saved request's `auth` carries, so it can be copied out of
   `list_requests` verbatim; the **cache key is the engine's**
-  (`accessTokenUrl` + `clientId` + `credentialsId` + username), so configs
-  differing only in scope share an entry and a distinct `credentialsId` is what
-  separates them.
+  (`accessTokenUrl` + `clientId` + `credentialsId` + username + the extra
+  parameter rows the engine would send, a credential-named row such as
+  `client_assertion` by its name alone, so the key never carries a secret),
+  so configs differing only in scope
+  share an entry and a distinct `credentialsId` is what separates them.
   Two rules here are security decisions rather than plumbing, and both are
   stated in the tool descriptions so an agent reads them before it reads a
   refusal. **No tool returns access-token bytes.** The engine is what applies a
@@ -1558,8 +1567,13 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     step's p99? an arrival-rate executor Vayu does not implement), as is any
     non-zero `targetRps`, which selects that path whatever the declared mode.
   - The collection tree **is** the sequence: there is no step list to send, and
-    `recursive: true` walks sub-collections in the sidebar's order (each
-    subtree before that level's own requests, mirroring `collect_requests`).
+    `recursive: true` walks sub-collections in the sidebar's order: at each
+    level the sub-collections and requests are one sibling list, a request runs
+    where it sits and a sub-collection's whole subtree where the sub-collection
+    sits, mirroring `collect_requests`. The pre-flight allowlist walk is the
+    same walk (`scenarioStepRows`), pinned to the engine's by
+    `recursive-run-order-conformance.json`, so the step a refusal names is the
+    first one the run would have reached.
   - **Rows are inline** - the engine never opens a file - and its
     `maxScenarioDataRows` / `maxScenarioDataBytes` refusals, and the depth
     refusal (a cell nested deeper than 100 levels, `400` `invalid_run_config`
@@ -2220,7 +2234,8 @@ cannot read a missing value as an empty one.
 | ---- | ----------- | ------- |
 | A variable whose `secret` is `true` (any other value is not a secret) | `value` dropped, `valueWithheld: true` | `list_environments`, `get_globals`, `list_collections`, `resolve_variables`, `vayu://environments`, `vayu://collections` |
 | An auth credential: `token`, `password`, `value` (an API key's), `clientSecret`, `secretKey`, `accessKey`, `sessionToken`, `accessToken`, `refreshToken`, `idToken`, `secret`, `authKey`, `consumerSecret`, `tokenSecret`, `clientToken`, `privateKey`, `code_verifier`, at the top of the block or under `config` | the member dropped, `<member>Withheld: true` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
-| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion` | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
+| A credential in a Postman import's `postman` source (the auth as Postman wrote it): a v2.1 `{key, value, type}` attribute whose `key` is one of the names above, a v2.0 `{name: value}` member named one of them, and a parameter row (`tokenRequestParams`, `authRequestParams`, `refreshRequestParams`) whose `key` is one of them or `client_secret`, `client_assertion`, `refresh_token`, `access_token`, `id_token`, `assertion`, or a header or query name from the `params` row below (`Authorization`, `X-Api-Key`, `api_key`, and the rest: a row can be sent as a header) | a row's `value` dropped, `valueWithheld: true` on the row; a v2.0 member as above | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
+| A credential in an OAuth 2.0 `config`'s extra request parameter rows (`authorizationParams`, `tokenParams`, `refreshParams`, #2536), by the same key names as the Postman rows above; and, as the export's `redact_config_param_rows` treats them, a row with no non-empty string `key`, a row member other than `key`, `value`, `enabled` and `sendAs`, or a list that is not an array, each when it holds a non-empty string that is not a pure `{{variable}}` reference | the row's `value` dropped, `valueWithheld: true` on the row; `key`, `enabled` and `sendAs` stay. A keyless row becomes `{valueWithheld: true}`, another member `<member>Withheld: true`, a list that is not one `<list>Withheld: true` on the `config` | `list_requests`, `get_request`, `list_collections`, `vayu://collections` |
 | The value of a credential-bearing header row in a saved request or example (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, `X-CSRF-Token`, or the header the request's API-key auth names, whatever its `in` says; disabled rows included; an empty value or a pure `{{variable}}` reference is shown as written) | `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `list_request_examples` |
 | A saved request's `url` and `params` (#1837): the password of `user:password@` userinfo is dropped (the user stays), and the value of a credential-named query or fragment parameter is emptied (`?api_key=S&page=2` becomes `?api_key=&page=2`); a `params` row with such a name, disabled rows included, loses its `value`. Names are `SENSITIVE_PARAM_NAMES`, matched whole and case-insensitively, plus the key of an API-key auth placed `in: "query"`; `code` and `key` are data, not credentials; an empty value or a pure `{{variable}}` reference is shown as written. The export's rule (#1804), ported rather than redefined | the URL as above, with no marker; a `params` row `value` dropped, `valueWithheld: true` on the row | `list_requests`, `get_request`, `delete_request`'s preview and prompt, `run_collection_smoke`'s `url` on every row (the stored URL for a request that failed to compose; the composed one otherwise, which run output below also masks), `get_graphql_schema`'s `endpoint` (the composed URL; the SDL is never withheld) |
 | A cookie value | `value` dropped, `valueWithheld: true` | `get_cookies` |
@@ -2311,7 +2326,9 @@ member or row holding one `{{variable}}` reference and nothing else is shown as
 written, the way the export keeps it: it names where the secret lives without
 being it, and the variable it names is withheld on its own terms. An auth block
 carrying a withheld marker (a `<member>Withheld` member, top level, under
-`config` or in its `postman` source, or a `valueWithheld` row in that source)
+`config` or in its `postman` source, a `valueWithheld` row in that source, or
+any `...Withheld` marker on or in place of a `config` extra parameter row or
+list)
 is refused as `auth` by every tool that takes one (`readAuthArg`): stored, it
 would replace the user's credential with nothing, and sent, it would
 authenticate with nothing. The server instructions state the withholding rules
@@ -2392,7 +2409,7 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `tools/<domain>.tools.ts` | The tool definitions (schemas, annotations, handlers), each file one contiguous run of the registry exported as an `McpTool[]`: `reads`, `run-request`, `engine-config`, `collections`, `spec`, `requests`, `trash`, `examples`, `move`, `environments`, `variables`, `cookies`, `collection-runs`, `load`, `runs`, `connection`, `oauth2`, `mock-issuer`, `mock-server`, `webhook-inbox`, in that order. The order is what `tools/list` and the Settings catalog show, so a new tool joins the file whose run it extends. |
 | `tools/contract.ts` | The registry's types (`McpTool`, `ToolContext` with its required `host`, `ToolResult`, `UserInput`) and `MCP_DATA_ENTITIES`. A tool's `description` is a string or a function of the session's safety config, and `resolveDescription` is the one place it is read (registration, the Settings catalog under the defaults, and the list-changed check). |
 | `tools/kit.ts`     | Helpers every tool shares: result builders, argument coercion (`ToolArgError`), the write and confirmation gates, and the `NOTHING_CHANGED` / `STARTED_RUNS` / `INPUT_REQUIRED` marks dispatch and `server.ts` read. |
-| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
+| `tools/<topic>.ts` | The helpers one family of tools draws on: `compose.ts` (request composition, the agent-script gate, load-run payloads), `input-schemas.ts`, `output-schemas.ts`, `inline-body-bounds.ts`, `run-housekeeping.ts`, `request-body.ts`, `variable-blobs.ts`, `scenario-runs.ts`, `cascade.ts`, `trash.ts`, `oauth2.ts`, `mock-issuer.ts`, `mock-server.ts`, `webhook-inbox.ts`, `examples.ts`, `move.ts`, `sibling-order.ts` (a parent's sub-collections and requests as one list, the third copy of the sibling comparator; `sibling-order.conformance.test.ts` replays both order fixtures through it), `spec-bindings.ts`. Imports run `contract.ts` → `kit.ts` → topic files → `*.tools.ts` → `tools.ts`; nothing under `tools/` imports `tools.ts`. |
 | `resources.ts`     | Static + templated resource definitions.                                    |
 | `prompts.ts`       | Prompt definitions (build messages from engine data).                       |
 | `server.ts`        | Builds the SDK `McpServer`; registers tools/resources/prompts; builds each call's context (`callContext`). |
