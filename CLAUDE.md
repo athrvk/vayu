@@ -149,6 +149,44 @@ assertion like `isMac === false` passes everywhere and exercises nothing. Stub
 the input (`vi.stubGlobal`, or `process.platform` as `updater.test.ts` does)
 and assert **both** branches.
 
+**A test must not depend on how fast the runner is.** CI runs on shared runners
+that are nothing like an idle dev box. macOS runs the engine suite at `-j3` on
+three vCPUs. Windows ticks its timers every 15.6ms, refuses a closed port only
+after about two seconds, and runs the app suite 3-4x slower than Linux. The
+sanitizer legs are about 10x slower. A test that passes idle and fails there
+costs a 20-30 minute re-run on every pull request that meets it, and it teaches
+people to retry red CI instead of reading it. Before writing or reviewing a
+test that touches time, threads, sockets or a large render, check these rules:
+
+- **Wait on the condition, never on a duration.** "Sleep 300ms, then assert X
+  happened (or has not yet)" is a race the runner decides. Use
+  `vayu::tests::wait_until` in the engine (`engine/tests/wait_until.hpp`), and
+  `waitFor` / `findBy*` in the app. Use fake timers when the code under test
+  owns the delay. A real-timer poll inside the code (a 100ms refetch) can land
+  between two assertions: hold the mock's answer behind a promise the test
+  releases (`queries/health.test.ts`). To stop something "mid-run", wait for
+  the first sign it started (a request the mock received), not a fixed delay.
+- **A wall-clock bound sits between the healthy reading and the broken one.**
+  Name both numbers in the comment. An upper bound is the side that flakes; a
+  lower bound cannot fail slow. If the gap is too narrow for one sample, widen
+  it (a longer injected delay, as in `mock_server_routes_test.cpp`), take the
+  best of N (`rate_limit_test.cpp`), or assert a recorded value instead of
+  the clock (an element's `waitedMs`).
+- **A budget is a hang detector, not a speed check.** The app's per-test and
+  `waitFor` budgets live in `app/src/test/timeouts.ts`, sized for the slowest
+  leg. `timeouts.guard.test.ts` refuses a numeric `timeout:` in a test file.
+  Render cost is held down by fixture size (`app/CLAUDE.md`), never by a clock.
+- **No fixed ports and no public internet.** Use port 0 / `bind_to_any_port`
+  in the engine, and `freePort()` (`app/electron/mcp/free-port.testkit.ts`) in
+  the app. The one test that needs a public host
+  (`tls_verification_test.cpp`) skips on every failure that is not its
+  subject.
+- **Fix a flake, never retry it.** No vitest `retry`, no
+  `ctest --repeat until-pass`, no "re-run and see". A test that failed on CI
+  and passed on retry broke one of the rules above. Find the job log (the
+  `Run engine tests` / `Run frontend tests` step names the case) and fix that
+  rule in the same pull request that meets it.
+
 ## Repo-wide conventions
 
 - **No em-dashes anywhere in the repo.** Use ` - `.
