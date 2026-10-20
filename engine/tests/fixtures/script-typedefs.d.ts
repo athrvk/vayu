@@ -1375,7 +1375,9 @@ declare const pm: {
 	 * 
 	 * Returns pm, so calls chain: pm.test(a, fn).test(b, fn).
 	 * 
-	 * A callback that declares a parameter is handed a done callback: call done() to pass, done(err) to fail. It must be called before the callback returns - the sandbox is synchronous and has no job queue, so a test that leaves done() for later fails saying so.
+	 * A callback that declares a parameter is handed a done callback: call done() to pass, done(err) to fail. It must be called before the callback returns - the test is judged when its callback returns, so a test that leaves done() for later fails saying so.
+	 * 
+	 * An async callback's test passes when it returns, as in Postman; a rejection inside it is reported as a script error naming the test.
 	 */
 	test(name: string, fn: (done: (error?: unknown) => void) => void): typeof pm;
 	/**

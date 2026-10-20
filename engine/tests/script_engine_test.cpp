@@ -216,8 +216,8 @@ TEST_F (ScriptEngineTest, DoneCallbackTreatsAnyTruthyArgumentAsTheFailure) {
 }
 
 // The divergence from Postman, made loud. Postman genuinely waits for a later
-// done(); this sandbox is synchronous and drains no job queue, so the test is
-// failed with the reason rather than reported on a verdict nothing gave.
+// done(); this sandbox judges the test when its callback returns, so the test
+// is failed with the reason rather than reported on a verdict nothing gave.
 TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) {
     auto result = engine.execute_test (R"(
         pm.test("never completes", function (done) {
@@ -232,7 +232,26 @@ TEST_F (ScriptEngineTest, DoneCallbackNeverCalledFailsSayingAsyncIsUnsupported) 
     EXPECT_NE (result.tests[0].error_message.find ("done() was never called"),
     std::string::npos)
     << "error was: " << result.tests[0].error_message;
-    EXPECT_NE (result.tests[0].error_message.find ("synchronous"), std::string::npos)
+    EXPECT_NE (
+    result.tests[0].error_message.find ("before the callback returns"), std::string::npos)
+    << "error was: " << result.tests[0].error_message;
+}
+
+// A done() left for a promise job runs once the queue drains, after the row
+// was written: the never-called verdict stands and the late call changes
+// nothing.
+TEST_F (ScriptEngineTest, ADoneLeftForAPromiseJobIsNotWaitedFor) {
+    auto result = engine.execute_test (R"(
+        pm.test("later", function (done) {
+            Promise.resolve().then(function () { done(); });
+        });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 1);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_NE (result.tests[0].error_message.find ("done() was never called"),
+    std::string::npos)
     << "error was: " << result.tests[0].error_message;
 }
 
@@ -276,8 +295,8 @@ TEST_F (ScriptEngineTest, DoneCalledTwiceFailsNamingIt) {
 
 // The reason `done` reports through a JS object rather than through a pointer
 // to `js_pm_test`'s frame: nothing stops a script keeping it and calling it
-// after pm.test returned. There is no job queue to resume such a script, but
-// the call itself still runs - against a stack frame that is gone. Here it is
+// after pm.test returned, later in the script or from a promise job, and the
+// call runs against a stack frame that is gone. Here it is
 // an ordinary refused second call, and the recorded verdict is untouched.
 TEST_F (ScriptEngineTest, DoneOutlivesTheCallThatHandedItOut) {
     auto result = engine.execute_test (R"(
@@ -3489,9 +3508,9 @@ TEST_F (ScriptEngineTest, NoUrlParserOrAsyncSurfaceIsExposed) {
     ASSERT_TRUE (result.success) << result.error_message;
     // If one of these ever lands, the "what a script can compute" section in
     // scripting.md stops being true and should be rewritten, not left standing.
-    // `crypto` in particular: a global of that name is a promise of Web Crypto,
-    // which is async, and nothing drains this sandbox's job queue - which is
-    // why the hashing surface is pm.crypto and synchronous.
+    // `crypto` in particular: a global of that name is a promise of Web Crypto's
+    // whole surface, which this sandbox does not implement - which is why the
+    // hashing surface is pm.crypto and synchronous.
     EXPECT_EQ (env["present"].value, "")
     << "a new global is available - update the 'What a script can compute' "
        "section in scripting.md";
@@ -5341,22 +5360,252 @@ TEST_F (ScriptEngineTest, PromiseJobsLeftBehindDoNotExhaustThePooledRuntime) {
     }
 }
 
-// The queue is discarded, never drained: a job run after its script ended
-// would be user code with no deadline and a dead context behind it.
-TEST_F (ScriptEngineTest, APromiseJobLeftBehindNeverRuns) {
+// A drained queue leaves nothing pinning the context, so the runtime goes back
+// to the pool; one cut off at the deadline still has jobs and is discarded.
+TEST_F (ScriptEngineTest, ADrainedRuntimeIsPooledAgain) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 100;
+    ScriptEngine pooled (cfg);
+
+    auto drained = ScriptContext::for_test (request, response);
+    auto result  = pooled.execute (R"JS(
+        (async () => { await null; await null; })();
+        Promise.resolve(1).then(function () {});
+    )JS",
+     drained);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (pooled.idle_runtime_count (), 1U);
+
+    auto cut_off = ScriptContext::for_test (request, response);
+    result = pooled.execute ("(async () => { for (;;) { await null; } })();", cut_off);
+    ASSERT_FALSE (result.success);
+    EXPECT_EQ (pooled.idle_runtime_count (), 0U);
+}
+
+// The queue is drained within the script's deadline, never past it: a job
+// still queued when the deadline stops the drain is dropped with its runtime,
+// because running it in the next execution's drain would be user code past
+// its budget against a context whose execution has ended. The loop needs
+// 300ms and the budget is 200ms, so a leftover carried into the second
+// execution would finish there and set `late`.
+TEST_F (ScriptEngineTest, APromiseJobLeftAtTheDeadlineNeverRuns) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 200;
+    ScriptEngine bounded (cfg);
+
     auto first        = ScriptContext::for_test (request, response);
     first.environment = &env;
-    auto first_result = engine.execute (
-    R"JS(Promise.resolve().then(function () { pm.environment.set("late", "1"); });)JS", first);
-    ASSERT_TRUE (first_result.success) << first_result.error_message;
+    auto first_result = bounded.execute (R"JS(
+        (async () => {
+            const until = Date.now() + 300;
+            while (Date.now() < until) { await null; }
+            pm.environment.set("late", "1");
+        })();
+    )JS",
+    first);
+    ASSERT_FALSE (first_result.success);
 
     auto second        = ScriptContext::for_test (request, response);
     second.environment = &env;
-    auto second_result = engine.execute ("pm.environment.set('next', '1');", second);
+    auto second_result = bounded.execute ("pm.environment.set('next', '1');", second);
     ASSERT_TRUE (second_result.success) << second_result.error_message;
 
     EXPECT_EQ (env.count ("late"), 0U);
     EXPECT_EQ (env.count ("next"), 1U);
+}
+
+// ============================================================================
+// Promises: the job queue is drained, and a rejection is a script error (#2531)
+// ============================================================================
+
+// postman-sandbox records an async callback's test as passed without awaiting
+// it and reports the rejection as a script error; the row stays passed so the
+// result reads as Postman's would.
+TEST_F (ScriptEngineTest, AnAsyncTestThatRejectsReportsAScriptError) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("t", async () => { pm.expect(1).to.eql(2); });
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find (R"(Unhandled promise rejection in test "t": )"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_NE (result.error_message.find ("deeply equal 2"), std::string::npos)
+    << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1U);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// The assertion after the `await` only runs because the queue is drained.
+TEST_F (ScriptEngineTest, AnAsyncTestThatAwaitsThenFailsIsReported) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        pm.test("after await", async () => {
+            const code = await Promise.resolve(pm.response.code);
+            pm.environment.set("resumed", "1");
+            pm.expect(code).to.equal(500);
+        });
+    )JS",
+        ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find (R"(Unhandled promise rejection in test "after await": )"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_NE (result.error_message.find ("equal 500"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (env["resumed"].value, "1");
+    ASSERT_EQ (result.tests.size (), 1U);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, AnUnobservedRejectionOutsideATestIsReported) {
+    auto result = engine.execute_test (R"JS(
+        (async () => { throw new Error("x"); })();
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Unhandled promise rejection: Error: x");
+}
+
+// Each rejection the script never observed counts; the first is the one named.
+TEST_F (ScriptEngineTest, EveryUnobservedRejectionIsCounted) {
+    auto result = engine.execute_test (R"JS(
+        Promise.reject(new Error("first"));
+        Promise.reject(new Error("second"));
+        Promise.reject(new Error("third"));
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Unhandled promise rejection: Error: first (and 2 more unhandled rejections)");
+}
+
+// The guard against reporting every rejection: one the script handles, before
+// or after it settles, is not an error.
+TEST_F (ScriptEngineTest, AHandledRejectionIsNotAnError) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        Promise.reject(new Error("caught")).catch(() => {});
+        const later = Promise.reject(new Error("handled later"));
+        (async () => {
+            await null;
+            later.catch(() => {});
+            try {
+                await Promise.reject(new Error("awaited"));
+            } catch (e) {
+                pm.environment.set("caught", e.message);
+            }
+        })();
+        pm.test("handles its own", async () => {
+            try { await Promise.reject(new Error("inner")); } catch (e) {}
+        });
+    )JS",
+        ctx);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["caught"].value, "awaited");
+    ASSERT_EQ (result.tests.size (), 1U);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+TEST_F (ScriptEngineTest, APassingAsyncTestStaysGreen) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("green", async () => {
+            const code = await Promise.resolve(pm.response.code);
+            pm.expect(code).to.equal(200);
+        });
+    )JS",
+    request, response, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1U);
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
+// Nothing in this sandbox can settle a promise once the script has ended, so a
+// test whose promise is still pending after the drain never finished.
+TEST_F (ScriptEngineTest, AnAsyncTestThatNeverSettlesIsReported) {
+    auto result = engine.execute_test (R"JS(
+        pm.test("stuck", async () => { await new Promise(() => {}); });
+    )JS",
+    request, response, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    R"(A promise did not settle before the script ended (returned by test "stuck"))");
+}
+
+// A chain of short jobs never runs long enough inside one job for the
+// interrupt handler to poll, so the drain checks the deadline between jobs.
+TEST_F (ScriptEngineTest, PendingJobsRunWithinTheDeadline) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 100;
+    ScriptEngine bounded (cfg);
+    auto ctx = ScriptContext::for_test (request, response);
+
+    const auto start = std::chrono::steady_clock::now ();
+    auto result =
+    bounded.execute ("(async () => { for (;;) { await null; } })();", ctx);
+    const auto elapsed = std::chrono::steady_clock::now () - start;
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 100ms");
+    EXPECT_LT (elapsed, std::chrono::seconds (5));
+}
+
+// A job that itself runs past the deadline is stopped by the interrupt handler,
+// and reported as the same timeout.
+TEST_F (ScriptEngineTest, AJobThatSpinsIsStoppedByTheDeadline) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 100;
+    ScriptEngine bounded (cfg);
+    auto ctx = ScriptContext::for_test (request, response);
+
+    auto result =
+    bounded.execute ("(async () => { await null; for (;;) {} })();", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 100ms");
+}
+
+// With no deadline the job cap bounds the drain, with its own message.
+TEST_F (ScriptEngineTest, WithNoTimeoutTheJobCapStopsARunawayDrain) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 0;
+    ScriptEngine unbounded (cfg);
+    auto ctx = ScriptContext::for_test (request, response);
+
+    auto result =
+    unbounded.execute ("(async () => { for (;;) { await null; } })();", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find (
+               "Script stopped after running 100000 promise jobs"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (unbounded.idle_runtime_count (), 0U);
+}
+
+// A script's own throw is the error it reports, and a job it queued before
+// throwing still runs, as it would on Postman's event loop.
+TEST_F (ScriptEngineTest, AThrowStaysTheErrorAndItsQueuedJobsStillRun) {
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &env;
+    auto result     = engine.execute (R"JS(
+        Promise.resolve().then(() => pm.environment.set("ran", "1"));
+        Promise.reject(new Error("also unhandled"));
+        throw new Error("the script's own");
+    )JS",
+        ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Error: the script's own");
+    EXPECT_EQ (env["ran"].value, "1");
 }
 
 // What a context that declares neither reports (#353): a bare `for_test` shape,
