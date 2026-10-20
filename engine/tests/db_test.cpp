@@ -14,10 +14,12 @@
 #include <fstream>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -2533,7 +2535,7 @@ TEST_F (DatabaseTest, AVersionOneDatabaseIsStampedTwoWithItsExamplesIntact) {
         db.init ();
     }
 
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 6);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 7);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "request_examples", "postman_response"));
     EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
@@ -3264,7 +3266,7 @@ TEST_F (DatabaseTest, AVersionFiveDatabaseWithoutTheRunOriginColumnsGetsThem) {
 
     Database db (TEST_DB_PATH);
     db.init ();
-    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 6);
+    EXPECT_EQ (vayu::db::SCHEMA_VERSION, 7);
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin"));
     EXPECT_TRUE (table_has_column (TEST_DB_PATH, "runs", "origin_client"));
@@ -3298,6 +3300,274 @@ TEST_F (DatabaseTest, ADatabaseStampedWithTheNextSchemaIsRefusedUntouched) {
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION + 1);
     EXPECT_TRUE (read_bytes () == before)
     << "a refused database must not be written";
+}
+
+namespace {
+
+/// One sibling of a parent collection as the database stores it.
+struct Sibling {
+    std::string id;
+    int64_t order      = 0;
+    int64_t created_at = 0;
+    int kind_rank      = 0; // 0 a sub-folder, 1 a request
+};
+
+/// Every child of @p parent_id, both kinds, trashed rows included.
+std::vector<Sibling> read_siblings (const std::string& path, const std::string& parent_id) {
+    std::vector<Sibling> siblings;
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "cannot open " << path;
+        return siblings;
+    }
+    constexpr const char* SQL =
+    "SELECT id, \"order\", created_at, 0 FROM collections WHERE parent_id = ?1 "
+    "UNION ALL SELECT id, \"order\", created_at, 1 FROM requests WHERE "
+    "collection_id = ?1";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, SQL, -1, &stmt, nullptr) != SQLITE_OK) {
+        ADD_FAILURE () << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+        return siblings;
+    }
+    sqlite3_bind_text (stmt, 1, parent_id.c_str (), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step (stmt) == SQLITE_ROW) {
+        const auto* id = vayu::db::column_text (stmt, 0);
+        siblings.push_back ({ id != nullptr ? id : "", sqlite3_column_int64 (stmt, 1),
+        sqlite3_column_int64 (stmt, 2), sqlite3_column_int (stmt, 3) });
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return siblings;
+}
+
+/// The ids of @p siblings in the order @p before ranks them.
+template <typename Before>
+std::vector<std::string> listed (std::vector<Sibling> siblings, Before before) {
+    std::sort (siblings.begin (), siblings.end (), before);
+    std::vector<std::string> ids;
+    ids.reserve (siblings.size ());
+    for (const auto& sibling : siblings) {
+        ids.push_back (sibling.id);
+    }
+    return ids;
+}
+
+/// The display before version 7: each kind on its own `(order, createdAt,
+/// id)`, sub-folders as one block above the requests.
+std::vector<std::string> listed_as_two_blocks (const std::vector<Sibling>& siblings) {
+    return listed (siblings, [] (const Sibling& a, const Sibling& b) {
+        return std::tie (a.kind_rank, a.order, a.created_at, a.id) <
+        std::tie (b.kind_rank, b.order, b.created_at, b.id);
+    });
+}
+
+/// #2535's comparator: one `order` space, a sub-folder first on a tie.
+std::vector<std::string> listed_in_one_space (const std::vector<Sibling>& siblings) {
+    return listed (siblings, [] (const Sibling& a, const Sibling& b) {
+        return std::tie (a.order, a.kind_rank, a.created_at, a.id) <
+        std::tie (b.order, b.kind_rank, b.created_at, b.id);
+    });
+}
+
+/// Every request's stored `order`, by id.
+std::map<std::string, int64_t> request_orders (const std::string& path) {
+    std::map<std::string, int64_t> orders;
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "cannot open " << path;
+        return orders;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (handle, "SELECT id, \"order\" FROM requests", -1,
+        &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step (stmt) == SQLITE_ROW) {
+            const auto* id                  = vayu::db::column_text (stmt, 0);
+            orders[id != nullptr ? id : ""] = sqlite3_column_int64 (stmt, 1);
+        }
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return orders;
+}
+
+/// The parents `seed_sibling_workspace` gives children.
+constexpr std::array<const char*, 5> SIBLING_PARENTS = { "col_root", "fld_a",
+    "col_plain", "col_trash_only", "col_negative" };
+
+/// A workspace as a version-6 engine numbered it, sub-folders and requests
+/// each from 0, stamped @p version:
+/// - `col_root`: folders `fld_a` 0, `fld_b` 1, `fld_trashed` 2 (trashed),
+///   requests `req_1` 0, `req_2` 1, `req_3` 2 (trashed);
+/// - `fld_a`: folder `fld_a_child` 0, requests `req_a1` 0, `req_a2` 1;
+/// - `col_plain`: no folder, requests `req_p1` 0, `req_p2` 1;
+/// - `col_trash_only`: folder `fld_gone` 0 (trashed), requests `req_t1` 0,
+///   `req_t2` 1;
+/// - `col_negative`: folder `fld_n` 0, requests `req_n1` -2, `req_n2` 0.
+void seed_sibling_workspace (const std::string& path, int64_t version) {
+    {
+        Database db (path);
+        db.init ();
+        int64_t created = 1;
+        const auto folder = [&] (const char* id, const char* parent, int order) {
+            Collection col;
+            col.id         = id;
+            col.name       = id;
+            col.order      = order;
+            col.created_at = created++;
+            col.updated_at = col.created_at;
+            if (parent != nullptr) {
+                col.parent_id = parent;
+            }
+            db.create_collection (col);
+        };
+        const auto request = [&] (const char* id, const char* parent, int order) {
+            Request r;
+            r.id            = id;
+            r.collection_id = parent;
+            r.name          = id;
+            r.method        = vayu::HttpMethod::GET;
+            r.url           = "https://example.test";
+            r.order         = order;
+            r.created_at    = created++;
+            r.updated_at    = r.created_at;
+            db.save_request (r);
+        };
+        for (const char* root : { "col_root", "col_plain", "col_trash_only", "col_negative" }) {
+            folder (root, nullptr, 0);
+        }
+        folder ("fld_a", "col_root", 0);
+        folder ("fld_b", "col_root", 1);
+        folder ("fld_trashed", "col_root", 2);
+        folder ("fld_a_child", "fld_a", 0);
+        folder ("fld_gone", "col_trash_only", 0);
+        folder ("fld_n", "col_negative", 0);
+        request ("req_1", "col_root", 0);
+        request ("req_2", "col_root", 1);
+        request ("req_3", "col_root", 2);
+        request ("req_a1", "fld_a", 0);
+        request ("req_a2", "fld_a", 1);
+        request ("req_p1", "col_plain", 0);
+        request ("req_p2", "col_plain", 1);
+        request ("req_t1", "col_trash_only", 0);
+        request ("req_t2", "col_trash_only", 1);
+        request ("req_n1", "col_negative", -2);
+        request ("req_n2", "col_negative", 0);
+    }
+    sqlite3* handle = nullptr;
+    ASSERT_EQ (sqlite3_open (path.c_str (), &handle), SQLITE_OK);
+    // Now, not a fixed instant: the startup trash retention would purge an
+    // old trashed row before the test reads it.
+    const std::string now   = std::to_string (now_ms ());
+    const std::string trash = "UPDATE collections SET deleted_at = " + now +
+    " WHERE id IN ('fld_trashed', 'fld_gone');" +
+    "UPDATE requests SET deleted_at = " + now + " WHERE id = 'req_3';";
+    ASSERT_EQ (sqlite3_exec (handle, trash.c_str (), nullptr, nullptr, nullptr), SQLITE_OK)
+    << sqlite3_errmsg (handle);
+    sqlite3_close (handle);
+    set_user_version (path, version);
+}
+
+} // namespace
+
+// Version 7 puts a collection's sub-folders and requests in one `order` space
+// (#2535). A version-6 workspace numbered each kind from 0, so the step moves
+// every request past its collection's highest sub-folder - trashed ones
+// included - and the merged comparator lists each parent exactly as the two
+// blocks did. Mutation checks: drop the `apply_sibling_order_shift` call from
+// `apply_migration_rows` and the interleaving parents' listings red; skip the
+// trashed folders in `plan_sibling_order_shift` and the stored orders red;
+// drop its negative-order term and `col_negative` reds.
+TEST_F (DatabaseTest, AVersionSixDatabaseListsTheSameInOneSiblingOrder) {
+    seed_sibling_workspace (TEST_DB_PATH, 6);
+    std::map<std::string, std::vector<std::string>> displayed;
+    for (const char* parent : SIBLING_PARENTS) {
+        displayed[parent] = listed_as_two_blocks (read_siblings (TEST_DB_PATH, parent));
+    }
+    ASSERT_NE (listed_in_one_space (read_siblings (TEST_DB_PATH, "col_root")),
+    displayed["col_root"])
+    << "the fixture does not interleave, so the step has nothing to prove";
+
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_TRUE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"))
+    << "no pre-migration backup was written before the shift";
+    for (const char* parent : SIBLING_PARENTS) {
+        EXPECT_EQ (listed_in_one_space (read_siblings (TEST_DB_PATH, parent)),
+        displayed[parent])
+        << parent;
+    }
+    const auto orders = request_orders (TEST_DB_PATH);
+    const std::map<std::string, int64_t> expected = { { "req_1", 3 },
+        { "req_2", 4 }, { "req_3", 5 }, { "req_a1", 1 }, { "req_a2", 2 },
+        { "req_p1", 0 }, { "req_p2", 1 }, { "req_t1", 1 }, { "req_t2", 2 },
+        { "req_n1", 1 }, { "req_n2", 3 } };
+    EXPECT_EQ (orders, expected)
+    << "past the trashed folders too; a collection with no folder is unmoved";
+}
+
+// The version stamp is the step's only done-marker: a second start, and a
+// workspace a version-7 engine numbered, are not shifted again. Mutation
+// check: drop both the fast path at `SCHEMA_VERSION` in `migrate_before_sync`
+// and the version gate in `plan_sibling_order_shift` and both halves red.
+TEST_F (DatabaseTest, TheSiblingOrderShiftRunsOnce) {
+    seed_sibling_workspace (TEST_DB_PATH, 6);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    const auto migrated = request_orders (TEST_DB_PATH);
+    std::filesystem::remove (std::string (TEST_DB_PATH) + ".pre-migration.bak");
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (request_orders (TEST_DB_PATH), migrated) << "shifted twice";
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+
+    vayu::tests::remove_database_files (TEST_DB_PATH);
+    seed_sibling_workspace (TEST_DB_PATH, vayu::db::SCHEMA_VERSION);
+    const auto numbered = request_orders (TEST_DB_PATH);
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (request_orders (TEST_DB_PATH), numbered)
+    << "a version-7 workspace is already in one space";
+    EXPECT_FALSE (std::filesystem::exists (std::string (TEST_DB_PATH) + ".pre-migration.bak"));
+}
+
+// A shift SQLite refuses rolls the whole step back: the file stays at version
+// 6 with every request where it was, and the next start runs the step again.
+TEST_F (DatabaseTest, ARefusedSiblingOrderShiftLeavesTheDatabaseAtSix) {
+    seed_sibling_workspace (TEST_DB_PATH, 6);
+    const auto before  = request_orders (TEST_DB_PATH);
+    const auto run_sql = [] (const char* sql) {
+        sqlite3* handle = nullptr;
+        ASSERT_EQ (sqlite3_open (TEST_DB_PATH, &handle), SQLITE_OK);
+        ASSERT_EQ (sqlite3_exec (handle, sql, nullptr, nullptr, nullptr), SQLITE_OK)
+        << sqlite3_errmsg (handle);
+        sqlite3_close (handle);
+    };
+    run_sql (
+    "CREATE TRIGGER refuse_order BEFORE UPDATE OF \"order\" ON requests "
+    "BEGIN SELECT RAISE (ABORT, 'refused by the test'); END;");
+
+    EXPECT_THROW ({ Database db (TEST_DB_PATH); }, std::runtime_error);
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), 6);
+    EXPECT_EQ (request_orders (TEST_DB_PATH), before) << "a half-shifted file";
+
+    run_sql ("DROP TRIGGER refuse_order;");
+    {
+        Database db (TEST_DB_PATH);
+        db.init ();
+    }
+    EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
+    EXPECT_EQ (request_orders (TEST_DB_PATH).at ("req_1"), 3);
 }
 
 // The column round-trips, and a tombstone clears it with the body it

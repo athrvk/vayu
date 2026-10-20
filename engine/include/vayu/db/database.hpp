@@ -34,7 +34,7 @@ namespace vayu::db {
  * `sync_schema ()` runs without `preserve`, so an older engine opening a
  * database with a column it does not map would rebuild the table without it.
  * Also bumped by a migration step that must run once and that an older engine
- * must not read past (4, 6). A database stamped newer than this is refused at startup. The
+ * must not read past (4, 6, 7). A database stamped newer than this is refused at startup. The
  * history is in `docs/engine/db-schema.md` (Schema versions):
  * 1 - scripts folded into `elements` (#1514);
  * 2 - `request_examples.postman_response`; `requests.disable_cookies`,
@@ -56,9 +56,15 @@ namespace vayu::db {
  *     every existing regular file a stored body marked `unresolved: false`,
  *     then removes the key from every stored body: trust is the engine's to
  *     derive from roots and grants, and an older engine would read the
- *     missing key as untrusted and refuse every picked file.
+ *     missing key as untrusted and refuse every picked file;
+ * 7 - no mapping change: a collection's sub-folders and requests share one
+ *     `order` space (#2535). The migration moves each collection's requests
+ *     past its highest sub-folder `order`, trashed folders included, so the
+ *     folders-first display survives. An older engine numbers the two kinds
+ *     apart again on its next create or reorder, and nothing would move them
+ *     back.
  */
-inline constexpr int SCHEMA_VERSION = 6;
+inline constexpr int SCHEMA_VERSION = 7;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.

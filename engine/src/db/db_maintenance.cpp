@@ -815,6 +815,88 @@ void log_file_trust_plan (const FileTrustPlan& plan) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Schema version 7: sub-folders and requests share one sibling order (#2535)
+// ---------------------------------------------------------------------------
+
+/// The first version whose requests and sub-folders share one `order` space.
+constexpr int64_t SHARED_SIBLING_ORDER_VERSION = 7;
+
+/// One collection whose requests move past its sub-folders, and by how much.
+struct SiblingOrderShift {
+    std::string collection_id;
+    int64_t amount = 0;
+};
+
+/**
+ * Plans the shared-sibling-order step for a database stamped @p version.
+ * Before it, a collection's sub-folders and its requests were each numbered
+ * from 0 and displayed as two blocks, folders first. Each collection's
+ * requests (trashed ones included) move up by one more than its highest
+ * sub-folder `order`, trashed folders included so a restore cannot land on a
+ * request, and further by its lowest request `order` when that is negative,
+ * so every request sorts strictly after every folder and the display stays
+ * as it was. A collection with no sub-folder plans nothing.
+ *
+ * @throws std::runtime_error when both tables are there and the read fails:
+ *         an empty plan is stamped as done, and the step never runs again.
+ */
+std::vector<SiblingOrderShift>
+plan_sibling_order_shift (sqlite3* connection, int64_t version, const std::string& path) {
+    std::vector<SiblingOrderShift> shifts;
+    if (version >= SHARED_SIBLING_ORDER_VERSION) {
+        return shifts;
+    }
+    const auto requests    = table_columns (connection, "requests");
+    const auto collections = table_columns (connection, "collections");
+    if (!has_column (requests, "order") || !has_column (requests, "collection_id") ||
+    !has_column (collections, "order") || !has_column (collections, "parent_id")) {
+        return shifts;
+    }
+    constexpr const char* SQL =
+    "SELECT r.collection_id, f.top + 1 - MIN (0, MIN (r.\"order\")) FROM "
+    "requests r "
+    "JOIN (SELECT parent_id, MAX (\"order\") AS top FROM collections "
+    "WHERE parent_id IS NOT NULL GROUP BY parent_id) f "
+    "ON f.parent_id = r.collection_id GROUP BY r.collection_id, f.top;";
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2 (connection, SQL, -1, &statement, nullptr) != SQLITE_OK) {
+        throw_migration_failure (path, sqlite3_errmsg (connection));
+    }
+    int step = sqlite3_step (statement);
+    for (; step == SQLITE_ROW; step = sqlite3_step (statement)) {
+        const auto* id = column_text (statement, 0);
+        if (id == nullptr || sqlite3_column_type (statement, 1) == SQLITE_NULL) {
+            continue;
+        }
+        const int64_t amount = sqlite3_column_int64 (statement, 1);
+        if (amount != 0) {
+            shifts.push_back ({ id, amount });
+        }
+    }
+    const std::string error = step == SQLITE_DONE ? "" : sqlite3_errmsg (connection);
+    sqlite3_finalize (statement);
+    if (!error.empty ()) {
+        throw_migration_failure (path, error);
+    }
+    return shifts;
+}
+
+/// Applies @p shifts inside the caller's transaction. False on the first
+/// SQLite error, message in @p error.
+bool apply_sibling_order_shift (sqlite3* connection,
+const std::vector<SiblingOrderShift>& shifts,
+std::string& error) {
+    for (const auto& shift : shifts) {
+        const std::string sql = "UPDATE requests SET \"order\" = \"order\" + " +
+        std::to_string (shift.amount) + " WHERE collection_id = ?1;";
+        if (!run_bound (connection, sql, { &shift.collection_id }, error)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 /**
@@ -951,13 +1033,14 @@ const std::function<ProbeResult (const std::string&)>& probe) {
 namespace {
 
 /// The writes of `migrate_before_sync`'s transaction: the script fold, the
-/// file-trust rewrite, the stamp and the `COMMIT`. The caller has opened the
-/// transaction and rolls it back on a throw.
+/// file-trust rewrite, the sibling-order shift, the stamp and the `COMMIT`.
+/// The caller has opened the transaction and rolls it back on a throw.
 void apply_migration_rows (sqlite3* connection,
 const std::string& path,
 bool requests_need_fold,
 bool collections_need_fold,
-const FileTrustPlan& trust_plan) {
+const FileTrustPlan& trust_plan,
+const std::vector<SiblingOrderShift>& order_shifts) {
     bool ok = true;
     std::string fold_error;
     if (requests_need_fold) {
@@ -967,6 +1050,7 @@ const FileTrustPlan& trust_plan) {
         ok = ok && fold_table_scripts_into_elements (connection, "collections", fold_error);
     }
     ok = ok && apply_file_trust_plan (connection, trust_plan, fold_error);
+    ok = ok && apply_sibling_order_shift (connection, order_shifts, fold_error);
     if (!ok) {
         throw_migration_failure (path, fold_error.empty () ? "unknown error" : fold_error);
     }
@@ -986,8 +1070,9 @@ const FileTrustPlan& trust_plan) {
  * `PRAGMA user_version` is the marker: 0 means pre-cutover (folds any
  * unrepresented script into `elements`, then stamps it with `SCHEMA_VERSION`);
  * 1 and 2 are stamped without a fold; anything older than this build also
- * gets the file-trust step (`plan_file_trust_migration`, versions 4 and 6) in
- * the same transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
+ * gets the file-trust step (`plan_file_trust_migration`, versions 4 and 6)
+ * and, below 7, the sibling-order shift (`plan_sibling_order_shift`) in the
+ * same transaction; already at `SCHEMA_VERSION` is a fast no-op; newer
  * than `SCHEMA_VERSION` refuses to start rather than silently serving - and
  * possibly writing - settings this build does not understand.
  *
@@ -1057,10 +1142,14 @@ const std::function<void (sqlite3*)>& on_connection) {
     // and `plan_refused_roots`.
     const FileTrustPlan trust_plan =
     plan_file_trust_migration (connection.get (), *version);
-    if (!requests_need_fold && !collections_need_fold && trust_plan.empty ()) {
+    // 6 -> 7: requests move past their sub-folders into one sibling order.
+    const auto order_shifts = plan_sibling_order_shift (connection.get (), *version, path);
+    if (!requests_need_fold && !collections_need_fold && trust_plan.empty () &&
+    order_shifts.empty ()) {
         // Nothing to fold or rewrite - a fresh schema with no rows yet, a
         // database some other path already brought to this shape, or one
-        // with no file reference to settle. The other steps only stamp:
+        // with no file reference to settle and no request beside a
+        // sub-folder. The other steps only stamp:
         // 1 -> 2 is
         // `request_examples.postman_response` and the four `requests`
         // protocol-setting columns of #1765, nullable or NOT NULL with a
@@ -1074,9 +1163,10 @@ const std::function<void (sqlite3*)>& on_connection) {
     }
 
     // Kept until the next successful start (issue #1487's rule) - the one
-    // copy of a pre-cutover row's exact script text, and of every body and
-    // allowed folder the file-trust step rewrites, if either were ever found
-    // to have gone wrong.
+    // copy of a pre-cutover row's exact script text, of every body and
+    // allowed folder the file-trust step rewrites, and of every request
+    // `order` before the sibling-order shift, if any were ever found to have
+    // gone wrong.
     const fs::path db_file (path);
     fs::path pre_migration_backup = db_file;
     pre_migration_backup += ".pre-migration.bak";
@@ -1085,12 +1175,16 @@ const std::function<void (sqlite3*)>& on_connection) {
     exec_or_throw (connection.get (), "BEGIN IMMEDIATE;", path);
     try {
         apply_migration_rows (connection.get (), path, requests_need_fold,
-        collections_need_fold, trust_plan);
+        collections_need_fold, trust_plan, order_shifts);
     } catch (...) {
         sqlite3_exec (connection.get (), "ROLLBACK;", nullptr, nullptr, nullptr);
         throw;
     }
     log_file_trust_plan (trust_plan);
+    if (!order_shifts.empty ()) {
+        vayu::utils::log_info ("db", "Moved each collection's requests after its sub-folders in one sibling order",
+        { { "collections", order_shifts.size () } });
+    }
 }
 
 const std::optional<RecoveryRecord>& Database::recovery () const {

@@ -252,7 +252,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `6`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `7`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
@@ -340,13 +340,38 @@ anything is written, so a database with nothing to change is only stamped; other
 and grants nothing twice. **The cost**: a body a non-editor caller managed to store as
 `unresolved: false` before the upgrade is granted once, like a pick.
 
+### The sibling-order migration (schema version 7)
+
+From version `7` a collection's sub-folders and its requests share one `order` space (#2535):
+siblings sort by `(order, kind, createdAt, id)` with a sub-folder before a request on a tie, so
+an imported Postman collection can keep a request above or between its folders. Before it, each
+kind was numbered from `0` and displayed as two blocks, folders first; read with the merged
+comparator, those numbers would interleave (`f0 r0 f1 r1`). So the same `migrate_before_sync`
+transaction, for any database below version `7`, after the file-grants step:
+
+- **Moves every request past its collection's sub-folders.** For each collection with at least
+  one sub-folder, every request whose `collection_id` it is gains one more than the highest
+  `order` among the collections whose `parent_id` it is - trashed folders included, so a folder
+  restored from the trash cannot land on a request - and, when the collection's lowest request
+  `order` is negative, that much again, so every request sorts strictly after every folder.
+  Trashed requests move with the rest. Relative order within each kind is unchanged, so the
+  merged comparator lists each parent exactly as the two blocks did. A collection with no
+  sub-folder, trashed or live, is untouched.
+
+`plan_sibling_order_shift` (`db_maintenance.cpp`) reads one shift per collection before anything
+is written, so a database with no request beside a sub-folder is only stamped; otherwise
+`<db>.pre-migration.bak` is written first, as for the fold. A plan read SQLite refuses throws
+rather than reading as "nothing to shift", and a refused shift rolls the whole transaction back
+with `user_version` unmoved. The step is not idempotent on its own - run twice, it would shift
+twice - so the version stamp, written in the same transaction, is its only done-marker.
+
 ### Schema versions
 
 `SCHEMA_VERSION` lives in `engine/include/vayu/db/database.hpp`. It is bumped by the commit that
 changes `make_vayu_storage`'s mapping - an added column included - because `sync_schema ()` runs
 without `preserve`: an older engine opening a database with a column it does not map would rebuild
 that table without it. It is also bumped by a migration step that must run exactly once and that an
-older engine must not read past (versions `4` and `6`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
+older engine must not read past (versions `4`, `6` and `7`); the version is that step's done-marker. **A bump is one-way.** Once a newer engine has opened a
 workspace, every engine built before the bump refuses it at startup (the refusal above), so the
 release that carries a bump says so in its notes.
 
@@ -359,6 +384,7 @@ release that carries a bump says so in its notes.
 | `4` | No mapping change. Every stored body's file references state `unresolved`, and the allowed folders that are a filesystem root, the home folder or a folder containing it are removed. An engine at `3` read an absent key as chosen | [the file-trust restatement](#the-file-trust-restatement-schema-version-4) |
 | `5` | `oauth_tokens.raw_response` dropped (#1781): the provider response, refresh and id tokens included, was stored and never read; [`runs.origin` and `runs.origin_client`](#runs) added (#1817) | none: `sync_schema ()` drops the one column at the constructor's probe and adds the defaulted and nullable two, the migration only stamps |
 | `6` | [`file_grants`](#file_grants) added - the files a person picked (#2356). Every stored file reference loses `unresolved`; the ones stored as chosen become grants. An engine at `5` would read the missing key as untrusted and refuse every picked file | [the file-grants migration](#the-file-grants-migration-schema-version-6) |
+| `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -380,6 +406,13 @@ Version `6` is a bump of its own: `0.41.0` released `5`, and every release since
 stamps it. **Merge gate:** the `git grep` against the last tag must show `5`; a
 column that joins `6` later must check the tag the same way. The release that
 carries `6` says so under Changed, naming #2356.
+
+Version `7` is a bump of its own even though no release stamps `6`: joining an
+unreleased version works for what `sync_schema ()` redoes on every start, and
+the sibling-order shift is a one-time rewrite of stored rows. A development
+database an unreleased build already stamped `6` must still run it, and would
+skip it at `6`. The release that carries `7` says so under Changed, naming
+#2535.
 
 ---
 
