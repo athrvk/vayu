@@ -331,7 +331,7 @@ TEST_F (PostmanQueryOnTheWire, TheLoadDriverNamesTheSpaceTheToggleLeftInTheUrl) 
 TEST (QueryEncodingConformance, EverySubstitutionIsWrittenByTheRuleOfItsComponent) {
     const json fixture = load_fixture ();
     const json& cases  = fixture.at ("substitutions").at ("cases");
-    ASSERT_GT (cases.size (), 10U);
+    ASSERT_GT (cases.size (), 45U);
     for (const json& c : cases) {
         vayu::http::VariableValues vars;
         for (const auto& [name, value] : c.at ("variables").items ()) {
