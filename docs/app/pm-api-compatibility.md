@@ -286,16 +286,22 @@ requests unless the caller explicitly asks for them: Vayu's own Send and load
 runs ask, and the MCP server never does. See
 [`docs/engine/mcp.md`](../engine/mcp.md#the-script-sandbox-surface).
 
-Only `raw` bodies are supported. Postman's `formdata` / `urlencoded` modes are
-refused by name rather than sent as an empty body - serialise the payload
-yourself and set the `Content-Type` header. A `raw` body is sent as
-`text/plain` unless that header names another type, which always wins. Headers
+Three body modes are supported: `raw`, `urlencoded` and `formdata` (#2563). The
+rest of Postman's - `file` and `graphql` - are refused by name rather than sent
+as an empty body; serialise the payload yourself and set the `Content-Type`
+header. A form body's rows are Postman's array of `{ key, value, disabled? }` or
+a plain `{ name: value }` object, encoded by the engine's own form encoders, and
+sent as `application/x-www-form-urlencoded` or `multipart/form-data` with its
+boundary; a `disabled` row is skipped. A `formdata` row of `type: 'file'` is
+refused by name, since a script cannot be granted a file to read. A `raw` body is
+sent as `text/plain` unless that header names another type, which always wins
+(a `urlencoded` body's type is likewise only a default). Headers
 may be Postman's `header` array of `{ key, value }` or a plain object under
 either `header` or `headers`; sending both spellings at once is refused rather
 than resolved by precedence.
 
-`{{variables}}` in the script-supplied URL, header names and values, a raw body
-and an `auth` credential **are** resolved, as the call is made (issues #1001,
+`{{variables}}` in the script-supplied URL, header names and values, a raw body,
+a form body's field names and values and an `auth` credential **are** resolved, as the call is made (issues #1001,
 #1067) - so a value the same script set two lines earlier is visible, which is
 Postman's rule and the reason an imported token-refresh script works. This is
 not a second pass over the composed payload: those fields were composed once,
