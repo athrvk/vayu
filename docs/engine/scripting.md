@@ -211,6 +211,7 @@ pm.expect(value).to.have.length(n);          // alias .lengthOf
 pm.expect(value).to.have.property('key');
 pm.expect(value).to.have.property('key', expectedValue);
 pm.expect(value).to.have.nested.property('a.b[0].c');
+pm.expect(value).to.have.property('id').that.is.a('number'); // name alone: the subject is now the value
 pm.expect(value).to.have.keys('a', 'b');     // exactly these keys; alias .key
 pm.expect(value).to.have.members([1, 2, 3]); // same members, any order
 
@@ -264,6 +265,14 @@ Notes on the edges:
   while the declarations nest them under `be` and `have` as the completion
   labels spell them, so `.that.be.a('string')` type-checks where chai's
   `.that.is.a('string')` does not - both run.
+- **`property(name)` moves the subject to the property's value** (#2524), as in
+  chai: `expect({id: 1}).to.have.property('id').that.is.a('number')` types the
+  value `1`, not the object, and `.and.equal(v)` compares the value. With
+  `nested` the value is the one at the last path segment, and `deep`, `nested`
+  and the failure message carry over to the new subject. The value is read
+  once, so a getter runs once. Two forms keep the chain they were called on:
+  `property(name, value)` (the value was already compared) and
+  `.not.have.property(name)` (absence has no value to move to).
 - **`keys` means exactly these keys**, as in chai's `have.keys`. The subset form
   (`include.keys`) is not implemented; `all` is accepted and changes nothing,
   `any` is not.

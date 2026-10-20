@@ -1511,6 +1511,80 @@ TEST_F (ScriptEngineTest, ExpectNestedProperty) {
     EXPECT_FALSE (result.tests[5].passed);
 }
 
+// #2524: `.property(name)` moves the chain's subject to the property's value, as
+// chai does, so what follows asserts on the value rather than on the object that
+// held it. Before the fix every case below that expects a failure passed: the
+// matcher after `.property` was run against the object.
+TEST_F (ScriptEngineTest, ExpectPropertyRetargetsTheChainToTheValue) {
+    auto result = engine.execute_test (R"(
+        pm.test("number", function() { pm.expect({id:1}).to.have.property("id").that.is.a("number"); });
+        pm.test("wrong type", function() { pm.expect({id:1}).to.have.property("id").that.is.a("string"); });
+        pm.test("string data is not an object", function() { pm.expect({data:"x"}).to.have.property("data").that.is.an("object"); });
+        pm.test("object data", function() { pm.expect({data:{k:1}}).to.have.property("data").that.is.an("object"); });
+        pm.test("equal compares the value", function() { pm.expect({source:"api"}).to.have.property("source").and.equal("api"); });
+        pm.test("equal misses the value", function() { pm.expect({source:"api"}).to.have.property("source").and.equal("web"); });
+        pm.test("nested", function() { pm.expect({a:{b:2}}).to.have.nested.property("a.b").that.equal(2); });
+        pm.test("nested miss", function() { pm.expect({a:{b:2}}).to.have.nested.property("a.b").that.equal(3); });
+        pm.test("deep survives the retarget", function() { pm.expect({a:{b:1}}).to.have.deep.property("a").that.equal({b:1}); });
+        pm.test("an object value is not empty", function() { pm.expect({a:{b:1}}).to.have.property("a").that.is.not.empty; });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 10u);
+    const std::array<bool, 10> expected_pass = { true, false, false, true, true,
+        false, true, false, true, true };
+    for (size_t i = 0; i < expected_pass.size (); i++) {
+        EXPECT_EQ (result.tests[i].passed, expected_pass.at (i))
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+}
+
+// The cases that must NOT move the subject: `.not` asserts absence and has no
+// value, and the value form already compared the value, so both keep handing back
+// the chain they were called on.
+TEST_F (ScriptEngineTest, ExpectPropertyKeepsTheChainForTheNegatedAndValueForms) {
+    auto result = engine.execute_test (R"(
+        pm.test("absence", function() { pm.expect({a:1}).to.not.have.property("x"); });
+        pm.test("absence still fails when present", function() { pm.expect({a:1}).to.not.have.property("a"); });
+        pm.test("negated chain keeps its subject", function() { pm.expect({a:1}).to.not.have.property("x").and.not.have.property("a"); });
+        pm.test("value form", function() { pm.expect({x:1}).to.have.property("x", 1); });
+        pm.test("value form keeps its subject", function() { pm.expect({x:1}).to.have.property("x", 1).and.be.an("object"); });
+        pm.test("value form is not retargeted", function() { pm.expect({x:1}).to.have.property("x", 1).and.be.a("number"); });
+        pm.test("missing property", function() { pm.expect({a:1}).to.have.property("x").that.is.a("number"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 7u);
+    const std::array<bool, 7> expected_pass = { true, false, false, true, true, false, false };
+    for (size_t i = 0; i < expected_pass.size (); i++) {
+        EXPECT_EQ (result.tests[i].passed, expected_pass.at (i))
+        << result.tests[i].name << ": " << result.tests[i].error_message;
+    }
+}
+
+// The value is read once: a getter that counts its calls sees exactly one, so the
+// retarget does not double-run a side effect, and a getter that throws fails the
+// assertion with its own error rather than passing.
+TEST_F (ScriptEngineTest, ExpectPropertyReadsTheValueOnce) {
+    auto result = engine.execute_test (R"(
+        var reads = 0;
+        var counted = { get n() { reads++; return 5; } };
+        pm.test("one read", function() {
+            pm.expect(counted).to.have.property("n").that.is.a("number").and.equal(5);
+            pm.expect(reads).to.equal(1);
+        });
+        var boom = { get n() { throw new Error("getter ran"); } };
+        pm.test("a throwing getter fails", function() { pm.expect(boom).to.have.property("n"); });
+    )",
+    request, response, env);
+
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_FALSE (result.tests[1].passed);
+    EXPECT_NE (result.tests[1].error_message.find ("getter ran"), std::string::npos)
+    << result.tests[1].error_message;
+}
+
 // `property(name, value)` and array membership compared `JS_ToCString` forms,
 // under which every object matched every other object - both render as
 // "[object Object]". Both now follow the chain's comparison rule.
