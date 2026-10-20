@@ -170,4 +170,12 @@ parse_ordered_json (std::string_view text, size_t max_depth) {
     return std::optional<nlohmann::ordered_json>{ std::in_place, builder.take_root () };
 }
 
+void append_unique_member (nlohmann::ordered_json& object,
+std::string key,
+nlohmann::ordered_json value) {
+    using Members = OrderedJson::object_t::Container;
+    static_cast<Members&> (object.get_ref<OrderedJson::object_t&> ())
+    .emplace_back (std::move (key), std::move (value));
+}
+
 } // namespace vayu::utils

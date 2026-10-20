@@ -518,6 +518,23 @@ TEST (PostmanExport, AGraphqlVariablesObjectOfAHundredThousandMembersIsReadInLin
     body["graphql"]["variables"].get<std::string> ().rfind ("{\n    \"k0\": 0,", 0), 0u);
 }
 
+// The members of the envelope beyond `query` and `variables` are copied across
+// one by one (#2552). Mutation check: copy them with `graphql[member.key ()]`
+// again and this runs for minutes and fails the budget.
+TEST (PostmanExport, AGraphqlEnvelopeOfAHundredThousandMembersIsCopiedInLinearTime) {
+    std::string content = vayu::tests::wide_object_json ();
+    content.insert (1, R"("query":"{ me }",)");
+
+    const auto started = std::chrono::steady_clock::now ();
+    ordered body = body_of ({ { "mode", "graphql" }, { "content", content } });
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    EXPECT_EQ (body["graphql"]["query"], "{ me }");
+    EXPECT_EQ (body["graphql"].size (), vayu::tests::WIDE_OBJECT_KEYS + 2);
+    EXPECT_EQ (body["graphql"]["k99999"], 99999);
+}
+
 TEST (PostmanExport, UrlencodedRowsAreTypedText) {
     ordered body = body_of ({ { "mode", "x-www-form-urlencoded" },
     { "fields", ordered::array ({ row ("a", "1"), row ("b", "2", false) }) } });
