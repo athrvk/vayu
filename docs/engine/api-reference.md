@@ -3951,8 +3951,8 @@ An auth a Postman import kept its original block for (`auth.postman`, see
 `docs/engine/db-schema.md`) is written as that block, while it still maps to
 the stored auth; everything below describes the rest.
 
-What maps where: folders are item groups (folders before requests, each in
-stored order); a request's `inherit` auth is an absent `auth` and its `none` is
+What maps where: folders are item groups (a folder's sub-folders and requests
+are written as one list in sibling order, a folder first on a tie); a request's `inherit` auth is an absent `auth` and its `none` is
 `noauth`, while a collection's or folder's `none` is an absent `auth` and its
 `noauth` is `noauth`; `aws` auth is `awsv4`; body modes `json` / `text` / `xml`
 are `raw` with that `options.raw.language` (or the language a Postman import

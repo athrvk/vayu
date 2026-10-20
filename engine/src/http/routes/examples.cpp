@@ -80,7 +80,7 @@ vayu::db::RequestExample& out) {
 /**
  * The `order` a new example takes when the caller states none: one past the
  * highest among the request's current examples, so a created example lands at
- * the end. The same scan `next_request_order` does for requests, and for the
+ * the end. The same scan `Database::next_sibling_order` does for requests, and for the
  * same reason - defaulting every row to 0 would make the column encode nothing
  * and hand the position back to the id tiebreak.
  */
