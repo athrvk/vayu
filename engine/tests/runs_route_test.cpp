@@ -1363,20 +1363,28 @@ TEST_F (RunsRouteTest, ScenarioReportLatencyIsTheSummarysSentSampleNotTheStoredR
     vayu::core::ScenarioSummaryInputs inputs;
     inputs.steps_executed = 3;
     inputs.duration_s     = 1.0;
-    inputs.latency = vayu::core::summarize_latencies ({ 50.0, 10.0, 30.0, 20.0, 40.0 });
+    std::vector<double> sample;
+    sample.reserve (1000);
+    for (int i = 1; i <= 1000; ++i) {
+        sample.push_back (static_cast<double> (i));
+    }
+    inputs.latency = vayu::core::summarize_latencies (sample);
     db_->update_run_summary ("run_sent_sample",
     vayu::core::build_scenario_summary_payload (inputs).dump ());
 
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_sent_sample");
     ASSERT_EQ (status, 200);
     const auto& latency = body["latency"];
-    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 10.0);
-    EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 50.0);
-    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 30.0);
-    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 30.0);
-    EXPECT_DOUBLE_EQ (latency["median"].get<double> (), 30.0);
-    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 50.0);
-    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 50.0);
+    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 1.0);
+    EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 500.5);
+    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 500.0);
+    EXPECT_DOUBLE_EQ (latency["median"].get<double> (), 500.0);
+    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 750.0);
+    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 950.0);
+    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 990.0);
+    EXPECT_DOUBLE_EQ (latency["p999"].get<double> (), 1000.0);
 }
 
 // A collection run in which no step sent stores `latency.count` 0, and the

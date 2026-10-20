@@ -1843,23 +1843,29 @@ TEST (ScenarioSummaryPayload, AZeroLengthRunReportsNoRateRatherThanDividingByZer
 // wrong rank answers differently on every figure. Mutation check: delete the
 // `summary["latency"]` write in `build_scenario_summary_payload` and this reds.
 TEST (ScenarioSummaryPayload, StoresTheExactNearestRankLatencyOfTheSentSample) {
+    // 1..1000 ms, shuffled by a stride: every percentile lands on a distinct
+    // value, so a figure written under the wrong key fails.
+    std::vector<double> sample;
+    sample.reserve (1000);
+    for (int i = 0; i < 1000; ++i) {
+        sample.push_back (static_cast<double> (((i * 7) % 1000) + 1));
+    }
     vayu::core::ScenarioSummaryInputs inputs;
-    inputs.steps_executed = 10;
-    inputs.latency        = vayu::core::summarize_latencies (
-    { 50.0, 10.0, 30.0, 20.0, 40.0, 60.0, 70.0, 80.0, 90.0, 1000.0 });
+    inputs.steps_executed = 1000;
+    inputs.latency        = vayu::core::summarize_latencies (sample);
 
     const auto summary = vayu::core::build_scenario_summary_payload (inputs);
     ASSERT_TRUE (summary.contains ("latency")) << summary.dump ();
     const auto& latency = summary["latency"];
-    EXPECT_EQ (latency["count"].get<size_t> (), 10u);
-    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 10.0);
+    EXPECT_EQ (latency["count"].get<size_t> (), 1000u);
+    EXPECT_DOUBLE_EQ (latency["min"].get<double> (), 1.0);
     EXPECT_DOUBLE_EQ (latency["max"].get<double> (), 1000.0);
-    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 145.0);
-    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 50.0);
-    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 80.0);
-    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 90.0);
-    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 1000.0);
-    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 1000.0);
+    EXPECT_DOUBLE_EQ (latency["avg"].get<double> (), 500.5);
+    EXPECT_DOUBLE_EQ (latency["p50"].get<double> (), 500.0);
+    EXPECT_DOUBLE_EQ (latency["p75"].get<double> (), 750.0);
+    EXPECT_DOUBLE_EQ (latency["p90"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (latency["p95"].get<double> (), 950.0);
+    EXPECT_DOUBLE_EQ (latency["p99"].get<double> (), 990.0);
     EXPECT_DOUBLE_EQ (latency["p999"].get<double> (), 1000.0);
 }
 
