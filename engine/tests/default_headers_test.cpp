@@ -337,6 +337,23 @@ TEST (DefaultHeadersTest, TheRefusalSpellsTheOffendingByteSafely) {
     EXPECT_EQ (*newline, "'X\nY' is not a header name: byte 0x0A cannot appear in one");
 }
 
+// A `{{token}}` stands in as one token character; a brace that closes none is
+// text and refused (issue #2467). The refusal quotes the name as written, not
+// the stand-in. Mutation check: restore a blanket skip of any name holding `{{`.
+TEST (DefaultHeadersTest, ATokenInAHeaderNameIsSetAsideAndTheRestJudged) {
+    using vayu::http::invalid_header_name_refusal;
+    for (const char* ok : { "{{h}}", "X-{{a}}-b", "{{a}}{{b}}", "X-{{ $guid }}" }) {
+        EXPECT_FALSE (invalid_header_name_refusal (ok).has_value ()) << ok;
+    }
+    for (const char* bad : { "Evil: injected{{", "X Bad {{x}}", "{{", "X-{{}}",
+         "X-{{a}", "{{{x}}}", "{{a}}:" }) {
+        const auto refusal = invalid_header_name_refusal (bad);
+        ASSERT_HAS_VALUE (refusal) << bad;
+        EXPECT_NE (refusal->find (std::string ("'") + bad + "'"), std::string::npos)
+        << *refusal;
+    }
+}
+
 // Only SP and HTAB are padding, and only at the ends (issue #2467): CR and LF
 // end a header line and are refused elsewhere, never trimmed away.
 TEST (DefaultHeadersTest, OptionalWhitespaceIsTrimmedAtTheEndsOnly) {

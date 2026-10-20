@@ -665,7 +665,7 @@ equal being already one key. The same pass also trims the spaces and tabs
 around every name and refuses one that is not an RFC 9110 token once trimmed
 (#2467, `invalid_header_name`), which is how a name a script defined is judged;
 it reads every name for that rule as it does for the empty one, and a token
-nothing answered is left written. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
+nothing answered is left written while the text around it is judged. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.
 

@@ -788,6 +788,21 @@ TEST_F (SendRequestTest, APaddedHeaderNameIsSentTrimmed) {
     EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
 }
 
+// Padding is not a spelling: ` X-Marker` beside `X-Marker` is a repeat the
+// script typed, sent, and never the collision of two names resolution made
+// one. Mutation check: pass the untrimmed `name` to `record_produced_name` in
+// `resolve_send_request_headers` and the call throws.
+TEST_F (SendRequestTest, APaddedHeaderNameBesideItsUnpaddedTwinIsARepeat) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', header: { ' X-Marker': 'one', 'X-Marker': 'two' } "
+    "}, function () {});");
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
 TEST_F (SendRequestTest, AHeaderNameThatIsNotATokenIsRefused) {
     SendRequestServer server;
 

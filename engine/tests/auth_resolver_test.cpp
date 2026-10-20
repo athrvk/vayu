@@ -110,6 +110,31 @@ TEST (AuthResolver, ApiKeyHeaderNameThatIsNotATokenIsRefused) {
     EXPECT_TRUE (req.secret_header_names.empty ());
 }
 
+// A name holding braces is judged on the text around its `{{token}}`; one
+// that closes no token is plain text. Mutation check: restore a blanket skip
+// of any name holding `{{` in `invalid_header_name_refusal`.
+TEST (AuthResolver, ApiKeyHeaderNameWithBracesIsJudgedAroundItsTokens) {
+    for (const std::string key : { "Evil: injected{{", "X Bad {{x}}" }) {
+        auto req    = make_request ();
+        auto result = vayu::http::apply_auth (req,
+        json{ { "mode", "apikey" }, { "key", key }, { "value", "secret" }, { "in", "header" } },
+        nullptr);
+        EXPECT_FALSE (result.ok) << key;
+        EXPECT_EQ (result.detail_code, "invalid_header_name") << key;
+        EXPECT_NE (result.message.find ("'" + key + "'"), std::string::npos)
+        << result.message;
+        EXPECT_TRUE (req.headers.empty ()) << key;
+    }
+
+    auto req    = make_request ();
+    auto result = vayu::http::apply_auth (req,
+    json{ { "mode", "apikey" }, { "key", "X-{{a}}-b" }, { "value", "secret" },
+    { "in", "header" } },
+    nullptr);
+    EXPECT_TRUE (result.ok);
+    EXPECT_EQ (req.headers.at ("X-{{a}}-b"), "secret");
+}
+
 TEST (AuthResolver, ApiKeyOfOnlyPaddingIsNoKey) {
     auto req    = make_request ();
     auto result = vayu::http::apply_auth (req,

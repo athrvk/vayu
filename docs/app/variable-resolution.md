@@ -686,8 +686,9 @@ the line this page draws throughout: repair what has one reading, refuse what
 has none, never guess.
 
 A name of only spaces and tabs trims to nothing, so it is the empty name above,
-however it got there. A name still holding a `{{token}}` nothing answered is not
-judged, since an unanswered token is sent as written; a name a variable
+however it got there. A `{{token}}` nothing answered is not judged, since an
+unanswered token is sent as written, but the text around it is (`X-{{a}}-b`
+passes, `X Bad {{x}}` and a stray `{{` are refused); a name a variable
 *produces* is trimmed and judged after substitution, so `{{h}}` answering
 ` X-Trace` sends `X-Trace` and answering `X Trace` is refused. Two lines written
 `X-A` and ` X-A` are a repeat the author typed, not a collision. The layers are

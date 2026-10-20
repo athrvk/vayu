@@ -1375,8 +1375,9 @@ the request builder surfaces a toast pointing the user at the Auth tab.
 
 `headers` is an ordered array of `{ name, value }` lines (issue #2466): the
 Headers table's enabled rows with a key, in row order, a repeated name repeated
-and each row in the case typed with the spaces and tabs around its name trimmed (`toHeaderRows`), and `POST /compose` answers
-the same shape, so a repeat survives compose to execute. The older single-valued
+and each row in the case typed with the spaces and tabs around its name trimmed
+(`toHeaderRows`), and `POST /compose` answers the same shape, so a repeat
+survives compose to execute. The older single-valued
 record (`{ "Accept": "..." }`) is still accepted by the engine, but the app no
 longer sends it: a record keeps one value per key and sends a different header
 from the one its table shows. The same holds for `POST /runs`.

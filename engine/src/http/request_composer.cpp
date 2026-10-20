@@ -1219,9 +1219,9 @@ struct ResolvedHeaders {
  * Settle a header name resolution produced (issue #2467): trim the spaces and
  * tabs around it, then file what is wrong with what is left. A name that trims
  * to nothing is `nameless`, however it got there; one that is not a token is
- * `invalid_name`. A name still holding a `{{token}}` is not judged here: the
- * residual pass resolves it against what a pre-request script defines and
- * judges what it produces (`http/request_exchange.cpp`).
+ * `invalid_name`. A `{{token}}` still in it is not judged here (the text
+ * around it is): the residual pass resolves it against what a pre-request
+ * script defines and judges what it produces (`http/request_exchange.cpp`).
  *
  * @param key the name as written, for the nameless message.
  */

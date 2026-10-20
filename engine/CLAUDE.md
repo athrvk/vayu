@@ -812,7 +812,8 @@ logged as a warning: it means a client skipped composition.
   libcurl's removal line for `Accept` and a body's `Content-Type`, #1765; a
   refused name is checked with `invalid_header_token`, never the
   correlation-id rule; so is a name a request *carries*, after its surrounding
-  spaces and tabs are trimmed, #2467 below), and none of what is added is stored - the renderer used to write
+  spaces and tabs are trimmed, #2467 below), and none of what is added is
+  stored - the renderer used to write
   `X-Vayu-Version` and a frozen `X-Request-ID` into the saved request, which a
   load run then replayed. `Accept-Encoding` is the one recorded without being
   appended: libcurl writes that line itself from `CURLOPT_ACCEPT_ENCODING`,
@@ -994,9 +995,11 @@ are the one rule, applied where a name enters - `stored_header_rows` and
 `deserialize_request` (`ErrorCode::InvalidHeaderName`, which is how
 `POST /execute` and a single-request `POST /runs` answer `400
 invalid_header_name`), and `resolve_header_names` in the residual pass. A blank
-name is the `empty_header_name` rule's, and a name still holding a `{{token}}`
-is left to the layer that resolves it. Refuse what trimming cannot settle, never
-repair it. It also writes a request's `:name` path variables from its
+name is the `empty_header_name` rule's, and a `{{token}}` still in a name is
+left to the layer that resolves it while the text around it is judged (each
+token stands in as one token character, a stray `{{` is ordinary text). Refuse
+what trimming cannot settle, never repair it. It also writes a request's
+`:name` path variables from its
 `in: "path"` Params rows (#1764, `core::substitute_path_variables` in
 `core/path_template.hpp`, Postman's segment rule; empty value stays literal;
 a value still holding a token after resolution is not joined into the URL but

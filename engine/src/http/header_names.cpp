@@ -50,14 +50,45 @@ std::string_view trim_optional_whitespace (std::string_view text) {
     return text.substr (first, text.find_last_not_of (OPTIONAL_WHITESPACE) - first + 1);
 }
 
-std::optional<std::string> invalid_header_name_refusal (std::string_view name) {
-    // `{` is not a token character, but a name still holding a `{{token}}` is
-    // one nothing answered, and an unanswered token is sent as written (issue
-    // #1009), not refused.
-    if (name.find ("{{") != std::string_view::npos) {
-        return std::nullopt;
+namespace {
+
+/// The length of the `{{token}}` that starts @p text, or 0 when none does. The
+/// same shape as `token_pattern` in `request_composer.cpp`: one or more
+/// characters that are not braces, between `{{` and `}}`.
+std::size_t token_span_length (std::string_view text) {
+    constexpr std::string_view OPEN  = "{{";
+    constexpr std::string_view CLOSE = "}}";
+    if (!text.starts_with (OPEN)) {
+        return 0;
     }
-    const auto reason = invalid_header_token (name);
+    const auto inner_end = text.find_first_of ("{}", OPEN.size ());
+    if (inner_end == OPEN.size () || inner_end == std::string_view::npos ||
+    !text.substr (inner_end).starts_with (CLOSE)) {
+        return 0;
+    }
+    return inner_end + CLOSE.size ();
+}
+
+/// @p name with each `{{token}}` standing in as one token character, so what
+/// is left to judge is the text the author wrote around the variables.
+std::string with_tokens_as_placeholders (std::string_view name) {
+    std::string out;
+    out.reserve (name.size ());
+    for (std::size_t at = 0; at < name.size ();) {
+        const auto span = token_span_length (name.substr (at));
+        out += span == 0 ? name[at] : 'x';
+        at += span == 0 ? 1 : span;
+    }
+    return out;
+}
+
+} // namespace
+
+std::optional<std::string> invalid_header_name_refusal (std::string_view name) {
+    // A `{{token}}` nothing has answered is sent as written (issue #1009), so
+    // it is not what is judged: the text around it is. A `{{` that closes no
+    // token is ordinary text, and `{` is not a token character.
+    const auto reason = invalid_header_token (with_tokens_as_placeholders (name), name);
     if (!reason) {
         return std::nullopt;
     }

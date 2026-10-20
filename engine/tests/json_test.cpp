@@ -131,9 +131,12 @@ TEST (JsonTest, PaddedHeaderNamesAreTrimmedInBothShapes) {
 
 // What is left after the trim must be a token, and the refusal carries the code
 // a route answers under. Mutation check: drop the `invalid_header_name_refusal`
-// call in `stored_header_name`.
+// call in `stored_header_name`. The last two hold braces: a `{{token}}` is set
+// aside and the text around it judged, and a `{{` closing no token is just
+// text (mutation check: restore a blanket skip of any name holding `{{`).
 TEST (JsonTest, RefusesAHeaderNameThatIsNotATokenInBothShapes) {
-    for (const std::string name : { "X Bad", "X:Bad", "X-\u00e9" }) {
+    for (const std::string name :
+    { "X Bad", "X:Bad", "X-\xC3\xA9", "Evil: injected{{", "X Bad {{x}}" }) {
         const std::vector<std::string> shapes = { R"([{"name":")" + name + R"(","value":"v"}])",
             R"({")" + name + R"(":"v"})" };
         for (const std::string& shape : shapes) {
@@ -161,6 +164,11 @@ TEST (JsonTest, ABlankOrTemplatedHeaderNameIsNotThisRefusal) {
     R"({"method":"GET","url":"https://x.test","headers":[{"name":" {{h}} ","value":"v"}]})"));
     ASSERT_TRUE (templated.is_ok ()) << templated.error ().message;
     EXPECT_EQ (templated.value ().headers, (HeaderList{ { "{{h}}", "v" } }));
+
+    auto embedded = deserialize_request (std::string (
+    R"({"method":"GET","url":"https://x.test","headers":[{"name":"X-{{a}}-b","value":"v"}]})"));
+    ASSERT_TRUE (embedded.is_ok ()) << embedded.error ().message;
+    EXPECT_EQ (embedded.value ().headers, (HeaderList{ { "X-{{a}}-b", "v" } }));
 }
 
 TEST (JsonTest, DeserializesRequestWithBody) {

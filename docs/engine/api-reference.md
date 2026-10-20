@@ -6035,9 +6035,11 @@ with specific codes:
   `INTERNAL_ERROR`, a streaming send a `400`, as above), which is where a name
   a pre-request script defined, or one a script's variable completes, is
   judged; a script's `pm.sendRequest` and a data cell bound into a name refuse
-  the same way, with the call or the row in front of the wording. A name still
-  holding a `{{token}}` nothing answered is not judged: like every unanswered
-  token it is sent as written.
+  the same way, with the call or the row in front of the wording. A `{{token}}`
+  nothing answered is not judged, since like every unanswered token it is sent
+  as written, but the text around it is: `X-{{a}}-b` passes, `X Bad {{x}}` and
+  `Evil: injected{{` (a `{{` that closes no token is ordinary text) are refused,
+  quoted as written.
 
   **Header names are trimmed, then checked.** A name loses the spaces and tabs
   (SP and HTAB, nothing else) at either end before it is checked or sent,
@@ -6047,7 +6049,10 @@ with specific codes:
   `Authorization`, not as the line `Authorization : Bearer x` with a space before
   its colon. A row whose key is only padding is no row, as an empty key always
   was. A value is not trimmed. Two lines written `X-A` and ` X-A` are a repeat
-  the caller typed, sent as two lines, not a collision.
+  the caller typed, sent as two lines, not a collision. In the object form of
+  `headers` two keys that differ only by padding or case fold to one line (the
+  last value wins), because an object has one slot per key; the array form
+  sends both.
 
 ### POST /execute
 

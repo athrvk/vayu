@@ -2555,9 +2555,7 @@ RunOrigin& origin) {
             return RouteError{ 400,
                 error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
         }
-    }
 
-    if (!is_scenario) {
         if (auto refusal = refuse_invalid_header_name (json)) {
             vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
             return RouteError{ 400, error_body (400, refusal->first, refusal->second) };

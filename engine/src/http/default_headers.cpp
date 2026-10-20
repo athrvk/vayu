@@ -201,15 +201,16 @@ const std::string& supported_accept_encodings () {
     return built_accept_encodings ();
 }
 
-std::optional<std::string> invalid_header_token (std::string_view name) {
+std::optional<std::string>
+invalid_header_token (std::string_view name, std::string_view quoted_as) {
     if (name.empty ()) {
         return "a header name cannot be empty";
     }
     const auto offending = std::find_if_not (name.begin (), name.end (), is_token_char);
     if (offending != name.end ()) {
         return std::format (
-        "'{}' is not a header name: {} cannot appear in one", name,
-        spelled_byte (*offending));
+        "'{}' is not a header name: {} cannot appear in one",
+        quoted_as.empty () ? name : quoted_as, spelled_byte (*offending));
     }
     return std::nullopt;
 }

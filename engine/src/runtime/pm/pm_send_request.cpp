@@ -357,8 +357,9 @@ std::optional<std::string> resolve_send_request_headers (JSContext* ctx, HeaderL
         if (auto invalid = vayu::http::invalid_header_name_refusal (resolved_name)) {
             return "pm.sendRequest: " + *invalid;
         }
-        if (auto collision =
-            vayu::http::record_produced_name (produced, resolved_name, name)) {
+        // Padding is not a spelling: ` X-A` beside `X-A` is a repeat as typed.
+        if (auto collision = vayu::http::record_produced_name (produced, resolved_name,
+            std::string (vayu::http::trim_optional_whitespace (name)))) {
             return "pm.sendRequest: " +
             vayu::http::describe_header_name_collision (*collision);
         }

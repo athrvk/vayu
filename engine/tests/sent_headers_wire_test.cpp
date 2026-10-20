@@ -331,6 +331,28 @@ TEST_F (SentHeadersWireTest, APaddedHeaderNameAndTokenReachTheWireTrimmed) {
     EXPECT_EQ (server_->header ("Authorization"), "Bearer tok");
 }
 
+// The padded and the plain spelling of one name each arrive as the same
+// `Authorization` line, in neither case with a space before the colon (a strict
+// server would answer that `400`, which this server's parser does too).
+// Mutation check: drop the trim in `stored_header_name` (`utils/json.cpp`) and
+// the padded send fails.
+TEST_F (SentHeadersWireTest, APaddedAndAPlainAuthorizationBothArriveAsAuthorizationLines) {
+    for (const std::string name : { "Authorization ", "Authorization" }) {
+        auto parsed = vayu::json::deserialize_request (
+        nlohmann::json{ { "method", "GET" }, { "url", server_->url () },
+        { "headers",
+        nlohmann::json::array ({ { { "name", name }, { "value", "Bearer x" } } }) } });
+        ASSERT_TRUE (parsed.is_ok ()) << parsed.error ().message;
+
+        auto result = client_->send (parsed.value ());
+        ASSERT_TRUE (result.is_ok ()) << "'" << name << "': " << result.error ().message;
+
+        EXPECT_EQ (lines_named (server_->header_lines (), { "Authorization" }),
+        (Lines{ { "Authorization", "Bearer x" } }))
+        << "'" << name << "'";
+    }
+}
+
 TEST_F (SentHeadersWireTest, TheLoadDriverSendsEveryLineInOrder) {
     EventLoop loop;
     loop.start ();

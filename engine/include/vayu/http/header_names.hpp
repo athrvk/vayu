@@ -145,9 +145,12 @@
  *
  * A name that is only whitespace trims to nothing and is the empty-name rule's
  * (`EMPTY_HEADER_NAME_CODE`), not this one: there is no spelling left to quote.
- * A name still holding a `{{token}}` is not judged: `{` is not a token
- * character, but a token nothing answered is sent as written (issue #1009), and
- * a layer that resolves later (the residual pass) judges the name it produces.
+ * A name still holding a `{{token}}` has the token set aside, not the name:
+ * `{` is not a token character, but a token nothing answered is sent as written
+ * (issue #1009), so each token stands in as one token character and the text
+ * around it is judged like any other (`X-{{a}}-b` passes, `X Bad {{x}}` and
+ * `Evil: injected{{` do not). A `{{` that closes no token is ordinary text. A
+ * layer that resolves later (the residual pass) judges the name it produces.
  *
  * Enforced wherever a name enters, each layer in its own words only where it
  * alone knows something:
@@ -268,11 +271,11 @@ inline constexpr std::string_view OPTIONAL_WHITESPACE = " \t";
  *
  * @p name is the name as it will be sent: already trimmed
  * (`trim_optional_whitespace`) and not empty - an empty one is
- * `describe_empty_header_name`'s. A name holding `{{` is never refused (see the
- * rule above). The message quotes the name and says which character cannot
- * appear in one. One wording for every layer that reads a
- * name, on the same reasoning as the two above: a layer may name itself in
- * front of it, never inside it.
+ * `describe_empty_header_name`'s. A `{{token}}` in it is not judged, the text
+ * around it is (see the rule above). The message quotes the name as given and
+ * says which character cannot appear in one. One wording for every layer that
+ * reads a name, on the same reasoning as the two above: a layer may name itself
+ * in front of it, never inside it.
  */
 [[nodiscard]] std::optional<std::string> invalid_header_name_refusal (std::string_view name);
 

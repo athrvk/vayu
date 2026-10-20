@@ -1628,9 +1628,13 @@ TEST_F (RequestComposerTest, AnInlineHeaderNameIsTrimmedAndAPaddedRepeatIsStillA
 }
 
 // Mutation check: drop the `invalid_header_name_refusal` call in
-// `settle_header_name` and all three compose as 200.
+// `settle_header_name` and all of them compose as 200. The last two hold
+// braces: the `{{token}}` is set aside and what surrounds it is judged, and a
+// `{{` that closes no token is ordinary text (mutation check: restore a
+// blanket skip of any name holding `{{`).
 TEST_F (RequestComposerTest, AHeaderNameThatIsNotATokenIsRefused) {
-    for (const std::string name : { "X Bad", "X:Bad", "X-\xC3\xA9" }) {
+    for (const std::string name :
+    { "X Bad", "X:Bad", "X-\xC3\xA9", "Evil: injected{{", "X Bad {{x}}" }) {
         auto [status, payload] = compose_header_named (*db_, name);
 
         EXPECT_EQ (status, 400) << name << ": " << payload.dump ();
@@ -1683,6 +1687,16 @@ TEST_F (RequestComposerTest, AnUnresolvedHeaderNameIsLeftForTheResidualPass) {
 
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (header_of (payload, "{{later}}"), "v");
+}
+
+// An unanswered token among token characters is a name a script may complete,
+// so it is left for the residual pass, not refused for its braces.
+TEST_F (RequestComposerTest, ATokenAmongTokenCharactersIsNotRefused) {
+    seed_environment ("env_1", "{}");
+    auto [status, payload] = compose_header_named (*db_, "X-{{a}}-b");
+
+    ASSERT_EQ (status, 200) << payload.dump ();
+    EXPECT_EQ (header_of (payload, "X-{{a}}-b"), "v");
 }
 
 TEST_F (RequestComposerTest, UnknownScopeIdsDegradeToAnEmptyScope) {
