@@ -706,6 +706,74 @@ TEST (ImportFetchReference, TheStreamedFormRefusesTheSamePeerAsAnErrorEvent) {
     EXPECT_EQ (other.requests_seen (), 0);
 }
 
+TEST (ImportFetchReference, TheStreamedFormFetchesTheSourcesOwnHostAndPort) {
+    vayu::tests::EchoServer source;
+    const std::string spec =
+    "http://127.0.0.1:" + std::to_string (source.port ()) + "/spec.yaml";
+    Recorder recorder;
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    reference_body (source.url (), spec), direct (), recorder.emitter ());
+
+    EXPECT_EQ (status, 200);
+    ASSERT_FALSE (recorder.events.empty ());
+    const Emitted& last = recorder.events.back ();
+    ASSERT_EQ (last.event, "result") << last.data.dump ();
+    EXPECT_EQ (last.data.value ("content", std::string ()), "{}");
+    EXPECT_EQ (source.requests_seen (), 1);
+}
+
+TEST (ImportFetchReference, TheStreamedFormDoesNotFollowARedirect) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::EchoServer target;
+    Recorder recorder;
+    vayu::http::routes::import_fetch_stream (
+    reference_body (origin.redirect_to (target.url ()), origin.url ()),
+    direct (), recorder.emitter ());
+
+    ASSERT_FALSE (recorder.events.empty ());
+    const Emitted& last = recorder.events.back ();
+    EXPECT_EQ (last.event, "error") << last.data.dump ();
+    EXPECT_EQ (last.data.value ("status", 0), 502);
+    EXPECT_EQ (error_message (last.data), "The server answered HTTP 302");
+    EXPECT_TRUE (recorder.of ("result").empty ());
+    EXPECT_EQ (origin.requests_seen (), 1);
+    EXPECT_EQ (target.requests_seen (), 0) << "the redirect was followed";
+}
+
+TEST (ImportFetchReference, TheStreamedFormRefusesALoopbackNameOnAnotherPortThanTheSource) {
+    vayu::tests::EchoServer source;
+    vayu::tests::EchoServer other;
+    const std::string port = std::to_string (other.port ());
+    for (const std::string& url : { "http://localhost:" + port + "/echo",
+         "http://vayu-ref.localhost:" + port + "/echo" }) {
+        Recorder recorder;
+        vayu::http::routes::import_fetch_stream (
+        reference_body (url, source.url ()), direct (), recorder.emitter ());
+
+        ASSERT_FALSE (recorder.events.empty ()) << url;
+        const Emitted& last = recorder.events.back ();
+        EXPECT_EQ (last.event, "error") << url << ": " << last.data.dump ();
+        EXPECT_EQ (last.data.value ("status", 0), 502) << url;
+        EXPECT_NE (error_message (last.data).find (LOCAL_PEER_RULE), std::string::npos)
+        << url << ": " << last.data.dump ();
+    }
+    EXPECT_EQ (other.requests_seen (), 0);
+}
+
+TEST (ImportFetchReference, TheStreamedFormWithoutTheFieldFollowsARedirect) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::EchoServer target;
+    Recorder recorder;
+    vayu::http::routes::import_fetch_stream (
+    fetch_body (origin.redirect_to (target.url ())), direct (), recorder.emitter ());
+
+    ASSERT_FALSE (recorder.events.empty ());
+    EXPECT_EQ (recorder.events.back ().event, "result")
+    << recorder.events.back ().data.dump ();
+    EXPECT_EQ (origin.requests_seen (), 1);
+    EXPECT_EQ (target.requests_seen (), 1);
+}
+
 // The wiring, on the seam both forms build their client from: a reference
 // reaches the client as the rule, with the source's host and port; a fetch a
 // person asked for carries none.
