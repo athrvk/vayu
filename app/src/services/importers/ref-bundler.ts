@@ -37,8 +37,9 @@
  * resolves its relative refs against that URL and fetches them through the
  * engine's `POST /import/fetch`, marked as a reference (`reference` plus the
  * discovering document's URL as `sourceUrl`, issue #2364) so the engine
- * refuses the local peers a document should not reach. A file-picked document reads its siblings through the `specFile:read` IPC, which
- * is gated in the main process (see `app/electron/spec-file.ts`). An absolute
+ * refuses the local peers a document should not reach. A file-picked document
+ * reads its siblings through the `specFile:read` IPC, which is gated in the
+ * main process (see `app/electron/spec-file.ts`). An absolute
  * `http(s)` ref is fetchable either way. A pasted document has neither, so its
  * relative refs are unresolvable by construction - and are reported as such
  * rather than silently dropped.
