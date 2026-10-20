@@ -171,6 +171,10 @@ export interface DisplayMetrics {
 	latency_p50_ms: number;
 	latency_p95_ms: number;
 	latency_p99_ms: number;
+	// The run's percentiles so far, on a live tick (`LoadTestMetrics`'s own docs).
+	cumulative_p50_ms?: number | null;
+	cumulative_p95_ms?: number | null;
+	cumulative_p99_ms?: number | null;
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;

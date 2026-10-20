@@ -32,6 +32,15 @@ interface RawSseMetrics {
 	latencyP50Ms?: number;
 	latencyP95Ms?: number;
 	latencyP99Ms?: number;
+	/** Gate frames only (issue #2385); the percentiles are `null` for an idle second. */
+	secondSamples?: number;
+	secondP50Ms?: number | null;
+	secondP95Ms?: number | null;
+	secondP99Ms?: number | null;
+	/** Every frame; `null` until a completion has been sampled. */
+	cumulativeP50Ms?: number | null;
+	cumulativeP95Ms?: number | null;
+	cumulativeP99Ms?: number | null;
 	avgLatencyMs?: number;
 	sendRate?: number;
 	throughput?: number;
@@ -61,6 +70,17 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		latency_p50_ms: m.latencyP50Ms || 0,
 		latency_p95_ms: m.latencyP95Ms || 0,
 		latency_p99_ms: m.latencyP99Ms || 0,
+		live: true,
+		// Passed through as sent, never `|| 0`: an absent key is "not a gate
+		// frame" and a null is "an idle second", and a 0 would read as a
+		// measured instant answer.
+		second_samples: m.secondSamples,
+		second_p50_ms: m.secondP50Ms,
+		second_p95_ms: m.secondP95Ms,
+		second_p99_ms: m.secondP99Ms,
+		cumulative_p50_ms: m.cumulativeP50Ms,
+		cumulative_p95_ms: m.cumulativeP95Ms,
+		cumulative_p99_ms: m.cumulativeP99Ms,
 		avg_latency_ms: m.avgLatencyMs || 0,
 		bytes_sent: m.bytesSent || 0,
 		bytes_received: m.bytesReceived || 0,
@@ -277,6 +297,9 @@ export class SSEClient {
 			latency_p50_ms: 0,
 			latency_p95_ms: 0,
 			latency_p99_ms: 0,
+			// Stands in for a frame that never arrived, so it is a live tick with
+			// no second behind it, not a stored second of 0 ms.
+			live: true,
 			avg_latency_ms: 0,
 			bytes_sent: 0,
 			bytes_received: 0,

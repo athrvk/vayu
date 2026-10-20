@@ -109,7 +109,7 @@ export function BreakpointStat({ d }: { d: DashboardDerived }) {
 	);
 }
 
-/** p99 at peak - tail latency at the breakpoint (or current p99 if uncrossed). */
+/** p99 at peak - tail latency at the breakpoint (or the run's p99 so far if uncrossed). */
 export function P99AtPeakStat({ d }: { d: DashboardDerived }) {
 	const p99 = d.breakpoint.crossed ? (d.breakpoint.p99Ms ?? d.p99Latency) : d.p99Latency;
 	const { value, unit } = formatLatencyParts(p99);

@@ -78,3 +78,43 @@ describe("computeBreakpoint", () => {
 		expect(bp.sloMs).toBe(200);
 	});
 });
+
+describe("computeBreakpoint on a live series (issue #2385)", () => {
+	it("is not latched by a window p99 between gates, and is by a gate's second", () => {
+		const history = [
+			// A ~100 ms window that read high: not a second's p99.
+			tick({ live: true, elapsed_seconds: 0.5, current_concurrency: 5, latency_p99_ms: 900 }),
+			tick({
+				live: true,
+				elapsed_seconds: 1,
+				current_concurrency: 10,
+				latency_p99_ms: 900,
+				second_samples: 50,
+				second_p50_ms: 10,
+				second_p95_ms: 20,
+				second_p99_ms: 120,
+			}),
+			tick({
+				live: true,
+				elapsed_seconds: 2,
+				current_concurrency: 20,
+				second_samples: 50,
+				second_p50_ms: 10,
+				second_p95_ms: 90,
+				second_p99_ms: 400,
+			}),
+		];
+		const bp = computeBreakpoint(history, 200);
+		expect(bp.crossed).toBe(true);
+		expect(bp.concurrency).toBe(20);
+		expect(bp.timeSeconds).toBe(2);
+		expect(bp.p99Ms).toBe(400);
+	});
+
+	it("does not cross on a series of windows alone", () => {
+		const windows = [1, 2, 3].map((s) =>
+			tick({ live: true, elapsed_seconds: s, latency_p99_ms: 900 })
+		);
+		expect(computeBreakpoint(windows, 200).crossed).toBe(false);
+	});
+});

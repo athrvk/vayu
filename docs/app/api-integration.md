@@ -1167,7 +1167,10 @@ collection run's per-step progress.
   still executing. `disconnect()` tells nobody - a subscriber hanging up on itself, and a stream
   that ended on the engine's `complete` frame, are not superseded by the next run to start
 - **Metrics Parsing**: `mapSseMetrics()` transforms the engine's camelCase blob to the frontend
-  `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map)
+  `LoadTestMetrics` shape (includes drops, queue-wait, percentiles, bytes, status-code map). It
+  marks the tick `live`, maps a gate frame's `secondSamples` / `secondP50Ms` / `secondP95Ms` /
+  `secondP99Ms` and every frame's `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms`, and
+  leaves an absent key `undefined` and a `null` as `null`, never a `0` (issue #2385)
 - **Step Parsing**: `parseStepEvent()` narrows a scenario run's `step` payload and returns `null`
   for one it cannot read. A malformed event is **dropped, never defaulted** - the step list keys
   on `(iteration, stepIndex)`, so a defaulted `0:0` would collide with the real first step's row

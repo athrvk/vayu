@@ -12,6 +12,7 @@
  */
 
 import type { LoadTestMetrics } from "@/types";
+import { secondPercentiles } from "./tickPercentiles";
 
 /**
  * The bucket every series transform here rounds a tick's elapsed time to before
@@ -186,16 +187,28 @@ export interface PercentilePoint {
 	p99: number;
 }
 
-/** Bucket per-tick latency percentiles to 0.5s. */
+/**
+ * Bucket per-second latency percentiles to 0.5s.
+ *
+ * Only a tick that holds a whole second's figures contributes a point
+ * ({@link secondPercentiles}): a live frame between gates carries a ~100 ms
+ * window and adds nothing, so the live series has one point a second like the
+ * stored one. Ticks sharing a bucket keep the worst value of each percentile -
+ * the final frame closing a partial second can land beside the last gate - and
+ * never an average, which would hide the stall the percentile exists to show.
+ */
 export function buildPercentileChartData(history: LoadTestMetrics[]): PercentilePoint[] {
 	const byBucket = new Map<number, PercentilePoint>();
 	for (const m of history) {
+		const second = secondPercentiles(m);
+		if (!second) continue;
 		const t = halfSecondBucket(m.elapsed_seconds);
+		const prev = byBucket.get(t);
 		byBucket.set(t, {
 			time: t,
-			p50: m.latency_p50_ms ?? 0,
-			p95: m.latency_p95_ms ?? 0,
-			p99: m.latency_p99_ms ?? 0,
+			p50: Math.max(prev?.p50 ?? 0, second.p50),
+			p95: Math.max(prev?.p95 ?? 0, second.p95),
+			p99: Math.max(prev?.p99 ?? 0, second.p99),
 		});
 	}
 	return Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
@@ -286,9 +299,8 @@ export const hasCustomMetrics = (m: LoadTestMetrics): boolean =>
 
 /**
  * Build one representative value per declared custom-metric name per 0.5s
- * bucket, last tick in the bucket wins - the same bucketing
- * `buildPercentileChartData` uses for the other per-tick (non-cumulative)
- * numbers this engine reports.
+ * bucket, last tick in the bucket wins - the bucketing the other per-tick
+ * (non-cumulative) series here use.
  *
  * One value per name per tick, not one line per stat: a `trend` metric carries
  * up to four numbers (p50/p95/p99/max) and charting all of them would multiply
@@ -374,16 +386,15 @@ export function spansMultipleBuckets(
 }
 
 /**
- * True when any tick reports a p99 above zero - the "is there latency to show"
- * half of the percentile card's gate, read off the ticks rather than off a
- * built series.
+ * True when any tick reports a whole-second p99 above zero - the "is there
+ * latency to show" half of the percentile card's gate, read off the ticks
+ * rather than off a built series.
  *
- * Deliberately not bucket-aware. `buildPercentileChartData` keeps the last tick
- * in each bucket, so a bucket whose final tick reported no completions reads 0
- * there while an earlier tick in it did not. This predicate can therefore only
- * be *more* permissive, and only while every such bucket is in that state - the
- * chart's own two-point guard still decides whether anything is drawn.
+ * Exact against {@link buildPercentileChartData}: it plots the same ticks and a
+ * bucket keeps the worst of its ticks, so a bucket reads above zero if and only
+ * if one of its ticks does. The chart's own two-point guard still decides
+ * whether anything is drawn.
  */
 export function hasPercentileSignal(history: LoadTestMetrics[]): boolean {
-	return history.some((m) => (m.latency_p99_ms ?? 0) > 0);
+	return history.some((m) => (secondPercentiles(m)?.p99 ?? 0) > 0);
 }

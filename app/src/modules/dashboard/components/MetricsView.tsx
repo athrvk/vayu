@@ -46,6 +46,7 @@ import {
 	spansMultipleBuckets,
 } from "../utils/metricsTransforms";
 import { createAnomalyDetector } from "../utils/detectAnomalies";
+import { cumulativePercentiles, hasSecondPercentiles } from "../utils/tickPercentiles";
 import { errorBreakdown } from "../utils/errorBreakdown";
 import { liveRateFidelity } from "../utils/rateFidelity";
 import { HeroRow } from "./hero/HeroRow";
@@ -116,10 +117,15 @@ function MetricsView({
 	// from `chartWindow` (it also needs the user's bucket width, which only it
 	// reads), so these gates ask the cheap question - is there more than one
 	// 0.5s bucket to plot - rather than building the series a second time here
-	// and throwing it away (#1152). Latency and percentiles share the count
-	// gate: both transforms bucket every tick, so they yield the same length.
+	// and throwing it away (#1152).
 	const hasMultiplePoints = useMemo(() => spansMultipleBuckets(chartWindow), [chartWindow]);
 	const hasPercentileData = useMemo(() => hasPercentileSignal(chartWindow), [chartWindow]);
+	// The percentile series is one point a second (a live frame between gates
+	// holds none), so its own count gates the card, not the latency chart's.
+	const hasPercentilePoints = useMemo(
+		() => spansMultipleBuckets(chartWindow, hasSecondPercentiles),
+		[chartWindow]
+	);
 	const hasStatusData = useMemo(
 		() => spansMultipleBuckets(chartWindow, hasStatusCodes),
 		[chartWindow]
@@ -190,6 +196,9 @@ function MetricsView({
 			durationSeconds: runDurationSeconds,
 		});
 		const droppedRequests = metrics.dropped_requests ?? 0;
+		// Over the run so far, the span `avg_latency_ms` covers, so the card's
+		// mean, median and tail describe one population (issue #2385).
+		const cumulative = cumulativePercentiles(metrics);
 		const failedRequests = metrics.requests_failed ?? 0;
 		const { httpErrors, noResponse } = errorBreakdown(
 			failedRequests,
@@ -219,10 +228,10 @@ function MetricsView({
 			currentConcurrency: metrics.current_concurrency ?? 0,
 			configuredConcurrency: rampConfig?.targetConcurrency ?? concurrency,
 			backpressure: metrics.backpressure ?? 0,
-			p99Latency: metrics.latency_p99_ms ?? 0,
+			p99Latency: cumulative.p99,
 			meanLatency: metrics.avg_latency_ms ?? 0,
-			medianLatency: metrics.latency_p50_ms ?? 0,
-			p95Latency: metrics.latency_p95_ms ?? 0,
+			medianLatency: cumulative.p50,
+			p95Latency: cumulative.p95,
 			elapsedSeconds: lastElapsedSeconds,
 			droppedRequests,
 			showDropped: isRateLimitedRun(mode, targetRps) && droppedRequests > 0,
@@ -345,7 +354,7 @@ function MetricsView({
 							/>
 						</Card>
 					)
-				: hasMultiplePoints &&
+				: hasPercentilePoints &&
 					hasPercentileData && (
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">

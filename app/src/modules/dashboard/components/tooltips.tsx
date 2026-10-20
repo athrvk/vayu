@@ -58,7 +58,7 @@ export const TOOLTIPS = {
 	throughput:
 		"Responses received per second since load started: so far while the run is live, the whole run once it has finished, including the wait for the last responses. In iterations mode, throughput is an output of how fast the server returns responses - there is no rate target.",
 	latencyPercentiles:
-		"Tail latency - 95 (p95) or 99 (p99) of every 100 timed requests finished in this time or less. A timed request got an answer or timed out; cancelled and never-sent requests are out. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
+		"Tail latency since the run started - 95 (p95) or 99 (p99) of every 100 timed requests finished in this time or less. A timed request got an answer or timed out; cancelled and never-sent requests are out. Real user-impact lives in the tail, not the mean; mean and median (sub-text) are misleading on heavy-tailed distributions.",
 	saturation:
 		"Whether the server has reached its capacity ceiling. 'healthy' means p99 latency is below the SLO threshold and the error rate is near zero. 'degrading' means p99 has crossed the threshold or errors started - the call-out shows the number of virtual users at which the degradation began (the breakpoint).",
 
@@ -94,9 +94,9 @@ export const TOOLTIPS = {
 	latencyOverTime:
 		"Per-tick latency over the run. The amber gap between Latency and Wire shows generator-side queue wait. When the gap grows, your generator is the bottleneck. Identity: latency = wire + queue wait.",
 	percentilesOverTime:
-		"Per-tick p50 / p95 / p99 latency over the run. p50 is what most users felt; p99 is the tail - heavy-tail divergence shows up as p99 climbing while p50 stays flat. Sourced from per-tick HdrHistogram snapshots.",
+		"p50 / p95 / p99 latency of each second of the run. p50 is what most users felt; p99 is the tail - heavy-tail divergence shows up as p99 climbing while p50 stays flat. At wider chart intervals each point shows the worst second in its interval. Sourced from HdrHistogram snapshots merged over each second.",
 	responseTimeVsConcurrency:
-		"Scatter plot - each dot is one tick. X axis is the number of virtual users at that moment; Y is p99 latency at that moment. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the SLO threshold.",
+		"Scatter plot - each dot is one second of the run. X axis is the number of virtual users at the end of that second; Y is that second's p99 latency. A flat left region means the server has headroom; the elbow (knee) is the breakpoint; the steep right region means the server is saturated. The amber vertical line marks where p99 first crossed the SLO threshold.",
 	statusCodesOverTime:
 		"Responses / 0.5 s by status class, stacked: the plotted height is the running total, and hovering shows each class's own count (classes with none in that interval are left out). A healthy run is a solid 2xx field; 4xx/5xx or connection-error bands rising out of it pinpoint when failures happened. Derived by diffing the cumulative status-code map between ticks.",
 

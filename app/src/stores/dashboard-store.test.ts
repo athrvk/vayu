@@ -95,6 +95,45 @@ describe("dashboard-store live retention window", () => {
 	});
 });
 
+describe("dashboard-store breakpoint on live frames (issue #2385)", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
+		useDashboardStore.getState().startRun("r");
+	});
+
+	it("latches on a gate frame's second p99, not on a window between gates", () => {
+		const s = useDashboardStore.getState();
+		// A ~100 ms window reading over the SLO, then a gate whose second did not.
+		s.addMetricsBatch([
+			{ ...tick(0.5, 900), live: true },
+			{
+				...tick(1, 900),
+				live: true,
+				second_samples: 80,
+				second_p50_ms: 5,
+				second_p95_ms: 8,
+				second_p99_ms: 120,
+			},
+		]);
+		expect(useDashboardStore.getState().breakpoint.crossed).toBe(false);
+
+		s.addMetricsBatch([
+			{
+				...tick(2, 10),
+				live: true,
+				second_samples: 80,
+				second_p50_ms: 5,
+				second_p95_ms: 90,
+				second_p99_ms: 310,
+			},
+		]);
+		const { breakpoint } = useDashboardStore.getState();
+		expect(breakpoint.crossed).toBe(true);
+		expect(breakpoint.timeSeconds).toBe(2);
+		expect(breakpoint.p99Ms).toBe(310);
+	});
+});
+
 describe("dashboard-store breakpoint SLO", () => {
 	beforeEach(() => {
 		useClientSettingsStore.setState({ sloThresholdMs: DEFAULT_SLO_THRESHOLD_MS });
