@@ -1303,7 +1303,10 @@ migration. The client's `origin` object is kept out of `config_snapshot`
 (`sanitize_config_snapshot`), so these two columns are its one record.
 [`GET /runs?origin=<kind>`](api-reference.md#get-runs) filters on `origin`
 (`run_filter_where`, `db/db_runs.cpp`) with no index: History's list is already
-bounded by retention and ordered by `idx_runs_start_time`.
+bounded by retention and ordered by `idx_runs_start_time`. The column sits past
+`config_snapshot` in the stored row, so reading it walks the snapshot's overflow
+pages; like every filter there, the term is a `CASE` that reads its column only
+when the filter is set (#2548).
 
 **`summary`** holds the aggregates `GET /runs/:runId/report` used to rebuild by scanning every
 metric row of the run: totals, the cumulative latency percentiles, the status-code distribution,
@@ -1500,9 +1503,9 @@ use - `sanitize_config_snapshot` truncates `body.content` in place and records
 it cuts. Without this cap a single oversized send (a large upload, a big JSON
 fixture) left a permanently bloated `config_snapshot` behind: the one-time
 summary build the cache above pays per run id, and the `q` filter's `LIKE` /
-`collectionId`'s `json_extract` (`run_filter_where`, `db/db_runs.cpp`, run
-unconditionally as part of every list query's `WHERE`) all scan the stored
-string's full length on every call that uses them. The by-id route
+`collectionId`'s `json_valid` / `json_extract` (`run_filter_where`,
+`db/db_runs.cpp`, evaluated only when that filter is set, #2548) all scan the
+stored string's full length on every call that uses them. The by-id route
 (`GET /runs/:id`) returns whatever was stored, cap included - it never
 re-derives or re-truncates.
 

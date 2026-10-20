@@ -24,6 +24,7 @@
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
@@ -1091,6 +1092,181 @@ TEST_F (RunsRouteTest, DbCountMatchesFilter) {
     EXPECT_EQ (db_->count_runs (f), 2);
     EXPECT_EQ (db_->get_runs_paginated (f, 50, 0).size (), 2u);
     EXPECT_EQ (db_->count_runs ({}), 3); // no filter -> everything
+}
+
+// The three SQL functions the snapshot filters call, counted (#2548).
+struct SnapshotPredicateCalls {
+    int like         = 0;
+    int json_valid   = 0;
+    int json_extract = 0;
+};
+
+SnapshotPredicateCalls& snapshot_predicate_calls () {
+    static SnapshotPredicateCalls calls;
+    return calls;
+}
+
+// Each stand-in answers "no match" (no LIKE hit, not JSON, no such key), so a
+// statement it runs in can only find less than the built-in would.
+void count_like (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().like;
+    sqlite3_result_int (context, 0);
+}
+void count_json_valid (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().json_valid;
+    sqlite3_result_int (context, 0);
+}
+void count_json_extract (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().json_extract;
+    sqlite3_result_null (context);
+}
+
+struct FunctionOverride {
+    const char* name                                      = nullptr;
+    int arity                                             = 0;
+    void (*body) (sqlite3_context*, int, sqlite3_value**) = nullptr;
+};
+
+// An auto-extension entry point: overrides the built-ins on a connection as
+// it opens. The arities are the ones run_filter_where calls with (`X LIKE Y`
+// is `like(Y, X)`): a function of the same name and arity replaces the
+// built-in, and an exact arity outranks json_extract's variadic one.
+int install_snapshot_predicate_counters (sqlite3* db,
+char** /*error*/,
+const sqlite3_api_routines* /*api*/) {
+    const auto overrides = std::to_array<FunctionOverride> ({
+    { "like", 2, &count_like },
+    { "json_valid", 1, &count_json_valid },
+    { "json_extract", 2, &count_json_extract },
+    });
+    for (const auto& [name, arity, body] : overrides) {
+        const int rc = sqlite3_create_function (
+        db, name, arity, SQLITE_UTF8, nullptr, body, nullptr, nullptr);
+        if (rc != SQLITE_OK) {
+            return rc;
+        }
+    }
+    return SQLITE_OK;
+}
+
+// sqlite3_auto_extension takes its entry point type-erased and casts it back
+// to `sqlite3_loadext_entry` before calling it.
+auto snapshot_predicate_counters_entry () {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return reinterpret_cast<void (*) ()> (&install_snapshot_predicate_counters);
+}
+
+// Installs the counters on every connection opened while this lives. A test
+// cannot reach the storage's own connection, so it reopens the database
+// inside one. Cancelled on scope exit because a direct run of the binary
+// (no ctest) keeps one process for every test after this one.
+class SnapshotPredicateCounters {
+    public:
+    SnapshotPredicateCounters ()
+    : registered (sqlite3_auto_extension (snapshot_predicate_counters_entry ())) {
+        snapshot_predicate_calls () = {};
+    }
+    ~SnapshotPredicateCounters () {
+        sqlite3_cancel_auto_extension (snapshot_predicate_counters_entry ());
+    }
+    SnapshotPredicateCounters (const SnapshotPredicateCounters&) = delete;
+    SnapshotPredicateCounters& operator= (const SnapshotPredicateCounters&) = delete;
+    SnapshotPredicateCounters (SnapshotPredicateCounters&&)            = delete;
+    SnapshotPredicateCounters& operator= (SnapshotPredicateCounters&&) = delete;
+
+    const int registered;
+};
+
+// The 5 s History poll lists and counts with no `q` and no collection, so
+// neither filter's predicate may touch a snapshot then; each set filter must
+// still reach its function once per row, which is also what proves the
+// counters are installed on the connection the queries run on.
+TEST_F (RunsRouteTest, AnUnfilteredListNeverEvaluatesTheSnapshotPredicates) {
+    constexpr int RUNS = 500;
+    for (int i = 0; i < RUNS; ++i) {
+        seed ({ .id      = "run_" + std::to_string (i),
+        .type            = vayu::RunType::Scenario,
+        .start_time      = i,
+        .config_snapshot = scenario_snapshot ("col_A") });
+    }
+
+    db_.reset ();
+    const SnapshotPredicateCounters counters;
+    ASSERT_EQ (counters.registered, SQLITE_OK);
+    // No `init ()`: its retention pass would prune the set to maxRunsRetained.
+    db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+
+    auto& calls = snapshot_predicate_calls ();
+    calls       = {};
+    EXPECT_EQ (db_->count_runs ({}), RUNS);
+    EXPECT_EQ (db_->get_runs_paginated ({}, 50, 0).size (), 50u);
+    EXPECT_EQ (calls.like, 0);
+    EXPECT_EQ (calls.json_valid, 0);
+    EXPECT_EQ (calls.json_extract, 0);
+
+    vayu::db::RunFilter by_text;
+    by_text.q = "col_A";
+    calls     = {};
+    EXPECT_EQ (db_->count_runs (by_text), 0); // the stand-in never matches
+    EXPECT_EQ (calls.like, RUNS);
+
+    vayu::db::RunFilter by_collection;
+    by_collection.collection_id = "col_A";
+    calls                       = {};
+    EXPECT_EQ (db_->count_runs (by_collection), 0);
+    EXPECT_EQ (calls.json_valid, RUNS);
+    EXPECT_EQ (calls.json_extract, RUNS);
+}
+
+// Every combination of the two snapshot filters over one mixed set, through
+// both reads: `q` is a substring of the stored text (a malformed snapshot
+// included), the collection is the parsed key (a design run naming it in its
+// URL excluded), and the two together intersect.
+TEST_F (RunsRouteTest, TextAndCollectionFiltersComposeOverOneSet) {
+    seed ({ .id = "orders_A",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 5,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_A"},"name":"orders"})" });
+    seed ({ .id = "users_A",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 4,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_A"},"name":"users"})" });
+    seed ({ .id = "orders_B",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 3,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_B"},"name":"orders"})" });
+    seed ({ .id      = "orders_design",
+    .type            = vayu::RunType::Design,
+    .start_time      = 2,
+    .config_snapshot = R"({"url":"https://api/col_A/orders"})" });
+    seed ({ .id = "orders_malformed", .start_time = 1, .config_snapshot = "orders {{{" });
+
+    const auto ids_of = [this] (const vayu::db::RunFilter& filter) {
+        std::vector<std::string> ids;
+        for (const auto& run : db_->get_runs_paginated (filter, 50, 0)) {
+            ids.push_back (run.id);
+        }
+        EXPECT_EQ (db_->count_runs (filter), static_cast<int64_t> (ids.size ()));
+        return ids;
+    };
+    using Ids = std::vector<std::string>;
+
+    vayu::db::RunFilter by_text;
+    by_text.q = "orders";
+    EXPECT_EQ (ids_of (by_text),
+    (Ids{ "orders_A", "orders_B", "orders_design", "orders_malformed" }));
+
+    vayu::db::RunFilter by_collection;
+    by_collection.collection_id = "col_A";
+    EXPECT_EQ (ids_of (by_collection), (Ids{ "orders_A", "users_A" }));
+
+    vayu::db::RunFilter both = by_collection;
+    both.q                   = "orders";
+    EXPECT_EQ (ids_of (both), (Ids{ "orders_A" }));
+
+    vayu::db::RunFilter empty_text;
+    empty_text.q = "";
+    EXPECT_EQ (ids_of (empty_text).size (), 5u); // an empty `q` is no filter
 }
 
 // GET /runs/:id/report's `configuration` object: same nine-key extension as
