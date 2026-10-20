@@ -923,10 +923,16 @@ class ScriptEngine::Impl {
             return timeout_message ();
         }
         if (!state.enabled && steps_run == cap) {
-            return "Script stopped after running " + std::to_string (cap) +
+            // Built in place: returning the concatenation by value trips a
+            // GCC 13 -Warray-bounds false positive on the optional's move.
+            std::optional<std::string> message;
+            message.emplace ("Script stopped after running ");
+            message->append (std::to_string (cap));
+            message->append (
             " promise jobs and timer callbacks: with no script timeout "
             "(scriptTimeout 0) that is the limit on asynchronous work, and the "
-            "rest were not run";
+            "rest were not run");
+            return message;
         }
         return std::nullopt;
     }
