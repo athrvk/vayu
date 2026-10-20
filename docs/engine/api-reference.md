@@ -5618,6 +5618,12 @@ and `cacheKey` is returned. A completion (the loopback callback and `POST
 /oauth2/authorize/complete` alike) always exchanges its code and replaces any
 token already cached under that key.
 
+The loopback callback reads nothing before `state`, `error` included: a request
+with a missing or wrong `state` answers `400` and the attempt keeps waiting, so
+an IdP that omits `state` on its error redirect leaves the attempt pending until
+the 5-minute timeout. A loopback attempt settles once, and the first settlement
+wins: a later callback with the right `state` answers `409` and changes nothing.
+
 ### Local mock issuer
 
 A built-in OAuth 2.0 issuer for developing and testing auth flows **offline** -
