@@ -3079,6 +3079,88 @@ TEST (PostmanImport, StoresTheProtocolSettingsAndKeepsTheWholeObject) {
     EXPECT_EQ (item.at ("followRedirects"), true);
 }
 
+/// The request called @p name anywhere under @p collection, as a plain `json`.
+json postman_request_named (const nlohmann::ordered_json& collection,
+const std::string& name) {
+    for (const auto& request : collection.at ("requests")) {
+        if (request.at ("name") == name) {
+            return json::parse (request.dump ());
+        }
+    }
+    for (const auto& child : collection.at ("children")) {
+        if (json found = postman_request_named (child, name); !found.is_null ()) {
+            return found;
+        }
+    }
+    return json ();
+}
+
+// Issue #2538: a folder's or the collection's `protocolProfileBehavior` reaches
+// every request below it, nearest key winning (Postman's
+// `getProtocolProfileBehaviorResolved`, one level deep), and the request keeps
+// only its own object as the export's carrier. A key Vayu cannot apply is
+// counted once, on the node that declared it, and named. Mutation checks: pass
+// `json::object ()` instead of `behavior` to `pm_request_named` and the
+// inheritance assertions fail; drop `note_unapplied_folder_behavior` and the
+// count assertion fails.
+TEST (PostmanImport, AFolderOrCollectionProtocolBehaviourReachesTheRequestsBelowIt) {
+    const ImportParse parsed = parse_import (
+    R"({"info":{"name":"Whole","schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
+        "protocolProfileBehavior":{"maxRedirects":3,"tlsDisabledProtocols":["TLSv1"]},
+        "item":[
+        {"name":"Inspect","protocolProfileBehavior":{"followRedirects":false,"strictSSL":false,
+            "insecureHTTPParser":true,"disabledSystemHeaders":{"accept":true,"user-agent":true}},
+         "item":[
+            {"name":"Inherits","request":{"method":"GET","url":"https://x.com"}},
+            {"name":"Overrides","protocolProfileBehavior":{"followRedirects":true},
+                "request":{"method":"GET","url":"https://x.com"}},
+            {"name":"Replaces","protocolProfileBehavior":{"disabledSystemHeaders":{"content-type":true}},
+                "request":{"method":"GET","url":"https://x.com"}},
+            {"name":"Nested","protocolProfileBehavior":{"disableCookies":true},"item":[
+                {"name":"Deep","request":{"method":"GET","url":"https://x.com"}}]}]},
+        {"name":"Outside","request":{"method":"GET","url":"https://x.com"}}
+    ]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const auto& root = parsed.result.at ("collections")[0];
+
+    const json inherits = postman_request_named (root, "Inherits");
+    EXPECT_EQ (inherits.at ("followRedirects"), false);
+    EXPECT_EQ (inherits.at ("verifySSL"), false);
+    EXPECT_EQ (inherits.at ("maxRedirects"), 3);
+    EXPECT_EQ (inherits.at ("disabledSystemHeaders"),
+    json::array ({ "accept", "user-agent" }));
+    EXPECT_FALSE (inherits.contains ("disableCookies"));
+    EXPECT_FALSE (inherits.contains ("postmanProtocolBehavior"));
+
+    const json overrides = postman_request_named (root, "Overrides");
+    EXPECT_EQ (overrides.at ("followRedirects"), true);
+    EXPECT_EQ (overrides.at ("verifySSL"), false);
+    EXPECT_EQ (overrides.at ("postmanProtocolBehavior"), R"({"followRedirects":true})");
+
+    const json replaces = postman_request_named (root, "Replaces");
+    EXPECT_EQ (replaces.at ("disabledSystemHeaders"), json::array ({ "content-type" }));
+    EXPECT_EQ (replaces.at ("followRedirects"), false);
+
+    const json deep = postman_request_named (root, "Deep");
+    EXPECT_EQ (deep.at ("disableCookies"), true);
+    EXPECT_EQ (deep.at ("followRedirects"), false);
+    EXPECT_EQ (deep.at ("maxRedirects"), 3);
+    EXPECT_FALSE (deep.contains ("postmanProtocolBehavior"));
+
+    const json outside = postman_request_named (root, "Outside");
+    EXPECT_EQ (outside.at ("maxRedirects"), 3);
+    EXPECT_FALSE (outside.contains ("followRedirects"));
+    EXPECT_FALSE (outside.contains ("verifySSL"));
+
+    const json skipped = json::parse (parsed.result.at ("meta").at ("skipped").dump ());
+    ASSERT_EQ (skipped.size (), 1u) << skipped.dump ();
+    EXPECT_EQ (skipped[0].at ("kind"), "protocol_behavior_folder");
+    EXPECT_EQ (skipped[0].at ("count"), 2);
+    EXPECT_EQ (skipped[0].at ("names"), json::array ({ "Inspect", "Whole" }));
+    EXPECT_FALSE (skipped[0].contains ("requests"));
+}
+
 // A GraphQL body's Content-Type is Postman's system header (issue #1765): the
 // importer writes it as the body mode's own row, marked the way the Body panel
 // marks it, and writes none for a request that refuses `content-type` - as

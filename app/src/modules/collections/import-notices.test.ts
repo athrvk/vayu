@@ -15,7 +15,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
-import type { CollectionDraft, ImportMeta, RequestDraft } from "@/services/importers/types";
+import type {
+	CollectionDraft,
+	ImportMeta,
+	RequestDraft,
+	SkippedItem,
+} from "@/services/importers/types";
 import {
 	bodiesWithoutFileNotice,
 	describeCarriedOver,
@@ -428,6 +433,23 @@ describe("importNotices", () => {
 		).map((n) => n.text);
 		expect(texts).toEqual([
 			"2 requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
+		]);
+	});
+
+	it("names the folder or collection that declared a setting Vayu cannot apply (#2538)", () => {
+		const texts = (item: SkippedItem) =>
+			importNotices(meta({ skipped: [item] })).map((n) => n.text);
+		expect(texts({ kind: "protocol_behavior_folder", count: 1, names: ["Payments"] })).toEqual([
+			"1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options) (Payments)",
+		]);
+		expect(
+			texts({
+				kind: "protocol_behavior_folder",
+				count: 2,
+				names: ["Payments", "Billing"],
+			})
+		).toEqual([
+			"2 folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options) (Payments, Billing)",
 		]);
 	});
 });

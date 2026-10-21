@@ -3563,9 +3563,10 @@ to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters, and Insomnia's file bodies and
 the resources it cannot import. A count that belongs to the document (a second
 server URL, a malformed section) has none. **`names`**, when present, names
-what the count dropped, never its value: today only `oauth2_unmapped_param`,
-whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
-did not carry.
+what the count dropped, never its value: `oauth2_unmapped_param`, whose
+`names` are the keys of the OAuth 2.0 request parameters a Postman parse did
+not carry, and `protocol_behavior_folder`, whose `names` are the folders or
+collection that declared a setting Vayu cannot apply.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
@@ -4074,6 +4075,9 @@ disabledSystemHeaders, disableBodyPruning`, each only where it differs from
 Postman's default: `strictSSL: false`, `followRedirects: false`, a
 `maxRedirects` other than 10, `true` for either flag, the non-empty header
 list, and `disableBodyPruning: true` on a GET or HEAD that sends a body.
+A folder or collection is never given one: an import flattens a folder's
+`protocolProfileBehavior` onto the requests below it (#2538), so its applied
+settings come back on those requests and a key Vayu does not apply is lost.
 
 **Saved examples.** An example imported from Postman carries the saved
 response it came from (`request_examples.postman_response`), and so does one

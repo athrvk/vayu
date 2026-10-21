@@ -822,7 +822,9 @@ logged as a warning: it means a client skipped composition.
   reaches `substitute_path_variables`' `encode`, `append_query_param` and the
   import's query join (`QueryEncoding::AsTyped`). The
   imported object itself is `requests.postman_protocol_behavior`, read only by
-  the Postman export.
+  the Postman export; it is the request's *own* object, while a folder's or the
+  collection's (#2538) is resolved into these typed columns at import and kept
+  nowhere.
 - **What Vayu adds to a request nobody wrote it into is the engine's, and one
   set** (#1229, `include/vayu/http/default_headers.hpp`): a `User-Agent`, a
   negotiated `Accept-Encoding`, and an opt-in correlation id namespaced to
