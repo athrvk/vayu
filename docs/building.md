@@ -431,6 +431,13 @@ The project uses GitHub Actions for automated builds:
     engine's release configuration for all three platforms, so all three exist
     in the **default-branch cache scope** a release tag reads
 
+- **Linux runners name their Ubuntu release** (`ubuntu-24.04`, and
+  `ubuntu-22.04` where the release's glibc floor needs it), never
+  `ubuntu-latest`. That label moves to a new image over a weeks-long rollout,
+  during which each job lands on either image at random: a new compiler on
+  some runs and not others. A `Script lint` step refuses the moving label, so
+  moving to a new release is a pull request of its own (#2633 for 26.04).
+
 These workflows use the same CMakePresets as local development for consistency.
 
 ### Why a separate cache-warming workflow
@@ -465,7 +472,7 @@ flag - so an entry serves only a build that compiles exactly the same way.
 - `pr-tests.yml` builds its own **pull-request** engine matrix on every push to
   `master` that touches the engine. The pull-request legs compile differently
   from the release (`-DVAYU_WERROR=ON` on Linux and macOS, `macos-prod` rather
-  than `macos-prod-arm64`, an ubuntu-latest leg), so the release warm-up never
+  than `macos-prod-arm64`, an `ubuntu-24.04` leg), so the release warm-up never
   served them: the first push of a one-file pull request read 28 hits against
   371 misses on three legs. Building the same job definition on `master` keeps
   writer and reader identical by construction. That run builds only - tests,

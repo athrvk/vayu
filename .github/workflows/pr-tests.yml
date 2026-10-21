@@ -50,7 +50,7 @@ on:
   # compiler binary, preset, `-DVAYU_WERROR`, include paths. cache-warm.yml
   # compiles the *release* configuration, which differs from the legs below on
   # three of four (no `-Werror`, `macos-prod-arm64` instead of `macos-prod`, no
-  # ubuntu-latest), so first pushes read nothing from it: 28 hits to 371 misses
+  # ubuntu-24.04), so first pushes read nothing from it: 28 hits to 371 misses
   # on both Linux legs and macOS in run 39181878500, a one-file change. Building
   # this same matrix on master is what makes the two sides agree by
   # construction - no second copy of the flags exists to drift.
@@ -82,7 +82,7 @@ jobs:
     # below read a pull request's file list. Skipped here, every job that needs
     # it is skipped too - except `engine`, whose condition admits a push.
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Both filters read the PR's file list from the API rather than cloning, so
     # this is all they need. Stated explicitly rather than inherited, since a
     # fork PR's token is read-only regardless and this job must work for those.
@@ -472,7 +472,7 @@ jobs:
   # for what the compiler says about the same files three times.
   quality:
     name: App quality checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     # The second clause is the JavaScript outside `app/` (#1166): its lint runs
     # here, so an edit to one of those files has to be able to reach this job.
@@ -594,7 +594,7 @@ jobs:
         # cannot drift apart. Adding a third shard means changing this list
         # *and* the count `ci-gate` expects per platform - the coverage check
         # fails loudly if that is done by halves.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
         shard: [1/2, 2/2]
     # Roughly 4 minutes on the slowest runner; the ceiling is for a cold pnpm
     # store, not for the steady state.
@@ -693,14 +693,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-24.04, ubuntu-22.04, windows-latest, macos-latest]
         include:
           # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
           # both legs that use it (issue #884) - a warning that only one
           # compiler emits is exactly the kind this gate exists to catch, so
           # gating Linux alone would leave Clang-only diagnostics unwatched.
           # Windows needs no flag: MSVC builds /WX unconditionally.
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           # The Linux release's own configuration: the oldest supported Ubuntu
@@ -708,8 +708,8 @@ jobs:
           # toolchain). release.yml runs only on a tag, so without this leg a
           # change that breaks that compiler, or pulls a newer glibc symbol into
           # the engine, would first fail with the release half-published.
-          # ubuntu-latest stays alongside it: it is the current distribution,
-          # and the clang-tidy gate runs there.
+          # ubuntu-24.04 stays alongside it: the newest Ubuntu this repository
+          # has adopted, and the clang-tidy gate runs there.
           - os: ubuntu-22.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
@@ -776,10 +776,10 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -847,7 +847,7 @@ jobs:
         run: ./scripts/check-macos-min-version.sh engine/build-release/vayu-engine
 
       # The Linux counterpart, on the leg built the way the release is. The
-      # ubuntu-latest leg links against a newer glibc by design and would fail
+      # ubuntu-24.04 leg links against a newer glibc by design and would fail
       # it, which is the point: only the release baseline has a floor to hold.
       - name: Verify engine glibc floor
         if: matrix.os == 'ubuntu-22.04'
@@ -1192,7 +1192,7 @@ jobs:
   # `DisableFormat: true` of its own besides.
   engine-format:
     name: Engine formatting
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
     permissions:
@@ -1268,7 +1268,7 @@ jobs:
         # its dry-run test exercises the real `codesign`/`xattr` call sites.
         # Windows is absent for the same reason it was absent before the split:
         # there is no shell to run it in.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     timeout-minutes: 10
 
     steps:
@@ -1328,7 +1328,7 @@ jobs:
   # the area filters above no longer route build.py edits into their matrices.
   build-script:
     name: Build script
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.build_script == 'true'
     permissions:
@@ -1363,7 +1363,7 @@ jobs:
   # looked at nothing is the one failure mode a lint gate cannot survive quietly.
   scripts:
     name: Script lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.scripts == 'true'
     permissions:
@@ -1418,6 +1418,33 @@ jobs:
             exit 1
           fi
           echo "${#refs[@]} action reference(s), all pinned"
+
+      # A runner label that moves is an image change no pull request asked for.
+      # `ubuntu-latest` moved from 24.04 to 26.04 over a month-long rollout
+      # (actions/runner-images#14748), during which each job landed on either
+      # image at random - new GCC, CMake and LLVM on some runs, not others,
+      # which is intermittent red CI by construction - and the vcpkg key, which
+      # names the label, would have shared one cache between two compilers.
+      # So every Linux job names its release, and moving to a new one is a pull
+      # request of its own (#2633 for 26.04). Comments may still say
+      # `ubuntu-latest`.
+      - name: Every Linux runner names its Ubuntu release
+        shell: bash
+        run: |
+          # Spelled in two halves so this step's own lines do not match it.
+          moving="ubuntu-""latest"
+          mapfile -t labels < <(grep -rEn "ubuntu-[0-9]+\.[0-9]+|${moving}" .github/workflows .github/actions | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#')
+          if [[ ${#labels[@]} -eq 0 ]]; then
+            echo "::error::No Ubuntu runner labels found - the scan is broken, not the tree"
+            exit 1
+          fi
+          bad=$(printf '%s\n' "${labels[@]}" | grep -E "${moving}" | grep -vE "#.*${moving}" || true)
+          if [[ -n "$bad" ]]; then
+            echo "::error::Name the Ubuntu release (ubuntu-24.04), not ${moving}:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          echo "${#labels[@]} Ubuntu label line(s), none on ${moving}"
 
       # The two git hooks are named on their own because they carry no
       # extension; `engine/vendor/` is dropped because upstream's scripts are
@@ -1495,7 +1522,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # `changes` is a dependency as well as the work jobs, so a failure in the
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
@@ -1533,7 +1560,7 @@ jobs:
           # The app matrix's platforms and its per-platform shard count. A
           # matrix that gains or loses either without this following it fails
           # below, rather than leaving part of the suite run nowhere.
-          platforms=(ubuntu-latest macos-latest windows-latest)
+          platforms=(ubuntu-24.04 macos-latest windows-latest)
           shards=2
           status=0
 

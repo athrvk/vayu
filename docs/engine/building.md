@@ -520,7 +520,7 @@ standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
   `libstdc++`/`libgcc_s` among its `NEEDED` libraries, and no glibc symbol
   version above `VAYU_LINUX_GLIBC_FLOOR` (default 2.35). It runs in
   `release.yml` and on the `ubuntu-22.04` leg of `pr-tests.yml`. The
-  `ubuntu-latest` leg is not checked: it links against 24.04's glibc by design.
+  `ubuntu-24.04` leg is not checked: it links against 24.04's glibc by design.
 - **The vcpkg cache key carries the runner image** (`matrix.os`). vcpkg's
   archives only fit the compiler that built them and `actions/cache` never
   overwrites a key, so with one `Linux` key for both images whichever saved
