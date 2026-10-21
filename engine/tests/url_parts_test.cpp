@@ -135,6 +135,23 @@ TEST (UrlPartsTest, AValueMayContainItsOwnEquals) {
     EXPECT_EQ (params[0].value, "a=b=c");
 }
 
+// One segment, never searched for `&`: the three shapes of a pair, and an
+// ampersand that stays inside the value.
+TEST (UrlPartsTest, ASingleSegmentSplitsAtTheFirstEqualsOnly) {
+    const auto bare  = parse_query_param ("flag");
+    const auto empty = parse_query_param ("a=");
+    const auto both  = parse_query_param ("a=b&c=d");
+
+    EXPECT_EQ (bare.key, "flag");
+    EXPECT_FALSE (bare.value.has_value ());
+    EXPECT_EQ (empty.key, "a");
+    const std::optional<std::string>& empty_value = empty.value;
+    ASSERT_HAS_VALUE (empty_value);
+    EXPECT_EQ (*empty_value, "");
+    EXPECT_EQ (both.key, "a");
+    EXPECT_EQ (both.value, "b&c=d");
+}
+
 TEST (UrlPartsTest, EmptyRunsBetweenSeparatorsAreDropped) {
     const auto params = parse_query_params ("a=1&&b=2&");
 
