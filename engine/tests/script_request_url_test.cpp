@@ -507,6 +507,230 @@ TEST_F (ScriptRequestUrlTest, ClearEmptiesTheQueryAndTheQuestionMarkWithIt) {
     EXPECT_EQ (request.url, "https://api.example.com/s");
 }
 
+// ---------------------------------------------------------------------------
+// addQueryParams / removeQueryParams - the Url-level writers that take several
+// params at once.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptRequestUrlTest, AddQueryParamsAppendsFromAStringAndAnArray) {
+    struct Case {
+        const char* argument;
+        const char* expected;
+    };
+    const std::array<Case, 9> CASES = { {
+    { "'a=1&b=2'", "https://api.example.com/s?page=1&a=1&b=2" },
+    // The first `=` splits, so a value may hold another; `a=` is an empty
+    // value and a bare word is a bare key.
+    { "'a=x=y&flag&c='", "https://api.example.com/s?page=1&a=x=y&flag&c=" },
+    // A leading `?` is tolerated; Postman would keep it in the first key.
+    { "'?a=1&b=2'", "https://api.example.com/s?page=1&a=1&b=2" },
+    { "'a=1&&b=2&'", "https://api.example.com/s?page=1&a=1&b=2" },
+    { "['a=1', { key: 'b', value: 2 }, { key: 'flag' }, 'c']",
+    "https://api.example.com/s?page=1&a=1&b=2&flag&c" },
+    // An array item is one param, so its `&` is data and is encoded.
+    { "['a=1&b=2']", "https://api.example.com/s?page=1&a=1%26b=2" },
+    { "{ key: 'sort', value: true }", "https://api.example.com/s?page=1&sort=true" },
+    // Duplicates are kept, as query.add keeps them.
+    { "'page=2'", "https://api.example.com/s?page=1&page=2" },
+    { "''", "https://api.example.com/s?page=1" },
+    } };
+
+    for (const auto& [argument, expected] : CASES) {
+        Request target = request;
+        target.url     = "https://api.example.com/s?page=1";
+        const std::string script =
+        std::string ("pm.request.url.addQueryParams(") + argument + ");";
+        const auto result = engine.execute_prerequest (script, target, env);
+
+        ASSERT_TRUE (result.success) << argument << ": " << result.error_message;
+        EXPECT_EQ (target.url, expected) << argument;
+    }
+}
+
+// The rows are written by the rule query.add writes them by: encoded as the
+// send would, or as typed when the request sends its URL as typed.
+TEST_F (ScriptRequestUrlTest, AddQueryParamsEncodesLikeQueryAdd) {
+    const auto run = [&] (const std::string& script, bool disable_encoding) {
+        Request target              = request;
+        target.url                  = "https://api.example.com/s";
+        target.disable_url_encoding = disable_encoding;
+        const auto result = engine.execute_prerequest (script, target, env);
+        EXPECT_TRUE (result.success) << script << ": " << result.error_message;
+        return target.url;
+    };
+
+    const std::string via_add  = run (R"JS(
+        pm.request.url.query.add({ key: 'k', value: 'a b' });
+        pm.request.url.query.add({ key: 'x=y', value: 'c#d' });
+    )JS",
+     false);
+    const std::string via_many = run (R"JS(
+        pm.request.url.addQueryParams([{ key: 'k', value: 'a b' }, { key: 'x=y', value: 'c#d' }]);
+    )JS",
+    false);
+
+    EXPECT_EQ (via_many, "https://api.example.com/s?k=a%20b&x%3Dy=c%23d");
+    EXPECT_EQ (via_many, via_add);
+    // A string is parsed first and then encoded per row, like an object.
+    EXPECT_EQ (run ("pm.request.url.addQueryParams(['k=a b']);", false),
+    "https://api.example.com/s?k=a%20b");
+    EXPECT_EQ (
+    run ("pm.request.url.addQueryParams({ key: 'k', value: 'a\"b' });", true),
+    "https://api.example.com/s?k=a\"b");
+    EXPECT_EQ (run ("pm.request.url.addQueryParams('k=a\"b');", true),
+    "https://api.example.com/s?k=a\"b");
+}
+
+// Every item is read before any is written: a bad one must not leave the good
+// ones in front of it behind. The script catches the throw and reads the query
+// back itself, so the check does not lean on the write-back.
+TEST_F (ScriptRequestUrlTest, AddQueryParamsLeavesTheUrlUntouchedWhenAnItemIsInvalid) {
+    const std::array<const char*, 10> ARGUMENTS = { {
+    "['ok=1', 42]",
+    "['ok=1', { value: 'x' }]",
+    "['ok=1', { key: '' }]",
+    "['ok=1', { key: 'a', value: { b: 1 } }]",
+    "['ok=1', '=x']",
+    "['ok=1', ['nested=1']]",
+    "'ok=1&=x'",
+    "42",
+    "null",
+    "undefined",
+    } };
+
+    for (const char* argument : ARGUMENTS) {
+        env.clear ();
+        const std::string script = std::string (R"JS(
+            try {
+                pm.request.url.addQueryParams()JS") +
+        argument + R"JS();
+                pm.environment.set('threw', 'no');
+            } catch (e) {
+                pm.environment.set('threw', String(e.message));
+            }
+            pm.environment.set('query', pm.request.url.getQueryString());
+            pm.environment.set('count', String(pm.request.url.query.count()));
+        )JS";
+        const auto result = engine.execute_prerequest (script, request, env);
+
+        ASSERT_TRUE (result.success) << argument << ": " << result.error_message;
+        ASSERT_EQ (env.count ("threw"), 1u) << argument;
+        EXPECT_NE (env.at ("threw").value.find ("addQueryParams"), std::string::npos)
+        << argument << " -> " << env.at ("threw").value;
+        EXPECT_EQ (env.at ("query").value, "page=2&sort=name&page=3") << argument;
+        EXPECT_EQ (env.at ("count").value, "3") << argument;
+    }
+
+    // And with no argument at all.
+    env.clear ();
+    const auto bare =
+    engine.execute_prerequest ("pm.request.url.addQueryParams();", request, env);
+    EXPECT_FALSE (bare.success);
+}
+
+TEST_F (ScriptRequestUrlTest, RemoveQueryParamsRemovesEveryParameterOfAName) {
+    struct Case {
+        const char* argument;
+        const char* expected;
+    };
+    const std::array<Case, 6> CASES = { {
+    { "'page'", "https://api.example.com/s?sort=name&q=x&flag" },
+    { "['page', 'sort']", "https://api.example.com/s?q=x&flag" },
+    { "[{ key: 'page' }, { key: 'flag' }]", "https://api.example.com/s?sort=name&q=x" },
+    { "['sort', { key: 'q' }]", "https://api.example.com/s?page=1&page=2&flag" },
+    { "['page', 'sort', 'q', 'flag']", "https://api.example.com/s" },
+    { "[]", "https://api.example.com/s?page=1&sort=name&page=2&q=x&flag" },
+    } };
+
+    for (const auto& [argument, expected] : CASES) {
+        Request target = request;
+        target.url =
+        "https://api.example.com/s?page=1&sort=name&page=2&q=x&flag";
+        const std::string script =
+        std::string ("pm.request.url.removeQueryParams(") + argument + ");";
+        const auto result = engine.execute_prerequest (script, target, env);
+
+        ASSERT_TRUE (result.success) << argument << ": " << result.error_message;
+        EXPECT_EQ (target.url, expected) << argument;
+    }
+}
+
+// A key written in the row as the wire has it is still found by the name the
+// script typed, the rule query.remove follows through QueryParamName.
+TEST_F (ScriptRequestUrlTest, RemoveQueryParamsFindsAKeyByTheNameAsTyped) {
+    request.url       = "https://api.example.com/s?a%20b=1&c=2";
+    const auto result = engine.execute_prerequest (
+    "pm.request.url.removeQueryParams(['a b']);", request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/s?c=2");
+}
+
+TEST_F (ScriptRequestUrlTest, RemoveQueryParamsOfAMissingNameIsANoOp) {
+    for (const char* argument : { "'nothing'", "['nothing', { key: 'none' }]", "[]" }) {
+        Request target    = request;
+        const auto result = engine.execute_prerequest (
+        std::string ("pm.request.url.removeQueryParams(") + argument + ");", target, env);
+
+        ASSERT_TRUE (result.success) << argument << ": " << result.error_message;
+        EXPECT_EQ (target.url, request.url) << argument;
+    }
+    // The fixture's URL has three params, so the equality above is not an
+    // empty URL comparing equal to itself.
+    EXPECT_NE (request.url.find ("page=3"), std::string::npos);
+}
+
+// A name that cannot be one is refused before anything is removed, so a good
+// name in front of a bad one is still there afterwards. A lone { key } object
+// is the Postman divergence: there it matches nothing, here it is an error.
+TEST_F (ScriptRequestUrlTest, RemoveQueryParamsRefusesWhatCannotNameAParameter) {
+    const std::array<const char*, 8> ARGUMENTS = { {
+    "''",
+    "['sort', '']",
+    "['sort', 42]",
+    "['sort', { key: 1 }]",
+    "['sort', { value: 'x' }]",
+    "['sort', ['page']]",
+    "{ key: 'page' }",
+    "null",
+    } };
+
+    for (const char* argument : ARGUMENTS) {
+        env.clear ();
+        const std::string script = std::string (R"JS(
+            try {
+                pm.request.url.removeQueryParams()JS") +
+        argument + R"JS();
+                pm.environment.set('threw', 'no');
+            } catch (e) {
+                pm.environment.set('threw', String(e.message));
+            }
+            pm.environment.set('query', pm.request.url.getQueryString());
+        )JS";
+        const auto result = engine.execute_prerequest (script, request, env);
+
+        ASSERT_TRUE (result.success) << argument << ": " << result.error_message;
+        ASSERT_EQ (env.count ("threw"), 1u) << argument;
+        EXPECT_NE (env.at ("threw").value.find ("removeQueryParams"), std::string::npos)
+        << argument << " -> " << env.at ("threw").value;
+        EXPECT_EQ (env.at ("query").value, "page=2&sort=name&page=3") << argument;
+    }
+}
+
+TEST_F (ScriptRequestUrlTest, TheQueryParamsWritersAreReadBackWithinTheSameScript) {
+    request.url = "https://api.example.com/v2/users?page=1&keep=y";
+    expect_script_passes (R"JS(
+        pm.request.url.addQueryParams('a=1&b=2');
+        pm.request.url.removeQueryParams(['page']);
+        pm.expect(pm.request.url.getQueryString()).to.equal('keep=y&a=1&b=2');
+        pm.expect(pm.request.url.toString())
+          .to.equal('https://api.example.com/v2/users?keep=y&a=1&b=2');
+        pm.expect(pm.request.url.query.count()).to.equal(3);
+        pm.expect(pm.request.url.query.get('b')).to.equal('2');
+        pm.expect(pm.request.url.query.has('page')).to.equal(false);
+    )JS");
+}
+
 // The reads have to follow the writes within the same script, or a script that
 // edits and then signs would sign the pre-edit URL.
 TEST_F (ScriptRequestUrlTest, TheReadsFollowAnEditWithinTheSameScript) {
@@ -553,10 +777,12 @@ TEST_F (ScriptRequestUrlTest, AScriptThatOnlyReadsLeavesTheUrlByteIdentical) {
 // A URL with no parts has no honest edit to make, and composing from empty
 // pieces would send "://" plus whatever was pushed.
 TEST_F (ScriptRequestUrlTest, EditingAnUnparseableUrlIsRefusedRatherThanComposed) {
-    const std::array<const char*, 4> EDITS = { {
+    const std::array<const char*, 6> EDITS = { {
     "pm.request.url.path.push('x');",
     "pm.request.url.query.add({key:'a', value:'1'});",
     "pm.request.url.query.clear();",
+    "pm.request.url.addQueryParams('a=1');",
+    "pm.request.url.removeQueryParams('a');",
     "pm.request.url.protocol = 'https';",
     } };
 

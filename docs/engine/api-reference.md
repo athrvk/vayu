@@ -5997,7 +5997,8 @@ read from `postman-url-encoder` 3.0.8's `toNodeUrl` over `postman-collection`'s
   written by its ASCII name, as above), so a `{{base}}` holding
   `https://x/p?k=a b` has its query part encoded and nothing else changed.
   `disableUrlEncoding` writes every value as typed.
-- A pair a script adds with `pm.request.url.query.add` or `upsert` is a row
+- A pair a script adds with `pm.request.url.query.add`, `upsert` or
+  `pm.request.url.addQueryParams` is a row
   and is written by the row rule above
   ([scripting](scripting.md#writing)).
 - A `pm.sendRequest` URL is encoded whole after its variables resolve, by the

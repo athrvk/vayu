@@ -12,6 +12,7 @@
 
 #include "pm_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -694,26 +695,33 @@ void mark_url_edited (RequestUrlState& state) {
     state.dirty = true;
 }
 
+/// A `{ ... }` argument: an object a script wrote, not an array or a function
+/// (both of which are objects to QuickJS).
+bool is_plain_object (JSContext* ctx, JSValueConst arg) {
+    return JS_IsObject (arg) && !JS_IsArray (arg) && !JS_IsFunction (ctx, arg);
+}
+
 /// One `{key, value}` argument of a query writer, read the way `all()` hands
 /// them back. A missing `value` is a bare key, which is the `?flag` form.
+/// @p api is the full name a refusal reports (`pm.request.url.query.add`).
 bool read_query_param_arg (JSContext* ctx,
 JSValueConst arg,
-const char* member,
+const char* api,
 vayu::http::UrlQueryParam& out) {
-    if (!JS_IsObject (arg) || JS_IsArray (arg) || JS_IsFunction (ctx, arg)) {
-        JS_ThrowTypeError (ctx, "pm.request.url.query.%s needs a { key, value } object, got %s",
-        member, js_type_name (ctx, arg));
+    if (!is_plain_object (ctx, arg)) {
+        JS_ThrowTypeError (ctx, "%s needs a { key, value } object, got %s", api,
+        js_type_name (ctx, arg));
         return false;
     }
     ScopedValue key (ctx, JS_GetPropertyStr (ctx, arg, "key"));
     if (!JS_IsString (key.get ())) {
-        JS_ThrowTypeError (ctx, "pm.request.url.query.%s needs a string key, got %s",
-        member, js_type_name (ctx, key.get ()));
+        JS_ThrowTypeError (ctx, "%s needs a string key, got %s", api,
+        js_type_name (ctx, key.get ()));
         return false;
     }
     out.key = js_to_string (ctx, key.get ());
     if (out.key.empty ()) {
-        JS_ThrowTypeError (ctx, "pm.request.url.query.%s needs a non-empty key", member);
+        JS_ThrowTypeError (ctx, "%s needs a non-empty key", api);
         return false;
     }
     ScopedValue value (ctx, JS_GetPropertyStr (ctx, arg, "value"));
@@ -723,12 +731,28 @@ vayu::http::UrlQueryParam& out) {
     }
     if (!JS_IsString (value.get ()) && !JS_IsNumber (value.get ()) &&
     !JS_IsBool (value.get ())) {
-        JS_ThrowTypeError (ctx, "pm.request.url.query.%s value must be a string, number, boolean or null, got %s",
-        member, js_type_name (ctx, value.get ()));
+        JS_ThrowTypeError (ctx, "%s value must be a string, number, boolean or null, got %s",
+        api, js_type_name (ctx, value.get ()));
         return false;
     }
     out.value = js_to_string (ctx, value.get ());
     return true;
+}
+
+/// Encoded here, as the send would write it (issue #1773): the rows hold wire
+/// bytes, so `all` and `getQueryString()` read what goes out. Postman adds a
+/// row and `normalizeParam` writes it, so the per-row rule applies. A request
+/// that sends its URL as typed keeps the row as typed.
+void encode_query_param_for_wire (JSContext* ctx, vayu::http::UrlQueryParam& param) {
+    if (!script_query_is_encoded (ctx)) {
+        return;
+    }
+    param.key =
+    vayu::core::encode_query_component (param.key, vayu::core::QueryPart::Key);
+    if (param.value) {
+        param.value = vayu::core::encode_query_component (
+        *param.value, vayu::core::QueryPart::Value);
+    }
 }
 
 /// `add` appends even when the key is already there - a query may repeat a key,
@@ -754,21 +778,14 @@ JSValue* func_data) {
         ctx, "pm.request.url.query.%s needs a { key, value } object", member);
     }
     vayu::http::UrlQueryParam param;
-    if (!read_query_param_arg (ctx, argv[0], member, param)) {
+    const char* api = magic == QUERY_ADD ? "pm.request.url.query.add" :
+                                           "pm.request.url.query.upsert";
+    if (!read_query_param_arg (ctx, argv[0], api, param)) {
         return JS_EXCEPTION;
     }
-    // Encoded here, as the send would write it (issue #1773): the rows hold
-    // wire bytes, so `all` and `getQueryString()` read what goes out. Postman
-    // adds a row and `normalizeParam` writes it, so the per-row rule applies.
+    // Named before the encode: a row is looked up by the name as typed.
     const QueryParamName name (ctx, param.key);
-    if (script_query_is_encoded (ctx)) {
-        param.key =
-        vayu::core::encode_query_component (param.key, vayu::core::QueryPart::Key);
-        if (param.value) {
-            param.value = vayu::core::encode_query_component (
-            *param.value, vayu::core::QueryPart::Value);
-        }
-    }
+    encode_query_param_for_wire (ctx, param);
     auto& params = state->parts.query_params;
     if (magic == QUERY_UPSERT) {
         for (auto& existing : params) {
@@ -832,6 +849,215 @@ JSValue* func_data) {
     }
     if (!state->parts.query_params.empty ()) {
         state->parts.query_params.clear ();
+        mark_url_edited (*state);
+    }
+    return JS_UNDEFINED;
+}
+
+// ----------------------------------------------------------------------------
+// url.addQueryParams / url.removeQueryParams - Postman's Url-level spellings of
+// query.add and query.remove, taking several params at once.
+// ----------------------------------------------------------------------------
+
+constexpr const char* ADD_QUERY_PARAMS_API = "pm.request.url.addQueryParams";
+constexpr const char* REMOVE_QUERY_PARAMS_API =
+"pm.request.url.removeQueryParams";
+
+/// Calls @p visit(item, index) on each element of the array @p list and stops
+/// at the first one it refuses (it has thrown by then). Every element is read
+/// before the caller writes anything, which is what keeps a refusal from
+/// leaving half an edit behind.
+template <typename Visit>
+bool for_each_array_item (JSContext* ctx, JSValueConst list, const char* api, Visit&& visit) {
+    int64_t length = 0;
+    if (JS_GetLength (ctx, list, &length) < 0) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        JS_ThrowTypeError (ctx, "%s could not read its array", api);
+        return false;
+    }
+    for (int64_t i = 0; i < length; i++) {
+        const ScopedValue item (ctx, JS_GetPropertyInt64 (ctx, list, i));
+        if (!visit (item.get (), i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// A key parsed out of a string names nothing when it is empty (`=1`), the same
+/// rule `query.add` holds an object's key to.
+bool require_query_key (JSContext* ctx, const vayu::http::UrlQueryParam& param, const char* api) {
+    if (!param.key.empty ()) {
+        return true;
+    }
+    JS_ThrowTypeError (ctx, "%s needs a non-empty key", api);
+    return false;
+}
+
+/// A whole query string. One leading `?` is dropped so the query of a URL can
+/// be passed as it reads; Postman keeps it, in the first key.
+bool read_query_string_arg (JSContext* ctx,
+JSValueConst arg,
+const char* api,
+std::vector<vayu::http::UrlQueryParam>& out) {
+    std::string text = js_to_string (ctx, arg);
+    if (text.starts_with ('?')) {
+        text.erase (0, 1);
+    }
+    out = vayu::http::parse_query_params (text);
+    return std::ranges::all_of (out, [&] (const vayu::http::UrlQueryParam& param) {
+        return require_query_key (ctx, param, api);
+    });
+}
+
+/// One element of an array argument: a `{ key, value }` object as `query.add`
+/// takes it, or a string holding exactly one param (`a=1`, never `a=1&b=2`).
+bool read_query_array_item (JSContext* ctx,
+JSValueConst item,
+int64_t index,
+const char* api,
+std::vector<vayu::http::UrlQueryParam>& out) {
+    vayu::http::UrlQueryParam param;
+    if (JS_IsString (item)) {
+        param = vayu::http::parse_query_param (js_to_string (ctx, item));
+        if (!require_query_key (ctx, param, api)) {
+            return false;
+        }
+    } else if (!is_plain_object (ctx, item)) {
+        JS_ThrowTypeError (ctx, "%s items must be strings or { key, value } objects, got %s at index %lld",
+        api, js_type_name (ctx, item), static_cast<long long> (index));
+        return false;
+    } else if (!read_query_param_arg (ctx, item, api, param)) {
+        return false;
+    }
+    out.push_back (std::move (param));
+    return true;
+}
+
+/// What `addQueryParams` takes: a query string, an array of strings and
+/// `{ key, value }` objects, or one `{ key, value }` object.
+bool read_query_params_arg (JSContext* ctx,
+JSValueConst arg,
+const char* api,
+std::vector<vayu::http::UrlQueryParam>& out) {
+    if (JS_IsString (arg)) {
+        return read_query_string_arg (ctx, arg, api, out);
+    }
+    if (JS_IsArray (arg)) {
+        return for_each_array_item (ctx, arg, api, [&] (JSValueConst item, int64_t index) {
+            return read_query_array_item (ctx, item, index, api, out);
+        });
+    }
+    if (!is_plain_object (ctx, arg)) {
+        JS_ThrowTypeError (ctx, "%s needs a query string, an array of params or a { key, value } object, got %s",
+        api, js_type_name (ctx, arg));
+        return false;
+    }
+    vayu::http::UrlQueryParam param;
+    if (!read_query_param_arg (ctx, arg, api, param)) {
+        return false;
+    }
+    out.push_back (std::move (param));
+    return true;
+}
+
+JSValue js_url_add_query_params (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* state = url_state_of_this (ctx, this_val, "addQueryParams");
+    if (!state || !require_parsed_url (ctx, *state, "addQueryParams")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "%s needs a query string, an array of params or a { key, value } object",
+        ADD_QUERY_PARAMS_API);
+    }
+    std::vector<vayu::http::UrlQueryParam> added;
+    if (!read_query_params_arg (ctx, argv[0], ADD_QUERY_PARAMS_API, added)) {
+        return JS_EXCEPTION;
+    }
+    if (added.empty ()) {
+        return JS_UNDEFINED;
+    }
+    for (auto& param : added) {
+        encode_query_param_for_wire (ctx, param);
+        state->parts.query_params.push_back (std::move (param));
+    }
+    mark_url_edited (*state);
+    return JS_UNDEFINED;
+}
+
+/// One name `removeQueryParams` is asked to drop: a string, or the `{ key }` of
+/// a param as `query.all()` hands it back.
+bool read_query_param_name (JSContext* ctx,
+JSValueConst item,
+const char* api,
+std::vector<QueryParamName>& out) {
+    std::string name;
+    if (JS_IsString (item)) {
+        name = js_to_string (ctx, item);
+    } else if (is_plain_object (ctx, item)) {
+        const ScopedValue key (ctx, JS_GetPropertyStr (ctx, item, "key"));
+        if (!JS_IsString (key.get ())) {
+            JS_ThrowTypeError (ctx, "%s needs a string key, got %s", api,
+            js_type_name (ctx, key.get ()));
+            return false;
+        }
+        name = js_to_string (ctx, key.get ());
+    } else {
+        JS_ThrowTypeError (ctx, "%s needs a name string or a { key } object, got %s",
+        api, js_type_name (ctx, item));
+        return false;
+    }
+    if (name.empty ()) {
+        JS_ThrowTypeError (ctx, "%s needs a non-empty name", api);
+        return false;
+    }
+    out.emplace_back (ctx, std::move (name));
+    return true;
+}
+
+/// What `removeQueryParams` takes: a name, or an array of names and `{ key }`
+/// objects. A lone object is refused where Postman's matches nothing, so a
+/// script that passes `{ key: 'page' }` is told rather than left with `page`.
+bool read_query_param_names_arg (JSContext* ctx,
+JSValueConst arg,
+const char* api,
+std::vector<QueryParamName>& out) {
+    if (JS_IsArray (arg)) {
+        return for_each_array_item (ctx, arg, api, [&] (JSValueConst item, int64_t) {
+            return read_query_param_name (ctx, item, api, out);
+        });
+    }
+    if (!JS_IsString (arg)) {
+        JS_ThrowTypeError (ctx, "%s needs a name string or an array of names, got %s",
+        api, js_type_name (ctx, arg));
+        return false;
+    }
+    return read_query_param_name (ctx, arg, api, out);
+}
+
+/// Removes **every** param of each name, as `query.remove` does for one.
+JSValue js_url_remove_query_params (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    auto* state = url_state_of_this (ctx, this_val, "removeQueryParams");
+    if (!state || !require_parsed_url (ctx, *state, "removeQueryParams")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx,
+        "%s needs a name string or an array of names", REMOVE_QUERY_PARAMS_API);
+    }
+    std::vector<QueryParamName> names;
+    if (!read_query_param_names_arg (ctx, argv[0], REMOVE_QUERY_PARAMS_API, names)) {
+        return JS_EXCEPTION;
+    }
+    auto& params        = state->parts.query_params;
+    const size_t before = params.size ();
+    std::erase_if (params, [&names] (const vayu::http::UrlQueryParam& param) {
+        return std::ranges::any_of (names, [&param] (const QueryParamName& name) {
+            return name.matches (param.key);
+        });
+    });
+    // A name that is not there is a no-op, as for `query.remove`.
+    if (params.size () != before) {
         mark_url_edited (*state);
     }
     return JS_UNDEFINED;
@@ -1080,6 +1306,10 @@ JSValue new_request_url (JSContext* ctx, std::string text) {
     JS_FreeAtom (ctx, to_primitive);
 
     define ("update", JS_NewCFunction (ctx, js_url_update, "update", 1));
+    define ("addQueryParams",
+    JS_NewCFunction (ctx, js_url_add_query_params, "addQueryParams", 1));
+    define ("removeQueryParams",
+    JS_NewCFunction (ctx, js_url_remove_query_params, "removeQueryParams", 1));
     for (const auto& [name, magic] :
     std::array<std::pair<const char*, int>, 3>{ { { "getHost", URL_GET_HOST },
     { "getPath", URL_GET_PATH }, { "getQueryString", URL_GET_QUERY_STRING } } }) {

@@ -1363,11 +1363,15 @@ declare const pm: {
 		 */
 		method: string;
 		/**
-		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString() and toString(). {{variables}} are already resolved here.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). {{variables}} are already resolved here.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */
 		get url(): string & {
+			/**
+			 * Append several parameters at once, duplicates kept. Takes a query string ("a=1&b=2"; a leading ? is dropped), an array of "a=1" strings and { key, value } objects, or one { key, value } object. Each is encoded the way query.add encodes it. Every item is checked before any is added, so a bad one leaves the URL as it was.
+			 */
+			addQueryParams(params: string | { key: string, value?: string | number | boolean | null } | ReadonlyArray<string | { key: string, value?: string | number | boolean | null }>): void;
 			/**
 			 * The host as one string - the segments of host joined by dots.
 			 */
@@ -1449,6 +1453,10 @@ declare const pm: {
 				 */
 				upsert(param: { key: string, value?: string | number | boolean | null }): void;
 			};
+			/**
+			 * Remove every parameter of each name given: a name, or an array of names and { key } objects. A name that is not there is a no-op. Unlike Postman, a single { key } object outside an array is an error rather than a silent no-op - wrap it in an array.
+			 */
+			removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void;
 			/**
 			 * The whole URL as a string, which is why JSON.stringify embeds the URL rather than an object dump.
 			 */

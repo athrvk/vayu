@@ -223,6 +223,15 @@ std::string_view origin);
 [[nodiscard]] std::vector<UrlQueryParam> parse_query_params (std::string_view query);
 
 /**
+ * @brief One query segment as a param, split at the *first* `=`.
+ *
+ * No `=` is a bare key (`nullopt`), `a=` is an empty value, and a later `=`
+ * belongs to the value. The segment is not searched for `&`: that is
+ * @ref parse_query_params' job.
+ */
+[[nodiscard]] UrlQueryParam parse_query_param (std::string_view segment);
+
+/**
  * @brief The params back as a wire query string, without the leading `?`.
  *
  * The inverse of @ref parse_query_params, and byte-for-byte its inverse for a

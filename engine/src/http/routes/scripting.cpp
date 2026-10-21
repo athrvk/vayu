@@ -635,8 +635,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.url" }, { "detail", "string & object (writable pre-request)" },
     { "documentation",
     "The full request URL, as Postman's Url object: protocol, host, port, "
-    "path, query and hash, plus getHost(), getPath(), getQueryString() and "
-    "toString(). {{variables}} are already resolved here.\n\nIt still behaves "
+    "path, query and hash, plus getHost(), getPath(), getQueryString(), "
+    "addQueryParams(), removeQueryParams() and toString(). {{variables}} are "
+    "already resolved here.\n\nIt still behaves "
     "as the string it used to be - concatenation, template literals, ==, the "
     "String methods and .length all give the full URL - so `===` and `typeof` "
     "are the two things that changed. Assign a string to retarget "
@@ -846,6 +847,34 @@ nlohmann::json get_script_completions () {
     "Both re-parse the whole URL in place; editing a single member (pushing "
     "to path, changing a query entry) is not supported." },
     { "sortText", "2_pm_request_url_update" } });
+
+    completions.push_back ({ { "label", "pm.request.url.addQueryParams" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.addQueryParams(\"${1:a=1&b=2}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.addQueryParams(params: string | { key: string, value?: "
+    "string | number | boolean | null } | ReadonlyArray<string | { key: "
+    "string, "
+    "value?: string | number | boolean | null }>): void" },
+    { "documentation",
+    "Append several parameters at once, duplicates kept. Takes a query string "
+    "(\"a=1&b=2\"; a leading ? is dropped), an array of \"a=1\" strings and "
+    "{ key, value } objects, or one { key, value } object. Each is encoded the "
+    "way query.add encodes it. Every item is checked before any is added, so a "
+    "bad one leaves the URL as it was." },
+    { "sortText", "2_pm_request_url_addQueryParams" } });
+
+    completions.push_back (
+    { { "label", "pm.request.url.removeQueryParams" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.removeQueryParams(${1:[\"page\", \"sort\"]})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void" },
+    { "documentation",
+    "Remove every parameter of each name given: a name, or an array of names "
+    "and { key } objects. A name that is not there is a no-op. Unlike "
+    "Postman, a single { key } object outside an array is an error rather "
+    "than a silent no-op - wrap it in an array." },
+    { "sortText", "2_pm_request_url_removeQueryParams" } });
 
     completions.push_back ({ { "label", "Retarget the request URL" }, { "kind", KIND_SNIPPET },
     { "insertText", "pm.request.url = \"${1:https://api.example.com/v2/users}\";" },
