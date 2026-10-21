@@ -196,6 +196,16 @@ struct ContextData {
      */
     int send_request_count = 0;
 
+    /**
+     * The hosts this execution has addressed through `pm.sendRequest`, in the
+     * form `cookie_scope_host` answers. `pm.cookies.jar()`'s reads may name
+     * these as well as the request's own site (#2358): a script that logged in
+     * somewhere has earned the right to read what that login set. Recorded
+     * when the call is made, so a transfer that fails still counts, and
+     * per-execution for the same reason `send_request_count` is.
+     */
+    std::vector<std::string> addressed_hosts;
+
     /// What `pm.cookies` reads and `pm.sendRequest` sends through - see
     /// `ScriptContext::cookie_jar`, which owns the rationale.
     vayu::http::CookieJar* cookie_jar = nullptr;

@@ -540,6 +540,15 @@ makes a session survive from one design-mode request to the next.
 script can log in and leave the session where the real request will find it; it
 also carries any write staged before it.
 
+`pm.cookies.jar().get` / `.getAll` are **limited to the request's site** (issue
+#2358): the URL a script names must domain-match the request's host in either
+direction (`hosts_domain_related`) or match a host the execution has called
+through `pm.sendRequest` (`ContextData::addressed_hosts`). Anything else answers
+`undefined` / `[]` and leaves a console warning. The jar keeps every host's
+session for the environment, so the limit is what stops a script reading one it
+has no business with. Redirect targets are not compared. The write half is not
+limited this way and stays scoped by the URL it is given.
+
 ### Auth Resolution & OAuth 2.0
 
 The engine resolves request auth server-side - the persisted `auth` object is

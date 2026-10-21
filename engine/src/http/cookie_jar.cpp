@@ -38,6 +38,35 @@ bool hosts_equal (std::string_view a, std::string_view b) {
     return vayu::utils::ascii_lower_equal (a, b);
 }
 
+/// RFC 6265 §5.1.3's domain-match for a non-identical pair: @p host is a
+/// subdomain of @p domain. The dot is what separates this from a suffix check -
+/// `notexample.com` is not under `example.com`.
+bool is_dot_subdomain (std::string_view host, std::string_view domain) {
+    if (host.size () <= domain.size () + 1) {
+        return false;
+    }
+    const size_t offset = host.size () - domain.size ();
+    return host[offset - 1] == '.' && hosts_equal (host.substr (offset), domain);
+}
+
+/// A bracketed IPv6 literal or a dotted-decimal IPv4 address: names that
+/// §5.1.3 lets match only themselves.
+bool is_ip_literal (std::string_view host) {
+    if (host.starts_with ("[")) {
+        return true;
+    }
+    return !host.empty () && std::ranges::all_of (host, [] (char c) {
+        return c == '.' || (c >= '0' && c <= '9');
+    });
+}
+
+std::string_view without_trailing_dot (std::string_view host) {
+    if (host.ends_with (".")) {
+        host.remove_suffix (1);
+    }
+    return host;
+}
+
 /**
  * @brief RFC 6265 §5.1.4 path-match.
  *
@@ -253,16 +282,30 @@ int64_t now_seconds) {
     if (!cookie.include_subdomains) {
         return false;
     }
-    // A subdomain match needs the dot: `notexample.com` must not match
-    // `example.com`.
-    if (host.size () <= domain.size () + 1) {
+    return is_dot_subdomain (host, domain) && path_matches (cookie.path, path);
+}
+
+bool hosts_domain_related (std::string_view a, std::string_view b) {
+    a = without_trailing_dot (a);
+    b = without_trailing_dot (b);
+    if (a.empty () || b.empty ()) {
         return false;
     }
-    const size_t offset = host.size () - domain.size ();
-    if (host[offset - 1] != '.' || !hosts_equal (host.substr (offset), domain)) {
+    if (hosts_equal (a, b)) {
+        return true;
+    }
+    if (is_ip_literal (a) || is_ip_literal (b)) {
         return false;
     }
-    return path_matches (cookie.path, path);
+    return is_dot_subdomain (a, b) || is_dot_subdomain (b, a);
+}
+
+std::optional<std::string> cookie_scope_host (const std::string& url) {
+    auto scope = url_scope_of (url);
+    if (!scope) {
+        return std::nullopt;
+    }
+    return std::move (scope->host);
 }
 
 std::string format_cookie_line (const JarCookie& cookie) {

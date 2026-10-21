@@ -27,7 +27,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Response headers    | `pm.response.headers.get(name)`, `.has(name[, value])` - case-insensitive; the value compare is strict; `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` - the read half of a Postman `PropertyList`, see [Header methods](#header-methods) |
 | Response cookies    | `pm.response.cookies` (array of `{ name, value, attrs }`), `.get(name)`, `.has(name)`, `.toObject()` - read-only, see below |
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
-| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)`, see below |
+| Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
@@ -984,6 +984,10 @@ jar.clear('https://api.example.com/');                       // that URL's cooki
 jar.clear();                                                 // this environment's jar
 ```
 
+`get` and `getAll` read only the request's own site and the hosts the script has
+called through `pm.sendRequest`; any other URL answers `undefined` / `[]` with a
+console warning. See the divergences below.
+
 Every method is URL-scoped and takes an optional trailing callback, invoked
 inline, that carries what the call did: `get` the value, `getAll` the array,
 `set` the **stored** cookie object (domain/path filled in from the URL), `unset`
@@ -996,6 +1000,16 @@ Divergences from Postman:
 - **No flat `pm.cookies.set(name, value)`.** Only the `jar()` form ships: a
   written cookie needs a URL to take its domain and path from, which is why
   Postman's own write half lives on the jar object.
+- **`jar.get` and `jar.getAll` are limited to the request's site** (#2358).
+  Postman's jar answers for any URL; here a URL answers only when its host is
+  equal to, a subdomain of, or a parent domain of the request's host (or of a
+  host the script has called with `pm.sendRequest`), and anything else gives
+  `undefined` / `[]` plus a console warning naming the host. The jar holds the
+  sessions of every host the environment has talked to, and a collection's
+  script should not be able to read them all. A redirect's target is not seen,
+  so it does not widen the scope. **Writes are not limited this way**: `set`,
+  `unset` and `clear` stay scoped by the URL they are given. Details in
+  [scripting.md](../engine/scripting.md#reads-are-limited-to-the-requests-site).
 - **A write is applied after the transfer it was made before**, not the moment
   it is called - so it rides that request and cannot be lost when the response's
   cookies are captured. Details in
