@@ -35,7 +35,7 @@ import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { isBlankRow } from "./key-value";
 import { keyValueGrid } from "./grid";
-import type { KeyValueItem, VariableSupport } from "@/types";
+import type { KeyValueItem, KeyValueRowExtra, VariableSupport } from "@/types";
 import VariableInput from "../VariableInput";
 import { TimeMarker } from "../TimeValue";
 import FilePartCell from "./FilePartCell";
@@ -51,12 +51,16 @@ interface KeyValueRowProps {
 	keySuggestions?: string[];
 	/** `form-data` only: rows may be switched between a text value and a file. */
 	allowFiles?: boolean;
+	/** The caller's own control for this row (`KeyValueEditorProps.rowExtra`). */
+	renderExtra?: KeyValueRowExtra["render"];
 	/** The variable scope this row edits inside, or none. See `VariableSupport`. */
 	variables?: VariableSupport;
 	onUpdate: (id: string, field: keyof KeyValueItem, value: string | boolean) => void;
 	/** Sets the file members of one row together - a pick is one edit, not four. */
 	onPickFile: (id: string, file: PickedFile) => void;
 	onToggleKind: (id: string, kind: "text" | "file") => void;
+	/** Backs `renderExtra`'s `replaceItem`; only a table that passes `renderExtra` needs it. */
+	onReplaceItem?: (id: string, next: KeyValueItem) => void;
 	onRemove: (id: string) => void;
 	canRemove?: boolean;
 	/** Per field - see the note at the call site in KeyValueEditor. */
@@ -155,10 +159,12 @@ function KeyValueRow({
 	readOnly,
 	keySuggestions,
 	allowFiles = false,
+	renderExtra,
 	variables,
 	onUpdate,
 	onPickFile,
 	onToggleKind,
+	onReplaceItem,
 	onRemove,
 	canRemove = true,
 	canEditKey = true,
@@ -195,7 +201,7 @@ function KeyValueRow({
 		<div
 			className={cn(
 				"grid gap-2 items-center group px-1 py-0.5 rounded-md",
-				keyValueGrid(allowFiles),
+				keyValueGrid(allowFiles, renderExtra !== undefined),
 				!item.enabled && "opacity-50",
 				isProtected && "bg-muted/30"
 			)}
@@ -298,6 +304,23 @@ function KeyValueRow({
 							{isFileRow ? "Send as text instead" : "Send a file instead"}
 						</TooltipContent>
 					</Tooltip>
+				</div>
+			)}
+
+			{/*
+			 * The caller's control, in the column the table opened for it. Not on
+			 * the trailing spare row: a blank row is dropped on save, so a choice
+			 * made there would be lost, and the cell keeps the column's width the
+			 * way the checkbox's spacer does.
+			 */}
+			{renderExtra && (
+				<div className="flex items-center">
+					{isPlaceholderRow
+						? null
+						: renderExtra(item, {
+								replaceItem: (next) => onReplaceItem?.(item.id, next),
+								disabled: readOnly || !canEditValue || !item.enabled,
+							})}
 				</div>
 			)}
 

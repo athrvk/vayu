@@ -10,6 +10,7 @@
 // preload contract. View/navigation state now lives with its owning store
 // (DrawerView in layout-store, TabType in tabs-store).
 
+import type { ReactNode } from "react";
 import type {
 	DataContractScope,
 	FormFieldEntry,
@@ -106,6 +107,33 @@ export interface KeyValueItem extends FormFieldEntry {
 	id: string;
 }
 
+/** What a {@link KeyValueRowExtra} control is handed besides its row. */
+export interface KeyValueRowExtraContext {
+	/**
+	 * Replaces the row with `next` (its `id` is kept). The table's own edits
+	 * leave members it does not know about untouched, so a control that owns
+	 * one writes the whole row: spread the row it was given, then set or drop
+	 * its member.
+	 */
+	replaceItem: (next: KeyValueItem) => void;
+	/** The row is off or the table read-only: the control should not take input. */
+	disabled: boolean;
+}
+
+/**
+ * A caller's own control in every row of the table, under a column of its own.
+ *
+ * `render` is a prop of the memo'd `KeyValueRow` (#1716), so the caller keeps
+ * its identity stable (`useCallback`). The trailing spare row gets an empty
+ * cell, not the control: it is dropped on save while blank, so a choice made
+ * there would be lost.
+ */
+export interface KeyValueRowExtra {
+	/** The column's header-band label. */
+	header: string;
+	render: (item: KeyValueItem, context: KeyValueRowExtraContext) => ReactNode;
+}
+
 /** Props of the shared key/value table (`components/shared/KeyValueEditor`). */
 export interface KeyValueEditorProps {
 	items: KeyValueItem[];
@@ -123,6 +151,11 @@ export interface KeyValueEditorProps {
 	 * something that cannot be sent.
 	 */
 	allowFiles?: boolean;
+	/**
+	 * A per-row control of the caller's own, with a column of its own. Omitted by
+	 * every other table, which keeps the track it always had.
+	 */
+	rowExtra?: KeyValueRowExtra;
 	/**
 	 * The variable scope the table edits inside, handed in by whoever mounts it.
 	 *

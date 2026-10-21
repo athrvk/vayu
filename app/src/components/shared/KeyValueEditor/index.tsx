@@ -71,6 +71,7 @@ export default function KeyValueEditor({
 	readOnly = false,
 	keySuggestions,
 	allowFiles = false,
+	rowExtra,
 	variables,
 	canEdit = ALLOW_ALL_ITEMS, // Default: allow editing all items
 	canRemove = ALLOW_ALL, // Default: allow removing all items
@@ -196,6 +197,24 @@ export default function KeyValueEditor({
 		[onChange, canEdit]
 	);
 
+	/**
+	 * A caller's own control writes its member of the row (`rowExtra`); the
+	 * table has no field of its own for it, so it hands back the whole row.
+	 */
+	const handleReplace = useCallback(
+		(id: string, next: KeyValueItem) => {
+			const currentItems = itemsRef.current;
+			const target = currentItems.find((item) => item.id === id);
+			if (!target || !canEdit(target, "value")) return;
+			onChange(
+				withTrailingBlank(
+					currentItems.map((item) => (item.id === id ? { ...next, id } : item))
+				)
+			);
+		},
+		[onChange, canEdit]
+	);
+
 	return (
 		<div className="space-y-1.5">
 			{/*
@@ -205,13 +224,20 @@ export default function KeyValueEditor({
 			 * below it. The placeholder is the one that has to name the thing,
 			 * because it is the one still visible once you start typing.
 			 */}
-			<div className={cn(EYEBROW_CLASS, "grid gap-2 px-1", keyValueGrid(allowFiles))}>
+			<div
+				className={cn(
+					EYEBROW_CLASS,
+					"grid gap-2 px-1",
+					keyValueGrid(allowFiles, !!rowExtra)
+				)}
+			>
 				<div />
 				<div>Key</div>
 				<div>Value</div>
-				<div />
-				<div />
 				{allowFiles && <div />}
+				{rowExtra && <div>{rowExtra.header}</div>}
+				<div />
+				<div />
 			</div>
 
 			<div className="space-y-0.5">
@@ -226,10 +252,12 @@ export default function KeyValueEditor({
 						readOnly={readOnly}
 						keySuggestions={keySuggestions}
 						allowFiles={allowFiles}
+						renderExtra={rowExtra?.render}
 						variables={variables}
 						onUpdate={handleUpdate}
 						onPickFile={handlePickFile}
 						onToggleKind={handleToggleKind}
+						onReplaceItem={handleReplace}
 						onRemove={handleRemove}
 						canRemove={canRemove(item)}
 						/*
