@@ -3489,11 +3489,24 @@ export interface McpToolInfo {
 	category: McpToolCategory;
 }
 
+/**
+ * Why an enabled server is not listening. Mirrors `McpStartError` in
+ * `electron/mcp/status.ts`, pinned by `electron/mcp/status.conformance.test.ts`.
+ */
+export interface McpStartError {
+	/** `EADDRINUSE`: another program holds the port. `EACCES`: the OS refused the bind. */
+	code: "EADDRINUSE" | "EACCES" | "other";
+	message: string;
+}
+
 export interface McpStatus {
 	running: boolean;
+	/** The configured endpoint while not running: it names the port, it is not usable. */
 	url: string;
 	/** Whether the MCP server is enabled (may be enabled-but-not-running on error). */
 	enabled: boolean;
+	/** Set while the server is enabled and its last start failed. */
+	error?: McpStartError;
 }
 
 /** Clients Vayu can register itself with via their own CLI (one-click connect). */
@@ -3501,8 +3514,11 @@ export type McpConnectClient = "claude" | "vscode";
 
 export interface McpConnectResult {
 	ok: boolean;
-	/** "cli-not-found" → the client's CLI isn't installed; fall back to the snippet. */
-	reason?: "cli-not-found" | "error" | "unsupported";
+	/**
+	 * "cli-not-found" → the client's CLI isn't installed; fall back to the snippet.
+	 * "not-running" → the server has no listener, so there is no endpoint to register.
+	 */
+	reason?: "cli-not-found" | "error" | "unsupported" | "not-running";
 	message?: string;
 }
 
