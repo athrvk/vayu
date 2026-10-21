@@ -17,12 +17,12 @@
  * next to the cursor it inserts at.
  *
  * **The outline reads the stored request, not the editor's live buffer.** The
- * bar sits outside `RequestBuilderProvider`, so the in-flight draft is not
- * reachable from here; what it shows is the last saved document, which autosave
- * keeps a second or two behind the editor. Reaching into the builder for the
- * live buffer would mean a cross-module channel that does not exist yet, and
- * the section would not be worth it - the outline answers "what is in this
- * request", which does not change per keystroke.
+ * bar sits outside `RequestBuilderProvider`; what it shows is the last saved
+ * document, which autosave keeps a second or two behind the editor. The Code
+ * section reads the draft through the `editorDraft` slot (#2638), but it
+ * composes a payload someone copies; this outline answers "what is in this
+ * request", which does not change per keystroke, so it is not worth a read of
+ * the live buffer.
  *
  * **A row scrolls the editor to its operation** by writing a command to
  * `lib/graphql/reveal-store.ts`, which `GraphQLBody` consumes and clears. The

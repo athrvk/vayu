@@ -27,6 +27,7 @@ import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
+import EditorDraftSurface from "./components/EditorDraftSurface";
 import {
 	useTabsStore,
 	useSessionStore,
@@ -60,14 +61,11 @@ import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValue
 import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
-import { composePathParams } from "./utils/path-variables";
-import { bodyModeHeaders, toHeaderRows } from "./utils/key-value";
+import { toHeaderRows } from "./utils/key-value";
 import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./utils/elements-parts";
+import { buildComposeBody } from "./utils/compose-body";
 import {
-	buildExecBody,
 	disabledDefaults,
-	protocolSettings,
-	execIdentity,
 	responseFromExecuteResult,
 	elementsMayWriteVariables,
 	toBodyPayload,
@@ -437,72 +435,18 @@ export default function RequestBuilder() {
 			ownerCollectionId: string,
 			dataRow?: Record<string, unknown>
 		) => {
-			// The user's enabled header rows as ordered lines - and nothing
-			// else. What Vayu adds is the engine's since issue #1229, applied on
-			// every send path rather than by whichever client happened to send.
-			const headerRows = toHeaderRows(request.headers);
-
-			// Shared with the History run view's send path - see execute-mapping.ts.
-			// Raw: since #226 the engine resolves {{variables}} and inherit auth
-			// (POST /compose), so the editor state goes over as-is - resolving
-			// here too would interpolate the payload twice.
-			const execBody = buildExecBody(request, (s) => s);
-
-			// Elements: the collection chain root to leaf, then the request's
-			// own, minus whatever the request's own `inherit.disable` entries
-			// name (issue #1512). The engine runs the resolved list at each
-			// element's phase. Resolving here (rather than by requestId) means
-			// Send executes editor state that may be unsaved.
-			const elements = elementsParts(collectionAncestors, ownerId, request.elements);
-
-			// Compose engine-side, then execute the composed payload unchanged.
-			// The inline shape (not compose-by-id) is deliberate: Send executes
-			// the *editor state*, which may be ahead of the saved row.
-			const composed = await engineComposeRequest({
-				request: {
-					method: request.method,
-					url: request.url,
-					// Always sent, `[]` included (#1764) - see composePathParams.
-					params: composePathParams(request.params),
-					headers: headerRows,
-					// Which of those the body mode wrote (issue #1765).
-					...bodyModeHeaders(request.headers),
-					body: execBody,
-					auth: { ...request.auth },
-					elements,
-					// Always sent, never elided: the engine defaults to
-					// following, so omitting `followRedirects: false` would
-					// silently follow the redirect the user asked to see.
-					followRedirects: request.followRedirects,
-					maxRedirects: request.maxRedirects,
-					// Same rule, same reason: an omitted httpVersion lets the
-					// engine's own default win silently, which is not a
-					// decision this client should hand over.
-					httpVersion: request.httpVersion,
-					// And the one where the silent default is a security
-					// decision: `verify_ssl` defaults to true engine-side, so an
-					// omitted `false` verifies the certificate the user turned
-					// verification off for (issue #706).
-					verifySSL: request.verifySSL,
-					// Postman's protocol switches (issue #1765), always sent for
-					// the same reason: the editor's value, not the saved row's.
-					...protocolSettings(request),
-					// Identity for the script sandbox (pm.info), not an HTTP
-					// field - it rides through composition to /execute.
-					...execIdentity(request),
-				},
+			const { body, elements } = buildComposeBody({
+				request,
+				elements: { chain: collectionAncestors, ownerId },
 				collectionId: ownerCollectionId,
-				environmentId: activeEnvironmentId || undefined,
+				environmentId: activeEnvironmentId,
 				// The row's own keys, which is exactly the set the engine's bind
-				// reads back (issue #1007). A Postman-shaped `{{username}}` has to
-				// survive composition to reach that bind, so composition is told the
-				// names *before* it can answer one of them from a same-named
-				// environment variable. Names only: a value here would be this row's
-				// value written into a payload composed once. Absent for an ordinary
+				// reads back (issue #1007): a Postman-shaped `{{username}}` has to
+				// survive composition to reach that bind. Absent for an ordinary
 				// Send, which composes exactly as it did.
-				...(dataRow ? { dataColumns: Object.keys(dataRow) } : {}),
+				dataColumns: dataRow ? Object.keys(dataRow) : undefined,
 			});
-
+			const composed = await engineComposeRequest(body);
 			return { composed, elements };
 		},
 		[collectionAncestors, engineComposeRequest, activeEnvironmentId]
@@ -746,82 +690,36 @@ export default function RequestBuilder() {
 
 			setIsStartingLoadTest(true);
 			try {
-				// The raw request half - the engine resolves {{variables}} and
-				// inherit auth when it composes (POST /compose, issue #226).
-				// `buildExecBody` is the same builder Send uses; sharing it is what
-				// keeps a load test measuring the request Send sends.
-				const bodyPayload = buildExecBody(pendingLoadTestRequest, (s) => s);
-
-				// Elements: the collection chain root to leaf, then the request's
-				// own, minus whatever the request's own `inherit.disable` entries
-				// name (issue #1512) - the same resolution `handleSendRequest`'s
-				// own compose call uses. The single-request load path runs this
-				// list's `extract.*` / `assert.*` inline and `timer.think` /
-				// `script.*` per `elements.scripts` below (issue #1594); before
-				// that, only `script.post` reached the run at all, joined into a
-				// flat replayed string. `POST /runs` reads this under
-				// `requestElements`, a distinct key from `elements` (the run-level
-				// timers/scripts override object) - a flat run payload has no
-				// `request` sub-object to nest a request-shaped array under.
-				const requestElements = elementsParts(
-					collectionAncestors,
-					fetchedRequest.id,
-					pendingLoadTestRequest.elements
-				);
+				// The request half through the same builder Send uses, so a load
+				// test measures the request Send sends - one Settings tab governs
+				// both, and the dialog decides load shape, not request semantics.
+				//
+				// Its resolved elements go to `POST /runs` as `requestElements`
+				// (issue #1594): the single-request load path runs their
+				// `extract.*` / `assert.*` inline and `timer.think` / `script.*` per
+				// `elements.scripts` below. A distinct key from `elements` (the
+				// run-level timers/scripts override object), because a flat run
+				// payload has no `request` sub-object to nest them under.
+				const { body, elements: requestElements } = buildComposeBody({
+					request: pendingLoadTestRequest,
+					elements: { chain: collectionAncestors, ownerId: fetchedRequest.id },
+					collectionId: fetchedRequest.collectionId,
+					environmentId: activeEnvironmentId,
+					// The picked file's columns, when the dialog picked one (issue
+					// #1007). This composition happens *before* `POST /runs`, so it
+					// is the only place that can leave a bare `{{username}}` for the
+					// per-iteration bind instead of resolving it from the
+					// environment. Absent whenever `config.data` is.
+					dataColumns: config.dataColumns,
+					// This composed payload is repeated once per iteration, per
+					// virtual user, so the `{{$guid}}` family belongs to each
+					// repetition, not to the one-time composition (issue #995).
+					deferDynamicVariables: true,
+				});
 
 				// Compose engine-side, then start the run with the composed
 				// request half plus the load shape - never re-resolved.
-				const composed = await engineComposeRequest({
-					request: {
-						method: pendingLoadTestRequest.method,
-						url: pendingLoadTestRequest.url,
-						params: composePathParams(pendingLoadTestRequest.params),
-						headers: toHeaderRows(pendingLoadTestRequest.headers),
-						...bodyModeHeaders(pendingLoadTestRequest.headers),
-						body: bodyPayload,
-						auth: { ...pendingLoadTestRequest.auth },
-						elements: requestElements,
-						// Same redirect policy the single-request Send uses, so a
-						// load test measures the same hops the user sees.
-						followRedirects: pendingLoadTestRequest.followRedirects,
-						maxRedirects: pendingLoadTestRequest.maxRedirects,
-						// Same protocol the single-request Send uses, and always
-						// sent for the same reason - see the execute payload above.
-						// One control in the Settings tab governs both modes; the
-						// load dialog decides load shape, not request semantics.
-						httpVersion: pendingLoadTestRequest.httpVersion,
-						// And its TLS verification, for the same reason: a load
-						// test that verified where Send did not would fail on
-						// every request against the host the user opted out for.
-						verifySSL: pendingLoadTestRequest.verifySSL,
-						// And its stored protocol switches (issue #1765): a load
-						// run must skip the jar, the headers and the encoding Send
-						// skips, or it measures a different request.
-						...protocolSettings(pendingLoadTestRequest),
-						// The name in the editor right now - Send's
-						// own compose call already carries this (see
-						// `composeForSend`); the load dialog composes separately
-						// and was the one caller that dropped it. Rides through
-						// composition into `config_snapshot`, which is where the
-						// history row's `requestName` comes from.
-						...execIdentity(pendingLoadTestRequest),
-					},
-					collectionId: fetchedRequest.collectionId,
-					environmentId: activeEnvironmentId || undefined,
-					// The picked file's columns, when the dialog picked one (issue
-					// #1007). This composition happens *before* `POST /runs`, so it is
-					// the only place that can leave a bare `{{username}}` for the
-					// per-iteration bind instead of resolving it from the environment.
-					// Names only, and absent whenever `config.data` is - a run with no
-					// data set composes exactly as it did.
-					...(config.dataColumns ? { dataColumns: config.dataColumns } : {}),
-					// This composed payload is repeated once per iteration, per
-					// virtual user, so the `{{$guid}}` family belongs to each
-					// repetition, not to the one-time composition - leave the tokens
-					// written as-is and let the engine generate a fresh value per
-					// iteration at bind time (issue #995).
-					deferDynamicVariables: true,
-				});
+				const composed = await engineComposeRequest(body);
 
 				// Convert LoadTestConfig to StartLoadTestRequest (flat structure)
 				const apiRequest: StartLoadTestRequest = {
@@ -1053,12 +951,13 @@ export default function RequestBuilder() {
 				) : (
 					<>
 						<RequestBuilderLayout />
-						{/* Render nothing. They publish this builder's live draft to the
-						    command registry, so the palette's "Load test …" and "Send …"
-						    act on the request as currently edited rather than as last
-						    saved. */}
+						{/* Render nothing. They publish this builder's live draft, so the
+						    palette's "Load test …" and "Send …" and the context bar's
+						    Code section act on the request as currently edited rather
+						    than as last saved. */}
 						<LoadTestCommandSurface />
 						<SendRequestCommandSurface />
+						<EditorDraftSurface />
 					</>
 				)}
 			</RequestBuilderProvider>

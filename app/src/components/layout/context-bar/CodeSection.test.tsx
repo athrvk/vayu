@@ -23,17 +23,25 @@
  * because it never resolves anything - the last case pins that, since a
  * regression there would leak the value into the mode that looks safest.
  *
+ * **It composes the editor, not the saved row** (#2638). With a builder
+ * holding the request, the compose body is the draft's, built the way Send
+ * builds it; without one it composes by id and says the snippet is the saved
+ * request's. Make the section compose by id again and the unsaved-edit case
+ * fails on the URL it was handed.
+ *
  * The generators themselves are covered in `services/codegen/codegen.test.ts`;
  * this file is about which input reaches them and with what options.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { CodeSection } from "./CodeSection";
 import { CODE_TARGETS, SECRET_PLACEHOLDER } from "@/services/codegen";
-import type { ResolvedVariable } from "@/types";
+import { useLiveCommandSurfaceStore, type EditorDraft } from "@/lib/commands/live-surfaces";
+import type { RequestState } from "@/modules/request-builder/types";
+import type { Collection, ResolvedVariable } from "@/types";
 
 const composeRequest = vi.fn();
 
@@ -89,11 +97,57 @@ vi.mock("@/stores", () => ({
 
 const TAB = { id: "t1", type: "request", entityId: "req_1" } as const;
 
-function renderSection() {
+/** The builder's draft of `STORED`, with a URL edit autosave has not written yet. */
+const DRAFT: RequestState = {
+	id: "req_1",
+	collectionId: "col_1",
+	name: "Create user",
+	method: "POST",
+	url: "https://{{host}}/v2/users",
+	params: [],
+	headers: [{ id: "h1", key: "X-Token", value: "{{token}}", enabled: true }],
+	disabledDefaultHeaders: [],
+	bodyMode: "json",
+	body: '{"a":1}',
+	formData: [],
+	urlEncoded: [],
+	binaryFile: { src: "", unresolved: true },
+	auth: { mode: "inherit" },
+	elements: [],
+	followRedirects: true,
+	maxRedirects: 10,
+	httpVersion: "auto",
+	verifySSL: true,
+	disableCookies: false,
+	disabledSystemHeaders: [],
+	disableUrlEncoding: false,
+	stream: false,
+};
+
+const CHAIN = [{ id: "col_1", name: "Users", elements: [] }] as unknown as Collection[];
+
+/** Publish a draft the way `EditorDraftSurface` does, through the slot itself. */
+function publishDraft(request: RequestState) {
+	const draft: EditorDraft = { request, ancestors: CHAIN };
+	act(() =>
+		useLiveCommandSurfaceStore
+			.getState()
+			.registerSurface("editorDraft", { requestId: request.id, read: () => draft })
+	);
+}
+
+/** The argument of the last compose call. */
+function lastComposeArg(): Record<string, unknown> {
+	return composeRequest.mock.lastCall?.[0] as Record<string, unknown>;
+}
+
+const SAVED_NOTE = /From the saved request/;
+
+function renderSection(
+	client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+) {
 	return render(
-		<QueryClientProvider
-			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-		>
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<CodeSection tab={TAB} />
 			</TooltipProvider>
@@ -116,6 +170,7 @@ beforeEach(() => {
 	// has no layout, so the method does not exist - the same stub the collection
 	// tree's tests use.
 	Element.prototype.scrollIntoView = vi.fn();
+	useLiveCommandSurfaceStore.setState({ editorDraft: null });
 	composeRequest.mockReset();
 	composeRequest.mockResolvedValue({
 		method: "POST",
@@ -131,6 +186,7 @@ describe("CodeSection - it generates from what will be sent", () => {
 		renderSection();
 
 		await waitFor(() => expect(snippet()).toContain("curl"));
+		// No builder holds the request here, so it composes the saved row.
 		expect(composeRequest).toHaveBeenCalledWith({ requestId: "req_1", environmentId: "env_1" });
 		// The resolved host, not `{{host}}` - the difference between a Vayu
 		// snippet and a template-based one.
@@ -187,6 +243,100 @@ describe("CodeSection - it generates from what will be sent", () => {
 
 		expect(await screen.findByText(/Couldn't compose this request/)).toBeInTheDocument();
 		expect(document.querySelector("pre")).toBeNull();
+	});
+});
+
+describe("CodeSection - it composes the editor, the way Send does (#2638)", () => {
+	it("composes the draft inline, unsaved edit included, rather than the row by id", async () => {
+		publishDraft(DRAFT);
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		const arg = lastComposeArg();
+		expect(arg).not.toHaveProperty("requestId");
+		expect(arg).toMatchObject({
+			request: { method: "POST", url: "https://{{host}}/v2/users" },
+			collectionId: "col_1",
+			environmentId: "env_1",
+		});
+		expect(screen.queryByText(SAVED_NOTE)).toBeNull();
+	});
+
+	it("composes the saved row by id, and says so, for another request's draft", async () => {
+		publishDraft({ ...DRAFT, id: "req_2" });
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(lastComposeArg()).toEqual({ requestId: "req_1", environmentId: "env_1" });
+		expect(screen.getByText(SAVED_NOTE)).toBeInTheDocument();
+	});
+
+	it("says the snippet is the saved request's when no builder holds it", async () => {
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(screen.getByText(SAVED_NOTE)).toBeInTheDocument();
+	});
+
+	it("recomposes on re-expand, so an edit made while collapsed is in the snippet", async () => {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		publishDraft(DRAFT);
+		const first = renderSection(client);
+		await waitFor(() => expect(composeRequest).toHaveBeenCalledTimes(1));
+		first.unmount();
+
+		publishDraft({ ...DRAFT, url: "https://{{host}}/v3/edited" });
+		renderSection(client);
+
+		await waitFor(() => expect(composeRequest).toHaveBeenCalledTimes(2));
+		expect(lastComposeArg()).toMatchObject({ request: { url: "https://{{host}}/v3/edited" } });
+	});
+
+	it("recomposes from the editor when a builder takes the request on after the first compose", async () => {
+		renderSection();
+		await waitFor(() => expect(screen.getByText(SAVED_NOTE)).toBeInTheDocument());
+		expect(lastComposeArg()).toHaveProperty("requestId", "req_1");
+
+		publishDraft(DRAFT);
+
+		await waitFor(() => expect(lastComposeArg()).not.toHaveProperty("requestId"));
+		await waitFor(() => expect(screen.queryByText(SAVED_NOTE)).toBeNull());
+		expect(composeRequest).toHaveBeenCalledTimes(2);
+	});
+
+	it("reads the stream flag from the draft it composed, not from the row", async () => {
+		const stored = STORED as Record<string, unknown>;
+		stored.stream = false;
+		try {
+			publishDraft({ ...DRAFT, stream: true });
+			renderSection();
+
+			await waitFor(() => expect(snippet()).toContain("curl"));
+			expect(snippet()).toContain(" -N");
+		} finally {
+			delete stored.stream;
+		}
+	});
+
+	it("reads the jar note from the draft it composed, not from the row", async () => {
+		publishDraft({ ...DRAFT, disableCookies: true });
+		renderSection();
+
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(screen.getByText(/The cookie jar is off for this request/)).toBeInTheDocument();
+	});
+
+	it("labels templated output as the saved request's, since it is built from the row", async () => {
+		publishDraft(DRAFT);
+		renderSection();
+		await waitFor(() => expect(snippet()).toContain("curl"));
+		expect(screen.queryByText(SAVED_NOTE)).toBeNull();
+
+		fireEvent.click(screen.getByRole("radio", { name: "Templated" }));
+
+		await waitFor(() => expect(snippet()).toContain("{{host}}"));
+		expect(snippet()).toContain("/v1/users");
+		expect(screen.getByText(SAVED_NOTE)).toBeInTheDocument();
 	});
 });
 

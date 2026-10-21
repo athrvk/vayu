@@ -2142,11 +2142,19 @@ into a pane that can never load on every restart.
 - **`useOAuth2TokenStatusQuery(cacheKey)`**,
   **`useFetchOAuth2TokenMutation()`**, **`useClearOAuth2TokenMutation()`** - the
   engine-side OAuth 2.0 token cache
-- **`queryKeys.compose.forRequest(requestId, environmentId)`** - `POST /compose`
-  for a stored request, behind an inline `useQuery` in the context bar's Code
+- **`queryKeys.compose.forRequest(requestId, environmentId, source)`** - `POST /compose`
+  for a request, behind an inline `useQuery` in the context bar's Code
   section. Keyed by environment as well as request, because the same request
   composes differently per environment and one key for both would serve the
-  wrong snippet after a switch. `staleTime: Infinity` with an explicit
+  wrong snippet after a switch. `source` is `"editor"` while the mounted
+  request builder publishes that request's draft (the `editorDraft` live
+  surface, #2638) and `"saved"` otherwise: the query function composes the
+  draft inline through `buildComposeBody`, as Send does, or the stored row by
+  id, so a builder taking the request on is a new key and a fresh compose
+  rather than the saved row's answer kept under `staleTime: Infinity`. The
+  draft is read when the query runs, never subscribed, so the key does not
+  move per keystroke; the autosave PUT's invalidation below reruns the same
+  function, which reads the draft again. `staleTime: Infinity` with an explicit
   recompose: the section is only mounted while expanded, so this is the "compose
   on expand, not per keystroke" rule. The section also ships collapsed by
   default (`CONTEXT_BAR_DEFAULT_COLLAPSED`), so that round trip now happens on

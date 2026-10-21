@@ -320,11 +320,16 @@ export const queryKeys = {
 	// construction: a write that names one request drops that request's
 	// compositions under every environment, and no other request's (issue
 	// #1438).
+	//
+	// `source` is what the composition was asked to read (#2638): the mounted
+	// builder's editor state or the saved row. A builder appearing for the
+	// request is then a new key and a fresh compose, not the saved row's answer
+	// held under `staleTime: Infinity` after the draft became reachable.
 	compose: {
 		all: ["compose"] as const,
 		allForRequest: (requestId: string) => [...queryKeys.compose.all, requestId] as const,
-		forRequest: (requestId: string, environmentId: string | null) =>
-			[...queryKeys.compose.allForRequest(requestId), environmentId] as const,
+		forRequest: (requestId: string, environmentId: string | null, source: "editor" | "saved") =>
+			[...queryKeys.compose.allForRequest(requestId), environmentId, source] as const,
 	},
 
 	// OAuth 2.0 token cache

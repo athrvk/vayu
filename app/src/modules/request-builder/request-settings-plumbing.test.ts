@@ -47,6 +47,12 @@
  * tab governs Send and load test alike, which is what `followRedirects` and
  * `maxRedirects` already did. A second control for one of the three would have
  * made that tab mean something different for that field alone.
+ *
+ * Since issue #2638 the execute hop and the load-test hop are one hop:
+ * `buildComposeBody` (`utils/compose-body.ts`) writes every field of the inline
+ * compose body once, and Send and the load test both build through it. So the
+ * field is scanned for in that file, and the load test for building through it
+ * from the request rather than from the dialog's config.
  */
 
 import { describe, it, expect } from "vitest";
@@ -58,6 +64,14 @@ const sources = import.meta.glob("/src/modules/request-builder/index.tsx", {
 });
 
 const source = Object.values(sources)[0] as string | undefined;
+
+const composeBodySources = import.meta.glob("/src/modules/request-builder/utils/compose-body.ts", {
+	query: "?raw",
+	import: "default",
+	eager: true,
+});
+
+const composeBody = Object.values(composeBodySources)[0] as string | undefined;
 
 /**
  * Occurrences of `field: <expr>.<field>` (an object literal property) or
@@ -78,21 +92,24 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(typeof source).toBe("string");
 		expect((source ?? "").length).toBeGreaterThan(1000);
 		expect(source).toContain("engineExecuteRequest");
+		expect(typeof composeBody).toBe("string");
+		expect((composeBody ?? "").length).toBeGreaterThan(1000);
+		expect(composeBody).toContain("export function buildComposeBody");
 	});
 
 	/**
-	 * `followRedirects` and `verifySSL` gained a third hop with issue #1436's
-	 * "gone" pane: `DeletedRequestBanner`'s cURL recovery snippet reads them off
-	 * the same `request`, so a draft copied out as curl after its request is
-	 * deleted still says `-L`/`-k` correctly rather than silently defaulting.
-	 * `maxRedirects` and `httpVersion` have no curl hop - `SnippetRequest` has no
-	 * field for either - so they stay at the original two.
+	 * `followRedirects` and `verifySSL` gained a second hop in the builder with
+	 * issue #1436's "gone" pane: `DeletedRequestBanner`'s cURL recovery snippet
+	 * reads them off the same `request`, so a draft copied out as curl after its
+	 * request is deleted still says `-L`/`-k` correctly rather than silently
+	 * defaulting. `maxRedirects` and `httpVersion` have no curl hop -
+	 * `SnippetRequest` has no field for either - so they stay at the save hop.
 	 */
-	const EXECUTE_AND_SAVE_HOPS: Record<string, number> = {
-		followRedirects: 3,
-		maxRedirects: 2,
-		httpVersion: 2,
-		verifySSL: 3,
+	const SAVE_AND_CURL_HOPS: Record<string, number> = {
+		followRedirects: 2,
+		maxRedirects: 1,
+		httpVersion: 1,
+		verifySSL: 2,
 	};
 
 	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
@@ -100,18 +117,26 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 			expect(hops(source ?? "", "fetchedRequest", field)).toBe(1);
 		});
 
-		it(`sends ${field} on execute and persists it on save`, () => {
-			// One for the `engineExecuteRequest` body, one for the update mutation,
-			// and for the two fields the cURL recovery snippet also reads, one more.
-			expect(hops(source ?? "", "request", field)).toBe(EXECUTE_AND_SAVE_HOPS[field]);
+		it(`persists ${field} on save`, () => {
+			// One for the update mutation, and for the two fields the cURL
+			// recovery snippet also reads, one more.
+			expect(hops(source ?? "", "request", field)).toBe(SAVE_AND_CURL_HOPS[field]);
+		});
+
+		it(`writes ${field} into the shared compose body`, () => {
+			expect(hops(composeBody ?? "", "request", field)).toBe(1);
 		});
 	}
 
-	for (const field of ["followRedirects", "maxRedirects", "httpVersion", "verifySSL"] as const) {
-		it(`sends ${field} with the load test`, () => {
-			expect(hops(source ?? "", "pendingLoadTestRequest", field)).toBe(1);
-		});
-	}
+	it("sends the load test through the shared compose body, from the request", () => {
+		const src = source ?? "";
+		const start = src.indexOf("const handleConfirmLoadTest");
+		const end = src.indexOf("const handleCloseLoadTestDialog");
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+		const body = src.slice(start, end);
+		expect(body).toMatch(/buildComposeBody\(\{\s*request: pendingLoadTestRequest,/);
+	});
 
 	/**
 	 * `stream` has the same load hop and the same save hop, and a *different*
@@ -186,15 +211,15 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		const body = src.slice(start, end);
 		expect(body.length).toBeGreaterThan(500);
 
-		expect(body).toContain("httpVersion: pendingLoadTestRequest.httpVersion");
+		expect(body).toContain("request: pendingLoadTestRequest,");
 		expect(body).not.toContain("updateRequestMutation");
 	});
 
 	/**
-	 * Postman's protocol switches (issue #1765) have the same load and save
-	 * hops, and one shared execute hop: `protocolSettings`, which the Send
-	 * compose and the load compose both spread so the three can never travel
-	 * apart. Its own always-send rule is `execute-mapping.test.ts`'s.
+	 * Postman's protocol switches (issue #1765) have the same save hop, and one
+	 * shared execute hop: `protocolSettings`, spread once by the shared compose
+	 * body so the three can never travel apart. Its own always-send rule is
+	 * `execute-mapping.test.ts`'s.
 	 */
 	const PROTOCOL_FIELDS = [
 		"disableCookies",
@@ -216,11 +241,10 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		expect(hops(source ?? "", "request", "disableUrlEncoding")).toBe(2);
 	});
 
-	it("sends the protocol switches with Send and with the load test", () => {
-		const src = source ?? "";
-		expect(src.match(/\.\.\.protocolSettings\(request\)/g) ?? []).toHaveLength(1);
-		expect(src.match(/\.\.\.protocolSettings\(pendingLoadTestRequest\)/g) ?? []).toHaveLength(
-			1
-		);
+	it("sends the protocol switches through the shared compose body", () => {
+		const shared = composeBody ?? "";
+		expect(shared.match(/\.\.\.protocolSettings\(request\)/g) ?? []).toHaveLength(1);
+		// A spread back at a send site is that site building its own body again.
+		expect(source ?? "").not.toContain("protocolSettings(");
 	});
 });

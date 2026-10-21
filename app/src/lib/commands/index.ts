@@ -8,11 +8,13 @@
 export { COMMANDS, availableCommands, commandById } from "./registry";
 export { baseCommandContext } from "./context";
 export {
+	editorDraftFor,
 	useLiveCommandSurfaceStore,
+	useRegisterEditorDraftSurface,
 	useRegisterExportRunSurface,
 	useRegisterLoadTestSurface,
 	useRegisterSendRequestSurface,
 } from "./live-surfaces";
-export type { LiveSurfaceSlot } from "./live-surfaces";
+export type { EditorDraft, EditorDraftSource, LiveSurfaceSlot } from "./live-surfaces";
 export { commandTitle } from "./types";
 export type { Command, CommandContext, CommandGroup, CommandSurfaces } from "./types";

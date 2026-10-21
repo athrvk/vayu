@@ -1362,7 +1362,12 @@ export const API_ENDPOINTS = {
 
 1. **User Action**: Clicks "Send" in RequestBuilder
 2. **Request Transformation**: Frontend format → backend format (raw - no
-   client-side `{{variable}}` resolution)
+   client-side `{{variable}}` resolution), built by `buildComposeBody`
+   (`modules/request-builder/utils/compose-body.ts`, issue #2638). It is the
+   one writer of the inline compose body: Send, the streaming Send, the load
+   run and the History replay all build through it, and so does the context
+   bar's Code section for the editor's draft, so a field added there reaches
+   every one of them
 3. **Composition**: `apiService.composeRequest()` → `POST /compose` - the
    engine resolves `{{variables}}` and `inherit` auth against the request's
    `collectionId` chain and the active `environmentId`, and returns the
@@ -1851,10 +1856,10 @@ the headers to see. The two must change together.
 ### Load Test Execution
 
 1. **User Action**: Configures and starts load test
-2. **Composition**: the request half (method/url/headers/body/auth/`tests`
-   script parts) goes raw through `apiService.composeRequest()` → `POST
-   /compose`, same as Send - so a load test measures the same composed request
-   Send sends
+2. **Composition**: the request half goes raw through `apiService.composeRequest()`
+   → `POST /compose`, built by the same `buildComposeBody` Send uses (plus
+   `dataColumns` and `deferDynamicVariables`) - so a load test measures the
+   same composed request Send sends
 3. **Request Transformation**: composed request half + frontend
    `LoadTestConfig` → backend format
 4. **API Call**: `apiService.startLoadTest()` → `POST /runs`

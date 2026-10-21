@@ -169,18 +169,21 @@ describe("invalidateForMcpEvent", () => {
 		 * never reach the open Code section.
 		 */
 		const queryClient = new QueryClient();
-		queryClient.setQueryData(queryKeys.compose.forRequest("req_3", "env_1"), { url: "old" });
-		queryClient.setQueryData(queryKeys.compose.forRequest("req_other", "env_1"), {
+		queryClient.setQueryData(queryKeys.compose.forRequest("req_3", "env_1", "editor"), {
+			url: "old",
+		});
+		queryClient.setQueryData(queryKeys.compose.forRequest("req_other", "env_1", "editor"), {
 			url: "keep",
 		});
 
 		invalidateForMcpEvent(queryClient, { entity: "request", requestId: "req_3" });
 
 		expect(
-			queryClient.getQueryState(queryKeys.compose.forRequest("req_3", "env_1"))?.isInvalidated
+			queryClient.getQueryState(queryKeys.compose.forRequest("req_3", "env_1", "editor"))
+				?.isInvalidated
 		).toBe(true);
 		expect(
-			queryClient.getQueryState(queryKeys.compose.forRequest("req_other", "env_1"))
+			queryClient.getQueryState(queryKeys.compose.forRequest("req_other", "env_1", "editor"))
 				?.isInvalidated
 		).toBe(false);
 	});
