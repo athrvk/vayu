@@ -21,13 +21,31 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 
+import type { DataFieldContext } from "./data-bind-escaping";
+import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import {
+	previewRowBind,
 	renderDataValue,
 	resolveTemplate,
 	resolveTemplateWithRow,
 	type DataRowCells,
 } from "./variable-resolution";
+
+/** Held in the testkit, so CI routes an edit to the fixture back to this suite. */
+const [bindFixturePath] = ENGINE_READING_GUARDS.dataBindEscaping.paths.map(fromRepoRoot);
+
+interface BindCase {
+	name: string;
+	fieldKind: DataFieldContext;
+	template: string;
+	cell: string;
+	expected?: string;
+	refusal?: string;
+}
+
+const bindFixture = JSON.parse(readFileSync(bindFixturePath, "utf8")) as { cases: BindCase[] };
 
 /** A scope lookup over a plain bag, the shape `useVariableResolver` passes. */
 const scopes =
@@ -85,7 +103,7 @@ describe("resolveTemplateWithRow", () => {
 		);
 	});
 
-	it("resolves a cell that carries tokens of its own through the same lookup", () => {
+	it("answers a token a cell's own text carries from the scopes, as the residual pass does", () => {
 		expect(
 			resolveTemplateWithRow(
 				"{{path}}",
@@ -119,13 +137,83 @@ describe("resolveTemplateWithRow", () => {
 	});
 
 	it("leaves a cycle in a cell literal rather than expanding forever", () => {
-		// `a` (the row) spells `{{b}}`, `b` (a scope) spells `{{a}}` back: the
-		// innermost `a` is already being expanded, so its token stays written and
-		// the recursion ends there. A row cell joins the same cycle chain a scope
-		// value does, because both go through one substitution core.
+		// `a` (the row) spells `{{b}}`, `b` (a scope) spells `{{a}}` back. The
+		// bind writes the cell once and never rescans it; the pass after it
+		// answers `{{b}}` from the scopes and leaves the column `a` written.
 		expect(resolveTemplateWithRow("{{a}}", scopes({ b: "{{a}}" }), row({ a: "{{b}}" }))).toBe(
 			"{{a}}"
 		);
+	});
+
+	it("escapes a row-answered cell inside a JSON string (issue #2639)", () => {
+		expect(
+			resolveTemplateWithRow(
+				'{"m":"{{data.msg}}"}',
+				scopes({}),
+				row({ msg: 'say "hi"' }),
+				"json"
+			)
+		).toBe('{"m":"say \\"hi\\""}');
+	});
+
+	it("leaves a scope-answered value raw beside an escaped cell, as composition writes it", () => {
+		// The documented asymmetry (`docs/app/data-driven-runs.md`): a variable
+		// is textual, so its quote can break the JSON exactly as it will on the
+		// wire, while the row's quote is escaped by the bind.
+		expect(
+			resolveTemplateWithRow(
+				'{"who":"{{name}}","m":"{{data.msg}}"}',
+				scopes({ name: 'Ada "A"' }),
+				row({ msg: 'say "hi"' }),
+				"json"
+			)
+		).toBe('{"who":"Ada "A"","m":"say \\"hi\\""}');
+	});
+
+	it("writes a cell as it stands in a plain field, the default context", () => {
+		expect(resolveTemplateWithRow('{"m":"{{data.msg}}"}', scopes({}), row({ msg: '"' }))).toBe(
+			'{"m":"""}'
+		);
+	});
+
+	it("previews a refused token as itself and names the refusal", () => {
+		const bound = previewRowBind(
+			"<o><!-- {{data.v}} --></o>",
+			scopes({}),
+			row({ v: "x" }),
+			"xml"
+		);
+		expect(bound.text).toBe("<o><!-- {{data.v}} --></o>");
+		expect(bound.refusals).toHaveLength(1);
+		expect(bound.refusals[0]).toContain("XML comment");
+	});
+
+	it("does not let a variable answer a refused bare column", () => {
+		const bound = previewRowBind(
+			"{{note}}",
+			scopes({ note: "from-the-environment" }),
+			row({ note: "a\nb" }),
+			"header"
+		);
+		expect(bound.text).toBe("{{note}}");
+		expect(bound.refusals).toHaveLength(1);
+	});
+});
+
+describe("data bind escaping conformance fixture", () => {
+	it("loaded a non-empty case list", () => {
+		expect(bindFixture.cases.length).toBeGreaterThan(20);
+	});
+
+	it.each(bindFixture.cases)("$name", (c) => {
+		const bound = previewRowBind(c.template, scopes({}), row({ v: c.cell }), c.fieldKind);
+		if (c.refusal !== undefined) {
+			expect(bound.refusals).toEqual([c.refusal]);
+			expect(bound.text).toBe(c.template);
+		} else {
+			expect(bound.refusals).toEqual([]);
+			expect(bound.text).toBe(c.expected);
+		}
 	});
 });
 

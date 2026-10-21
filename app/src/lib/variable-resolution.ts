@@ -46,6 +46,8 @@
  */
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
+import { resolveUrlTemplate } from "@/modules/request-builder/utils/query-encoding";
+import { bindDataTokens, type BoundField, type DataFieldContext } from "./data-bind-escaping";
 import { isDynamicVariableName, resolveDynamicVariable } from "./dynamic-variables";
 import { isIterationVariableName } from "./iteration-variables";
 
@@ -165,10 +167,7 @@ const MAX_NESTED_RESOLUTIONS = 8;
  * name it answers `undefined` for keeping its braces.
  *
  * The engine's `substitute_tokens`, restated: the recursion and its bound live
- * here and the tier order lives in the lookup, which is what lets one core
- * serve both a composition preview (`resolveTemplate`) and a preview that holds
- * the row (`resolveTemplateWithRow`) without either restating the other's
- * nesting rules.
+ * here and the tier order lives in the lookup.
  *
  * A replacement that carries tokens of its own is resolved through the same
  * lookup, to `MAX_NESTED_RESOLUTIONS` levels, so a layered `{{baseUrl}}`
@@ -287,15 +286,14 @@ export function renderDataValue(value: unknown): string {
 }
 
 /**
- * Resolve @p input against a bound row as well as the scopes - the engine's
- * `resolve_template_with_data`, restated for the preview that holds a row.
+ * Resolve @p input as a Send-with-row puts it on the wire, for the preview that
+ * holds the row: what composition leaves, with the row bound into it.
  *
  * Composition has no row: a payload is composed once and a row is bound per
  * iteration, which is why `resolveTemplate` above leaves both spellings of a
- * data read written as they stand. A Send-with-row's preview is the other case,
- * the one the engine meets in `pm.variables.replaceIn` (issue #890) - the row
- * is already picked, so the preview can show what the send will put on the wire
- * rather than the token that stands in for it.
+ * data read written as they stand. A Send-with-row's preview is the other case
+ * - the row is already picked, so the preview can show what the send will put
+ * on the wire rather than the token that stands in for it.
  *
  * The tiers, in the engine's order:
  *  - `{{data.column}}` reads @p row, and a `data.` name the row has no column
@@ -309,16 +307,52 @@ export function renderDataValue(value: unknown): string {
  *    columns: a name the row does not carry is an ordinary variable, not a
  *    mistake about a column, which is what keeps one request previewing the
  *    same way with and without a row picked
+ *
+ * A cell is written for the field @p context says it lands in (issue #2639):
+ * escaped inside a JSON string or XML, encoded in a URL - the bind's rule,
+ * `bindDataTokens`. A value a scope answers is written raw, as composition
+ * writes it. `context` defaults to `plain`, where a cell is its own text.
  */
 export function resolveTemplateWithRow(
 	input: string,
 	lookup: (name: string) => string | undefined,
-	row: DataRowCells
+	row: DataRowCells,
+	context: DataFieldContext = "plain"
 ): string {
-	return substituteTokens(input, (name) => {
-		const column = dataColumnName(name);
-		if (column !== null) return row.get(column);
-		const cell = row.get(name);
-		return cell !== undefined ? cell : lookupVariable(name, lookup, NO_BOUND_COLUMNS);
-	});
+	return previewRowBind(input, lookup, row, context).text;
+}
+
+/**
+ * `resolveTemplateWithRow`, with the engine's words for every token the send
+ * would refuse the row over (a cell in an XML comment, a line break bound into
+ * a header). Such a token previews as itself. One call for both halves, so a
+ * generator in the field is drawn once.
+ *
+ * Three passes, the send's own: composition (`POST /compose` with the row's
+ * columns, which leaves every row token written), the bind, and the residual
+ * pass that answers a token a cell's own text carried. That last pass keeps
+ * the row's columns written as they stand, where the engine's would ask the
+ * scopes, so a refused token is not answered by a variable of the same name.
+ */
+export function previewRowBind(
+	input: string,
+	lookup: (name: string) => string | undefined,
+	row: DataRowCells,
+	context: DataFieldContext = "plain"
+): BoundField {
+	if (!input || typeof input !== "string") return { text: input, refusals: [] };
+	const columns: BoundColumnNames = new Set(row.keys());
+	const resolve = (text: string) =>
+		context === "url"
+			? resolveUrlTemplate(text, (token) => resolveTemplate(token, lookup, columns), {
+					encode: true,
+				})
+			: resolveTemplate(text, lookup, columns);
+	const bound = bindDataTokens(
+		resolve(input),
+		(name) => isDataVariableName(name) || row.has(name),
+		(name) => row.get(dataColumnName(name) ?? name),
+		context
+	);
+	return { text: resolve(bound.text), refusals: bound.refusals };
 }

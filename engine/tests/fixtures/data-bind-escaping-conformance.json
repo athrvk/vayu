@@ -1,0 +1,229 @@
+{
+  "$comment": "Cross-language conformance fixture for how a bound data row's cell is written into the field it lands in (issue #2639). Read by BOTH the engine gtest suite (engine/tests/scenario_data_test.cpp, via VAYU_ENGINE_SOURCE_DIR, through `bind_data_row` with row index 0) and the app's vitest suite (app/src/lib/variable-resolution.row.test.ts, through `previewRowBind`). Each case binds the row `{\"v\": cell}` into one field of the kind `fieldKind` names: `plain` a `text` body, `url` the request URL sent encoded, `header` the value of a header, `json` a `json` body, `xml` an `xml` body. `expected` is the field after the bind, byte for byte; a case with `refusal` instead is a row the bind refuses, and `refusal` is the engine's whole message. A token's encoding is decided by the literal text before it only: inside a JSON string the cell is escaped (quote, backslash, controls; non-ASCII and `/` as typed), outside one it is verbatim; in XML character data `&`, `<` and `>` are escaped, in an attribute the delimiter in force as well, inside CDATA only `]]>` is split, in a tag or attribute name nothing is, and in a comment or processing instruction the row is refused; in a header a CR or LF refuses the row; in a URL the cell is URL text encoded by Postman's set for the component it lands in.",
+  "cases": [
+    {
+      "name": "json: a quote inside a string is escaped (the issue's case)",
+      "fieldKind": "json",
+      "template": "{\"m\":\"{{data.v}}\"}",
+      "cell": "say \"hi\"",
+      "expected": "{\"m\":\"say \\\"hi\\\"\"}"
+    },
+    {
+      "name": "json: a backslash inside a string is escaped",
+      "fieldKind": "json",
+      "template": "{\"p\":\"{{data.v}}\"}",
+      "cell": "C:\\tmp",
+      "expected": "{\"p\":\"C:\\\\tmp\"}"
+    },
+    {
+      "name": "json: newline, tab and carriage return take their short escapes",
+      "fieldKind": "json",
+      "template": "{\"p\":\"{{data.v}}\"}",
+      "cell": "a\nb\tc\rd",
+      "expected": "{\"p\":\"a\\nb\\tc\\rd\"}"
+    },
+    {
+      "name": "json: other controls are \\u00xx in lowercase hex, backspace and form feed short",
+      "fieldKind": "json",
+      "template": "{\"p\":\"{{data.v}}\"}",
+      "cell": "\u0001\u001f\b\f",
+      "expected": "{\"p\":\"\\u0001\\u001f\\b\\f\"}"
+    },
+    {
+      "name": "json: non-ASCII, a slash and DEL pass as typed",
+      "fieldKind": "json",
+      "template": "{\"p\":\"{{data.v}}\"}",
+      "cell": "café/日本 😀",
+      "expected": "{\"p\":\"café/日本 😀\"}"
+    },
+    {
+      "name": "json: outside a string the cell is written verbatim",
+      "fieldKind": "json",
+      "template": "{\"n\":{{data.v}}}",
+      "cell": "{\"k\":\"q\"}",
+      "expected": "{\"n\":{\"k\":\"q\"}}"
+    },
+    {
+      "name": "json: an escaped quote in the template does not end the string",
+      "fieldKind": "json",
+      "template": "{\"m\":\"say \\\"{{data.v}}\\\"\"}",
+      "cell": "x\"y",
+      "expected": "{\"m\":\"say \\\"x\\\"y\\\"\"}"
+    },
+    {
+      "name": "json: the escape flag does not carry across a token",
+      "fieldKind": "json",
+      "template": "{\"m\":\"\\{{data.v}}\", \"n\":{{data.v}}}",
+      "cell": "\"q\"",
+      "expected": "{\"m\":\"\\\\\"q\\\"\", \"n\":\"q\"}"
+    },
+    {
+      "name": "json: a bare column binds by the same rule",
+      "fieldKind": "json",
+      "template": "{\"m\":\"{{v}}\"}",
+      "cell": "a\"b",
+      "expected": "{\"m\":\"a\\\"b\"}"
+    },
+    {
+      "name": "xml: character data escapes &, < and >, not the apostrophe",
+      "fieldKind": "xml",
+      "template": "<o>{{data.v}}</o>",
+      "cell": "Ben & Jerry's <boss>",
+      "expected": "<o>Ben &amp; Jerry's &lt;boss&gt;</o>"
+    },
+    {
+      "name": "xml: a double-quoted attribute escapes its own delimiter",
+      "fieldKind": "xml",
+      "template": "<o a=\"{{data.v}}\"/>",
+      "cell": "x\"y'z&",
+      "expected": "<o a=\"x&quot;y'z&amp;\"/>"
+    },
+    {
+      "name": "xml: a single-quoted attribute escapes its own delimiter",
+      "fieldKind": "xml",
+      "template": "<o a='{{data.v}}'/>",
+      "cell": "x\"y'z&",
+      "expected": "<o a='x\"y&apos;z&amp;'/>"
+    },
+    {
+      "name": "xml: CDATA takes the cell byte for byte, splitting ]]>",
+      "fieldKind": "xml",
+      "template": "<o><![CDATA[{{data.v}}]]></o>",
+      "cell": "a]]>b & <c>",
+      "expected": "<o><![CDATA[a]]]]><![CDATA[>b & <c>]]></o>"
+    },
+    {
+      "name": "xml: an attribute name is written verbatim",
+      "fieldKind": "xml",
+      "template": "<o><n {{data.v}}=\"1\"/></o>",
+      "cell": "a&b",
+      "expected": "<o><n a&b=\"1\"/></o>"
+    },
+    {
+      "name": "xml: a token straight after < is character data until the tag is read",
+      "fieldKind": "xml",
+      "template": "<{{data.v}}>x</{{data.v}}>",
+      "cell": "a&b",
+      "expected": "<a&amp;b>x</a&b>"
+    },
+    {
+      "name": "xml: a declaration is stepped over",
+      "fieldKind": "xml",
+      "template": "<?xml version=\"1.0\"?><o>{{data.v}}</o>",
+      "cell": "a<b",
+      "expected": "<?xml version=\"1.0\"?><o>a&lt;b</o>"
+    },
+    {
+      "name": "xml: after a CDATA section is character data again",
+      "fieldKind": "xml",
+      "template": "<o><![CDATA[x]]>{{data.v}}</o>",
+      "cell": "a&b",
+      "expected": "<o><![CDATA[x]]>a&amp;b</o>"
+    },
+    {
+      "name": "xml: after a comment is character data again",
+      "fieldKind": "xml",
+      "template": "<o><!-- c -->{{data.v}}</o>",
+      "cell": "a<b",
+      "expected": "<o><!-- c -->a&lt;b</o>"
+    },
+    {
+      "name": "xml: a delimiter half-read before a token completes after it",
+      "fieldKind": "xml",
+      "template": "<o><![CDA{{data.v}}TA[{{data.v}}]]></o>",
+      "cell": "a<b",
+      "expected": "<o><![CDAa&lt;bTA[a<b]]></o>"
+    },
+    {
+      "name": "xml: a token in a comment is refused",
+      "fieldKind": "xml",
+      "template": "<o><!-- {{data.v}} --></o>",
+      "cell": "x",
+      "refusal": "{{data.v}} sits inside an XML comment, where a bound value is not sent at all - and one carrying \"-->\" would end the comment and change the document instead, so the row is refused rather than bound somewhere it cannot be read"
+    },
+    {
+      "name": "xml: a token in a processing instruction is refused",
+      "fieldKind": "xml",
+      "template": "<?render style=\"{{data.v}}\"?><o/>",
+      "cell": "x",
+      "refusal": "{{data.v}} sits inside an XML processing instruction, which is markup addressed to the parser rather than content - a bound value carrying \"?>\" would end it and change the document, so the row is refused rather than bound into markup"
+    },
+    {
+      "name": "header: a cell is written as it stands",
+      "fieldKind": "header",
+      "template": "Bearer {{data.v}}",
+      "cell": "a\"b<c>&\\",
+      "expected": "Bearer a\"b<c>&\\"
+    },
+    {
+      "name": "header: CR LF in a cell is refused",
+      "fieldKind": "header",
+      "template": "{{data.v}}",
+      "cell": "ok\r\nX-Admin: true",
+      "refusal": "{{data.v}} is bound into a header, and data row 0 has a line break in that column - a CR or LF ends the header line rather than sitting in it, so the rest of the value would be read as headers of its own; the row is refused rather than sent forging a header"
+    },
+    {
+      "name": "header: a lone LF is refused too",
+      "fieldKind": "header",
+      "template": "note {{v}}",
+      "cell": "a\nb",
+      "refusal": "{{v}} is bound into a header, and data row 0 has a line break in that column - a CR or LF ends the header line rather than sitting in it, so the rest of the value would be read as headers of its own; the row is refused rather than sent forging a header"
+    },
+    {
+      "name": "plain: a text body takes the cell byte for byte",
+      "fieldKind": "plain",
+      "template": "<o>{{data.v}}</o>",
+      "cell": "a&b \"c\" \\",
+      "expected": "<o>a&b \"c\" \\</o>"
+    },
+    {
+      "name": "plain: a line break is ordinary content outside a header",
+      "fieldKind": "plain",
+      "template": "line {{data.v}}",
+      "cell": "a\r\nb",
+      "expected": "line a\r\nb"
+    },
+    {
+      "name": "url: a space in the path is %20",
+      "fieldKind": "url",
+      "template": "https://api.test/u/{{data.v}}",
+      "cell": "John Doe",
+      "expected": "https://api.test/u/John%20Doe"
+    },
+    {
+      "name": "url: a quote in the path is encoded, not JSON-escaped",
+      "fieldKind": "url",
+      "template": "https://api.test/u/{{data.v}}",
+      "cell": "a\"b",
+      "expected": "https://api.test/u/a%22b"
+    },
+    {
+      "name": "url: a cell's & and = split query pairs",
+      "fieldKind": "url",
+      "template": "https://api.test/s?q={{data.v}}",
+      "cell": "a b&c=d\"",
+      "expected": "https://api.test/s?q=a%20b&c=d%22"
+    },
+    {
+      "name": "url: a cell's ? in the path opens the query",
+      "fieldKind": "url",
+      "template": "https://api.test/{{data.v}}",
+      "cell": "a?b c",
+      "expected": "https://api.test/a?b%20c"
+    },
+    {
+      "name": "url: non-ASCII in the query is UTF-8 percent-encoded",
+      "fieldKind": "url",
+      "template": "https://api.test/s?q={{data.v}}",
+      "cell": "ü",
+      "expected": "https://api.test/s?q=%C3%BC"
+    },
+    {
+      "name": "url: the fragment takes its own set",
+      "fieldKind": "url",
+      "template": "https://api.test/p#{{data.v}}",
+      "cell": "x y",
+      "expected": "https://api.test/p#x%20y"
+    }
+  ]
+}

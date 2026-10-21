@@ -17,7 +17,10 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 #include "vayu/core/scenario_data.hpp"
@@ -1368,4 +1371,86 @@ TEST (ScenarioDataBareColumnTest, TheColumnSetIsReadOffTheRowsOnce) {
     const auto columns = vayu::core::bound_columns_of (rows);
     EXPECT_EQ (columns, vayu::http::BoundColumnNames ({ "a", "b" }));
     EXPECT_TRUE (vayu::core::bound_columns_of (json::parse ("[1,2]")).empty ());
+}
+
+// ---------------------------------------------------------------------------
+// The shared escaping fixture (issue #2639): the Send-with-row preview's copy
+// of this bind (`app/src/lib/data-bind-escaping.ts`) answers the same cases in
+// `variable-resolution.row.test.ts`.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+json load_bind_escaping_fixture () {
+    const std::filesystem::path path = std::filesystem::path (VAYU_ENGINE_SOURCE_DIR) /
+    "tests" / "fixtures" / "data-bind-escaping-conformance.json";
+    std::ifstream in (path);
+    if (!in.good ()) {
+        ADD_FAILURE () << "fixture missing: " << path;
+        return json::object ();
+    }
+    return json::parse (in);
+}
+
+std::optional<vayu::BodyMode> body_mode_of (const std::string& field_kind) {
+    if (field_kind == "plain") {
+        return vayu::BodyMode::Text;
+    }
+    if (field_kind == "json") {
+        return vayu::BodyMode::Json;
+    }
+    if (field_kind == "xml") {
+        return vayu::BodyMode::Xml;
+    }
+    return std::nullopt;
+}
+
+/// A request carrying @p tmpl in the one field @p field_kind names.
+vayu::Request request_with_field (const std::string& field_kind, const std::string& tmpl) {
+    auto request = request_with_url ("https://api.test/");
+    if (field_kind == "url") {
+        request.url = tmpl;
+    } else if (field_kind == "header") {
+        request.headers["X-V"] = tmpl;
+    } else if (const auto mode = body_mode_of (field_kind)) {
+        request.body.mode    = *mode;
+        request.body.content = tmpl;
+    } else {
+        ADD_FAILURE () << "unknown fieldKind: " << field_kind;
+    }
+    return request;
+}
+
+std::string field_of (const std::string& field_kind, const vayu::Request& request) {
+    if (field_kind == "url") {
+        return request.url;
+    }
+    if (field_kind == "header") {
+        return request.headers.at ("X-V");
+    }
+    return request.body.content;
+}
+
+} // namespace
+
+TEST (ScenarioDataEscapingConformance, EveryCaseBindsAsTheSharedFixtureSays) {
+    const json fixture = load_bind_escaping_fixture ();
+    const json cases   = fixture.value ("cases", json::array ());
+    // Guards the loop itself: an empty table would pass every case.
+    ASSERT_GT (cases.size (), 20U);
+    for (const json& c : cases) {
+        const auto name       = c.at ("name").get<std::string> ();
+        const auto field_kind = c.at ("fieldKind").get<std::string> ();
+        auto request =
+        request_with_field (field_kind, c.at ("template").get<std::string> ());
+        const auto result = bind_data_row (request, json{ { "v", c.at ("cell") } }, 0);
+        if (c.contains ("refusal")) {
+            EXPECT_FALSE (result.ok) << name;
+            EXPECT_EQ (result.error, c.at ("refusal").get<std::string> ()) << name;
+            continue;
+        }
+        EXPECT_TRUE (result.ok) << name << ": " << result.error;
+        EXPECT_EQ (field_of (field_kind, request), c.at ("expected").get<std::string> ())
+        << name;
+    }
 }
