@@ -52,8 +52,13 @@ import SpecReimportDialog from "./SpecReimportDialog";
 import { apiService } from "@/services/api";
 import { type CollectionDraft, type ImportResult } from "@/services/importers/types";
 import { draftSiblings } from "@/services/importers/draft-siblings";
+import {
+	unselectedCertificateCount,
+	withCertificateTicked,
+} from "@/services/importers/client-certificate-selection";
 import { describeCarriedOver, describeCounts, importNotices } from "./import-notices";
 import { NoticeList } from "./NoticeList";
+import { ImportClientCertificates } from "./ImportClientCertificates";
 import { announceImport, buildImportReport } from "./import-report";
 import { activateImportedEnvironment } from "./import-environment";
 import { ImportFileFolders } from "./ImportFileFolders";
@@ -695,14 +700,25 @@ export function ImportModal() {
 			try {
 				const applied = await importMutation.mutateAsync({
 					result,
-					opts: { importEnvironments, importScripts },
+					opts: {
+						importEnvironments,
+						importScripts,
+						// This file's own ticks: a batch applies one file at a time.
+						selectedClientCertificates: entry.selectedCertificates ?? [],
+					},
 					// Only meaningful for a spec import; the mutation ignores it when
 					// the parsed tree carries no spec document.
 					...(entry.specPath && result.meta.fileName
 						? { specFile: { path: entry.specPath, fileName: result.meta.fileName } }
 						: {}),
 				});
-				reports.push(buildImportReport(result, Object.values(applied?.rootIds ?? {})));
+				reports.push(
+					buildImportReport(
+						result,
+						Object.values(applied?.rootIds ?? {}),
+						entry.selectedCertificates
+					)
+				);
 				createdEnvironmentIds.push(...Object.values(applied?.environmentIds ?? {}));
 				outcomes.set(entry.id, { ok: true, message: "Imported" });
 			} catch (e) {
@@ -773,6 +789,29 @@ export function ImportModal() {
 		}));
 	};
 
+	/** Tick or untick one of a file's client-certificate candidates; only this file's selection moves. */
+	const toggleCertificate = (id: string, index: number, ticked: boolean) => {
+		const t = tab;
+		setTabs((current) => ({
+			...current,
+			[t]: {
+				...current[t],
+				entries: current[t].entries.map((entry) =>
+					entry.id === id
+						? {
+								...entry,
+								selectedCertificates: withCertificateTicked(
+									entry.selectedCertificates,
+									index,
+									ticked
+								),
+							}
+						: entry
+				),
+			},
+		}));
+	};
+
 	const toggleEnvironments = (v: boolean) => {
 		setImportEnvironments(v);
 		redetect({ importEnvironments: v, importScripts });
@@ -792,6 +831,7 @@ export function ImportModal() {
 						<PreviewView
 							result={single.result}
 							importEnvironments={importEnvironments}
+							selectedCertificates={single.selectedCertificates}
 							onDismiss={() => resetTab(tab)}
 						/>
 					) : (
@@ -1116,6 +1156,11 @@ export function ImportModal() {
 						 * them would hide the very thing the apply is producing.
 						 */}
 						{progress && <ImportProgressView progress={progress} />}
+						<ImportClientCertificates
+							entries={applicable}
+							disabled={applying}
+							onToggle={toggleCertificate}
+						/>
 						<div className="flex items-center justify-between gap-3">
 							{/*
 							 * One <label> each. These were two checkboxes inside a single
@@ -1201,10 +1246,12 @@ export function ImportModal() {
 function PreviewView({
 	result,
 	importEnvironments,
+	selectedCertificates,
 	onDismiss,
 }: {
 	result: ImportResult;
 	importEnvironments: boolean;
+	selectedCertificates: readonly number[] | undefined;
 	onDismiss: () => void;
 }) {
 	const { meta, collections, environments, globals } = result;
@@ -1280,7 +1327,12 @@ function PreviewView({
 					Same-named globals will be overwritten.
 				</p>
 			)}
-			<NoticeList notices={importNotices(meta)} />
+			<NoticeList
+				notices={importNotices(
+					meta,
+					unselectedCertificateCount(result, selectedCertificates)
+				)}
+			/>
 			<ImportFileFolders results={[result]} />
 		</div>
 	);
@@ -1355,7 +1407,9 @@ function BatchRow({
 	// Shared with the re-import dialog, so one file is called the same thing
 	// wherever it is named.
 	const name = entryLabel(entry);
-	const notices = result ? importNotices(result.meta) : [];
+	const notices = result
+		? importNotices(result.meta, unselectedCertificateCount(result, entry.selectedCertificates))
+		: [];
 	return (
 		<label className="flex items-start gap-2 py-1 pl-1 text-xs">
 			<Checkbox

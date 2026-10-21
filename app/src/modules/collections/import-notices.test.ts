@@ -813,3 +813,45 @@ describe("describeCarriedOver", () => {
 		expect(describeTree(collection({ requests }))).toBe("Carried over: auth on 1,200 requests");
 	});
 });
+
+describe("importNotices - client certificates left unticked (#2363)", () => {
+	const certificateLine = (unticked: number, skipped: SkippedItem[] = []) =>
+		importNotices(meta({ skipped }), unticked).map((notice) => notice.text);
+
+	it("says nothing when every candidate was ticked", () => {
+		expect(certificateLine(0)).toEqual([]);
+	});
+
+	it("tallies the unticked ones in the existing certificate line", () => {
+		expect(certificateLine(1)).toEqual([
+			"1 client certificate not imported - add it in Settings",
+		]);
+		expect(certificateLine(2)).toEqual([
+			"2 client certificates not imported - add them in Settings",
+		]);
+	});
+
+	it("sums them with the certificates the engine could not resolve", () => {
+		expect(certificateLine(2, [{ kind: "certificate", count: 1 }])).toEqual([
+			"3 client certificates not imported - add them in Settings",
+		]);
+	});
+
+	it("leaves the engine's own line, request names and all, when nothing is unticked", () => {
+		expect(
+			certificateLine(0, [{ kind: "certificate", count: 1, requests: ["Get user"] }])
+		).toEqual(["Get user: client certificate not imported - add it in Settings"]);
+	});
+
+	it("keeps every other line as it was", () => {
+		expect(
+			certificateLine(1, [
+				{ kind: "proxy_config", count: 1 },
+				{ kind: "certificate", count: 1 },
+			])
+		).toEqual([
+			"2 client certificates not imported - add them in Settings",
+			"1 per-request proxy setting not imported",
+		]);
+	});
+});

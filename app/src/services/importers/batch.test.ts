@@ -360,6 +360,17 @@ describe("reparseBatch", () => {
 		expect((await reparseBatch(unchecked, OPTS))[0]?.included).toBe(false);
 	});
 
+	it("drops the certificates the user ticked, which index a parse that was replaced (#2363)", async () => {
+		const entries = await detectBatch(
+			[{ fileName: "a.json", relativePath: "a.json", text: postman }],
+			OPTS,
+			intake()
+		);
+		const ticked = entries.map((e) => ({ ...e, selectedCertificates: [0, 1] }));
+
+		expect((await reparseBatch(ticked, OPTS))[0]?.selectedCertificates).toEqual([]);
+	});
+
 	it("restates the unresolved refs a re-parse cannot rediscover", async () => {
 		const entries = await detectBatch(
 			[

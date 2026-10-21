@@ -275,6 +275,65 @@ describe("ImportOrchestrator", () => {
 		expect(calls[0].environments).toHaveLength(0);
 	});
 
+	describe("client certificates (#2363)", () => {
+		const candidates = [
+			{ host: "a.example.com", certPath: "/c/a.pem", passphrase: "secret" },
+			{ host: "b.example.com", port: 8443, certPath: "/c/b.p12", certFormat: "p12" as const },
+			{ host: "c.example.com", certPath: "/c/c.pem", keyPath: "/c/c.key" },
+		];
+		const withCandidates = (): ImportResult => ({
+			...fixture(),
+			clientCertificates: candidates,
+		});
+
+		it("sends none when the caller states no selection", async () => {
+			const { api, calls } = fakeApi();
+			await new ImportOrchestrator(api).run(withCandidates(), opts);
+			expect(calls[0].clientCertificates).toEqual([]);
+		});
+
+		it("sends none for an empty selection", async () => {
+			const { api, calls } = fakeApi();
+			await new ImportOrchestrator(api).run(withCandidates(), {
+				...opts,
+				selectedClientCertificates: [],
+			});
+			expect(calls[0].clientCertificates).toEqual([]);
+		});
+
+		it("sends exactly the selected candidates, whole and in the preview's order", async () => {
+			const { api, calls } = fakeApi();
+			await new ImportOrchestrator(api).run(withCandidates(), {
+				...opts,
+				selectedClientCertificates: [2, 0],
+			});
+			expect(calls[0].clientCertificates).toEqual([candidates[0], candidates[2]]);
+		});
+
+		it("sends [] for a format whose parse lists no candidates", async () => {
+			const { api, calls } = fakeApi();
+			await new ImportOrchestrator(api).run(fixture(), {
+				...opts,
+				selectedClientCertificates: [],
+			});
+			expect(calls[0].clientCertificates).toEqual([]);
+		});
+
+		it.each([[3], [-1], [1.5]])(
+			"refuses a selection naming candidate %s before anything is sent",
+			async (index) => {
+				const { api, calls } = fakeApi();
+				await expect(
+					new ImportOrchestrator(api).run(withCandidates(), {
+						...opts,
+						selectedClientCertificates: [index],
+					})
+				).rejects.toThrow(/Client certificate selection/);
+				expect(calls).toHaveLength(0);
+			}
+		);
+	});
+
 	it("propagates the engine's failure (nothing to roll back - the write is atomic)", async () => {
 		const { api } = fakeApi({ reject: new Error("boom") });
 		await expect(new ImportOrchestrator(api).run(fixture(), opts)).rejects.toThrow("boom");

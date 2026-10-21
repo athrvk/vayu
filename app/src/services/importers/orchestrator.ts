@@ -16,7 +16,8 @@ import type {
 	ImportApplyResponse,
 	ImportApplySpec,
 } from "@/types";
-import type { CollectionDraft, ImportOptions, ImportResult } from "./types";
+import type { CollectionDraft, ImportApplyOptions, ImportResult } from "./types";
+import { selectedCertificates } from "./client-certificate-selection";
 import { requestFieldsFromDraft } from "./request-payload";
 import { siblingPositions } from "./draft-siblings";
 
@@ -54,7 +55,7 @@ export class ImportOrchestrator {
 	 * file path is remembered under does not have an id until this call answers
 	 * (issue #638).
 	 */
-	async run(result: ImportResult, opts: ImportOptions): Promise<Record<string, string>> {
+	async run(result: ImportResult, opts: ImportApplyOptions): Promise<Record<string, string>> {
 		const collections: ImportApplyCollection[] = [];
 		const requests: ImportApplyRequestItem[] = [];
 		const specs: ImportApplySpec[] = [];
@@ -84,10 +85,13 @@ export class ImportOrchestrator {
 				}))
 			: [];
 
-		// Pass-through, no temp id: only a Postman preview ever populates this
-		// (issue #1656), and every other format's `result.clientCertificates` is
-		// absent rather than `[]` - see `ImportResult.clientCertificates`.
-		const clientCertificates: ImportApplyClientCertificate[] = result.clientCertificates ?? [];
+		// No temp id, so the per-item preview does not cover these: only the
+		// candidates the user ticked go out (issue #2363), and a caller that states
+		// no selection sends none.
+		const clientCertificates: ImportApplyClientCertificate[] = selectedCertificates(
+			result,
+			opts.selectedClientCertificates
+		);
 
 		const { idMap } = await this.api.applyImport({
 			collections,
@@ -133,7 +137,7 @@ export class ImportOrchestrator {
 	 * file's variables, and skipping them would be the silent no-op the issue calls
 	 * the worst outcome. Documented in `docs/app/import-collections/postman-environment.md`.
 	 */
-	private async applyGlobals(result: ImportResult, opts: ImportOptions): Promise<void> {
+	private async applyGlobals(result: ImportResult, opts: ImportApplyOptions): Promise<void> {
 		if (!opts.importEnvironments) return;
 		// No read, no write - every other format lands here and must not touch the scope.
 		if (Object.keys(result.globals).length === 0) return;

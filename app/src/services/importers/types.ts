@@ -23,6 +23,18 @@ export interface ImportOptions {
 	importScripts: boolean;
 }
 
+/**
+ * What an apply takes beyond the parse options (`ImportOrchestrator.run`).
+ *
+ * `selectedClientCertificates` are indexes into `ImportResult.clientCertificates`
+ * - the candidates the user ticked in the preview. Absent means none: a
+ * programmatic caller that states nothing registers no certificate, because a
+ * registry row is host-wide and outlives the import (issue #2363).
+ */
+export interface ImportApplyOptions extends ImportOptions {
+	selectedClientCertificates?: readonly number[];
+}
+
 import type { RefReport } from "./ref-bundler";
 
 /**
@@ -623,9 +635,9 @@ export interface ImportResult {
 	 * `client_certificates` registry candidates the engine resolved (issue
 	 * #1656) - present only from a Postman parse; every other format's parser
 	 * sets no such key, so this is optional here rather than "always sent,
-	 * `[]` included" the way {@link ImportApplyRequest.specs} is. The
-	 * orchestrator defaults an absent one to `[]` when it flattens the preview
-	 * into the apply payload.
+	 * `[]` included" the way {@link ImportApplyRequest.specs} is. This is the
+	 * full candidate list the preview shows; the apply payload carries only the
+	 * ones the user ticked ({@link ImportApplyOptions.selectedClientCertificates}).
 	 */
 	clientCertificates?: ImportApplyClientCertificate[];
 }
