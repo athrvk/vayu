@@ -410,6 +410,7 @@ stored order - a mock server answers with the first example of a matched request
 **`ImportMeta`** - `format`, `fileName?`, `requestCount`, `folderCount`,
 `folderStrategy?`, `environmentCount`, `globalCount`, `exampleCount`,
 `skipped: SkippedItem[]`, `nonExecutableAuth: number`, `nonExecutableAuthRequests?: string[]`,
+`nonExecutableAuthFolders?: string[]`, `nonExecutableAuthCollection?: string`,
 `unattachedFileParts: number`, `refReport?` (set app-side by the `$ref` bundling, never by the
 engine), `unsupportedScriptApis?: {request, names}[]`.
 
@@ -523,8 +524,9 @@ document that arrived with no URL to resolve it against (see
 
 The last three are Postman kinds added by issue #1443, closing gaps in the same "dropped is
 counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu has no mode
-for (`hawk`, `oauth1`, `edgegrid`, or a non-string `type`), unlike `awsv4`/`digest`/`ntlm`,
-which import as data and count under `nonExecutableAuth` instead. `url_without_raw` is not a
+for (a non-string `type`, or one the schema does not list), unlike `awsv4`, `digest`, `ntlm`,
+`hawk`, `oauth1`, `edgegrid` and `jwt`, which import as data and are reported under
+`nonExecutableAuth` instead. `url_without_raw` is not a
 loss: it counts a URL assembled from `host[]`/`path[]` because it carried no `raw` - a mapping
 that changes nothing the user sends, so like `default_response` the Preview does not show it;
 it stays counted in `meta.skipped`. (A fourth, `path_variables`, counted a `:key` segment
@@ -619,7 +621,9 @@ OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
   OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
 
 Grant/field normalization is shared here so the parsers agree. Only the data-only modes (`digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt`)
-remain non-executable and are counted in `meta.nonExecutableAuth`.
+remain non-executable and are reported in `meta.nonExecutableAuth`: Postman counts the requests whose resolved auth is one of them
+(declaring folders and the collection go in `nonExecutableAuthFolders` / `nonExecutableAuthCollection`),
+Insomnia counts each declaration (see [Postman](./postman.md#auth-mapping)).
 
 ### postman_raw_body
 `postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map
