@@ -45,8 +45,7 @@ export default function PerformanceTab({
 	monitorSamples,
 	monitorFailure,
 	isLoadingSeries,
-	isFetchingMore,
-	progress,
+	ticksPerBucket,
 }: PerformanceTabProps) {
 	// The run's own record of the host sleeping under it (#1357), read here by
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
@@ -69,7 +68,7 @@ export default function PerformanceTab({
 	// Memoised despite returning a boolean, as MetricsView does: the predicate
 	// stops at the first tick carrying a p99, but the run that has none - the
 	// one whose card this hides - is the case that scans every tick, and a
-	// loaded series runs to tens of thousands of them.
+	// loaded series runs to thousands of them.
 	const hasPercentileData = useMemo(() => hasPercentileSignal(timeSeries), [timeSeries]);
 	const isRampUp = derived.mode === "ramp_up";
 
@@ -83,8 +82,7 @@ export default function PerformanceTab({
 					monitorSamples={monitorSamples}
 					monitorFailure={monitorFailure}
 					isLoading={isLoadingSeries}
-					isFetchingMore={isFetchingMore}
-					progress={progress}
+					ticksPerBucket={ticksPerBucket}
 					mode={derived.mode}
 					breakpoint={derived.breakpoint}
 					anomalies={anomalies}

@@ -15,7 +15,7 @@
 
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Callout, DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
-import { Loader2 } from "lucide-react";
+import { formatSeconds } from "@/lib/format-number";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL, isClosedLoopMode } from "@/constants/load-test-modes";
 import type { Breakpoint } from "@/modules/dashboard/utils/computeBreakpoint";
@@ -36,10 +36,14 @@ interface HistoricalChartsSectionProps {
 	data: LoadTestMetrics[];
 	/**
 	 * The series fetch failed. With too little data to plot it replaces the
-	 * "insufficient data" sentence, which would blame the run for the network;
-	 * with an unfinished series it sits above the charts that did load.
+	 * "insufficient data" sentence, which would blame the run for the network.
 	 */
 	failure?: SeriesFailure;
+	/**
+	 * Stored ticks the engine folded into each point of `data` (#2547); absent
+	 * when the series is raw, one tick a second.
+	 */
+	ticksPerBucket?: number;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples?: MonitorSample[];
 	/**
@@ -49,8 +53,6 @@ interface HistoricalChartsSectionProps {
 	 */
 	monitorFailure?: SeriesFailure;
 	isLoading?: boolean;
-	isFetchingMore?: boolean;
-	progress?: { loaded: number; total: number };
 	/** The run's mode, which decides whether its concurrency series counts virtual users or requests. */
 	mode?: string;
 	breakpoint?: Breakpoint | null;
@@ -60,6 +62,25 @@ interface HistoricalChartsSectionProps {
 }
 
 const SYNC_KEY = CHART_SYNC.history;
+
+/**
+ * What a point is on a downsampled series, and what that does to the events
+ * judged over it (#2547; the fold rules are the engine's, the detector's
+ * reading of them is spelled out in `LoadTestDetail`). Stored ticks are one a
+ * second, so a bucket of N ticks is N seconds.
+ */
+function BucketNote({ ticksPerBucket }: { ticksPerBucket: number }) {
+	return (
+		<Callout
+			severity="info"
+			title={`Each point covers ${formatSeconds(ticksPerBucket)} of this run`}
+		>
+			Latency and concurrency show the worst second in it, counts and rates their value at its
+			end. Events are judged point to point, so a slowdown has to span two points to be named;
+			the breakpoint still marks the first point holding a second over the SLO.
+		</Callout>
+	);
+}
 
 export default function HistoricalChartsSection({
 	monitorFailure,
@@ -90,8 +111,7 @@ function SeriesCharts({
 	failure,
 	monitorSamples = [],
 	isLoading,
-	isFetchingMore,
-	progress,
+	ticksPerBucket,
 	mode,
 	breakpoint,
 	anomalies,
@@ -121,6 +141,9 @@ function SeriesCharts({
 		);
 	}
 
+	// This counts points, not seconds. Only a run longer than
+	// HISTORY_SERIES_MAX_POINTS ticks is bucketed, and into many points, so a
+	// series this short is raw and each of its points is a second.
 	if (data.length < 2) {
 		return (
 			<Card>
@@ -136,30 +159,7 @@ function SeriesCharts({
 
 	return (
 		<div className="space-y-4">
-			{failure && !isFetchingMore && progress && progress.loaded < progress.total && (
-				<Callout
-					severity="warning"
-					title="Charts are incomplete"
-					action={
-						<Button variant="outline" size="sm" onClick={failure.retry}>
-							Try again
-						</Button>
-					}
-				>
-					Loaded {progress.loaded.toLocaleString()} of {progress.total.toLocaleString()}{" "}
-					points before the fetch failed ({failure.message}).
-				</Callout>
-			)}
-
-			{isFetchingMore && progress && (
-				<div className="enter-fade flex items-center gap-2 text-sm text-muted-foreground">
-					<Loader2 className="size-icon animate-spin" />
-					<span>
-						Loading more data… ({progress.loaded.toLocaleString()} /{" "}
-						{progress.total.toLocaleString()} points)
-					</span>
-				</div>
-			)}
+			{ticksPerBucket !== undefined && <BucketNote ticksPerBucket={ticksPerBucket} />}
 
 			<Card>
 				<CardHeader className="pb-2">

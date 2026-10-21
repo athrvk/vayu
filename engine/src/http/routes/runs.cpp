@@ -1732,7 +1732,19 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
         return { 404, error_body (404, "Run not found") };
     }
 
-    auto results = db.get_results (run_id);
+    // A load run that is not terminal is read without its traces (#2548): a
+    // client re-reads this report on a timer until the run ends, and the
+    // trace-derived parts (`errors.types`, the phase averages, `slowRequests`,
+    // `results[].trace`) then take their no-trace answers. Decided from the
+    // same row `metadata.status` reports, so a run that turns terminal before
+    // the results read is answered as the running run this report says it is.
+    // Design and scenario runs store their rows just before the status flips,
+    // and their one-shot readers (response restore, the step list) need
+    // `trace` from a report fetched in that gap, so they always read it.
+    const bool live_load =
+    run->type == vayu::RunType::Load && !vayu::is_terminal (run->status);
+    const auto results =
+    live_load ? db.get_results_without_traces (run_id) : db.get_results (run_id);
 
     double duration_s = 0;
     if (run->start_time > 0) {

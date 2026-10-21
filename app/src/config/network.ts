@@ -60,6 +60,16 @@ export const ENGINE_MAX_DEFAULT_TIMEOUT_MS = 300_000;
 export const STATS_PAGE_LIMIT = 5000;
 
 /**
+ * How many points the History view asks `GET /runs/:id/metrics?maxPoints=` for
+ * (#2547). A run with at most this many ticks (about 33 minutes at the engine's
+ * one tick a second) comes back raw; a longer one comes back folded into this
+ * many buckets, so a 24 h soak is one response of about 2,000 ticks instead of
+ * 18 pages of 5,000. Two or more, so a bucketed series always has the two
+ * points a chart needs.
+ */
+export const HISTORY_SERIES_MAX_POINTS = 2000;
+
+/**
  * Page size for `GET /runs/:id/samples`. The report itself serialises at most
  * 100 result rows, so one page covers every sample a surface can show; the
  * engine caps a page at 500 either way.

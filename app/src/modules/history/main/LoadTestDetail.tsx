@@ -63,7 +63,6 @@ import {
 	type LoadTestDetailProps,
 	type MonitorSeriesResponse,
 	type SeriesFailure,
-	type TimeSeriesResponse,
 } from "../types";
 
 export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
@@ -107,47 +106,29 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 			(virtualUsers === undefined ? "" : ` - ${formatConcurrency(virtualUsers)}`)
 		: "";
 
-	// Fetch the persisted per-tick time-series once, here, so both the Overview
-	// stat cards (breakpoint / saturation, derived below) and the Performance tab
-	// charts read the same data - one query, shared cache.
+	// Fetch the persisted time-series once, here, so both the Overview stat cards
+	// (breakpoint / saturation, derived below) and the Performance tab charts
+	// read the same data - one query, shared cache. One request, never paged: a
+	// long run arrives downsampled (#2547).
 	const {
 		data: timeSeriesData,
 		isLoading: isLoadingSeries,
 		isError: isSeriesError,
 		error: seriesError,
-		isFetchingNextPage,
-		hasNextPage,
-		fetchNextPage,
 		refetch: refetchSeries,
 	} = useRunTimeSeriesQuery(runId ?? null, report.metadata?.status);
 
-	// Auto-page through the full series so breakpoint detection and the charts see
-	// every tick, not just the first page. Not while the query is in error: a
-	// failed page leaves `hasNextPage` true and `isFetchingNextPage` back at
-	// false, which is exactly this effect's trigger, so it would re-request the
-	// failing page in a tight loop. The failure's Retry calls `fetchNextPage`
-	// itself, and a success clears the error and resumes the paging.
-	useEffect(() => {
-		if (hasNextPage && !isFetchingNextPage && !isSeriesError) {
-			fetchNextPage();
-		}
-	}, [hasNextPage, isFetchingNextPage, isSeriesError, fetchNextPage]);
-
-	// A partly loaded series resumes at the page that failed; one with nothing
-	// loaded starts over. `refetch` would re-read every loaded page instead.
 	const seriesFailure = useMemo<SeriesFailure | undefined>(() => {
 		if (!isSeriesError) return undefined;
-		const resumable = hasNextPage && !!timeSeriesData?.pages?.length;
 		return {
 			message: seriesError?.message ?? "The engine returned no time-series data.",
-			retry: () => void (resumable ? fetchNextPage() : refetchSeries()),
+			retry: () => void refetchSeries(),
 		};
-	}, [isSeriesError, seriesError, hasNextPage, timeSeriesData, fetchNextPage, refetchSeries]);
+	}, [isSeriesError, seriesError, refetchSeries]);
 
-	const timeSeries = useMemo(
-		() => timeSeriesData?.pages?.flatMap((page: TimeSeriesResponse) => page.data) ?? [],
-		[timeSeriesData]
-	);
+	const timeSeries = useMemo(() => timeSeriesData?.data ?? [], [timeSeriesData]);
+	// Set only when the engine folded the series; the charts say what a point is.
+	const ticksPerBucket = timeSeriesData?.bucketed ? timeSeriesData.ticksPerBucket : undefined;
 
 	// Server vitals, only for a run that actually recorded some: the report's
 	// `monitor` section is the run's own record of what the scrape did, so a run
@@ -164,7 +145,11 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		refetch: refetchMonitor,
 	} = useRunMonitorSeriesQuery(runId ?? null, hasMonitorSamples, report.metadata?.status);
 
-	// Held back while in error for the reason the time series' effect is (#2062).
+	// Auto-page through every scrape. Not while the query is in error (#2062): a
+	// failed page leaves `hasNextPage` true and `isFetchingNextPage` back at
+	// false, which is exactly this effect's trigger, so it would re-request the
+	// failing page in a tight loop. The failure's Retry calls `fetchMoreMonitor`
+	// itself, and a success clears the error and resumes the paging.
 	useEffect(() => {
 		if (hasMoreMonitor && !isFetchingMonitorPage && !isMonitorError) {
 			fetchMoreMonitor();
@@ -192,11 +177,19 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 		[monitorData]
 	);
 
-	const seriesProgress = useMemo(() => {
-		if (!timeSeriesData?.pages?.length) return undefined;
-		const lastPage = timeSeriesData.pages[timeSeriesData.pages.length - 1];
-		return { loaded: timeSeries.length, total: lastPage.pagination.total };
-	}, [timeSeriesData, timeSeries]);
+	/*
+	 * The breakpoint and the anomaly windows are derived from the series the
+	 * charts plot, whatever its shape (#2547). A run of at most
+	 * HISTORY_SERIES_MAX_POINTS ticks arrives raw, one tick a second, and both
+	 * behave as they always have. A longer run arrives as buckets whose p99 is
+	 * the worst second in each, so neither can miss a second over a threshold:
+	 * the breakpoint lands on the bucket holding the first such second (its time
+	 * the bucket's end, its concurrency the bucket's peak), and the 5xx onset on
+	 * the bucket it appeared in. The detector's tick counts then count buckets:
+	 * a 15-bucket baseline, and a window needs two hot buckets, so a slowdown
+	 * shorter than that goes unnamed while the breakpoint still marks it. The
+	 * chart section says so beside the charts.
+	 */
 
 	// The report alone can't supply the capacity breakpoint (it needs the per-tick
 	// p99 series, now persisted per W1). Derive it from the time-series and fold it
@@ -426,8 +419,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									monitorSamples={monitorSamples}
 									monitorFailure={monitorFailure}
 									isLoadingSeries={isLoadingSeries}
-									isFetchingMore={isFetchingNextPage}
-									progress={seriesProgress}
+									ticksPerBucket={ticksPerBucket}
 								/>
 								{/* Not part of PerformanceTab: that is a view of this run's report
 								    and renders without a QueryClient in tests; this reads the request's other runs. */}
