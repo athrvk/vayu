@@ -258,8 +258,9 @@ namespace capacity {
 /// Default latency budget the search looks for the edge of, in ms. Matches the
 /// app's `DEFAULT_SLO_THRESHOLD_MS` so the dialog's prefill is the same number.
 constexpr int64_t SLO_MS = 200;
-/// How long each level is held before its window is judged. Long enough for the
-/// windowed percentiles to settle at the stock 100ms tick cadence, short enough
+/// How long each level is held before it is judged. Long enough to outlast the
+/// settle ticks and leave a level histogram worth a p99 at the stock 100ms tick
+/// cadence, short enough
 /// that a search over tens of levels finishes inside a normal run duration.
 constexpr int64_t STEP_DURATION_MS = 5000;
 /// Deadline for the whole search when the run config names no `duration`.
