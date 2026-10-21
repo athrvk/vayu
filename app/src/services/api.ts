@@ -983,16 +983,17 @@ export const apiService = {
 	},
 
 	/**
-	 * Get time-series metrics for a run (paginated)
-	 * Used for rendering historical charts
+	 * Get time-series metrics for a run: one page of raw ticks, or with
+	 * `maxPoints` the whole series in one response, folded into buckets when the
+	 * run has more ticks than that (#2547).
 	 */
 	async getRunTimeSeries(
 		id: string,
-		options: { limit?: number; offset?: number } = {}
+		options: { limit?: number; offset?: number; maxPoints?: number } = {}
 	): Promise<TimeSeriesResponse> {
-		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
+		const { limit = STATS_PAGE_LIMIT, offset = 0, maxPoints } = options;
 		return await httpClient.get<TimeSeriesResponse>(
-			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset)
+			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset, maxPoints)
 		);
 	},
 
