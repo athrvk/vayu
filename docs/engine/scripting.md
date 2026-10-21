@@ -2888,6 +2888,15 @@ const signature = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 ```
 
+A library is evaluated under its own stack budget, not the script's
+(`constants::script_engine::SHELF_LIBRARY_STACK_SIZE`, 768 KB; a script whose
+`scriptStackSize` is larger keeps it). The library is Vayu's own vendored
+source, and how much native stack QuickJS's parser needs for it depends on the
+toolchain: MSVC at `/Od` under AddressSanitizer overflowed the default 256 KB
+`scriptStackSize` evaluating lodash and moment (#2652), while GCC at `-O0` loads
+them from 46 KB and 30 KB. The script's budget is put back as soon as the
+library has loaded, so the script's own recursion is limited exactly as before.
+
 #### `crypto-js`
 
 **It is Vayu's own code with crypto-js's shape, not the crypto-js library.** The

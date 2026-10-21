@@ -30,6 +30,7 @@
 
 #include "pm/pm_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -46,6 +47,7 @@
 #include "lodash_glue.hpp"
 #include "moment_glue.hpp"
 #include "uuid_glue.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/embedded/lodash_js.hpp"
 #include "vayu/embedded/moment_js.hpp"
 #include "vayu/embedded/uuid_js.hpp"
@@ -231,8 +233,46 @@ std::string shelf_names () {
     return names;
 }
 
+/// Holds the runtime's stack budget at SHELF_LIBRARY_STACK_SIZE (or the
+/// script's own, when that is larger) for as long as it lives, and puts the
+/// script's budget back on every exit. A library is Vayu's own source, so how
+/// deep its parse goes is not the script's to budget; the script's recursion
+/// after the library is loaded still is.
+class LibraryStackBudget {
+    public:
+    explicit LibraryStackBudget (JSContext* ctx)
+    : runtime_ (JS_GetRuntime (ctx)),
+      state_ (static_cast<RuntimeState*> (JS_GetRuntimeOpaque (runtime_))) {
+        // 0 is "no limit": there is nothing to raise.
+        if (state_ == nullptr || state_->stack_size == 0) {
+            state_ = nullptr;
+            return;
+        }
+        JS_SetMaxStackSize (runtime_,
+        std::max (state_->stack_size,
+        vayu::core::constants::script_engine::SHELF_LIBRARY_STACK_SIZE));
+    }
+
+    ~LibraryStackBudget () {
+        if (state_ != nullptr) {
+            JS_SetMaxStackSize (runtime_, state_->stack_size);
+        }
+    }
+
+    LibraryStackBudget (const LibraryStackBudget&)            = delete;
+    LibraryStackBudget& operator= (const LibraryStackBudget&) = delete;
+    LibraryStackBudget (LibraryStackBudget&&)                 = delete;
+    LibraryStackBudget& operator= (LibraryStackBudget&&)      = delete;
+
+    private:
+    JSRuntime* runtime_;
+    /// Null when the budget was left alone.
+    RuntimeState* state_;
+};
+
 /// Evaluates @p library's source and builds its module.
 JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
+    const LibraryStackBudget stack_budget (ctx);
     // A std::string carries the terminator JS_Eval reads past the length.
     std::string source;
     source.reserve (

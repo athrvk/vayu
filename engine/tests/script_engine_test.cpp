@@ -8797,6 +8797,63 @@ TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
+// A library's parse depth is Vayu's own, not the script's to budget (#2652):
+// MSVC at /Od under ASan has frames large enough that lodash and moment
+// overflowed the default 256 KB budget inside QuickJS's parser, while the same
+// source loads on GCC at -O0 from 46 KB (lodash) and 30 KB (moment). 24 KB is
+// under both, so these fail the way Windows did on any toolchain: the
+// RangeError "Maximum call stack size exceeded" without the raise, a loaded
+// library with it. The raise must also end with the library: recursion
+// afterwards reaches the depth it reached before the require, not the 32 times
+// deeper one the library's budget allows.
+namespace {
+
+constexpr std::size_t SHALLOW_STACK_BYTES = std::size_t{ 24 } * 1024;
+
+ScriptConfig shallow_stack_config () {
+    ScriptConfig config;
+    config.stack_size = SHALLOW_STACK_BYTES;
+    return config;
+}
+
+} // namespace
+
+TEST_F (ScriptEngineTest, RequireShelfLibrariesLoadUnderAShallowInterpreterStack) {
+    ScriptEngine shallow{ shallow_stack_config () };
+    EXPECT_EQ (shelf_answer (shallow, request, "require('lodash').get({ a: 1 }, 'a')"), "1");
+    EXPECT_EQ (shelf_answer (shallow, request, "require('moment').utc(0).year()"), "1970");
+    EXPECT_EQ (shelf_answer (shallow, request, "_.get({ a: 2 }, 'a')"), "2");
+}
+
+TEST_F (ScriptEngineTest, RequireShelfRestoresTheScriptsStackBudgetAfterALibraryLoads) {
+    ScriptEngine shallow{ shallow_stack_config () };
+    Environment shallow_env;
+    const auto result = shallow.execute_prerequest (R"(
+        function depth() {
+            var reached = 0;
+            function descend() { reached++; descend(); }
+            try { descend(); } catch (e) { if (!(e instanceof RangeError)) { throw e; } }
+            return reached;
+        }
+        var before = depth();
+        require('lodash');
+        require('moment');
+        var after = depth();
+        pm.environment.set('before', String(before));
+        pm.environment.set('after', String(after));
+    )",
+    request, shallow_env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const auto before = std::stoul (shallow_env["before"].value);
+    const auto after  = std::stoul (shallow_env["after"].value);
+    ASSERT_GT (before, 0u);
+    // Raised and never restored, the budget is 768 KB / 24 KB = 32 times deeper.
+    EXPECT_LE (after, before + before / 2)
+    << "recursion after require() ran under the library's budget, not the "
+       "script's";
+}
+
 // The defect #2578 measured: a crypto-js signing script failed and the request
 // went out unsigned. Asserted on what the server received.
 TEST_F (ScriptEngineTest, RequireShelfSignedHeaderReachesTheWire) {
