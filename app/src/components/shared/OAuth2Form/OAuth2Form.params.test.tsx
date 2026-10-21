@@ -81,3 +81,69 @@ describe("the extra parameter tables", () => {
 		});
 	});
 });
+
+describe("the Send in select", () => {
+	const selects = (name: string) =>
+		within(group(name) as HTMLElement).queryAllByRole("combobox", { name: /^Send .* in$/ });
+
+	it("is on the token and refresh tables of a grant with a sign-in step", () => {
+		open({
+			...CONFIG,
+			grantType: "authorization_code",
+			refreshParams: [{ key: "scope", value: "x", enabled: true }],
+		});
+
+		expect(selects("Token request parameters")).toHaveLength(1);
+		expect(selects("Refresh request parameters")).toHaveLength(1);
+	});
+
+	it("is not on the authorization table, whose rows all ride the sign-in URL", () => {
+		open({
+			...CONFIG,
+			grantType: "authorization_code",
+			authorizationParams: [{ key: "prompt", value: "login", enabled: true }],
+		});
+
+		expect(
+			within(group("Authorization request parameters") as HTMLElement).queryAllByRole(
+				"combobox"
+			)
+		).toHaveLength(0);
+	});
+
+	it("writes the choice into the token list and leaves the rest of the config", () => {
+		const onChange = open(CONFIG);
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Send audience in" }));
+		fireEvent.click(screen.getByRole("option", { name: "Header" }));
+
+		expect(onChange.mock.lastCall?.[0]).toMatchObject({
+			clientId: "cid",
+			tokenParams: [{ key: "audience", value: "api", enabled: true, sendAs: "header" }],
+		});
+	});
+
+	it("drops sendAs from the written list when Body is chosen", () => {
+		const onChange = open(CONFIG);
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Send audience in" }));
+		fireEvent.click(screen.getByRole("option", { name: "Body" }));
+
+		const written = onChange.mock.lastCall?.[0] as OAuth2Config;
+		expect(written.tokenParams).toEqual([{ key: "audience", value: "api", enabled: true }]);
+	});
+
+	it("writes the choice into the refresh list", () => {
+		const onChange = open({
+			...CONFIG,
+			refreshParams: [{ key: "scope", value: "x", enabled: true }],
+		});
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Send scope in" }));
+		fireEvent.click(screen.getByRole("option", { name: "URL" }));
+
+		expect((onChange.mock.lastCall?.[0] as OAuth2Config).refreshParams).toEqual([
+			{ key: "scope", value: "x", enabled: true, sendAs: "url" },
+		]);
+	});
+});

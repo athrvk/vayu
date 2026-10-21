@@ -405,10 +405,11 @@ export default function OAuth2Form({
 
 					<ParamRowsEditor
 						label="Token request parameters"
-						hint="Sent in the body of each new token request, such as an Auth0 audience. Rows imported to go in the URL or a header keep that place. Different values keep separate cached tokens."
+						hint="Sent with each new token request, such as an Auth0 audience. Choose whether a row goes in the body, the URL or a header. Different values keep separate cached tokens."
 						rows={value.tokenParams}
 						onChange={(rows) => setParams("tokenParams", rows)}
 						variables={variables}
+						sendAs
 					/>
 
 					<ParamRowsEditor
@@ -417,6 +418,7 @@ export default function OAuth2Form({
 						rows={value.refreshParams}
 						onChange={(rows) => setParams("refreshParams", rows)}
 						variables={variables}
+						sendAs
 					/>
 
 					<div className="flex items-center gap-6">
