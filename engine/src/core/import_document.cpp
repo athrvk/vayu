@@ -1586,10 +1586,6 @@ bool declares_packages (const json* event) {
     (packages->is_object () || packages->is_array ()) && !packages->empty ();
 }
 
-bool is_blank_script (const std::string& script) {
-    return script.find_first_not_of (" \t\r\n") == std::string::npos;
-}
-
 bool is_disabled_event (const json* event) {
     const json* disabled = prop (event, "disabled");
     return disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
@@ -1627,7 +1623,7 @@ void set_event_elements (json& item, const std::vector<const json*>& events, Pos
         from_url ? nullptr : script_kind_of (as_str (prop (event, "listen")));
         const std::string script = join_exec (event);
         const bool disabled      = is_disabled_event (event);
-        if (!disabled && kind == nullptr && (from_url || !is_blank_script (script))) {
+        if (!disabled && kind == nullptr && (from_url || !is_blank_script_text (script))) {
             counts.skipped_script_unsupported += 1;
         }
         // Packages are named for an event that would run, blank or not.
@@ -1637,7 +1633,7 @@ void set_event_elements (json& item, const std::vector<const json*>& events, Pos
                 unsupported.note_packages ();
             }
         }
-        if (kind == nullptr || is_blank_script (script)) {
+        if (kind == nullptr || is_blank_script_text (script)) {
             continue;
         }
         json element = { { "kind", kind }, { "config", { { "script", script } } } };

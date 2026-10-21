@@ -210,8 +210,7 @@ parsers join their own drafts, also with `encodeURIComponent`, because the
 spec sync diff compares stored URLs against that form. It **appends**, so a URL
 that arrived with a query of its own keeps it -
 which is what Insomnia's own send does with its two sources. The query is
-written before a `#fragment` the URL carries, never inside it (issue #2541).
-Each parser's
+written before a `#fragment` the URL carries, never inside it (issue #2541). Each parser's
 mapping stays as documented: `params[]` is still exactly what the source
 declared, and only the enabled rows reach `url`.
 
