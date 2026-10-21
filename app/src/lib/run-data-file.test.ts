@@ -28,7 +28,6 @@ import {
 	DATA_FILE_CAST_NOTE,
 	DATA_FILE_CHANGED_NOTE,
 	DATA_FILE_MISSING_NOTE,
-	DATA_FILE_READING_CHANGED_NOTE,
 	dataFileFromSnapshot,
 	dataFileFromSummary,
 	runDataFileName,
