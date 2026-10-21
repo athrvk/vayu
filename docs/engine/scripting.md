@@ -2839,6 +2839,10 @@ The covered members are one list, `CRYPTO_JS_MEMBERS`
 (`include/vayu/runtime/shelf_modules.hpp`), which the Postman import's script
 scan reads: a collection that uses a `CryptoJS` member outside it is named
 `CryptoJS` in `meta.unsupportedScriptApis`, and one that stays inside it is not.
+The scan reads a member off `CryptoJS`, `require('crypto-js')`, a name declared
+with `const`, `let` or `var` as either of them, or a destructure of one
+(`CryptoJsReads` in `script_api_scan.cpp`); a reassignment or a name handed
+through a parameter is not followed.
 `script_completions_test.cpp` fails when the list and the shim, or the list and
 the editor's completions, disagree.
 
