@@ -1029,13 +1029,14 @@ export const apiService = {
 		);
 	},
 
+	/** Server vitals for a run, paged or - with `maxPoints` - whole and folded (#2611). */
 	async getRunMonitorSeries(
 		id: string,
-		options: { limit?: number; offset?: number } = {}
+		options: { limit?: number; offset?: number; maxPoints?: number } = {}
 	): Promise<MonitorSeriesResponse> {
-		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
+		const { limit = STATS_PAGE_LIMIT, offset = 0, maxPoints } = options;
 		return await httpClient.get<MonitorSeriesResponse>(
-			API_ENDPOINTS.RUN_MONITOR(id, limit, offset)
+			API_ENDPOINTS.RUN_MONITOR(id, limit, offset, maxPoints)
 		);
 	},
 

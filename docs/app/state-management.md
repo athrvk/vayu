@@ -1950,8 +1950,7 @@ click; refetching either removes it or proves it real.
 
 - **`useRunsQuery(q?, pinnedOnly?, origin?)`** - Run history as an **infinite
   query** over the paginated `GET /runs` `{data, pagination}` envelope, newest
-  first. Mirrors `useRunMonitorSeriesQuery`'s `getNextPageParam` on the same
-  envelope shape; `fetchNextPage` pages older runs in on demand. `q` is the
+  first. `fetchNextPage` pages older runs in on demand. `q` is the
   optional server-side search; `origin` (`"app"` or `"mcp"`, `undefined` for
   all) is `GET /runs?origin=`.
   - **Polling is gated to the unpaged state** (`runsPollInterval`): 5s while
@@ -2064,9 +2063,19 @@ click; refetching either removes it or proves it real.
   in-progress `status` the ticks written so far are stale at once. `gcTime` is
   the short `RUN_SERIES_GC_TIME_MS` (1m): the entry is small and one request to
   read again. Not polled; the live ticks have the dashboard's stream.
-  `useRunMonitorSeriesQuery(runId, enabled, status?)` is still an infinite query
-  over the raw `{data, pagination}` pages (`LoadTestDetail` pages it in whole),
-  with the same staleness and `RUNS_GC_TIME_MS`.
+- **`useRunMonitorSeriesQuery(runId, enabled, status?)`** (`@/queries/runs`) - The
+  server vitals scraped during the run, in **one request** the same way:
+  `GET /runs/:id/monitor?maxPoints=HISTORY_SERIES_MAX_POINTS` (#2611). A run
+  with at most 2,000 scrapes comes back raw; a longer one is folded into
+  buckets (each series the bucket's max, the timestamp its last scrape's) with
+  `bucketed: true` and `ticksPerBucket`, which the Server vitals card states in
+  its own note, apart from the tick series' note. A plain query keyed
+  `runs.monitorSeriesDownsampled(id, maxPoints)`, under the `runs.monitorSeries(id)`
+  prefix the run-scoped invalidation and removal use, with the time series'
+  staleness and `RUN_SERIES_GC_TIME_MS`. `enabled` is the report's
+  `monitor.samples > 0`, so a run that scraped nothing issues no request. A
+  failed read is a `monitorFailure` whose Try again refetches it; nothing
+  requests it again on its own.
 
 **Mutations:**
 - **Stopping a run is not a mutation hook.** It is
@@ -2183,7 +2192,8 @@ runs: {
   report: (id) => ["runs", "report", id],
   timeSeries: (id) => ["runs", "timeSeries", id],          // prefix: every read of the run's tick series
   timeSeriesDownsampled: (id, maxPoints) => ["runs", "timeSeries", id, { maxPoints }], // the History charts' one read
-  monitorSeries: (id) => ["runs", "monitorSeries", id],   // scraped server vitals, when the run had a monitor
+  monitorSeries: (id) => ["runs", "monitorSeries", id],   // prefix: scraped server vitals, when the run had a monitor
+  monitorSeriesDownsampled: (id, maxPoints) => ["runs", "monitorSeries", id, { maxPoints }], // the History charts' one read
   samples: (id) => ["runs", "samples", id],               // captured response bodies, fetched lazily
 },
 // environments mirrors collections; globals / cookies / health / config /
@@ -2411,7 +2421,7 @@ is how this section drifted before. The current shape:
 | Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once and mutations invalidate it |
 | Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934) |
 | Run time series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
-| Run monitor series (raw pages) | `staleTime: Infinity`, `RUNS_GC_TIME_MS` (30m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
+| Run monitor series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Engine config | `CONFIG_STALE_TIME_MS` (1m) |
 | Script completions | `SCRIPT_COMPLETIONS_STALE_TIME_MS` (1h), same gc time |
 | Health | `staleTime: 0`, refetched every `TIMING.HEALTH_CHECK_INTERVAL_MS` (30s) |

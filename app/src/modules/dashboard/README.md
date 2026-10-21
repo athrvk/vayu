@@ -183,7 +183,11 @@ bucket late. The tick counts then count buckets, so the baseline is 15 buckets
 and a window needs 2 hot ones: a slowdown shorter than two buckets goes unnamed
 while the breakpoint still marks it, and an error burst is a share of its
 bucket's completions, diluted by the rest of the bucket. The Performance tab
-says so in a note above the charts. A run of at most 2,000 ticks arrives raw and
+says so in a note above the charts. The scraped server vitals are folded the
+same way when a run scraped more than 2,000 (#2611, each series the bucket's
+max); `joinMonitorToTimeline` needs nothing for it, because its staleness window
+is derived from the samples' own spacing and so widens with the buckets, and the
+Server vitals card carries its own note. A run of at most 2,000 ticks arrives raw and
 behaves exactly as it always has; `utils/downsampled-series.test.ts` holds the
 two paths to each other. The status chart rates each point per second over the
 time it closes (`buildStatusOverTime`), so a bucket is not drawn

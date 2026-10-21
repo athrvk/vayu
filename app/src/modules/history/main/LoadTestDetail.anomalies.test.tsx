@@ -46,12 +46,7 @@ vi.mock("@/queries/runs", () => ({
 		isLoading: false,
 	}),
 	// Server vitals are a separate query on this pane; these runs scrape nothing.
-	useRunMonitorSeriesQuery: () => ({
-		data: undefined,
-		isFetchingNextPage: false,
-		fetchNextPage: vi.fn(),
-		hasNextPage: false,
-	}),
+	useRunMonitorSeriesQuery: () => ({ data: undefined }),
 	// So is the vs-baseline strip. Nothing here pins a run, and a
 	// strip with no baseline draws nothing - which is the state these cases
 	// render in.
