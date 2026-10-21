@@ -399,10 +399,14 @@ JSValue expect_chained (JSContext* ctx, JSValueConst this_val) {
  * exposed - chai's lives on the `chai` module, which Vayu does not ship, and a
  * bare global would be a name Postman scripts cannot rely on either.
  *
- * Only *assertion* failures come through here. A script-text mistake - a
- * matcher called with no argument, a misspelled name under `pm.response.to` -
- * stays a `TypeError`, in chai as much as here: nothing was asserted, the call
- * itself was wrong.
+ * Only *assertion* failures come through here, and that includes the type
+ * checks chai makes as assertions of their own, in both polarities: a
+ * `members` target that is not an array, a `length` read off a target with
+ * none, an `include` pair chai has no rule for (#2582). A script-text mistake
+ * stays a `TypeError`: a matcher called with no argument or a malformed one
+ * (`members` given a non-array argument, `keys()` with no names), a misspelled name, and
+ * the ordering matchers' refusal of a value that is not a number or a Date.
+ * Nothing was asserted; the call itself was wrong.
  */
 JSValue throw_assertion_failure (JSContext* ctx, const std::string& message) {
     JSValue error = JS_NewError (ctx);
@@ -431,7 +435,7 @@ namespace {
  * prefix itself, so the prefix is one rule in one place: a matcher added later
  * gets it by throwing the way its neighbours do, and cannot report a bare
  * message by forgetting a concatenation. Usage errors - `above()` with no
- * argument, `members()` against a non-array - deliberately do **not** come
+ * argument, `members()` given a non-array argument - deliberately do **not** come
  * through here: they name a mistake in the script text, not the value under
  * test, and their message already names the matcher that rejected the call.
  */
@@ -846,6 +850,30 @@ int array_holds (JSContext* ctx, JSValueConst target, JSValueConst needle, bool 
     return 0;
 }
 
+/**
+ * @brief A Map's or a Set's contents as a new array: what the target's own
+ * @p method (`keys` or `values`) iterates, or the exception.
+ *
+ * A Set's keys are its members, so `keys` reads the same list from either.
+ * The target's own method is called, as chai calls the target's own
+ * `forEach`.
+ */
+JSValue collection_contents (JSContext* ctx, JSValueConst target, const char* method) {
+    const ScopedValue read (ctx, JS_GetPropertyStr (ctx, target, method));
+    if (JS_IsException (read.get ())) {
+        return JS_EXCEPTION;
+    }
+    const ScopedValue iterator (ctx, JS_Call (ctx, read.get (), target, 0, nullptr));
+    if (JS_IsException (iterator.get ())) {
+        return JS_EXCEPTION;
+    }
+    const ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+    const ScopedValue array (ctx, JS_GetPropertyStr (ctx, global.get (), "Array"));
+    const ScopedValue from (ctx, JS_GetPropertyStr (ctx, array.get (), "from"));
+    JSValueConst source = iterator.get ();
+    return JS_Call (ctx, from.get (), array.get (), 1, &source);
+}
+
 JSValue expect_to_getter (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)argc;
     (void)argv;
@@ -1089,8 +1117,8 @@ LengthSubject read_length_subject (JSContext* ctx, JSValueConst target) {
 
     ScopedValue measured (ctx, JS_GetPropertyStr (ctx, target, out.descriptor));
     // A measurement the read could not produce is neither absent nor a number:
-    // the script's own error is the answer, not "requires a value with a
-    // length" and not a comparison against an uninitialised double.
+    // the script's own error is the answer, not the missing-length assertion
+    // and not a comparison against an uninitialised double.
     if (JS_IsException (measured.get ())) {
         out.status = LengthRead::Failed;
     } else if (JS_IsUndefined (measured.get ())) {
@@ -1104,15 +1132,19 @@ LengthSubject read_length_subject (JSContext* ctx, JSValueConst target) {
 }
 
 // The throw to propagate when the length could not be read, nothing when it
-// could. @p matcher names the call the script wrote.
+// could. A target with no length is chai's `to.have.property('length')`
+// failing, an assertion in both polarities: `.not` negates the comparison
+// after it, never the measurement.
 std::optional<JSValue>
-length_read_refusal (JSContext* ctx, const LengthSubject& subject, const char* matcher) {
+length_read_refusal (JSContext* ctx, const ExpectState& state, const LengthSubject& subject) {
     switch (subject.status) {
     case LengthRead::Found: return std::nullopt;
     case LengthRead::Failed: return JS_EXCEPTION;
     case LengthRead::Missing: break;
     }
-    return JS_ThrowTypeError (ctx, "%s() requires a value with a length", matcher);
+    return throw_expect_failure (ctx, &state,
+    "Expected " + js_describe (ctx, state.actual) + " to have property '" +
+    subject.descriptor + "'");
 }
 
 // The ordering matchers differ in one comparison and one word, so they are one
@@ -1220,7 +1252,7 @@ OrderingOperands& operands) {
     bool failed = false;
     if (state.do_length) {
         const LengthSubject length = read_length_subject (ctx, state.actual);
-        if (auto refusal = length_read_refusal (ctx, length, matcher.name)) {
+        if (auto refusal = length_read_refusal (ctx, state, length)) {
             return refusal;
         }
         operands.actual   = { OrderingKind::Number, length.value };
@@ -1362,6 +1394,10 @@ enum class PropertyPresence { Present, Absent, Failed };
  * a getter. When @p value is given and the property is present it receives the
  * value as a new reference, which is the first read of it and the only one.
  *
+ * A primitive is read through its wrapper object, as chai reads it
+ * (`name in Object(obj)`, `hasOwnProperty.call(obj, name)`), so `'abc'` has an
+ * own `length` and `0`; only `null` and `undefined` hold no property at all.
+ *
  * `Failed` leaves the exception pending: a segment behind a getter that throws
  * is a walk that did not finish, and reporting it as absent would make `.not`
  * pass.
@@ -1374,9 +1410,12 @@ JSValue* value) {
     if (segments.empty ()) {
         return PropertyPresence::Absent;
     }
+    const auto holds_nothing = [] (JSValueConst v) {
+        return JS_IsNull (v) || JS_IsUndefined (v);
+    };
     JSValue holder = JS_DupValue (ctx, target);
     for (size_t i = 0; i + 1 < segments.size (); i++) {
-        if (!JS_IsObject (holder)) {
+        if (holds_nothing (holder)) {
             JS_FreeValue (ctx, holder);
             return PropertyPresence::Absent;
         }
@@ -1387,9 +1426,14 @@ JSValue* value) {
         }
         holder = next;
     }
-    const ScopedValue parent (ctx, holder);
-    if (!JS_IsObject (parent.get ())) {
+    const ScopedValue walked (ctx, holder);
+    if (holds_nothing (walked.get ())) {
         return PropertyPresence::Absent;
+    }
+    // The own-property read needs an object; an object converts to itself.
+    const ScopedValue parent (ctx, JS_ToObject (ctx, walked.get ()));
+    if (JS_IsException (parent.get ())) {
+        return PropertyPresence::Failed;
     }
 
     JSAtom atom = JS_NewAtom (ctx, segments.back ().c_str ());
@@ -1414,16 +1458,28 @@ JSValue* value) {
  * `nested.include` reads each key as a path, which is chai running `.property`
  * per key with the chain's flags. Answers 1, 0, or -1 with a pending exception.
  *
- * A target that is not an object holds no key, so it matches nothing. That is
- * the verdict chai reaches for the same pair by a longer route (it runs a
- * property assertion per key against the primitive).
+ * A primitive target is read through its wrapper, as chai's per-key property
+ * assertion reads it.
  *
- * The caller has already refused an expectation with no keys, so "every key
- * matched" is never vacuous here.
+ * An expectation with no own enumerable keys is refused rather than matched.
+ * chai walks its keys and, finding none, asserts nothing and passes in *both*
+ * directions; a computed subset that came out empty is then a green test that
+ * compared nothing. A Date, a RegExp and a function all land here, and each of
+ * them reads as an assertion while carrying no key to check.
  */
 int expect_object_subset (JSContext* ctx, const ExpectState& state, JSValueConst expected) {
     std::vector<std::string> keys;
     if (!js_own_enumerable_keys (ctx, expected, keys)) {
+        return -1;
+    }
+    if (keys.empty ()) {
+        JS_ThrowTypeError (ctx,
+        "include() was given %s with no properties to match, which would "
+        "assert nothing",
+        js_describe (ctx, expected).c_str ());
+        return -1;
+    }
+    if (refuse_nested_own (ctx, state, "include")) {
         return -1;
     }
 
@@ -1453,6 +1509,92 @@ int expect_object_subset (JSContext* ctx, const ExpectState& state, JSValueConst
     return 1;
 }
 
+/**
+ * @brief chai's `include` on a Map or a Set: whether a Map holds @p needle as a
+ * *value* (never a key) or a Set as a member.
+ *
+ * Strictly it is SameValueZero, what `Set.prototype.has` answers, so `NaN`
+ * finds `NaN`; under `deep` it is deep-eql. 1, 0, or -1 with a pending
+ * exception.
+ */
+int collection_includes (JSContext* ctx, const ExpectState& state, JSValueConst needle) {
+    const ScopedValue values (ctx, collection_contents (ctx, state.actual, "values"));
+    if (JS_IsException (values.get ())) {
+        return -1;
+    }
+    const uint32_t len = js_array_length (ctx, values.get ());
+    for (uint32_t i = 0; i < len; i++) {
+        const ScopedValue held (ctx, JS_GetPropertyUint32 (ctx, values.get (), i));
+        if (JS_IsException (held.get ())) {
+            return -1;
+        }
+        const int same = state.deep ?
+        js_compare_for_chain (ctx, held.get (), needle, true) :
+        (JS_IsSameValueZero (ctx, held.get (), needle) ? 1 : 0);
+        if (same != 0) {
+            return same;
+        }
+    }
+    return 0;
+}
+
+// chai's refusal of a pair `include` has no rule for (a number target, an
+// object target given a primitive). chai raises it as an assertion, in both
+// polarities, so a `.not` cannot turn it into a pass.
+int refuse_include_combination (JSContext* ctx, const ExpectState& state, JSValueConst needle) {
+    const char* needle_type = js_type_name (ctx, needle);
+    throw_expect_failure (ctx, &state,
+    std::format (
+    "the given combination of arguments ({} and {}) is invalid for "
+    "this assertion. You can use an array, a map, an object, a set, "
+    "a string, or a weakset instead of a {}",
+    js_type_name (ctx, state.actual), needle_type, needle_type));
+    return -1;
+}
+
+/**
+ * @brief Whether the target holds @p needle, by the rule chai's `include` has
+ * for the target's type. 1, 0, or -1 with a pending exception.
+ *
+ * A Url or RequestBody object reads as the string it stands for: both replaced
+ * a string on `pm.request` (#991, #1003) and both are documented as still
+ * reading as one (`expect_string_like`). A boxed `String` is a string to chai's
+ * type-detect too. @p subject receives what the object branch matched, for the
+ * failure: "own properties " when the flags narrowed it, empty otherwise.
+ */
+int include_holds (JSContext* ctx, const ExpectState& state, JSValueConst needle, std::string& subject) {
+    if (auto text = expect_string_like (ctx, state.actual)) {
+        return text->find (js_to_string (ctx, needle)) != std::string::npos ? 1 : 0;
+    }
+    if (JS_IsArray (state.actual)) {
+        return array_holds (ctx, state.actual, needle, state.deep);
+    }
+    if (JS_IsObject (state.actual)) {
+        bool tag_failed       = false;
+        const std::string tag = js_class_tag (ctx, state.actual, &tag_failed);
+        if (tag_failed) {
+            return -1;
+        }
+        if (tag == "[object Map]" || tag == "[object Set]") {
+            return collection_includes (ctx, state, needle);
+        }
+        if (tag == "[object String]") {
+            const std::string text = js_to_string (ctx, state.actual);
+            if (JS_HasException (ctx)) {
+                return -1;
+            }
+            return text.find (js_to_string (ctx, needle)) != std::string::npos ? 1 : 0;
+        }
+    }
+    if (!JS_IsObject (needle)) {
+        return refuse_include_combination (ctx, state, needle);
+    }
+    if (state.own || state.nested) {
+        subject = state.own ? "own properties " : "nested properties ";
+    }
+    return expect_object_subset (ctx, state, needle);
+}
+
 JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     if (argc < 1) {
         return JS_ThrowTypeError (ctx, "include() requires an argument");
@@ -1463,73 +1605,13 @@ JSValue expect_include (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
 
-    bool includes = false;
-    // What the object branch matched, for the failure: "own properties " when
-    // the flags narrowed it, empty otherwise.
     std::string subject;
-
-    // A Url or RequestBody object takes the substring branch, not the "neither
-    // string nor array" one that answers false: both replaced a string on
-    // `pm.request` (#991, #1003) and both are documented as still reading as
-    // one. See `expect_string_like`.
-    if (auto text = expect_string_like (ctx, state->actual)) {
-        const std::string substr = js_to_string (ctx, argv[0]);
-        includes                 = text->find (substr) != std::string::npos;
-    } else if (JS_IsArray (state->actual)) {
-        // Membership follows the chain's comparison rule. It used to compare
-        // `JS_ToCString` forms, under which every object member matched every
-        // object needle - both render as "[object Object]".
-        const int held = array_holds (ctx, state->actual, argv[0], state->deep);
-        if (held < 0) {
-            return JS_EXCEPTION;
-        }
-        includes = (held == 1);
-    } else if (JS_IsObject (argv[0])) {
-        // chai's `.include` on anything that is not a string, an array or one of
-        // the containers it inspects is subset matching. This branch answered
-        // false for every object pair, so `.include({...})` always failed and
-        // `.not.include({...})` always passed - a verdict, silently, whatever
-        // the target held.
-        //
-        // An expectation with no own enumerable keys is refused rather than
-        // matched. chai walks its keys and, finding none, asserts nothing and
-        // passes in *both* directions; a computed subset that came out empty is
-        // then a green test that compared nothing, which is the defect this
-        // whole change exists to remove. A Date, a RegExp and a function all
-        // land here, and each of them reads as an assertion while carrying no
-        // key to check.
-        std::vector<std::string> keys;
-        if (!js_own_enumerable_keys (ctx, argv[0], keys)) {
-            return JS_EXCEPTION;
-        }
-        if (keys.empty ()) {
-            return JS_ThrowTypeError (ctx,
-            "include() was given %s with no properties to match, "
-            "which would assert nothing",
-            js_describe (ctx, argv[0]).c_str ());
-        }
-
-        if (auto refusal = refuse_nested_own (ctx, *state, "include")) {
-            return *refusal;
-        }
-        const int same = expect_object_subset (ctx, *state, argv[0]);
-        if (same < 0) {
-            return JS_EXCEPTION;
-        }
-        includes = (same == 1);
-        if (state->own || state->nested) {
-            subject = state->own ? "own properties " : "nested properties ";
-        }
-    } else {
-        // chai refuses this combination rather than answering it, and so does
-        // this: `expect(5).to.include("x")` asserted nothing here, which under
-        // `.not` is a pass no script author asked for.
-        return JS_ThrowTypeError (ctx,
-        "include() expects an object argument when the target is %s, got %s",
-        js_type_name (ctx, state->actual), js_type_name (ctx, argv[0]));
+    const int held = include_holds (ctx, *state, argv[0], subject);
+    if (held < 0) {
+        return JS_EXCEPTION;
     }
-
-    bool pass = state->negated ? !includes : includes;
+    const bool includes = held == 1;
+    const bool pass     = state->negated ? !includes : includes;
 
     if (!pass) {
         const std::string msg = "Expected " + js_describe (ctx, state->actual) +
@@ -1991,7 +2073,7 @@ JSValue expect_length (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     }
 
     const LengthSubject subject = read_length_subject (ctx, state->actual);
-    if (auto refusal = length_read_refusal (ctx, subject, "length")) {
+    if (auto refusal = length_read_refusal (ctx, *state, subject)) {
         return *refusal;
     }
 
@@ -2256,12 +2338,7 @@ const std::vector<std::string>& expected) {
     return actual == expected;
 }
 
-std::string keys_failure_message (const ExpectState& state,
-const std::vector<std::string>& expected) {
-    std::string listed;
-    for (const auto& key : expected) {
-        listed += (listed.empty () ? "" : ", ") + std::string ("'") + key + "'";
-    }
+std::string keys_failure_message (const ExpectState& state, const std::string& listed) {
     const char* relation = "have exactly the keys ";
     if (state.any_key) {
         relation = "have any of the keys ";
@@ -2270,6 +2347,154 @@ const std::vector<std::string>& expected) {
     }
     return std::string ("Expected object to ") + (state.negated ? "not " : "") +
     relation + listed;
+}
+
+// The keys `keys` was asked about, as a new array: one array argument's
+// elements, or every argument.
+JSValue key_argument_list (JSContext* ctx, int argc, JSValueConst* argv) {
+    if (argc == 1 && JS_IsArray (argv[0])) {
+        return JS_DupValue (ctx, argv[0]);
+    }
+    JSValue list = JS_NewArray (ctx);
+    for (int i = 0; i < argc && !JS_IsException (list); i++) {
+        if (JS_SetPropertyUint32 (ctx, list, static_cast<uint32_t> (i),
+            JS_DupValue (ctx, argv[i])) < 0) {
+            JS_FreeValue (ctx, list);
+            return JS_EXCEPTION;
+        }
+    }
+    return list;
+}
+
+// What `keys` decided: 1, 0, or -1 with a pending exception, and the keys it
+// was asked about as its failure names them.
+struct KeysAnswer {
+    int matched = -1;
+    std::string listed{};
+};
+
+/**
+ * @brief The names an object target's `keys` is asked about, each a string.
+ *
+ * One plain-object argument stands for its own enumerable keys, chai's
+ * `Object.keys` of it; otherwise the names are `key_argument_list`'s. A name
+ * that could not be read is not a name: `js_to_string` answers "" for it, and
+ * an empty key would be compared against the target's real ones as though the
+ * script had asked for it. False with a pending exception.
+ */
+bool read_key_names (JSContext* ctx, int argc, JSValueConst* argv, std::vector<std::string>& out) {
+    if (argc == 1 && JS_IsObject (argv[0]) && !JS_IsArray (argv[0])) {
+        bool tag_failed       = false;
+        const std::string tag = js_class_tag (ctx, argv[0], &tag_failed);
+        if (tag_failed) {
+            return false;
+        }
+        if (tag == "[object Object]") {
+            return js_own_enumerable_keys (ctx, argv[0], out);
+        }
+    }
+    const ScopedValue list (ctx, key_argument_list (ctx, argc, argv));
+    if (JS_IsException (list.get ())) {
+        return false;
+    }
+    const uint32_t len = js_array_length (ctx, list.get ());
+    for (uint32_t i = 0; i < len; i++) {
+        const ScopedValue key (ctx, JS_GetPropertyUint32 (ctx, list.get (), i));
+        if (JS_IsException (key.get ())) {
+            return false;
+        }
+        out.push_back (js_to_string (ctx, key.get ()));
+    }
+    return true;
+}
+
+// chai's "keys required": an empty list would make `include.keys([])` pass for
+// every target, asserting nothing.
+int refuse_empty_keys (JSContext* ctx) {
+    JS_ThrowTypeError (ctx, "keys() requires at least one key name");
+    return -1;
+}
+
+// `keys` on anything but a Map or a Set compares own enumerable key names.
+KeysAnswer
+object_keys_answer (JSContext* ctx, const ExpectState& state, int argc, JSValueConst* argv) {
+    std::vector<std::string> expected;
+    if (!read_key_names (ctx, argc, argv, expected)) {
+        return {};
+    }
+    if (expected.empty ()) {
+        return { refuse_empty_keys (ctx) };
+    }
+    std::sort (expected.begin (), expected.end ());
+    expected.erase (std::unique (expected.begin (), expected.end ()), expected.end ());
+
+    std::vector<std::string> actual_keys;
+    if (!js_own_enumerable_keys (ctx, state.actual, actual_keys)) {
+        return {};
+    }
+    std::sort (actual_keys.begin (), actual_keys.end ());
+
+    KeysAnswer answer{ keys_match (state, actual_keys, expected) ? 1 : 0 };
+    for (const auto& key : expected) {
+        answer.listed += (answer.listed.empty () ? "'" : ", '") + key + "'";
+    }
+    return answer;
+}
+
+/**
+ * @brief Whether @p held, a Map's keys or a Set's members, answers `keys` for
+ * @p wanted. 1, 0, or -1 with a pending exception.
+ *
+ * chai compares the values themselves here, never their strings (`===`, or
+ * deep-eql under `deep`), so `new Map([[1, 1]])` has the key `1` and not `'1'`.
+ * Exactness counts the list as given rather than de-duplicating it.
+ */
+int collection_keys_match (JSContext* ctx, const ExpectState& state, JSValueConst held, JSValueConst wanted) {
+    const uint32_t wanted_len = js_array_length (ctx, wanted);
+    const bool exact          = !state.any_key && !state.contains;
+    if (exact && wanted_len != js_array_length (ctx, held)) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < wanted_len; i++) {
+        const ScopedValue want (ctx, JS_GetPropertyUint32 (ctx, wanted, i));
+        if (JS_IsException (want.get ())) {
+            return -1;
+        }
+        const int found = array_holds (ctx, held, want.get (), state.deep);
+        if (found < 0 || (state.any_key && found == 1)) {
+            return found;
+        }
+        if (!state.any_key && found == 0) {
+            return 0;
+        }
+    }
+    return state.any_key ? 0 : 1;
+}
+
+KeysAnswer
+collection_keys_answer (JSContext* ctx, const ExpectState& state, int argc, JSValueConst* argv) {
+    const ScopedValue wanted (ctx, key_argument_list (ctx, argc, argv));
+    if (JS_IsException (wanted.get ())) {
+        return {};
+    }
+    const uint32_t wanted_len = js_array_length (ctx, wanted.get ());
+    if (wanted_len == 0) {
+        return { refuse_empty_keys (ctx) };
+    }
+    KeysAnswer answer;
+    for (uint32_t i = 0; i < wanted_len; i++) {
+        const ScopedValue want (ctx, JS_GetPropertyUint32 (ctx, wanted.get (), i));
+        if (JS_IsException (want.get ())) {
+            return {};
+        }
+        answer.listed += (i == 0 ? "" : ", ") + js_describe (ctx, want.get ());
+    }
+    const ScopedValue held (ctx, collection_contents (ctx, state.actual, "keys"));
+    if (JS_IsException (held.get ())) {
+        return {};
+    }
+    answer.matched = collection_keys_match (ctx, state, held.get (), wanted.get ());
+    return answer;
 }
 
 JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
@@ -2285,42 +2510,23 @@ JSValue expect_keys (JSContext* ctx, JSValueConst this_val, int argc, JSValueCon
         return JS_ThrowTypeError (ctx, "keys() requires an object or array");
     }
 
-    std::vector<std::string> expected;
-    if (argc == 1 && JS_IsArray (argv[0])) {
-        const uint32_t len = js_array_length (ctx, argv[0]);
-        for (uint32_t i = 0; i < len; i++) {
-            // A name that could not be read is not a name: `js_to_string`
-            // answers "" for it, and an empty key would be compared against
-            // the target's real ones as though the script had asked for it.
-            ScopedValue key (ctx, JS_GetPropertyUint32 (ctx, argv[0], i));
-            if (JS_IsException (key.get ())) {
-                return JS_EXCEPTION;
-            }
-            expected.push_back (js_to_string (ctx, key.get ()));
-        }
-    } else {
-        for (int i = 0; i < argc; i++) {
-            expected.push_back (js_to_string (ctx, argv[i]));
-        }
-    }
-    // chai's "keys required": an empty list would make `include.keys([])`
-    // pass for every target, asserting nothing.
-    if (expected.empty ()) {
-        return JS_ThrowTypeError (ctx, "keys() requires at least one key name");
-    }
-    std::sort (expected.begin (), expected.end ());
-    expected.erase (std::unique (expected.begin (), expected.end ()), expected.end ());
-
-    std::vector<std::string> actual_keys;
-    if (!js_own_enumerable_keys (ctx, state->actual, actual_keys)) {
+    bool tag_failed       = false;
+    const std::string tag = js_class_tag (ctx, state->actual, &tag_failed);
+    if (tag_failed) {
         return JS_EXCEPTION;
     }
-    std::sort (actual_keys.begin (), actual_keys.end ());
+    const KeysAnswer answer = (tag == "[object Map]" || tag == "[object Set]") ?
+    collection_keys_answer (ctx, *state, argc, argv) :
+    object_keys_answer (ctx, *state, argc, argv);
+    if (answer.matched < 0) {
+        return JS_EXCEPTION;
+    }
 
-    const bool matches = keys_match (*state, actual_keys, expected);
+    const bool matches = answer.matched == 1;
     const bool pass    = state->negated ? !matches : matches;
     if (!pass) {
-        return throw_expect_failure (ctx, state, keys_failure_message (*state, expected));
+        return throw_expect_failure (
+        ctx, state, keys_failure_message (*state, answer.listed));
     }
 
     return expect_chained (ctx, this_val);
@@ -2419,8 +2625,11 @@ JSValue expect_members (JSContext* ctx, JSValueConst this_val, int argc, JSValue
     if (!state) {
         return JS_ThrowInternalError (ctx, "Invalid expectation state");
     }
+    // chai asserts the target's type first, as an assertion of its own, so a
+    // `.not` cannot turn a non-array into a pass.
     if (!JS_IsArray (state->actual)) {
-        return JS_ThrowTypeError (ctx, "members() requires the target to be an array");
+        return throw_expect_failure (ctx, state,
+        "Expected " + js_describe (ctx, state->actual) + " to be an array");
     }
 
     const int matched = members_match (ctx, *state, argv[0]);

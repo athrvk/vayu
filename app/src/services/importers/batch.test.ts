@@ -122,6 +122,35 @@ function intake(over: Partial<BatchIntake> = {}): BatchIntake {
 	};
 }
 
+describe("detectBatch - a $ref fetch", () => {
+	it("hands the bundler's reference marking to the intake's fetch, naming the document's URL", async () => {
+		const spec = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "t", version: "1" },
+			paths: { "/p": { get: { responses: { "200": { $ref: "./ok.json#/Ok" } } } } },
+		});
+		const fetchUrl = vi.fn(async () => JSON.stringify({ Ok: { description: "ok" } }));
+
+		await detectBatch(
+			[
+				{
+					fileName: "spec.json",
+					relativePath: "spec.json",
+					text: spec,
+					sourceUrl: "https://api.example.com/spec.json",
+				},
+			],
+			OPTS,
+			intake({ fetchUrl })
+		);
+
+		expect(fetchUrl).toHaveBeenCalledExactlyOnceWith("https://api.example.com/ok.json", {
+			reference: true,
+			sourceUrl: "https://api.example.com/spec.json",
+		});
+	});
+});
+
 describe("detectBatch - every picked file gets a row", () => {
 	it("parses each file independently, mixed formats and all", async () => {
 		const entries = await detectBatch(

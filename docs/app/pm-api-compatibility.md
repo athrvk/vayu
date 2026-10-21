@@ -538,7 +538,10 @@ flags carry over, and the value is read once, so a getter runs once. Two forms
 keep the chain they were called on: `.property(name, value)`, which already
 compared the value, and `.not.have.property(name)`, which asserts absence and
 has no value to move to. A property that is missing fails the assertion before
-any retarget.
+any retarget. A primitive is read through its wrapper, as chai reads it
+(#2582): `expect('abc').to.have.ownProperty('length')` and
+`.property('length', 3)` pass, `expect(5).to.have.ownProperty('x')` fails, and
+`null` and `undefined` have no property at all.
 
 **`equal` is `===`; `eql` (and `deep.equal`) is deep.** So
 `expect({a:1}).to.equal({a:1})` **fails** - different references - and
@@ -549,17 +552,20 @@ libraries Vayu answers for disagree is the pair `+0` / `-0`: `eql` separates
 them (deep-eql's `1/x` rule) while the response assertions in the table above
 compare them equal, because chai-postman runs on lodash `_.isEqual`.
 
-**`include` on an object target is a subset match**, as in chai: every key of
-the argument must be on the target with an equal value. Any target other than a
-string or an array takes an *object* argument, so `expect({a:1}).to.include('a')`
-and `expect(5).to.include('x')` are both a `TypeError` - the combination chai
-refuses rather than answers. Vayu is stricter than chai in three places, each
-because chai's answer there is a silent non-assertion or a quiet wrong verdict:
-an expectation carrying no own enumerable keys is refused (`to.include({})`, a
-`Date`, a `RegExp`, a function - chai passes all of them, in both directions,
-having compared nothing); a getter that throws is reported rather than read as
-"these differ"; and a `Map`, `Set` or boxed `String` target is refused rather
-than answered, since deep equality here does not inspect the first two.
+**`include` answers by the target's type, as chai does**: a substring of a
+string (a boxed `String` too), an element of an array, a member of a `Set`, a
+*value* of a `Map` (never a key), and on any other object a subset match, every
+key of the argument on the target with an equal value. A `Set` or `Map` compares
+by SameValueZero, what `Set.prototype.has` answers, so `NaN` finds `NaN`, and
+deeply under `deep`: `expect(new Set([{a:1}])).to.include({a:1})` fails and
+`.deep.include({a:1})` passes. Any other pair is chai's own refusal, an
+`AssertionError` in both polarities: `expect({a:1}).to.include('a')` and
+`expect(5).to.include('x')` fail with or without `.not`. Vayu is stricter than
+chai in two places, each because chai's answer there is a silent non-assertion
+or a quiet wrong verdict: an expectation carrying no own enumerable keys is
+refused (`to.include({})`, a `Date`, a `RegExp`, a function - chai passes all of
+them, in both directions, having compared nothing); and a getter that throws is
+reported rather than read as "these differ".
 
 **Quantifiers, order and ownership are flags the matcher after them reads** (#2528),
 as in chai. `any` and `all` (the default) say how many of the `keys` are
@@ -571,9 +577,16 @@ compare by position, and `include.ordered.members` checks a prefix. `own` makes
 `property` and `include({...})` look at own properties only, `nested.include`
 reads each key as a path, and `nested` together with `own` is a `TypeError`, as
 chai refuses it. `.keys()` with no names is a `TypeError` too: `include.keys([])`
-would pass for every target having compared nothing. `.length` and `.lengthOf`
+would pass for every target having compared nothing. One plain-object argument
+stands for its own keys (`keys({a: 1})` asks for `a`, chai's `Object.keys`). On
+a `Map` the keys are its keys and on a `Set` its members, compared as values
+rather than names: `new Map([[1, 1]])` has the key `1` and not `'1'`, and
+`deep.keys` compares them deeply. `.length` and `.lengthOf`
 are a call (`length(3)`) and a chain (`length.above(2)`), and the ordering
-matchers after one compare the length - a Map's or Set's `size`. `length`
+matchers after one compare the length - a Map's or Set's `size`. A target with
+no length fails as chai's `to.have.property('length')` does, an
+`AssertionError` that `.not` does not reverse:
+`expect(3).to.not.have.length.within(1, 2)` fails. `length`
 directly after a chainable method (`include`, `a`, `length` itself,
 `responseTime`) is a `TypeError`, as chai's length guard makes it; write
 `lengthOf` there.
@@ -631,10 +644,17 @@ what is accepted or how it is reported, never a quiet pass:
 - A name outside this list throws, which chai would too for a misspelling but
   not for a plugin's member; there is no plugin interface.
 
-**A wrong-typed value is a `TypeError` where chai raises an `AssertionError`** -
-`expect('5').to.be.above(3)`, `expect(5).to.include('x')`. Deliberate, and the
-same choice `pm.response.to.have.body` made for a wrong-typed argument (#998):
-the rule below is that a mistake in the script text stays a `TypeError` because
+**Which wrong-typed values are an `AssertionError` and which a `TypeError`.**
+Where chai checks a type as an assertion of its own, so does Vayu, in both
+polarities (#2582): a `members` target that is not an array
+(`expect('foo').to.include.members(['f'])`), a `length` read off a target with
+none, and an `include` pair chai has no rule for (`expect({a:1}).to.include(1)`).
+What stays a `TypeError` is a call that was itself malformed: a missing or
+wrong-typed argument (`members(1)`, `above()`), `keys()` with no names, `nested`
+with `own`, and the ordering matchers' refusal of a value that is not a number
+or a `Date` (`expect('5').to.be.above(3)`). chai raises an `AssertionError` for
+each of these; the `TypeError` is deliberate, the same choice
+`pm.response.to.have.body` made for a wrong-typed argument (#998), because
 nothing was asserted. Both throw, so a test fails either way; `e.name` is what
 differs.
 

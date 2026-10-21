@@ -36,6 +36,14 @@ export const QUERY_CACHE = {
 	/** Completed runs are immutable; cache them aggressively. */
 	RUNS_STALE_TIME_MS: 5 * MINUTE,
 	RUNS_GC_TIME_MS: 30 * MINUTE,
+	/**
+	 * The History charts' downsampled series (#2547). Short on purpose: it is at
+	 * most `HISTORY_SERIES_MAX_POINTS` ticks and one request to read again, so
+	 * holding it half an hour after the view closes buys nothing. The raw paged
+	 * series (server vitals) keeps `RUNS_GC_TIME_MS`, because re-reading it is a
+	 * page per 5,000 rows.
+	 */
+	RUN_SERIES_GC_TIME_MS: 1 * MINUTE,
 
 	/** Script completion metadata is static per engine version. */
 	SCRIPT_COMPLETIONS_STALE_TIME_MS: 1 * HOUR,

@@ -1547,14 +1547,74 @@ run_report_response (vayu::db::Database& db, const std::string& run_id);
  * the run's ticks, 404 for a missing run. @p limit and @p offset arrive
  * clamped (at most `RUN_TIME_SERIES_PAGE_MAX` ticks a page). Defined in
  * metrics.cpp; `POST /export/run-report` pages it to the end.
+ *
+ * With @p max_points set (#2547), @p limit and @p offset are ignored and the
+ * whole series comes back as at most that many ticks: every stored tick when
+ * it fits, otherwise runs of `ceil(total / max_points)` consecutive ticks each
+ * folded through a `MetricTickBucket`. The envelope then adds `bucketed` and
+ * `ticksPerBucket`, which the paged answer never carries.
  */
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id,
 int64_t limit,
-int64_t offset);
+int64_t offset,
+std::optional<int64_t> max_points = std::nullopt);
 
 /// The most ticks one `run_time_series_response` page returns.
 constexpr int64_t RUN_TIME_SERIES_PAGE_MAX = 50000;
+
+/**
+ * The `maxPoints` query parameter of `GET /runs/:id/metrics`: a positive
+ * integer capped at `RUN_TIME_SERIES_PAGE_MAX`. Anything else is
+ * `std::nullopt`, the same answer as an absent parameter, so a malformed
+ * value falls back to the paged series the way a malformed `limit` falls back
+ * to its default. Defined in metrics.cpp.
+ */
+std::optional<int64_t> parse_max_points (std::string_view raw);
+
+/**
+ * Folds consecutive stored ticks of `GET /runs/:id/metrics` into one (#2547).
+ *
+ * Most tick fields are cumulative (run totals, run-long rates, the status-code
+ * map, `custom_metrics`), so a folded tick is its bucket's *last* tick, with
+ * these keys replaced:
+ *
+ * - `latency_p50_ms` / `latency_p95_ms` / `latency_p99_ms`: the max over the
+ *   bucket, its worst second. Each row's percentile is of its own second, so
+ *   the max is an upper bound on the bucket's percentile, never an estimate of
+ *   it; `0` is a second with no completion.
+ * - `current_concurrency`, `backpressure`: the max.
+ * - `current_rps`, `current_send_rate`: the mean of the bucket's ticks.
+ * - `window_avg_latency_ms`, `window_avg_queue_wait_ms` (#2393): the mean over
+ *   the ticks that carried a number, `null` when none did (every second idle).
+ *   The run's own mean over the bucket would weight each second by its
+ *   completions; this one weights the seconds equally, as the chart plots them.
+ *
+ * Any other key, recognised or not, is the last tick's. A key no tick in the
+ * bucket carried is never added, and a bucket of one tick is that tick
+ * unchanged. Defined in metrics.cpp.
+ */
+class MetricTickBucket {
+    public:
+    /// Fold in the next tick, in stored order.
+    void add (nlohmann::json tick);
+    [[nodiscard]] bool empty () const;
+    /// The folded tick. The bucket is empty again afterwards.
+    [[nodiscard]] nlohmann::json take ();
+
+    private:
+    nlohmann::json last_;
+    nlohmann::json maxima_ = nlohmann::json::object ();
+    size_t ticks_          = 0;
+
+    /// A key averaged over the ticks that carried a number for it.
+    struct Mean {
+        double sum    = 0.0;
+        size_t ticks  = 0;
+        bool seen_key = false; // Present (maybe null) on some tick.
+    };
+    std::map<std::string, Mean, std::less<>> means_;
+};
 
 /**
  * Testable core of `POST /export/run-report` (#2127): a finished load run as

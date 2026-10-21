@@ -11,10 +11,14 @@
  */
 
 #include <algorithm>
+#include <array>
+#include <optional>
+#include <string_view>
 #include <thread>
 
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http::routes {
 
@@ -40,6 +44,27 @@ size_t returned) {
 }
 
 /**
+ * One stored row's payload object, or nothing for a damaged row. A payload
+ * this engine wrote always parses; a corrupt one is a damaged row, not a
+ * client error, so it is skipped loudly rather than failing the whole read.
+ */
+template <typename Row>
+std::optional<nlohmann::json>
+parse_stored_payload (const Row& row, const char* kind, const std::string& run_id) {
+    try {
+        auto payload = nlohmann::json::parse (row.payload);
+        if (!payload.is_object ()) {
+            throw std::runtime_error ("payload is not an object");
+        }
+        return std::optional<nlohmann::json> (std::in_place, std::move (payload));
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("http", "Skipping unreadable row",
+        { { "kind", kind }, { "runId", run_id }, { "id", row.id }, { "error", e.what () } });
+        return std::nullopt;
+    }
+}
+
+/**
  * The current path: each `metric_ticks` row already *is* one `data[]` entry, so
  * the reader parses and forwards it. Pagination is tick-aligned by
  * construction - a page boundary can no longer land inside a tick and hand the
@@ -54,19 +79,8 @@ int64_t limit,
 int64_t offset) {
     nlohmann::json data_array = nlohmann::json::array ();
     for (const auto& row : rows) {
-        try {
-            auto payload = nlohmann::json::parse (row.payload);
-            if (!payload.is_object ()) {
-                throw std::runtime_error ("payload is not an object");
-            }
-            data_array.push_back (std::move (payload));
-        } catch (const std::exception& e) {
-            // A payload this engine wrote always parses; a corrupt one is a
-            // damaged row, not a client error - skip it loudly rather than
-            // failing the whole page.
-            vayu::utils::log_warning ("http", "Skipping unreadable row",
-            { { "kind", kind }, { "runId", run_id }, { "id", row.id },
-            { "error", e.what () } });
+        if (auto payload = parse_stored_payload (row, kind, run_id)) {
+            data_array.push_back (std::move (*payload));
         }
     }
     return time_series_envelope (
@@ -82,7 +96,134 @@ int64_t offset) {
     "metric tick", run_id, total_count, limit, offset);
 }
 
+/// The tick keys a `MetricTickBucket` takes the bucket's max of.
+constexpr auto BUCKET_MAX_KEYS =
+std::to_array<std::string_view> ({ "latency_p50_ms", "latency_p95_ms",
+"latency_p99_ms", "current_concurrency", "backpressure" });
+
+/// The tick keys a `MetricTickBucket` averages (`current_rps` since #2547, the
+/// rest since #2393).
+constexpr auto BUCKET_MEAN_KEYS = std::to_array<std::string_view> (
+{ "current_rps", "current_send_rate", "window_avg_latency_ms", "window_avg_queue_wait_ms" });
+
+/// Rows read per query while folding a downsampled series: it bounds the
+/// stored text held at once, the folded ticks being all that accumulates.
+/// stats_route_test.cpp sizes its long series to cross this edge.
+constexpr int64_t DOWNSAMPLE_READ_CHUNK = 5000;
+
+/**
+ * The whole stored series as at most @p max_points ticks (#2547). Reads stop
+ * at @p total_count, the count taken before the first read, so a tick a live
+ * run appends meanwhile cannot push the answer past @p max_points. A damaged
+ * row still occupies its place in a bucket, so bucket edges stay on stored
+ * row positions.
+ */
+nlohmann::json downsampled_tick_series (vayu::db::Database& db,
+const std::string& run_id,
+int64_t total_count,
+int64_t max_points) {
+    const int64_t ticks_per_bucket =
+    std::max<int64_t> (1, (total_count + max_points - 1) / max_points);
+
+    nlohmann::json data = nlohmann::json::array ();
+    MetricTickBucket bucket;
+    int64_t rows_in_bucket  = 0;
+    const auto close_bucket = [&] {
+        if (!bucket.empty ()) {
+            data.push_back (bucket.take ());
+        }
+        rows_in_bucket = 0;
+    };
+
+    for (int64_t offset = 0; offset < total_count;) {
+        const auto rows = db.get_metric_ticks_paginated (
+        run_id, std::min (DOWNSAMPLE_READ_CHUNK, total_count - offset), offset);
+        if (rows.empty ()) {
+            break; // Rows removed since the count; what was read stands.
+        }
+        for (const auto& row : rows) {
+            if (auto tick = parse_stored_payload (row, "metric tick", run_id)) {
+                bucket.add (std::move (*tick));
+            }
+            if (++rows_in_bucket == ticks_per_bucket) {
+                close_bucket ();
+            }
+        }
+        offset += static_cast<int64_t> (rows.size ());
+    }
+    close_bucket ();
+
+    nlohmann::json response;
+    const size_t returned              = data.size ();
+    response["data"]                   = std::move (data);
+    response["pagination"]["total"]    = total_count;
+    response["pagination"]["limit"]    = max_points;
+    response["pagination"]["offset"]   = 0;
+    response["pagination"]["hasMore"]  = false;
+    response["pagination"]["returned"] = returned;
+    response["bucketed"]               = ticks_per_bucket > 1;
+    response["ticksPerBucket"]         = ticks_per_bucket;
+    return response;
+}
+
 } // namespace
+
+void MetricTickBucket::add (nlohmann::json tick) {
+    for (const auto key : BUCKET_MAX_KEYS) {
+        const auto value = tick.find (key);
+        if (value == tick.end () || !value->is_number ()) {
+            continue;
+        }
+        const auto best = maxima_.find (key);
+        if (best == maxima_.end () || value->get<double> () > best->get<double> ()) {
+            maxima_[std::string (key)] = *value;
+        }
+    }
+    for (const auto key : BUCKET_MEAN_KEYS) {
+        const auto value = tick.find (key);
+        if (value == tick.end ()) {
+            continue;
+        }
+        auto& mean    = means_[std::string (key)];
+        mean.seen_key = true;
+        if (value->is_number ()) {
+            mean.sum += value->get<double> ();
+            ++mean.ticks;
+        }
+    }
+    last_ = std::move (tick);
+    ++ticks_;
+}
+
+bool MetricTickBucket::empty () const {
+    return ticks_ == 0;
+}
+
+nlohmann::json MetricTickBucket::take () {
+    nlohmann::json folded = std::move (last_);
+    if (ticks_ > 1) {
+        for (const auto& item : maxima_.items ()) {
+            folded[item.key ()] = item.value ();
+        }
+        for (const auto& [key, mean] : means_) {
+            if (mean.ticks > 0) {
+                folded[key] = mean.sum / static_cast<double> (mean.ticks);
+            } else if (mean.seen_key) {
+                folded[key] = nullptr; // Every second idle: no mean to give.
+            }
+        }
+    }
+    *this = MetricTickBucket{};
+    return folded;
+}
+
+std::optional<int64_t> parse_max_points (std::string_view raw) {
+    const auto value = vayu::utils::parse_number<int64_t> (raw);
+    if (!value || *value <= 0) {
+        return std::nullopt;
+    }
+    return std::min (*value, RUN_TIME_SERIES_PAGE_MAX);
+}
 
 /**
  * Testable core of the time-series JSON endpoint, returning {http_status,
@@ -103,7 +244,8 @@ int64_t offset) {
 std::pair<int, nlohmann::json> run_time_series_response (vayu::db::Database& db,
 const std::string& run_id,
 int64_t limit,
-int64_t offset) {
+int64_t offset,
+std::optional<int64_t> max_points) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
@@ -112,6 +254,11 @@ int64_t offset) {
     // metric_ticks is the only time series; the count doubles as the
     // pagination total, so this is not an extra query.
     const int64_t tick_count = db.count_metric_ticks (run_id);
+    if (max_points) {
+        return { 200,
+            downsampled_tick_series (db, run_id, tick_count,
+            std::clamp (*max_points, int64_t{ 1 }, RUN_TIME_SERIES_PAGE_MAX)) };
+    }
     return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
 }
 
@@ -179,9 +326,13 @@ void handle_run_metrics (RouteContext& ctx, const httplib::Request& req, httplib
     std::string run_id = req.matches[1];
     vayu::utils::log_info (
     "http", "GET /runs/:id/metrics - Fetching time-series for run: " + run_id);
-    auto [limit, offset] = parse_time_series_pagination (req);
+    auto [limit, offset]  = parse_time_series_pagination (req);
+    const auto max_points = req.has_param ("maxPoints") ?
+    parse_max_points (req.get_param_value ("maxPoints")) :
+    std::nullopt;
     try {
-        auto [status, body] = run_time_series_response (ctx.db, run_id, limit, offset);
+        auto [status, body] =
+        run_time_series_response (ctx.db, run_id, limit, offset, max_points);
         if (status == 404) {
             vayu::utils::log_warning (
             "http", "GET /runs/:id/metrics - Run not found: " + run_id);
@@ -367,6 +518,10 @@ void register_metrics_routes (RouteContext& ctx) {
      * Query Parameters:
      * - limit: Max records per page (default 5000, capped at 50000)
      * - offset: Skip N records (default 0)
+     * - maxPoints: Return the whole series as at most this many ticks,
+     *   folded by `MetricTickBucket` when it has more (capped at 50000;
+     *   limit and offset ignored; a non-positive or malformed value is
+     *   treated as absent)
      */
     ctx.server.Get (R"(/runs/([^/]+)/metrics)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

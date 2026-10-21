@@ -29,7 +29,7 @@ export function isRateLimitedRun(mode: string | undefined, targetRps: number | u
 	return mode === "constant_rps" && (targetRps ?? 0) > 0;
 }
 
-/** Per-interval status-class counts at a point in time. */
+/** Responses per second of each status class over the interval a point closes. */
 export interface StatusPoint {
 	time: number;
 	c2xx: number;
@@ -60,31 +60,68 @@ function classifyCumulative(codes: Record<string, number> | undefined): ClassSum
 	return s;
 }
 
+/** The engine stores one tick a second. */
+const STORED_TICK_SECONDS = 1;
+
 /**
- * Build per-interval status-class counts from the cumulative `status_codes`
- * map each tick carries. Buckets to 0.5s, then diffs consecutive buckets so the
- * stacked chart shows how many of each class arrived in each interval - a 5xx
- * burst shows up as a band, not a slope change. Diffs are clamped >= 0 (the
+ * Where a series' elapsed clock starts, relative to the first response it
+ * counts. A live frame's `elapsed_seconds` runs from load start. A stored
+ * tick's runs from the first stored tick, which already holds the second the
+ * engine's 1 Hz gate waited before writing it (`run_manager.cpp`), so that
+ * tick closes the second before elapsed 0.
+ */
+function elapsedOrigin(first: LoadTestMetrics | undefined): number {
+	return first?.live ? 0 : -STORED_TICK_SECONDS;
+}
+
+/**
+ * Build per-second status-class rates from the cumulative `status_codes` map
+ * each tick carries. Buckets to 0.5s, diffs consecutive buckets so a 5xx burst
+ * shows up as a band, not a slope change, and divides each diff by the
+ * elapsed time between the two buckets' ticks. Diffs are clamped >= 0 (the
  * source is monotonic). Returns [] when no tick carries a status map.
+ *
+ * The division is what keeps one unit across sources (#2547): live frames
+ * close half a second per bucket, a stored series a second per tick, and a
+ * downsampled one `ticksPerBucket` seconds per point, which a raw count would
+ * draw that many times taller.
  */
 export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
-	const byBucket = new Map<number, ClassSums & { time: number }>();
+	const byBucket = new Map<number, ClassSums & { time: number; elapsed: number }>();
+	let first: LoadTestMetrics | undefined;
 	for (const m of history) {
 		if (!m.status_codes) continue;
+		first ??= m;
 		const t = halfSecondBucket(m.elapsed_seconds);
-		byBucket.set(t, { time: t, ...classifyCumulative(m.status_codes) });
+		byBucket.set(t, {
+			time: t,
+			elapsed: m.elapsed_seconds,
+			...classifyCumulative(m.status_codes),
+		});
 	}
 	const cum = Array.from(byBucket.values()).sort((a, b) => a.time - b.time);
 	const out: StatusPoint[] = [];
-	let prev: ClassSums = { c2: 0, c3: 0, c4: 0, c5: 0, cErr: 0 };
+	let prev: ClassSums & { elapsed: number } = {
+		c2: 0,
+		c3: 0,
+		c4: 0,
+		c5: 0,
+		cErr: 0,
+		elapsed: elapsedOrigin(first),
+	};
 	for (const c of cum) {
+		const seconds = c.elapsed - prev.elapsed;
+		// Only a live frame stamped at load start closes no time, and nothing has
+		// completed by then; its count stands as it is rather than divide by 0.
+		const rate = (now: number, before: number) =>
+			Math.max(0, now - before) / (seconds > 0 ? seconds : 1);
 		out.push({
 			time: c.time,
-			c2xx: Math.max(0, c.c2 - prev.c2),
-			c3xx: Math.max(0, c.c3 - prev.c3),
-			c4xx: Math.max(0, c.c4 - prev.c4),
-			c5xx: Math.max(0, c.c5 - prev.c5),
-			cErr: Math.max(0, c.cErr - prev.cErr),
+			c2xx: rate(c.c2, prev.c2),
+			c3xx: rate(c.c3, prev.c3),
+			c4xx: rate(c.c4, prev.c4),
+			c5xx: rate(c.c5, prev.c5),
+			cErr: rate(c.cErr, prev.cErr),
 		});
 		prev = c;
 	}
@@ -92,11 +129,11 @@ export function buildStatusOverTime(history: LoadTestMetrics[]): StatusPoint[] {
 }
 
 /**
- * The status chart's two views of the same per-interval counts: `own` is how
- * many responses of each class arrived in the 0.5 s bucket (what a tooltip
- * reports), `stacked` is the running total up the stack (what the chart plots,
- * so each class' band fills between consecutive lines). Both run bottom to top:
- * 2xx, 3xx, 4xx, 5xx, err.
+ * The status chart's two views of the same per-second rates: `own` is each
+ * class' rate over the interval a point closes (what a tooltip reports),
+ * `stacked` is the running total up the stack (what the chart plots, so each
+ * class' band fills between consecutive lines). Both run bottom to top: 2xx,
+ * 3xx, 4xx, 5xx, err.
  */
 export interface StatusStack {
 	times: number[];

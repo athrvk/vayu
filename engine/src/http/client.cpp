@@ -672,9 +672,15 @@ Result<Response> Client::send (const Request& request) {
     // TLS verification, the proxy and this target's client certificate, all
     // through the one shared applier. The matched registry entry is recorded on
     // the response rather than looked up again by a reader: see
-    // Response::client_certificate.
+    // Response::client_certificate. The peer check is libcurl's callback data,
+    // so it lives on this frame, past `curl_easy_perform`.
+    detail::ConnectedPeerCheck peer_check;
+    const auto& local_peer_rule = impl_->config.local_peer_rule;
+    if (local_peer_rule) {
+        peer_check.local_peers = &*local_peer_rule;
+    }
     if (const ClientCertRule* certificate = detail::apply_transport_policy (
-        curl, impl_->config.transport, request.verify_ssl, url)) {
+        curl, impl_->config.transport, request.verify_ssl, url, &peer_check)) {
         response.client_certificate = client_cert_label (*certificate);
     }
 
@@ -801,7 +807,7 @@ Result<Response> Client::send (const Request& request) {
         Error error = sink.limit_exceeded ?
         Error{ ErrorCode::ResponseTooLarge,
             too_large_message (response.headers, sink.max_bytes) } :
-        detail::curl_to_error (curl, res, impl_->errors, &request);
+        detail::curl_to_error (curl, res, impl_->errors, &request, &peer_check);
 
         // Return Response object with error details (Postman-compatible approach)
         response.status_code = 0; // 0 indicates client-side error (no server response)

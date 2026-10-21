@@ -120,10 +120,12 @@ The unspecified addresses (`0.0.0.0`, `::`), a trailing dot (`localhost.`) and
 the IPv4-mapped IPv6 spelling of any of these (`[::ffff:127.0.0.1]`,
 `[::ffff:a9fe:a9fe]`) are refused the same way. The one exception is a spec that
 was itself fetched from such a host (a dev server), which may reference its own
-host.
+host and port.
 
-The check reads the address as written. A DNS name that resolves to a local
-address, and a redirect that lands on one, are not caught on the renderer side.
+Vayu reads the address as written first, so the preview can name the reference
+it refused. The engine then checks the address it actually connects to and
+follows no redirect for a reference, so a DNS name that resolves to a local
+address, and a redirect that lands on one, are refused as well.
 
 References are followed through the files they lead to, so a file that refers to
 a third is resolved too, and a cycle stops rather than looping. Each file is read
