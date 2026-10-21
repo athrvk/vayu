@@ -378,11 +378,15 @@ jobs:
               - 'install.sh'
               - 'scripts/test/install_test.sh'
               - 'scripts/test/install_e2e.sh'
-              # The git hook's suite rides this job because it is the only one
-              # with a bash toolchain already stood up. Linting both of them is
+              # The git hooks' suites ride this job because it is the only one
+              # with a bash toolchain already stood up. Linting them is
               # `scripts` below, for every shell script at once.
               - 'scripts/pre-commit'
+              - 'scripts/pre-push'
+              - 'scripts/lib/llvm-tools.sh'
               - 'scripts/test/pre-commit_test.sh'
+              - 'scripts/test/pre-push_test.sh'
+              - 'scripts/test/hook_test_lib.sh'
               - '.github/workflows/pr-tests.yml'
             # Globs rather than a list, deliberately: the `Script lint` job
             # takes its files from `git ls-files`, so a script added tomorrow is
@@ -397,6 +401,7 @@ jobs:
               - '*.py'
               - '**/*.py'
               - 'scripts/pre-commit'
+              - 'scripts/pre-push'
               # Not a script: the data-directory check below takes the allowed
               # directory names from this file, so it is an input to the job by
               # the same rule the globs above are, and a rename that invalidates
@@ -1011,7 +1016,7 @@ jobs:
           done
           if [[ ${#headers[@]} -gt 0 ]]; then
             {
-              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not direct inputs here - this gate lints translation units only (#940). Their findings surface through any changed source that includes them (#946, #1023); \`scripts/pre-commit\` lints them directly:"
+              echo "- clang-tidy: **${#headers[@]}** changed header(s) are not direct inputs here - this gate lints translation units only (#940). Their findings surface through any changed source that includes them (#946, #1023); \`scripts/pre-push\` lints them directly:"
               printf '  - `%s`\n' "${headers[@]}"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -1281,14 +1286,16 @@ jobs:
         shell: bash
         run: bash scripts/test/install_test.sh
 
-      # The pre-commit hook's clang-tidy version probe (#659). Linux only: the
-      # hook prepends Homebrew's LLVM directory when it exists, which shadows
-      # the stubbed clang-tidy the suite drives it with, and the probe has no
+      # The git hooks: clang-format at commit, clang-tidy at push. Linux only:
+      # the hooks prepend Homebrew's LLVM directory when it exists, which
+      # shadows the stubbed tools the suites drive them with, and neither has a
       # platform-specific half worth running twice.
-      - name: Test the pre-commit hook
+      - name: Test the git hooks
         if: runner.os == 'Linux'
         shell: bash
-        run: bash scripts/test/pre-commit_test.sh
+        run: |
+          bash scripts/test/pre-commit_test.sh
+          bash scripts/test/pre-push_test.sh
 
       # The dry-run suite above asserts on the commands the installer would have
       # run. This one runs it: a real download from a local release, a real
@@ -1412,13 +1419,13 @@ jobs:
           fi
           echo "${#refs[@]} action reference(s), all pinned"
 
-      # `scripts/pre-commit` is named on its own because it carries no
+      # The two git hooks are named on their own because they carry no
       # extension; `engine/vendor/` is dropped because upstream's scripts are
       # not ours to keep clean.
       - name: Shellcheck every tracked shell script
         shell: bash
         run: |
-          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' 'scripts/pre-push' | grep -v '^engine/vendor/')
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "::error::No shell scripts to check - the file list is broken, not the tree"
             exit 1
@@ -1436,7 +1443,7 @@ jobs:
       - name: Shell scripts name the app's real data directory
         shell: bash
         run: |
-          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' | grep -v '^engine/vendor/')
+          mapfile -t files < <(git ls-files -- '*.sh' 'scripts/pre-commit' 'scripts/pre-push' | grep -v '^engine/vendor/')
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "::error::No shell scripts to check - the file list is broken, not the tree"
             exit 1

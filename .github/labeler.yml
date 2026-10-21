@@ -42,8 +42,8 @@ component:ci:
 
 # The build system spans both trees and the repo root. This is an explicit file
 # list rather than a directory: version manifests, CMake configuration,
-# dependency manifests, and build script. `scripts/**` covers the pre-commit
-# hook and build/test tooling.
+# dependency manifests, and build script. `scripts/**` covers the git hooks
+# and build/test tooling.
 component:build:
   - changed-files:
       - any-glob-to-any-file:

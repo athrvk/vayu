@@ -1,0 +1,207 @@
+#!/bin/bash
+
+# clang-tidy over the whole of every C++ file a push changes, mirroring CI's
+# `Lint changed engine sources` gate (#946, the promotion that closed the #928
+# backlog paydown). Runs once per push, not per commit: whole-file clang-tidy
+# costs 20-90s a file, and a branch of six commits pays it once here where the
+# pre-commit hook it used to live in charged every one of them.
+#
+# It also lints a changed header directly, which CI does not: that gate lints
+# translation units only (#940), so a header's findings reach it only through a
+# changed source that includes the header, and a header-only change reaches no
+# per-PR lint at all - only the weekly whole-tree scan.
+#
+# Not stricter than the gate it mirrors, which is the property that keeps
+# `--no-verify` from becoming a reflex: a refusal here is a merge blocker seen
+# early, never a local rule of its own.
+#
+# Git runs this with the remote's name and URL as arguments and one line per
+# ref on stdin: `<local ref> <local sha> <remote ref> <remote sha>`.
+
+# The directory this script lives in, through the `.git/hooks/` symlink the
+# installer makes, so the shared helper is found wherever the hook runs from.
+# A loop over `readlink` rather than `readlink -f`, which macOS's bash 3.2
+# toolchain did not always have.
+hook_source_dir() {
+    local path="${BASH_SOURCE[0]}" target
+    while [ -L "$path" ]; do
+        target="$(readlink "$path")"
+        case "$target" in
+            /*) path="$target" ;;
+            *) path="$(dirname "$path")/$target" ;;
+        esac
+    done
+    cd "$(dirname "$path")" && pwd
+}
+# shellcheck source=scripts/lib/llvm-tools.sh
+source "$(hook_source_dir)/lib/llvm-tools.sh"
+
+# The oldest clang-tidy that can parse engine/.clang-tidy. `ExcludeHeaderFilterRegex`
+# landed in LLVM 19; an older binary rejects the whole config file, so it lints
+# *nothing* and still exits 0 - a hook that scans an empty set and reports success
+# (issue #659 item 4). Ubuntu 24.04 ships 18 by default, so this is the common case,
+# not an exotic one.
+MIN_CLANG_TIDY_MAJOR=19
+
+# What the push carries: every commit reachable from a pushed ref that no
+# remote-tracking ref already reaches. One rule for every shape - a new branch
+# (its commits since it left master), an update (the commits since the last
+# push), a force-push (the rewritten commits) - because whatever an earlier push
+# carried is behind a remote-tracking ref and was linted then. A ref being
+# deleted carries nothing, and a tag points at commits a branch already carried.
+#
+# A clone with no remote-tracking refs at all would lint its whole history on
+# its first push; that clone has never fetched, so it is not a contributor's.
+ZERO_SHA=0000000000000000000000000000000000000000
+PUSHED_SHAS=()
+while read -r LOCAL_REF LOCAL_SHA _REMOTE_REF _REMOTE_SHA; do
+    [ -z "${LOCAL_SHA:-}" ] && continue
+    [ "$LOCAL_SHA" = "$ZERO_SHA" ] && continue
+    case "$LOCAL_REF" in
+        refs/tags/*) continue ;;
+    esac
+    PUSHED_SHAS+=("$LOCAL_SHA")
+done
+
+if [ ${#PUSHED_SHAS[@]} -eq 0 ]; then
+    exit 0
+fi
+
+FILES=$(git log --format= --name-only --diff-filter=d "${PUSHED_SHAS[@]}" --not --remotes 2>/dev/null \
+    | grep -E "\.(cpp|hpp|c|h)$" | sort -u)
+
+if [ -z "$FILES" ]; then
+    exit 0
+fi
+
+# The lint reads files from the working tree, because clang-tidy needs them on
+# disk beside the compile database. Say so when the tree is not what is being
+# pushed - an uncommitted edit, or a ref other than the checked-out one - so a
+# verdict about unpushed bytes is not mistaken for one about the push.
+DIFFERS=()
+for FILE in $FILES; do
+    [ -f "$FILE" ] || continue
+    for SHA in "${PUSHED_SHAS[@]}"; do
+        if ! git diff --quiet "$SHA" -- "$FILE" 2>/dev/null; then
+            DIFFERS+=("$FILE")
+            break
+        fi
+    done
+done
+if [ ${#DIFFERS[@]} -gt 0 ]; then
+    echo "Note: the working tree's copy of these files is not what is being pushed;"
+    echo "clang-tidy reads the working tree:"
+    printf '    %s\n' "${DIFFERS[@]}"
+fi
+
+STATUS=0
+
+# Discovery and version probe, before any file is linted, and said loudly and
+# once: the failure this replaces was silent, and a contributor on 18 had no way
+# to tell "clean" from "never ran". Absent and too-old share one message because
+# they share one cure; the nearest candidate is what tells them apart, and
+# naming it is what stops the warning from reading as advice already followed
+# (issue #918).
+#
+# The `Lint changed engine sources` step in .github/workflows/pr-tests.yml lints
+# the same files whole on clang-tidy 19 before a pull request can merge, so this
+# stays a skip rather than a refusal to push - a missing or old local toolchain
+# costs a contributor nothing but the early warning.
+find_llvm_tool clang-tidy "$MIN_CLANG_TIDY_MAJOR" minimum
+CLANG_TIDY="$LLVM_TOOL"
+if [ -z "$CLANG_TIDY" ]; then
+    echo "WARNING: no clang-tidy ${MIN_CLANG_TIDY_MAJOR} or newer found${LLVM_TOOL_NEAREST:+ (nearest: ${LLVM_TOOL_NEAREST})}."
+    echo "         engine/.clang-tidy uses ExcludeHeaderFilterRegex, which needs clang-tidy"
+    echo "         >= ${MIN_CLANG_TIDY_MAJOR}; an older binary rejects the whole config and lints nothing."
+    echo "         NOTHING WAS LINTED. Install it ('apt install clang-tidy-${MIN_CLANG_TIDY_MAJOR}',"
+    echo "         'brew install llvm@${MIN_CLANG_TIDY_MAJOR}') or rely on CI, which lints the same"
+    echo "         files on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
+    exit 0
+fi
+
+# The binary is named because it need not be the plain one.
+echo "Running ${CLANG_TIDY} on the C++ files this push changes..."
+
+# The files to lint, minus vendored code and paths that no longer exist on disk.
+# An array, so a path reaches xargs and the loop below without quoting tricks.
+LINT_FILES=()
+for FILE in $FILES; do
+    if [[ "$FILE" == *"vendor/"* ]]; then
+        continue
+    fi
+    if [ ! -f "$FILE" ]; then
+        continue
+    fi
+    LINT_FILES+=("$FILE")
+done
+
+# Whole files, not changed lines (#946): CI gates whole changed files on both
+# its linting legs, so a finding anywhere in a file the push changes is yours to
+# fix now, or to NOLINT with the reason at the site.
+#
+# Each file's status is kept (#885), so one finding neither stops the rest from
+# being linted nor gets lost. The status means something only because
+# `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
+# prints its findings and exits 0. Files run in parallel because whole-file
+# clang-tidy is slow (20-90s a file); `xargs -P` exits 123 if any file failed,
+# which is what feeds STATUS.
+lint_one_file() {
+    local FILE="$1"
+    echo "Linting $FILE..."
+    # `--allow-no-checks` is for engine/src/runtime/, whose .clang-tidy sets
+    # `Checks: '-*'`: clang-tidy otherwise treats an empty check list as a usage
+    # error and exits 1, and the one directory meant to be exempt would refuse
+    # the push.
+    #
+    # `--extra-arg=-Wno-ignored-gch` is this hook's alone (#912). It lints
+    # against whatever build tree you have, and a GCC build's precompiled header
+    # is not one clang can read, so every file would warn about it before
+    # analysing the same translation unit as text. It has to be a compiler flag:
+    # `-Werror` in the compile command raises it before any check filter is
+    # read. It must never move to `ExtraArgs` in engine/.clang-tidy, which CI
+    # reads too: on the command clang-tidy synthesises for a header the flag
+    # lands in input position and fails the job. CI needs no flag, because it
+    # regenerates its compile database with precompiled headers off.
+    #
+    # `$CLANG_TIDY`, not `clang-tidy`: discovery can settle on `clang-tidy-19`
+    # while the plain name is an 18 that cannot read the config at all.
+    if [ -f "engine/build/compile_commands.json" ]; then
+        "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
+            -p engine/build "$FILE"
+    else
+        echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
+        # Fallback: try to include common directories
+        "$CLANG_TIDY" --allow-no-checks "$FILE" \
+            -- -Iengine/include -Iengine/vendor/quickjs-ng
+    fi
+}
+export -f lint_one_file
+export CLANG_TIDY
+
+# nproc (Linux) -> sysctl -n hw.ncpu (macOS) -> 4, matching this repo's own
+# Windows ctest parallelism default, where neither exists.
+NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+if [ ${#LINT_FILES[@]} -gt 0 ]; then
+    if command -v xargs &> /dev/null; then
+        printf '%s\n' "${LINT_FILES[@]}" | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
+    else
+        # No xargs (e.g. this hook's own test sandbox, or a stripped-down
+        # container): fall back to sequential rather than let a bare "command
+        # not found" masquerade as a clang-tidy finding below.
+        for FILE in "${LINT_FILES[@]}"; do
+            lint_one_file "$FILE" || STATUS=1
+        done
+    fi
+fi
+
+if [ "$STATUS" -ne 0 ]; then
+    echo
+    echo "clang-tidy reported findings in the files above; the push was refused."
+    echo "Fix them, or mark a deliberate exception with a NOLINT comment naming the check."
+    echo
+    echo "CI lints the same files whole (#946), so this is a merge blocker you are"
+    echo "seeing early. To push anyway: git push --no-verify"
+    exit 1
+fi
+exit 0
