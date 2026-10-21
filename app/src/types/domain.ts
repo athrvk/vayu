@@ -941,19 +941,22 @@ export interface Request {
 	order: number;
 	createdAt: string;
 	updatedAt: string;
-	/**
-	 * Names which of `params` / `headers` / `body` / `auth` the engine
-	 * substituted a default for on this row, because the stored column is over
-	 * its field cap (issue #1485). Only `GET /requests?collectionId=` (the tree
-	 * list) can carry this - `GET /requests/:id` always answers with the
-	 * genuine, whole value, however large, so a request opened in the builder is
-	 * never affected. Typed here because Duplicate reads it: a list-derived
-	 * record carrying this must not be copied, or the copy silently drops
-	 * whatever was substituted. Absent for a row with nothing over the cap, and
-	 * for one written before the engine had this field.
-	 */
-	truncatedFields?: string[];
 }
+
+/**
+ * A request as the tree lists it: one row of `GET /requests?fields=summary`
+ * (#2546), the shape every `listByCollection` cache holds. A `Request` is one,
+ * so a write that has the whole row (a create, a reorder's settle) may store it
+ * as it stands; a reader that needs anything else fetches the row through
+ * `requestDetailOptions`.
+ *
+ * `createdAt` is here for `compareTreeOrder`'s tie-break and `specOperation`
+ * for the Spec tab's mapping count; the rest is what a tree row draws.
+ */
+export type RequestSummary = Pick<
+	Request,
+	"id" | "collectionId" | "name" | "method" | "url" | "order" | "createdAt" | "specOperation"
+>;
 
 /**
  * A saved example response stored against a request (issue #481).
@@ -3488,7 +3491,10 @@ export interface McpConnectResult {
  * `electron/mcp/data-changed.conformance.test.ts`.
  */
 export type McpDataEntity =
+	/** Collections, and anything under them: request lists, trash, compositions. */
 	| "collection"
+	/** One collection row and nothing under it: a create, an update, an unbind. */
+	| "collectionRow"
 	| "request"
 	| "environment"
 	| "run"

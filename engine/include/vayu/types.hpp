@@ -1640,6 +1640,24 @@ struct Request {
 };
 
 /**
+ * @brief The columns of a `Request` a client builds its tree from (#2546).
+ *
+ * Not a table: a projection the `get_request_summaries_*` reads select column
+ * by column, so body, headers, auth and elements are never read from SQLite.
+ * Each field means what its `Request` namesake means.
+ */
+struct RequestSummary {
+    std::string id;
+    std::string collection_id;
+    std::string name;
+    HttpMethod method = HttpMethod::GET;
+    std::string url;
+    int order          = 0;
+    int64_t created_at = 0;
+    std::optional<std::string> spec_operation;
+};
+
+/**
  * @brief A saved example response for a request (issue #481).
  *
  * What an importer finds in `item.response[]` (Postman) or under an operation's

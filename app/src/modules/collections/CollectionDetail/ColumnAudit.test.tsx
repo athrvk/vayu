@@ -38,7 +38,7 @@ let globalVariables: Record<string, { value: string; enabled?: boolean }> = {};
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: collections }),
-	useMultipleCollectionRequests: (ids: string[]) => ({
+	useFullCollectionRequests: (ids: string[]) => ({
 		// Mirrors the real hook: one entry per requested id, empty where the
 		// collection holds nothing.
 		requestsByCollection: new Map(ids.map((id) => [id, requestsByCollection.get(id) ?? []])),

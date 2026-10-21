@@ -114,6 +114,8 @@ vi.mock("@/queries", () => ({
 	runDetailOptions: () => ({ queryKey: ["run"], queryFn: async () => undefined, enabled: false }),
 	useCollectionsQuery: () => ({ data: COLLECTIONS }),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: REQUESTS, isLoading: false }),
+	// The run dialog's column audit reads whole rows (#2546).
+	useFullCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 	useRunsQuery: () => ({ data: { pages: runPages } }),
 	// The deep sources (phase 3). Their own behaviour lives in
 	// `deep-sources.test.tsx`; here they only have to exist so the list renders.

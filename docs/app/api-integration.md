@@ -672,12 +672,24 @@ on the action that needs it, where the wait is something the user started.
 #### Requests
 
 ```typescript
-apiService.listRequests(params?): Promise<Request[]>
+apiService.listRequestSummaries(params?): Promise<RequestSummary[]>  // GET /requests?fields=summary
+apiService.listRequests(params?): Promise<Request[]>     // GET /requests, whole rows
 apiService.getRequest(id): Promise<Request>
 apiService.createRequest(data): Promise<Request>         // POST /requests
 apiService.updateRequest(data): Promise<Request>         // PUT  /requests/:id
 apiService.deleteRequest(id): Promise<void>
 ```
+
+The two list calls answer the same rows in the same order; `params` is
+`{ collectionId? }` on both. **`listRequestSummaries`** is the tree's
+(#2546): each row is a `RequestSummary` (`id`, `collectionId`, `name`,
+`method`, `url`, `order`, `createdAt`, `specOperation`), read by
+`RequestTransformer.toSummary`, and it is the only list call the launch makes.
+**`listRequests`** is the whole row, `RequestTransformer.toFrontend` (built on
+`toSummary`, so a column the two share reads the same way in both); only the
+column audit asks for it (`useFullCollectionRequests`). A reader that needs one
+request's body, headers or scripts reads `getRequest`, which never substitutes
+a default for an over-cap column the way a full list row can.
 
 A request carries **`specOperation`** - which operation of the bound spec it is
 (issue #637): `{operationId?, method, path}`, where `path` is the document's
@@ -1550,9 +1562,10 @@ URL with every secret variable value and auth credential (each encoded
 spelling too) replaced by `••••`; the masking is at render, so what
 resolves and what is sent are unchanged (#1806). The imported
 `protocolProfileBehavior` object itself (`postmanProtocolBehavior`) is read by
-the Postman exporter only: `GET /requests` returns it as the stored JSON text,
-which the app keeps as a string and never parses, so an import and a Duplicate
-carry it byte for byte, and nothing sends it. The ordered `headers` lines every
+the Postman exporter only: `GET /requests/:id` returns it as the stored JSON
+text, which the app keeps as a string and never parses, so an import and a
+Duplicate (which copies that detail read) carry it byte for byte, and nothing
+sends it. The ordered `headers` lines every
 inline compose sends (`toHeaderRows`: enabled rows with a key, in row order, a
 repeated name repeated, issue #2466) lose each row's `source`, so beside them goes
 `bodyModeHeaders` (`bodyModeHeaders()` in `request-builder/utils/key-value.ts`):

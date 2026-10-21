@@ -184,6 +184,35 @@ describe("a restored tab racing an engine that is still starting", () => {
 	});
 });
 
+/**
+ * The tree's rows are summaries (#2546): a request the sidebar is showing has
+ * no body, headers or scripts in any cache until it is opened, and opening it
+ * is one `GET /requests/:id` that brings them.
+ */
+describe("a request the tree holds as a summary", () => {
+	it("is read whole on open, once, rather than served from the list row", async () => {
+		const stored = {
+			...REQ,
+			headers: [{ key: "Accept", value: "application/json", enabled: true }],
+			body: { mode: "json", content: '{"id":1}' },
+			elements: [{ id: "el_1", kind: "script.pre", enabled: true, config: { script: "1;" } }],
+		};
+		getRequest.mockResolvedValue(stored);
+		const client = makeClient();
+		client.setQueryData(queryKeys.requests.listByCollection("col_b"), [
+			{ ...REQ, order: 0, createdAt: "2026-01-01T00:00:00.000Z" },
+		]);
+
+		const { result, rerender } = renderHook(() => useRequestQuery("req_2"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.data).toEqual(stored));
+		rerender();
+
+		expect(getRequest).toHaveBeenCalledExactlyOnceWith("req_2");
+	});
+});
+
 describe("cache and gating", () => {
 	it("serves an already-cached request without a network call", async () => {
 		const client = makeClient();

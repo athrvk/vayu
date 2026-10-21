@@ -27,7 +27,7 @@ const fetchedIds: string[][] = [];
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: collections }),
-	useMultipleCollectionRequests: (ids: string[]) => {
+	useFullCollectionRequests: (ids: string[]) => {
 		fetchedIds.push(ids);
 		return { requestsByCollection: new Map(), isLoading: ids.length > 0 };
 	},

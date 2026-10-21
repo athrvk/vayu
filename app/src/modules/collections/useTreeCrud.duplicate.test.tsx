@@ -15,16 +15,23 @@
  * reset those to the engine's defaults and dropped the binding. The payload
  * must carry the whole source record instead, so a field added later is
  * copied without anyone updating this list.
+ *
+ * The tree's row is a summary (#2546), so the whole record is the detail read:
+ * a copy made from the row it was invoked on would carry no body, headers,
+ * auth or scripts at all.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 import { useTreeCrud } from "./useTreeCrud";
 import { useToastStore } from "@/stores";
-import type { Collection, Request } from "@/types";
+import type { Collection, Request, RequestSummary } from "@/types";
 
 const createRequest = vi.fn();
+const getRequest = vi.fn<(id: string) => Promise<Request>>();
 
 vi.mock("@/queries", () => ({
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -36,6 +43,11 @@ vi.mock("@/queries", () => ({
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: [] }),
 	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	requestDetailOptions: (id: string) => ({
+		queryKey: ["requests", "detail", id],
+		queryFn: () => getRequest(id),
+		retry: false,
+	}),
 }));
 
 const collections = [{ id: "c-1", name: "Acme", order: 0 }] as Collection[];
@@ -85,21 +97,41 @@ const source: Request = {
 	updatedAt: "2026-01-02T00:00:00.000Z",
 };
 
-const requestsByCollection = new Map([["c-1", [source]]]);
+/** What the tree holds for `source`: `GET /requests?fields=summary`'s row. */
+const listRow: RequestSummary = {
+	id: source.id,
+	collectionId: source.collectionId,
+	name: source.name,
+	method: source.method,
+	url: source.url,
+	order: source.order,
+	createdAt: source.createdAt,
+	specOperation: source.specOperation,
+};
+
+const requestsByCollection = new Map([["c-1", [listRow]]]);
 
 function renderCrud() {
-	return renderHook(() =>
-		useTreeCrud({
-			collections,
-			requestsByCollection,
-			getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
-		})
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	return renderHook(
+		() =>
+			useTreeCrud({
+				collections,
+				requestsByCollection,
+				getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
+			}),
+		{ wrapper }
 	);
 }
 
 beforeEach(() => {
 	createRequest.mockReset();
 	createRequest.mockResolvedValue({ id: "r-1-copy", collectionId: "c-1" });
+	getRequest.mockReset();
+	getRequest.mockResolvedValue(source);
 	useToastStore.setState({ toasts: [] });
 });
 
@@ -108,9 +140,10 @@ describe("duplicating a request", () => {
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.handlers.onDuplicateRequest(source);
+			await result.current.handlers.onDuplicateRequest(listRow);
 		});
 
+		expect(getRequest).toHaveBeenCalledExactlyOnceWith("r-1");
 		expect(createRequest).toHaveBeenCalledTimes(1);
 		const sent = createRequest.mock.calls[0][0];
 		const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...expected } = source;
@@ -125,10 +158,11 @@ describe("duplicating a request", () => {
 			body: { mode: "binary", file: { src: "/data/a.bin", unresolved: true } },
 			bodyType: "binary",
 		};
+		getRequest.mockResolvedValue(upload);
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.handlers.onDuplicateRequest(upload);
+			await result.current.handlers.onDuplicateRequest(listRow);
 		});
 
 		expect(createRequest.mock.calls[0][0].body).toEqual({
@@ -137,21 +171,20 @@ describe("duplicating a request", () => {
 		});
 	});
 
-	// Issue #1485: a list row can carry `truncatedFields` when the engine
-	// substituted a default for a column over its size cap. Copying it would
-	// silently persist the substitution as if it were the real value.
-	it("refuses to copy a row whose engine substituted a default for an oversized field", async () => {
-		const truncated: Request = { ...source, truncatedFields: ["body", "auth"] };
+	// A request deleted elsewhere (an agent over MCP) since the tree drew it:
+	// the detail read is a 404, and a copy of the summary is no copy at all.
+	it("reports a request it could not read rather than copying the tree's row", async () => {
+		getRequest.mockRejectedValue(new Error("Request r-1 no longer exists"));
 		const { result } = renderCrud();
 
 		await act(async () => {
-			await result.current.handlers.onDuplicateRequest(truncated);
+			await result.current.handlers.onDuplicateRequest(listRow);
 		});
 
 		expect(createRequest).not.toHaveBeenCalled();
 		const toasts = useToastStore.getState().toasts;
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0].variant).toBe("error");
-		expect(toasts[0].message).toContain("body, auth");
+		expect(toasts[0].message).toContain("Couldn't duplicate the request");
 	});
 });
