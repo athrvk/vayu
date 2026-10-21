@@ -23,18 +23,46 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 
-const REQUESTS: Record<string, { id: string; name: string; method: string; url: string }> = {
-	unparseable: { id: "unparseable", name: "", method: "GET", url: "abc123secret/users" },
-	templated: { id: "templated", name: "", method: "GET", url: "{{x}}.host/y" },
-	parsed: { id: "parsed", name: "", method: "GET", url: "https://api.test/orders/s3cret" },
+const REQUESTS: Record<
+	string,
+	{ id: string; name: string; method: string; url: string; params: [] }
+> = {
+	unparseable: {
+		id: "unparseable",
+		name: "",
+		method: "GET",
+		url: "abc123secret/users",
+		params: [],
+	},
+	templated: { id: "templated", name: "", method: "GET", url: "{{x}}.host/y", params: [] },
+	parsed: {
+		id: "parsed",
+		name: "",
+		method: "GET",
+		url: "https://api.test/orders/s3cret",
+		params: [],
+	},
 	placeholder: {
 		id: "placeholder",
 		name: "New Request",
 		method: "GET",
 		url: "abc123secret/users",
+		params: [],
 	},
-	slashNamed: { id: "slashNamed", name: "/orders", method: "POST", url: "https://api.test/x" },
-	named: { id: "named", name: "Create order", method: "POST", url: "abc123secret/users" },
+	slashNamed: {
+		id: "slashNamed",
+		name: "/orders",
+		method: "POST",
+		url: "https://api.test/x",
+		params: [],
+	},
+	named: {
+		id: "named",
+		name: "Create order",
+		method: "POST",
+		url: "abc123secret/users",
+		params: [],
+	},
 };
 
 const RUNS: Record<string, { id: string; type: string; configSnapshot: { url: string } }> = {

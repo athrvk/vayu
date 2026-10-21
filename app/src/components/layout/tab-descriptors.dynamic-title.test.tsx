@@ -30,12 +30,14 @@ const REQUEST_A = {
 	name: "",
 	method: "GET",
 	url: "https://api.test/todos/{{$randomInt}}",
+	params: [],
 };
 const REQUEST_B = {
 	id: "req_b",
 	name: "",
 	method: "GET",
 	url: "https://api.test/todos/{{$randomInt}}",
+	params: [],
 };
 
 const REQUESTS: Record<string, typeof REQUEST_A> = { req_a: REQUEST_A, req_b: REQUEST_B };

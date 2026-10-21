@@ -42,6 +42,11 @@ import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { boundRowFor, useBoundRowStore, type Tab } from "@/stores";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { dataFileFromSnapshot } from "@/lib/run-data-file";
+import {
+	resolveSendsUrl,
+	sendsCacheInput,
+	sendsResolver,
+} from "@/modules/request-builder/utils/sends-url";
 
 /**
  * Title for a request tab: the user-set name when there is one, otherwise the
@@ -175,8 +180,10 @@ export function iconForTab(
  * fresh on every call (`lib/dynamic-variables.ts`'s own contract), and this
  * hook has no memoization of its own - it recomputes on every render the strip
  * takes, for any tab, not only when a URL actually changed (issue #1739).
- * `stableTitleUrl` holds the last resolved value per request id, in the
- * module-scope cache `lib/dynamic-variable-cache.ts` describes - which is also
+ * `stableTitleUrl` holds the last resolved value per request id (the URL as
+ * `modules/request-builder/utils/sends-url.ts` resolves it, the Params panel's
+ * "Sends" line included), in the module-scope cache
+ * `lib/dynamic-variable-cache.ts` describes - which is also
  * why it cannot be a `useMemo` or a `useRef` here, quite apart from the hooks
  * lint: this is a caching layer keyed on every open tab, of which there can be
  * any number, so it is not one hook's worth of state to begin with.
@@ -280,13 +287,19 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 			case "request": {
 				if (!request) return { label: "Request", title: "Request" };
 				const row = boundRowFor(bound, tab.entityId);
+				// The URL as the Params panel's "Sends" line draws it (path rows,
+				// encoding), so the tab and the line cannot disagree.
 				// A per-call `row` (Send-with-row) is a one-off preview of a specific
 				// row's bind, not this tab's own steady-state label, so it skips the
 				// cache and always resolves fresh - the same reasoning `resolveString`
 				// callers elsewhere apply (see `useVariableResolver`).
 				const resolvedUrl = row
-					? resolveString(request.url, row)
-					: stableTitleUrl(request.id ?? tab.entityId ?? "", request.url, resolveString);
+					? resolveSendsUrl(request, (text) => resolveString(text, row))
+					: stableTitleUrl(
+							request.id ?? tab.entityId ?? "",
+							sendsCacheInput(request),
+							sendsResolver(resolveString)
+						);
 				const name = requestTabTitle(request.name, resolvedUrl);
 				const chain = collectionNamePath(request.collectionId, collections);
 				return {
