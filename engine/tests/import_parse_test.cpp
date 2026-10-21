@@ -202,6 +202,8 @@ json comparable (const nlohmann::ordered_json& result) {
     json out               = json::parse (result.dump ());
     out["meta"]["skipped"] = skip_counts (out.at ("meta").at ("skipped"));
     out["meta"].erase ("nonExecutableAuthRequests");
+    out["meta"].erase ("nonExecutableAuthFolders");
+    out["meta"].erase ("nonExecutableAuthCollection");
     out["meta"].erase ("unsupportedScriptApis");
     sort_examples (out.at ("collections"));
     return out;
@@ -2127,28 +2129,166 @@ TEST (PostmanImport, KeepsHawkOAuth1EdgeGridAndJwtAsDataNotSent) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
 }
 
-/// A collection's or folder's data-only auth reaches every request inheriting
-/// it, so it is counted where it is declared - once, named - rather than
-/// nowhere. Mutation check: drop the count in `pm_folder` and this goes red.
-TEST (PostmanImport, CountsADataOnlyAuthOnACollectionOrFolder) {
-    const ImportParse parsed = parse_import (
-    R"({"info":{"name":"Signed API","schema":")" + std::string (POSTMAN_SCHEMA) + R"("},
-        "auth":{"type":"hawk","hawk":[{"key":"authId","value":"id"}]},
-        "item":[
-        {"name":"Reports","auth":{"type":"digest","digest":[{"key":"username","value":"u"}]},
-         "item":[{"name":"R","request":{"method":"GET","url":"https://x.com/r"}}]},
-        {"name":"A","request":{"method":"GET","url":"https://x.com/a"}},
-        {"name":"B","request":{"method":"GET","url":"https://x.com/b"}}
-    ]})",
-    {}, {});
+/// A Postman auth block of @p type with one attribute, which is all a
+/// data-only family needs to import as `{mode, config}`.
+json postman_auth (const std::string& type) {
+    return json{ { "type", type },
+        { type, json::array ({ { { "key", "k" }, { "value", "v" } } }) } };
+}
+
+json postman_request_item (const std::string& name, const json& auth = nullptr) {
+    json request = { { "method", "GET" }, { "url", "https://x.com/" + name } };
+    if (!auth.is_null ()) {
+        request["auth"] = auth;
+    }
+    return json{ { "name", name }, { "request", std::move (request) } };
+}
+
+json postman_folder_item (const std::string& name, const json& items, const json& auth = nullptr) {
+    json folder = { { "name", name }, { "item", items } };
+    if (!auth.is_null ()) {
+        folder["auth"] = auth;
+    }
+    return folder;
+}
+
+/// A Postman v2.1 collection named "Signed API" holding @p items, under
+/// @p auth when given.
+ImportParse parse_postman_tree (const json& items, const json& auth = nullptr) {
+    json document = { { "info", { { "name", "Signed API" }, { "schema", POSTMAN_SCHEMA } } },
+        { "item", items } };
+    if (!auth.is_null ()) {
+        document["auth"] = auth;
+    }
+    return parse_import (document.dump (), {}, {});
+}
+
+Names names_in (const json& meta, const char* member) {
+    return meta.contains (member) ? meta.at (member).get<Names> () : Names{};
+}
+
+/// The preview line is a list of requests to finish by hand, so the count and
+/// the names are the requests whose *resolved* auth is data-only (#2537): a
+/// folder that declares one is not a request, and a request that inherits it
+/// is. Mutation checks: restore the folder push in `pm_folder` and "Signed" is
+/// listed as a request; make an `inherit` request stop at its own mode and the
+/// inheriting names go missing.
+TEST (PostmanImport, CountsTheRequestsThatLoseADataOnlyAuthNotTheFolderDeclaringIt) {
+    const ImportParse parsed = parse_postman_tree (json::array (
+    { postman_folder_item ("Signed",
+      json::array ({ postman_request_item ("Inherits A"),
+      postman_folder_item ("Deeper",
+      json::array ({ postman_request_item ("Inherits deep", json{ { "type", "inherit" } }) })),
+      postman_request_item ("Inherits B"), postman_request_item ("Own bearer", postman_auth ("bearer")),
+      postman_request_item ("Opted out", json{ { "type", "noauth" } }),
+      postman_request_item ("Own digest", postman_auth ("digest")) }),
+      postman_auth ("oauth1")),
+    postman_request_item ("Outside") }));
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const json& root = parsed.result.at ("collections")[0];
-    EXPECT_EQ (root.at ("auth").at ("mode"), "hawk");
-    EXPECT_EQ (root.at ("children")[0].at ("auth").at ("mode"), "digest");
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 4);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+    (Names{ "Inherits A", "Inherits deep", "Inherits B", "Own digest" }));
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"), Names{ "Signed" });
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+}
+
+/// `noauth` on a folder is the end of the walk: nothing under it is sent
+/// signed, however deep, while a request outside it still inherits the
+/// collection's. The collection is named apart from the folders.
+TEST (PostmanImport, ANoAuthFolderEndsTheWalkForDataOnlyAuth) {
+    const ImportParse parsed = parse_postman_tree (
+    json::array ({ postman_folder_item ("Public",
+                   json::array ({ postman_folder_item ("Nested",
+                   json::array ({ postman_request_item ("Still open") })) }),
+                   json{ { "type", "noauth" } }),
+    postman_folder_item ("Plain", json::array ({ postman_request_item ("Plain child") })),
+    postman_request_item ("Top") }),
+    postman_auth ("hawk"));
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& meta = parsed.result.at ("meta");
     EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
-    EXPECT_EQ (meta.at ("nonExecutableAuthRequests").get<Names> (),
-    (Names{ "Reports", "Signed API" }));
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+    (Names{ "Plain child", "Top" }));
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "Signed API");
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthFolders"));
+}
+
+/// A folder with no auth, or one set to inherit, is `none` in the draft and
+/// `resolve_inherited_auth` walks past it; a folder with an auth of its own
+/// ends the walk at that auth. Mutation check: stop at the first `none` and
+/// "Through two plain folders" drops out.
+TEST (PostmanImport, ARequestInheritsDataOnlyAuthThroughFoldersThatSayNothing) {
+    const ImportParse parsed = parse_postman_tree (
+    json::array (
+    { postman_folder_item ("Plain",
+      json::array ({ postman_folder_item ("Explicit inherit",
+      json::array ({ postman_request_item ("Through two plain folders"),
+      postman_request_item ("Opted out", json{ { "type", "noauth" } }) }),
+      json{ { "type", "inherit" } }) })),
+    postman_folder_item ("Shield",
+    json::array ({ postman_request_item ("Shielded") }), postman_auth ("bearer")) }),
+    postman_auth ("jwt"));
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 1);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+    Names{ "Through two plain folders" });
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "Signed API");
+}
+
+/// The shape of the Twitter v2 collection (#2537): four folders declare
+/// `oauth1`, 11 requests declare it themselves and 12 more inherit it, 23 in
+/// all. The count it used to report was 15 - those 11 plus the four folders -
+/// which named folders as requests and missed the 12.
+TEST (PostmanImport, ACollectionShapedLikeTwitterReportsEveryRequestThatLosesOAuth1) {
+    const auto own_requests = [] (const std::string& prefix, int count) {
+        json items = json::array ();
+        for (int i = 0; i < count; ++i) {
+            items.push_back (postman_request_item (
+            prefix + " own " + std::to_string (i), postman_auth ("oauth1")));
+        }
+        return items;
+    };
+    const auto inheriting = [] (const std::string& prefix, int count, json items) {
+        for (int i = 0; i < count; ++i) {
+            items.push_back (
+            postman_request_item (prefix + " inherits " + std::to_string (i)));
+        }
+        return items;
+    };
+    json tweets = json::array ();
+    for (int i = 0; i < 33; ++i) {
+        tweets.push_back (postman_request_item ("Tweet " + std::to_string (i)));
+    }
+    const ImportParse parsed = parse_postman_tree (
+    json::array ({ postman_folder_item ("Tweets", tweets),
+    postman_folder_item ("Blocks",
+    inheriting ("Blocks", 1, own_requests ("Blocks", 2)), postman_auth ("oauth1")),
+    postman_folder_item ("Manage Tweets", own_requests ("Manage", 7), postman_auth ("oauth1")),
+    postman_folder_item ("Mutes",
+    inheriting ("Mutes", 2, own_requests ("Mutes", 1)), postman_auth ("oauth1")),
+    postman_folder_item ("Lists",
+    inheriting ("Lists", 9, own_requests ("Lists", 1)), postman_auth ("oauth1")) }),
+    postman_auth ("bearer"));
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("requestCount"), 56);
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 23);
+    const Names lost = names_in (meta, "nonExecutableAuthRequests");
+    EXPECT_EQ (lost.size (), 23U);
+    for (const char* folder : { "Tweets", "Blocks", "Manage Tweets", "Mutes", "Lists" }) {
+        EXPECT_EQ (std::ranges::count (lost, folder), 0) << folder << " is not a request";
+    }
+    const auto inherits = [&lost] (const std::string& name) {
+        return std::ranges::contains (lost, name);
+    };
+    EXPECT_TRUE (inherits ("Blocks inherits 0"));
+    EXPECT_TRUE (inherits ("Mutes inherits 1"));
+    EXPECT_TRUE (inherits ("Lists inherits 8"));
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"),
+    (Names{ "Blocks", "Manage Tweets", "Mutes", "Lists" }));
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
 }
 
 /// One Postman request with a single `prerequest` script whose lines are

@@ -291,8 +291,16 @@ export function ImportModal() {
 				// moves the refusal to where the bytes arrive, instead of after
 				// a file the engine was never going to store has been buffered
 				// whole (issue #784).
-				fetchUrl: async (target) =>
-					(await apiService.importFetch(target, specMaxBytes)).content,
+				fetchUrl: async (target, options) =>
+					(
+						await apiService.importFetch(
+							target,
+							specMaxBytes,
+							undefined,
+							undefined,
+							options
+						)
+					).content,
 				...(readSpecFile
 					? {
 							readSibling: async (specPath, refPath) => {

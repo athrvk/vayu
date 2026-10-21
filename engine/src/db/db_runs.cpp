@@ -25,6 +25,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -92,20 +93,29 @@ std::vector<Run> Database::get_all_runs () {
 }
 
 namespace {
-// Compose the sqlite_orm WHERE for a RunFilter. Each optional filter becomes
-// `(column == value) OR <inactive>`, where <inactive> is a bound `true` when
-// the filter is unset - so an unset field is a wildcard and the same compiled
-// expression serves every filter combination (no per-combination branching).
-// `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+// `CASE WHEN <unset> THEN 1 ELSE <test> END`: true for every row when the
+// filter is unset, and <test> is never evaluated then, because SQLite
+// evaluates only the CASE branch it selects (#2548). That matters for more
+// than the snapshot's LIKE and JSON parse: `origin` sits past config_snapshot
+// in the stored row, so reading it walks the snapshot's overflow pages. An
+// `OR` with the bound flag would leave which operand runs first to the
+// planner, which is not ours to depend on.
+template <class Test> auto unless_unset (bool unset, Test test) {
+    return c (case_<bool> ().when (unset, then (true)).else_ (std::move (test)).end ());
+}
+
+// Compose the sqlite_orm WHERE for a RunFilter, one `unless_unset` term per
+// optional filter, so the same compiled expression serves every filter
+// combination (no per-combination branching). `q` is a substring LIKE over
+// config_snapshot (see RunFilter's contract).
 //
 // `collection_id` reads the snapshot as JSON instead. `json_extract` raises a
 // SQL error - not NULL - on text that is not JSON, and `sanitize_config_snapshot`
 // stores an unparseable body verbatim, so handing it the column directly would
-// turn one malformed row into a 500 for the whole page. The CASE is the guard:
-// SQLite evaluates only the branch it selects, so `json_extract` is never
+// turn one malformed row into a 500 for the whole page. The inner CASE is the
+// guard, on the same only-the-selected-branch rule: `json_extract` is never
 // applied to anything but valid JSON. A boolean `json_valid(...) AND ...` guard
-// would rely on the planner's evaluation order for the same protection, which
-// is not ours to depend on.
+// would rely on the planner's evaluation order for the same protection.
 //
 // A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
 // id, so design and load runs (and a scenario run stored before the snapshot
@@ -135,14 +145,15 @@ auto run_filter_where (const RunFilter& filter) {
     .else_ (std::string{ "{}" })
     .end ();
 
-    return where ((c (&Run::type) == type_val || no_type) &&
-    (c (&Run::status) == status_val || no_status) &&
-    (c (&Run::request_id) == req_val || no_req) &&
-    (like (&Run::config_snapshot, q_pat) || no_q) &&
-    (c (&Run::baseline) == baseline_val || no_baseline) &&
-    (c (&Run::origin) == origin_val || no_origin) &&
-    (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val ||
-    no_collection));
+    return where (unless_unset (no_type, c (&Run::type) == type_val) &&
+    unless_unset (no_status, c (&Run::status) == status_val) &&
+    unless_unset (no_req, c (&Run::request_id) == req_val) &&
+    unless_unset (no_q, like (&Run::config_snapshot, q_pat)) &&
+    unless_unset (no_baseline, c (&Run::baseline) == baseline_val) &&
+    unless_unset (no_origin, c (&Run::origin) == origin_val) &&
+    unless_unset (no_collection,
+    json_extract<std::string> (
+    snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val));
 }
 } // namespace
 
@@ -557,6 +568,28 @@ const std::vector<PendingResultBody>& bodies) {
 std::vector<Result> Database::get_results (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Result> (where (c (&Result::run_id) == run_id));
+}
+
+std::vector<Result> Database::get_results_without_traces (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.select (
+    columns (&Result::id, &Result::timestamp, &Result::status_code,
+    &Result::status_text, &Result::latency_ms, &Result::error),
+    where (c (&Result::run_id) == run_id), order_by (&Result::id));
+
+    std::vector<Result> results;
+    results.reserve (rows.size ());
+    for (auto& [id, timestamp, status_code, status_text, latency_ms, error] : rows) {
+        Result& result     = results.emplace_back ();
+        result.id          = id;
+        result.run_id      = run_id;
+        result.timestamp   = timestamp;
+        result.status_code = status_code;
+        result.status_text = std::move (status_text);
+        result.latency_ms  = latency_ms;
+        result.error       = std::move (error);
+    }
+    return results;
 }
 
 std::unordered_map<std::string, DesignResultOutcome>

@@ -4477,7 +4477,7 @@ describe("start_load_run scenario runs", () => {
 			ctxWith(client, allowed)
 		);
 		expect(capacity.isError).toBe(true);
-		expect(firstText(capacity)).toMatch(/one windowed p99/);
+		expect(firstText(capacity)).toMatch(/one p99 per level/);
 		expect(firstText(capacity)).toMatch(/constant_concurrency, ramp_up, iterations/);
 
 		const rps = await dispatchTool(

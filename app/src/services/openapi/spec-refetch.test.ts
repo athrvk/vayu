@@ -67,8 +67,16 @@ describe("refetchSpec", () => {
 			io({ fetchUrl })
 		);
 
-		expect(fetchUrl).toHaveBeenCalledWith("https://api.example.com/openapi.json");
-		expect(fetchUrl).toHaveBeenCalledWith("https://api.example.com/pet.yaml");
+		// The bound document is the user's own URL, so it carries no reference
+		// marking (exactly one argument); the `$ref` it names does, and names the
+		// document it was found in (issue #2364).
+		expect(fetchUrl.mock.calls).toStrictEqual([
+			["https://api.example.com/openapi.json"],
+			[
+				"https://api.example.com/pet.yaml",
+				{ reference: true, sourceUrl: "https://api.example.com/openapi.json" },
+			],
+		]);
 		expect(result.unresolvedRefs).toBe(0);
 		// Bundled, not verbatim: the stored document is the bundled one, so a
 		// comparison against the raw fetch would report a change on every check.
@@ -106,7 +114,7 @@ describe("refetchSpec", () => {
 			io({ fetchUrl, readSpecFile })
 		);
 
-		expect(fetchUrl).toHaveBeenCalledWith("https://api.example.com/openapi.json");
+		expect(fetchUrl.mock.calls[0]).toStrictEqual(["https://api.example.com/openapi.json"]);
 		expect(readSpecFile).not.toHaveBeenCalled();
 	});
 

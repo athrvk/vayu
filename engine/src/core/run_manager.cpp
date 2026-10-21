@@ -2708,6 +2708,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         size_t requests_expected = context->requests_expected.load ();
         double elapsed_seconds = context->seconds_since_load_start (now_steady_ms);
 
+        // Before the sample, so a level the capacity search opened since the
+        // previous tick starts with this tick's window.
+        mc.adopt_level_epoch (context->requested_level_epoch ());
         // Exactly once per tick: it resets the window on read, and folds the
         // window into the open second before that.
         auto window = mc.sample_window_percentiles ();
@@ -2754,8 +2757,8 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every
         // tick, and the serialize-and-append below is the slower half.
-        context->publish_live_tick ({ 0, window.p50, window.p95, window.p99,
-        live_current_rps, backpressure, window.count });
+        context->publish_live_tick (
+        { 0, live_current_rps, backpressure, mc.level_latency () });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the

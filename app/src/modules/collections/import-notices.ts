@@ -68,6 +68,9 @@ interface Copy {
 /** How many request names a line spells out before "+N more". */
 const NAMES_SHOWN = 3;
 
+/** How many folder names the "set on" clause of the unsent-auth line spells out. */
+const AUTH_FOLDERS_SHOWN = 5;
+
 /** How many script API names a line spells out before "+N more". */
 const API_NAMES_SHOWN = 4;
 
@@ -376,6 +379,38 @@ function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 }
 
 /**
+ * "set on the collection and folders A, B": where the unsent auth is declared,
+ * which the request line cannot say - the requests it counts mostly inherit it
+ * (#2537). "" when the engine named no declaring site.
+ */
+function authDeclaredOn(meta: ImportMeta): string {
+	const folders = meta.nonExecutableAuthFolders ?? [];
+	const sites = [
+		meta.nonExecutableAuthCollection !== undefined && "the collection",
+		folders.length > 0 &&
+			`${pluralize(folders.length, "folder")} ${listed(folders, AUTH_FOLDERS_SHOWN)}`,
+	].filter((site): site is string => typeof site === "string");
+	return sites.length > 0 ? `; set on ${sites.join(" and ")}` : "";
+}
+
+/**
+ * The line for requests whose auth imports but is never sent: the requests
+ * that lose it, then where it was declared. The count is of requests, so a
+ * collection that only declares it on a folder nothing inherits from shows
+ * no line at all.
+ */
+function nonExecutableAuthNotice(meta: ImportMeta): ImportNotice {
+	const phrase =
+		"auth imported but not sent (Vayu does not sign AWS, Digest, NTLM, Hawk, OAuth 1, EdgeGrid or JWT)";
+	const requests = meta.nonExecutableAuthRequests;
+	const lead =
+		requests && requests.length > 0
+			? named(phrase, requests)
+			: `${meta.nonExecutableAuth} ${pluralize(meta.nonExecutableAuth, "request's", "requests'")} ${phrase}`;
+	return { tier: "action", text: lead + authDeclaredOn(meta) };
+}
+
+/**
  * The scripts that import but throw at first run (#2576): one amber line naming
  * the requests and, as a union, the APIs. The import is not blocked, and the
  * engine names only scripts it imported, so the import-scripts option needs no
@@ -444,17 +479,7 @@ export function importNotices(meta: ImportMeta): ImportNotice[] {
 			text: `${n} ${pluralize(n, "file field")} ${pluralize(n, "needs", "need")} ${pluralize(n, "a file", "files")}`,
 		});
 	}
-	if (meta.nonExecutableAuth > 0) {
-		const phrase =
-			"auth imported but not sent (Vayu does not sign AWS, Digest, NTLM, Hawk, OAuth 1, EdgeGrid or JWT)";
-		notices.push({
-			tier: "action",
-			text:
-				meta.nonExecutableAuthRequests && meta.nonExecutableAuthRequests.length > 0
-					? named(phrase, meta.nonExecutableAuthRequests)
-					: `${meta.nonExecutableAuth} ${pluralize(meta.nonExecutableAuth, "request's", "requests'")} ${phrase}`,
-		});
-	}
+	if (meta.nonExecutableAuth > 0) notices.push(nonExecutableAuthNotice(meta));
 	const scriptApis = unsupportedScriptApiNotice(meta.unsupportedScriptApis);
 	if (scriptApis) notices.push(scriptApis);
 	// Path grouping builds a tree the document never spelled out (#710); a
