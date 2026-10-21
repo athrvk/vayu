@@ -1097,14 +1097,23 @@ const std::vector<vayu::db::SpecDocument>& spec_rows) {
 void apply_client_certificate_candidates (vayu::db::Database& db,
 const nlohmann::json& candidates) {
     for (const auto& candidate : candidates) {
-        const int status = create_client_certificate_response (db, candidate).first;
-        if (status != 200) {
-            vayu::utils::log_warning ("http", "POST /import/apply - skipped an imported client certificate candidate",
-            { { "status", status },
-            { "host",
-            candidate.is_object () ? candidate.value ("host", std::string ()) :
-                                     std::string () } });
+        const auto [status, registered] = create_client_certificate_response (db, candidate);
+        if (status == 200) {
+            // The stored row's own members, never the candidate's: the
+            // response carries `hasPassphrase` where the candidate carries
+            // the passphrase, and the key path is not needed to tell which
+            // certificate was registered.
+            vayu::utils::log_info ("http",
+            "POST /import/apply - registered an imported client certificate",
+            { { "host", registered["host"] }, { "port", registered["port"] },
+            { "certPath", registered["certPath"] } });
+            continue;
         }
+        vayu::utils::log_warning ("http",
+        "POST /import/apply - skipped an imported client certificate candidate",
+        { { "status", status },
+        { "host",
+        candidate.is_object () ? candidate.value ("host", std::string ()) : std::string () } });
     }
 }
 
