@@ -33,7 +33,7 @@ import { useReorderMutation } from "./collections";
 import { queryKeys } from "./keys";
 import { useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
-import type { Collection, Request, ReorderRequest } from "@/types";
+import type { Collection, Request, RequestSummary, ReorderRequest } from "@/types";
 
 const reorder = vi.fn();
 
@@ -43,8 +43,15 @@ vi.mock("@/services/api", () => ({
 	},
 }));
 
-const req = (id: string, collectionId: string, order: number): Request =>
-	({ id, collectionId, name: id, order, createdAt: "2026-01-01T00:00:00.000Z" }) as Request;
+const req = (id: string, collectionId: string, order: number): RequestSummary => ({
+	id,
+	collectionId,
+	name: id,
+	method: "GET",
+	url: "",
+	order,
+	createdAt: "2026-01-01T00:00:00.000Z",
+});
 
 const col = (id: string, order: number, parentId?: string): Collection =>
 	({ id, name: id, order, parentId, createdAt: "2026-01-01T00:00:00.000Z" }) as Collection;
@@ -74,8 +81,9 @@ function seedLegacyParent(client: QueryClient) {
 function ordersOf(client: QueryClient, collectionId: string): Record<string, number> {
 	const rows = [
 		...(client.getQueryData<Collection[]>(queryKeys.collections.list()) ?? []),
-		...(client.getQueryData<Request[]>(queryKeys.requests.listByCollection(collectionId)) ??
-			[]),
+		...(client.getQueryData<RequestSummary[]>(
+			queryKeys.requests.listByCollection(collectionId)
+		) ?? []),
 	];
 	return Object.fromEntries(rows.map((row) => [row.id, row.order]));
 }
@@ -109,9 +117,10 @@ function seed(client: QueryClient) {
 
 /** Ids of a collection's cached requests, in cache order. */
 const ids = (client: QueryClient, collectionId: string) =>
-	(client.getQueryData<Request[]>(queryKeys.requests.listByCollection(collectionId)) ?? []).map(
-		(r) => r.id
-	);
+	(
+		client.getQueryData<RequestSummary[]>(queryKeys.requests.listByCollection(collectionId)) ??
+		[]
+	).map((r) => r.id);
 
 /** A within-collection swap of the first two requests. */
 const swapPlan: ReorderRequest = {
@@ -166,6 +175,33 @@ describe("useReorderMutation draws the drop before the write returns", () => {
 		expect(client.getQueryData<Request>(queryKeys.requests.detail("a"))?.collectionId).toBe(
 			"col_b"
 		);
+	});
+
+	it("takes a moved request out of every list its old collection has cached", async () => {
+		// The column audit's whole rows sit under `lists()` beside the tree's
+		// summaries (#2546). Cached first, they are what a scan meets first -
+		// mutation check: stop at the first list holding the row and the
+		// tree's own list for `col_a` keeps showing it.
+		reorder.mockResolvedValue({ collections: [], requests: [] });
+		const client = makeClient();
+		client.setQueryData(queryKeys.requests.fullListByCollection("col_a"), [
+			req("a", "col_a", 0),
+			req("b", "col_a", 1),
+		]);
+		seed(client);
+
+		const { result } = renderHook(() => useReorderMutation(), { wrapper: wrapper(client) });
+		await result.current.mutateAsync({
+			moves: [{ type: "request", id: "a", order: 0, collectionId: "col_b" }],
+			normalize: [],
+		});
+
+		expect(ids(client, "col_a")).toEqual(["b", "c"]);
+		expect(
+			client
+				.getQueryData<Request[]>(queryKeys.requests.fullListByCollection("col_a"))
+				?.map((r) => r.id)
+		).toEqual(["b"]);
 	});
 
 	it("renumbers a normalized parent's folders and requests as one list", async () => {

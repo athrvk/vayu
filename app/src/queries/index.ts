@@ -20,6 +20,7 @@ export {
 	usePrefetchCollectionsAndRequests,
 	useRequestsQuery,
 	useMultipleCollectionRequests,
+	useFullCollectionRequests,
 	useRequestQuery,
 	requestDetailOptions,
 	useCollectionAncestors,

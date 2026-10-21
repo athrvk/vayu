@@ -39,7 +39,7 @@ import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
 import { useToastStore, useSaveStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 import { isDescendant } from "./tree-utils";
 import { childrenOf, type TreeChild } from "./tree-children";
 import { isEmptyPlan, planMove, type OrderedRow } from "./reorder-math";
@@ -76,7 +76,7 @@ interface Placement {
 
 export interface TreeDndOptions {
 	collections: Collection[];
-	getRequestsByCollection: (collectionId: string) => Request[];
+	getRequestsByCollection: (collectionId: string) => RequestSummary[];
 	/** The tree root, for hit testing and for finding the scroll container. */
 	treeRef: RefObject<HTMLElement | null>;
 	/**

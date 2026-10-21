@@ -189,13 +189,6 @@ export class RequestTransformer {
 
 		const methodSource = toMethodSource(raw.methodSource);
 
-		// Which columns the engine substituted a default for (issue #1485) -
-		// absent for a row with nothing over the field cap, same reason
-		// `specOperation` is spread rather than assigned.
-		const truncatedFields = Array.isArray(raw.truncatedFields)
-			? (raw.truncatedFields as unknown[]).filter((f): f is string => typeof f === "string")
-			: undefined;
-
 		return {
 			...summary,
 			description: asStr(raw.description) ?? "",
@@ -244,7 +237,6 @@ export class RequestTransformer {
 				: {}),
 			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
 			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),
-			...(truncatedFields?.length ? { truncatedFields } : {}),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),
 		};
 	}

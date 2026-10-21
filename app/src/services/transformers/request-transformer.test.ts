@@ -190,37 +190,6 @@ describe("RequestTransformer method source", () => {
 });
 
 /**
- * `truncatedFields` (issue #1485) names which columns the list route
- * substituted a default for. Without an explicit read here it is exactly the
- * "written but never read" defect this transformer exists to prevent - the
- * allowlist below `raw` drops any wire field it does not name.
- */
-describe("RequestTransformer truncated fields", () => {
-	it("carries the field names through", () => {
-		const req = RequestTransformer.toFrontend({ ...base, truncatedFields: ["body", "auth"] });
-		expect(req.truncatedFields).toEqual(["body", "auth"]);
-	});
-
-	it("is absent when the row carries nothing over the cap", () => {
-		const req = RequestTransformer.toFrontend({ ...base });
-		expect("truncatedFields" in req).toBe(false);
-	});
-
-	it("is absent for an empty array, same as no key at all", () => {
-		const req = RequestTransformer.toFrontend({ ...base, truncatedFields: [] });
-		expect("truncatedFields" in req).toBe(false);
-	});
-
-	it("drops non-string entries rather than passing a malformed list on", () => {
-		const req = RequestTransformer.toFrontend({
-			...base,
-			truncatedFields: ["body", 42, null],
-		});
-		expect(req.truncatedFields).toEqual(["body"]);
-	});
-});
-
-/**
  * A summary row (#2546) carries exactly the tree's keys, read the way the full
  * row reads them - a list row and a detail row of one request must agree on
  * every column they share, or the tree and the builder disagree about it.

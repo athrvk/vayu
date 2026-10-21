@@ -12,7 +12,7 @@
  */
 
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
+import type { QueryClient, QueryKey, UseQueryResult } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { apiService } from "@/services/api";
 import { ApiError } from "@/services";
@@ -29,6 +29,7 @@ import { childrenOf } from "@/modules/collections/tree-children";
 import type {
 	Collection,
 	Request,
+	RequestSummary,
 	CreateCollectionRequest,
 	UpdateCollectionRequest,
 	CreateRequestRequest,
@@ -52,14 +53,19 @@ export function useCollectionsQuery() {
 
 /**
  * Every collection's request list, keyed by collection id, from one
- * `GET /requests` - every collection the collections list names has an entry,
- * an empty one included.
+ * `GET /requests?fields=summary` - every collection the collections list names
+ * has an entry, an empty one included.
  */
-type RequestsByCollection = Record<string, Request[]>;
+type RequestsByCollection = Record<string, RequestSummary[]>;
 
 /**
  * The warm-cache pass: every collection's request list, seeded into each
  * collection's own `listByCollection` entry.
+ *
+ * Summaries, not whole rows (#2546): the tree draws a name, a method and a
+ * URL, and serializing every body, header set and script in the workspace
+ * made this one answer 10.7 MB on a 6,000-request workspace. A reader that
+ * needs more fetches the request through `requestDetailOptions`.
  *
  * One `GET /requests` for the whole workspace, fetched alongside the
  * collections rather than after them. It used to be one list call per
@@ -77,7 +83,7 @@ async function seedRequestsByCollection(queryClient: QueryClient): Promise<Reque
 			queryKey: queryKeys.collections.list(),
 			queryFn: () => apiService.listCollections(),
 		}),
-		apiService.listRequests(),
+		apiService.listRequestSummaries(),
 	]);
 	const byCollection: RequestsByCollection = {};
 	for (const collection of collections) byCollection[collection.id] = [];
@@ -100,7 +106,10 @@ async function seedRequestsByCollection(queryClient: QueryClient): Promise<Reque
  * a mutation invalidating one collection, say - it fetches just that list,
  * because the pass's answer is then older than whatever made this refetch.
  */
-function requestsForCollection(queryClient: QueryClient, collectionId: string): Promise<Request[]> {
+function requestsForCollection(
+	queryClient: QueryClient,
+	collectionId: string
+): Promise<RequestSummary[]> {
 	const seed = queryClient.getQueryState(queryKeys.prefetch.allRequests());
 	if (seed?.fetchStatus === "fetching") {
 		return queryClient
@@ -110,7 +119,7 @@ function requestsForCollection(queryClient: QueryClient, collectionId: string): 
 			})
 			.then((byCollection) => byCollection[collectionId] ?? []);
 	}
-	return apiService.listRequests({ collectionId });
+	return apiService.listRequestSummaries({ collectionId });
 }
 
 /**
@@ -130,7 +139,7 @@ export function invalidateAllRequestLists(queryClient: QueryClient): void {
  * displaying it.
  */
 function ownerOfRequest(queryClient: QueryClient, requestId: string): string | undefined {
-	for (const [, rows] of queryClient.getQueriesData<Request[]>({
+	for (const [, rows] of queryClient.getQueriesData<RequestSummary[]>({
 		queryKey: queryKeys.requests.lists(),
 	})) {
 		const found = rows?.find((row) => row.id === requestId);
@@ -187,6 +196,34 @@ export function useRequestsQuery(collectionId: string | null) {
  */
 export function useMultipleCollectionRequests(collectionIds: string[]) {
 	const queryClient = useQueryClient();
+	return useListsByCollection(collectionIds, (collectionId) => ({
+		queryKey: queryKeys.requests.listByCollection(collectionId),
+		queryFn: () => requestsForCollection(queryClient, collectionId),
+	}));
+}
+
+/**
+ * `useMultipleCollectionRequests` with every column of every request, for a
+ * reader that inspects what each request sends (the column audit). One full
+ * `GET /requests?collectionId=` per collection, made only while a caller is
+ * mounted - never at launch, where the tree's summaries are all that is read.
+ */
+export function useFullCollectionRequests(collectionIds: string[]) {
+	return useListsByCollection(collectionIds, (collectionId) => ({
+		queryKey: queryKeys.requests.fullListByCollection(collectionId),
+		queryFn: () => apiService.listRequests({ collectionId }),
+	}));
+}
+
+/**
+ * One query per collection, combined into a map of collectionId -> rows sorted
+ * by `compareTreeOrder`, stable while the results are (see
+ * `useMultipleCollectionRequests`).
+ */
+function useListsByCollection<Row extends RequestSummary>(
+	collectionIds: string[],
+	listQuery: (collectionId: string) => { queryKey: QueryKey; queryFn: () => Promise<Row[]> }
+) {
 	// Callers build this array inline from the collections query, so it is a new
 	// array on every render. Pin it to its contents: it is what `combine` closes
 	// over, and `combine` has to keep a stable identity (see below).
@@ -202,9 +239,8 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 	 * and defeat the whole point, so this is a `useCallback`.
 	 */
 	const combine = useCallback(
-		(results: Array<UseQueryResult<Request[]>>) => {
-			// Map of collectionId -> requests, sorted by order then createdAt.
-			const requestsByCollection = new Map<string, Request[]>();
+		(results: Array<UseQueryResult<Row[]>>) => {
+			const requestsByCollection = new Map<string, Row[]>();
 			results.forEach((query, index) => {
 				const requests = query.data ?? [];
 				requestsByCollection.set(
@@ -220,12 +256,8 @@ export function useMultipleCollectionRequests(collectionIds: string[]) {
 		[stableCollectionIds]
 	);
 
-	// Create a query for each collection
 	return useQueries({
-		queries: stableCollectionIds.map((collectionId) => ({
-			queryKey: queryKeys.requests.listByCollection(collectionId),
-			queryFn: () => requestsForCollection(queryClient, collectionId),
-		})),
+		queries: stableCollectionIds.map(listQuery),
 		combine,
 	});
 }
@@ -448,9 +480,15 @@ export function useCreateRequestMutation() {
 		mutationFn: (data: CreateRequestRequest) => apiService.createRequest(data),
 		onSuccess: (newRequest) => {
 			// Add to collection's requests cache
-			queryClient.setQueryData<Request[]>(
+			queryClient.setQueryData<RequestSummary[]>(
 				queryKeys.requests.listByCollection(newRequest.collectionId),
 				(old) => (old ? [...old, newRequest] : [newRequest])
+			);
+			// And to its whole rows, only where something already holds them: a
+			// Duplicate's copy is what the column audit must count next.
+			queryClient.setQueryData<Request[]>(
+				queryKeys.requests.fullListByCollection(newRequest.collectionId),
+				(old) => (old ? [...old, newRequest] : old)
 			);
 			// Also set the detail cache so useRequestQuery can find it immediately
 			queryClient.setQueryData(queryKeys.requests.detail(newRequest.id), newRequest);
@@ -562,8 +600,9 @@ function normalizeParentScope(
 	parentId: string | null
 ) {
 	const requestsOf = (collectionId: string) =>
-		queryClient.getQueryData<Request[]>(queryKeys.requests.listByCollection(collectionId)) ??
-		[];
+		queryClient.getQueryData<RequestSummary[]>(
+			queryKeys.requests.listByCollection(collectionId)
+		) ?? [];
 	const collections = queryClient.getQueryData<Collection[]>(queryKeys.collections.list()) ?? [];
 	const positions = new Map(
 		childrenOf(parentId, collections, requestsOf).map(
@@ -581,8 +620,9 @@ function normalizeParentScope(
 		old?.map(renumber<Collection>("collection"))
 	);
 	if (parentId === null) return;
-	queryClient.setQueryData<Request[]>(queryKeys.requests.listByCollection(parentId), (old) =>
-		old?.map(renumber<Request>("request"))
+	queryClient.setQueryData<RequestSummary[]>(
+		queryKeys.requests.listByCollection(parentId),
+		(old) => old?.map(renumber<RequestSummary>("request"))
 	);
 }
 
@@ -626,6 +666,10 @@ function drawPlan(queryClient: ReturnType<typeof useQueryClient>, plan: ReorderR
  * names a different owner. Shared by the optimistic draw and by the settle on
  * the engine's response, so a move cannot be applied one way going out and
  * another coming back.
+ *
+ * A move leaves every cached list of the old owner, not only the first one
+ * found: the owner can hold its full list (`fullListByCollection`) beside the
+ * tree's, and both sit under `lists()`.
  */
 function placeRequest(
 	queryClient: ReturnType<typeof useQueryClient>,
@@ -633,29 +677,36 @@ function placeRequest(
 	order: number,
 	collectionId: string | undefined
 ) {
-	let moved: Request | undefined;
-	for (const [key, rows] of queryClient.getQueriesData<Request[]>({
+	let moved: RequestSummary | undefined;
+	for (const [key, rows] of queryClient.getQueriesData<RequestSummary[]>({
 		queryKey: queryKeys.requests.lists(),
 	})) {
 		const found = rows?.find((row) => row.id === requestId);
 		if (!found) continue;
-		moved = found;
+		moved ??= found;
 		if (collectionId && collectionId !== found.collectionId) {
-			queryClient.setQueryData<Request[]>(key, (old) =>
+			queryClient.setQueryData<RequestSummary[]>(key, (old) =>
 				old?.filter((row) => row.id !== requestId)
 			);
 		}
-		break;
 	}
 
 	const owner = collectionId ?? moved?.collectionId;
 	if (!owner) return; // Nothing cached is showing it; nothing on screen to fix.
-	const next: Request = { ...(moved as Request), id: requestId, collectionId: owner, order };
-	queryClient.setQueryData<Request[]>(queryKeys.requests.listByCollection(owner), (old) => {
-		if (!old) return old;
-		const without = old.filter((row) => row.id !== requestId);
-		return [...without, next].sort(compareTreeOrder);
-	});
+	const next: RequestSummary = {
+		...(moved as RequestSummary),
+		id: requestId,
+		collectionId: owner,
+		order,
+	};
+	queryClient.setQueryData<RequestSummary[]>(
+		queryKeys.requests.listByCollection(owner),
+		(old) => {
+			if (!old) return old;
+			const without = old.filter((row) => row.id !== requestId);
+			return [...without, next].sort(compareTreeOrder);
+		}
+	);
 	// Only if something already held it: `staleTime: Infinity` means an entry
 	// written here would never be refetched, and a half-built row from a list
 	// entry is not the full request a restored tab reads.

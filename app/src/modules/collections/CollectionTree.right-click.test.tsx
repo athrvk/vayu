@@ -51,6 +51,11 @@ vi.mock("@/queries", () => ({
 		refetch: vi.fn(),
 	}),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: requests }),
+	// A Duplicate copies the detail read, not the tree's row (#2546).
+	requestDetailOptions: (id: string) => ({
+		queryKey: ["requests", "detail", id],
+		queryFn: async () => requests.get("acme")!.find((row) => row.id === id),
+	}),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),

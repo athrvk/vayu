@@ -1743,7 +1743,17 @@ from `@/queries/runs`); everything with more than one is in the barrel.
 
 - **`useCollectionsQuery()`** - Fetch all collections (there is no
   single-collection query: a collection is read out of this list)
-- **`useRequestsQuery(collectionId)`** - Fetch requests in a collection
+- **`useRequestsQuery(collectionId)`** - Fetch requests in a collection, as
+  `RequestSummary` rows (`types/domain.ts`, #2546): `id`, `collectionId`,
+  `name`, `method`, `url`, `order`, `createdAt` and `specOperation`, from
+  `GET /requests?fields=summary` (`apiService.listRequestSummaries`). Every
+  `listByCollection` cache holds that shape, and its type is what makes a
+  reader that wants a body, headers, auth or scripts fail to compile rather
+  than read `undefined`. `createdAt` is `compareTreeOrder`'s tie-break and
+  `specOperation` the Spec tab's mapping count; the rest is what a tree row,
+  the palette and "Copy for agent" draw. A write that already holds the whole
+  row (a create, a reorder's settle) stores it as it stands, since a `Request`
+  is a `RequestSummary`
 - **`useMultipleCollectionRequests(collectionIds)`** - The same list for several
   collections at once, as parallel queries. Its `requestsByCollection` map is
   **referentially stable** while the underlying results are unchanged (built in
@@ -1752,9 +1762,22 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   dependencies; when it was rebuilt on every call, the collection tree's reveal
   effect (`useRevealActiveSelection`) re-ran on every render and re-expanded a
   collection the user had just collapsed
+- **`useFullCollectionRequests(collectionIds)`** - The same map over whole
+  `Request` rows (`GET /requests?collectionId=`), for the column audit
+  (`useColumnAudit`), which reads what each request sends. Mounted only by the
+  audit's callers (the Data tab, the run dialog), so nothing fetches whole rows
+  at launch. Its key, `requests.fullListByCollection(id)`, sits under that
+  collection's `listByCollection` key, so every invalidation of the tree's list
+  reaches it; a reorder therefore removes a moved request from *every* list
+  its old collection has cached, not the first one a scan of `lists()` meets
 - **`useRequestQuery(requestId)`** / **`requestDetailOptions(requestId)`** - One
-  request by id (`GET /requests/:id`), used by a restored request tab and by a
-  design-run copy on cold start. Only an `ApiError` with `statusCode === 404`
+  request by id (`GET /requests/:id`): what a request tab opens, what a
+  restored tab and a design-run copy read on cold start, and what the tree's
+  Duplicate copies (`queryClient.fetchQuery(requestDetailOptions(id))` in
+  `useTreeCrud.ts`). Never seeded from a list row - a summary is not the
+  request. The detail route also never substitutes a default for a column over
+  the field cap, where a full list row can (`truncatedFields`, #1485), so a
+  copy made from it is the whole request. Only an `ApiError` with `statusCode === 404`
   becomes **`RequestNotFoundError`** (test it with `isRequestNotFound`); a 5xx or
   an unreachable engine is rethrown untouched, because a transport failure must
   not read as "this request was deleted"
@@ -1762,7 +1785,9 @@ from `@/queries/runs`); everything with more than one is in the barrel.
   including itself, root first, derived from the collections list rather than
   fetched
 - **`usePrefetchCollectionsAndRequests()`** - Warm-cache pass over every
-  collection's requests at startup
+  collection's requests at startup: one `GET /requests?fields=summary` for the
+  whole workspace (10.7 MB of whole rows on a 6,000-request workspace before
+  #2546), split into each collection's `listByCollection` entry
 
 **Sorting:** every tree list - roots, a collection's children, a collection's
 requests - sorts with the single exported `compareTreeOrder` (`types/domain.ts`):
@@ -1801,10 +1826,12 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
   that invalidates **all** the request lists does it through
   `invalidateAllRequestLists` (`queries/collections.ts`): `prefetch.allRequests()`
   *before* `requests.all`, so the per-collection lists that refetch join the one
-  `GET /requests` instead of each making a call of their own. It is used by this
+  `GET /requests?fields=summary` instead of each making a call of their own. It is used by this
   mutation, `useImportMutation`, `useBindSpecMutation`, `useSyncSpecMutation`,
   `useRestoreTrashMutation` and the MCP `collection` family
-- **`useCreateRequestMutation()`** - Create request
+- **`useCreateRequestMutation()`** - Create request: appends the engine's row
+  to the tree's list, to the whole-row list only where one is cached, and
+  writes its detail
 - **`useUpdateRequestMutation()`** - Update request (invalidates only the lists
   that can have changed, see below)
 - **`useDeleteRequestMutation()`** - Soft-delete a request into the trash (also
@@ -2112,7 +2139,8 @@ collections: {
 requests: {
   all: ["requests"],
   lists: () => ["requests", "list"],
-  listByCollection: (collectionId) => ["requests", "list", { collectionId }],
+  listByCollection: (collectionId) => ["requests", "list", { collectionId }],  // RequestSummary[]
+  fullListByCollection: (collectionId) => ["requests", "list", { collectionId }, "full"],  // Request[], the column audit's
   details: () => ["requests", "detail"],
   detail: (id) => ["requests", "detail", id],
   examples: (id) => ["requests", "detail", id, "examples"],  // saved example responses (#481)

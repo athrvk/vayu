@@ -20,7 +20,7 @@
  * request can sit above or between folders.
  */
 
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 import { compareTreeOrder } from "@/types";
 import type { TreeModelRow } from "./tree-focus";
 import type { TreeEntity } from "./drop-position";
@@ -66,7 +66,7 @@ export interface FolderRow extends RowBase, SetPosition {
 
 export interface RequestRow extends RowBase, SetPosition {
 	kind: "request";
-	request: Request;
+	request: RequestSummary;
 	/** The collection whose requests list this row came from. */
 	parentId: string;
 }
@@ -89,7 +89,7 @@ export type TreeRow = FolderRow | RequestRow | NewFolderFormRow | EmptyPlacehold
 
 export interface VisibleRowsInput {
 	collections: readonly Collection[];
-	getRequestsByCollection: (collectionId: string) => readonly Request[];
+	getRequestsByCollection: (collectionId: string) => readonly RequestSummary[];
 	expandedCollectionIds: ReadonlySet<string>;
 	/** The folder whose new-subfolder form is open, if any. */
 	creatingSubfolder: string | null;
@@ -128,7 +128,7 @@ export function collectionEntity(collection: Collection): TreeEntity {
 }
 
 /** The same for a request, listed under `collectionId`. */
-export function requestEntity(request: Request, collectionId: string): TreeEntity {
+export function requestEntity(request: RequestSummary, collectionId: string): TreeEntity {
 	return { kind: "request", id: request.id, name: request.name, collectionId };
 }
 
