@@ -613,13 +613,19 @@ literal_text (std::string_view script, std::string_view code, std::size_t quote)
     return script.substr (quote + 1, close - quote - 1);
 }
 
-/// The offset one past the `)` of the call whose `(` follows @p callee_end, when
-/// it passes one string literal that names a module on the shelf. A computed
-/// name (`require(name)`), a template with a `${ }` and a second argument are
-/// all refused: the scan cannot say what they load, and a notice errs toward
-/// naming.
-std::optional<std::size_t>
-shelf_require_end (std::string_view script, std::string_view code, std::size_t callee_end) {
+/// A `require` of a module on the shelf: its name, and the offset one past the
+/// call's `)`.
+struct ShelfRequire {
+    std::string_view name;
+    std::size_t end = 0;
+};
+
+/// The call whose `(` follows @p callee_end, when it passes one string literal
+/// that names a module on the shelf. A computed name (`require(name)`), a
+/// template with a `${ }` and a second argument are all refused: the scan
+/// cannot say what they load, and a notice errs toward naming.
+std::optional<ShelfRequire>
+shelf_require (std::string_view script, std::string_view code, std::size_t callee_end) {
     const std::size_t open = code.find_first_not_of (WHITESPACE, callee_end);
     if (open == std::string_view::npos || code[open] != '(') {
         return std::nullopt;
@@ -638,7 +644,7 @@ shelf_require_end (std::string_view script, std::string_view code, std::size_t c
     if (close == std::string_view::npos || code[close] != ')') {
         return std::nullopt;
     }
-    return close + 1;
+    return ShelfRequire{ name, close + 1 };
 }
 
 /// The script being read: its text, the stripped view of it, and what both hold.
@@ -703,8 +709,7 @@ bool is_exempt_use (const ApiRule& rule, const ScanInput& in, std::size_t end) {
     switch (rule.exempt) {
     case Exemption::None: break;
     case Exemption::ShelfModule:
-        return shelf_require_end (in.script, in.code, in.tokens.at (end - 1).end)
-        .has_value ();
+        return shelf_require (in.script, in.code, in.tokens.at (end - 1).end).has_value ();
     case Exemption::CryptoJsMember:
         return crypto_js_use_is_supported (in, end - 1);
     }
@@ -731,10 +736,6 @@ bool is_unsupported_use (const ScanInput& in, std::size_t first, const ApiRule& 
     }
     return !is_exempt_use (rule, in, *end);
 }
-
-// The one module on the shelf is crypto-js, so `require('<a shelf module>')` is
-// the namespace itself; tell them apart here when a second one joins.
-static_assert (vayu::runtime::SHELF_MODULE_NAMES.size () == 1);
 
 bool is_variable_keyword (std::string_view word) {
     return word == "const" || word == "let" || word == "var";
@@ -800,7 +801,8 @@ class CryptoJsReads {
     }
 
     /// Where a read of the namespace starts at token @p at: the global, a name
-    /// bound to it, or a `require` of the shelf.
+    /// bound to it, or `require('crypto-js')`. Another shelf module's members
+    /// are not crypto-js's, so a read of them starts nothing here.
     [[nodiscard]] std::optional<PathCursor> root_at (std::size_t at) const {
         const Token& token          = in_.tokens.at (at);
         const std::string_view word = word_of (in_.code, token);
@@ -813,11 +815,11 @@ class CryptoJsReads {
         if (word != "require") {
             return std::nullopt;
         }
-        const auto end = shelf_require_end (in_.script, in_.code, token.end);
-        if (!end) {
+        const auto required = shelf_require (in_.script, in_.code, token.end);
+        if (!required || required->name != vayu::runtime::CRYPTO_JS_MODULE) {
             return std::nullopt;
         }
-        return PathCursor{ token_from (*end), *end, {} };
+        return PathCursor{ token_from (required->end), required->end, {} };
     }
 
     /// The namespace a binding pattern ending at @p pattern_end is assigned

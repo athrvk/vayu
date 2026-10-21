@@ -454,7 +454,7 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | Library | Purpose |
 |---------|---------|
 | curl | HTTP client library - built with `default-features: false` and an explicit `openssl` (plus `http2`), so every platform *verifies* with OpenSSL ([#851](https://github.com/athrvk/vayu/issues/851)). It does not make Windows a single-backend build: the port's `http2` feature itself depends on `curl[ssl]`, which resolves to Schannel there, so the Windows libcurl is MultiSSL and the engine names its backend at startup instead (`pin_tls_backend()`). Keep the explicit `openssl` regardless - without it there is no OpenSSL to name. See [#858](https://github.com/athrvk/vayu/issues/858). libcurl links every protocol the port builds by default (`file`, `ftp(s)`, `gopher(s)`, `dict`, `imap(s)`, `pop3(s)`, `smtp(s)`, `telnet`, `tftp`, `rtsp`, `mqtt(s)`): curl 8.23 removed the `HTTP_ONLY` build that the port's `non-http` feature used to select, so the build no longer backs the engine's http/https scheme rule ([#2321](https://github.com/athrvk/vayu/issues/2321)). The rule is enforced per handle - `apply_transport_policy` sets `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` to `http,https` on every transfer handle - and by the URL check before a send ([URL schemes](api-reference.md#url-schemes)). `UrlSchemeHandle.TheApplierAloneRefusesEveryOtherProtocolLibcurlSpeaks`, `UrlSchemeRedirect.TheTransportApplierAloneRefusesAFileUrl` and `UrlSchemeRedirect.ARedirectToFtpIsRefusedOnBothDrivers` pin the handle option, and `UrlSchemeGuard.EveryFileThatCreatesAHandleAppliesTheTransportPolicy` fails when a source file creates a handle without calling the applier. WebSocket support would be the port's `websockets` feature |
-| libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`) |
+| libsodium | SHA-256, HMAC-SHA256, base64 and hex (PKCE, Basic/OAuth credentials, `pm.crypto`), and the CSPRNG behind the script sandbox's `require('uuid')` (`randombytes_buf`, [#2650](https://github.com/athrvk/vayu/issues/2650)) |
 | OpenSSL (libcrypto) | MD5, SHA-1 and the SHA-2 digests and HMACs behind the script sandbox's `crypto-js` shim (`utils/digest.hpp`, [#2578](https://github.com/athrvk/vayu/issues/2578)). Not a new dependency: it is libcurl's TLS backend, and `vayu_core` now links `OpenSSL::Crypto` directly |
 | nlohmann-json | JSON parsing/serialization |
 | valijson | JSON Schema validation of responses against a bound OpenAPI document |
@@ -465,6 +465,37 @@ Dependencies are managed via vcpkg and specified in `engine/vcpkg.json`:
 | sqlite3 | Embedded database |
 | sqlite-orm | C++ ORM for SQLite |
 | gtest | Unit testing framework |
+
+### Vendored JavaScript libraries
+
+The libraries the script sandbox's `require()` hands out are the real npm
+builds, not vcpkg ports: each one is committed under `engine/vendor/<lib>/`
+beside its licence and a `README.md` naming the package, the exact version,
+the tarball URL and its registry integrity. They are compiled into `vayu_core`
+as data and evaluated on a script's first `require` of them, never when a
+context is built ([#2650](https://github.com/athrvk/vayu/issues/2650)).
+
+| Library | Version | Licence | Vendored file |
+|---------|---------|---------|---------------|
+| uuid | 8.3.2 | MIT | `engine/vendor/uuid/uuid.min.js` (`dist/umd/uuid.min.js`, 8,160 bytes) |
+
+`vayu_embed_js(<target> <symbol> <file>)` (`engine/cmake/embed_js.cmake`) is
+the embed step, one call per library inside the QuickJS block of
+`engine/CMakeLists.txt`. At configure time it reads the file as hex and writes
+`<build>/generated/vayu/embedded/<symbol>.hpp`, a `constexpr std::string_view`
+over a byte array that ends in the zero byte `JS_Eval` reads past the length;
+the generated directory is on `vayu_core`'s private include path only. Bytes
+rather than a string literal because MSVC refuses one literal over 16,380
+bytes (C2026) and a concatenation over 65,535 (C1091). The file is a configure
+dependency, so editing it re-runs CMake, and the header is rewritten only when
+its content changes. The header asserts that it holds as many bytes as the file
+has, so an embed that came out short is a compile error. The cost is linear:
+about 10 ms of configure for uuid's 8 KB and 90 ms per 70 KB.
+
+The vendored files are excluded from every formatter and linter
+(`engine/vendor/.clang-format`, the repo-JS ESLint config's ignores) and must
+stay byte-identical to the package; `.gitattributes`' `eol=lf` is a no-op on
+them because they hold no CR.
 
 ### vcpkg Setup
 

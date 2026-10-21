@@ -8454,7 +8454,7 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find ("crypto-js"), std::string::npos)
+    EXPECT_NE (refusal.find ("(crypto-js, uuid)"), std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8532,6 +8532,88 @@ TEST_F (ScriptEngineTest, RequireShelfGlobalCanBeReassigned) {
     request, env);
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (env["out"].value, "d41d8cd98f00b204e9800998ecf8427e");
+}
+
+// require('uuid') is npm's uuid 8.3.2, vendored (#2650).
+
+namespace {
+
+constexpr const char* UUID_V4_PATTERN =
+"/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/";
+
+} // namespace
+
+// Mutation: have native.randomBytes answer zeros and the two calls agree.
+TEST_F (ScriptEngineTest, RequireShelfUuidV4IsRandomAndWellFormed) {
+    const std::string v4_shape = std::string (UUID_V4_PATTERN) + ".test(require('uuid').v4())";
+    EXPECT_EQ (shelf_answer (engine, request, v4_shape), "true");
+    EXPECT_EQ (shelf_answer (engine, request,
+               "(function (u) { var a = u.v4(), b = u.v4(); return a !== b && "
+               "u.validate(a) && u.version(b) === 4; })(require('uuid'))"),
+    "true");
+}
+
+// Postman's uuid is called as a function; npm's members ride on it.
+// Mutation: return `api` from the glue and the call throws.
+TEST_F (ScriptEngineTest, RequireShelfUuidIsCallableAsPostmansIs) {
+    EXPECT_EQ (shelf_answer (engine, request, std::string (UUID_V4_PATTERN) + ".test(require('uuid')())"),
+    "true");
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require('uuid') + ' ' + (require('uuid') === require('uuid'))"),
+    "function true");
+    EXPECT_EQ (shelf_answer (engine, request,
+               "(function () { const { v4: uuidv4 } = require('uuid'); return "
+               "uuidv4().length; })()"),
+    "36");
+}
+
+// The name-based and time-based versions against their published answers:
+// RFC 4122's DNS namespace and uuid's own README examples.
+TEST_F (ScriptEngineTest, RequireShelfUuidMatchesKnownAnswers) {
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "require('uuid').v5('www.example.com', require('uuid').v5.DNS)", "2ed6657d-e927-568b-95e1-2665a8aea6a2" },
+    { "require('uuid').v3('www.example.com', require('uuid').v3.DNS)", "5df41881-3aed-3515-88a7-2f4a814cf09e" },
+    { "require('uuid').v5('https://www.w3.org/', require('uuid').v5.URL)",
+    "c106a26a-21bb-5538-8bf2-57095d1976c1" },
+    { "require('uuid').v1({ node: [0x01, 0x23, 0x45, 0x67, 0x89, 0xab], "
+      "clockseq: 0x1234, msecs: Date.UTC(2011, 10, 1), nsecs: 5678 })",
+    "710b962e-041c-11e1-9234-0123456789ab" },
+    { "/^[0-9a-f]{8}-[0-9a-f]{4}-1[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/"
+      ".test(require('uuid').v1())",
+    "true" },
+    { "require('uuid').NIL", "00000000-0000-0000-0000-000000000000" },
+    { "require('uuid').validate('not a UUID')", "false" },
+    { "require('uuid').validate('6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b')", "true" },
+    { "require('uuid').version('45637ec4-c85f-11ea-87d0-0242ac130003')", "1" },
+    { "require('uuid').stringify(require('uuid').parse("
+      "'6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b'))",
+    "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// The UMD's CommonJS branch and the glue's `crypto` are the factory's own;
+// none of them reaches the script's global scope.
+TEST_F (ScriptEngineTest, RequireShelfUuidLeavesNoGlobalBehind) {
+    EXPECT_EQ (shelf_answer (engine, request,
+               "(require('uuid').v4(), [typeof uuid, typeof crypto, typeof "
+               "module, typeof exports, typeof define].join(' '))"),
+    "undefined undefined undefined undefined undefined");
+}
+
+// Mutation: evaluate the shelf in `setup_require_shelf` and the first
+// expectation fails.
+TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require"), "function");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that requires nothing evaluated a library";
+
+    EXPECT_EQ (shelf_answer (engine, request, "require('uuid').v4().length + require('uuid')().length"),
+    "72");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
 // The defect #2578 measured: a crypto-js signing script failed and the request

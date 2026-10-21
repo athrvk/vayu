@@ -307,6 +307,22 @@ TEST (ScriptApiScan, ARequireOfAShelfModuleIsNotNamed) {
     EXPECT_EQ (names_in ("const { MD5 } = require('crypto-js');"), Names{});
 }
 
+// uuid's members are not crypto-js's (#2650): reading them off its require is
+// neither an unsupported require nor an unsupported CryptoJS member.
+TEST (ScriptApiScan, AShelfModuleOtherThanCryptoJsIsNotReadAsTheNamespace) {
+    for (const char* script : { "require('uuid');", "const uuid = require('uuid'); uuid.v4();",
+         "const { v4 } = require('uuid');", "const { v4: uuidv4, v5 } = require('uuid');",
+         "require('uuid').v4();", "require('uuid')();" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+    // Beside it, crypto-js is read as it was.
+    EXPECT_EQ (names_in ("require('uuid').v4(); require('crypto-js').AES;"),
+    Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("const { v4 } = require('uuid'); const { AES } = "
+                         "require('crypto-js');"),
+    Names{ "CryptoJS" });
+}
+
 TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
     // Off the shelf, or a name that only starts like one.
     EXPECT_EQ (names_in ("require('lodash');"), Names{ "require()" });
