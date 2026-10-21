@@ -8660,8 +8660,8 @@ after its first three live ticks, which measure the transition to the new
 target, read from one histogram; it is not a mean of 100 ms window percentiles,
 which a level with a periodic pause would pass. Its `rps` is the mean throughput
 over the same ticks. It stops - and names the reason in
-the report - when p99 exceeds `sloMs` across **two consecutive** windows
-(`slo_exceeded`; one breaching window re-measures the same level rather than
+the report - when p99 exceeds `sloMs` across **two consecutive** judged levels
+(`slo_exceeded`; one breaching measurement re-measures the same level rather than
 ending the search), when two step-ups buy under 5% more throughput
 (`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
 runs out (`deadline`), or when the operator stops the run (`stopped`).
