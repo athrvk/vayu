@@ -30,6 +30,7 @@ const REQUEST = {
 	name: "Get customer",
 	method: "GET",
 	url: "https://api.example.test/v1/customers/42",
+	params: [],
 };
 
 // Billing is a folder inside Acme, so the path has to walk the chain rather

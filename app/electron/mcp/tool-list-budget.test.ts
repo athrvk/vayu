@@ -30,7 +30,9 @@
  * #2540's `dataFileCastNumbers` sentence in `list_runs`, with the descriptions
  * master gained meanwhile, took the writes-on rows to 190,876 B (reveal off)
  * and 186,479 B (reveal on), and their caps went from 186,000 / 190,600 to
- * 191,000 / 186,800 (one measurement plus a few hundred bytes).
+ * 191,000 / 186,800 (one measurement plus a few hundred bytes). The
+ * descriptions #2629, #2632 and #2640 then added took the reveal-off row to
+ * 191,138 B on master itself, and its cap went to 191,500.
  *
  * #2445 (an output schema on every tool) grows the list and must land under
  * these caps, or raise them in its own diff, where a reviewer sees it.
@@ -57,7 +59,7 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 51, maxBytes: 127_300 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 51, maxBytes: 124_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 191_000 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 79, maxBytes: 191_500 },
 	{ allowWrites: true, revealSecretsToAgents: true, tools: 79, maxBytes: 186_800 },
 ];
 

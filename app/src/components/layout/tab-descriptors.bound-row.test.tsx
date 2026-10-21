@@ -33,6 +33,7 @@ const request = {
 	name: "",
 	method: "GET",
 	url: "https://api.test/u/{{username}}",
+	params: [],
 };
 
 vi.mock("@/queries", () => ({
