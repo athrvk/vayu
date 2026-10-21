@@ -471,6 +471,16 @@ Bug reports, feature ideas, docs, and code are all welcome. The
 covers dev setup, code style, testing, and the release process;
 [Build from Source](building.md) gets the engine and app compiling locally.
 
+Find Vayu useful? Recommend it on AlternativeTo, where people compare API
+clients:
+
+<a href="https://alternativeto.net/software/vayu-api-client/about/?utm_source=badge&utm_medium=referral" target="_blank" rel="noopener">
+  <img src="https://alternativeto.net/static/badges/badge-wide-dark.svg"
+       alt="Vayu API Client | AlternativeTo"
+       width="406" height="77"
+       style="max-width: 100%; height: auto;" />
+</a>
+
 !!! note "Licensing"
 
     The engine is AGPL-3.0 and the app is Apache-2.0. See
