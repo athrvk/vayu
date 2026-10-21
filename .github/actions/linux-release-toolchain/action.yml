@@ -82,10 +82,25 @@ runs:
           gnupg \
           software-properties-common
 
+        # Launchpad answers 5xx now and then: the signing key comes from its
+        # API (`GPGKeyTemporarilyNotFoundError`, HTTP 500) and the PPA host
+        # serves 503s. The whole sequence is retried so a blip is not a red
+        # release; an outage that outlasts the attempts still fails the step.
+        install_gcc13() {
+          as_root add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
+            as_root apt-get update &&
+            apt_install gcc-13 g++-13
+        }
         if ! command -v g++-13 >/dev/null 2>&1; then
-          as_root add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          as_root apt-get update
-          apt_install gcc-13 g++-13
+          for attempt in 1 2 3 4 5; do
+            install_gcc13 && break
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Could not install GCC 13 from ppa:ubuntu-toolchain-r/test after $attempt attempts." >&2
+              exit 1
+            fi
+            echo "GCC 13 install failed (attempt $attempt), retrying in $((attempt * 30))s" >&2
+            sleep "$((attempt * 30))"
+          done
         fi
         g++-13 --version | head -1
         # CMake reads CC/CXX on a fresh configure, and vcpkg builds its ports
