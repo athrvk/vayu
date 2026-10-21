@@ -391,7 +391,7 @@ Both redirect fields are optional because absent means "leave the engine's defau
 file states it, and the orchestrator forwards it to `POST /import/apply` only when set.
 Sending an omitted `false` as `true` would follow a 3xx the user disabled; sending an
 absent value as `false` would stop one they never touched. Producers: Postman's
-item-level `protocolProfileBehavior` (both fields, see [postman.md](./postman.md)) and
+item-level `protocolProfileBehavior`, resolved through its folders (both fields, see [postman.md](./postman.md)) and
 Insomnia's `settingFollowRedirects` (`followRedirects` only - its redirect *limit* is an
 app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md)).
 

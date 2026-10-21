@@ -45,15 +45,15 @@ The match is a substring check (`schema.includes(...)`), so the full schema URL 
 `parse_postman(parsed, options, format)` serves both versions:
 
 1. Creates one `PostmanCounts` (the options, the request, folder and non-executable-auth counts, a counter per skipped kind, the client-certificate candidates, and the request names each counter grew on) threaded through the whole walk.
-2. Calls `pm_folder(parsed, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
+2. Calls `pm_folder(parsed, {}, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
 3. Builds `meta`, adding a `SkippedItem` for each counter that is greater than zero.
 
 ### Tree walk - `pm_folder`
 
-`pm_folder(node, counts)` walks `node.item[]`. For each `child`:
+`pm_folder(node, inherited, counts)` walks `node.item[]`, passing down `resolved`: `inherited` (the enclosing nodes' `protocolProfileBehavior`, merged) overlaid with the node's own - see [Redirect settings](#redirect-settings). For each `child`:
 
-- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, counts)`, push into `children`.
-- **Request** (`child.request` is truthy) → `pm_request_named(child, counts)`, push into `requests`.
+- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, resolved, counts)`, push into `children`.
+- **Request** (`child.request` is truthy) → `pm_request_named(child, resolved, counts)`, push into `requests`.
 - **Not an object at all** (`null`, a string, a number) → skipped, counting toward `malformed_item`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; such an entry used to fail the whole import with an error naming neither the format nor an item. `event[]` entries are filtered the same way (`pm_events`).
 - Anything else (an object with no `item[]` and no `request`) is silently ignored.
 
@@ -65,13 +65,13 @@ The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth
 
 ### Request build - `pm_request`
 
-`pm_request(item, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, increments `counts.requests`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `counts.non_executable`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
+`pm_request(item, inherited, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, increments `counts.requests`, and (if the request auth mode is one of the data-only modes in `CONFIG_AUTH_TYPES`) increments `counts.non_executable`. Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` resolved through its folders (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
 
 ## Field mapping
 
 ### Collection (root)
 
-The root is produced by `pm_folder(parsed, counts)`; `parsed` is the whole collection object.
+The root is produced by `pm_folder(parsed, {}, counts)`; `parsed` is the whole collection object.
 
 | Postman | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
@@ -100,7 +100,7 @@ Same `pm_folder` mapping. A folder node has `name`/`description`/`variable`/`aut
 | `request.body` | `body` | via `pmBody` (see [Body mapping](#body-mapping)) |
 | `request.auth` | `auth` | via `map_postman_auth`; `inherit` allowed for requests |
 | `item.event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
-| `item.protocolProfileBehavior.followRedirects` | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
+| `item.protocolProfileBehavior.followRedirects` (and the five like it: read from the object resolved through the folders, see [Redirect settings](#redirect-settings)) | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
 | `item.protocolProfileBehavior.strictSSL` | `verifySSL` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.disableCookies` | `disableCookies` | only when it is a boolean; otherwise **absent** (engine default `false`) - issue #1765 |
@@ -187,7 +187,7 @@ Postman writes item-level `protocolProfileBehavior` exactly when the user overri
 
 The three redirect and TLS fields are **optional on the draft and omitted from the payload when the source did not state them** - the engine then applies its own defaults (`followRedirects: true`, `maxRedirects: 10`, `verifySSL: true`). An absent field must not look like a stated `true`: the engine follows redirects and verifies certificates by default, so dropping a source `false` silently follows the 3xx the request exists to inspect, or trusts a host the export deliberately did not.
 
-Values of the wrong type are ignored rather than coerced (a `"false"` string would read as the user's setting while being its opposite). Collection- and folder-level `protocolProfileBehavior` is **not** read: Vayu stores these settings per request only, so there is nowhere to put it.
+Values of the wrong type are ignored rather than coerced (a `"false"` string would read as the user's setting while being its opposite). A folder's or the collection's `protocolProfileBehavior` is read too (issue [#2538](https://github.com/athrvk/vayu/issues/2538)). Postman resolves it the way `postman-collection`'s `getProtocolProfileBehaviorResolved` does: the collection's object, each enclosing folder's and the request's own are merged in that order with the nearest winning, key by key and one level deep, whatever the value's type. Vayu stores these settings per request, so the import flattens that merge: `pm_folder` hands `pm_request` the object resolved so far (`inherit_protocol_behavior`), and the six settings Vayu applies (`followRedirects`, `maxRedirects`, `strictSSL`, `disableCookies`, `disableUrlEncoding`, `disabledSystemHeaders`) land on every request below the node that does not state its own. A request stating `followRedirects: true` under a folder that states `false` keeps `true`. There is no per-header merge: a request's own `disabledSystemHeaders` replaces the folder's wholesale, as in Postman (checked against Newman). The resolved values are what the request applies; `postmanProtocolBehavior` stays the request's **own** object alone, so a request with none states none.
 
 Since issue #1765 the three settings that change what Postman sends are
 stored and applied per request, the same optional-on-the-draft way:
@@ -221,6 +221,8 @@ is not Postman's default (`false`, or an empty object or array) - a TLS option,
 `insecureHTTPParser` - or `host` / `content-length` set in
 `disabledSystemHeaders`, which Vayu cannot omit without breaking the request's
 framing. `disableBodyPruning` is not counted: Vayu always sends a body.
+
+The same test runs on a folder's and on the collection's own object, with the result counted once per declaring node as `protocol_behavior_folder` (not once per request below it, and not again on those requests), with that folder's or collection's name under `names`. The preview says "folder or collection" for it where the `protocol_behavior` line says "request". The applied settings need no line: they arrive on the requests, where the Settings tab shows them.
 
 ## URL handling
 
@@ -413,7 +415,7 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`; a `script` that is itself a string is used as the text). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), `protocol_behavior_folder` (the same, declared on a folder or the collection, counted once per declaring node with its name under `names`), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.unsupportedScriptApis`** - `[{request, names}]`, present **only when non-empty** (no other importer sends it, and it is not a `meta.skipped` kind: it carries a list per subject, which `ImportTally` cannot hold). `request` is the request's name, or the folder's or collection's (`info.name`) for a script declared there; `names` are the table's spellings (`tests[]`, `postman.*`, `require()`, `script.packages`, `pm.visualizer`, ...), deduplicated and in table order, across all of that subject's scripts. Entries follow the walk: a folder's requests, then the folder, then the collection last, as with `nonExecutableAuthRequests`. A request name used twice is listed twice - they are different requests. See [Scripts](#scripts).
 
@@ -530,6 +532,12 @@ export writes the edit.
   `query[]` rows themselves come back as written, a null value as `null`.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
+- **A folder's or the collection's `protocolProfileBehavior`** is not written
+  back at the level it was declared on. The import flattened its applied
+  settings onto the requests below it, so they come back as request-level keys
+  (generated, or reconciled into the request's own object by the rule below);
+  a key Vayu does not apply (`insecureHTTPParser`, a TLS option) is counted at
+  import and not carried, because there is no folder-level carrier.
 - **`protocolProfileBehavior`** is written back as imported, member order and
   every key included, while it agrees with the request's settings; a setting
   edited in Vayu since is written over its key in place (or appended), and a

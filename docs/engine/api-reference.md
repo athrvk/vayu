@@ -4018,6 +4018,9 @@ disabledSystemHeaders, disableBodyPruning`, each only where it differs from
 Postman's default: `strictSSL: false`, `followRedirects: false`, a
 `maxRedirects` other than 10, `true` for either flag, the non-empty header
 list, and `disableBodyPruning: true` on a GET or HEAD that sends a body.
+A folder or collection is never given one: an import flattens a folder's
+`protocolProfileBehavior` onto the requests below it (#2538), so its applied
+settings come back on those requests and a key Vayu does not apply is lost.
 
 **Saved examples.** An example imported from Postman carries the saved
 response it came from (`request_examples.postman_response`), and so does one
