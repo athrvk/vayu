@@ -1815,7 +1815,9 @@ the sub-folder sits - which is pinned across the render and the engine's plan by
 engine's `scenario_plan_test.cpp` (issues #431, #2535).
 
 **Mutations:**
-- **`useCreateCollectionMutation()`** - Create collection
+- **`useCreateCollectionMutation()`** - Create collection: appends the row to
+  the collections list and seeds the new collection's request list with `[]`,
+  so the tree mounting it makes no list call and no other list refetches
 - **`useUpdateCollectionMutation()`** - Update collection (with cache update)
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
@@ -2274,9 +2276,10 @@ key rather than a stale entry under this one.
   from the `requests.detail` cache, which still holds the pre-update row at that
   point - the response carries only the new owner.
 - **The warm-cache prefetch is a query too.** `usePrefetchCollectionsAndRequests`
-  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so
-  creating a collection can invalidate it - it succeeds once at startup and
-  would otherwise never re-run for a collection created mid-session.
+  is keyed as `queryKeys.prefetch.allRequests()` rather than an inline key, so a
+  write that can change any collection's requests re-runs it as one call
+  (`invalidateAllRequestLists`). Creating a collection does not: a new
+  collection holds no requests, so its list is seeded empty instead (#2546).
 - **...but warming a *polled* list must not be a query.** `usePrefetchRuns` is a
   one-shot `prefetchInfiniteQuery` on mount, not an observer, because
   `useRunsQuery` carries a `refetchInterval` and observing it from the root
@@ -2295,7 +2298,7 @@ to keys through `lib/mcp-invalidation.ts`:
 
 | Entity | Invalidates | Why that key |
 |--------|-------------|--------------|
-| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` because the warm-cache pass succeeds once and would stay fresh forever, so a collection created mid-session never gets one - the same invalidation `useCreateCollectionMutation` and `useRestoreTrashMutation` do (#1438) |
+| `collection` | `collections.all`, `requests.all`, `trash.all`, `compose.all`, `prefetch.allRequests()` | A `delete_collection` cascades through descendants and their requests, and which rows those were is engine-side knowledge - the same reason `useDeleteCollectionMutation` invalidates coarsely. `trash.all` because a delete is what *adds* a row the drawer lists and a restore or purge is what takes one away; `compose.all` because a collection write moves the chain every descendant inherits auth, headers and scripts from, and this event carries no way to name them; `prefetch.allRequests()` because the warm-cache pass succeeds once and would stay fresh forever, so a collection created mid-session never gets one - the same invalidation `useRestoreTrashMutation` does (#1438) |
 | `request` | `requests.listByCollection(collectionId)`, or `requests.lists()` when the call named no collection, `trash.all`, plus `requests.detail(requestId)` and `compose.allForRequest(requestId)` when the call named one row | The same narrowing `useUpdateRequestMutation` does; without a named owner the owner is unknowable here. The detail key is for `update_request` / `delete_request`: it is `staleTime: Infinity`, so a restored tab would otherwise keep serving the copy it read on open. `trash.all` because `delete_request` declares this family alone and stamps a row the drawer lists. The compose key is the per-request prefix, not `compose.all`: every tool that can change a composition either names the row it wrote or declares `collection` too, `create_request` composes nothing yet, and `invalidateQueries` refetches a *mounted* observer whatever its `staleTime` - so the wide key would re-compose an open snippet once per write in an agent's loop over rows it never touched. Every compose cell in this table is `invalidateCompositions`, the helper the renderer's own PUTs call. `prefetch.allRequests()` is deliberately **not** here for the same reason: it fans out one list fetch per collection, and this is the family an agent loops over row by row (#1438) |
 | `environment` | `environments.all`, `globals.all`, `compose.all` | Variables are read through the detail cache as well as the list; `POST /compose` substitutes those same variables, and a composition refetches only when told to, so `invalidateCompositions` is what `useUpdateEnvironmentMutation` and `useUpdateGlobalsMutation` call too (#1877). `globals.all` rides along because `update_globals` (#758) declares this family - same resolution order, same blob shape, and an entity of its own would have had exactly one reader |
 | `run` | `runs.lists()`, `runs.allRuns()`, `runs.baselines()`, `runs.requestRuns()`, `runs.recentDesigns()`, `runs.lastCollectionRuns()`, `runs.lastDesigns()` - and a **removal** of `runs.detail/report/samples/timeSeries/monitorSeries` for a named `runId` | The history list polls, but Settings' count, the vs-baseline strip, Recent sends, Last run and every open tab's last design run do not. The five prefixes rather than per-row keys because a run id gives no way back to the request or collection it belonged to - the same trade `useDeleteRunMutation` makes |

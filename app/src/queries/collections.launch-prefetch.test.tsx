@@ -27,6 +27,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
+	useCreateCollectionMutation,
 	useDeleteCollectionMutation,
 	useDeleteRequestMutation,
 	useMultipleCollectionRequests,
@@ -48,6 +49,7 @@ vi.mock("@/services/api", () => ({
 		listRequestSummaries: (...a: unknown[]) => listRequestSummaries(...a),
 		listRequests: () => listRequests(),
 		listCollections: (...a: unknown[]) => listCollections(...a),
+		createCollection: vi.fn(async () => collection("c4")),
 		deleteCollection: vi.fn(async () => undefined),
 		deleteRequest: vi.fn(async () => undefined),
 		applyImport: vi.fn(async () => ({ idMap: {} })),
@@ -310,6 +312,39 @@ describe("a mutation that invalidates every request list", () => {
 		await settle(client);
 
 		expectOneWorkspaceCall();
+	});
+});
+
+/**
+ * A collection write that changes nothing under the row reads no request list
+ * (#2546): an agent looping over collections would otherwise put one
+ * workspace-wide `GET /requests` on the engine per call.
+ */
+describe("a collection write that changes no request", () => {
+	it("seeds a created collection's list, so the tree mounting it fetches nothing", async () => {
+		const client = await launched();
+		const { result } = renderHook(() => useCreateCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+
+		await act(async () => {
+			await result.current.mutateAsync({ name: "c4" });
+		});
+		// The tree has mounted the new collection's list.
+		await waitFor(() =>
+			expect(
+				client
+					.getQueryCache()
+					.find({ queryKey: queryKeys.requests.listByCollection("c4") })
+					?.getObserversCount()
+			).toBe(1)
+		);
+		await waitFor(() => expect(client.isFetching()).toBe(0));
+
+		// Mutation check: drop the seed and the mount fetches `{ collectionId: "c4" }`;
+		// invalidate the pass on create again and it is a workspace call.
+		expect(listRequestSummaries).not.toHaveBeenCalled();
+		expect(listRequests).not.toHaveBeenCalled();
 	});
 });
 

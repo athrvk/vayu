@@ -381,10 +381,13 @@ export function useCreateCollectionMutation() {
 				const next = old ? [...old, newCollection] : [newCollection];
 				return next.sort(compareTreeOrder);
 			});
-			// The warm-cache pass is a query like any other: it succeeded once at
-			// startup and would stay fresh forever, so a collection created
-			// mid-session never got one. Invalidating re-runs it over the new set.
-			queryClient.invalidateQueries({ queryKey: queryKeys.prefetch.allRequests() });
+			// A new collection holds no requests. Seeded, so the tree mounting it
+			// makes no list call - the warm-cache pass seeds every collection it
+			// saw the same way.
+			queryClient.setQueryData<RequestSummary[]>(
+				queryKeys.requests.listByCollection(newCollection.id),
+				[]
+			);
 		},
 	});
 }
