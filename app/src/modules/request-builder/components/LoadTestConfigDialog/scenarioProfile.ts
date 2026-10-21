@@ -36,7 +36,7 @@ import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 /**
  * `constant_rps` and `capacity` are a `400` engine-side for a scenario: an
  * open-loop rate over a multi-step sequence is an arrival-rate executor Vayu
- * does not implement, and a capacity search judges one windowed p99 where a
+ * does not implement, and a capacity search judges one p99 per level where a
  * sequence has one per step.
  */
 export const SCENARIO_LOAD_MODES = ["constant_concurrency", "iterations", "ramp_up"] as const;
