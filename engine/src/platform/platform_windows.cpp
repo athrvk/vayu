@@ -30,10 +30,12 @@
 
 #include <sddl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -249,6 +251,57 @@ FileReplacement replace_file_durably (const std::string& from, const std::string
     }
     replacement.durable = true;
     return replacement;
+}
+
+namespace {
+std::error_code last_error () {
+    return { static_cast<int> (GetLastError ()), std::system_category () };
+}
+} // namespace
+
+std::expected<OpenedFile, std::error_code> open_regular_file (
+const std::filesystem::path& path) {
+    // No FILE_FLAG_BACKUP_SEMANTICS, so a directory fails to open here; a
+    // device or a pipe opens and is refused by its type below. Sharing delete
+    // as well lets the file be moved or removed while a run holds it, as on
+    // POSIX.
+    HANDLE file = CreateFileW (path.c_str (), GENERIC_READ,
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return std::unexpected (last_error ());
+    }
+    LARGE_INTEGER size{};
+    if (GetFileType (file) != FILE_TYPE_DISK || GetFileSizeEx (file, &size) == 0) {
+        CloseHandle (file);
+        return std::unexpected (std::make_error_code (std::errc::invalid_argument));
+    }
+    return OpenedFile{ file, static_cast<std::uint64_t> (size.QuadPart) };
+}
+
+std::expected<std::size_t, std::error_code>
+read_file_at (ReadOnlyFile file, std::uint64_t offset, std::span<char> buffer) {
+    // An OVERLAPPED on a synchronous handle is a positional read: it starts at
+    // the offset it names and returns once the read completes.
+    OVERLAPPED at{};
+    at.Offset         = static_cast<DWORD> (offset & 0xFFFFFFFFULL);
+    at.OffsetHigh     = static_cast<DWORD> (offset >> 32U);
+    const auto wanted = static_cast<DWORD> (
+    std::min<std::size_t> (buffer.size (), std::numeric_limits<DWORD>::max ()));
+    DWORD got = 0;
+    if (ReadFile (file, buffer.data (), wanted, &got, &at) == 0) {
+        if (GetLastError () == ERROR_HANDLE_EOF) {
+            return 0;
+        }
+        return std::unexpected (last_error ());
+    }
+    return static_cast<std::size_t> (got);
+}
+
+void close_file (ReadOnlyFile file) {
+    if (file != INVALID_READ_ONLY_FILE) {
+        CloseHandle (file);
+    }
 }
 
 void restrict_new_files_to_owner () {
