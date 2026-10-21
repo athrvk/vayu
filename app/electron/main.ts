@@ -98,6 +98,7 @@ import {
 } from "./app-log.js";
 import { registerLogIpc } from "./log-ipc.js";
 import { registerFileIpc } from "./file-ipc.js";
+import { createFileRoots } from "./file-roots.js";
 import { createFileTrustClient } from "./file-trust-client.js";
 import { createFileGrants, registerFilePickedIpc } from "./file-grants.js";
 import { isFromAppMainFrame, type IpcSenderLike } from "./ipc-sender.js";
@@ -240,6 +241,11 @@ const fileGrants = createFileGrants({
 	client: fileTrust,
 	log: (msg, fields) => appLogger().warn("ipc", msg, fields),
 });
+/**
+ * The folders the user allowed, copied from the engine for `file:stat`
+ * (#2357); refreshed by the two folder channels and after each engine start.
+ */
+const fileRoots = createFileRoots(fileTrust);
 let mainWindow: BrowserWindow | null = null;
 
 /** The window as it is right now, or null if there isn't a usable one. */
@@ -921,11 +927,13 @@ function publishEnginePort(port: number): void {
 
 /**
  * A spawned engine's grant secret, for the one module that sends it (#2356).
- * A new engine is also when the grants copy can have gone stale.
+ * A new engine is also when the grants and allowed-folder copies can have gone
+ * stale.
  */
 function receiveGrantSecret(secret: string): void {
 	fileTrust.setSecret(secret);
 	fileGrants.invalidate();
+	fileRoots.invalidate();
 }
 
 /** Whether an IPC message came from the app window's top-level document. */
@@ -1591,7 +1599,8 @@ function setupIpcHandlers() {
 
 	// The folder picker behind Settings > Files and the body editor's "Allow
 	// folder...", which allows what was chosen with the grant secret (#2356),
-	// and the size-only stat behind the body editor's file line. Nothing here
+	// and the size-only stat behind the body editor's file line, which answers
+	// only for a picked file or one under an allowed folder (#2357). Nothing here
 	// reads a file's contents; see file-ipc.ts.
 	registerFileIpc(ipcMain, {
 		showOpenDialog: (options) => {
@@ -1601,6 +1610,8 @@ function setupIpcHandlers() {
 		createFileRoot: (folder) => fileTrust.createFileRoot(folder),
 		deleteFileRoot: (id) => fileTrust.deleteFileRoot(id),
 		isAppFrame,
+		isGranted: (p) => fileGrants.isGranted(p),
+		roots: fileRoots,
 	});
 
 	// The preload's report of a file the user picked or dropped, recorded with

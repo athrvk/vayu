@@ -9,12 +9,14 @@
  * The main-process half of the body-file channels: the folder picker that
  * allows what was chosen, the delete beside it, and the stat behind the body
  * editor's size line. `file:stat` is a channel on which the renderer names a
- * path, so what it refuses to answer is the part worth pinning; the two folder
- * channels change what every request may read, so who may call them is.
+ * path, so what it refuses to answer is the part worth pinning (#2357: a path
+ * that is neither picked nor under an allowed folder); the two folder channels
+ * change what every request may read, so who may call them is.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { allowFolder, chooseFolder, registerFileIpc, statFile } from "./file-ipc";
+import type { FileRoots } from "./file-roots";
 import type { EngineWrite, FileTrustRow } from "./file-trust-client";
 import type { IpcSenderLike } from "./ipc-sender";
 
@@ -25,47 +27,67 @@ function fileStat(size: number, isFile = true) {
 	return vi.fn(async () => ({ size, mtimeMs: 1_700_000_000_000, isFile: () => isFile }));
 }
 
+/** A roots reader holding @p folders, with `invalidate` spied. */
+function rootsOf(...folders: string[]): FileRoots & { invalidate: Mock<() => void> } {
+	return { list: vi.fn(async () => folders), invalidate: vi.fn() };
+}
+
+/** The gate deps for a path the user picked: granted, no folder allowed. */
+const allowed = { isGranted: async () => true, roots: rootsOf() };
+
+const identity = async (p: string) => p;
+
 describe("statFile", () => {
 	it("answers size and mtime for a regular file at an absolute path", async () => {
 		const stat = fileStat(1234);
-		await expect(statFile("/data/a.bin", { stat, isAbsolute: posixAbsolute })).resolves.toEqual(
-			{
-				size: 1234,
-				mtimeMs: 1_700_000_000_000,
-			}
-		);
+		await expect(
+			statFile("/data/a.bin", { stat, isAbsolute: posixAbsolute, ...allowed })
+		).resolves.toEqual({
+			size: 1234,
+			mtimeMs: 1_700_000_000_000,
+		});
 		expect(stat).toHaveBeenCalledWith("/data/a.bin");
 	});
 
 	it("follows the host's absolute-path rule, whichever host it is", async () => {
 		const stat = fileStat(1);
 		await expect(
-			statFile("C:\\data\\a.bin", { stat, isAbsolute: windowsAbsolute })
+			statFile("C:\\data\\a.bin", { stat, isAbsolute: windowsAbsolute, ...allowed })
 		).resolves.not.toBeNull();
 		await expect(
-			statFile("C:\\data\\a.bin", { stat, isAbsolute: posixAbsolute })
+			statFile("C:\\data\\a.bin", { stat, isAbsolute: posixAbsolute, ...allowed })
 		).resolves.toBeNull();
 	});
 
 	it("refuses a relative path without touching the disk", async () => {
 		const stat = fileStat(1);
-		await expect(statFile("a.bin", { stat, isAbsolute: posixAbsolute })).resolves.toBeNull();
 		await expect(
-			statFile("{{fixturesDir}}/a.bin", { stat, isAbsolute: posixAbsolute })
+			statFile("a.bin", { stat, isAbsolute: posixAbsolute, ...allowed })
+		).resolves.toBeNull();
+		await expect(
+			statFile("{{fixturesDir}}/a.bin", { stat, isAbsolute: posixAbsolute, ...allowed })
 		).resolves.toBeNull();
 		expect(stat).not.toHaveBeenCalled();
 	});
 
 	it("refuses a non-string or a NUL-carrying path", async () => {
 		const stat = fileStat(1);
-		await expect(statFile(42, { stat, isAbsolute: posixAbsolute })).resolves.toBeNull();
-		await expect(statFile("/a\0b", { stat, isAbsolute: posixAbsolute })).resolves.toBeNull();
+		await expect(
+			statFile(42, { stat, isAbsolute: posixAbsolute, ...allowed })
+		).resolves.toBeNull();
+		await expect(
+			statFile("/a\0b", { stat, isAbsolute: posixAbsolute, ...allowed })
+		).resolves.toBeNull();
 		expect(stat).not.toHaveBeenCalled();
 	});
 
 	it("answers null for something that is not a regular file", async () => {
 		await expect(
-			statFile("/data", { stat: fileStat(4096, false), isAbsolute: posixAbsolute })
+			statFile("/data", {
+				stat: fileStat(4096, false),
+				isAbsolute: posixAbsolute,
+				...allowed,
+			})
 		).resolves.toBeNull();
 	});
 
@@ -74,8 +96,124 @@ describe("statFile", () => {
 			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 		});
 		await expect(
-			statFile("/gone.bin", { stat, isAbsolute: posixAbsolute })
+			statFile("/gone.bin", { stat, isAbsolute: posixAbsolute, ...allowed })
 		).resolves.toBeNull();
+	});
+
+	describe("the grant gate", () => {
+		const stat = () => fileStat(77);
+
+		it("answers null for an existing file that is neither picked nor under an allowed folder", async () => {
+			const s = stat();
+			await expect(
+				statFile("/etc/passwd", {
+					stat: s,
+					isAbsolute: posixAbsolute,
+					realpath: identity,
+					isGranted: async () => false,
+					roots: rootsOf("/fixtures"),
+				})
+			).resolves.toBeNull();
+			expect(s).not.toHaveBeenCalled();
+		});
+
+		it("answers a picked file wherever it is, without consulting the folders", async () => {
+			const roots = rootsOf();
+			const isGranted = vi.fn(async () => true);
+			await expect(
+				statFile("/home/me/a.bin", {
+					stat: stat(),
+					isAbsolute: posixAbsolute,
+					isGranted,
+					roots,
+				})
+			).resolves.toEqual({ size: 77, mtimeMs: 1_700_000_000_000 });
+			expect(isGranted).toHaveBeenCalledWith("/home/me/a.bin");
+			expect(roots.list).not.toHaveBeenCalled();
+		});
+
+		it("answers a file under an allowed folder that was never picked", async () => {
+			await expect(
+				statFile("/fixtures/sub/a.bin", {
+					stat: stat(),
+					isAbsolute: posixAbsolute,
+					realpath: identity,
+					isGranted: async () => false,
+					roots: rootsOf("/other", "/fixtures"),
+				})
+			).resolves.toEqual({ size: 77, mtimeMs: 1_700_000_000_000 });
+		});
+
+		it("compares by path component, so root /a/b does not admit /a/bc", async () => {
+			const deps = {
+				stat: stat(),
+				isAbsolute: posixAbsolute,
+				realpath: identity,
+				isGranted: async () => false,
+				roots: rootsOf("/a/b"),
+			};
+			await expect(statFile("/a/bc/x.bin", deps)).resolves.toBeNull();
+			await expect(statFile("/a/b/x.bin", deps)).resolves.not.toBeNull();
+		});
+
+		it("refuses a symlink inside an allowed folder that points outside it", async () => {
+			const s = stat();
+			await expect(
+				statFile("/fixtures/link.bin", {
+					stat: s,
+					isAbsolute: posixAbsolute,
+					realpath: async () => "/etc/shadow",
+					isGranted: async () => false,
+					roots: rootsOf("/fixtures"),
+				})
+			).resolves.toBeNull();
+			expect(s).not.toHaveBeenCalled();
+		});
+
+		it("answers null for a path that cannot be resolved, as for one that is missing", async () => {
+			await expect(
+				statFile("/fixtures/gone.bin", {
+					stat: stat(),
+					isAbsolute: posixAbsolute,
+					realpath: async () => {
+						throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+					},
+					isGranted: async () => false,
+					roots: rootsOf("/fixtures"),
+				})
+			).resolves.toBeNull();
+		});
+
+		it("fails closed when the folders cannot be read, while a picked file still answers", async () => {
+			const roots: FileRoots = {
+				list: async () => {
+					throw new Error("engine down");
+				},
+				invalidate: vi.fn(),
+			};
+			const base = { stat: stat(), isAbsolute: posixAbsolute, realpath: identity, roots };
+
+			await expect(
+				statFile("/fixtures/a.bin", { ...base, isGranted: async () => false })
+			).resolves.toBeNull();
+			await expect(
+				statFile("/fixtures/a.bin", { ...base, isGranted: async () => true })
+			).resolves.toEqual({ size: 77, mtimeMs: 1_700_000_000_000 });
+		});
+
+		it("fails closed when the grant registry itself fails, but a folder still admits", async () => {
+			const isGranted = async (): Promise<boolean> => {
+				throw new Error("registry down");
+			};
+			const base = { stat: stat(), isAbsolute: posixAbsolute, realpath: identity, isGranted };
+
+			await expect(
+				statFile("/elsewhere/a.bin", { ...base, roots: rootsOf("/fixtures") })
+			).resolves.toBeNull();
+			await expect(
+				statFile("/fixtures/a.bin", { ...base, roots: rootsOf("/fixtures") })
+			).resolves.not.toBeNull();
+		});
 	});
 });
 
@@ -169,6 +307,8 @@ describe("allowFolder", () => {
 
 describe("registerFileIpc", () => {
 	function register(isAppFrame: boolean) {
+		const roots = rootsOf();
+		const isGranted = vi.fn(async () => true);
 		const handlers = new Map<string, (event: IpcSenderLike, ...args: unknown[]) => unknown>();
 		const ipc = {
 			handle: (
@@ -194,14 +334,16 @@ describe("registerFileIpc", () => {
 			isAppFrame: () => isAppFrame,
 			stat: fileStat(9),
 			isAbsolute: posixAbsolute,
+			isGranted,
+			roots,
 		});
 		const call = (channel: string, ...args: unknown[]) =>
 			handlers.get(channel)?.({ sender: {} }, ...args);
-		return { handlers, call, showOpenDialog, createFileRoot, deleteFileRoot };
+		return { handlers, call, showOpenDialog, createFileRoot, deleteFileRoot, roots, isGranted };
 	}
 
 	it("registers the three channels against their handlers", async () => {
-		const { handlers, call, deleteFileRoot } = register(true);
+		const { handlers, call, deleteFileRoot, isGranted } = register(true);
 
 		expect([...handlers.keys()].sort()).toEqual([
 			"file:allowFolder",
@@ -221,6 +363,42 @@ describe("registerFileIpc", () => {
 			size: 9,
 			mtimeMs: 1_700_000_000_000,
 		});
+		expect(isGranted).toHaveBeenCalledWith("/a.bin");
+	});
+
+	it("answers file:stat null when the injected gate says neither granted nor rooted", async () => {
+		const { call, isGranted } = register(true);
+		isGranted.mockResolvedValue(false);
+
+		await expect(call("file:stat", "/nowhere/a.bin")).resolves.toBeNull();
+	});
+
+	it("refreshes the allowed folders after the picker and after a delete, whatever the outcome", async () => {
+		const { call, roots, createFileRoot, deleteFileRoot } = register(true);
+
+		await call("file:allowFolder", {});
+		expect(roots.invalidate).toHaveBeenCalledTimes(1);
+
+		createFileRoot.mockResolvedValueOnce({
+			outcome: "refused",
+			status: 409,
+			code: "conflict",
+			message: "already",
+		});
+		await call("file:allowFolder", {});
+		expect(roots.invalidate).toHaveBeenCalledTimes(2);
+
+		await call("file:removeAllowedFolder", "froot_1");
+		expect(roots.invalidate).toHaveBeenCalledTimes(3);
+		expect(deleteFileRoot).toHaveBeenCalledOnce();
+	});
+
+	it("does not refresh the folders for a refused sender", () => {
+		const { call, roots } = register(false);
+
+		expect(() => call("file:allowFolder", {})).toThrow();
+		expect(() => call("file:removeAllowedFolder", "froot_1")).toThrow();
+		expect(roots.invalidate).not.toHaveBeenCalled();
 	});
 
 	it("hands a non-string id on as one the client refuses", async () => {

@@ -17,6 +17,10 @@
  * `fileGrants`. `main.ts` creates windows and starts the engine at import time,
  * so the wiring can only be read, the approach `startup-order.test.ts` takes.
  *
+ * `file:stat` is the fourth: `registerFileIpc` takes the same `isGranted` and
+ * the allowed-folder reader, and a call without them fails type-check, so the
+ * case below holds what they are.
+ *
  * Mutation check: pass `async () => true` instead of `fileGrants.isGranted(p)`
  * at any one call site and that site's case fails; delete a handler's read call
  * and the "found" case fails.
@@ -95,5 +99,20 @@ describe("the readers of a renderer-named path consult the grant registry", () =
 		const sites = READERS.flatMap((fn) => callArguments(code, fn));
 		expect(sites).toHaveLength(4);
 		for (const args of sites) expect(args).toMatch(/fileGrants\.isGranted\(/);
+	});
+
+	it("gives file:stat the grant registry and the allowed-folder reader", () => {
+		const calls = callArguments(code, "registerFileIpc");
+		// The scan found the one registration.
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatch(/isGranted:\s*\(\w+\)\s*=>\s*fileGrants\.isGranted\(/);
+		expect(calls[0]).toMatch(/roots:\s*fileRoots\b/);
+		expect(code).toMatch(/const fileRoots = createFileRoots\(fileTrust\)/);
+	});
+
+	it("re-reads the allowed folders when an engine is spawned", () => {
+		const at = code.indexOf("function receiveGrantSecret(");
+		expect(at).toBeGreaterThan(-1);
+		expect(balanced(code, code.indexOf("{", at))).toMatch(/fileRoots\.invalidate\(\)/);
 	});
 });

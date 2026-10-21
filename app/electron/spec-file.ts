@@ -59,6 +59,7 @@ import { SPEC_DOCUMENT_MAX_BYTES_SEED } from "./constants.js";
 import { engineOrigin } from "./engine-endpoint.js";
 import { engineFetch } from "./engine-fetch.js";
 import { assertGranted, type IsGranted } from "./file-grants.js";
+import { isWithin } from "./path-within.js";
 
 /** Extensions this channel will open, lower-cased and with the dot. */
 export const SPEC_FILE_EXTENSIONS: readonly string[] = [".json", ".yaml", ".yml"];
@@ -118,15 +119,6 @@ async function maxSpecFileBytes(system: SpecFileSystem): Promise<number> {
 		// Fall through to the seed.
 	}
 	return SPEC_DOCUMENT_MAX_BYTES_SEED;
-}
-
-/** True when @p target is @p root or sits beneath it, by path component. */
-function isWithin(root: string, target: string): boolean {
-	const relative = path.relative(root, target);
-	return (
-		relative === "" ||
-		(!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
-	);
 }
 
 class OutsideFolderError extends Error {

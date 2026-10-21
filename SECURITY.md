@@ -53,7 +53,9 @@ built from text rather than markup, an HTML response preview in a `sandbox=""`
 frame that runs no script and loads nothing from the network, and Electron
 fuses that disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` on
 packaged builds. The channels that read a file by a path the window names read
-only files you picked, dropped or opened through the app.
+only files you picked, dropped or opened through the app, and the one that
+reports a file's size answers only for those or for files under a folder you
+allowed.
 
 ## Data at rest
 
