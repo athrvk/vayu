@@ -440,6 +440,69 @@ TEST_F (MetricsCollectorTest, CumulativeTickPercentilesSpanEverySampledWindow) {
     EXPECT_NEAR (stats.at ("latencyP50Ms").get<double> (), 200.0, 0.2);
 }
 
+// #2388: a capacity level is the percentile of its completions, not the mean of
+// its windows' p99s. Ten windows at 300 ms among ninety at 50 ms read 300 ms;
+// the mean of the window p99s, which the search used to judge on, is 75 ms.
+// Mutation-check: drop the `add_window` into the level histogram in
+// sample_window_percentiles and the count fails; reset the level histogram
+// before every window and the p99 reads 50.
+TEST_F (MetricsCollectorTest, LevelLatencyIsThePercentileOfTheLevelNotTheMeanOfItsWindows) {
+    constexpr int WINDOWS          = 100;
+    constexpr int SLOW_EVERY       = 10;
+    constexpr int SAMPLES_A_WINDOW = 10;
+    collector->adopt_level_epoch (1);
+
+    double window_p99_sum = 0.0;
+    for (int window = 0; window < WINDOWS; ++window) {
+        const double latency_ms = window % SLOW_EVERY == 0 ? 300.0 : 50.0;
+        for (int i = 0; i < SAMPLES_A_WINDOW; ++i) {
+            collector->record_success (200, latency_ms, 0.0);
+        }
+        window_p99_sum += collector->sample_window_percentiles ().p99;
+    }
+    ASSERT_NEAR (window_p99_sum / WINDOWS, 75.0, 0.1)
+    << "the fixture is not the bimodal level the issue describes";
+
+    const auto level = collector->level_latency ();
+    EXPECT_EQ (level.epoch, 1u);
+    EXPECT_EQ (level.samples, static_cast<size_t> (WINDOWS * SAMPLES_A_WINDOW));
+    // HdrHistogram at 3 significant figures holds a value to 0.1%.
+    EXPECT_NEAR (level.p99_ms, 300.0, 0.3);
+}
+
+// The level histogram changes only when the epoch does: re-adopting the same
+// one keeps it, a new one empties it, and neither an empty window nor the
+// stored row's take touches it.
+// Mutation-check: reset unconditionally in adopt_level_epoch and the first
+// re-adopt fails; drop the reset and the new epoch still holds the old level.
+TEST_F (MetricsCollectorTest, AdoptingANewLevelEpochAndOnlyThatResetsTheLevel) {
+    EXPECT_EQ (collector->level_latency ().samples, 0u);
+    for (int i = 0; i < 10; ++i) {
+        collector->record_success (200, 500.0, 0.0);
+    }
+    (void)collector->sample_window_percentiles ();
+    collector->adopt_level_epoch (0);
+    EXPECT_EQ (collector->level_latency ().samples, 10u)
+    << "re-adopting the epoch it holds reset the level";
+
+    collector->adopt_level_epoch (1);
+    const auto fresh = collector->level_latency ();
+    EXPECT_EQ (fresh.epoch, 1u);
+    EXPECT_EQ (fresh.samples, 0u) << "a new epoch kept the previous level";
+    EXPECT_DOUBLE_EQ (fresh.p99_ms, 0.0);
+
+    for (int i = 0; i < 5; ++i) {
+        collector->record_success (200, 20.0, 0.0);
+    }
+    (void)collector->sample_window_percentiles ();
+    (void)collector->sample_window_percentiles (); // an empty window
+    (void)collector->take_second_percentiles ();
+    collector->adopt_level_epoch (1);
+    const auto level = collector->level_latency ();
+    EXPECT_EQ (level.samples, 5u);
+    EXPECT_NEAR (level.p99_ms, 20.0, 0.02);
+}
+
 // ============================================================================
 // Status Code Distribution Tests
 // ============================================================================

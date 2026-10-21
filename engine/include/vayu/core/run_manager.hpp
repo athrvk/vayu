@@ -927,35 +927,32 @@ struct RunContext {
 
     // ---- Published metric tick (the strategies' one feedback path) --------
     /**
-     * The numbers of the most recent live tick, as the dashboard sees them.
+     * What the metrics thread measured at its most recent live tick.
      *
-     * The capacity strategy needs windowed percentiles to steer by, and it must
-     * NOT call `MetricsCollector::sample_window_percentiles()` for them: that
-     * call is documented single-reader and *resets* the window on read, and the
+     * The capacity strategy needs latency to steer by, and it must NOT sample
+     * the collector for it: `MetricsCollector::sample_window_percentiles()` is
+     * documented single-reader and *resets* the window on read, and the
      * metrics thread already consumes it once per tick in `emit_live_tick`. A
      * second consumer would silently halve both readers' sample counts, and
-     * would take its share out of the stored per-second rows too, which
-     * `take_second_percentiles()` merges from the same windows.
+     * would take its share out of the stored per-second rows and the level
+     * histogram too, which are merged from the same windows.
      *
      * So the producer publishes what it already computed, and the strategy
-     * copies it out. One writer (the metrics thread), cheap reads, and the
-     * controller steers by exactly the figures the live chart is drawing.
+     * copies it out. One writer (the metrics thread), cheap reads.
      */
     struct LiveTick {
         /// Monotonic per run, starting at 1. A reader compares it against the
         /// last one it saw to tell a fresh tick from a re-read of the same one;
         /// a wall-clock timestamp cannot, since two ticks can share a
         /// millisecond and the clock can step.
-        uint64_t sequence     = 0;
-        double latency_p50_ms = 0.0;
-        double latency_p95_ms = 0.0;
-        double latency_p99_ms = 0.0;
-        double current_rps    = 0.0;
-        size_t in_flight      = 0;
-        /// Completions the percentiles above were computed over. Zero means an
-        /// idle window, whose percentiles are zeros and must not be read as a
-        /// service answering instantly.
-        size_t latency_samples = 0;
+        uint64_t sequence  = 0;
+        double current_rps = 0.0;
+        size_t in_flight   = 0;
+        /// Every window since the level histogram adopted `level.epoch`, this
+        /// tick's included. A reader judging a level it asked for with
+        /// `request_level_reset` ignores a tick carrying any other epoch: that
+        /// tick was produced before the reset was applied.
+        MetricsCollector::LevelLatency level;
     };
     mutable std::mutex live_tick_mtx;
     std::optional<LiveTick> live_tick_; // live_tick_mtx
@@ -974,6 +971,23 @@ struct RunContext {
         std::lock_guard<std::mutex> lock (live_tick_mtx);
         return live_tick_;
     }
+
+    /// Ask the metrics thread to start a new level histogram at its next
+    /// tick; answers the epoch that tick and every later one will carry until
+    /// the next request. Called by the capacity strategy only.
+    uint64_t request_level_reset () {
+        return level_epoch_.fetch_add (1, std::memory_order_relaxed) + 1;
+    }
+
+    /// The epoch the last `request_level_reset` answered; 0 before any. Read
+    /// by the metrics thread before it samples each window.
+    [[nodiscard]] uint64_t requested_level_epoch () const {
+        return level_epoch_.load (std::memory_order_relaxed);
+    }
+
+    // Relaxed: it carries no data but itself, and the tick that reports it
+    // applied is published under live_tick_mtx.
+    std::atomic<uint64_t> level_epoch_{ 0 };
 
     /**
      * What a capacity run's search found, written by `CapacityLoadStrategy`

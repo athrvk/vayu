@@ -181,7 +181,8 @@ size_t reclaimed_bytes (SlotOutcome outcome, size_t candidate_bytes, const Respo
 MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig config)
 : run_id_ (std::move (run_id)), config_ (config),
   second_histogram_ (new_latency_histogram ()),
-  run_so_far_histogram_ (new_latency_histogram ()) {
+  run_so_far_histogram_ (new_latency_histogram ()),
+  level_histogram_ (new_latency_histogram ()) {
     // Both sample rates are sampling *periods* - "keep 1 in N" - used as the
     // right-hand side of a `%` in the hot record path and as a divisor in the
     // reserve below. A 0 there is integer division by zero: a SIGFPE that takes
@@ -1063,6 +1064,7 @@ MetricsCollector::Percentiles MetricsCollector::sample_window_percentiles () {
     }
     add_window (second_histogram_.get (), interval, run_id_);
     add_window (run_so_far_histogram_.get (), interval, run_id_);
+    add_window (level_histogram_.get (), interval, run_id_);
     return percentiles_of (interval);
 }
 
@@ -1070,6 +1072,23 @@ MetricsCollector::Percentiles MetricsCollector::take_second_percentiles () {
     const Percentiles second = percentiles_of (second_histogram_.get ());
     hdr_reset (second_histogram_.get ());
     return second;
+}
+
+void MetricsCollector::adopt_level_epoch (uint64_t epoch) {
+    if (epoch == level_epoch_) {
+        return;
+    }
+    hdr_reset (level_histogram_.get ());
+    level_epoch_ = epoch;
+}
+
+MetricsCollector::LevelLatency MetricsCollector::level_latency () const {
+    const struct hdr_histogram* level = level_histogram_.get ();
+    if (level->total_count == 0) {
+        return { level_epoch_, 0, 0.0 };
+    }
+    return { level_epoch_, static_cast<size_t> (level->total_count),
+        us_to_ms (hdr_value_at_percentile (level, 99.0)) };
 }
 
 void MetricsCollector::record_status_code (int status_code) {

@@ -254,6 +254,17 @@
   },
   {
     "advanced": false,
+    "category": "data_retention",
+    "default_value": "100",
+    "depends_on": "",
+    "key": "maxDesignRunsRetained",
+    "max_value": "100000",
+    "min_value": "0",
+    "requires_restart": false,
+    "type": "integer"
+  },
+  {
+    "advanced": false,
     "category": "limits",
     "default_value": "1048576",
     "depends_on": "",

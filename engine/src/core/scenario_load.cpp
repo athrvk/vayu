@@ -96,7 +96,7 @@ std::optional<std::string> validate_scenario_load_config (const nlohmann::json& 
 
     if (*type == LoadTestType::Capacity) {
         return "'capacity' is not available for scenario runs: the search "
-               "judges one windowed p99, and a sequence has one per step - "
+               "judges one p99 per level, and a sequence has one per step - "
                "which of them is 'the' latency the knee is measured against is "
                "a question the mode does not answer. Use "
                "'constant_concurrency', 'ramp_up' or 'iterations'.";

@@ -134,7 +134,7 @@ export const RUN_TOOLS: McpTool[] = [
 		description:
 			"Delete a run and everything recorded against it - its report, metrics, captured samples and step traces. " +
 			GUARDED_WRITE_SENTENCE +
-			", and confirmation: if the client supports elicitation the user is prompted with what the run was, otherwise call once for a preview and again with `confirmed: true`. There is no undo. A run still executing is stopped first and deleted once its worker has settled; if it does not settle in time nothing is deleted and the call says to retry.",
+			", and confirmation: if the client supports elicitation the user is prompted with what the run was, otherwise call once for a preview and again with `confirmed: true`. There is no undo, and a run pinned as a baseline is deleted too when named here. A run still executing is stopped first and deleted once its worker has settled; if it does not settle in time nothing is deleted and the call says to retry.",
 		annotations: {
 			title: "Delete run",
 			readOnlyHint: false,

@@ -1395,154 +1395,115 @@ class RampUpLoadStrategy : public LoadStrategy {
 // Capacity Discovery Load Strategy
 // ============================================================================
 
-namespace {
+CapacitySearch::CapacitySearch (CapacityConfig config, std::shared_ptr<RunContext> context)
+: config_ (config), context_ (std::move (context)) {
+}
 
-/**
- * The moving parts of a capacity search that the pure controller deliberately
- * does not hold: the clock, the tick feed, and the window being accumulated.
- *
- * All of it is touched from the `maintain_concurrency` closures, which run on
- * the strategy thread and nowhere else - `target_fn` is evaluated inside the
- * refill condition-variable predicate, but a predicate runs on the waiting
- * thread, so there is one thread here and no lock is owed.
- */
-class CapacitySearch {
-    public:
-    CapacitySearch (CapacityConfig config, std::shared_ptr<RunContext> context)
-    : config_ (config), context_ (std::move (context)) {
+bool CapacitySearch::advance (int64_t elapsed_ms) {
+    if (stop_reason_ != nullptr) {
+        return false;
+    }
+    // The deadline lives here rather than in the controller because it is
+    // the one stop condition that is about time rather than about what the
+    // service did, and the controller holds no clock.
+    if (elapsed_ms >= config_.deadline_ms) {
+        stop_reason_ = capacity_stop::DEADLINE;
+        return false;
     }
 
-    /// The level to hold right now. Zero before the first window opens, which
-    /// only happens if `advance` has not been called yet.
-    [[nodiscard]] size_t level () const {
-        return current_;
+    collect_tick ();
+
+    if (current_ == 0) {
+        open_level (decide_next_level (config_, history_).next_concurrency, elapsed_ms);
+        return true;
     }
-
-    /**
-     * Drive the search one step. Returns whether the run should keep going -
-     * this is `maintain_concurrency`'s `should_continue`, so returning false
-     * ends the run.
-     */
-    bool advance (int64_t elapsed_ms) {
-        if (stop_reason_ != nullptr) {
-            return false;
-        }
-        // The deadline lives here rather than in the controller because it is
-        // the one stop condition that is about time rather than about what the
-        // service did, and the controller holds no clock.
-        if (elapsed_ms >= config_.deadline_ms) {
-            stop_reason_ = capacity_stop::DEADLINE;
-            return false;
-        }
-
-        collect_tick ();
-
-        if (current_ == 0) {
-            open_level (decide_next_level (config_, history_).next_concurrency, elapsed_ms);
-            return true;
-        }
-        if (elapsed_ms - level_started_ms_ < config_.step_duration_ms) {
-            return true;
-        }
-        if (latency_windows_ == 0) {
-            // Not one timed completion landed in the whole step - neither an
-            // answer nor a failure whose transfer ran, which a timeout is
-            // (#2384) - so every windowed percentile it saw was the
-            // empty-window zero. Judging the level on those would read a
-            // service that measured nothing as one that answered instantly,
-            // and the search would climb straight past the limit it exists to
-            // find. The level stays open instead; a search that never gets a
-            // timed completion ends on its deadline having reported only the
-            // levels it actually measured.
-            return true;
-        }
-
-        history_.push_back ({ current_,
-        rps_windows_ > 0 ? rps_sum_ / static_cast<double> (rps_windows_) : 0.0,
-        p99_sum_ / static_cast<double> (latency_windows_) });
-
-        const CapacityDecision decision = decide_next_level (config_, history_);
-        switch (decision.action) {
-        case CapacityAction::Stop:
-            stop_reason_ = decision.stop_reason;
-            return false;
-        case CapacityAction::Hold:
-        case CapacityAction::StepUp:
-            open_level (decision.next_concurrency, elapsed_ms);
-            return true;
-        }
+    if (elapsed_ms - level_started_ms_ < config_.step_duration_ms) {
+        return true;
+    }
+    if (level_samples_ == 0) {
+        // Not one timed completion landed in the level's histogram - neither
+        // an answer nor a failure whose transfer ran, which a timeout is
+        // (#2384). Judging it would read a service that measured nothing as
+        // one that answered instantly, and the search would climb straight
+        // past the limit it exists to find. The level stays open instead; a
+        // search that never gets a timed completion ends on its deadline
+        // having reported only the levels it actually measured.
         return true;
     }
 
-    /// What the search found. The level still being measured when the run ended
-    /// is dropped: `levels[]` holds judged windows only, and a partial one
-    /// would sit in the audit trail looking like a measurement.
-    [[nodiscard]] CapacitySummary finish () const {
-        const char* reason = stop_reason_;
-        if (reason == nullptr) {
-            reason = context_->should_stop ? capacity_stop::STOPPED : capacity_stop::DEADLINE;
-        }
-        return summarize_capacity (config_, history_, reason);
-    }
+    history_.push_back ({ current_,
+    rps_windows_ > 0 ? rps_sum_ / static_cast<double> (rps_windows_) : 0.0, level_p99_ms_ });
 
-    private:
-    void open_level (size_t level, int64_t now_ms) {
-        current_          = level;
-        level_started_ms_ = now_ms;
-        ticks_seen_       = 0;
-        rps_windows_      = 0;
-        latency_windows_  = 0;
-        rps_sum_          = 0.0;
-        p99_sum_          = 0.0;
-        // Adopt the newest published sequence so the first tick this level
-        // counts is one produced after the target moved, not the one already
-        // sitting there describing the previous level.
-        if (auto tick = context_->latest_live_tick ()) {
-            last_sequence_ = tick->sequence;
-        }
+    const CapacityDecision decision = decide_next_level (config_, history_);
+    switch (decision.action) {
+    case CapacityAction::Stop:
+        stop_reason_ = decision.stop_reason;
+        return false;
+    case CapacityAction::Hold:
+    case CapacityAction::StepUp:
+        open_level (decision.next_concurrency, elapsed_ms);
+        return true;
     }
+    return true;
+}
 
-    void collect_tick () {
-        auto tick = context_->latest_live_tick ();
-        if (!tick || tick->sequence <= last_sequence_) {
-            return;
-        }
+CapacitySummary CapacitySearch::finish () const {
+    const char* reason = stop_reason_;
+    if (reason == nullptr) {
+        reason = context_->should_stop ? capacity_stop::STOPPED : capacity_stop::DEADLINE;
+    }
+    return summarize_capacity (config_, history_, reason);
+}
+
+void CapacitySearch::open_level (size_t level, int64_t now_ms) {
+    current_          = level;
+    level_started_ms_ = now_ms;
+    ticks_seen_       = 0;
+    rps_windows_      = 0;
+    rps_sum_          = 0.0;
+    level_epoch_      = 0;
+    level_samples_    = 0;
+    level_p99_ms_     = 0.0;
+    // Adopt the newest published sequence so the first tick this level
+    // counts is one produced after the target moved, not the one already
+    // sitting there describing the previous level.
+    if (auto tick = context_->latest_live_tick ()) {
         last_sequence_ = tick->sequence;
-        ++ticks_seen_;
-        // The first ticks after a target change measure the transition - the
-        // in-flight count is still climbing - so they are watched but not
-        // counted.
-        if (ticks_seen_ <= constants::capacity::SETTLE_TICKS) {
-            return;
-        }
-        rps_sum_ += tick->current_rps;
-        ++rps_windows_;
-        // An idle window reports percentiles of zero, which averaged in with
-        // real ones would understate the level's latency by however much of the
-        // step went quiet - at one completion per 500ms against a 100ms tick,
-        // by a factor of five. Throughput has no such problem: an idle window
-        // really is zero requests per second.
-        if (tick->latency_samples > 0) {
-            p99_sum_ += tick->latency_p99_ms;
-            ++latency_windows_;
-        }
     }
+}
 
-    CapacityConfig config_;
-    std::shared_ptr<RunContext> context_;
-    std::vector<CapacityWindow> history_;
-    size_t current_           = 0;
-    int64_t level_started_ms_ = 0;
-    uint64_t last_sequence_   = 0;
-    size_t ticks_seen_        = 0;
-    size_t rps_windows_       = 0;
-    size_t latency_windows_   = 0;
-    double rps_sum_           = 0.0;
-    double p99_sum_           = 0.0;
-    const char* stop_reason_  = nullptr;
-};
+// The level histogram's reset is requested on the last settle tick rather
+// than when the level opens, so the producer, which knows nothing of
+// SETTLE_TICKS, resets it before sampling the first window this search counts.
+static_assert (constants::capacity::SETTLE_TICKS > 0,
+"the level reset is requested on the last settle tick");
 
-} // namespace
+void CapacitySearch::collect_tick () {
+    auto tick = context_->latest_live_tick ();
+    if (!tick || tick->sequence <= last_sequence_) {
+        return;
+    }
+    last_sequence_ = tick->sequence;
+    ++ticks_seen_;
+    // The first ticks after a target change measure the transition - the
+    // in-flight count is still climbing - so they are watched but not
+    // counted.
+    if (ticks_seen_ < constants::capacity::SETTLE_TICKS) {
+        return;
+    }
+    if (ticks_seen_ == constants::capacity::SETTLE_TICKS) {
+        level_epoch_ = context_->request_level_reset ();
+        return;
+    }
+    rps_sum_ += tick->current_rps;
+    ++rps_windows_;
+    // A tick under an older epoch was produced before the reset applied, and
+    // its level histogram still holds the previous level or the settle ticks.
+    if (tick->level.epoch == level_epoch_) {
+        level_samples_ = tick->level.samples;
+        level_p99_ms_  = tick->level.p99_ms;
+    }
+}
 
 class CapacityLoadStrategy : public LoadStrategy {
     public:

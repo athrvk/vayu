@@ -75,7 +75,7 @@ const MEMBER_RULES: Array<[string, RegExp]> = [
 		"the URL is an object that still reads as its string",
 		/It still behaves as the string it used to be/i,
 	],
-	["sendRequest is synchronous", /the send blocks and the callback runs inline/i],
+	["sendRequest is synchronous", /the send blocks, then the callback runs inline/i],
 	["sendRequest is bounded", /at most 10 requests/i],
 	["signing is synchronous and hex by default", /HMAC-SHA256, hex by default/i],
 	["pm.info says which hook is running", /which hook it is running in/i],
@@ -90,7 +90,7 @@ const HOOK_RULES: Array<[string, RegExp]> = [
 		/[Ll]oad tests? (do not|runs no) run?s? ?pre-request scripts?/,
 	],
 	["a test script under load grades sampled responses", /sampled response/],
-	["the sandbox has no URL parser", /no `setTimeout`, `fetch`, `URL`/],
+	["the sandbox has no URL parser", /no `fetch`, `URL`/],
 ];
 
 describe("the rules the script panels used to carry", () => {

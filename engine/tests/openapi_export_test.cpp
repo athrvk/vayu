@@ -1132,6 +1132,22 @@ TEST (SkeletonExport, DerivesNoSchemaFromABodyItOnlyHasPartOf) {
     EXPECT_EQ (exported.notes.examples_written, 0);
 }
 
+// Who wrote a row decides whether the next spec sync may replace it, so the
+// document names it for every example, in stored order (#2430).
+TEST (SkeletonExport, WritesWhoSavedEachExampleInXVayuRequest) {
+    ExportRequest entry = request ("GET", "{{baseUrl}}/pets");
+    entry.examples = { example ("saved by a person"), imported (example ("200 - ok")) };
+
+    const Exported exported = export_json ({ entry });
+    const json& written     = operation_of (
+    exported.document, "/pets", "get")["x-vayu-request"]["examples"];
+    ASSERT_EQ (written.size (), 2U);
+    EXPECT_EQ (written[0]["name"], "saved by a person");
+    EXPECT_EQ (written[0]["origin"], "user");
+    EXPECT_EQ (written[1]["name"], "200 - ok");
+    EXPECT_EQ (written[1]["origin"], "import");
+}
+
 TEST (SkeletonExport, CountsARequestItCannotPlaceInsteadOfGuessingAtOne) {
     const Exported exported = export_json ({ request ("GET", "{{baseUrl}}"),
     request ("GET", "{{baseUrl}}/pets"), request ("GET", "https://api.example.com/pets") });

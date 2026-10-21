@@ -40,8 +40,8 @@ struct CapacityWindow {
     size_t concurrency = 0;
     /// Mean throughput observed over the level's settled ticks.
     double rps = 0.0;
-    /// Mean of the level's windowed p99 samples - the signal the SLO is judged
-    /// against, and the same number the dashboard's live chart shows.
+    /// The p99 of every completion the level's settled ticks sampled, from one
+    /// histogram (#2388) - the signal the SLO is judged against.
     double p99_ms = 0.0;
 };
 

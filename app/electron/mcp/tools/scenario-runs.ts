@@ -282,7 +282,7 @@ function scenarioModeRefusal(mode: string): string | null {
 	const shared = `Scenario load runs accept ${SCENARIO_LOAD_MODES.join(", ")}.`;
 	if (mode === "capacity") {
 		return (
-			`"capacity" is not available for scenario runs: the search judges one windowed p99, ` +
+			`"capacity" is not available for scenario runs: the search judges one p99 per level, ` +
 			`and a sequence has one per step - which of them is "the" latency the knee is measured ` +
 			`against is a question the mode does not answer. ${shared}`
 		);
