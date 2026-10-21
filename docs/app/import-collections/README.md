@@ -209,7 +209,8 @@ read as a space; a request with `disableUrlEncoding` as written. The OpenAPI
 parsers join their own drafts, also with `encodeURIComponent`, because the
 spec sync diff compares stored URLs against that form. It **appends**, so a URL
 that arrived with a query of its own keeps it -
-which is what Insomnia's own send does with its two sources. Each parser's
+which is what Insomnia's own send does with its two sources. The query is
+written before a `#fragment` the URL carries, never inside it (issue #2541). Each parser's
 mapping stays as documented: `params[]` is still exactly what the source
 declared, and only the enabled rows reach `url`.
 
@@ -471,7 +472,8 @@ they already have their own segments in the count line.
 "url_without_raw" | "variable_metadata", count, requests?, names? }`.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
-per-operation OpenAPI count, Postman's per-request counters, Insomnia's file bodies and the
+per-operation OpenAPI count, Postman's per-request counters - `script_unsupported` also names
+the folder or collection that declares the script - Insomnia's file bodies and the
 resources it cannot import), so the Preview can say which request to finish rather than only
 how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
 parameters a Postman parse did not carry (`oauth2_unmapped_param`, see

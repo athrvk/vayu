@@ -53,6 +53,8 @@ interface Copy {
 	tier: NoticeTier | "hidden";
 	/** Read after "<Request name>: " and after "N requests: ". */
 	named?: string;
+	/** What the plural "N ...:" prefix counts when the names are not all requests. */
+	owners?: string;
 	/** The count form, for a line with no request names. */
 	one: string;
 	many: string;
@@ -250,6 +252,15 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 request's Postman setting kept but not applied (e.g. TLS options, Host header)",
 		many: "{n} requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
 	},
+	// The engine names whoever declares the script, which is a folder or the
+	// collection as often as a request, so the plural prefix counts "items".
+	script_unsupported: {
+		tier: "action",
+		owners: "items",
+		named: "script not imported (loaded from a URL, or on an event Vayu has no phase for) - add it as a pre-request or test script",
+		one: "1 script not imported (loaded from a URL, or on an event Vayu has no phase for) - add it as a pre-request or test script",
+		many: "{n} scripts not imported (loaded from a URL, or on an event Vayu has no phase for) - add them as pre-request or test scripts",
+	},
 	// The engine names the folder or collection under `names`, not `requests`:
 	// the line is about the node that declared the setting.
 	protocol_behavior_folder: {
@@ -341,10 +352,10 @@ function listed(items: readonly string[], limit: number): string {
 }
 
 /** "Find pet by ID: ..." or "3 requests: ... - A, B, C, +2 more". */
-function named(phrase: string, requests: readonly string[]): string {
+function named(phrase: string, requests: readonly string[], noun = "requests"): string {
 	const names = requests.map(quoted);
 	if (names.length === 1) return `${names[0]}: ${phrase}`;
-	return `${names.length} requests: ${phrase} - ${listed(names, NAMES_SHOWN)}`;
+	return `${names.length} ${noun}: ${phrase} - ${listed(names, NAMES_SHOWN)}`;
 }
 
 function skippedNotice(item: SkippedItem): ImportNotice | null {
@@ -352,7 +363,7 @@ function skippedNotice(item: SkippedItem): ImportNotice | null {
 	if (copy.tier === "hidden") return null;
 	const text =
 		copy.named && item.requests && item.requests.length > 0
-			? named(copy.named, item.requests)
+			? named(copy.named, item.requests, copy.owners)
 			: counted(copy, item.count);
 	return { tier: copy.tier, text: text.replace("{names}", namesClause(item.names)) };
 }

@@ -56,6 +56,7 @@
 #include "sibling_listing.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/import_document.hpp"
+#include "vayu/core/postman_export.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
@@ -2444,6 +2445,264 @@ TEST (PostmanImport, ScriptApisAreNamedOnlyForScriptsThatWouldRun) {
     parse_import (R"({"openapi":"3.0.0","info":{"title":"T"},"paths":{}})", {}, {});
     ASSERT_TRUE (spec.ok ()) << spec.error;
     EXPECT_FALSE (spec.result.at ("meta").contains ("unsupportedScriptApis"));
+}
+
+/// A script Postman would run but Vayu cannot import is counted and its owner
+/// named, rather than vanishing (#2541): a `script.src` (Postman reads it as a
+/// URL and ignores `exec` beside it) and a `listen` Vayu has no phase for. A
+/// folder and the collection are named like a request, the collection last. A
+/// blank unknown-listen script is nothing to lose, and `script.packages` stays
+/// with `unsupportedScriptApis` alone. Mutation check: dropping the count in
+/// `set_event_elements`, or the naming in `pm_folder`, reds the count or the
+/// list; counting a packages-only event reds the last assertion.
+TEST (PostmanImport, CountsAScriptItCannotImportAndNamesItsOwner) {
+    const ImportParse parsed = parse_import (
+    R"j({"info":{"name":"Signed API","schema":")j" + std::string (POSTMAN_SCHEMA) + R"j("},
+        "event":[{"listen":"afterResponse","script":{"exec":["pm.test('x', () => {});"]}}],
+        "item":[
+        {"name":"Reports",
+         "event":[{"listen":"test","script":{"type":"text/javascript","src":"https://example.com/folder.js"}}],
+         "item":[
+           {"name":"From URL","event":[{"listen":"test","script":{"src":"https://example.com/check.js"}}],
+            "request":{"method":"GET","url":"https://x.com/r"}},
+           {"name":"Both","event":[{"listen":"prerequest","script":{
+              "src":"https://example.com/both.js","exec":["pm.environment.set('a', 1);"]}}],
+            "request":{"method":"GET","url":"https://x.com/b"}},
+           {"name":"Odd listen","event":[{"listen":"beforeRequest","script":{"exec":["pm.test('x', () => {});"]}}],
+            "request":{"method":"GET","url":"https://x.com/o"}}]},
+        {"name":"Blank odd listen","event":[{"listen":"beforeRequest","script":{"exec":["  "]}}],
+         "request":{"method":"GET","url":"https://x.com/blank"}},
+        {"name":"Packages only","event":[{"listen":"test","script":{
+            "exec":["pm.test('x', () => {});"],"packages":{"abc":{"id":"abc"}}}}],
+         "request":{"method":"GET","url":"https://x.com/p"}},
+        {"name":"Fine","event":[{"listen":"test","script":{"exec":["pm.test('x', () => {});"]}}],
+         "request":{"method":"GET","url":"https://x.com/f"}}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const json& meta = parsed.result.at ("meta");
+    // From URL, Both, Odd listen, the folder and the collection: one event each.
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("script_unsupported"), 5);
+    EXPECT_EQ (skipped_named (parsed, "script_unsupported"),
+    (Names{ "From URL", "Both", "Odd listen", "Reports", "Signed API" }));
+
+    // Nothing of an event with no phase or a `src` is imported, `exec` beside
+    // a `src` included: Postman would not run it.
+    const json& root     = parsed.result.at ("collections")[0];
+    const json& reports  = root.at ("children")[0];
+    const json& requests = reports.at ("requests");
+    EXPECT_FALSE (root.contains ("elements"));
+    EXPECT_FALSE (reports.contains ("elements"));
+    for (const json& request : requests) {
+        EXPECT_FALSE (request.contains ("elements")) << request.at ("name");
+    }
+    EXPECT_EQ (root.at ("requests")[2].at ("elements")[0].at ("kind"), "script.post");
+
+    // The packages are named once, by the scan that already reported them.
+    EXPECT_EQ (meta.at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (
+    R"j([{"request":"Packages only","names":["script.packages"]}])j"));
+}
+
+/// A disabled event runs nothing so it counts nothing, and with the scripts
+/// option off no script is read at all. Mutation check: counting before the
+/// `disabled` test, or outside the `import_scripts` gate, reds one of the two.
+TEST (PostmanImport, ScriptUnsupportedIsNotCountedWhenTheEventWouldNotRun) {
+    const std::string items =
+    R"j({"name":"Off","event":[{"listen":"test","disabled":true,"script":{"src":"https://example.com/a.js"}},
+                                   {"listen":"beforeRequest","disabled":true,"script":{"exec":["x();"]}}],
+         "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"On","event":[{"listen":"test","script":{"src":"https://example.com/a.js"}}],
+         "request":{"method":"GET","url":"https://x.com"}})j";
+
+    const ImportParse counted = parse_postman_items (items);
+    ASSERT_TRUE (counted.ok ()) << counted.error;
+    EXPECT_EQ (
+    skip_counts (counted.result.at ("meta").at ("skipped")).at ("script_unsupported"), 1);
+    EXPECT_EQ (skipped_named (counted, "script_unsupported"), Names{ "On" });
+
+    ImportOptions off;
+    off.import_scripts      = false;
+    const ImportParse gated = parse_postman_items (items, off);
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_FALSE (
+    skip_counts (gated.result.at ("meta").at ("skipped")).contains ("script_unsupported"));
+}
+
+/// An event whose `exec` is blank still declares its packages, and the early
+/// `continue` on a blank script used to skip naming them. Mutation check:
+/// moving the packages note back below the blank-script `continue` reds this.
+TEST (PostmanImport, NamesPackagesOnAnEventWithNoScriptText) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"Blank with packages","event":[{"listen":"test","script":{
+            "exec":[""],"packages":{"abc":{"id":"abc","type":"collection"}}}}],
+         "request":{"method":"GET","url":"https://x.com"}},
+        {"name":"Disabled with packages","event":[{"listen":"test","disabled":true,"script":{
+            "exec":[""],"packages":{"abc":{"id":"abc"}}}}],
+         "request":{"method":"GET","url":"https://x.com"}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (
+    R"j([{"request":"Blank with packages","names":["script.packages"]}])j"));
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("script_unsupported"));
+}
+
+using HeaderPairs = std::vector<std::pair<std::string, std::string>>;
+
+/// @p headers as `{key, value}` pairs, in order.
+HeaderPairs header_pairs (const json& headers) {
+    HeaderPairs pairs;
+    for (const json& row : headers) {
+        pairs.emplace_back (row.at ("key").get<std::string> (),
+        row.at ("value").get<std::string> ());
+        EXPECT_TRUE (row.at ("enabled").get<bool> ()) << row.dump ();
+    }
+    return pairs;
+}
+
+json header_request (const std::string& name, const std::string& header) {
+    return { { "name", name },
+        { "request",
+        { { "method", "GET" }, { "url", "https://x.com" }, { "header", header } } } };
+}
+
+/// The v2.1 schema allows `request.header` to be the text of the headers pane;
+/// it used to import as no headers at all. Read as postman-collection's
+/// `Header.parse` reads it: a line is `name: value` with the value trimmed,
+/// lines with no colon, leading whitespace or a space before the colon name
+/// nothing, folded lines join, and CRLF and LF both end a line. The Hawk line
+/// keeps its own colons. Mutation check: reading only an array reds this.
+TEST (PostmanImport, ReadsAStringRequestHeaderTheWayPostmanParsesIt) {
+    const std::string hawk =
+    R"(Hawk id="dh37fgj492je", ts="1353832234", nonce="j4h3g2", )"
+    R"(ext="some-app-ext-data", mac="6R4rV5iE+NPoym+WwjeHzjAGXUtLNIxmo1vpMofpLAE=")";
+    const json document      = { { "info", { { "schema", POSTMAN_SCHEMA } } },
+             { "item",
+             json::array ({ header_request ("Crlf",
+                            "Authorization: " + hawk +
+                            "\r\nContent-Type: application/json\r\n"
+                                 "X-Folded: one\r\n  two\r\n\tthree\r\n"
+                                 "no colon here\r\n"
+                                 "\r\n"
+                                 " Indented: skipped\r\n"
+                                 "Spaced : skipped\r\n"
+                                 "Empty:\r\n"
+                                 "X-Time:   12:30:45  \r\n"),
+             header_request ("Lf", "A: 1\nB:{{ token }}\n") }) } };
+    const ImportParse parsed = parse_import (document.dump (), {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+
+    EXPECT_EQ (header_pairs (requests[0].at ("headers")),
+    (HeaderPairs{ { "Authorization", hawk }, { "Content-Type", "application/json" },
+    { "X-Folded", "one two three" }, { "Empty", "" }, { "X-Time", "12:30:45" } }));
+    EXPECT_EQ (header_pairs (requests[1].at ("headers")),
+    (HeaderPairs{ { "A", "1" }, { "B", "{{token}}" } }));
+}
+
+/// A saved response's `header` takes the same string form (the same helper
+/// reads it), so its Content-Type is still found. Mutation check: reading only
+/// an array leaves the example with no headers and no content type.
+TEST (PostmanImport, ReadsAStringHeaderOnASavedResponse) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
+         "response":[{"name":"ok","code":200,
+            "header":"Content-Type: application/json\nX-Trace: a:b\n","body":"{}"}]})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& example =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples")[0];
+    EXPECT_EQ (header_pairs (example.at ("headers")),
+    (HeaderPairs{ { "Content-Type", "application/json" }, { "X-Trace", "a:b" } }));
+    EXPECT_EQ (example.at ("contentType"), "application/json");
+}
+
+/// The fragment is the URL's, never a query value's: it is cut at the first
+/// `#` before the query is looked for, kept on the url, and the query joined
+/// before it. `url.hash` supplies it when `raw` has none. Mutation check:
+/// splitting at `?` first leaves `#{{search}}` in the last row's key; ignoring
+/// `url.hash` drops the `#top` of the no-raw shape.
+TEST (PostmanImport, KeepsAUrlFragmentOffTheQueryRows) {
+    const ImportParse parsed = parse_postman_items (
+    // A bare string with the query before the fragment (collection-v2.json).
+    R"j({"name":"Bare","request":{"method":"GET",
+            "url":"https://x.com/p?query=string&a=b&abcd#{{ search }}"}},
+        {"name":"Raw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1&flag#top","query":[{"key":"q","value":"1"},{"key":"flag","value":null}]}}},
+        {"name":"RawOnly","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top?not=query"}}},
+        {"name":"NoRaw","request":{"method":"GET","url":{
+            "protocol":"https","host":["x","com"],"path":["p"],"hash":"top",
+            "query":[{"key":"q","value":"1"}]}}},
+        {"name":"HashBeyondRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1","hash":"top"}}},
+        {"name":"HashAlreadyInRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top","hash":"top"}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+
+    EXPECT_EQ (requests[0].at ("url"), "https://x.com/p?query=string&a=b&abcd#{{search}}");
+    EXPECT_EQ (requests[0].at ("params").size (), 3u);
+    EXPECT_EQ (requests[0].at ("params")[2].at ("key"), "abcd");
+    EXPECT_EQ (requests[1].at ("url"), "https://x.com/p?q=1&flag#top");
+    // The first `#` ends the URL: what follows it is the fragment, `?` included,
+    // so there is no query to read.
+    EXPECT_EQ (requests[2].at ("url"), "https://x.com/p#top?not=query");
+    EXPECT_TRUE (requests[2].at ("params").empty ());
+    EXPECT_EQ (requests[3].at ("url"), "https://x.com/p?q=1#top");
+    EXPECT_EQ (requests[4].at ("url"), "https://x.com/p?q=1#top");
+    EXPECT_EQ (requests[5].at ("url"), "https://x.com/p#top");
+
+    // The export splits the same URL back to the hash it was read from.
+    EXPECT_EQ (vayu::core::postman_url_parts (requests[0].at ("url")).at ("hash"), "{{search}}");
+}
+
+/// The shape of postman-collection's own `collection-v2.json` fixture: script
+/// events as bare strings, a `packages` member beside the root events, a header
+/// string carrying a Hawk `Authorization` and a `Content-Type`, and a bare URL
+/// whose fragment is a variable. Every piece reads, and the one thing Vayu
+/// cannot take (a `src`) is counted rather than lost. Mutation check: reverting
+/// any one of the string-script, header-string, fragment or `src` fixes reds a
+/// distinct assertion here.
+TEST (PostmanImport, ReadsTheShapeOfPostmansOwnV2Fixture) {
+    const ImportParse parsed = parse_import (
+    R"j({"info":{"_postman_id":"4455f5e6-5f6a-4b9b-8f2a-9f4b9c8d1111","name":"Sample","version":"1.0.0",
+            "schema":")j" +
+    std::string (POSTMAN_SCHEMA) + R"j("},
+        "event":[{"listen":"prerequest","script":"console.log('root pre');",
+                  "id":"e1"},
+                 {"listen":"test","script":{"id":"e2","exec":["pm.test('root', () => {});"],
+                  "packages":{"p1":{"id":"p1","name":"shared"}}}}],
+        "item":[
+        {"id":"i1","name":"Folded","item":[
+           {"id":"i2","name":"Echo","event":[{"listen":"test","script":{"src":"https://example.com/echo.js"}}],
+            "request":{"url":"https://postman-echo.com/get?query=string&a=b&abcd#{{search}}",
+                       "method":"GET",
+                       "header":"Authorization: Hawk id=\"dh37fgj492je\", ts=\"1353832234\", mac=\"abc=\"\r\nContent-Type: application/json"}}]}
+    ]})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& root    = parsed.result.at ("collections")[0];
+    const json& request = root.at ("children")[0].at ("requests")[0];
+
+    ASSERT_EQ (root.at ("elements").size (), 2u);
+    EXPECT_EQ (root.at ("elements")[0].at ("kind"), "script.pre");
+    EXPECT_EQ (root.at ("elements")[0].at ("config").at ("script"), "console.log('root pre');");
+    EXPECT_EQ (root.at ("elements")[1].at ("kind"), "script.post");
+
+    EXPECT_EQ (request.at ("url"),
+    "https://postman-echo.com/get?query=string&a=b&abcd#{{search}}");
+    ASSERT_EQ (request.at ("headers").size (), 2u);
+    EXPECT_EQ (request.at ("headers")[0].at ("key"), "Authorization");
+    EXPECT_EQ (request.at ("headers")[0].at ("value"),
+    R"(Hawk id="dh37fgj492je", ts="1353832234", mac="abc=")");
+    EXPECT_EQ (request.at ("headers")[1].at ("value"), "application/json");
+
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (skipped_named (parsed, "script_unsupported"), Names{ "Echo" });
+    EXPECT_EQ (meta.at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([{"request":"Sample","names":["script.packages"]}])j"));
 }
 
 /**

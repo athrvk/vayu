@@ -252,6 +252,16 @@ export interface SkippedItem {
 		 */
 		| "protocol_behavior"
 		/**
+		 * A Postman event whose script has no element to become (issue #2541): a
+		 * `script.src` (a URL to fetch it from; neither it nor the `exec` beside it
+		 * is imported), or script text under a `listen` other than `prerequest` /
+		 * `test`. Counted once per enabled event. `requests` names the request,
+		 * folder or collection that declares it, so unlike every other kind here
+		 * an entry is not always a request. `script.packages` is not this kind:
+		 * `ImportMeta.unsupportedScriptApis` reports it.
+		 */
+		| "script_unsupported"
+		/**
 		 * The same, declared on a Postman folder or on the collection itself (issue
 		 * #2538), counted once per declaring node with its name under `names`. The
 		 * settings Vayu applies (redirects, TLS verification, cookies, URL encoding,
