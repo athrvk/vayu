@@ -454,6 +454,36 @@ describe("importNotices", () => {
 	});
 });
 
+describe("importNotices - a body on a GET or HEAD (#2540)", () => {
+	const texts = (item: SkippedItem) => importNotices(meta({ skipped: [item] }));
+
+	it("names the request and tells the user to clear the body, as an action", () => {
+		expect(texts({ kind: "body_on_get", count: 1, requests: ["201"] })).toEqual([
+			{
+				tier: "action",
+				text: "201: GET or HEAD body kept - Postman does not send it, Vayu will; clear the body to match",
+			},
+		]);
+	});
+
+	it("lists several requests under one count", () => {
+		expect(
+			texts({ kind: "body_on_get", count: 2, requests: ["Find", "Probe"] }).map((n) => n.text)
+		).toEqual([
+			"2 requests: GET or HEAD body kept - Postman does not send it, Vayu will; clear the body to match - Find, Probe",
+		]);
+	});
+
+	it("falls back to the count form when the engine named no request", () => {
+		expect(texts({ kind: "body_on_get", count: 1 }).map((n) => n.text)).toEqual([
+			"1 GET or HEAD body kept - Postman does not send it, Vayu will; clear it to match",
+		]);
+		expect(texts({ kind: "body_on_get", count: 3 }).map((n) => n.text)).toEqual([
+			"3 GET or HEAD bodies kept - Postman does not send them, Vayu will; clear them to match",
+		]);
+	});
+});
+
 describe("importNotices - a Postman OAuth 2.0 block (#2536)", () => {
 	it("tells the user a saved token was not imported, naming the request, as a note", () => {
 		expect(

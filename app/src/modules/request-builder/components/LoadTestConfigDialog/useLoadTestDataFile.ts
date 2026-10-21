@@ -81,6 +81,16 @@ export function useLoadTestDataFile(collectionId?: string, request?: ColumnAudit
 	};
 
 	/*
+	 * "Read numbers as numbers" re-parsed the same file. Remembered on the
+	 * binding when the request's collection has one; for a request in no
+	 * collection the setting lives in the selection alone, for this run.
+	 */
+	const changeReading = (next: SelectedDataFile) => {
+		setFile(next);
+		writer.rememberReading(next);
+	};
+
+	/*
 	 * The one request this run sends, audited under its collection's chain (its
 	 * `inherit` auth and the chain's scripts are part of what it sends) against
 	 * the picked file's columns. The contract diff beside it is for a pre-filled
@@ -104,6 +114,7 @@ export function useLoadTestDataFile(collectionId?: string, request?: ColumnAudit
 		error,
 		setError,
 		select,
+		changeReading,
 		prefillNote,
 		warnings,
 		/** Present only when there is a declared contract for Remove to clear. */

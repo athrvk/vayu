@@ -7,9 +7,10 @@
 
 /**
  * The two writes that change a collection's data contract (issue #2050):
- * declare it from a file, or clear it. Shared by every surface where a pick or
- * a Remove names the file a contract comes from, so the rules about *when* the
- * remembered path is written live once.
+ * declare it from a file, or clear it - plus the one that changes only how the
+ * bound file is read (`rememberReading`, #2540). Shared by every surface where a
+ * pick or a Remove names the file a contract comes from, so the rules about
+ * *when* the remembered binding is written live once.
  *
  * Two halves, stored in two places on purpose: the schema rides the engine row
  * (`dataSchema`, the same on every machine), the file's path stays in
@@ -29,6 +30,12 @@ export interface DataContractWriter {
 	declare: (file: SelectedDataFile) => void;
 	/** Drop the contract and the remembered path with it. */
 	clear: () => void;
+	/**
+	 * Remember how `file` is read - its `castNumbers` (#2540) - on the binding,
+	 * when the binding names that file. Writes no contract: the columns do not
+	 * change with how a value is read.
+	 */
+	rememberReading: (file: SelectedDataFile) => void;
 	isPending: boolean;
 	isError: boolean;
 	error: Error | null;
@@ -43,6 +50,7 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 	const { mutate, isPending, isError, error } = useUpdateCollectionMutation();
 	const setDataFile = useDataFileStore((s) => s.setDataFile);
 	const clearDataFile = useDataFileStore((s) => s.clearDataFile);
+	const setDataFileCastNumbers = useDataFileStore((s) => s.setDataFileCastNumbers);
 
 	const declare = useCallback(
 		(file: SelectedDataFile) => {
@@ -66,6 +74,7 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 								path: file.path,
 								fileName: file.fileName,
 								hash: file.hash,
+								castNumbers: file.parsed.castNumbers,
 							});
 						} else {
 							clearDataFile(collectionId);
@@ -90,5 +99,13 @@ export function useDataContractWriter(collectionId: string | null | undefined): 
 		);
 	}, [collectionId, mutate, clearDataFile]);
 
-	return { declare, clear, isPending, isError, error };
+	const rememberReading = useCallback(
+		(file: SelectedDataFile) => {
+			if (!collectionId || !file.path) return;
+			setDataFileCastNumbers(collectionId, file.path, file.parsed.castNumbers);
+		},
+		[collectionId, setDataFileCastNumbers]
+	);
+
+	return { declare, clear, rememberReading, isPending, isError, error };
 }

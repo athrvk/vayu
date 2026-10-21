@@ -42,6 +42,11 @@ export interface DataFileLocation {
 	 * Absent for a location remembered before hashes were recorded.
 	 */
 	hash?: string;
+	/**
+	 * The app reads this CSV/TSV file's unquoted numbers as numbers (#2540), so
+	 * an agent building `data` rows from it can read them the same way.
+	 */
+	castNumbers?: boolean;
 }
 
 /** The entries of a published payload this process is willing to repeat. */
@@ -59,7 +64,14 @@ export function normalizeDataFileLocations(payload: unknown): Map<string, DataFi
 			typeof entry.hash === "string" && DATA_FILE_HASH_PATTERN.test(entry.hash)
 				? { hash: entry.hash }
 				: {};
-		locations.set(collectionId, { path: entry.path, fileName: entry.fileName, ...hash });
+		const castNumbers =
+			typeof entry.castNumbers === "boolean" ? { castNumbers: entry.castNumbers } : {};
+		locations.set(collectionId, {
+			path: entry.path,
+			fileName: entry.fileName,
+			...hash,
+			...castNumbers,
+		});
 	}
 	return locations;
 }

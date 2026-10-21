@@ -11,6 +11,8 @@
  * The grammar cases are the ones that separate a real RFC 4180 tokenizer from
  * a `split(",")`: quoted delimiters, embedded newlines, doubled quotes, CRLF.
  * Revert the quote handling in `tabular.ts` and the first four of them fail.
+ * Default `castNumbers` to true, ignore `quoted`, or drop the safe-integer
+ * guard in `numeric-cell.ts`, and the `castNumbers` cases fail (#2540).
  * Remove the `exceedsNesting` loop from `assertRowObject` in `index.ts` and the
  * nesting cases fail (#2362).
  */
@@ -23,6 +25,7 @@ import {
 	parseDataFile,
 	parseDelimited,
 	resolveIterationCount,
+	tokenizeDelimited,
 } from "./index";
 
 describe("parseDelimited", () => {
@@ -85,6 +88,57 @@ describe("parseDelimited", () => {
 
 	it("counts the opening line over physical lines, quoted newlines included", () => {
 		expect(() => parseDelimited('a\n"one\ntwo"\n"unclosed', ",")).toThrow(/line 4/);
+	});
+});
+
+describe("tokenizeDelimited", () => {
+	it("reports the same cells as parseDelimited", () => {
+		const text = 'a,b\n"x,y",z\r\n"",\n';
+		expect(tokenizeDelimited(text, ",").cells).toEqual(parseDelimited(text, ","));
+	});
+
+	it("tells a quoted empty cell from an unquoted one", () => {
+		const { cells, quoted } = tokenizeDelimited('a,b,c\n"",,x', ",");
+		expect(cells[1]).toEqual(["", "", "x"]);
+		expect(quoted[1]).toEqual([true, false, false]);
+	});
+
+	it("flags a quoted cell whose text looks like a number", () => {
+		const { quoted } = tokenizeDelimited('id,n\n"007",007', ",");
+		expect(quoted).toEqual([
+			[false, false],
+			[true, false],
+		]);
+	});
+
+	it("keeps the flag through escaped quotes, embedded delimiters and newlines", () => {
+		const { cells, quoted } = tokenizeDelimited('a,b,c\n"say ""hi""","x,y","l1\nl2"', ",");
+		expect(cells[1]).toEqual(['say "hi"', "x,y", "l1\nl2"]);
+		expect(quoted[1]).toEqual([true, true, true]);
+	});
+
+	it("does not flag a quote that appears mid-field", () => {
+		const { cells, quoted } = tokenizeDelimited('a\n6" pipe', ",");
+		expect(cells[1]).toEqual(['6" pipe']);
+		expect(quoted[1]).toEqual([false]);
+	});
+
+	it("flags the cell by how it opened, not by how it closed", () => {
+		const { quoted } = tokenizeDelimited('a\n"x"y', ",");
+		expect(quoted[1]).toEqual([true]);
+	});
+
+	it("clears the flag between cells and rows, last row without a newline included", () => {
+		const { quoted } = tokenizeDelimited('"a",b\nc,"d"', ",");
+		expect(quoted).toEqual([
+			[true, false],
+			[false, true],
+		]);
+	});
+
+	it("is the same grammar on tabs", () => {
+		const { quoted } = tokenizeDelimited('a\tb\n"1"\t2', "\t");
+		expect(quoted[1]).toEqual([true, false]);
 	});
 });
 
@@ -170,6 +224,133 @@ describe("parseDataFile - CSV and TSV", () => {
 
 	it("refuses an empty file", () => {
 		expect(() => parseDataFile("", "rows.csv")).toThrow(DataFileError);
+	});
+});
+
+describe("parseDataFile - castNumbers (#2540)", () => {
+	const cast = { castNumbers: true };
+
+	it("leaves every cell text by default, and echoes the setting", () => {
+		const text = "a,b,c\n3,3.5,007";
+		for (const parsed of [parseDataFile(text, "r.csv"), parseDataFile(text, "r.csv", {})]) {
+			expect(parsed.rows).toEqual([{ a: "3", b: "3.5", c: "007" }]);
+			expect(parsed.castNumbers).toBe(false);
+		}
+		const explicit = parseDataFile(text, "r.csv", { castNumbers: false });
+		expect(explicit.rows).toEqual([{ a: "3", b: "3.5", c: "007" }]);
+	});
+
+	it("reads an unquoted integer or decimal as a number, leading zeros and sign included", () => {
+		const parsed = parseDataFile("a,b,c,d,e,f\n3,3.5,-2,+4,007,1.50", "r.csv", cast);
+		expect(parsed.rows).toEqual([{ a: 3, b: 3.5, c: -2, d: 4, e: 7, f: 1.5 }]);
+		expect(parsed.castNumbers).toBe(true);
+	});
+
+	it("keeps a quoted cell as text however numeric it looks", () => {
+		const parsed = parseDataFile('a,b\n"3",3', "r.csv", cast);
+		expect(parsed.rows).toEqual([{ a: "3", b: 3 }]);
+	});
+
+	it("keeps everything that is not a plain integer or decimal as text", () => {
+		// Each of these is a number to Newman and to Number(), and not to us.
+		const cells = [
+			"abc",
+			"1e3",
+			".5",
+			"5.",
+			"0x1F",
+			"NaN",
+			"Infinity",
+			"-Infinity",
+			"",
+			" 5",
+			"5 ",
+			"1,5",
+		];
+		const header = cells.map((_, i) => `c${i}`).join(",");
+		const row = cells.map((c) => (c.includes(",") ? `"${c}"` : c)).join(",");
+		const parsed = parseDataFile(`${header}\n${row}`, "r.csv", cast);
+		expect(Object.values(parsed.rows[0])).toEqual(cells);
+	});
+
+	it("keeps an integer past the safe range as text, so a long id survives", () => {
+		const parsed = parseDataFile(
+			"id,edge,over\n12345678901234567890,9007199254740991,9007199254740992",
+			"r.csv",
+			cast
+		);
+		expect(parsed.rows).toEqual([
+			{ id: "12345678901234567890", edge: 9007199254740991, over: "9007199254740992" },
+		]);
+	});
+
+	it("keeps a decimal text when the number would not print back as its digits", () => {
+		const parsed = parseDataFile(
+			"a,b,c,d\n0.1000000000000000055511151231257827,12345678901234567890.5,0.0000001,0.10",
+			"r.csv",
+			cast
+		);
+		expect(parsed.rows).toEqual([
+			{
+				a: "0.1000000000000000055511151231257827",
+				b: "12345678901234567890.5",
+				c: "0.0000001",
+				d: 0.1,
+			},
+		]);
+	});
+
+	it("does not turn -0 into a number that prints differently from its cell", () => {
+		const parsed = parseDataFile("a,b\n-0,-0.0", "r.csv", cast);
+		expect(Object.is(parsed.rows[0].a, 0)).toBe(true);
+		expect(Object.is(parsed.rows[0].b, 0)).toBe(true);
+	});
+
+	it("casts TSV the same way", () => {
+		const parsed = parseDataFile('a\tb\tc\n007\t"007"\tx', "r.tsv", cast);
+		expect(parsed.format).toBe("tsv");
+		expect(parsed.rows).toEqual([{ a: 7, b: "007", c: "x" }]);
+	});
+
+	it("casts a header-sniffed file with no extension too", () => {
+		expect(parseDataFile("a,b\n1,2", undefined, cast).rows).toEqual([{ a: 1, b: 2 }]);
+	});
+
+	it("does not touch the header row", () => {
+		const parsed = parseDataFile("1,2\n3,4", "r.csv", cast);
+		expect(parsed.columns).toEqual(["1", "2"]);
+		expect(parsed.rows).toEqual([{ "1": 3, "2": 4 }]);
+	});
+
+	it("is ignored by JSON and JSONL, which already carry types", () => {
+		const json = parseDataFile('[{"id":"007","n":3}]', "r.json", cast);
+		expect(json.rows).toEqual([{ id: "007", n: 3 }]);
+		expect(json.castNumbers).toBe(false);
+		const jsonl = parseDataFile('{"id":"007","n":3}', "r.jsonl", cast);
+		expect(jsonl.rows).toEqual([{ id: "007", n: 3 }]);
+		expect(jsonl.castNumbers).toBe(false);
+	});
+
+	it("keeps the preview note about reading values as text when off, naming Newman", () => {
+		const note = parseDataFile("a\n1", "r.csv").warnings.find((w) =>
+			w.includes("read as text")
+		);
+		expect(note).toBe(
+			'Values are read as text - "007" stays "007". Newman reads unquoted numbers as numbers; turn on "Read numbers as numbers" for that, or use a JSON or JSONL file.'
+		);
+	});
+
+	it("says numbers were read as numbers and quoted cells stay text when on", () => {
+		const warnings = parseDataFile("a\n1", "r.csv", cast).warnings;
+		expect(warnings).toContain(
+			'Numbers are read as numbers - "007" becomes 7. A quoted value such as "007" stays text.'
+		);
+		expect(warnings.some((w) => w.includes("read as text"))).toBe(false);
+	});
+
+	it("states no value-reading note for JSON, which has nothing to explain", () => {
+		const warnings = parseDataFile('[{"a":1}]', "r.json", cast).warnings;
+		expect(warnings.some((w) => /read as/.test(w))).toBe(false);
 	});
 });
 

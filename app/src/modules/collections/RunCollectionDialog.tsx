@@ -406,6 +406,16 @@ export default function RunCollectionDialog({
 		if (!next && iterationsBlank) setIterations("1");
 	};
 
+	/*
+	 * "Read numbers as numbers" re-parsed the same file: not a pick, so nothing
+	 * is declared and Iterations is left alone (the row count cannot change).
+	 * The binding remembers the reading, for the next pre-fill.
+	 */
+	const handleCastNumbersChange = (next: SelectedDataFile) => {
+		setDataFile(next);
+		writer.rememberReading(next);
+	};
+
 	const handleRun = () => {
 		if (!canRun) return;
 		const thresholds = buildThresholds(budgets, failRun, customBudgets);
@@ -451,12 +461,14 @@ export default function RunCollectionDialog({
 						: {}),
 					// The parsed rows themselves - the same array the preview
 					// showed, never a re-parse - and which file they came from, by
-					// name and content hash, never path (#2051).
+					// name and content hash, never path (#2051), and how it was
+					// read (#2540).
 					...(dataFile
 						? {
 								data: dataFile.parsed.rows,
 								dataFileName: runDataFileName(dataFile.fileName),
 								dataFileHash: dataFile.hash,
+								dataFileCastNumbers: dataFile.parsed.castNumbers,
 							}
 						: {}),
 				},
@@ -505,6 +517,7 @@ export default function RunCollectionDialog({
 							dataRowCount: dataFile?.parsed.rows.length,
 							dataFileName: dataFile?.fileName,
 							dataFileHash: dataFile?.hash,
+							dataFileCastNumbers: dataFile?.parsed.castNumbers,
 						});
 						loadTestService.startMonitoring(runId);
 						openTab({ type: "dashboard", entityId: null });
@@ -856,6 +869,7 @@ export default function RunCollectionDialog({
 					<DataFilePicker
 						selected={dataFile}
 						onSelect={handleSelectDataFile}
+						onCastNumbersChange={handleCastNumbersChange}
 						// Only with a contract to clear: Remove on a collection that
 						// declares nothing has nothing to write.
 						onRemove={contract ? writer.clear : undefined}

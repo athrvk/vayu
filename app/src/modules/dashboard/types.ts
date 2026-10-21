@@ -80,6 +80,8 @@ export interface DashboardHeaderProps {
 		 */
 		dataFileName?: string;
 		dataFileHash?: string;
+		/** Whether its numbers were read as numbers (issue #2540); printed beside the name. */
+		dataFileCastNumbers?: boolean;
 	};
 }
 

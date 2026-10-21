@@ -2306,7 +2306,8 @@ pm.iterationData.toObject();       // the whole row as a plain object
 `get` on a column the row does not carry returns `undefined`, as every other
 `pm` scope reader does. Values keep their JSON type: a JSON file's `3` arrives
 as a number, and a CSV column arrives as a string, because that is what the
-file said.
+file said - unless the file was picked with number reading on, which hands a
+script an unquoted integer or decimal cell as a number (#2540).
 
 **The row reaches a request through a different channel, with a different type
 story.** `pm.iterationData` hands a script the cell as the value it is - a
@@ -2399,7 +2400,8 @@ Rows are validated before the run row exists: a `data` that is present and empty
 a row that is not an object (the message names its index), or a set over
 `maxScenarioDataRows` is a `400`. Rows are never persisted - the run's snapshot
 records the row count (`dataRowCount`) plus the file's name and content hash
-(`dataFileName`, `dataFileHash`), never its path or rows.
+(`dataFileName`, `dataFileHash`) and how it was read (`dataFileCastNumbers`),
+never its path or rows.
 
 ## Console Output
 

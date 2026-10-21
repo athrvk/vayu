@@ -93,6 +93,14 @@ describe("scenarioFromSnapshot", () => {
 		);
 		expect(named?.dataFileName).toBe("users.csv");
 		expect(named?.dataFileHash).toBe(hash);
+		expect(named?.dataFileCastNumbers).toBe(false);
+
+		// How the run read it (#2540). Mutation check: drop
+		// `dataFileCastNumbers` from `scenarioOfSnapshot` and this fails.
+		const cast = scenarioFromSnapshot(
+			run("scenario", { scenario: { dataFileName: "plans.csv", dataFileCastNumbers: true } })
+		);
+		expect(cast?.dataFileCastNumbers).toBe(true);
 
 		const junk = scenarioFromSnapshot(
 			run("scenario", { scenario: { dataFileName: 7, dataFileHash: {} } })

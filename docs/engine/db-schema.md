@@ -498,8 +498,9 @@ rows backfill to `{}` (the same migration shape as `config_entries.keywords`).
 The **schema** is stored; the **rows** never are. A data file's contents are
 user data of unknown sensitivity and are persisted nowhere - not here, not in a
 run snapshot, which records the row count (`dataRowCount`) plus the file's name
-and content hash (`dataFileName`, `dataFileHash`, issue #2051), never its path
-or rows. The file's path is not stored engine-side: it is true of one machine,
+and content hash (`dataFileName`, `dataFileHash`, issue #2051) and whether its
+numbers were read as numbers (`dataFileCastNumbers`, issue #2540), never its
+path or rows. The file's path is not stored engine-side: it is true of one machine,
 so the app keeps it in a local store. See [Data-driven runs](../app/data-driven-runs.md).
 
 **openapi** - the OpenAPI document this collection is bound to (issue #637):
@@ -1519,6 +1520,7 @@ sitting beside it (`scenario_snapshot`, `http/routes/execution.cpp`).
   "source": "collection", "collectionId": "col_123", "recursive": false,
   "iterations": 3, "dataRowCount": 2,
   "dataFileName": "users.csv", "dataFileHash": "<sha256 hex>",
+  "dataFileCastNumbers": true,
   "steps": [
     { "index": 0, "requestId": "req_1", "name": "Log in",
       "url": "https://{{host}}/login", "method": "POST" }
@@ -1534,7 +1536,12 @@ memory for the run's life and nowhere else. Inline `data` rows are not
 snapshotted either: they are user data of unknown sensitivity, and the manifest
 records only their count plus the file's name and content hash (`dataFileName`
 and `dataFileHash`, each absent when the run named no file; issue #2051), never
-its path. The writer is `vayu::core::build_scenario_manifest`
+its path, and `dataFileCastNumbers: true` when the client read the file's
+numbers as numbers (issue #2540). That key is written only when true: absent is
+the one spelling of "read as text", which is also how every run recorded before
+it reads, so it needed no migration or schema version. A single-request load
+run's snapshot carries the same keys at its top level (`load_data_snapshot`),
+the flag written from the validated payload rather than the body's own copy. The writer is `vayu::core::build_scenario_manifest`
 (`core/scenario_plan.cpp`). Only the `scenario` block is replaced: the run's
 top-level options (`environmentId`, `failOnSchemaError`, `stopOnError`,
 `thresholds` and the rest) stay beside it as sent, which is what keeps two runs

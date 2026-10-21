@@ -268,6 +268,15 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options){names}",
 		many: "{n} folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options){names}",
 	},
+	// Postman prunes a GET or HEAD body unless the request opts out; Vayu sends
+	// what the Body tab holds, so the request behaves differently until the
+	// body is cleared (#2540).
+	body_on_get: {
+		tier: "action",
+		named: "GET or HEAD body kept - Postman does not send it, Vayu will; clear the body to match",
+		one: "1 GET or HEAD body kept - Postman does not send it, Vayu will; clear it to match",
+		many: "{n} GET or HEAD bodies kept - Postman does not send them, Vayu will; clear them to match",
+	},
 	elements_invalid: {
 		tier: "action",
 		named: "script or check dropped (invalid)",

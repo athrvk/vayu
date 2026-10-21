@@ -62,6 +62,16 @@ const RUNS: Record<string, unknown> = {
 			dataFileName: "users.csv",
 		},
 	},
+	run_load_cast: {
+		id: "run_load_cast",
+		type: "load",
+		configSnapshot: {
+			method: "GET",
+			url: "https://api.test/orders",
+			dataFileName: "plans.csv",
+			dataFileCastNumbers: true,
+		},
+	},
 	run_load_old: {
 		id: "run_load_old",
 		type: "load",
@@ -164,6 +174,13 @@ describe("a run tab's tooltip names the data file", () => {
 		const d = descriptorOf("run_load");
 		expect(d.title).toBe("Load test: GET /orders · users.csv");
 		expect(d.label).toBe("/orders");
+	});
+
+	// Mutation check: append `dataFile.fileName` bare again and this fails (#2540).
+	it("says in the title when the run read the file's numbers as numbers", () => {
+		expect(descriptorOf("run_load_cast").title).toBe(
+			"Load test: GET /orders · plans.csv (numbers read as numbers)"
+		);
 	});
 
 	it.each([

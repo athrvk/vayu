@@ -266,10 +266,11 @@ export type DataRowCells = ReadonlyMap<string, string>;
  * Render one row value as the text a token substitutes - the engine's
  * `render_data_value`, restated.
  *
- * A string is its own text: the CSV/TSV path produces only strings, so this is
- * the ordinary case and it is byte-exact. A JSON or JSONL file may carry any
- * type: numbers and booleans render as JSON writes them (`7`, `true`), `null`
- * renders empty, and an object or array renders as compact JSON so a nested
+ * A string is its own text: a CSV/TSV cell is one unless the file opted into
+ * `castNumbers`, so this is the ordinary case and it is byte-exact. A JSON or
+ * JSONL file may carry any type, and so may a cast CSV/TSV cell (a number):
+ * numbers and booleans render as JSON writes them (`7`, `true`, a cast `1.50`
+ * as `1.5`), `null` renders empty, and an object or array renders as compact JSON so a nested
  * value can still be dropped into a body.
  *
  * A null cell never reaches a request through the binder - it is refused, for

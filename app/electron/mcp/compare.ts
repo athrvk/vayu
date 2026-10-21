@@ -299,18 +299,26 @@ function durationWarning(base: Report, target: Report): ComparabilityWarning | n
 }
 
 const dataFileHash = (report: Report): string | null => str(report, ...CONFIG, "dataFileHash");
+const dataFileCast = (report: Report): boolean => bool(report, ...CONFIG, "dataFileCastNumbers");
 
 /** The file's name with the start of its hash, or `null` for a run that bound none. */
 function dataFileLabel(report: Report): string | null {
 	const hash = dataFileHash(report);
 	if (hash === null) return null;
 	const name = str(report, ...CONFIG, "dataFileName");
-	return name === null ? hash.slice(0, 8) : `${name} (${hash.slice(0, 8)})`;
+	const label = name === null ? hash.slice(0, 8) : `${name} (${hash.slice(0, 8)})`;
+	return dataFileCast(report) ? `${label}, numbers read as numbers` : label;
 }
 
-/** Unlike the other fields, no file on one side and a file on the other is a real difference. */
+/**
+ * Unlike the other fields, no file on one side and a file on the other is a
+ * real difference. The hash is of the file's bytes, so one file read with and
+ * without its numbers cast (#2540) differs too.
+ */
 function dataFileWarning(base: Report, target: Report): ComparabilityWarning | null {
-	if (dataFileHash(base) === dataFileHash(target)) return null;
+	const hash = dataFileHash(base);
+	const sameReading = hash === null || dataFileCast(base) === dataFileCast(target);
+	if (hash === dataFileHash(target) && sameReading) return null;
 	return {
 		code: "data_file",
 		message: "Data file differs.",

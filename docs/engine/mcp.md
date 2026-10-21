@@ -263,7 +263,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_request`          | read     | `GET /requests/:id`                          | - (the row is withheld as `list_requests` withholds each of its rows; an unknown id is a 404 error) |
 | `get_graphql_schema`   | read     | `POST /compose` + `POST /execute` (transient) with `origin: mcp` | allowlist on the composed host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; SDL capped at 256 KB, `types` to read it in parts; `endpoint` withheld as a saved request's `url` is |
 | `list_environments`    | read     | `GET /environments`                          | - (secret values withheld unless revealed) |
-| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
+| `list_runs`            | read     | `GET /runs?limit=&offset=&type=&status=&requestId=&collectionId=&q=&baseline=` | Page of the `{data, pagination}` envelope, newest first; 100 rows by default, 500 max (refused above, not clamped); rows carry a compact summary, including a data-driven run's `dataFileName` / `dataFileHash` / `dataFileCastNumbers` (`summary.scenario.*` on a collection run - see [Data files](#data-files)); a terminal load run's row carries `resultSummary` `{rps, p95Ms, errorRate, verdict}` (`errorRate` a percentage 0-100, `verdict` absent when the run declared no budgets, each key absent when not recorded) and a design run's `{statusCode, latencyMs}` (`verdict` is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged"; `errorRate` is computed over the status-code distribution, so it can differ slightly from the report's `summary.errorRate`); secret values and credential header values read `<redacted>` unless revealed |
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
@@ -276,7 +276,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `export_run_report`    | read     | `POST /export/run-report` (`series: "none"`)  | The Export menu's document as its own text (not a result object): aggregates, budgets and, with `baseRunId` or `baseline: true` (not both), a comparison; no traces, samples, per-tick series or request values - `get_run_samples` and `get_run_report` hold those. `format` defaults to `markdown` (plain GFM: verdict, run, headline numbers, latency against budgets, errors, comparison, warnings - [the report's layout](api-reference.md#the-markdown-report)) and `json` is the document itself for a program; `html` is the Export menu's alone (a file for a person, with charts an agent cannot read) and is refused here, naming the Export menu, without asking the engine. A design or collection run, or one still executing, is an engine error; secret values read `<redacted>` unless revealed |
 | `run_request`          | execute  | `POST /compose` (with `requestId` when no `url` is given - a saved request sent as the app's Send does) + `POST /execute` with `origin: mcp` (+ `GET /runs/:id/events` when streaming) | allowlist, checked on the composed URL on either path; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); response body capped at 32 KB; `verifySSL: false` refused - the downgrade belongs on a saved request; with write access off, `persistVariables: false`, so nothing a script or extractor sets is stored; the response and any streamed events read secret values and credential header values as `<redacted>` unless revealed |
 | `run_collection_smoke` | execute  | `GET /requests?…` + `POST /compose` + `POST /execute` with `origin: mcp` (×N) | allowlist per host; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused before any row is sent; each row's `url`, `reason`, `error` and failing test lines read secret values as `<redacted>` unless revealed; every row's `url` (composed, skipped, send-error or compose-failure, where it is the stored one) also has a URL password dropped and a credential query value emptied unless revealed |
-| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
+| `run_collection`       | execute  | `GET /requests?…` (+ `GET /collections` when recursive) + `POST /compose` (×N) + `POST /runs` with `origin: mcp` | allowlist on **every** step - one step off it refuses the whole run; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused; optional `data` rows with `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside them, forwarded into the `scenario` block; optional `thresholds` budgets, the same argument `start_load_run` takes; the result's `nextStep` names `get_run`, the terminal statuses and the poll interval |
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` has its credentials withheld |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch) | write toggle; `variables` merges like `update_environment`'s, `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
@@ -314,7 +314,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `set_run_baseline`     | write    | `PUT /runs/:id/baseline`                     | write toggle; the returned run row reads secret values and credential header values as `<redacted>` unless revealed |
 | `delete_run`           | write    | `GET /runs/:id` + `DELETE /runs/:id`         | write toggle + confirm     |
 | `update_engine_config` | write    | `POST /config`                               | write toggle; the `proxy*` keys and `customCaCertificates` also need the network gate, and a batch naming one without it is refused whole |
-| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
+| `start_load_run`       | load     | `POST /compose` + `POST /runs`, or (with `scenario`) `GET /requests?…` + `POST /compose` (×N) + `POST /runs`; both with `origin: mcp` | allowlist + caps + confirm; omitted `environmentId` is the active environment, `"none"` is none, an unknown id is refused on both shapes (the app's load-test dialog advises about an off-network host where this gates: an info notice, Start never blocked); optional `data` rows (single target) or `scenario.data` (sequence), each with an optional `dataFileName` / `dataFileHash` / `dataFileCastNumbers` beside it at the same level; optional `thresholds` budgets and `monitor` server-vitals block; `headers` is `{name, value}` lines or a string map, a repeated name sent once per line (issue #2466); `mode` is one of `constant_concurrency` (the default) \| `constant_rps` \| `ramp_up` \| `iterations` \| `capacity`, a schema refusal naming the five otherwise, narrowed to `constant_concurrency` \| `ramp_up` \| `iterations` for a scenario; an omitted shape field is sent as the engine's default (see [Load defaults](#load-defaults)); the recording knobs and `comment` below apply to both shapes, the redirect policy to a single target only; the confirmation preview states the effective shape in words ("constant_concurrency, 100 virtual users, closed loop, 60 s") above the planned payload; the result carries a `nextStep` field naming `get_run`, the terminal statuses and the poll interval, and a `shape` object with the resolved fields and `closedLoop` (single target and scenario alike); a single target's confirmation preview reads secret values as `<redacted>` and its `auth` credentials as `<member>Withheld` unless revealed |
 | `stop_run`             | load     | `POST /runs/:id/stop`                        | -                          |
 | `fetch_oauth2_token`   | execute  | `POST /oauth2/token`                         | allowlist, on `accessTokenUrl` **and** `refreshTokenUrl`; `authorization_code` refused before the call; the access token is never returned |
 | `get_oauth2_token_status` | read  | `GET /oauth2/token?key=`                     | - (an absent entry is `found: false`, not a 404); the access token is never returned |
@@ -1474,8 +1474,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   bound one per request the run sends off a cursor that wraps rather than one
   per iteration of a sequence. The two fields are mutually exclusive: `data`
   beside a `scenario` block is refused by name rather than dropped, and so are
-  a top-level `dataFileName` / `dataFileHash` there - a sequence names its
-  rows' file inside the block.
+  a top-level `dataFileName` / `dataFileHash` / `dataFileCastNumbers` there - a
+  sequence names its rows' file inside the block.
 - **Protocol** - `run_request` and `start_load_run` both take an optional
   `httpVersion` Zod-enum arg (`"auto" | "http1.1" | "http2"`, default `"auto"`),
   mirroring the request builder's Settings-tab picker. `run_collection_smoke`
@@ -1591,7 +1591,11 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     `dataFileHash` (issue #2051) name the file the rows came from - a display
     name and the SHA-256 of its bytes as 64 lowercase hex, which the schema
     checks, refusing a name holding a `/` or `\` as a path - and are forwarded
-    as given; the engine refuses either one sent without rows, by name. See [Data files](#data-files).
+    as given; the engine refuses either one sent without rows, by name.
+    `dataFileCastNumbers` (issue #2540), a boolean, says the agent read the
+    file's unquoted numeric cells as numbers; Vayu never converts the rows, it
+    only records the reading, and it is forwarded and refused without rows on
+    the same terms. See [Data files](#data-files).
   - `scenario.iterations` is offered on `run_collection` only. A load run reads
     the **top-level** `iterations` (total passes across all virtual users); the
     in-block count is the design runner's and the load executor never reads it,
@@ -1825,6 +1829,13 @@ Send-with-row or the Data tab), or none for a location it has not read since
 hashes were recorded. A write tool's echoed collection row carries that stored
 hash too; it does not read the disk.
 
+`castNumbers: true` (issue #2540) appears on `dataFile` when the collection's
+binding reads the CSV/TSV file with **Read numbers as numbers** on: the app
+reads an unquoted integer or decimal cell as a number and a quoted one as text.
+It is absent otherwise, which means every cell is a string. An agent building
+`data` rows from the file reads it the same way, so its rows match the ones the
+app would send, and says so with `dataFileCastNumbers: true` on the run.
+
 A path is true of one filesystem only, which is why it never reaches the engine
 or an export. It may reach MCP because the Electron-hosted server listens on
 loopback (`MCP_HOST`): every client that can read the answer runs on the machine
@@ -1834,17 +1845,24 @@ a path. **The rows are never sent:** no tool reads the file, so an agent that
 wants the data opens it itself, and a run still takes its rows inline as `data`.
 
 **Re-running with the same data file.** A data-driven run records which file
-drove it, by name and content hash, never by path or rows: `list_runs` carries
-`summary.dataFileName` / `summary.dataFileHash` on a single-request run and
-`summary.scenario.dataFileName` / `dataFileHash` on a collection run, and
-`get_run_report` carries both under `metadata.configuration`. To repeat such a
+drove it, by name and content hash, never by path or rows, and how it was read
+(`dataFileCastNumbers`, present as `true` only when its numbers were read as
+numbers): `list_runs` carries `summary.dataFileName` / `summary.dataFileHash` /
+`summary.dataFileCastNumbers` on a single-request run and
+`summary.scenario.dataFileName` / `dataFileHash` / `dataFileCastNumbers` on a
+collection run, and `get_run_report` carries all three under
+`metadata.configuration`. To repeat such a
 run, read the run row for the file's name and hash, then `list_collections` for
 the file's current `dataFile.path` and `hash`, and compare the two hashes
 *before* reading the file and sending its rows - a mismatch means the file has
 changed since that run (hash the bytes you read yourself to be certain they are
-the ones you send). Then pass the rows with the same `dataFileName` and
-`dataFileHash`: `data` / `dataFileName` / `dataFileHash` on `run_collection`,
-`scenario.*` or the top-level trio on `start_load_run`. The run tools take rows,
+the ones you send). Read the file the way the run did - numbers as numbers when
+it recorded `dataFileCastNumbers: true`, every cell as text otherwise - and
+pass the rows with the same `dataFileName`, `dataFileHash` and
+`dataFileCastNumbers`: `data` and the three on `run_collection`, `scenario.*`
+or the same four at the top level on `start_load_run`. `compare_runs` reports
+one file read two ways as a `data_file` difference, because the hash is of the
+bytes and cannot tell the readings apart. The run tools take rows,
 never a path: `dataFileName` is `dataFile.fileName`, and a value holding a `/`
 or `\` is refused by the tool schema (pointing at `dataFile.fileName`) and by
 the engine alike.

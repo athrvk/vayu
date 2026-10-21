@@ -341,6 +341,8 @@ describe("data rows (issue #993)", () => {
 		expect(config.dataFileHash).toBe(
 			"47084569d953e21c1461d202a7e698a28ff349bd3a5cd6df5230b2f40e3a6f6c"
 		);
+		// And how it was read (issue #2540), off until asked for.
+		expect(config.dataFileCastNumbers).toBe(false);
 	});
 
 	// Mutation check: send `dataFile.fileName` unfiltered and this fails.
@@ -364,6 +366,7 @@ describe("data rows (issue #993)", () => {
 		expect(config).not.toHaveProperty("dataColumns");
 		expect(config).not.toHaveProperty("dataFileName");
 		expect(config).not.toHaveProperty("dataFileHash");
+		expect(config).not.toHaveProperty("dataFileCastNumbers");
 	});
 
 	it("refuses to start while the picked file cannot be read", async () => {
@@ -1771,6 +1774,35 @@ describe("a pick declares the contract (issue #2050)", () => {
 		).toBeInTheDocument();
 		// A warning, never a blocker.
 		expect(started(onStart).data).toEqual([{ plan: "free", price: "0" }]);
+	});
+
+	it("Read numbers as numbers re-parses the sent rows and stays with the binding (#2540)", async () => {
+		const { onStart } = open({ collectionId: "col_1" });
+		await pick("plans.csv", "plan,price\nfree,0");
+		succeedContractWrite();
+		updateCollection.mutate.mockClear();
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }));
+
+		const config = started(onStart);
+		expect(config.data).toEqual([{ plan: "free", price: 0 }]);
+		// The run records how its rows were typed. Mutation check: drop
+		// `dataFileCastNumbers` from `buildLoadTestConfig` and this fails.
+		expect(config.dataFileCastNumbers).toBe(true);
+		// Mutation check: drop `writer.rememberReading` from `changeReading`
+		// and the next pre-fill reads the file as text.
+		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+	});
+
+	it("Read numbers as numbers lives in the selection for a request in no collection", async () => {
+		const { onStart } = open();
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }));
+
+		expect(started(onStart).data).toEqual([{ plan: "free", price: 0 }]);
+		expect(useDataFileStore.getState().locations).toEqual({});
 	});
 
 	it("a declare that fails does not block Start", async () => {

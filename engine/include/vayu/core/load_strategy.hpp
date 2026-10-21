@@ -66,8 +66,7 @@ struct LoadDataSet {
     /// The file @ref rows came from, as the caller named it (issue #2051,
     /// `core::read_data_file_fields`). Empty when none was named; recorded in
     /// the run's snapshot, never read by the run itself.
-    std::string file_name;
-    std::string file_hash;
+    DataFileProvenance file;
 };
 
 /**

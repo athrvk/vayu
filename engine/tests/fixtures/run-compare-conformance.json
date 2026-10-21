@@ -1290,6 +1290,126 @@
       }
     },
     {
+      "name": "the same file read as text against read with numbers cast: the hash is of the bytes, so the reading is a data-file difference of its own",
+      "base": {"metadata":{"configuration":{"dataFileName":"users.csv","dataFileHash":"aaaaaaaa11112222"}}},
+      "target": {"metadata":{"configuration":{"dataFileName":"users.csv","dataFileHash":"aaaaaaaa11112222","dataFileCastNumbers":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": [{"code":"data_file","message":"Data file differs.","base":"users.csv (aaaaaaaa)","target":"users.csv (aaaaaaaa), numbers read as numbers"}]
+      }
+    },
+    {
+      "name": "the same file read with numbers cast on both sides is the same data",
+      "base": {"metadata":{"configuration":{"dataFileName":"users.csv","dataFileHash":"aaaaaaaa11112222","dataFileCastNumbers":true}}},
+      "target": {"metadata":{"configuration":{"dataFileName":"users.csv","dataFileHash":"aaaaaaaa11112222","dataFileCastNumbers":true}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
+      "name": "a cast flag beside no file names no file, so it is no difference",
+      "base": {"metadata":{"configuration":{"dataFileCastNumbers":true}}},
+      "target": {"metadata":{"configuration":{}}},
+      "expected": {
+        "latency": [
+          {"metric":"latency.p50","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p90","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p95","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.p99","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.avg","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"},
+          {"metric":"latency.max","base":null,"target":null,"delta":null,"pctChange":null,"direction":"lower-is-better"}
+        ],
+        "throughput": [
+          {"metric":"summary.avgRps","base":null,"target":null,"delta":null,"pctChange":null,"direction":"higher-is-better"},
+          {
+            "metric": "summary.throughput",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "higher-is-better"
+          }
+        ],
+        "reliability": [
+          {
+            "metric": "summary.errorRate",
+            "base": null,
+            "target": null,
+            "delta": null,
+            "pctChange": null,
+            "direction": "lower-is-better"
+          },
+          {"metric":"summary.totalRequests","base":null,"target":null,"delta":null,"pctChange":null,"direction":"neutral"}
+        ],
+        "statusCodes": {},
+        "compressionNegotiationDiffers": false,
+        "comparability": []
+      }
+    },
+    {
       "name": "a status differing only in case, compared before it is capitalised",
       "base": {"metadata":{"status":"completed"}},
       "target": {"metadata":{"status":"Completed"}},

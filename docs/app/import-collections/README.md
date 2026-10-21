@@ -481,7 +481,9 @@ how many. `names` names what was dropped, never its value: the keys of the OAuth
 parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
 [postman.md](./postman.md#oauth-20-extra-request-parameters)), and the folders or collection
 that declared a Postman setting Vayu cannot apply (`protocol_behavior_folder`, see
-[postman.md](./postman.md#redirect-settings)). How the Preview words and ranks each kind - amber for what the user must finish, muted
+[postman.md](./postman.md#redirect-settings)). A Postman GET or HEAD that carries a body Postman
+would prune, and that does not opt out with `disableBodyPruning`, is counted as `body_on_get`
+and named under `requests` (also [postman.md](./postman.md#redirect-settings)). How the Preview words and ranks each kind - amber for what the user must finish, muted
 for what the import decided, not shown for what changes nothing sent - is
 `app/src/modules/collections/import-notices.ts`.
 Three of the kinds are not about representability: `unsupported_method` is an operation whose

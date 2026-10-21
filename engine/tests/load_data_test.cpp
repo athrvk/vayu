@@ -345,9 +345,10 @@ TEST (ReadLoadDataSet, TopLevelRowsBesideAScenarioBlockAreRefusedByName) {
     EXPECT_EQ (read.set, nullptr);
 }
 
-/// A well-formed value for each of the two data-file keys (issue #2051).
-std::vector<std::pair<std::string, std::string>> data_file_fields () {
-    return { { "dataFileName", "users.csv" }, { "dataFileHash", std::string (64, 'c') } };
+/// A well-formed value for each of the data-file keys (issues #2051, #2540).
+std::vector<std::pair<std::string, json>> data_file_fields () {
+    return { { "dataFileName", "users.csv" },
+        { "dataFileHash", std::string (64, 'c') }, { "dataFileCastNumbers", true } };
 }
 
 // Issue #2051: the file the rows came from rides the set, by name and content
@@ -360,8 +361,52 @@ TEST (ReadLoadDataSet, TheDataFileNameAndHashRideTheSet) {
     const auto read = read_load_data_set (payload, stock_limits (), false);
     ASSERT_TRUE (read.ok) << read.error;
     ASSERT_NE (read.set, nullptr);
-    EXPECT_EQ (read.set->file_name, "users.csv");
-    EXPECT_EQ (read.set->file_hash, std::string (64, 'b'));
+    EXPECT_EQ (read.set->file.name, "users.csv");
+    EXPECT_EQ (read.set->file.hash, std::string (64, 'b'));
+    EXPECT_FALSE (read.set->file.cast_numbers) << "absent reads as not cast";
+}
+
+// Issue #2540: how the client read the file rides the set beside its name, so
+// the snapshot can say a re-read must cast the same way. Mutation check: drop
+// the `read_data_file_cast` call in `read_data_file_fields` and this reds.
+TEST (ReadLoadDataSet, TheDataFileCastFlagRidesTheSet) {
+    const json payload = { { "url", "https://example.test/" },
+        { "data", json::array ({ json{ { "id", 7 } } }) },
+        { "dataFileName", "users.csv" }, { "dataFileCastNumbers", true } };
+
+    const auto read = read_load_data_set (payload, stock_limits (), false);
+    ASSERT_TRUE (read.ok) << read.error;
+    ASSERT_NE (read.set, nullptr);
+    EXPECT_TRUE (read.set->file.cast_numbers);
+}
+
+TEST (ReadLoadDataSet, ANonBooleanDataFileCastFlagIsRefused) {
+    for (const json& bad : { json ("true"), json (1), json::object () }) {
+        const json payload = { { "url", "https://example.test/" },
+            { "data", json::array ({ json{ { "id", "a" } } }) },
+            { "dataFileCastNumbers", bad } };
+
+        const auto read = read_load_data_set (payload, stock_limits (), false);
+        EXPECT_FALSE (read.ok) << bad.dump ();
+        EXPECT_NE (read.error.find ("'dataFileCastNumbers' must be a boolean"),
+        std::string::npos)
+        << read.error;
+        EXPECT_EQ (read.set, nullptr);
+    }
+}
+
+// `false` is a statement about a file too, so it is refused without rows like
+// `true` is; only `null` is absent.
+TEST (ReadLoadDataSet, AFalseDataFileCastFlagWithoutRowsIsRefusedAndNullIsAbsent) {
+    json payload = { { "url", "https://example.test/" }, { "dataFileCastNumbers", false } };
+    auto read = read_load_data_set (payload, stock_limits (), false);
+    EXPECT_FALSE (read.ok);
+    EXPECT_NE (read.error.find ("'dataFileCastNumbers'"), std::string::npos)
+    << read.error;
+
+    payload["dataFileCastNumbers"] = nullptr;
+    read = read_load_data_set (payload, stock_limits (), false);
+    EXPECT_TRUE (read.ok) << read.error;
 }
 
 // The same rule as the rows above it: a collection run names its file inside
@@ -385,7 +430,8 @@ TEST (ReadLoadDataSet, TopLevelDataFileFieldsBesideAScenarioBlockAreRefusedByNam
 
 // Refused rather than ignored (#1503): a name stored for a run that bound no
 // rows would describe a data set that never existed. Mutation check: drop the
-// `has_data` check in `read_data_file_string` and both cases red.
+// `has_data` check in `read_data_file_string` or `read_data_file_cast` and
+// that function's keys red.
 TEST (ReadLoadDataSet, TheDataFileFieldsWithoutRowsAreRefused) {
     for (const auto& [key, value] : data_file_fields ()) {
         json payload = { { "url", "https://example.test/" } };

@@ -1154,6 +1154,12 @@ export interface RunConfigSnapshot {
 	dataFileName?: string;
 	dataFileHash?: string;
 	/**
+	 * Whether the file's numbers were read as numbers (issue #2540). The hash
+	 * is of the bytes, so it cannot tell two readings apart. Absent means read
+	 * as text, and is how every run recorded before the flag reads.
+	 */
+	dataFileCastNumbers?: boolean;
+	/**
 	 * Requested protocol the run executed with - `build_run_report_config` in
 	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
 	 * key to `"auto"` before this ever reaches the client, so it is always
@@ -1687,6 +1693,8 @@ export interface RunScenarioSummary {
 	/** The data file that drove the run (issue #2051): its name and content hash, never a path. */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/** Whether its numbers were read as numbers (issue #2540); absent means read as text. */
+	dataFileCastNumbers?: boolean;
 }
 
 /**
@@ -1758,6 +1766,8 @@ export interface RunSummary {
 	 */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/** Whether its numbers were read as numbers (issue #2540); absent means read as text. */
+	dataFileCastNumbers?: boolean;
 	/**
 	 * Whether the run's terminal report carries a non-empty `warnings` array
 	 * (issue #1527, extending #1503). Omitted, not `false`, for a run with
@@ -2077,6 +2087,11 @@ export interface LoadTestConfig {
 	 */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/**
+	 * Whether the picked file's numbers were read as numbers (issue #2540),
+	 * so the run records how its rows were typed. Absent exactly when `data` is.
+	 */
+	dataFileCastNumbers?: boolean;
 	/**
 	 * The `elements` run override (issue #1594), single-request runs only:
 	 * whether an inherited `script.*` element's own `config.inline` decides
@@ -2656,6 +2671,8 @@ export interface RunReport {
 			 */
 			dataFileName?: string;
 			dataFileHash?: string;
+			/** Whether its numbers were read as numbers (issue #2540); absent means read as text. */
+			dataFileCastNumbers?: boolean;
 		};
 		/**
 		 * The document this run was measured against (issue #637), echoed from

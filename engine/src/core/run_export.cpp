@@ -397,10 +397,11 @@ ordered report_section (const json& report) {
 
 // --- config ------------------------------------------------------------------
 
-constexpr auto CONFIGURATION_KEYS = std::to_array<std::string_view> ({ "mode",
-"duration", "concurrency", "startConcurrency", "rampUpDuration", "timeout", "targetRps",
-"comment", "followRedirects", "maxRedirects", "httpVersion", "acceptEncoding",
-"expectContinue", "dataRowCount", "dataFileName", "dataFileHash", "carriedBudgets" });
+constexpr auto CONFIGURATION_KEYS = std::to_array<std::string_view> (
+{ "mode", "duration", "concurrency", "startConcurrency", "rampUpDuration",
+"timeout", "targetRps", "comment", "followRedirects", "maxRedirects",
+"httpVersion", "acceptEncoding", "expectContinue", "dataRowCount",
+"dataFileName", "dataFileHash", "dataFileCastNumbers", "carriedBudgets" });
 
 /// The names of a payload's headers or Params rows: an object's keys, or each
 /// row's `key` - a header line's `name` (issue #2466). Values never.

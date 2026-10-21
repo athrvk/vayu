@@ -22,10 +22,13 @@
  * something the file already states. An empty or duplicated header cell is
  * therefore a parse error, not a column nobody can address.
  *
- * **CSV and TSV values are strings, always.** `007` stays `007` and a 20-digit
- * id survives, matching JMeter and k6. JSON and JSONL keep their native types,
- * because the file said what they were. The preview states the asymmetry
- * rather than leaving it to be discovered.
+ * **CSV and TSV values are strings, unless the file opts in.** `007` stays
+ * `007` and a 20-digit id survives, matching JMeter and k6. `castNumbers` is the
+ * per-file opt-in for Newman's reading (#2540): an unquoted integer or decimal
+ * cell becomes a number, a quoted one never does (`numeric-cell.ts`). JSON and
+ * JSONL keep their native types, because the file said what they were, and
+ * ignore the option. The preview states the asymmetry rather than leaving it to
+ * be discovered.
  *
  * Everything here is pure: text in, rows out. Reading the file is the caller's
  * (a `FileReader`, exactly as `ImportModal` does it - no Electron dialog IPC),
@@ -38,7 +41,8 @@
 import { DATA_FILE_MAX_NESTING } from "@/constants/data-files";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DataFileError } from "./errors";
-import { isBlankRow, parseDelimited } from "./tabular";
+import { castNumericCell } from "./numeric-cell";
+import { isBlankRow, tokenizeDelimited } from "./tabular";
 
 export type DataFileFormat = "csv" | "tsv" | "json" | "jsonl";
 
@@ -54,6 +58,12 @@ export interface ParsedDataFile {
 	 */
 	columns: string[];
 	rows: DataFileRow[];
+	/**
+	 * Whether CSV/TSV numbers were cast: the setting in force, so the preview and
+	 * a run's snapshot can state it. Always `false` for JSON and JSONL, which
+	 * ignore the option.
+	 */
+	castNumbers: boolean;
 	/**
 	 * Things worth saying that are not failures - skipped blank lines, the
 	 * CSV-values-are-strings asymmetry. Shown beside the preview; a warning
@@ -104,6 +114,25 @@ export function detectDataFileFormat(text: string, fileName?: string): DataFileF
 	return tabs > commas ? "tsv" : "csv";
 }
 
+export interface ParseDataFileOptions {
+	/**
+	 * Read an unquoted integer or decimal CSV/TSV cell as a number (default
+	 * `false`). Ignored for JSON and JSONL.
+	 */
+	castNumbers?: boolean;
+}
+
+/**
+ * The preview's note about how CSV/TSV values were read. One place, because the
+ * wording changes with the setting and the picker's checkbox points at it.
+ */
+function describeValueReading(castNumbers: boolean): string {
+	if (castNumbers) {
+		return `Numbers are read as numbers - "007" becomes 7. A quoted value such as "007" stays text.`;
+	}
+	return `Values are read as text - "007" stays "007". Newman reads unquoted numbers as numbers; turn on "Read numbers as numbers" for that, or use a JSON or JSONL file.`;
+}
+
 /** The header row's rules, which are also the `{{data.*}}` namespace's rules. */
 function readHeader(cells: string[]): string[] {
 	const columns: string[] = [];
@@ -126,8 +155,13 @@ function readHeader(cells: string[]): string[] {
 	return columns;
 }
 
-function parseTabular(text: string, delimiter: string, warnings: string[]): ParsedDataFile {
-	const grid = parseDelimited(text, delimiter);
+function parseTabular(
+	text: string,
+	delimiter: string,
+	warnings: string[],
+	castNumbers: boolean
+): ParsedDataFile {
+	const { cells: grid, quoted } = tokenizeDelimited(text, delimiter);
 	const format: DataFileFormat = delimiter === "\t" ? "tsv" : "csv";
 
 	if (grid.length === 0 || (grid.length === 1 && isBlankRow(grid[0]))) {
@@ -153,7 +187,8 @@ function parseTabular(text: string, delimiter: string, warnings: string[]): Pars
 		}
 		const row: DataFileRow = {};
 		columns.forEach((name, index) => {
-			row[name] = cells[index];
+			const cell = cells[index];
+			row[name] = castNumbers && !quoted[i][index] ? castNumericCell(cell) : cell;
 		});
 		rows.push(row);
 	}
@@ -161,11 +196,9 @@ function parseTabular(text: string, delimiter: string, warnings: string[]): Pars
 	if (blanks > 0) {
 		warnings.push(`Skipped ${blanks} blank ${pluralize(blanks, "line")}.`);
 	}
-	warnings.push(
-		`Values are read as text - "007" stays "007". Use a JSON or JSONL file for numbers and booleans.`
-	);
+	warnings.push(describeValueReading(castNumbers));
 
-	return { format, columns, rows, warnings };
+	return { format, columns, rows, castNumbers, warnings };
 }
 
 /**
@@ -298,7 +331,7 @@ function parseJsonArray(text: string, warnings: string[]): ParsedDataFile {
 	const rows = parsed.map((row, index) => assertRowObject(row, `Row ${index}`));
 	const columns = columnsOf(rows);
 	warnAboutUnevenColumns(columns, rows, warnings);
-	return { format: "json", columns, rows, warnings };
+	return { format: "json", columns, rows, castNumbers: false, warnings };
 }
 
 function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
@@ -326,7 +359,7 @@ function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
 	}
 	const columns = columnsOf(rows);
 	warnAboutUnevenColumns(columns, rows, warnings);
-	return { format: "jsonl", columns, rows, warnings };
+	return { format: "jsonl", columns, rows, castNumbers: false, warnings };
 }
 
 /**
@@ -337,7 +370,11 @@ function parseJsonLines(text: string, warnings: string[]): ParsedDataFile {
  * `data` array (a data set that binds nothing is a mistake, not an empty run),
  * and refusing it here means the user hears it before starting anything.
  */
-export function parseDataFile(text: string, fileName?: string): ParsedDataFile {
+export function parseDataFile(
+	text: string,
+	fileName?: string,
+	options: ParseDataFileOptions = {}
+): ParsedDataFile {
 	const source = stripBom(text);
 	const format = detectDataFileFormat(source, fileName);
 	const warnings: string[] = [];
@@ -347,7 +384,12 @@ export function parseDataFile(text: string, fileName?: string): ParsedDataFile {
 			? parseJsonArray(source, warnings)
 			: format === "jsonl"
 				? parseJsonLines(source, warnings)
-				: parseTabular(source, format === "tsv" ? "\t" : ",", warnings);
+				: parseTabular(
+						source,
+						format === "tsv" ? "\t" : ",",
+						warnings,
+						options.castNumbers ?? false
+					);
 
 	if (parsed.rows.length === 0) {
 		throw new DataFileError(
@@ -378,7 +420,8 @@ export function resolveIterationCount(
 	return rowCount > 0 ? rowCount : 1;
 }
 
-export { parseDelimited } from "./tabular";
+export { parseDelimited, tokenizeDelimited, type TabularGrid } from "./tabular";
+export { castNumericCell } from "./numeric-cell";
 export { DataFileError } from "./errors";
 export { decodeDataFile, type DecodedDataFile } from "./decode";
 export { sha256Hex } from "./hash";

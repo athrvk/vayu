@@ -146,6 +146,15 @@ export const DOC_READING_GUARDS = {
 		paths: ["docs/app/data-driven-runs.md", "docs/app/COMPONENTS.md"],
 	},
 	/*
+	 * The same page, read for what it says about how a data file's cells are
+	 * typed (#2540): the Newman difference and the option's own name, which a
+	 * heading or sentence reworded on the page alone would drop.
+	 */
+	dataFileReading: {
+		reader: "app/src/modules/collections/data-file-reading-docs.test.ts",
+		paths: ["docs/app/data-driven-runs.md"],
+	},
+	/*
 	 * The one guard whose input is a *number* in prose (#1431): the MCP tool
 	 * registry grows by a tool, and every page that says how many there are
 	 * stays on the figure that was true when it was written - 24 on two pages,

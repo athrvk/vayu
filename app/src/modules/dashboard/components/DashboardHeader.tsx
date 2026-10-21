@@ -24,6 +24,7 @@ import { MethodBadge, RunComment, RunStatusPill, StopRunButton } from "@/compone
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { formatClock, pluralize } from "../utils/format";
 import { formatNumber } from "@/lib/format-number";
+import { dataFileDisplayName } from "@/lib/run-data-file";
 import RunExportMenu from "@/modules/history/main/components/RunExportMenu";
 
 /**
@@ -101,7 +102,11 @@ function DashboardHeader({
 	if (rowCount != null && rowCount > 0) {
 		const fileName = configuration?.dataFileName;
 		const rows = `${formatNumber(rowCount)} ${pluralize(rowCount, "row")}`;
-		configParts.push(fileName ? `${rows} from ${fileName}` : rows);
+		configParts.push(
+			fileName
+				? `${rows} from ${dataFileDisplayName(fileName, configuration?.dataFileCastNumbers)}`
+				: rows
+		);
 	}
 	if (displayMs > 0) configParts.push(`${formatClock(displayMs)} elapsed`);
 	const configSummary = configParts.join(" · ");

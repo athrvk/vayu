@@ -235,18 +235,28 @@ std::optional<Difference> duration_difference (const json& base, const json& tar
     return Difference{ "duration", duration_label (base, *b), duration_label (target, *t) };
 }
 
+bool data_file_cast (const json& report) {
+    return flag_at (report, { "metadata", "configuration", "dataFileCastNumbers" });
+}
+
 Text data_file_label (const json& report) {
     const Text hash = config_text (report, "dataFileHash");
     if (!hash) {
         return std::nullopt;
     }
     const Text name = config_text (report, "dataFileName");
-    return name ? *name + " (" + hash->substr (0, 8) + ")" : hash->substr (0, 8);
+    const std::string label =
+    name ? *name + " (" + hash->substr (0, 8) + ")" : hash->substr (0, 8);
+    return data_file_cast (report) ? label + ", numbers read as numbers" : label;
 }
 
-/// Unlike the other fields, no file against a file is a real difference.
+/// Unlike the other fields, no file against a file is a real difference. The
+/// hash is of the file's bytes, so one file read with and without its numbers
+/// cast (#2540) differs too.
 std::optional<Difference> data_file_difference (const json& base, const json& target) {
-    if (config_text (base, "dataFileHash") == config_text (target, "dataFileHash")) {
+    const Text hash = config_text (base, "dataFileHash");
+    if (hash == config_text (target, "dataFileHash") &&
+    (!hash || data_file_cast (base) == data_file_cast (target))) {
         return std::nullopt;
     }
     return Difference{ "data_file", data_file_label (base).value_or ("none"),

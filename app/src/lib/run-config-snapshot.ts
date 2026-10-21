@@ -58,6 +58,7 @@ export function loadConfigFromSnapshot(snapshot: RunConfigSnapshot): LoadTestRun
 		dataRowCount: count(scenario.dataRowCount) ?? count(snapshot.dataRowCount),
 		dataFileName: dataFile?.fileName,
 		dataFileHash: dataFile?.hash,
+		dataFileCastNumbers: dataFile?.castNumbers,
 	};
 	return Object.fromEntries(
 		Object.entries(fields).filter(([, value]) => value !== undefined)

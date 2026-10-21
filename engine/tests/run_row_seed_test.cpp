@@ -174,6 +174,7 @@ TEST (LoadDataSnapshot, ReplacesTheRowsWithTheirCount) {
     // A set sent without a file name stores no key, never an empty one.
     EXPECT_FALSE (stored.contains ("dataFileName"));
     EXPECT_FALSE (stored.contains ("dataFileHash"));
+    EXPECT_FALSE (stored.contains ("dataFileCastNumbers"));
     // Everything else the client sent is left alone.
     EXPECT_EQ (stored["environmentId"], "env_1");
     EXPECT_EQ (stored["url"], "https://api.test/login");
@@ -195,8 +196,8 @@ TEST (LoadDataSnapshot, RecordsTheFilesNameAndHashBesideTheCount) {
 
     vayu::core::LoadDataSet set;
     set.rows      = rows;
-    set.file_name = "users.csv";
-    set.file_hash = std::string (64, 'f');
+    set.file.name = "users.csv";
+    set.file.hash = std::string (64, 'f');
 
     const auto stored = json::parse (load_data_snapshot (payload.dump (), set));
 
@@ -206,6 +207,30 @@ TEST (LoadDataSnapshot, RecordsTheFilesNameAndHashBesideTheCount) {
     EXPECT_FALSE (stored.contains ("data"));
     EXPECT_EQ (stored.dump ().find ("hunter2"), std::string::npos)
     << "a row's cell reached the run store";
+}
+
+// Issue #2540: a file read with its numbers cast says so beside its name, and
+// one read as text stores no key, even when the body the sanitizer kept spelled
+// `false` itself, so absent is the one spelling of "read as text". Mutation
+// check: drop the `erase` branch in `stamp_data_file_fields` and the first
+// half reds; never stamp `true` and the second does.
+TEST (LoadDataSnapshot, RecordsANumbersCastReadingOnlyWhenOn) {
+    json payload;
+    payload["url"]                 = "https://api.test/plans";
+    payload["data"]                = json::array ({ json{ { "price", 3 } } });
+    payload["dataFileCastNumbers"] = false;
+
+    vayu::core::LoadDataSet set;
+    set.rows.push_back (json{ { "price", 3 } });
+    set.file.name = "plans.csv";
+
+    const auto as_text = json::parse (load_data_snapshot (payload.dump (), set));
+    EXPECT_FALSE (as_text.contains ("dataFileCastNumbers")) << as_text.dump ();
+
+    // The body still says `false`: the validated set decides, not the body.
+    set.file.cast_numbers = true;
+    const auto cast = json::parse (load_data_snapshot (payload.dump (), set));
+    EXPECT_EQ (cast.value ("dataFileCastNumbers", false), true) << cast.dump ();
 }
 
 TEST (LoadDataSnapshot, LeavesANonObjectSnapshotAlone) {

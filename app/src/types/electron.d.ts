@@ -430,7 +430,10 @@ interface ElectronAPI {
 	 * each time, never a diff: the main process keeps no copy of its own.
 	 */
 	publishDataFileLocations: (
-		locations: Record<string, { path: string; fileName: string; hash?: string }>
+		locations: Record<
+			string,
+			{ path: string; fileName: string; hash?: string; castNumbers?: boolean }
+		>
 	) => void;
 
 	/**

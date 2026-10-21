@@ -52,7 +52,7 @@
  * read of what was declared, not a pick. The one store write is the read's
  * own: `readDeclaredDataFile` records the hash of the bytes it read against the
  * remembered path (#2051), which is why the read below depends on the
- * location's path and name rather than on the location object.
+ * location's path, name and reading rather than on the location object.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -197,10 +197,11 @@ export function useDeclaredDataFile(
 	// answers, and finds nothing otherwise - which is the correct answer.
 	const declaringCollectionId = heldDeclarer ?? contract?.collectionId ?? collectionId ?? "";
 	const rememberedFile = useDataFileStore((s) => s.locations[declaringCollectionId]);
-	// Strings, not the object: the read's hash record replaces the object, and
-	// an object dependency would cancel the very read that replaced it.
+	// Primitives, not the object: the read's hash record replaces the object,
+	// and an object dependency would cancel the very read that replaced it.
 	const rememberedPath = rememberedFile?.path;
 	const rememberedName = rememberedFile?.fileName;
+	const rememberedCastNumbers = rememberedFile?.castNumbers ?? false;
 	const { maxRows } = useDataFileLimits();
 
 	const [file, setFile] = useState<SelectedDataFile | null>(null);
@@ -227,7 +228,7 @@ export function useDeclaredDataFile(
 		// a failure worth a note: it is a state that will never resolve.
 		if (!canReadDeclaredDataFile()) return;
 
-		void readDeclaredDataFile(rememberedPath, { maxRows })
+		void readDeclaredDataFile(rememberedPath, { maxRows, castNumbers: rememberedCastNumbers })
 			.then((read) => {
 				if (cancelled || picked.current) return;
 				setFile(read);
@@ -245,7 +246,7 @@ export function useDeclaredDataFile(
 		return () => {
 			cancelled = true;
 		};
-	}, [rememberedPath, rememberedName, maxRows]);
+	}, [rememberedPath, rememberedName, rememberedCastNumbers, maxRows]);
 
 	const dismissNote = useCallback(() => setNote(null), []);
 

@@ -3686,13 +3686,21 @@ describe("run_collection", () => {
 		expect(payload).not.toHaveProperty("mode");
 	});
 
-	test("forwards the rows' file name and hash into the scenario block (#2051)", async () => {
+	// How the file was read rides with it (#2540). Mutation check: drop
+	// `dataFileCastNumbers` from `scenarioBlock` and this fails.
+	test("forwards the rows' file name, hash and reading into the scenario block (#2051)", async () => {
 		const client = scenarioClient();
 		const rows = [{ id: "1" }];
 		const hash = "c".repeat(64);
 		const res = await dispatchTool(
 			"run_collection",
-			{ collectionId: "c1", data: rows, dataFileName: "users.csv", dataFileHash: hash },
+			{
+				collectionId: "c1",
+				data: rows,
+				dataFileName: "users.csv",
+				dataFileHash: hash,
+				dataFileCastNumbers: true,
+			},
 			ctxWith(client, { allowlist: ["api.example.com"] })
 		);
 		expect(res.isError).toBeFalsy();
@@ -3706,9 +3714,34 @@ describe("run_collection", () => {
 			data: rows,
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 		expect(payload).not.toHaveProperty("dataFileName");
 		expect(payload).not.toHaveProperty("dataFileHash");
+		expect(payload).not.toHaveProperty("dataFileCastNumbers");
+	});
+
+	test("the schema refuses a reading that is not a boolean, on every tool that takes one", () => {
+		const schemaOf = (name: string) =>
+			z.object(TOOLS.find((t) => t.name === name)!.inputSchema as Record<string, z.ZodType>);
+		const cases = [
+			[
+				"run_collection",
+				(cast: unknown) => ({ collectionId: "c1", dataFileCastNumbers: cast }),
+			],
+			["start_load_run", (cast: unknown) => ({ dataFileCastNumbers: cast })],
+			[
+				"start_load_run",
+				(cast: unknown) => ({
+					scenario: { collectionId: "c1", dataFileCastNumbers: cast },
+				}),
+			],
+		] as const;
+		for (const [name, args] of cases) {
+			expect(schemaOf(name).safeParse(args(true)).success, name).toBe(true);
+			expect(schemaOf(name).safeParse(args(false)).success, name).toBe(true);
+			expect(schemaOf(name).safeParse(args("true")).success, name).toBe(false);
+		}
 	});
 
 	test("the schema refuses a hash that is not 64 lowercase hex, on every tool that takes one", () => {
@@ -4223,7 +4256,7 @@ describe("start_load_run scenario runs", () => {
 		});
 	});
 
-	test("forwards scenario.dataFileName and scenario.dataFileHash inside the block (#2051)", async () => {
+	test("forwards scenario.dataFileName, dataFileHash and dataFileCastNumbers inside the block (#2051)", async () => {
 		const client = scenarioLoadClient();
 		const rows = [{ id: "1" }];
 		const hash = "c".repeat(64);
@@ -4235,6 +4268,7 @@ describe("start_load_run scenario runs", () => {
 					data: rows,
 					dataFileName: "users.csv",
 					dataFileHash: hash,
+					dataFileCastNumbers: true,
 				},
 				confirmed: true,
 			},
@@ -4246,6 +4280,7 @@ describe("start_load_run scenario runs", () => {
 			data: rows,
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 		expect(payload).not.toHaveProperty("dataFileName");
 	});
@@ -4303,6 +4338,7 @@ describe("start_load_run scenario runs", () => {
 			// a sequence names its rows' file inside the block.
 			["dataFileName", "users.csv"],
 			["dataFileHash", "c".repeat(64)],
+			["dataFileCastNumbers", true],
 			// The send's default-header refusals (issue #1337): the engine reads
 			// them off one request's payload, and a scenario's steps are each
 			// composed from their own saved request, so a run-level list would be
@@ -4616,6 +4652,7 @@ describe("start_load_run scenario runs", () => {
 		expect(Object.keys(shape).sort()).toEqual([
 			"collectionId",
 			"data",
+			"dataFileCastNumbers",
 			"dataFileHash",
 			"dataFileName",
 			"recursive",
@@ -10198,15 +10235,19 @@ describe("start_load_run recording knobs", () => {
 		expect(started(client)).not.toHaveProperty("data");
 		expect(started(client)).not.toHaveProperty("dataFileName");
 		expect(started(client)).not.toHaveProperty("dataFileHash");
+		expect(started(client)).not.toHaveProperty("dataFileCastNumbers");
 	});
 
-	test("forwards the rows' file name and hash at the top level (#2051)", async () => {
+	// Mutation check: drop the `dataFileCastNumbers` forward in start_load_run's
+	// handler and the reading is lost (#2540).
+	test("forwards the rows' file name, hash and reading at the top level (#2051)", async () => {
 		const rows = [{ id: "1" }];
 		const hash = "c".repeat(64);
 		const { res, client } = await start({
 			data: rows,
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 
 		expect(res.isError).toBeFalsy();
@@ -10214,6 +10255,7 @@ describe("start_load_run recording knobs", () => {
 			data: rows,
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 	});
 
@@ -13539,6 +13581,7 @@ describe("secret withholding", () => {
 			// either, so withholding passes both through.
 			dataFileName: "users.csv",
 			dataFileHash: "c".repeat(64),
+			dataFileCastNumbers: true,
 		},
 	};
 
@@ -13552,6 +13595,7 @@ describe("secret withholding", () => {
 			comment: "after rotating <redacted>",
 			dataFileName: "users.csv",
 			dataFileHash: "c".repeat(64),
+			dataFileCastNumbers: true,
 		});
 		expect((await read("list_runs", client, REVEAL)).body).toEqual(runs);
 	});

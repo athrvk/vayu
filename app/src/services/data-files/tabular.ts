@@ -32,7 +32,33 @@ import { DataFileError } from "./errors";
 export type TabularRow = string[];
 
 /**
+ * A tokenized grid with the one fact the text alone loses: whether each cell
+ * was wrapped in the quote character in the source. `quoted[r][c]` describes
+ * `cells[r][c]`, and the two grids have the same shape.
+ *
+ * An unquoted empty cell and `""` both read as `""`; the flag is what tells
+ * them apart, and what a number cast needs to leave `"007"` alone (#2540).
+ * A cell is quoted when a quote *opened* it, wherever the closing one fell:
+ * `"a"b` is quoted, `6" pipe` is not.
+ */
+export interface TabularGrid {
+	cells: TabularRow[];
+	quoted: boolean[][];
+}
+
+/**
  * Split @p text into rows of cells on @p delimiter.
+ *
+ * The text-only view of {@link tokenizeDelimited}, for callers that do not care
+ * how a cell was written.
+ */
+export function parseDelimited(text: string, delimiter: string): TabularRow[] {
+	return tokenizeDelimited(text, delimiter).cells;
+}
+
+/**
+ * Split @p text into rows of cells on @p delimiter, remembering which cells
+ * were quoted.
  *
  * A quoted field may contain the delimiter, a newline, and a literal quote
  * written as `""`. A quote that opens a field is structural; one that appears
@@ -48,10 +74,13 @@ export type TabularRow = string[];
  * the most ordinary way a CSV is corrupted, so it is named, with the line the
  * quote opened on.
  */
-export function parseDelimited(text: string, delimiter: string): TabularRow[] {
+export function tokenizeDelimited(text: string, delimiter: string): TabularGrid {
 	const rows: TabularRow[] = [];
+	const quotedRows: boolean[][] = [];
 	let row: TabularRow = [];
+	let quotedRow: boolean[] = [];
 	let field = "";
+	let fieldQuoted = false;
 	let inQuotes = false;
 	// Counted over *physical* lines, newlines inside quotes included, so the
 	// reported line is the one the user sees in an editor.
@@ -64,12 +93,16 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 
 	const endField = () => {
 		row.push(field);
+		quotedRow.push(fieldQuoted);
 		field = "";
+		fieldQuoted = false;
 	};
 	const endRow = () => {
 		endField();
 		rows.push(row);
+		quotedRows.push(quotedRow);
 		row = [];
+		quotedRow = [];
 		rowStarted = false;
 	};
 
@@ -93,6 +126,7 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 
 		if (char === '"' && field === "") {
 			inQuotes = true;
+			fieldQuoted = true;
 			quoteOpenedOnLine = line;
 			rowStarted = true;
 			continue;
@@ -126,7 +160,7 @@ export function parseDelimited(text: string, delimiter: string): TabularRow[] {
 	}
 
 	if (rowStarted || field !== "" || row.length > 0) endRow();
-	return rows;
+	return { cells: rows, quoted: quotedRows };
 }
 
 /**
