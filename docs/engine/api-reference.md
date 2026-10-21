@@ -135,6 +135,15 @@ is not read, the engine answers and closes the connection: a client that is
 still writing a large body may see the connection reset rather than the
 response.
 
+Once read, a JSON body is held to a depth bound on `POST /collections`,
+`PUT /collections/:id`, `POST /requests`, `PUT /requests/:id`, `POST /specs`
+and `POST /specs/diff`: one nested deeper than 128 levels answers `400`
+`request body is nested deeper than 128 levels` (code `bad_request`) before
+the route reads a field, and text that does not parse answers `400` `Invalid
+JSON: <parser message>` (code `bad_request`) (issue
+[#2417](https://github.com/athrvk/vayu/issues/2417)). `POST /execute` and
+`POST /runs` hold the same bound; see their sections.
+
 ## Removed route aliases
 
 The execution and run/metrics routes were consolidated behind a `/runs` family,

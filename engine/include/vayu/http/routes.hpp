@@ -268,6 +268,22 @@ std::string_view code = {}) {
 }
 
 /**
+ * Answer the refusal `parse_request_json` returned, logged under @p route
+ * (`"POST /collections"`). Dumped with `replace` for `send_error`'s reason: a
+ * parse error quotes the bytes it stopped at.
+ */
+inline void refuse_request_body (httplib::Response& res,
+std::string_view route,
+const RouteError& refusal) {
+    vayu::utils::log_warning (
+    "http", std::string (route) + " - " + error_message_of (refusal.body));
+    res.status = refusal.status;
+    res.set_content (
+    refusal.body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+    "application/json");
+}
+
+/**
  * @brief Admit a write to file trust (`/file-grants`, `/file-roots`) only
  * when @p req carries the grant secret (`grant_secret.hpp`, #2356); otherwise
  * answer it 403 and return false.

@@ -464,8 +464,12 @@ void register_collection_routes (RouteContext& ctx) {
     ctx.server.Post ("/collections",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_collection_response (ctx.db, json);
+            auto json = parse_request_json (req.body);
+            if (!json) {
+                refuse_request_body (res, "POST /collections", json.error ());
+                return;
+            }
+            auto [status, body] = create_collection_response (ctx.db, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "POST /collections - " + std::to_string (status) + ": " +
@@ -497,8 +501,13 @@ void register_collection_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string collection_id = req.matches[1];
         try {
-            auto json = nlohmann::json::parse (req.body);
-            auto [status, body] = update_collection_response (ctx.db, collection_id, json);
+            auto json = parse_request_json (req.body);
+            if (!json) {
+                refuse_request_body (res, "PUT /collections/:id", json.error ());
+                return;
+            }
+            auto [status, body] =
+            update_collection_response (ctx.db, collection_id, *json);
             if (status != 200) {
                 vayu::utils::log_warning ("http", "PUT /collections/:id failed",
                 { { "status", status }, { "id", collection_id },

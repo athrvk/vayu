@@ -802,6 +802,66 @@ const nlohmann::json& json) {
     return update_request_response (db, id, json, nullptr);
 }
 
+namespace {
+
+/// `POST /requests`, registered below.
+void handle_create_request (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    try {
+        auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "POST /requests", json.error ());
+            return;
+        }
+        auto [status, body] = create_request_response (ctx.db, *json);
+        if (status != 200) {
+            vayu::utils::log_warning ("http",
+            "POST /requests - " + std::to_string (status) + ": " + error_message_of (body));
+        } else {
+            vayu::utils::log_info ("http", "Created request",
+            { { "id", body["id"].get<std::string> () },
+            { "name", body["name"].get<std::string> () },
+            { "method", body["method"].get<std::string> () },
+            { "url", body["url"].get<std::string> () },
+            { "collectionId", body["collectionId"].get<std::string> () } });
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "POST /requests - Error: " + std::string (e.what ()));
+        send_error (res, 400, e.what ());
+    }
+}
+
+/// `PUT /requests/:id`, registered below.
+void handle_update_request (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
+    std::string request_id = req.matches[1];
+    try {
+        auto json = parse_request_json (req.body);
+        if (!json) {
+            refuse_request_body (res, "PUT /requests/:id", json.error ());
+            return;
+        }
+        auto [status, body] = update_request_response (ctx.db, request_id, *json);
+        if (status != 200) {
+            vayu::utils::log_warning ("http", "PUT /requests/:id failed",
+            { { "status", status }, { "id", request_id },
+            { "error", error_message_of (body) } });
+        } else {
+            vayu::utils::log_info ("http", "Updated request",
+            { { "id", request_id }, { "name", body["name"].get<std::string> () } });
+        }
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "PUT /requests/:id - Error: " + std::string (e.what ()));
+        send_error (res, 400, e.what ());
+    }
+}
+
+} // namespace
+
 void register_request_routes (RouteContext& ctx) {
     /**
      * GET /requests
@@ -875,28 +935,7 @@ void register_request_routes (RouteContext& ctx) {
      */
     ctx.server.Post (
     "/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        try {
-            auto json           = nlohmann::json::parse (req.body);
-            auto [status, body] = create_request_response (ctx.db, json);
-            if (status != 200) {
-                vayu::utils::log_warning ("http",
-                "POST /requests - " + std::to_string (status) + ": " +
-                error_message_of (body));
-            } else {
-                vayu::utils::log_info ("http", "Created request",
-                { { "id", body["id"].get<std::string> () },
-                { "name", body["name"].get<std::string> () },
-                { "method", body["method"].get<std::string> () },
-                { "url", body["url"].get<std::string> () },
-                { "collectionId", body["collectionId"].get<std::string> () } });
-            }
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "http", "POST /requests - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
-        }
+        handle_create_request (ctx, req, res);
     });
 
     /**
@@ -909,25 +948,7 @@ void register_request_routes (RouteContext& ctx) {
      */
     ctx.server.Put (R"(/requests/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
-        std::string request_id = req.matches[1];
-        try {
-            auto json = nlohmann::json::parse (req.body);
-            auto [status, body] = update_request_response (ctx.db, request_id, json);
-            if (status != 200) {
-                vayu::utils::log_warning ("http", "PUT /requests/:id failed",
-                { { "status", status }, { "id", request_id },
-                { "error", error_message_of (body) } });
-            } else {
-                vayu::utils::log_info ("http", "Updated request",
-                { { "id", request_id }, { "name", body["name"].get<std::string> () } });
-            }
-            res.status = status;
-            res.set_content (body.dump (), "application/json");
-        } catch (const std::exception& e) {
-            vayu::utils::log_error (
-            "http", "PUT /requests/:id - Error: " + std::string (e.what ()));
-            send_error (res, 400, e.what ());
-        }
+        handle_update_request (ctx, req, res);
     });
 
     /**
