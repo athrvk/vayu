@@ -148,7 +148,7 @@ void Database::purge_collection_locked (const std::string& id) {
     // single transaction so a crash mid-cascade cannot leave a half-deleted
     // subtree. Safe under the recursive mutex already held - the lambda only
     // calls sqlite_orm on the same storage handle (same pattern as
-    // add_results_batch).
+    // spec_sync_apply).
     impl_->storage.transaction ([&] {
         for (const auto& collection_id : subtree) {
             for (auto& spared : impl_->storage.get_all<Collection> (
