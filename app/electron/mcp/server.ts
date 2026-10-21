@@ -87,6 +87,27 @@ const INSTRUCTIONS_HEAD =
 	"retry. A tool that is subject to either gate says so in its own description. ";
 
 /**
+ * The task families behind the write tools, so an agent can tell a save from a
+ * read when it decides whether the missing tools matter. Without them an agent
+ * that does not guess tool names concluded the MCP cannot save (#2442). Families,
+ * never tool names: the user can disable any tool individually, and a family
+ * outlives a rename. `protocol.integration.test.ts` classifies every write tool
+ * into one of these, so a new write tool fails there until its family is named.
+ */
+const WRITE_TASK_FAMILIES = [
+	"saving, editing, moving or deleting collections, requests and examples",
+	"restoring or purging trashed items",
+	"creating, editing, activating or deleting environments and globals",
+	"importing a document",
+	"binding, syncing or unbinding an OpenAPI spec",
+	"pinning a run baseline",
+	"deleting runs",
+	"clearing cookies, cached OAuth 2.0 tokens or webhook inbox captures",
+	"deleting webhook inboxes",
+	"changing engine config",
+];
+
+/**
  * The write gate, stated where an agent reads it before its first call - and
  * only in the sessions it applies to, since the server is rebuilt per request
  * and this text is therefore as current as `tools/list` itself.
@@ -94,13 +115,15 @@ const INSTRUCTIONS_HEAD =
  * Withholding the write tools (#1429) took the handlers' "turn on write access"
  * refusal off the wire with them: the SDK rejects an unregistered name before
  * dispatch, so an agent on a default install saw no write tool and no reason
- * for its absence (#1431). It names how the host lifts the gate, and no tool.
+ * for its absence (#1431). It names how the host lifts the gate and which tasks
+ * the gate covers, and no tool.
  */
 function writeGateSentence(host: McpHost): string {
 	return (
-		"Write access is off in this session, so no write tool is listed: a task that " +
-		`needs one is blocked until the user chooses to ${settingRemedy("allowWrites", host)}, ` +
-		"after which they appear in `tools/list`. "
+		"Write access is off in this session, so no write tool is listed. The tasks that " +
+		`need one are ${WRITE_TASK_FAMILIES.join("; ")}. Such a task is blocked until the ` +
+		`user chooses to ${settingRemedy("allowWrites", host)}, ` +
+		"after which the write tools appear in `tools/list`. "
 	);
 }
 
