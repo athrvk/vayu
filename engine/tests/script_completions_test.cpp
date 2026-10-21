@@ -717,6 +717,27 @@ TEST (ScriptCompletions, TheRequireSnippetOffersEveryShelfModule) {
     EXPECT_TRUE (found);
 }
 
+// lodash's `_` (#2651) is offered, and what the runtime binds under it is the
+// library the entry names.
+TEST (ScriptCompletions, TheLodashGlobalIsOfferedAndBound) {
+    const auto completions = get_script_completions ();
+    const auto* item       = find_by_label (completions, "_");
+    ASSERT_NE (item, nullptr) << "the _ global is not offered";
+    EXPECT_NE (item->value ("documentation", std::string{}).find ("require('lodash')"),
+    std::string::npos);
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+    const auto result =
+    engine.execute_test ("if (typeof _ !== 'function' || _.VERSION !== "
+                         "'4.17.21') throw new Error('not lodash');",
+    request, response, env);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

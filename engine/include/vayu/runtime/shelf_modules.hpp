@@ -26,10 +26,11 @@ namespace vayu::runtime {
 
 inline constexpr std::string_view CRYPTO_JS_MODULE = "crypto-js";
 inline constexpr std::string_view UUID_MODULE      = "uuid";
+inline constexpr std::string_view LODASH_MODULE    = "lodash";
 
 /// Every name `require` accepts.
 inline constexpr auto SHELF_MODULE_NAMES =
-std::to_array<std::string_view> ({ CRYPTO_JS_MODULE, UUID_MODULE });
+std::to_array<std::string_view> ({ CRYPTO_JS_MODULE, UUID_MODULE, LODASH_MODULE });
 
 [[nodiscard]] constexpr bool is_shelf_module (std::string_view name) {
     for (const std::string_view shelf_name : SHELF_MODULE_NAMES) {
