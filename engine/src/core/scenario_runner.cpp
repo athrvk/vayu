@@ -1240,6 +1240,24 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
     return teardown_outcomes;
 }
 
+namespace {
+
+/// Step rows stored for @p run_id after a failed write. The write is chunked,
+/// so the chunks that landed before the failure stay: report those, not zero.
+/// A database that cannot be read either stores nothing as far as anyone can
+/// tell.
+size_t stored_step_count (vayu::db::Database& db, const std::string& run_id) {
+    try {
+        return db.get_results_without_traces (run_id).size ();
+    } catch (const std::exception&) {
+        // @deliberate the database that refused the write cannot be counted
+        // either; zero is the answer the summary gave before writes were chunked.
+        return 0;
+    }
+}
+
+} // namespace
+
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<const ScenarioExecution>& execution,
 vayu::db::Database* db_ptr,
@@ -1440,7 +1458,7 @@ RunManager& manager) {
             vayu::utils::log_error ("run",
             "Failed to store scenario step results: " + std::string (e.what ()),
             { { "runId", context->run_id } });
-            summary.steps_stored = 0;
+            summary.steps_stored = stored_step_count (db, context->run_id);
         }
 
         final_status = context->should_stop ? vayu::RunStatus::Stopped :
