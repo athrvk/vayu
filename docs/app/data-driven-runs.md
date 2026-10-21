@@ -463,7 +463,9 @@ run:
   file itself, the way you would; `hash` is the SHA-256 of the file's bytes as
   they are on disk when the agent asks (the digest the app last read when the
   file cannot be read), the same digest a run records, so an agent can tell
-  whether the file is still the one a past run used. A run's file name is a
+  whether the file is still the one a past run used. `castNumbers: true` on it
+  says the app reads the file with **Read numbers as numbers** on, so the agent
+  can type its rows the same way; absent, every cell is text. A run's file name is a
   name, never a path: one holding a `/` or `\` is refused. A collection that declares nothing has neither -
   the ancestor walk above is left to the reader, the same as it is for
   variables. The rows never go over MCP: Vayu does not read the file for the

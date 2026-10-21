@@ -1820,6 +1820,13 @@ Send-with-row or the Data tab), or none for a location it has not read since
 hashes were recorded. A write tool's echoed collection row carries that stored
 hash too; it does not read the disk.
 
+`castNumbers: true` (issue #2540) appears on `dataFile` when the collection's
+binding reads the CSV/TSV file with **Read numbers as numbers** on: the app
+reads an unquoted integer or decimal cell as a number and a quoted one as text.
+It is absent otherwise, which means every cell is a string. An agent building
+`data` rows from the file reads it the same way, so its rows match the ones the
+app would send.
+
 A path is true of one filesystem only, which is why it never reaches the engine
 or an export. It may reach MCP because the Electron-hosted server listens on
 loopback (`MCP_HOST`): every client that can read the answer runs on the machine

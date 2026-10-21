@@ -36,6 +36,20 @@ describe("normalizeDataFileLocations", () => {
 		expect(locations.get("col_1")).toEqual({ path: ABSOLUTE, fileName: "users.csv", hash });
 	});
 
+	it("keeps how the app reads the file's values, and drops a non-boolean (#2540)", () => {
+		const locations = normalizeDataFileLocations({
+			col_1: { path: ABSOLUTE, fileName: "users.csv", castNumbers: true },
+			col_2: { path: ABSOLUTE, fileName: "users.csv", castNumbers: "yes" },
+		});
+		// Mutation check: drop `castNumbers` from the rebuild and col_1 loses it.
+		expect(locations.get("col_1")).toEqual({
+			path: ABSOLUTE,
+			fileName: "users.csv",
+			castNumbers: true,
+		});
+		expect(locations.get("col_2")).toEqual({ path: ABSOLUTE, fileName: "users.csv" });
+	});
+
 	it.each([
 		["not a digest", "users.csv"],
 		["upper-case hex", "A".repeat(64)],
