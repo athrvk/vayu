@@ -19,8 +19,8 @@
  * The bar sits outside `RequestBuilderProvider` and reads the stored request via
  * `useRequestQuery`, so the reference set lags the live editor buffer by the
  * autosave interval - the same lag the GraphQL section's outline documents. That
- * is deliberate: reading the editor buffer from the bar would duplicate provider
- * state here.
+ * is deliberate: a reference list does not need the live buffer the way a copied
+ * snippet does (see the Code section's `editorDraft` read, #2638).
  */
 
 import { useState } from "react";
