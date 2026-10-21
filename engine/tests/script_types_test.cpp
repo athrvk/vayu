@@ -464,7 +464,7 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
 }
 
 // The declarations name the globals the sandbox lacks (`fetch`, `process`,
-// Postman's bundled `moment`, ...) so that using one is an error the editor can
+// Postman's bundled `tv4`, ...) so that using one is an error the editor can
 // explain, rather than the silence the app's suppression of "Cannot find name"
 // would otherwise leave.
 //
@@ -584,7 +584,8 @@ std::string documentation_above (const std::string& dts, const std::string& decl
 // imported from Postman reaches for these by habit, and the editor says what
 // to write instead on hover. Postman's pre-`pm.*` globals left this list when
 // they started running (#2577), `CryptoJS` when the require() shelf did
-// (#2578), and `_` when lodash joined it (#2651).
+// (#2578), `_` when lodash joined it (#2651) and `moment` when it did (#2652;
+// Postman binds no global of that name, only require('moment')).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
@@ -600,7 +601,6 @@ TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement)
     { "tv4", "require('ajv')" },
     { "xml2Json", "require('xml2js')" },
     { "cheerio", "require('cheerio')" },
-    { "moment", "require('moment')" },
     { "Backbone", "Backbone" },
     });
     for (const auto& legacy : globals) {
@@ -681,7 +681,7 @@ TEST (ScriptTypesTest, ThePostmanLegacyGlobalsAreDeclaredAsTheValuesTheyAre) {
     EXPECT_TRUE (contains (dts, "\turl: string;\n"));
     // What stays absent stays `never`.
     EXPECT_TRUE (contains (dts, "declare const fetch: never;\n"));
-    EXPECT_TRUE (contains (dts, "declare const moment: never;\n"));
+    EXPECT_TRUE (contains (dts, "declare const tv4: never;\n"));
 }
 
 // `require` and crypto-js run (#2578), so they are declared as what they are:
@@ -702,7 +702,8 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     EXPECT_TRUE (contains (dts,
     "interface VayuShelfModules {\n\t'crypto-js': typeof import('crypto-js');\n"
     "\t'uuid': typeof import('uuid');\n"
-    "\t'lodash': typeof import('lodash');\n}\n"));
+    "\t'lodash': typeof import('lodash');\n"
+    "\t'moment': typeof import('moment');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -731,6 +732,17 @@ TEST (ScriptTypesTest, LodashIsDeclaredAsTheGlobalAndTheModule) {
     EXPECT_FALSE (contains (doc, "Not available in the Vayu script sandbox."));
     EXPECT_FALSE (contains (dts, "declare const _: never;"));
     EXPECT_TRUE (contains (dts, "declare module 'lodash' {\n\texport = _;\n}\n"));
+}
+
+// moment runs (#2652), but only as `require('moment')`: Postman binds no
+// `moment` global, so none is declared (neither a value nor an absent name) and
+// the module carries its own declaration. `any`, as lodash's is.
+TEST (ScriptTypesTest, MomentIsDeclaredAsAModuleAndNotAsAGlobal) {
+    const std::string dts = generate_script_typedefs ();
+
+    EXPECT_TRUE (contains (
+    dts, "declare module 'moment' {\n\tconst moment: any;\n\texport = moment;\n}\n"));
+    EXPECT_FALSE (contains (dts, "declare const moment"));
 }
 
 // uuid has no global to point at (#2650), so its module carries the whole

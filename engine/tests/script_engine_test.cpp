@@ -8454,7 +8454,7 @@ TEST_F (ScriptEngineTest, RequireShelfAnswersOneModuleForRequireAndTheGlobal) {
 TEST_F (ScriptEngineTest, RequireShelfRefusesANameOffTheShelf) {
     const std::string refusal = shelf_answer (engine, request, "require('nope')");
     EXPECT_NE (refusal.find ("Cannot find module 'nope'"), std::string::npos) << refusal;
-    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash)"), std::string::npos)
+    EXPECT_NE (refusal.find ("(crypto-js, uuid, lodash, moment)"), std::string::npos)
     << "the refusal names the shelf: " << refusal;
     EXPECT_NE (refusal.find ("reads no file and fetches nothing"), std::string::npos)
     << refusal;
@@ -8706,6 +8706,95 @@ TEST_F (ScriptEngineTest, RequireShelfLodashEvaluatesOnlyOnFirstUse) {
                "(require('lodash'), typeof _ + (_ === require('lodash')))"),
     "functiontrue");
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 2);
+}
+
+// require('moment') is npm's moment 2.31.0 (the English-only min build),
+// vendored (#2652). Postman binds no `moment` global, so there is only the
+// module. Local-time cases use a calendar date and format it back, which does
+// not move with the host's zone; the rest read moment.utc and fixed instants,
+// never the clock.
+TEST_F (ScriptEngineTest, RequireShelfMomentAnswersKnownCalls) {
+    constexpr auto ANSWERS = std::to_array<ShelfAnswer> ({
+    { "require('moment')('2026-10-21').add(1, 'day').format('YYYY-MM-DD')", "2026-10-22" },
+    { "require('moment').utc(0).toISOString()", "1970-01-01T00:00:00.000Z" },
+    { "require('moment').utc('2026-10-21T12:00:00Z').format('dddd, MMMM Do "
+      "YYYY, h:mm a')",
+    "Wednesday, October 21st 2026, 12:00 pm" },
+    { "require('moment').utc('2026-10-21').unix()", "1792540800" },
+    { "require('moment').utc('2026-10-21').isBefore(require('moment').utc('"
+      "2026-10-22'))",
+    "true" },
+    { "require('moment').utc('2026-10-22').isBefore(require('moment').utc('"
+      "2026-10-21'))",
+    "false" },
+    { "require('moment').utc('2026-10-22').diff(require('moment').utc('2026-10-"
+      "21'), 'hours')",
+    "24" },
+    { "require('moment').utc('2026-01-31').add(1, "
+      "'month').format('YYYY-MM-DD')",
+    "2026-02-28" },
+    { "require('moment').utc('2026-10-21').startOf('month').format()", "2026-10-01T00:00:00Z" },
+    { "require('moment').utc('2026-02-30').isValid()", "false" },
+    { "require('moment').duration(90, 'minutes').asHours()", "1.5" },
+    { "require('moment').version", "2.31.0" },
+    });
+    for (const auto& answer : ANSWERS) {
+        EXPECT_EQ (shelf_answer (engine, request, answer.expression), answer.expected)
+        << answer.expression;
+    }
+}
+
+// A destructured member is the one the module holds, and every require answers
+// one module.
+TEST_F (ScriptEngineTest, RequireShelfMomentDestructuredAndDirectAgree) {
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { const { utc, duration } = require('moment'); "
+    "return [utc(0).toISOString() === require('moment').utc(0).toISOString(), "
+    "duration(1, 'day').asHours(), "
+    "require('moment') === require('moment')].join(); })()"),
+    "true,24,true");
+}
+
+// moment's UMD takes its CommonJS branch inside the glue, so it assigns no
+// global: Postman has none either, so `moment` stays undeclared before and
+// after a require, and nothing else is added to the global object.
+TEST_F (ScriptEngineTest, RequireShelfMomentLeavesNoGlobalBehind) {
+    const std::string probe =
+    "[typeof moment, typeof module, typeof exports, typeof define].join(' ')";
+    EXPECT_EQ (shelf_answer (engine, request, probe), "undefined undefined undefined undefined");
+    EXPECT_EQ (shelf_answer (engine, request, "(require('moment'), " + probe + ")"),
+    "undefined undefined undefined undefined");
+    EXPECT_EQ (
+    shelf_answer (engine, request,
+    "(function () { var before = Object.getOwnPropertyNames(globalThis)"
+    ".sort().join(); require('moment').utc(0).format(); return "
+    "Object.getOwnPropertyNames(globalThis).sort().join() === before; })()"),
+    "true");
+}
+
+// The English-only build has no locale files. moment.locale('fr') asks the
+// sandbox's require for './locale/fr', which refuses, and moment keeps
+// English: the call answers 'en' and throws nothing a script would see.
+TEST_F (ScriptEngineTest, RequireShelfMomentFallsBackToEnglishForAnotherLocale) {
+    EXPECT_EQ (shelf_answer (engine, request, "require('moment').locale('fr') + ' ' + require('moment').locale()"),
+    "en en");
+    EXPECT_EQ (shelf_answer (engine, request, "require('moment').utc('2026-10-21').locale('fr').format('MMMM')"),
+    "October");
+}
+
+// Mutations: evaluate the shelf in `setup_require_shelf` and the first count
+// fails; let the glue assign a `moment` global and the leaves-no-global case
+// fails.
+TEST_F (ScriptEngineTest, RequireShelfMomentEvaluatesOnlyOnFirstUse) {
+    const size_t before = ScriptEngine::shelf_library_loads ();
+    EXPECT_EQ (shelf_answer (engine, request, "typeof require + typeof pm"), "functionobject");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before)
+    << "a script that touches no library evaluated one";
+
+    EXPECT_EQ (shelf_answer (engine, request, "require('moment').utc(0).year() + require('moment').utc(0).month()"),
+    "1970");
+    EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
 // The defect #2578 measured: a crypto-js signing script failed and the request
