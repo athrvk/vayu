@@ -8,14 +8,28 @@
 /**
  * How many requests crossed the run's slow-request threshold.
  *
- * Absent when none did: the engine writes `slowRequests` for every run, and a
- * card of zeros would read as a finding rather than as the absence of one. The
- * per-row verdict is the Samples tab's "Slow" chip and callout.
+ * Absent when none did, and for a run with no slow threshold, where the engine
+ * leaves `slowRequests` out: a card of zeros would read as a finding rather
+ * than as the absence of one. The per-row verdict is the Samples tab's "Slow"
+ * chip and callout.
+ *
+ * `count` is every slow completion; `tracesStored` is the capped sample of them
+ * the run kept (#2399), so the footer says how many can be opened rather than
+ * implying all of them can.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { formatLatency, formatNumber, formatPercent } from "@/lib/format-number";
+import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunReport } from "@/types";
+
+type SlowRequests = NonNullable<RunReport["slowRequests"]>;
+
+function keptAsSamplesSentence({ count, tracesStored }: SlowRequests): string {
+	if (tracesStored >= count) return "Each is kept as a sample on the Samples tab.";
+	if (tracesStored <= 0) return "None were kept as samples on the Samples tab.";
+	return `${formatNumber(tracesStored)} kept as ${pluralize(tracesStored, "a sample", "samples")} on the Samples tab.`;
+}
 
 export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["slowRequests"] }) {
 	if (!slowRequests || slowRequests.count <= 0) return null;
@@ -43,7 +57,8 @@ export function SlowRequestsCard({ slowRequests }: { slowRequests: RunReport["sl
 					</div>
 				</div>
 				<p className="text-xs text-muted-foreground mt-3">
-					Requests that exceeded the configured threshold and were automatically captured
+					Requests that exceeded the configured threshold.{" "}
+					{keptAsSamplesSentence(slowRequests)}
 				</p>
 			</CardContent>
 		</Card>
