@@ -3507,8 +3507,9 @@ other format, is not a `meta.skipped` kind, and never changes what is imported;
 **`meta.skipped`** is one `{kind, count}` per kind the parse counted, in a fixed
 kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
-an operation, Postman's per-request counters, and Insomnia's file bodies and
-the resources it cannot import. A count that belongs to the document (a second
+an operation, Postman's per-request counters (and, for `script_unsupported`,
+the folder or collection that declares the script), and Insomnia's file bodies
+and the resources it cannot import. A count that belongs to the document (a second
 server URL, a malformed section) has none. **`names`**, when present, names
 what the count dropped, never its value: today only `oauth2_unmapped_param`,
 whose `names` are the keys of the OAuth 2.0 request parameters a Postman parse
