@@ -72,6 +72,7 @@ import type {
 	RequestDefaultsScope,
 	UpdateConfigRequest,
 	GlobalsResponse,
+	ImportFetchOptions,
 	ImportFetchProgress,
 	ImportFetchResponse,
 	ImportApplyRequest,
@@ -1044,14 +1045,24 @@ export const apiService = {
 	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
 	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
 	 * longer racing `proxiedRequestTimeoutMs`.
+	 * @param options marks the fetch as a `$ref` a document asked for (issue
+	 * #2364), which the engine holds to a stricter rule than a URL a person typed.
+	 * Only `ref-bundler`'s fetches pass it; the body is otherwise exactly
+	 * `{url}` / `{url, maxBytes}`.
 	 */
 	async importFetch(
 		url: string,
 		maxBytes?: number,
 		onProgress?: (progress: ImportFetchProgress) => void,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		options?: ImportFetchOptions
 	): Promise<ImportFetchResponse> {
-		const body = maxBytes === undefined ? { url } : { url, maxBytes };
+		const body = {
+			url,
+			...(maxBytes === undefined ? {} : { maxBytes }),
+			...(options?.reference ? { reference: true } : {}),
+			...(options?.sourceUrl ? { sourceUrl: options.sourceUrl } : {}),
+		};
 		if (!onProgress) {
 			return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, body, {
 				timeout: proxiedRequestTimeoutMs(),

@@ -147,7 +147,9 @@ export default function SpecSync({ collection, collections, specId, specFile }: 
 					maxBytes,
 					// Spec-only path, so the fetch carries the document's own
 					// live cap (issue #784).
-					fetchUrl: async (url) => (await apiService.importFetch(url, maxBytes)).content,
+					fetchUrl: async (url, options) =>
+						(await apiService.importFetch(url, maxBytes, undefined, undefined, options))
+							.content,
 					...(window.electronAPI?.readSpecFile
 						? { readSpecFile: window.electronAPI.readSpecFile }
 						: {}),

@@ -50,6 +50,7 @@ import {
 } from "./ref-bundler";
 import { parseImport } from "./factory";
 import { UnrecognisedFormatError, type ImportOptions, type ImportResult } from "./types";
+import type { ImportFetchOptions } from "@/types/api";
 
 /**
  * What a folder pick will even look at.
@@ -127,8 +128,8 @@ export interface BatchEntry {
 export interface BatchIntake {
 	/** The engine's live `maxSpecDocumentBytes`; a bundle has to fit it. */
 	maxBytes: number;
-	/** Fetch an absolute URL's text through the engine proxy. */
-	fetchUrl: (url: string) => Promise<string>;
+	/** Fetch an absolute URL's text through the engine proxy; `options` marks a `$ref`. */
+	fetchUrl: (url: string, options?: ImportFetchOptions) => Promise<string>;
 	/**
 	 * Read a file beside a picked document, from disk. Absent outside Electron -
 	 * in-batch siblings still resolve, because their text never left the picker.

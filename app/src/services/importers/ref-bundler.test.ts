@@ -203,7 +203,10 @@ describe("bundleExternalRefs - URLs", () => {
 			sourceUrl: "https://acme.dev/specs/openapi.json",
 			fetchUrl,
 		});
-		expect(fetchUrl).toHaveBeenCalledWith("https://acme.dev/specs/defs/pet.yaml");
+		expect(fetchUrl).toHaveBeenCalledWith("https://acme.dev/specs/defs/pet.yaml", {
+			reference: true,
+			sourceUrl: "https://acme.dev/specs/openapi.json",
+		});
 		expect(bundled).toBe(1);
 		expect(unresolvedRefs).toBe(0);
 	});
@@ -213,7 +216,7 @@ describe("bundleExternalRefs - URLs", () => {
 		const fetchUrl = vi.fn(async () => JSON.stringify({ Pet: { type: "object" } }));
 		const intake = fileIntake({ fetchUrl });
 		const { bundled } = await bundleExternalRefs(absolute, intake);
-		expect(fetchUrl).toHaveBeenCalledWith("https://acme.dev/common.json");
+		expect(fetchUrl).toHaveBeenCalledWith("https://acme.dev/common.json", { reference: true });
 		expect(intake.readSibling).not.toHaveBeenCalled();
 		expect(bundled).toBe(1);
 	});
@@ -469,7 +472,10 @@ describe("bundleExternalRefs - what a spec may make Vayu fetch or read (#1782)",
 			sourceUrl: "http://localhost:3000/openapi.json",
 			fetchUrl,
 		});
-		expect(fetchUrl).toHaveBeenCalledWith("http://localhost:3000/c.json");
+		expect(fetchUrl).toHaveBeenCalledWith("http://localhost:3000/c.json", {
+			reference: true,
+			sourceUrl: "http://localhost:3000/openapi.json",
+		});
 		expect(result.refused).toEqual([]);
 	});
 
@@ -505,6 +511,85 @@ describe("bundleExternalRefs - what a spec may make Vayu fetch or read (#1782)",
 		});
 		expect(missing.refused).toEqual([]);
 		expect(missing.unresolvedRefs).toBe(1);
+	});
+
+	// The engine holds a $ref fetch to a stricter rule than a typed URL (issue #2364),
+	// and only these fields tell it which one it is serving.
+	const PET_DOC = JSON.stringify({ Pet: { type: "object" } });
+
+	it("marks the fetch a reference and names the document the ref was found in", async () => {
+		const fetchUrl = vi.fn(async () => PET_DOC);
+		await bundleExternalRefs(specReferencing("https://cdn.acme.dev/c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			sourceUrl: "https://acme.dev/openapi.json",
+			fetchUrl,
+		});
+		expect(fetchUrl).toHaveBeenCalledExactlyOnceWith("https://cdn.acme.dev/c.json", {
+			reference: true,
+			sourceUrl: "https://acme.dev/openapi.json",
+		});
+	});
+
+	it("names the intermediate document for a nested ref, not the one the user fetched", async () => {
+		const fetchUrl = vi.fn(async (url: string) =>
+			url.endsWith("/a.json") ? JSON.stringify({ A: { $ref: "./b.json#/B" } }) : PET_DOC
+		);
+		await bundleExternalRefs(specReferencing("https://cdn.acme.dev/a.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			sourceUrl: "https://acme.dev/openapi.json",
+			fetchUrl,
+		});
+		expect(fetchUrl.mock.calls).toEqual([
+			[
+				"https://cdn.acme.dev/a.json",
+				{ reference: true, sourceUrl: "https://acme.dev/openapi.json" },
+			],
+			[
+				"https://cdn.acme.dev/b.json",
+				{ reference: true, sourceUrl: "https://cdn.acme.dev/a.json" },
+			],
+		]);
+	});
+
+	it("sends no sourceUrl when the document has no URL (picked file, pasted text)", async () => {
+		const picked = vi.fn(async () => PET_DOC);
+		await bundleExternalRefs(specReferencing("https://acme.dev/c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			readSibling: vi.fn(),
+			fetchUrl: picked,
+		});
+		const pasted = vi.fn(async () => PET_DOC);
+		await bundleExternalRefs(specReferencing("https://acme.dev/c.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			fetchUrl: pasted,
+		});
+		for (const fetchUrl of [picked, pasted]) {
+			const [, options] = fetchUrl.mock.calls[0] as unknown as [string, object];
+			expect(options).toEqual({ reference: true });
+			expect(options).not.toHaveProperty("sourceUrl");
+		}
+	});
+
+	it("refuses a nested ref to the root's own local host when the document naming it is elsewhere", async () => {
+		// The engine judges against the document the ref sits in, so a remote
+		// document does not inherit the dev server's right to reference itself.
+		const fetchUrl = vi.fn(async (url: string) =>
+			url.endsWith("/a.json")
+				? JSON.stringify({ A: { $ref: "http://localhost:3000/b.json#/B" } })
+				: PET_DOC
+		);
+		const result = await bundleExternalRefs(specReferencing("https://acme.dev/a.json"), {
+			maxBytes: ROOMY,
+			parseDocument,
+			sourceUrl: "http://localhost:3000/openapi.json",
+			fetchUrl,
+		});
+		expect(fetchUrl).toHaveBeenCalledTimes(1);
+		expect(result.refused.map((r) => r.target)).toEqual(["http://localhost:3000/b.json"]);
 	});
 });
 
