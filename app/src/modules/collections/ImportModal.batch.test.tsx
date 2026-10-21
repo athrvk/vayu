@@ -110,6 +110,7 @@ vi.mock("@/services/api", async () => {
 
 import { ImportModal } from "./ImportModal";
 import { useImportModalStore } from "@/stores";
+import { apiService } from "@/services/api";
 
 const fixture = (...parts: string[]) =>
 	readFileSync(join(__dirname, "../../services/importers/__fixtures__", ...parts), "utf8");
@@ -204,6 +205,46 @@ describe("dropping several files", () => {
 
 		await waitFor(() => expect(screen.getByText("2 files")).toBeInTheDocument());
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeDisabled();
+	});
+});
+
+describe("a dropped spec that references a remote file", () => {
+	it("fetches the $ref as a reference, with no source URL to name", async () => {
+		vi.mocked(apiService.importFetch).mockResolvedValue({
+			content: '{"Pet":{"type":"object"}}',
+			contentType: "application/json",
+		});
+		const spec = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "t", version: "1" },
+			paths: {
+				"/pets": {
+					get: {
+						responses: {
+							"200": {
+								description: "ok",
+								content: {
+									"application/json": {
+										schema: { $ref: "https://acme.dev/pet.json#/Pet" },
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		});
+		renderModal();
+		drop(file("spec.json", spec));
+
+		await waitFor(() => expect(apiService.importFetch).toHaveBeenCalledTimes(1));
+		// A dropped file has no URL, so only `reference` is sent (issue #2364).
+		expect(vi.mocked(apiService.importFetch).mock.calls[0][0]).toBe(
+			"https://acme.dev/pet.json"
+		);
+		expect(vi.mocked(apiService.importFetch).mock.calls[0][4]).toStrictEqual({
+			reference: true,
+		});
 	});
 });
 

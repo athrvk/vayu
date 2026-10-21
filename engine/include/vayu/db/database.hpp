@@ -844,6 +844,16 @@ class Database {
     const std::vector<PendingResultBody>& bodies = {});
     std::vector<Result> get_results (const std::string& run_id);
     /**
+     * @brief A run's results with every column but `trace_data`, in id order.
+     *
+     * What GET /runs/:id/report reads for a load run that is not terminal
+     * yet (#2548): its aggregate needs the status, latency and error of each row,
+     * and the poll that repeats it every few seconds should not copy and parse
+     * every stored trace to get them. Each row's `trace_data` comes back empty,
+     * which every reader of a `Result` already takes to mean "no trace".
+     */
+    std::vector<Result> get_results_without_traces (const std::string& run_id);
+    /**
      * @brief Status code and latency for a page of **design** runs, in one query.
      *
      * The paginated GET /runs list attaches each design run's outcome to its
@@ -868,8 +878,8 @@ class Database {
     get_design_result_outcomes (const std::vector<std::string>& run_ids);
 
     // Captured response bodies for a run's sampled results. Deliberately not
-    // reachable from get_results: the report path loads and parses every
-    // result row for a run, and this is exactly the data it must not pay for.
+    // reachable from get_results: a finished run's report loads and parses
+    // every result row's trace, and this is exactly the data it must not pay for.
     std::vector<ResultBody>
     get_result_bodies_paginated (const std::string& run_id, int64_t limit, int64_t offset);
     int64_t count_result_bodies (const std::string& run_id);

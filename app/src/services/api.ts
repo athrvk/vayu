@@ -73,6 +73,7 @@ import type {
 	RequestDefaultsScope,
 	UpdateConfigRequest,
 	GlobalsResponse,
+	ImportFetchOptions,
 	ImportFetchProgress,
 	ImportFetchResponse,
 	ImportApplyRequest,
@@ -991,16 +992,17 @@ export const apiService = {
 	},
 
 	/**
-	 * Get time-series metrics for a run (paginated)
-	 * Used for rendering historical charts
+	 * Get time-series metrics for a run: one page of raw ticks, or with
+	 * `maxPoints` the whole series in one response, folded into buckets when the
+	 * run has more ticks than that (#2547).
 	 */
 	async getRunTimeSeries(
 		id: string,
-		options: { limit?: number; offset?: number } = {}
+		options: { limit?: number; offset?: number; maxPoints?: number } = {}
 	): Promise<TimeSeriesResponse> {
-		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
+		const { limit = STATS_PAGE_LIMIT, offset = 0, maxPoints } = options;
 		return await httpClient.get<TimeSeriesResponse>(
-			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset)
+			API_ENDPOINTS.STATS_TIME_SERIES(id, limit, offset, maxPoints)
 		);
 	},
 
@@ -1053,14 +1055,24 @@ export const apiService = {
 	 * have nowhere to draw a bar and no reason to pay for a stream. With it the
 	 * timeout becomes an *idle* one, so an 8 MB document arriving steadily is no
 	 * longer racing `proxiedRequestTimeoutMs`.
+	 * @param options marks the fetch as a `$ref` a document asked for (issue
+	 * #2364), which the engine holds to a stricter rule than a URL a person typed.
+	 * Only `ref-bundler`'s fetches pass it; the body is otherwise exactly
+	 * `{url}` / `{url, maxBytes}`.
 	 */
 	async importFetch(
 		url: string,
 		maxBytes?: number,
 		onProgress?: (progress: ImportFetchProgress) => void,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		options?: ImportFetchOptions
 	): Promise<ImportFetchResponse> {
-		const body = maxBytes === undefined ? { url } : { url, maxBytes };
+		const body = {
+			url,
+			...(maxBytes === undefined ? {} : { maxBytes }),
+			...(options?.reference ? { reference: true } : {}),
+			...(options?.sourceUrl ? { sourceUrl: options.sourceUrl } : {}),
+		};
 		if (!onProgress) {
 			return await httpClient.post<ImportFetchResponse>(API_ENDPOINTS.IMPORT_FETCH, body, {
 				timeout: proxiedRequestTimeoutMs(),

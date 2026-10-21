@@ -91,51 +91,42 @@ describe("HistoricalChartsSection, fetch failure", () => {
 		expect(screen.queryByText("Couldn't load the time-series data")).toBeNull();
 	});
 
-	it("warns with the progress and keeps the loaded charts when a later page failed", () => {
-		const retry = vi.fn();
-
+	it("keeps the loaded charts, with no error over them, when a refetch failed", () => {
 		render(
 			<HistoricalChartsSection
 				data={ticks(1000)}
-				progress={{ loaded: 1000, total: 2500 }}
-				failure={{ message: "Failed to fetch", retry }}
+				failure={{ message: "Failed to fetch", retry: vi.fn() }}
 			/>
 		);
 
-		expect(screen.getByText("Charts are incomplete")).toBeTruthy();
-		expect(screen.getByText(/Loaded 1,000 of 2,500 points/)).toBeTruthy();
 		expect(screen.getByTestId("rate-chart")).toBeTruthy();
 		expect(screen.queryByText("Couldn't load the time-series data")).toBeNull();
-
-		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-		expect(retry).toHaveBeenCalledTimes(1);
 	});
+});
 
-	it("draws no warning while the failed page is being re-requested", () => {
-		render(
-			<HistoricalChartsSection
-				data={ticks(1000)}
-				isFetchingMore
-				progress={{ loaded: 1000, total: 2500 }}
-				failure={{ message: "Failed to fetch", retry: vi.fn() }}
-			/>
-		);
+/*
+ * The reader of the envelope's `bucketed` / `ticksPerBucket` (#2547): a chart of
+ * a downsampled series says what one of its points is.
+ *
+ * Mutation check: drop the note from the section and the bucketed case
+ * reddens; draw it unconditionally and the raw case does.
+ */
+describe("HistoricalChartsSection, downsampled series", () => {
+	const NOTE = /Each point covers/;
 
-		expect(screen.queryByText("Charts are incomplete")).toBeNull();
-		expect(screen.getByText(/Loading more data/)).toBeTruthy();
-	});
+	it("says what a point covers, and what events are judged over, when the engine bucketed the series", () => {
+		render(<HistoricalChartsSection data={ticks(10)} ticksPerBucket={44} />);
 
-	it("draws no warning when the failure left every point loaded", () => {
-		render(
-			<HistoricalChartsSection
-				data={ticks(1000)}
-				progress={{ loaded: 1000, total: 1000 }}
-				failure={{ message: "Failed to fetch", retry: vi.fn() }}
-			/>
-		);
-
-		expect(screen.queryByText("Charts are incomplete")).toBeNull();
+		expect(screen.getByText(/Each point covers 44\.00s of this run/)).toBeTruthy();
+		expect(screen.getByText(/a slowdown has to span two\s+points to be named/)).toBeTruthy();
 		expect(screen.getByTestId("rate-chart")).toBeTruthy();
+	});
+
+	it("draws no note over a raw series", () => {
+		render(<HistoricalChartsSection data={ticks(10)} />);
+
+		expect(screen.getByTestId("rate-chart")).toBeTruthy();
+		expect(screen.queryByText(NOTE)).toBeNull();
 	});
 });
 

@@ -2023,7 +2023,8 @@ response. It defaults to `"import"`, which is honest for every row written
 before the column existed, and an unrecognised value is a `400` rather than a
 silent fall back - the OpenAPI spec sync (#627) may replace `"import"` rows
 wholesale and must never touch a `"user"` one, so an absorbed typo would cost a
-user their saved example.
+user their saved example. An OpenAPI export carries it on every example in
+`x-vayu-request.examples` so a re-import keeps it (#2430).
 
 **`bodyTruncated` says the body stops short** (issue #659). A mock server serves
 a stored example verbatim, with nothing in the response to say anything is
@@ -2956,8 +2957,11 @@ and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
-`verifySSL`, `stream`), every saved example with its headers, and the mock mode
-with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
+`verifySSL`, `stream`), every saved example with its headers and its `origin`
+(`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
+and a document with none, as an older Vayu wrote, imports as `"import"`), and
+the mock mode with the index of a `fixed` target. At the root,
+`x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
 folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
 folders included; `order` shares its parent's space with the requests'
@@ -3352,6 +3356,48 @@ still ends. What bounds a transfer that never ends at all is `maxBytes` above,
 which is the bound that was always meant. Both forms of the route get this: a
 document must not arrive on one and time out on the other.
 
+**`reference: true` marks a fetch a document asked for, not a person** (issue
+[#2364](https://github.com/athrvk/vayu/issues/2364)): `$ref` bundling sends
+it, with `sourceUrl` set to the URL of the document the reference was found
+in. A URL typed into the import dialog or a spec re-fetch sends neither field
+and is fetched exactly as before, loopback and redirects included.
+
+```json
+{ "url": "http://localhost:3000/schemas/pet.json", "maxBytes": 10485760,
+  "reference": true, "sourceUrl": "http://localhost:3000/openapi.yaml" }
+```
+
+- `reference` is a boolean, default `false`; `sourceUrl` is an `http` or
+  `https` URL. Absent or `null` means the default for either; any other shape
+  is a `400`, and a malformed `sourceUrl` is refused even without `reference`.
+- **No redirect is followed.** A `3xx` is the upstream's answer and is refused
+  as every non-`2xx` one is (`502` `The server answered HTTP 302`): a hop is a
+  target the document never named.
+- **A loopback or link-local peer is refused unless it is the source's own.**
+  Judged on the address libcurl connected to, so a name that resolves there
+  (`localhost`, `*.localhost`, a DNS record pointing at `127.0.0.1`) is caught
+  as surely as a literal. Refused: `127.0.0.0/8`, `::1`, `::ffff:127.0.0.0/104`,
+  the unspecified `0.0.0.0` and `::`, `169.254.0.0/16` (cloud metadata lives
+  there), `::ffff:169.254.0.0/112` and `fe80::/10`. Allowed: a peer on
+  `sourceUrl`'s port (its scheme default when it names none) when either the
+  source host is itself loopback (`localhost`, `*.localhost` or a loopback
+  address) and the peer is loopback, or the source host is the peer's address
+  written as a literal - the only way a link-local peer is ever the source's.
+  A source named by a host name that resolves to loopback earns nothing: that
+  is what a rebinding DNS answer looks like. With no `sourceUrl`, every
+  loopback and link-local peer is refused.
+- The refusal is `502` `Failed to fetch: Cannot send this request: Vayu does
+  not fetch a reference from a loopback or link-local address other than its
+  source document's own host and port - not when the URL names one and not
+  when a host name resolves to one`, on both forms of the route.
+- **With a proxy in force the connected peer is the proxy**, so the rule judges
+  the proxy's address and the proxy decides where the request goes next. A
+  proxy listening on loopback is therefore refused for a reference unless it
+  is the source's host and port.
+- Vayu's own engine and MCP ports stay refused whatever the source
+  ([Reserved local ports](#reserved-local-ports)); this rule is added to that
+  one, never in place of it.
+
 **Response:** `200`
 ```json
 {
@@ -3371,11 +3417,15 @@ never turn into a `500`.
 - `400` `Invalid URL: scheme '<scheme>' is not supported - only http and
   https URLs can be sent` - `url` names any other scheme (`ftp`, `file`, ...).
 - `400` `Invalid 'maxBytes': must be a positive integer`.
+- `400` `Invalid 'reference': must be a boolean`.
+- `400` `Invalid 'sourceUrl': must be an http or https URL` - also a URL that
+  names no host.
 - `413` `Refused to fetch: <detail>` - the response was over the bound in force.
   The detail names the bound that was applied (the clamped one, not the one
   asked for) and the size when the upstream declared one.
 - `502` `Failed to fetch: <detail>` - the upstream request failed
-  (connection error, transport failure).
+  (connection error, transport failure), or a reference's peer was refused
+  (see `reference` above).
 - `502` `The server answered HTTP <status>` - the upstream answered, but with a
   status outside `2xx`. Its body is not the document, so it is not returned as
   `content`: handed on, a `404` or `500` page would reach the format reader and
@@ -3783,9 +3833,12 @@ accepted a client-supplied `id` - which they no longer do (see
   engine-generated ids, and so **do not appear in `idMap`**. Each entry takes the
   fields `POST /requests/:id/examples` accepts, through the same field applier,
   and an entry that fails validation is a per-item `400` naming the *request's*
-  `tempId`. `origin` is among those fields and an importer leaves it at its
-  `"import"` default, which is what these rows are. An entry with no `order` takes its payload position, so the stored
-  order is the order the source file listed the responses in.
+  `tempId`. `origin` is among those fields: a spec or Postman import leaves it at its
+  `"import"` default, which is what those rows are, and a Vayu OpenAPI export
+  re-imported passes through the `origin` it wrote into `x-vayu-request.examples`
+  (#2430), so a user-saved example stays `"user"`. An entry with no `order` takes
+  its payload position, so the stored order is the order the source file listed
+  the responses in.
 - A **`specs`** item carries `content` (required, non-empty) and an optional
   `sourceUrl`; its `hash` and `fetchedAt` are engine-computed and a per-item
   `400` if sent, and the size cap is the same live `maxSpecDocumentBytes` that
@@ -6019,6 +6072,13 @@ rule is applied twice:
   proxy in force the connected address is the proxy's, so this half cannot see
   the origin behind it; the URL check above still applies, and where a proxy
   you configured forwards to is your choice.
+
+A `$ref` fetched through `POST /import/fetch` with `reference: true` runs a
+wider rule on the same connected-address check: every loopback and link-local
+peer is refused unless it is the source document's own host and port (issue
+[#2364](https://github.com/athrvk/vayu/issues/2364), see
+[POST /import/fetch](#post-importfetch)). It is added to the reserved ports,
+so a source on one of them does not open it.
 
 #### Path variables
 
@@ -8822,6 +8882,10 @@ Paginated **historical time-series** (JSON) for a run's charts. The response is
 **Query parameters:**
 - `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
 - `offset` - skip N records (default 0, negative floored to 0).
+- `maxPoints` - return the **whole series as at most this many ticks**
+  (capped at 50000; anything but a positive integer is treated as absent).
+  `limit` and `offset` are then ignored. See
+  [Downsampling with `maxPoints`](#downsampling-with-maxpoints).
 
 Per-tick rows carry the latency percentiles of **their second**
 (`latency_p50_ms` / `latency_p95_ms` / `latency_p99_ms`, snake_case): every
@@ -8891,6 +8955,60 @@ engine writes the tick object once, at write time. Two things follow:
 
 A run with no ticks returns `200` with an empty `data` array - only a run that
 does not exist is a `404`.
+
+#### Downsampling with `maxPoints`
+
+Without `maxPoints` the answer is exactly the paged series above (issue #2547
+adds no key to it). With it, the engine reads every stored tick and answers in
+one response:
+
+- If the run has at most `maxPoints` ticks, every tick comes back unchanged.
+- Otherwise each run of `ticksPerBucket = ceil(total / maxPoints)`
+  consecutive ticks, in stored order, is folded into one; the last bucket may
+  be shorter, and a one-tick bucket is that tick unchanged.
+
+The envelope gains two top-level keys on this path only:
+
+```json
+{
+  "data": [ ... ],
+  "pagination": { "total": 86400, "limit": 2000, "offset": 0, "hasMore": false, "returned": 1964 },
+  "bucketed": true,
+  "ticksPerBucket": 44
+}
+```
+
+`pagination.total` is the stored tick count, `limit` echoes `maxPoints`,
+`returned` is the number of `data` entries and `hasMore` is always `false`.
+`bucketed` is `false` and `ticksPerBucket` is `1` when the series already fit.
+
+Most tick fields are cumulative (a run total or a rate over the run so far), so
+a folded tick is its bucket's **last** tick, with a few keys replaced:
+
+| Field | Folded value |
+|-------|--------------|
+| `timestamp`, `elapsed_seconds` | The last tick's |
+| `requests_completed`, `requests_failed`, `http_errors`, `no_response`, `cancelled`, `dropped_requests`, `bytes_sent`, `bytes_received` | The last tick's (run totals) |
+| `error_rate`, `send_rate`, `throughput` | The last tick's (run-long rates) |
+| `status_codes`, `custom_metrics` | The last tick's (cumulative maps) |
+| `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | The **max** over the bucket, its worst second |
+| `current_concurrency`, `backpressure` | The max over the bucket |
+| `current_rps` | The mean over the bucket's ticks |
+| Any other key | The last tick's |
+
+The latency fields are never averaged: each row's percentile is of its own
+second, so the bucket's max is an **upper bound** on the bucket's percentile,
+not an estimate of it, and a one-second spike survives into the bucket that
+holds it. `0` still means a second with no completion, so a bucket reads `0`
+only when none of its seconds completed anything. Rows an engine older than
+issue #2385 stored hold the last 100 ms window of their second instead, and
+the max is then taken over those windows. A key no tick in the bucket carried
+(`http_errors` on an older row, `custom_metrics` on a run that recorded none)
+is never added.
+
+Only `GET /runs/:runId/metrics` downsamples. The run-report export
+([`POST /export/run-report`](#post-exportrun-report)), the MCP
+`get_run_timeseries` tool and `GET /runs/:runId/monitor` read the raw ticks.
 
 ### GET /runs/:runId/monitor
 
@@ -9635,10 +9753,20 @@ the engine died mid-run; its report is built from those sampled `results` alone 
 erroring. **The response shape is the same either way.**
 
 A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
-come from whatever results have been sampled so far, `metadata.status` says the run is still in
+come from whatever results have been stored so far, `metadata.status` says the run is still in
 flight, and `thresholdValidation` is absent even when the run declared budgets, because the
 verdict is computed from the summary written at the end. Read `metadata.status` before treating a
 report as final.
+
+A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A
+partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
+it is the one a client re-reads on a timer (a design or scenario run stores its rows just before
+the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
+traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
+`errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
+unless the run recorded `phases`) and `slowRequests` is absent. The status distribution, latency
+percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
+a finished run.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is

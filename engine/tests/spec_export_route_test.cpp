@@ -36,6 +36,7 @@
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/json.hpp"
 
 using nlohmann::json;
 
@@ -64,6 +65,10 @@ const nlohmann::json& json);
 // here for the round trip a mock mode's `x-vayu-mock` export exists for.
 std::pair<int, nlohmann::json>
 import_response (vayu::db::Database& db, const nlohmann::json& body);
+// Defined in spec_sync.cpp - the sync a re-imported, bound collection meets
+// next, which is where a lost `origin` shows.
+std::pair<int, nlohmann::json>
+spec_sync_response (vayu::db::Database& db, const nlohmann::json& body);
 } // namespace vayu::http::routes
 
 namespace {
@@ -120,7 +125,7 @@ json snapshot (vayu::db::Database& db, const std::string& root_id, bool is_root 
             json{ { "name", example.name }, { "status", example.status },
             { "body", example.body }, { "contentType", example.content_type },
             { "headers", column (example.headers) },
-            { "truncated", example.body_truncated } });
+            { "truncated", example.body_truncated }, { "origin", example.origin } });
             if (row.mock_example_id && *row.mock_example_id == example.id) {
                 fixed = static_cast<int> (at);
             }
@@ -227,6 +232,30 @@ class SpecExportRouteTest : public ::testing::Test {
     json export_collection (const std::string& collection_id = {}) {
         return export_ok (
         json{ { "collectionId", collection_id.empty () ? root_ : collection_id } });
+    }
+
+    /// Every request outside `root_`'s own collection: what an import of the
+    /// exported file created beside it.
+    std::vector<vayu::db::Request> requests_outside_root () {
+        std::vector<vayu::db::Request> found;
+        for (const auto& c : db_->get_collections ()) {
+            if (c.id == root_) {
+                continue;
+            }
+            for (auto& request : db_->get_requests_in_collection (c.id)) {
+                found.push_back (std::move (request));
+            }
+        }
+        return found;
+    }
+
+    /// `name=origin` of each of @p request_id's examples, in stored order.
+    std::vector<std::string> example_origins (const std::string& request_id) {
+        std::vector<std::string> out;
+        for (const auto& stored : db_->get_request_examples (request_id)) {
+            out.push_back (stored.name + "=" + stored.origin);
+        }
+        return out;
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -537,6 +566,91 @@ TEST_F (SpecExportRouteTest, RoundTripsEveryFieldOfAFreeFormCollection) {
     const std::string copy = import_text (text);
     ASSERT_FALSE (copy.empty ());
     EXPECT_EQ (snapshot (*db_, copy), before) << text;
+}
+
+// An example a person saved and one a spec import wrote must come back as
+// they were: the next spec sync replaces `import` rows and never touches
+// `user` ones (#2430). Mutation check: stop writing `origin` in
+// `examples_object_of`, or stop reading it in `example_of`, and the user row
+// returns as `import`.
+TEST_F (SpecExportRouteTest, KeepsWhoSavedEachExampleAcrossASkeletonRoundTrip) {
+    const std::string listed = create_request (root_, "GET", "{{baseUrl}}/pets");
+    add_example (listed,
+    json{ { "name", "Mine" }, { "status", 200 }, { "origin", "user" },
+    { "body", R"({"id":"p1"})" }, { "contentType", "application/json" } });
+    add_example (listed,
+    json{ { "name", "From the spec" }, { "status", 404 }, { "origin", "import" },
+    { "body", R"({"error":"none"})" }, { "contentType", "application/json" } });
+    const std::vector<std::string> expected{ "Mine=user", "From the spec=import" };
+    ASSERT_EQ (example_origins (listed), expected);
+
+    const std::string text = export_collection ()["text"].get<std::string> ();
+    import_text (text);
+
+    const auto copies = requests_outside_root ();
+    ASSERT_EQ (copies.size (), 1U) << text;
+    EXPECT_EQ (example_origins (copies.front ().id), expected) << text;
+}
+
+// The same for a bound collection exported with `mode: full`, which is the
+// other direction that writes `x-vayu-request`; then the sync the re-imported
+// collection meets next must leave the user's row byte-for-byte alone while it
+// replaces the imported one. Mutation check: as above; with `origin` lost the
+// user row is already `import` before the sync, and the sync would replace it.
+TEST_F (SpecExportRouteTest, KeepsWhoSavedEachExampleAcrossABoundFullRoundTripAndSync) {
+    const std::string spec = store_spec (PETS_DOC);
+    bind (root_, spec);
+    const std::string listed = create_request (root_, "GET", "{{baseUrl}}/pets",
+    json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } });
+    create_request (root_, "POST", "{{baseUrl}}/pets",
+    json{ { "operationId", "createPet" }, { "method", "POST" }, { "path", "/pets" } });
+    add_example (listed,
+    json{ { "name", "200 - ok" }, { "status", 200 }, { "origin", "import" },
+    { "body", R"({"id":"sampled"})" }, { "contentType", "application/json" } });
+    add_example (listed,
+    json{ { "name", "Mine" }, { "status", 200 }, { "origin", "user" },
+    { "body", R"({"id":"p1"})" }, { "contentType", "application/json" } });
+    const std::vector<std::string> expected{ "200 - ok=import", "Mine=user" };
+    ASSERT_EQ (example_origins (listed), expected);
+
+    const std::string text =
+    export_ok (json{ { "collectionId", root_ }, { "mode", "full" } })["text"].get<std::string> ();
+    const std::string copy = import_text (text);
+    ASSERT_FALSE (copy.empty ());
+
+    std::string copied_request;
+    for (const auto& request : requests_outside_root ()) {
+        if (request.method == vayu::HttpMethod::GET) {
+            copied_request = request.id;
+        }
+    }
+    ASSERT_FALSE (copied_request.empty ()) << text;
+    ASSERT_EQ (example_origins (copied_request), expected) << text;
+
+    const auto user_row = [&] {
+        for (const auto& stored : db_->get_request_examples (copied_request)) {
+            if (stored.origin == "user") {
+                return vayu::json::serialize (stored);
+            }
+        }
+        ADD_FAILURE () << "the user's example is gone";
+        return json ();
+    };
+    const json before = user_row ();
+
+    auto [status, synced] = routes::spec_sync_response (*db_,
+    json{ { "collectionId", copy }, { "spec", json{ { "content", PETS_DOC } } },
+    { "update", json::array ({ json{ { "id", copied_request }, { "examples", true } } }) } });
+    ASSERT_EQ (status, 200) << synced.dump ();
+
+    EXPECT_EQ (user_row (), before);
+    // The sync did act: the imported row is the document's now (its 200 declares
+    // no example, so no longer the sampled body), the user's stays beside it.
+    const auto rows = db_->get_request_examples (copied_request);
+    ASSERT_EQ (rows.size (), 2U);
+    EXPECT_EQ (rows[0].origin, "import");
+    EXPECT_NE (rows[0].body, R"({"id":"sampled"})");
+    EXPECT_EQ (rows[1].origin, "user");
 }
 
 // A parent's sub-folders and requests share one `order` space (#2535), and a

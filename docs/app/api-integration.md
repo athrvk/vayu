@@ -779,7 +779,7 @@ apiService.updateGlobals(variables): Promise<GlobalVariables>
 #### Import
 
 ```typescript
-apiService.importFetch(url, maxBytes?, onProgress?): Promise<ImportFetchResponse> // POST /import/fetch
+apiService.importFetch(url, maxBytes?, onProgress?, signal?, options?): Promise<ImportFetchResponse> // POST /import/fetch
 apiService.applyImport(payload): Promise<ImportApplyResponse>      // POST /import/apply
 ```
 
@@ -817,6 +817,22 @@ while `importFetch` sits in the loop on its behalf - has no way to reach that, s
 An abort raises an `AbortError`, deliberately distinct from the idle stall's
 `Request timeout`: both end in an `AbortController`, and a deliberate cancel
 reported as a timeout is an error banner about a failure nobody had.
+
+`importFetch`'s fifth argument, `options: ImportFetchOptions`, marks the fetch as
+a `$ref` a document asked for rather than a URL a person typed (issue
+[#2364](https://github.com/athrvk/vayu/issues/2364)): `{ reference: true,
+sourceUrl? }` adds those two fields to the body of both the buffered and the
+streamed form, and the engine then follows no redirect and refuses a loopback or
+link-local peer other than the source's own host and port (see
+[POST /import/fetch](../engine/api-reference.md#post-importfetch)). Only
+`ref-bundler` sets it, with `sourceUrl` the URL of the document the ref was found
+in (the intermediate document for a nested ref) and absent for a picked or pasted
+document, whose references can then reach no local peer. Without it the body is
+exactly `{url}` or `{url, maxBytes}`: the import dialog's URL box, the Spec tab's
+URL box and a spec re-fetch's own document are the user's URLs and stay that way.
+Every layer between the bundler and `importFetch` (`ExternalRefIntake.fetchUrl`,
+`BatchIntake.fetchUrl`, `SpecRefetchIo.fetchUrl`) forwards the options as its
+second argument, and TypeScript will not flag a wrapper that drops it.
 
 `applyImport` sends a whole parsed import - collections, requests, environments
 and **spec documents** - in one atomic call. Items reference each other by
@@ -1298,9 +1314,13 @@ export const API_ENDPOINTS = {
   // Real-time stats (SSE)
   METRICS_LIVE: (runId: string) => `/runs/${runId}/live`,
 
-  // Time-series metrics (JSON, paginated) - used to hydrate history
-  STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0) =>
-    `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
+  // Time-series metrics (JSON, paginated) - used to hydrate history. With
+  // maxPoints the whole series in one response, downsampled when the run has
+  // more ticks than that (#2547); the History charts ask for 2000.
+  STATS_TIME_SERIES: (runId: string, limit = 5000, offset = 0, maxPoints?: number) =>
+    maxPoints === undefined
+      ? `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`
+      : `/runs/${runId}/metrics?maxPoints=${maxPoints}`,
 
   // Server vitals scraped during the run (JSON, paginated, same envelope).
   // Fetched by the history view only when the report says the run recorded some.

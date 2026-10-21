@@ -26,7 +26,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { isRunInProgress } from "@/lib/run-status";
-import { STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
+import { HISTORY_SERIES_MAX_POINTS, STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
@@ -345,30 +345,25 @@ export function useRunSamplesQuery(runId: string | null, enabled: boolean) {
 }
 
 /**
- * Fetch time-series metrics for a run (paginated, auto-fetches all pages)
- * Used for rendering historical charts in load test detail view.
+ * A run's stored series for the History charts, in one request: at most
+ * {@link HISTORY_SERIES_MAX_POINTS} ticks, folded into buckets by the engine
+ * when the run stored more (#2547; `bucketed` / `ticksPerBucket` on the answer
+ * say so). Never paged: a 24 h soak used to be 18 pages of raw ticks held for
+ * half an hour.
  *
  * A finished run's ticks never change, so they are cached for good; `status`
  * says when the run is not finished, and the ticks written so far are then
- * stale at once (#1934). Not polled: a refetch re-reads every loaded page, and
- * the live ticks have the dashboard's stream.
+ * stale at once (#1934). Not polled: the live ticks have the dashboard's
+ * stream.
  */
 export function useRunTimeSeriesQuery(runId: string | null, status?: string | null) {
-	return useInfiniteQuery<TimeSeriesResponse, Error>({
-		queryKey: queryKeys.runs.timeSeries(runId ?? ""),
-		queryFn: ({ pageParam = 0 }) =>
-			apiService.getRunTimeSeries(runId!, {
-				limit: STATS_PAGE_LIMIT,
-				offset: pageParam as number,
-			}),
+	return useQuery<TimeSeriesResponse, Error>({
+		queryKey: queryKeys.runs.timeSeriesDownsampled(runId ?? "", HISTORY_SERIES_MAX_POINTS),
+		queryFn: () =>
+			apiService.getRunTimeSeries(runId!, { maxPoints: HISTORY_SERIES_MAX_POINTS }),
 		enabled: !!runId,
 		staleTime: runStaleTime(status, Infinity),
-		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
-		initialPageParam: 0,
-		getNextPageParam: (lastPage) =>
-			lastPage.pagination.hasMore
-				? lastPage.pagination.offset + lastPage.pagination.limit
-				: undefined,
+		gcTime: QUERY_CACHE.RUN_SERIES_GC_TIME_MS,
 	});
 }
 
