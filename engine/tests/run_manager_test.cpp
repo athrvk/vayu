@@ -1316,6 +1316,36 @@ TEST (ReadRetention, CarriesTheResponseSampleBudgetMarkerWhetherOrNotItWasSpent)
     .get<bool> ());
 }
 
+// #2399: a load run that throws still stores a summary, built by its own
+// producer. The exact slow count has to ride that one too, or a crashed run's
+// report falls back to counting the capped traces. Mutation check: drop either
+// slow assignment in failed_run_summary_inputs and this reds.
+TEST (FailedRunSummaryInputs, CarriesTheExactSlowCountAndItsThreshold) {
+    RunContext ctx ("run_failed_slow",
+    nlohmann::json{ { "slow_threshold_ms", 100 }, { "max_slow_results", 2 } });
+    for (int i = 0; i < 5; ++i) {
+        ctx.metrics_collector->record_success (
+        200, 900.0, 0.0, "{}", SuccessTraceReason::Slow);
+    }
+
+    const auto inputs = failed_run_summary_inputs (ctx);
+    EXPECT_EQ (inputs.slow_total, 5u);
+    EXPECT_EQ (inputs.slow_threshold_ms, 100);
+    const auto summary = build_run_summary_payload (inputs);
+    ASSERT_TRUE (summary.contains ("slow_requests")) << summary.dump ();
+    EXPECT_EQ (summary["slow_requests"]["count"].get<size_t> (), 5u);
+    EXPECT_EQ (summary["slow_requests"]["thresholdMs"].get<int> (), 100);
+}
+
+// A threshold of 0 measured nothing, so the summary says nothing rather than
+// a 0 a reader would take for "no outliers".
+TEST (FailedRunSummaryInputs, AZeroThresholdKeepsTheSlowSectionOut) {
+    RunContext ctx (
+    "run_failed_no_threshold", nlohmann::json{ { "slow_threshold_ms", 0 } });
+    EXPECT_FALSE (
+    build_run_summary_payload (failed_run_summary_inputs (ctx)).contains ("slow_requests"));
+}
+
 // ============================================================================
 // finish_load_test's terminal-status decision (issue #1497). `finish_load_test`
 // itself is not declared in run_manager.hpp, so this drives it the only way a
@@ -1349,7 +1379,8 @@ vayu::RunStatus::Failed },
 false, vayu::RunStatus::Completed },
 });
 
-class FailRunTest : public ::testing::TestWithParam<FailRunCase> {
+/// A real load run against a local mock, driven to its terminal row.
+class LoadRunToTerminalTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_run_manager_fail_run.db";
 
@@ -1368,10 +1399,10 @@ class FailRunTest : public ::testing::TestWithParam<FailRunCase> {
     }
 
     /// Create the row `start_run` expects to already exist (the route's own
-    /// job), then drive the run to completion and hand back its stored status.
+    /// job), then drive the run to completion and hand back its stored row.
     /// Waits well past a healthy run's own duration on purpose: a slow-but-
-    /// finishing run fails the caller's status assertion, not this wait.
-    std::optional<vayu::RunStatus> run_to_terminal_status (const std::string& run_id,
+    /// finishing run fails the caller's assertions, not this wait.
+    std::optional<vayu::db::Run> run_to_terminal_row (const std::string& run_id,
     const nlohmann::json& config) {
         vayu::db::Run row;
         row.id              = run_id;
@@ -1401,9 +1432,24 @@ class FailRunTest : public ::testing::TestWithParam<FailRunCase> {
         auto stored = db->get_run (run_id);
         if (!stored.has_value ()) {
             ADD_FAILURE () << "the finished run left no row behind";
+        }
+        return stored;
+    }
+
+    std::unique_ptr<vayu::tests::SlowMockServer> server;
+    std::unique_ptr<vayu::db::Database> db;
+};
+
+class FailRunTest : public LoadRunToTerminalTest,
+                    public ::testing::WithParamInterface<FailRunCase> {
+    protected:
+    std::optional<vayu::RunStatus> run_to_terminal_status (const std::string& run_id,
+    const nlohmann::json& config) {
+        auto row = run_to_terminal_row (run_id, config);
+        if (!row.has_value ()) {
             return std::nullopt;
         }
-        return stored->status;
+        return row->status;
     }
 
     nlohmann::json base_config () const {
@@ -1411,9 +1457,6 @@ class FailRunTest : public ::testing::TestWithParam<FailRunCase> {
             { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
             { "tests", "pm.test('always fails', function () { pm.expect(1).to.equal(2); });" } };
     }
-
-    std::unique_ptr<vayu::tests::SlowMockServer> server;
-    std::unique_ptr<vayu::db::Database> db;
 };
 
 TEST_P (FailRunTest, EndsWithTheExpectedTerminalStatus) {
@@ -1435,3 +1478,23 @@ FailRunTest,
 [] (const ::testing::TestParamInfo<FailRunCase>& info) {
     return std::string (info.param.name);
 });
+
+// #2399, the completed-run producer end to end: every request to `/slow`
+// (500ms) crosses a 100ms threshold - a lower bound, so a slow runner cannot
+// fail it - and the slow store keeps 2 of the 4. The stored summary has to
+// count all 4. Mutation check: drop the `slow_total` assignment in
+// collect_summary_inputs and the count reds at 0.
+TEST_F (LoadRunToTerminalTest, ACompletedRunStoresTheExactSlowCount) {
+    const nlohmann::json config = { { "mode", "iterations" }, { "iterations", 4 },
+        { "concurrency", 4 }, { "url", server->slow_url () }, { "method", "GET" },
+        { "workers", 1 }, { "slow_threshold_ms", 100 }, { "max_slow_results", 2 } };
+
+    const auto row = run_to_terminal_row ("run-slow-count-e2e", config);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->status, vayu::RunStatus::Completed);
+    const auto summary = nlohmann::json::parse (row->summary);
+    ASSERT_TRUE (summary.contains ("slow_requests")) << summary.dump ();
+    EXPECT_EQ (summary["slow_requests"]["count"].get<size_t> (), 4u);
+    EXPECT_EQ (summary["slow_requests"]["thresholdMs"].get<int> (), 100);
+    EXPECT_EQ (summary["sampling"]["slow_traces_dropped"].get<size_t> (), 2u);
+}

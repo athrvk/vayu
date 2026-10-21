@@ -61,6 +61,7 @@ json healthy_summary () {
         { "slow_traces_dropped", 0 }, { "response_samples_dropped", 0 },
         { "exemplars_dropped", 0 }, { "sample_bodies_dropped", 0 },
         { "response_bodies_captured", 0 }, { "response_sample_budget_spent", false } } },
+        { "slow_requests", { { "count", 12 }, { "thresholdMs", 500 } } },
         { "scenario",
         { { "iterations", 10 }, { "iterations_completed", 10 },
         { "steps_executed", 20 }, { "passed", 20 }, { "failed", 0 },
@@ -227,8 +228,8 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     json document = expect_valid (json{ { "runId", "run_healthy" } });
     // Validating an absent section proves nothing about its shape.
     for (const char* section : { "summary", "latency", "statusCodes", "rateControl",
-         "errors", "timingBreakdown", "stream", "sampling", "warnings", "scenario",
-         "monitor", "testValidation", "capacity", "coverage", "schemaValidation",
+         "errors", "timingBreakdown", "stream", "slowRequests", "sampling", "warnings",
+         "scenario", "monitor", "testValidation", "capacity", "coverage", "schemaValidation",
          "lifecycle", "elements", "thresholdValidation", "customMetrics" }) {
         EXPECT_TRUE (document["report"].contains (section)) << section;
     }
@@ -236,6 +237,8 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (
     document["report"]["summary"].contains ("sendingDurationSeconds"));
     EXPECT_TRUE (document["report"]["rateControl"].contains ("requestsSent"));
+    // The allowlist has to name it, or the export drops the sample size (#2399).
+    EXPECT_TRUE (document["report"]["slowRequests"].contains ("tracesStored"));
     EXPECT_TRUE (
     document["report"]["rateControl"].contains ("requestsExpected"));
     EXPECT_FALSE (document["timeSeries"].empty ());

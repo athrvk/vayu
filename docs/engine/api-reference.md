@@ -8599,7 +8599,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
 | `max_response_sample_bytes` | `0`-`1073741824` | The whole-run budget for those bodies, held in memory for the run *and* its retention window. The count cap above bounds the store only for a target whose bodies are small - at 1 MiB each, 1000 samples is ~1 GB. `0` retains no sample that has a body. Defaults to the `maxResponseSampleBytes` setting. |
 | `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
-| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
+| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. It caps the slow traces kept, never the report's `slowRequests.count`, which counts every slow completion. |
 | `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
 | `max_sample_body_bytes` | `0`-`104857600` | A captured body is copied on the completion callback, so the cap bounds hot-path work. `0` keeps headers and metadata and no body. Defaults to the `maxSampleBodyBytes` setting. |
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
@@ -8668,7 +8668,7 @@ independent budgets:
 | Budget | Filled by | Bounded by |
 |--------|-----------|------------|
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
-| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
+| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` (the traces only: the slow *count* is an aggregate counter) |
 | Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples`, **and** `max_response_sample_bytes` |
 | Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
@@ -9902,7 +9902,8 @@ it is the one a client re-reads on a timer (a design or scenario run stores its 
 the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
 traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
 `errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
-unless the run recorded `phases`) and `slowRequests` is absent. The status distribution, latency
+unless the run recorded `phases`) and `slowRequests` is absent: with no trace read there is no
+threshold to report, and the exact count arrives with the summary. The status distribution, latency
 percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
 a finished run.
 
@@ -10105,7 +10106,7 @@ named it.
       "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000 }
     }
   },
-  "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "slowRequests": { "count": 12, "thresholdMs": 1000, "tracesStored": 12, "percentage": 0.2 },
   "warnings": [
     { "code": "unresolved_tokens",
       "message": "12 requests sent with unresolved variables: token",
@@ -10209,6 +10210,18 @@ size_t>`, which nlohmann serialises that way. The app folds the pairs
 (`statusCodeEntries`). The stored summary, a live `metrics` frame and the
 document [`POST /export/run-report`](#post-exportrun-report) writes all spell
 the distribution as an object.
+
+**`slowRequests`** is present when the run set a `slow_threshold_ms` above `0`.
+`count` is every successful completion at or past `thresholdMs`, counted as it
+happened (issue #2399), and `percentage` is `count` over
+`summary.totalRequests` - a denominator that includes failed requests, although
+only a success is ever marked slow. `tracesStored` is how many of them the run
+kept a trace for: the slow store is a reservoir capped at `max_slow_results`, so
+past the cap `count - tracesStored` is what the reservoir dropped
+(`sampling.slowTracesDropped`). `count: 0` is a run that measured and found
+nothing slow. A run stored before issue #2399 has no exact count in its summary,
+so its `count` is the stored traces again (equal to `tracesStored`, and never
+past the cap), and the section is absent when none of its traces was slow.
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every

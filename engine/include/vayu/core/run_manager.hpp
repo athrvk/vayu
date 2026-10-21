@@ -1319,6 +1319,12 @@ struct RunSummaryInputs {
     // fixed-target run a knee it never looked for.
     std::optional<CapacitySummary> capacity;
     SamplingRetention retention;
+    // Every completion past the slow threshold, under the summary's
+    // `slow_requests` key (#2399): exact, where the stored slow traces are a
+    // sample capped at `max_slow_results`. A threshold of 0 disabled slow
+    // capture and keeps the key out, as for a run stored before it existed.
+    size_t slow_total     = 0;
+    int slow_threshold_ms = 0;
     // A scenario load run's sequence tallies and per-step breakdown, stored
     // under the summary's `scenario` key. Absent for a single-request load run,
     // which leaves the report's scenario section out entirely rather than
@@ -1395,6 +1401,16 @@ struct RunSummaryInputs {
  * else in the engine would say so.
  */
 [[nodiscard]] SamplingRetention read_retention (const MetricsCollector& mc);
+
+/**
+ * @brief The summary inputs of a load run that threw before it finished: what
+ *        its collector holds, with a duration from load start.
+ *
+ * Declared here so a test reaches the crashed-run summary without making a run
+ * crash; it is the second producer of `RunSummaryInputs` beside the completed
+ * run's, and a field one fills and the other forgets reaches half the reports.
+ */
+[[nodiscard]] RunSummaryInputs failed_run_summary_inputs (const RunContext& context);
 
 /**
  * @brief Wrap a per-tick stats object as a wire-ready SSE "metrics" event,

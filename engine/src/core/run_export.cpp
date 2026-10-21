@@ -176,8 +176,8 @@ constexpr auto STREAM_KEYS = std::to_array<std::string_view> (
 { "completions", "totalEvents", "capped", "eventsPerSecond" });
 constexpr auto STREAM_EVENTS_KEYS = std::to_array<std::string_view> (
 { "min", "max", "p50", "p90", "p95", "p99", "count" });
-constexpr auto SLOW_REQUESTS_KEYS =
-std::to_array<std::string_view> ({ "count", "thresholdMs", "percentage" });
+constexpr auto SLOW_REQUESTS_KEYS = std::to_array<std::string_view> (
+{ "count", "thresholdMs", "tracesStored", "percentage" });
 constexpr auto SAMPLING_KEYS =
 std::to_array<std::string_view> ({ "errorsDropped", "successTracesDropped",
 "slowTracesDropped", "responseSamplesDropped", "exemplarsDropped",

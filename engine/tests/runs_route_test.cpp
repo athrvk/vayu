@@ -2000,6 +2000,73 @@ TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
     EXPECT_EQ (live, expected);
 }
 
+namespace {
+constexpr std::string_view SLOW_TRACE = R"({"isSlow":true,"thresholdMs":500})";
+}
+
+// #2399: the slow store keeps at most `max_slow_results` traces, so counting
+// them reported a 60,000-outlier run as having 3. The stored summary's count is
+// the run's and the traces are reported beside it as the sample they are.
+// Mutation check: drop `apply_summary_slow_requests` from apply_run_summary and
+// `count` reds at 3.
+TEST_F (RunsRouteTest, ReportSlowCountIsTheSummarysNotTheStoredTraces) {
+    seed ({ .id = "run_slow_exact", .start_time = 1000 });
+    for (int i = 0; i < 3; ++i) {
+        seed_traced_result ("run_slow_exact", 200, 900.0, std::string (SLOW_TRACE));
+    }
+    auto inputs              = summary_inputs ();
+    inputs.total_requests    = 100000;
+    inputs.slow_total        = 60000;
+    inputs.slow_threshold_ms = 500;
+    db_->update_run_summary (
+    "run_slow_exact", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_slow_exact");
+    ASSERT_EQ (status, 200);
+    ASSERT_TRUE (body.contains ("slowRequests")) << body.dump ();
+    const auto& slow = body["slowRequests"];
+    EXPECT_EQ (slow["count"].get<size_t> (), 60000u);
+    EXPECT_EQ (slow["thresholdMs"].get<size_t> (), 500u);
+    EXPECT_EQ (slow["tracesStored"].get<size_t> (), 3u);
+    EXPECT_DOUBLE_EQ (slow["percentage"].get<double> (), 60.0);
+}
+
+// A summary that measured with a threshold and found nothing slow says 0, which
+// is an answer; one with no `slow_requests` key (stored before #2399, or a 0
+// threshold) is not, and the report counts the stored traces as it always did.
+TEST_F (RunsRouteTest, ReportSlowCountFallsBackToTracesOnlyWhenTheSummaryHasNone) {
+    seed ({ .id = "run_slow_zero", .start_time = 1000 });
+    auto measured              = summary_inputs ();
+    measured.slow_threshold_ms = 500;
+    db_->update_run_summary (
+    "run_slow_zero", vayu::core::build_run_summary_payload (measured).dump ());
+
+    auto [zero_status, zero] =
+    vayu::http::routes::run_report_response (*db_, "run_slow_zero");
+    ASSERT_EQ (zero_status, 200);
+    ASSERT_TRUE (zero.contains ("slowRequests")) << zero.dump ();
+    EXPECT_EQ (zero["slowRequests"]["count"].get<size_t> (), 0u);
+    EXPECT_EQ (zero["slowRequests"]["tracesStored"].get<size_t> (), 0u);
+    EXPECT_EQ (zero["slowRequests"]["thresholdMs"].get<size_t> (), 500u);
+
+    seed ({ .id = "run_slow_legacy", .start_time = 1000 });
+    for (int i = 0; i < 2; ++i) {
+        seed_traced_result ("run_slow_legacy", 200, 900.0, std::string (SLOW_TRACE));
+    }
+    const auto legacy_summary =
+    vayu::core::build_run_summary_payload (summary_inputs ());
+    ASSERT_FALSE (legacy_summary.contains ("slow_requests"));
+    db_->update_run_summary ("run_slow_legacy", legacy_summary.dump ());
+
+    auto [legacy_status, legacy] =
+    vayu::http::routes::run_report_response (*db_, "run_slow_legacy");
+    ASSERT_EQ (legacy_status, 200);
+    ASSERT_TRUE (legacy.contains ("slowRequests")) << legacy.dump ();
+    EXPECT_EQ (legacy["slowRequests"]["count"].get<size_t> (), 2u);
+    EXPECT_EQ (legacy["slowRequests"]["tracesStored"].get<size_t> (), 2u);
+    EXPECT_EQ (legacy["slowRequests"]["thresholdMs"].get<size_t> (), 500u);
+}
+
 // #2548: only a load run is read trace-free. A design or scenario run stores
 // its rows just before the status flips, and a one-shot reader (response
 // restore, the step list) fetching in that gap needs `trace`.

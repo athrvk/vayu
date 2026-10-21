@@ -2819,8 +2819,11 @@ export interface RunReport {
 		>;
 	};
 	slowRequests?: {
+		/** Every completion past the threshold, counted exactly (#2399). */
 		count: number;
 		thresholdMs: number;
+		/** How many of them were kept as sample traces; capped, so it can be below `count`. */
+		tracesStored: number;
 		percentage: number;
 	};
 	/**
