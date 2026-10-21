@@ -62,7 +62,8 @@ const LEVEL_TONE: Record<ConsoleLevel, { gutter: string; text: string; label: st
  */
 export function ScriptError({ which, message }: { which: ScriptKey; message: string }) {
 	return (
-		<Callout severity="blocking" title={SCRIPT_SECTIONS[which].errorLabel}>
+		<Callout severity="blocking">
+			<span className="font-semibold">{SCRIPT_SECTIONS[which].errorLabel}</span>
 			<pre className="mt-1 block font-mono whitespace-pre-wrap break-words overflow-x-auto">
 				{message}
 			</pre>
