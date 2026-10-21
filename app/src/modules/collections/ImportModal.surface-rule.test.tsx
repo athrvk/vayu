@@ -82,10 +82,13 @@ function dialog(): HTMLElement {
  * `border-border` is the token that is invisible on a card in dark - the exact
  * defect of #69. An exact-token scan, so `border-border-strong` (the dialog's
  * own outline, facing the overlay, deliberately kept) does not match.
+ *
+ * A `bg-panel` box is exempt: it paints its own surface, and `--border` is the
+ * rule tuned for `--panel`. The info `Callout` is that box (#2317).
  */
 function invisibleDividers(root: HTMLElement): string[] {
 	return [root, ...Array.from(root.querySelectorAll("*"))]
-		.filter((el) => tokens(el).includes("border-border"))
+		.filter((el) => tokens(el).includes("border-border") && !tokens(el).includes("bg-panel"))
 		.map((el) => el.getAttribute("class") ?? "");
 }
 

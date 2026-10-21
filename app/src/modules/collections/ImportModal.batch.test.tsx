@@ -173,6 +173,21 @@ describe("dropping several files", () => {
 		await waitFor(() => expect(applied.names).toEqual(["one.json", "two.json"]));
 	});
 
+	it("draws the batch band as a positive info Callout with a Dismiss (#2317)", async () => {
+		renderModal();
+		drop(file("one.json", postman), file("two.json", insomnia));
+		await waitFor(() => expect(screen.getByText("2 files")).toBeInTheDocument());
+
+		const box = screen.getByText("2 files").closest(".border");
+		expect(box).toHaveClass("border-border", "bg-panel");
+		expect(box?.className).not.toMatch(/status-success/);
+		expect(box?.querySelector("svg.text-status-success-text")).not.toBeNull();
+		expect(within(box as HTMLElement).getByText("2 selected for import")).toBeInTheDocument();
+
+		fireEvent.click(within(box as HTMLElement).getByRole("button", { name: "Dismiss" }));
+		expect(screen.queryByText("2 files")).toBeNull();
+	});
+
 	it("reports a file it cannot parse and imports the rest", async () => {
 		renderModal();
 		drop(file("good.json", postman), file("junk.json", '{"x":1}'));

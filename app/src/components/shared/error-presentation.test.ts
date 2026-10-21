@@ -67,8 +67,6 @@ const NOT_A_MESSAGE: Record<string, string> = {
 		"the 'not defined' state chip on a variable reference row, and the reference's own name in red",
 	"components/layout/Dock.tsx":
 		"the Dock's save status reads 'Not saved' - a persistent state label in the footer strip, not a message about an event",
-	"modules/request-builder/components/ResponseViewer/console/ScriptSection.tsx":
-		"the console's script-failure block builds its own section (heading plus a mono <pre> of the engine's text); a Callout's single line of prose cannot hold a stack trace",
 };
 
 /**

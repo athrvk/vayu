@@ -101,6 +101,24 @@ describe("TestValidationSummary", () => {
 		expect(screen.getByText("body has token: expected undefined to exist")).toBeTruthy();
 	});
 
+	it("draws each failure as a blocking Callout, not a hand-rolled status box (#2317)", () => {
+		render(
+			<TestValidationSummary
+				testValidation={TALLIES}
+				sampling={undefined}
+				failures={["status is 200: expected 404 to equal 200", "body has token"]}
+				failuresTotal={2}
+			/>
+		);
+
+		for (const message of ["status is 200: expected 404 to equal 200", "body has token"]) {
+			const box = screen.getByText(message).closest(".border");
+			expect(box).toHaveClass("border-destructive/40");
+			expect(box?.className).not.toMatch(/status-/);
+			expect(box?.querySelector("svg")).not.toBeNull();
+		}
+	});
+
 	it("says a shorter list is a slice of a larger count", () => {
 		render(
 			<TestValidationSummary

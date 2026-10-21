@@ -112,7 +112,11 @@ describe("NotificationsPanel", () => {
 		});
 		render(<NotificationsPanel />);
 		// The one option that can make a failed request report nothing anywhere.
-		expect(screen.getByText(/errors are hidden too/i)).toBeInTheDocument();
+		const box = screen.getByText(/errors are hidden too/i).closest(".border");
+		expect(box).toHaveClass("border-warning/40");
+		// An advisory is `--warning`; `--status-*` is lifecycle state (#2317).
+		expect(box?.className).not.toMatch(/status-/);
+		expect(box?.querySelector("svg")).not.toBeNull();
 	});
 
 	it("shows no warning for the floors that still surface failures", () => {
@@ -145,7 +149,12 @@ describe("NotificationsPanel", () => {
 			await waitFor(() =>
 				expect(screen.getByText(/unavailable on this build/i)).toBeInTheDocument()
 			);
-			expect(screen.getByText(/keep reporting these events as toasts/i)).toBeInTheDocument();
+			const box = screen
+				.getByText(/keep reporting these events as toasts/i)
+				.closest(".border");
+			expect(box).toHaveClass("border-warning/40");
+			expect(box?.className).not.toMatch(/status-/);
+			expect(box?.querySelector("svg")).not.toBeNull();
 		});
 
 		it("posts a real one on demand, so nobody has to finish a run to find out", async () => {

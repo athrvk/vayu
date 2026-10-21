@@ -25,7 +25,8 @@
 
 import { useState } from "react";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
-import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Callout } from "@/components/shared";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { ConsoleLevel } from "@/types";
@@ -56,24 +57,16 @@ const LEVEL_TONE: Record<ConsoleLevel, { gutter: string; text: string; label: st
 /**
  * A script error.
  *
- * `--destructive` rather than the section's own tone: an error is state, not
- * identity, and it has to read as a failure whichever script raised it.
+ * A `blocking` Callout rather than the section's own tone: an error is state,
+ * not identity, and it has to read as a failure whichever script raised it.
  */
 export function ScriptError({ which, message }: { which: ScriptKey; message: string }) {
 	return (
-		<div className="p-3 rounded-md bg-destructive/10 border border-destructive/20">
-			<div className="flex items-start gap-2">
-				<AlertCircle className="size-icon-sm text-destructive-text mt-0.5 shrink-0" />
-				<div className="flex-1 min-w-0">
-					<p className="text-xs font-semibold text-destructive-text">
-						{SCRIPT_SECTIONS[which].errorLabel}
-					</p>
-					<pre className="text-xs text-status-error-text mt-1 font-mono whitespace-pre-wrap break-words overflow-x-auto">
-						{message}
-					</pre>
-				</div>
-			</div>
-		</div>
+		<Callout severity="blocking" title={SCRIPT_SECTIONS[which].errorLabel}>
+			<pre className="mt-1 block font-mono whitespace-pre-wrap break-words overflow-x-auto">
+				{message}
+			</pre>
+		</Callout>
 	);
 }
 

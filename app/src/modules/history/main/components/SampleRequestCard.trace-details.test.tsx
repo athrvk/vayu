@@ -76,6 +76,17 @@ describe("SampleRequestCard per-test failures (#111)", () => {
 		expect(screen.getByText(/Failed tests/).textContent).toMatch(/Failed tests\s*\(2\)/);
 	});
 
+	it("draws each failure as a blocking Callout, not a hand-rolled status box (#2317)", () => {
+		renderExpanded({ failures });
+
+		for (const message of failures) {
+			const box = screen.getByText(message).closest(".border");
+			expect(box).toHaveClass("border-destructive/40");
+			expect(box?.className).not.toMatch(/status-/);
+			expect(box?.querySelector("svg")).not.toBeNull();
+		}
+	});
+
 	it("omits the count when the trace carries none", () => {
 		renderExpanded({ failures });
 
