@@ -285,7 +285,6 @@ void Server::setup_routes () {
     // ==========================================
     // Register Modular Routes
     // ==========================================
-    // Note: route_ctx_ is a class member, ensuring it outlives the lambdas
     route_ctx_ = std::make_unique<routes::RouteContext> (
     routes::RouteContext{ server_, db_, run_manager_, shutdown_callback_,
     oauth_authorize_manager_, cookie_jar_, mock_issuer_manager_, inbox_manager_,
