@@ -339,7 +339,7 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
 // ============================================================================
 
 // A payload that fails to write leaves nothing behind (issue #96). Same shape as
-// add_results_batch: retry_on_busy holds the recursive mutex while the lambda
+// spec_sync_apply: retry_on_busy holds the recursive mutex while the lambda
 // runs, and the lambda only touches the same storage handle.
 void Database::import_apply (const std::vector<Collection>& collections,
 const std::vector<Request>& requests,

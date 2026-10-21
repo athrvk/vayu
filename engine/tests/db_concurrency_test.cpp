@@ -13,17 +13,24 @@
  * needs fault injection we deliberately do not build (see the issue). The value
  * here is proving the restructured locking neither deadlocks nor loses rows
  * under contention - the concurrency the recursive_mutex is there to tame.
+ *
+ * The add_results_batch tests at the end guard its chunked write (#2548): one
+ * transaction per chunk, the mutex released between them.
  */
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "wait_until.hpp"
 
 namespace vayu::db {
 namespace {
@@ -132,6 +139,109 @@ TEST_F (DatabaseConcurrencyTest, ConcurrentBatchWritesAndReadsReconcile) {
     EXPECT_EQ (db_->get_results ("run_1").size (), expected);
     // Readers ran throughout and observed only consistent snapshots.
     EXPECT_GT (reads_ok.load (), 0);
+}
+
+Result result_at (size_t index) {
+    Result result;
+    result.run_id      = "run_1";
+    result.timestamp   = 1000 + static_cast<int64_t> (index);
+    result.status_code = 200;
+    // The index travels in the row so a reader can tell which input it was.
+    result.latency_ms = static_cast<double> (index);
+    return result;
+}
+
+std::string body_at (size_t index) {
+    return index % 2 == 0 ? std::string ("shared") : "body-" + std::to_string (index);
+}
+
+// add_results_batch writes in chunks (#2548). A body must still land on its own
+// result when its index is in a later chunk than the first, and identical
+// bodies must share one blob row across chunks, not one per chunk.
+TEST_F (DatabaseConcurrencyTest, ChunkedBatchAttachesEveryBodyAndSharesBlobsAcrossChunks) {
+    constexpr size_t chunk = vayu::core::constants::database::RESULTS_WRITE_CHUNK_ROWS;
+    constexpr size_t count = (3 * chunk) + 7; // three whole chunks and a remainder
+
+    std::vector<Result> results;
+    results.reserve (count);
+    std::vector<PendingResultBody> bodies;
+    bodies.reserve (count + 1);
+    for (size_t i = 0; i < count; ++i) {
+        results.push_back (result_at (i));
+    }
+    // Reverse order, so attachment cannot depend on the bodies arriving
+    // sorted by result.
+    for (size_t i = count; i-- > 0;) {
+        PendingResultBody pending;
+        pending.result_index = i;
+        pending.headers      = R"({"x-index":")" + std::to_string (i) + R"("})";
+        pending.body         = body_at (i);
+        pending.body_hash    = "hash-" + pending.body;
+        pending.body_bytes   = static_cast<int64_t> (pending.body.size ());
+        bodies.push_back (std::move (pending));
+    }
+    PendingResultBody orphan; // an index past the batch has nothing to attach to
+    orphan.result_index = count;
+    orphan.body         = "orphan";
+    orphan.body_hash    = "hash-orphan";
+    bodies.push_back (orphan);
+
+    db_->add_results_batch (results, bodies);
+
+    const auto stored = db_->get_results ("run_1");
+    ASSERT_EQ (stored.size (), count);
+    std::map<int, size_t> index_of_result;
+    for (const auto& result : stored) {
+        index_of_result.emplace (result.id, static_cast<size_t> (result.latency_ms));
+    }
+
+    const auto rows = db_->get_result_bodies_paginated ("run_1", count + 10, 0);
+    ASSERT_EQ (rows.size (), count)
+    << "one body row per result, and none for the orphan";
+    std::set<int> shared_blob_ids;
+    for (const auto& row : rows) {
+        const auto found = index_of_result.find (row.result_id);
+        ASSERT_NE (found, index_of_result.end ())
+        << "a body row points at no result";
+        const size_t index = found->second;
+        EXPECT_EQ (row.headers, R"({"x-index":")" + std::to_string (index) + R"("})");
+        EXPECT_EQ (db_->get_body_blob_content (row.blob_id), body_at (index));
+        if (index % 2 == 0) {
+            shared_blob_ids.insert (row.blob_id);
+        }
+    }
+    EXPECT_EQ (shared_blob_ids.size (), 1u)
+    << "the shared body spans every chunk and must be stored once";
+}
+
+// The point of chunking (#2548): a reader polling while a flush is written gets
+// the mutex between two chunks and sees part of the batch, instead of waiting
+// out the whole flush and seeing all of it. A single transaction can only ever
+// show it none or all, and so, nearly always, can chunks whose writer re-locks
+// without stepping away (CHUNK_HANDOFF_PAUSE in db_runs.cpp).
+TEST_F (DatabaseConcurrencyTest, ChunkedBatchLetsAReaderInBetweenChunks) {
+    constexpr size_t count = 20 * vayu::core::constants::database::RESULTS_WRITE_CHUNK_ROWS;
+    std::vector<Result> results;
+    results.reserve (count);
+    for (size_t i = 0; i < count; ++i) {
+        results.push_back (result_at (i));
+    }
+
+    std::thread writer ([this, &results] { db_->add_results_batch (results); });
+
+    size_t observed = 0;
+    // Ends on the first partial read, or on the whole batch, which means the
+    // reader never got in while it was being written.
+    const bool settled = vayu::tests::wait_until ([&] {
+        observed = db_->get_results_without_traces ("run_1").size ();
+        return observed > 0;
+    });
+    writer.join ();
+
+    ASSERT_TRUE (settled) << "the writer stored nothing";
+    EXPECT_LT (observed, count)
+    << "the reader saw only the finished batch, never one between chunks";
+    EXPECT_EQ (db_->get_results_without_traces ("run_1").size (), count);
 }
 
 } // namespace

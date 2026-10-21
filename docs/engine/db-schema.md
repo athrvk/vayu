@@ -1794,6 +1794,15 @@ yet is read through `Database::get_results_without_traces` instead (#2548), whic
 column but `trace_data`, so a report polled while the run is in flight copies and parses no
 trace at all.
 
+**Written in chunks.** A load run's results, with their [`result_bodies`](#result_bodies) rows and
+the [`body_blobs`](#body_blobs) those introduce, are written by `Database::add_results_batch` in
+chunks of `RESULTS_WRITE_CHUNK_ROWS` (250) results, one transaction each, staying off the DB
+mutex for 1 ms between chunks (#2548): the mutex is not fair, and a writer that re-locks at once
+wins it back from the reader it just woke. A report poll that lands during the flush waits for
+one chunk (about 7 ms in a Release build) rather than the whole write, and may count a run's
+results part-written. A body row always commits with its result; a failure part-way keeps the
+chunks already committed. Blob dedup spans the whole flush, not one chunk.
+
 `trace_data` timing keys are all in ms and carry the `Ms` suffix: `totalMs`, `wireMs`,
 `queueWaitMs`, `dnsMs`, `connectMs`, `tlsMs`, `firstByteMs`, `downloadMs`. `totalMs` is perceived
 latency; `wireMs` is libcurl's `CURLINFO_TOTAL_TIME`; `queueWaitMs = totalMs − wireMs` is time

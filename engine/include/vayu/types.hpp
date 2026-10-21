@@ -2030,9 +2030,10 @@ struct ResultBody {
  * @brief A captured exchange on its way to `result_bodies`, still unattached.
  *
  * `results.id` is assigned by the insert, so the pairing between a result and
- * its exchange has to travel as the result's index within the batch. Both are
- * written in one transaction (Database::add_results_batch), so a run never
- * persists a body row pointing at a result that did not land.
+ * its exchange has to travel as the result's index within the batch. A body is
+ * written in the same transaction as its result, the one for the result's
+ * chunk (Database::add_results_batch), so a run never persists a body row
+ * pointing at a result that did not land.
  */
 struct PendingResultBody {
     size_t result_index = 0;

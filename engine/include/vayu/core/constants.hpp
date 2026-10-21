@@ -1258,6 +1258,11 @@ constexpr int BUSY_TIMEOUT_MS = 10000;
 /// checkpoint may be lost. FULL adds a sync per commit and loses nothing. OFF
 /// hands the file to the OS and can corrupt it on power loss or an OS crash.
 constexpr int SYNCHRONOUS = 1;
+/// Rows `Database::add_results_batch` writes per transaction, releasing the
+/// DB mutex between chunks so a report poll waits on one chunk rather than the
+/// whole flush (#2548). 10,000 rows took ~270 ms in a Release build, so 250
+/// hold the lock for about 7 ms.
+constexpr size_t RESULTS_WRITE_CHUNK_ROWS = 250;
 /// Run retention: keep at most N most-recent load and collection runs
 /// (0 = unlimited). Design Sends are counted apart, under the cap below.
 constexpr int MAX_RUNS_RETAINED = 200;

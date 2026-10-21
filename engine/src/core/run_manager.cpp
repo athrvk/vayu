@@ -2025,7 +2025,9 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         }
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
-        "Failed to flush results to database: " + std::string (e.what ()),
+        "Failed to flush results to database, the chunks written before the "
+        "failure are kept: " +
+        std::string (e.what ()),
         { { "runId", context->run_id } });
     }
 
