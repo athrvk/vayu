@@ -161,22 +161,114 @@ TEST (ScriptApiScan, ARuleNeedsItsFollowingCharacter) {
 
 TEST (ScriptApiScan, APropertyOfSomethingElseIsNotTheGlobal) {
     EXPECT_EQ (names_in (R"(
-        x.CryptoJS.MD5(a); opts._; thing?.moment(); lib.require('x');
+        x.Backbone.MD5(a); opts._; thing?.moment(); lib.require('x');
         pm.environment.get("Buffer"); o.tv4 = 1; x?.cheerio;
     )"),
     Names{});
 }
 
 TEST (ScriptApiScan, NamesRequireInBothSpellings) {
-    EXPECT_EQ (names_in ("const c = require('crypto-js');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const c = require('lodash');"), Names{ "require()" });
     EXPECT_EQ (names_in ("const c = require ( \"lodash\" );"), Names{ "require()" });
     EXPECT_EQ (names_in ("const lib = pm.require('@scope/pkg');"), Names{ "pm.require" });
     EXPECT_EQ (
     names_in ("// require('x')\nrequirement(1); const r = 'require(';"), Names{});
 }
 
+// Vayu runs part of crypto-js (#2578), as the global and as a shelf module: a
+// script that stays inside what the shim defines is not named, one that reaches
+// past it is, under the one name `CryptoJS`.
+TEST (ScriptApiScan, CryptoJsMembersThatRunAreNotNamed) {
+    EXPECT_EQ (names_in ("CryptoJS.MD5('x');"), Names{});
+    EXPECT_EQ (names_in ("const sig = `sig=${CryptoJS.HmacSHA256(m, k)}`;"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS.SHA512(m).toString(CryptoJS.enc.Base64);"), Names{});
+    EXPECT_EQ (
+    names_in ("CryptoJS.enc.Hex.stringify(CryptoJS.enc.Utf8.parse(s));"), Names{});
+    EXPECT_EQ (names_in ("const w = CryptoJS.lib.WordArray.create([1, 2], 8);"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS\n  .HmacSHA1(m, k);"), Names{});
+    // The shelf's own binding is the same object, declared or not.
+    EXPECT_EQ (
+    names_in ("const CryptoJS = require('crypto-js'); CryptoJS.MD5(x);"), Names{});
+    // A bare reference is not a member.
+    EXPECT_EQ (
+    names_in ("const c = CryptoJS; const { MD5 } = CryptoJS; use(CryptoJS);"), Names{});
+    EXPECT_EQ (names_in ("CryptoJS.enc;"), Names{});
+}
+
+TEST (ScriptApiScan, CryptoJsMembersThatThrowAreNamedAsCryptoJs) {
+    const Names expected{ "CryptoJS" };
+    for (const char* script : { "CryptoJS.AES.encrypt(m, k);",
+         "CryptoJS.SHA3(m);", "CryptoJS.RIPEMD160(m);", "CryptoJS.HmacSHA3(m, k);",
+         "CryptoJS.HmacRIPEMD160(m, k);", "CryptoJS.PBKDF2(p, s, { keySize: 8 });",
+         "CryptoJS.algo.SHA256.create();", "CryptoJS.enc.Base64url.stringify(w);",
+         "CryptoJS.enc.Utf16.parse(s);", "CryptoJS.lib.WordArray.random(16);",
+         "CryptoJS.lib.Cipher;", "CryptoJS.mode.CBC;", "CryptoJS.pad.Pkcs7;",
+         "CryptoJS.Hmac(m, k);", "CryptoJS.hmacSHA256(m, k);", "CryptoJS?.AES;" }) {
+        EXPECT_EQ (names_in (script), expected) << script;
+    }
+}
+
+TEST (ScriptApiScan, AComputedCryptoJsMemberIsNamed) {
+    EXPECT_EQ (names_in ("CryptoJS[algorithm](m);"), Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("CryptoJS.enc[encoding].parse(s);"), Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("CryptoJS.lib['WordArray'].create();"), Names{ "CryptoJS" });
+}
+
+TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberIsNamedBesideSupportedOnes) {
+    EXPECT_EQ (
+    names_in ("CryptoJS.MD5(a); CryptoJS.AES.decrypt(b, k); CryptoJS.SHA1(c);"),
+    Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("const CryptoJS = require('crypto-js'); "
+                         "CryptoJS.AES.encrypt(m, k);"),
+    Names{ "CryptoJS" });
+}
+
+TEST (ScriptApiScan, ACryptoJsMentionInACommentOrStringIsNotNamed) {
+    EXPECT_EQ (
+    names_in ("// CryptoJS.AES.encrypt(m, k)\nconst s = 'CryptoJS.SHA3';"), Names{});
+    EXPECT_EQ (names_in ("a.CryptoJS.AES; CryptoJSX.AES; myCryptoJS.AES;"), Names{});
+}
+
+TEST (ScriptApiScan, ARequireOfAShelfModuleIsNotNamed) {
+    EXPECT_EQ (names_in ("const c = require('crypto-js');"), Names{});
+    EXPECT_EQ (names_in ("const c = require ( \"crypto-js\" ) ;"), Names{});
+    EXPECT_EQ (names_in ("const c = require(`crypto-js`);"), Names{});
+    EXPECT_EQ (names_in ("const { MD5 } = require('crypto-js');"), Names{});
+}
+
+TEST (ScriptApiScan, ARequireOfAnythingElseIsStillNamed) {
+    // Off the shelf, or a name that only starts like one.
+    EXPECT_EQ (names_in ("require('lodash');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('crypto-js/aes');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('CRYPTO-JS');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('crypto');"), Names{ "require()" });
+    // A name the scan cannot read is one it cannot call supported.
+    EXPECT_EQ (names_in ("const m = 'crypto-js'; require(m);"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('crypto-' + 'js');"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require(`crypto-${x}`);"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require();"), Names{ "require()" });
+    EXPECT_EQ (names_in ("require('crypto-js"), Names{ "require()" });
+    // A second argument is not the call `require` answers.
+    EXPECT_EQ (names_in ("require('crypto-js', opts);"), Names{ "require()" });
+}
+
+TEST (ScriptApiScan, AnyOffShelfRequireNamesEvenBesideAShelfOne) {
+    EXPECT_EQ (
+    names_in ("const c = require('crypto-js'); const l = require('lodash');"),
+    Names{ "require()" });
+    EXPECT_EQ (
+    names_in ("const l = require('lodash'); const c = require('crypto-js');"),
+    Names{ "require()" });
+}
+
+TEST (ScriptApiScan, ARequireInACommentOrStringIsReadFromTheOriginalText) {
+    // The name inside the literal is blanked in the stripped view, so the scan
+    // reads it from the original: this one is not a shelf name.
+    EXPECT_EQ (names_in ("require('lodash'); // require('crypto-js')"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const s = \"require('lodash')\";"), Names{});
+}
+
 TEST (ScriptApiScan, NamesEachBundledLibrary) {
-    EXPECT_EQ (names_in ("CryptoJS.MD5('x');"), Names{ "CryptoJS" });
     EXPECT_EQ (names_in ("_.each(a, f);"), Names{ "_" });
     EXPECT_EQ (names_in ("tv4.validate(a, s);"), Names{ "tv4" });
     EXPECT_EQ (names_in ("const o = xml2Json(xml);"), Names{ "xml2Json" });
@@ -187,9 +279,9 @@ TEST (ScriptApiScan, NamesEachBundledLibrary) {
 
 TEST (ScriptApiScan, ALibraryNameInACommentStringOrPropertyIsNotUse) {
     EXPECT_EQ (names_in (R"(
-        // CryptoJS.MD5(x)
+        // Buffer.from(x)
         /* _.each(a) and moment() */
-        const label = "uses CryptoJS and _ and tv4";
+        const label = "uses Buffer and _ and tv4";
         const t = `${label} xml2Json`;
         const o = pm.environment.get("cheerio");
         x.moment = 1; y.Backbone;
@@ -199,8 +291,7 @@ TEST (ScriptApiScan, ALibraryNameInACommentStringOrPropertyIsNotUse) {
 }
 
 TEST (ScriptApiScan, ACodeExpressionInATemplateIsStillUse) {
-    EXPECT_EQ (names_in ("const sig = `sig=${CryptoJS.HmacSHA256(m, k)}`;"),
-    Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("const sig = `sig=${Buffer.from(m, k)}`;"), Names{ "Buffer" });
 }
 
 TEST (ScriptApiScan, NamesTheHostGlobalsASandboxLacks) {
@@ -365,13 +456,12 @@ TEST (ScriptApiScan, ANameTheScriptDeclaresItselfIsNotTheGlobal) {
 }
 
 TEST (ScriptApiScan, ADeclarationElsewhereDoesNotHideADifferentName) {
-    // `moment` is declared; `CryptoJS` and `Buffer` are not.
-    EXPECT_EQ (names_in ("const moment = 1; CryptoJS.MD5(x); "
+    // `moment` is declared; `tv4` and `Buffer` are not.
+    EXPECT_EQ (names_in ("const moment = 1; tv4.validate(x); "
                          "Buffer.from(moment);"),
-    (Names{ "CryptoJS", "Buffer" }));
+    (Names{ "tv4", "Buffer" }));
     // A class declares its name, not what its methods read.
-    EXPECT_EQ (names_in ("class Checker { run () { return CryptoJS; } }"),
-    Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("class Checker { run () { return tv4; } }"), Names{ "tv4" });
     // A declaration of one name does not declare what shares a function body.
     EXPECT_EQ (names_in ("function f(a) { return Buffer; }"), Names{ "Buffer" });
 }
@@ -379,13 +469,13 @@ TEST (ScriptApiScan, ADeclarationElsewhereDoesNotHideADifferentName) {
 TEST (ScriptApiScan, ReportsEachNameOnceInTheOrderOfTheTable) {
     EXPECT_EQ (names_in (R"(
         Buffer.from(later);
-        CryptoJS.MD5(b);
-        CryptoJS.MD5(a);
+        tv4.validate(b);
+        tv4.validate(a);
         const c = require("x");
         _.each(list, f);
         Buffer.from(again);
     )"),
-    (Names{ "require()", "CryptoJS", "_", "Buffer" }));
+    (Names{ "require()", "_", "tv4", "Buffer" }));
 }
 
 TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
@@ -394,13 +484,13 @@ TEST (ScriptApiScan, PackagesJoinTheListInTableOrder) {
     uses.scan ("Buffer.from(go);");
     uses.note_packages ();
     uses.note_packages ();
-    uses.scan ("CryptoJS.MD5('a');");
+    uses.scan ("tv4.validate('a');");
     EXPECT_FALSE (uses.empty ());
-    EXPECT_EQ (uses.names (), (Names{ "script.packages", "CryptoJS", "Buffer" }));
+    EXPECT_EQ (uses.names (), (Names{ "script.packages", "tv4", "Buffer" }));
 }
 
 TEST (ScriptApiScan, AnUnparsableScriptContributesWhatItsTokensShow) {
-    EXPECT_EQ (names_in ("CryptoJS['a' = ((( {{{ `${ 'x"), Names{ "CryptoJS" });
+    EXPECT_EQ (names_in ("tv4['a' = ((( {{{ `${ 'x"), Names{ "tv4" });
     std::string binary = "\xff\xfe";
     binary.push_back ('\0');
     binary += " Buffer";

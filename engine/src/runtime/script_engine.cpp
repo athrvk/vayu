@@ -240,62 +240,6 @@ JSValue js_atob (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
     return JS_NewStringLen (ctx, text.data (), text.size ());
 }
 
-// Reads a hash input: a string contributes its UTF-8 bytes, a Uint8Array its
-// bytes as they are. Anything else throws rather than being stringified -
-// hashing the text "[object Object]" would be a silent wrong answer, and the
-// digest gives the author no clue that it happened.
-// Deliberately built from JS_GetTypedArrayBuffer + JS_GetArrayBuffer rather
-// than JS_GetUint8Array: the engine vendors Bellard's QuickJS on Linux and
-// macOS and quickjs-ng on Windows, and only the latter has the Uint8Array
-// shortcuts. These two calls exist in both.
-bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, std::string& out) {
-    if (JS_IsString (value)) {
-        out = js_to_string (ctx, value);
-        return true;
-    }
-
-    size_t byte_offset  = 0;
-    size_t byte_length  = 0;
-    size_t element_size = 0;
-    JSValue buffer =
-    JS_GetTypedArrayBuffer (ctx, value, &byte_offset, &byte_length, &element_size);
-
-    if (!JS_IsException (buffer)) {
-        // A wider element type would make the digest depend on this machine's
-        // byte order, so only byte-sized views are accepted.
-        if (element_size != 1) {
-            JS_FreeValue (ctx, buffer);
-            JS_ThrowTypeError (ctx,
-            "%s must be a byte-sized typed array (Uint8Array); a %zu-byte "
-            "element type would hash in this machine's byte order",
-            what, element_size);
-            return false;
-        }
-
-        size_t buffer_size = 0;
-        uint8_t* base      = JS_GetArrayBuffer (ctx, &buffer_size, buffer);
-        JS_FreeValue (ctx, buffer);
-
-        // A detached buffer reads as zero length with a null base; hashing
-        // nothing and calling it a digest of the caller's data is the silent
-        // wrong answer this whole path exists to avoid.
-        if (!base || byte_offset + byte_length > buffer_size) {
-            JS_FreeValue (ctx, JS_GetException (ctx));
-            JS_ThrowTypeError (ctx, "%s is backed by a detached buffer", what);
-            return false;
-        }
-
-        out.assign (reinterpret_cast<const char*> (base + byte_offset), byte_length);
-        return true;
-    }
-
-    // JS_GetTypedArrayBuffer threw its own TypeError for the not-a-typed-array
-    // case; replace it with one that names the argument and what is accepted.
-    JS_FreeValue (ctx, JS_GetException (ctx));
-    JS_ThrowTypeError (ctx, "%s must be a string or a Uint8Array", what);
-    return false;
-}
-
 // Turns a digest into whatever the caller asked for. 'bytes' exists so a digest
 // can be fed back in as a key: multi-round key derivation (AWS SigV4 signs with
 // the raw digest of the previous round) is impossible when the only outputs are
@@ -306,8 +250,6 @@ const std::string& encoding) {
     const std::string_view raw = vayu::utils::byte_view (digest);
 
     if (encoding == "bytes") {
-        // Constructed through the global Uint8Array rather than a helper, for
-        // the same cross-vendor reason as read_crypto_bytes.
         JSValue global = JS_GetGlobalObject (ctx);
         JSValue ctor   = JS_GetPropertyStr (ctx, global, "Uint8Array");
         JS_FreeValue (ctx, global);
@@ -605,6 +547,61 @@ std::mutex& class_id_registration_mutex () {
 
 } // anonymous namespace
 
+// Reads a hash input: a string contributes its UTF-8 bytes, a Uint8Array its
+// bytes as they are. Anything else throws rather than being stringified -
+// hashing the text "[object Object]" would be a silent wrong answer, and the
+// digest gives the author no clue that it happened.
+// Built from JS_GetTypedArrayBuffer + JS_GetArrayBuffer rather than
+// JS_GetUint8Array because the first reports the element size, which the
+// byte-order refusal below needs.
+bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, std::string& out) {
+    if (JS_IsString (value)) {
+        out = js_to_string (ctx, value);
+        return true;
+    }
+
+    size_t byte_offset  = 0;
+    size_t byte_length  = 0;
+    size_t element_size = 0;
+    JSValue buffer =
+    JS_GetTypedArrayBuffer (ctx, value, &byte_offset, &byte_length, &element_size);
+
+    if (!JS_IsException (buffer)) {
+        // A wider element type would make the digest depend on this machine's
+        // byte order, so only byte-sized views are accepted.
+        if (element_size != 1) {
+            JS_FreeValue (ctx, buffer);
+            JS_ThrowTypeError (ctx,
+            "%s must be a byte-sized typed array (Uint8Array); a %zu-byte "
+            "element type would hash in this machine's byte order",
+            what, element_size);
+            return false;
+        }
+
+        size_t buffer_size = 0;
+        uint8_t* base      = JS_GetArrayBuffer (ctx, &buffer_size, buffer);
+        JS_FreeValue (ctx, buffer);
+
+        // A detached buffer reads as zero length with a null base; hashing
+        // nothing and calling it a digest of the caller's data is the silent
+        // wrong answer this whole path exists to avoid.
+        if (!base || byte_offset + byte_length > buffer_size) {
+            JS_FreeValue (ctx, JS_GetException (ctx));
+            JS_ThrowTypeError (ctx, "%s is backed by a detached buffer", what);
+            return false;
+        }
+
+        out.assign (reinterpret_cast<const char*> (base + byte_offset), byte_length);
+        return true;
+    }
+
+    // JS_GetTypedArrayBuffer threw its own TypeError for the not-a-typed-array
+    // case; replace it with one that names the argument and what is accepted.
+    JS_FreeValue (ctx, JS_GetException (ctx));
+    JS_ThrowTypeError (ctx, "%s must be a string or a Uint8Array", what);
+    return false;
+}
+
 void free_script_timer (JSContext* ctx, ScriptTimer& timer) {
     JS_FreeValue (ctx, timer.callback);
     timer.callback = JS_UNDEFINED;
@@ -829,9 +826,10 @@ class ScriptEngine::Impl {
     }
 
     /// A context with the standard intrinsics and the sandbox globals
-    /// (`console`, `btoa`/`atob`, the timers, `pm`) and nothing else; `execute`
-    /// binds the legacy globals (`postman`, `tests`, ...) once the execution's
-    /// data is in place.
+    /// (`console`, `btoa`/`atob`, the timers, `require` and the library
+    /// globals, `pm`) and nothing else; `execute` binds the legacy globals
+    /// (`postman`, `tests`, ...) once the execution's data is in place. Paid
+    /// for by every script, so nothing here evaluates a library (#2578).
     JSContext* build_context (JSRuntime* rt) {
         JSContext* ctx = JS_NewContext (rt);
         if (!ctx) {
@@ -842,6 +840,7 @@ class ScriptEngine::Impl {
         }
         setup_base64_globals (ctx);
         setup_timers (ctx);
+        setup_require_shelf (ctx);
         setup_pm_object (ctx);
         return ctx;
     }
@@ -1095,6 +1094,7 @@ class ScriptEngine::Impl {
         }
         data.async_tests.clear ();
         data.timers.clear (js_ctx);
+        release_shelf_modules (js_ctx, data);
     }
 
     /// The first error an execution meets is the one it reports.
@@ -1286,6 +1286,10 @@ bool ScriptEngine::is_available () {
     return true;
 }
 
+size_t ScriptEngine::shelf_library_loads () {
+    return pm_detail::shelf_library_loads ();
+}
+
 size_t ScriptEngine::idle_runtime_count () const {
     std::lock_guard<std::mutex> lock (impl_->pool_mutex);
     return impl_->context_pool.size ();
@@ -1337,6 +1341,10 @@ ScriptEngine::execute_test (const std::string&, const Request&, const Response&,
 
 bool ScriptEngine::is_available () {
     return false;
+}
+
+size_t ScriptEngine::shelf_library_loads () {
+    return 0;
 }
 
 std::string ScriptEngine::version () {

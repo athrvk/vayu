@@ -621,6 +621,137 @@ interface VayuExpectation {
 }
 
 /**
+ * Postman's bundled crypto-js, for signing: the hashers (MD5, SHA1, SHA224, SHA256, SHA384, SHA512) and their Hmac* forms, enc.Hex, enc.Latin1, enc.Utf8, enc.Base64 and lib.WordArray. Vayu's own implementation of that shape, not the library: there are no ciphers (AES, DES), no PBKDF2 and no WordArray.random.
+ * 
+ * Loaded the first time a script reads it.
+ * 
+ * Example:
+ * const signature = CryptoJS.HmacSHA256(message, secret)
+ *   .toString(CryptoJS.enc.Base64);
+ */
+declare const CryptoJS: {
+	/**
+	 * HMAC-MD5 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacMD5(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * HMAC-SHA1 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacSHA1(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * HMAC-SHA224 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacSHA224(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * HMAC-SHA256 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacSHA256(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * HMAC-SHA384 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacSHA384(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * HMAC-SHA512 of message under key - message first, as crypto-js orders them. A WordArray result can be passed back as the next round's key.
+	 */
+	HmacSHA512(message: string | object, key: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The MD5 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	MD5(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The SHA1 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	SHA1(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The SHA224 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	SHA224(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The SHA256 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	SHA256(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The SHA384 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	SHA384(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * The SHA512 digest of a string's UTF-8 bytes or of a WordArray, as a WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64.
+	 */
+	SHA512(message: string | object): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+	/**
+	 * Text <-> WordArray. Pass one to a WordArray's toString(), or call its stringify(wordArray) and parse(text) directly.
+	 */
+	enc: {
+		/**
+		 * Standard base64 with = padding. parse stops at the first =, skips whitespace and refuses any other character outside the alphabet.
+		 */
+		Base64: {
+			/**
+			 * Text as a WordArray, to hash or to use as a key.
+			 */
+			parse(text: string): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+			/**
+			 * A WordArray as text.
+			 */
+			stringify(wordArray: object): string;
+		};
+		/**
+		 * Lower-case hex, two digits a byte. parse refuses an odd length or a non-hex digit.
+		 */
+		Hex: {
+			/**
+			 * Text as a WordArray, to hash or to use as a key.
+			 */
+			parse(text: string): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+			/**
+			 * A WordArray as text.
+			 */
+			stringify(wordArray: object): string;
+		};
+		/**
+		 * One character a byte.
+		 */
+		Latin1: {
+			/**
+			 * Text as a WordArray, to hash or to use as a key.
+			 */
+			parse(text: string): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+			/**
+			 * A WordArray as text.
+			 */
+			stringify(wordArray: object): string;
+		};
+		/**
+		 * UTF-8. stringify throws "Malformed UTF-8 data" on bytes that are not UTF-8.
+		 */
+		Utf8: {
+			/**
+			 * Text as a WordArray, to hash or to use as a key.
+			 */
+			parse(text: string): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+			/**
+			 * A WordArray as text.
+			 */
+			stringify(wordArray: object): string;
+		};
+	};
+	/**
+	 * Holds WordArray, the bytes every hasher answers.
+	 */
+	lib: {
+		/**
+		 * Bytes as big-endian 32-bit words plus a byte count (words, sigBytes), crypto-js's representation.
+		 */
+		WordArray: {
+			/**
+			 * A WordArray from 32-bit words (and a byte count), or from an ArrayBuffer or typed array's bytes.
+			 */
+			create(value?: number[] | ArrayBuffer | ArrayBufferView, sigBytes?: number): { words: number[], sigBytes: number, toString(encoder?: { stringify(wordArray: any): string }): string, concat(other: object): any, clone(): any };
+		};
+	};
+};
+
+/**
  * Decode base64 to a binary string - one character per byte. Throws on input that is not valid base64.
  */
 declare function atob(encoded: string): string;
@@ -2221,6 +2352,14 @@ declare const request: {
 };
 
 /**
+ * Load a library Vayu bundles. The shelf is crypto-js, which answers the same object as the CryptoJS global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * 
+ * Example:
+ * const CryptoJS = require('crypto-js');
+ */
+declare function require(name: 'crypto-js'): typeof CryptoJS;
+
+/**
  * The response body as text, what pm.response.text() answers.
  * 
  * A test script only, as in Postman: a pre-request script has no response, and no responseBody.
@@ -2313,13 +2452,6 @@ declare const XMLHttpRequest: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * No module system - QuickJS here has no loader, and there is no filesystem to load from.
- */
-declare const require: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
  * Not Node. There is no process, no argv and no env.
  */
 declare const process: never;
@@ -2404,42 +2536,35 @@ declare const alert: never;
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled lodash. Its replacement is require('lodash'); Vayu has neither. The Array and Object built-ins (map, filter, flatMap, Object.entries, Object.fromEntries) cover most uses.
+ * Postman's bundled lodash. Its replacement is require('lodash'), which Vayu's require() does not load either. The Array and Object built-ins (map, filter, flatMap, Object.entries, Object.fromEntries) cover most uses.
  */
 declare const _: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled crypto-js; its replacement is the global crypto object. Vayu has pm.crypto.sha256(data) and pm.crypto.hmacSha256(key, data), and no other hash or cipher.
- */
-declare const CryptoJS: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's bundled JSON Schema validator. Its replacement is require('ajv'); Vayu has neither.
+ * Postman's bundled JSON Schema validator. Its replacement is require('ajv'), which Vayu's require() does not load either.
  */
 declare const tv4: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled XML parser. Its replacement is require('xml2js'); Vayu has neither.
+ * Postman's bundled XML parser. Its replacement is require('xml2js'), which Vayu's require() does not load either.
  */
 declare const xml2Json: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled HTML parser. Its replacement is require('cheerio'); Vayu has neither.
+ * Postman's bundled HTML parser. Its replacement is require('cheerio'), which Vayu's require() does not load either.
  */
 declare const cheerio: never;
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * Postman's bundled moment. Its replacement is require('moment'); Vayu has neither. The Date built-in is what a script has.
+ * Postman's bundled moment. Its replacement is require('moment'), which Vayu's require() does not load either. The Date built-in is what a script has.
  */
 declare const moment: never;
 
@@ -2449,3 +2574,7 @@ declare const moment: never;
  * Postman's bundled Backbone, which it names no replacement for. Vayu has no Backbone.
  */
 declare const Backbone: never;
+
+declare module 'crypto-js' {
+	export = CryptoJS;
+}

@@ -2001,6 +2001,128 @@ nlohmann::json get_script_completions () {
     { "sortText", "2_atob" } });
 
     // ========================================
+    // require() and the library it loads (#2578)
+    // ========================================
+    completions.push_back ({ { "label", "require" }, { "kind", KIND_FUNCTION },
+    { "insertText", "require('${1:crypto-js}')" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "require(name: 'crypto-js'): typeof CryptoJS" },
+    { "documentation",
+    "Load a library Vayu bundles. The shelf is crypto-js, which answers the "
+    "same object as the CryptoJS global. Any other name throws \"Cannot find "
+    "module\" and lists the shelf: nothing is read from disk or fetched.\n\n"
+    "Example:\nconst CryptoJS = require('crypto-js');" },
+    { "sortText", "2_require" } });
+
+    completions.push_back ({ { "label", "CryptoJS" }, { "kind", KIND_VARIABLE },
+    { "insertText", "CryptoJS" }, { "detail", "crypto-js, as Vayu provides it" },
+    { "documentation",
+    "Postman's bundled crypto-js, for signing: the hashers (MD5, SHA1, SHA224, "
+    "SHA256, SHA384, SHA512) and their Hmac* forms, enc.Hex, enc.Latin1, "
+    "enc.Utf8, enc.Base64 and lib.WordArray. Vayu's own implementation of "
+    "that shape, not the library: there are no ciphers (AES, DES), no PBKDF2 "
+    "and no WordArray.random.\n\nLoaded the first time a script reads it.\n\n"
+    "Example:\nconst signature = CryptoJS.HmacSHA256(message, secret)\n  "
+    ".toString(CryptoJS.enc.Base64);" },
+    { "sortText", "2_CryptoJS" } });
+
+    // What every hasher answers. Spelled out rather than named because the
+    // declarations have no type aliases; `toString` takes any encoder below.
+    constexpr std::string_view WORD_ARRAY =
+    "{ words: number[], sigBytes: number, toString(encoder?: { "
+    "stringify(wordArray: any): string }): string, concat(other: object): any, "
+    "clone(): any }";
+
+    for (const char* hasher : { "MD5", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512" }) {
+        const std::string name = hasher;
+        completions.push_back ({ { "label", "CryptoJS." + name },
+        { "kind", KIND_FUNCTION }, { "insertText", "CryptoJS." + name + "(${1:message})" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", std::format ("CryptoJS.{}(message: string | object): {}", name, WORD_ARRAY) },
+        { "documentation",
+        "The " + name +
+        " digest of a string's UTF-8 bytes or of a WordArray, as a "
+        "WordArray: toString() is hex, toString(CryptoJS.enc.Base64) base64." },
+        { "sortText", "2_CryptoJS_" + name } });
+
+        completions.push_back ({ { "label", "CryptoJS.Hmac" + name }, { "kind", KIND_FUNCTION },
+        { "insertText", "CryptoJS.Hmac" + name + "(${1:message}, ${2:key})" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", std::format ("CryptoJS.Hmac{}(message: string | object, key: string | object): {}", name, WORD_ARRAY) },
+        { "documentation",
+        "HMAC-" + name +
+        " of message under key - message first, as crypto-js "
+        "orders them. A WordArray result can be passed back as the next "
+        "round's key." },
+        { "sortText", "2_CryptoJS_Hmac" + name } });
+    }
+
+    completions.push_back ({ { "label", "CryptoJS.enc" }, { "kind", KIND_VARIABLE },
+    { "insertText", "CryptoJS.enc" }, { "detail", "crypto-js encoders" },
+    { "documentation",
+    "Text <-> WordArray. Pass one to a WordArray's toString(), or call its "
+    "stringify(wordArray) and parse(text) directly." },
+    { "sortText", "2_CryptoJS_enc" } });
+
+    struct Encoder {
+        const char* name;
+        const char* documentation;
+    };
+    constexpr auto ENCODERS = std::to_array<Encoder> ({
+    { "Hex", "Lower-case hex, two digits a byte. parse refuses an odd length or a non-hex digit." },
+    { "Latin1", "One character a byte." },
+    { "Utf8",
+    "UTF-8. stringify throws \"Malformed UTF-8 data\" on bytes that are not "
+    "UTF-8." },
+    { "Base64",
+    "Standard base64 with = padding. parse stops at the first =, skips "
+    "whitespace and refuses any other character outside the alphabet." },
+    });
+    for (const auto& encoder : ENCODERS) {
+        const std::string label = std::string ("CryptoJS.enc.") + encoder.name;
+        completions.push_back ({ { "label", label }, { "kind", KIND_VARIABLE },
+        { "insertText", label }, { "detail", "crypto-js encoder" },
+        { "documentation", encoder.documentation },
+        { "sortText", "2_CryptoJS_enc_" + std::string (encoder.name) } });
+        completions.push_back ({ { "label", label + ".stringify" },
+        { "kind", KIND_FUNCTION }, { "insertText", label + ".stringify(${1:wordArray})" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", label + ".stringify(wordArray: object): string" },
+        { "documentation", "A WordArray as text." },
+        { "sortText", "2_CryptoJS_enc_" + std::string (encoder.name) + "_stringify" } });
+        completions.push_back ({ { "label", label + ".parse" },
+        { "kind", KIND_FUNCTION }, { "insertText", label + ".parse(${1:text})" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", std::format ("{}.parse(text: string): {}", label, WORD_ARRAY) },
+        { "documentation", "Text as a WordArray, to hash or to use as a key." },
+        { "sortText", "2_CryptoJS_enc_" + std::string (encoder.name) + "_parse" } });
+    }
+
+    completions.push_back ({ { "label", "CryptoJS.lib" }, { "kind", KIND_VARIABLE },
+    { "insertText", "CryptoJS.lib" }, { "detail", "crypto-js types" },
+    { "documentation", "Holds WordArray, the bytes every hasher answers." },
+    { "sortText", "2_CryptoJS_lib" } });
+
+    completions.push_back ({ { "label", "CryptoJS.lib.WordArray" }, { "kind", KIND_VARIABLE },
+    { "insertText", "CryptoJS.lib.WordArray" }, { "detail", "crypto-js byte array" },
+    { "documentation",
+    "Bytes as big-endian 32-bit words plus a byte count (words, sigBytes), "
+    "crypto-js's representation." },
+    { "sortText", "2_CryptoJS_lib_WordArray" } });
+
+    completions.push_back ({ { "label", "CryptoJS.lib.WordArray.create" },
+    { "kind", KIND_FUNCTION }, { "insertText", "CryptoJS.lib.WordArray.create(${1:bytes})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    std::format ("CryptoJS.lib.WordArray.create(value?: number[] | ArrayBuffer "
+                 "| "
+                 "ArrayBufferView, sigBytes?: number): {}",
+    WORD_ARRAY) },
+    { "documentation",
+    "A WordArray from 32-bit words (and a byte count), or from an "
+    "ArrayBuffer or typed array's bytes." },
+    { "sortText", "2_CryptoJS_lib_WordArray_create" } });
+
+    // ========================================
     // Timers - run to completion before the script ends (#2577)
     // ========================================
     completions.push_back ({ { "label", "setTimeout" }, { "kind", KIND_FUNCTION },

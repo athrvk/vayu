@@ -261,7 +261,7 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	 */
 	it.each([
 		["_.map([1], function (n) { return n; });", 2339],
-		["CryptoJS.MD5('x').toString();", 2339],
+		["require('lodash');", 2345],
 		["xml2Json(pm.response.text());", 2349],
 		["moment().format();", 2349],
 		["fetch('https://example.com');", 2349],
@@ -282,6 +282,24 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 					"pm.test('fast', function () { pm.expect(pm.response.responseTime).to.be.below(200); });",
 					"pm.environment.set('token', body.token);",
 					"pm.execution.setNextRequest(null);",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	/*
+	 * `require` and crypto-js run (#2578): a signing script reads clean, and a
+	 * hasher's result has the toString(encoder) every one calls.
+	 */
+	it("declares crypto-js and require as what they load", () => {
+		expect(
+			errorsOf(
+				[
+					"const lib = require('crypto-js');",
+					"const hex = lib.HmacSHA256('msg', 'key').toString(lib.enc.Hex);",
+					"const b64 = CryptoJS.enc.Base64.stringify(CryptoJS.MD5('x'));",
+					"const kRegion = CryptoJS.HmacSHA256('us-east-1', CryptoJS.HmacSHA256('20150830', 'k'));",
+					"pm.environment.set('sig', hex + b64 + kRegion.toString(CryptoJS.enc.Base64));",
 				].join("\n")
 			)
 		).toBe("");

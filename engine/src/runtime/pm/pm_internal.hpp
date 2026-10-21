@@ -32,6 +32,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -260,6 +261,11 @@ struct ContextData {
     /// as Postman reads it. An owned reference, freed before the context is
     /// released.
     JSValue legacy_tests = JS_UNDEFINED;
+
+    /// The shelf libraries this execution has loaded, by the name `require`
+    /// takes (#2578). Owned references, freed by `release_shelf_modules`
+    /// before the context is released.
+    std::map<std::string_view, JSValue> shelf_modules;
 };
 
 // Get context data from JS context
@@ -355,6 +361,19 @@ extern JSClassDef request_body_class;
 extern JSClassDef expect_class;
 extern JSClassDef expect_member_class;
 extern JSClassDef response_chain_class;
+
+// Reads a hash input into @p out: a string as its UTF-8 bytes, a Uint8Array as
+// its bytes. Anything else leaves a TypeError naming @p what pending and
+// answers false (script_engine.cpp, shared with the require shelf's natives).
+bool read_crypto_bytes (JSContext* ctx, JSValueConst value, const char* what, std::string& out);
+
+// `require` and the library globals over the bundled shelf (require_shelf.cpp,
+// #2578). `setup_require_shelf` installs them on a context and evaluates no
+// library; `release_shelf_modules` frees what an execution loaded.
+void setup_require_shelf (JSContext* ctx);
+void release_shelf_modules (JSContext* ctx, ContextData& data);
+// How many times this process has evaluated a shelf library's source.
+std::size_t shelf_library_loads ();
 
 // Name a rejected value the way the script author wrote it, so the error says
 // "got number" rather than showing them a coerced "[object Object]".
