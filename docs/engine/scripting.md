@@ -1493,10 +1493,14 @@ const token = pm.environment.get('auth_token');
 
 // Set variable (persists to environment)
 pm.environment.set('auth_token', 'new_token_value');
+
+// Set a secret variable in one call
+pm.environment.set('auth_token', 'new_token_value', { secret: true });
 ```
 
 `set()` on an existing name replaces its value and keeps the variable's `secret`,
-`type` and creation time. It also turns `enabled` on (#2479): a set is a write of a
+`type` and creation time, unless its third argument names one (below). It also
+turns `enabled` on (#2479): a set is a write of a
 value the script means to use, so a row unticked in the variables editor is ticked
 again, and the script's own `get`, `has` and `replaceIn` and the `{{name}}` pass
 before the send all see it. A name that does not exist yet is
@@ -1570,12 +1574,48 @@ Two limits:
 - **A later write replaces it.** An `extract.*` element writes a whole new
   variable, so its text replaces a value a script set earlier.
 
+### The third argument of `set` (#2664)
+
+`set(name, value, options)` reads Postman's optional third argument
+(postman-collection 5.3.0), in either of its two shapes:
+
+- **a string** is a type: `set('n', 1, 'number')`;
+- **an object** contributes `type` when it is a string and `secret` when it is a
+  boolean: `set('token', t, { secret: true })`, `set('n', 1, { type: 'number' })`.
+
+Anything else (`null`, a number, an object whose members are the wrong kind) is
+ignored, as Postman ignores it. The type names map onto the four Vayu declares:
+`string`, `number` and `boolean` are their own, `json`, `object` and `array` are
+`json`, and any other name (`any`, `default`, a word Postman has no type for)
+leaves the row's type as it was. **`"secret"` is not a Postman type**; as the
+string, or as the object's `type`, it marks the variable secret and leaves the
+type alone - the same reading the importer gives `type: "secret"`. An explicit
+`secret` boolean beside it wins, so `{ type: 'secret', secret: false }` is not
+secret, and `{ secret: false }` on its own clears the flag of a secret row.
+
+Each field the argument names is set on a new row and on an existing one; a field
+it does not name keeps what the row has, so `set(name, value)` is exactly what it
+was before. The stored text follows the type the set declares, not the one the
+row had: `set('filter', { a: 1 }, 'json')` stores the document `{"a":1}` (#2568),
+where the same set on a default-type row stores `[object Object]`.
+
+A changed flag or type is more than a value change, so the run's delta writes the
+row whole and it reaches the stored scope. **The flag takes effect from the next
+read of the scope**: `secret_variable_values`, which decides what a run snapshot
+masks, reads the stored scopes when a run starts, so the value is masked from the
+next run on and not inside the run that made it secret. The variables editor and
+an MCP agent's withholding read the stored flag too.
+
+`pm.variables.set` is the local scope and takes the argument like the others, but
+that scope is never stored and never masked, so a `secret` flag on it has no
+effect.
+
 ### The six methods every scope has
 
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time; turns `enabled` on |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -1673,7 +1713,7 @@ console.log(pm.variables.toObject()); // every tier, merged, the local scope win
 
 ### The local scope (`pm.variables.set`)
 
-`pm.variables.set(name, value)` writes Postman's *local* scope (issue #2564):
+`pm.variables.set(name, value, options?)` writes Postman's *local* scope (issue #2564):
 the strongest tier of all, above a bound data row, and never stored anywhere.
 It is for a value a script computes for this run and nothing after it - a
 signature, a nonce, a counter - which no named scope can hold without the
@@ -1694,7 +1734,9 @@ pm.variables.get('nonce'); // the number as set
   `{{data.column}}` is the row's own spelling and never reads the local scope.
 - **The writes are the scoped ones.** `set` keeps the value's type for the
   run and stores its string form for `{{name}}`, exactly as
-  [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does;
+  [the named scopes' `set`](#a-value-keeps-its-type-for-the-run) does, and it
+  reads [the third argument](#the-third-argument-of-set-2664) too, though a
+  `secret` flag here is never stored or masked;
   `unset(name)` removes one local name, so the tiers below it answer again;
   `clear()` empties the local scope. None of the three touches the
   environment, the collections or the globals.

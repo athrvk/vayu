@@ -1429,12 +1429,17 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.environment.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.environment.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.environment.set(name: string, value: any): void" },
+    { "detail", "pm.environment.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set an environment variable. Later reads in this run answer the value "
     "as set; its string form is what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.environment.set('auth_token', "
-    "response.token);" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.environment.set('auth_token', "
+    "response.token, { secret: true });" },
     { "sortText", "1_pm_environment_set" } });
 
     // ========================================
@@ -1458,11 +1463,17 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.globals.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.globals.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.globals.set(name: string, value: any): void" },
+    { "detail", "pm.globals.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a global variable. Later reads in this run answer the value as set; "
     "its string form is what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.globals.set('api_key', 'new_key');" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.globals.set('api_key', 'new_key', { secret: "
+    "true });" },
     { "sortText", "1_pm_globals_set" } });
 
     // ========================================
@@ -1489,14 +1500,19 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.collectionVariables.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.collectionVariables.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.collectionVariables.set(name: string, value: any): void" },
+    { "detail", "pm.collectionVariables.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a collection variable on the request's own collection - it shadows a "
     "parent collection's variable of the same name rather than changing it. "
     "Later reads in this run answer the value as set; its string form is "
     "what {{name}} substitutes and what is "
-    "persisted.\n\nExample:\npm.collectionVariables.set('base_url', "
-    "'https://api.example.com');" },
+    "persisted.\n\nThe optional third argument is a type name ('string', "
+    "'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { "
+    "type, secret }. { secret: true } marks the variable secret, "
+    "{ secret: false } clears the flag. Run snapshots mask a secret from the "
+    "next run on, not the run that set "
+    "it.\n\nExample:\npm.collectionVariables.set('token', t, { secret: "
+    "true });" },
     { "sortText", "1_pm_collectionVariables_set" } });
 
     // ========================================
@@ -1587,12 +1603,14 @@ nlohmann::json get_script_completions () {
     completions.push_back ({ { "label", "pm.variables.set" }, { "kind", KIND_FUNCTION },
     { "insertText", "pm.variables.set(\"${1:variable}\", ${2:value})" },
     { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "pm.variables.set(name: string, value: any): void" },
+    { "detail", "pm.variables.set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void" },
     { "documentation",
     "Set a local variable: read before every other scope by pm.variables and "
     "{{name}} for the rest of the run, and never stored. Later reads answer "
     "the value as set; its string form is what {{name}} "
-    "substitutes.\n\nExample:\npm.variables.set('signature', sig);" },
+    "substitutes.\n\nThe optional third argument is read as on the other "
+    "scopes, but this scope is never stored or masked, so a secret flag on it "
+    "has no effect.\n\nExample:\npm.variables.set('signature', sig);" },
     { "sortText", "1_pm_variables_set" } });
 
     completions.push_back ({ { "label", "pm.variables.unset" },

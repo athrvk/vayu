@@ -24,6 +24,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -353,6 +354,230 @@ TEST_F (ScriptVariablesTest, OnlyADeclaredJsonRowChangesTheStoredText) {
     )JS");
 }
 
+// ---------------------------------------------------------------------------
+// The third argument of set (#2664): Postman's `VariableScope#set(key, value,
+// options)`. A string is a type; an object contributes `type` (a string) and
+// `secret` (a boolean); anything else is ignored.
+// ---------------------------------------------------------------------------
+
+// Mutation check: drop the argv[2] read in `js_pm_scope_set` and every scope's
+// new row is a plain variable.
+TEST_F (ScriptVariablesTest, SetWithSecretTrueCreatesASecretVariable) {
+    run (R"JS(
+        pm.environment.set('e', 'env-token', { secret: true });
+        pm.globals.set('g', 'global-token', { secret: true });
+        pm.collectionVariables.set('c', 'collection-token', { secret: true });
+    )JS");
+
+    const auto expect_secret = [] (const vayu::Environment& scope,
+                               const std::string& name, const std::string& value) {
+        ASSERT_EQ (scope.count (name), 1U) << name;
+        const vayu::Variable& variable = scope.at (name);
+        EXPECT_TRUE (variable.secret) << name;
+        EXPECT_TRUE (variable.enabled) << name;
+        EXPECT_EQ (variable.value, value) << name;
+        EXPECT_EQ (variable.type, "string") << name;
+        EXPECT_TRUE (variable.created_at.has_value ()) << name;
+    };
+    expect_secret (scopes_.environment, "e", "env-token");
+    expect_secret (scopes_.globals, "g", "global-token");
+    expect_secret (scopes_.collection, "c", "collection-token");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('e')).to.equal('env-token');
+    )JS");
+}
+
+TEST_F (ScriptVariablesTest, SetWithSecretTrueMarksAnExistingPlainRowSecret) {
+    scopes_.environment["t"] = vayu::Variable{ "old", false, true, "number" };
+
+    run ("pm.environment.set('t', 'new', { secret: true });");
+
+    const vayu::Variable& variable = scopes_.environment.at ("t");
+    EXPECT_TRUE (variable.secret);
+    EXPECT_EQ (variable.value, "new");
+    EXPECT_EQ (variable.type, "number") << "a flag alone leaves the type";
+}
+
+// Mutation check: as above; the secret row stays secret.
+TEST_F (ScriptVariablesTest, SetWithSecretFalseClearsTheFlag) {
+    scopes_.environment["t"] = vayu::Variable{ "old", true, true, "json" };
+
+    run ("pm.environment.set('t', 'new', { secret: false });");
+
+    const vayu::Variable& variable = scopes_.environment.at ("t");
+    EXPECT_FALSE (variable.secret);
+    EXPECT_EQ (variable.value, "new");
+    EXPECT_EQ (variable.type, "json") << "a flag alone leaves the type";
+}
+
+// Mutation check: as above; the row stays "string".
+TEST_F (ScriptVariablesTest, SetWithATypeStringDeclaresTheType) {
+    scopes_.environment["existing"] = vayu::Variable{ "x", true, true, "string" };
+
+    run (R"JS(
+        pm.environment.set('n', 1, 'number');
+        pm.environment.set('b', 'true', 'boolean');
+        pm.environment.set('s', 5, 'string');
+        pm.environment.set('existing', '7', 'number');
+    )JS");
+
+    EXPECT_EQ (scopes_.environment.at ("n").type, "number");
+    EXPECT_EQ (scopes_.environment.at ("n").value, "1");
+    EXPECT_EQ (scopes_.environment.at ("b").type, "boolean");
+    EXPECT_EQ (scopes_.environment.at ("s").type, "string");
+    EXPECT_EQ (scopes_.environment.at ("existing").type, "number");
+    EXPECT_TRUE (scopes_.environment.at ("existing").secret)
+    << "a type alone leaves the flag";
+
+    run (R"JS(
+        pm.expect(pm.environment.get('n')).to.equal(1);
+        pm.expect(pm.environment.get('b')).to.equal(true);
+        pm.expect(pm.environment.get('existing')).to.equal(7);
+    )JS");
+}
+
+TEST_F (ScriptVariablesTest, SetWithAnObjectOptionDeclaresTypeAndSecretTogether) {
+    run (
+    "pm.collectionVariables.set('k', 3, { type: 'number', secret: true });");
+
+    const vayu::Variable& variable = scopes_.collection.at ("k");
+    EXPECT_EQ (variable.type, "number");
+    EXPECT_TRUE (variable.secret);
+}
+
+// Postman's `object` and `array` are Vayu's `json`; its `any` and `default`,
+// and a word it has no type for, declare nothing.
+TEST_F (ScriptVariablesTest, SetMapsPostmanTypeNamesOntoVayuTypes) {
+    scopes_.environment["keep"] = vayu::Variable{ "1", false, true, "number" };
+
+    run (R"JS(
+        pm.environment.set('o', {}, 'object');
+        pm.environment.set('a', [], 'array');
+        pm.environment.set('j', {}, 'json');
+        pm.environment.set('o2', {}, { type: 'object' });
+        pm.environment.set('keep', '2', 'any');
+        pm.environment.set('keep', '3', 'default');
+        pm.environment.set('keep', '4', { type: 'no-such-type' });
+        pm.environment.set('keep', '5', 'NUMBER');
+        pm.environment.set('fresh', 'v', 'any');
+    )JS");
+
+    EXPECT_EQ (scopes_.environment.at ("o").type, "json");
+    EXPECT_EQ (scopes_.environment.at ("a").type, "json");
+    EXPECT_EQ (scopes_.environment.at ("j").type, "json");
+    EXPECT_EQ (scopes_.environment.at ("o2").type, "json");
+    EXPECT_EQ (scopes_.environment.at ("keep").type, "number");
+    EXPECT_EQ (scopes_.environment.at ("keep").value, "5");
+    EXPECT_EQ (scopes_.environment.at ("fresh").type, "string");
+}
+
+// Mutation check: make `"secret"` an unknown word and the flag stays false.
+TEST_F (ScriptVariablesTest, SetWithSecretTypeStringMarksSecret) {
+    scopes_.environment["n"] = vayu::Variable{ "1", false, true, "number" };
+
+    run (R"JS(
+        pm.environment.set('t', 'x', 'secret');
+        pm.environment.set('u', 'x', { type: 'secret' });
+        pm.environment.set('n', '2', 'secret');
+        pm.environment.set('both', 'x', { type: 'secret', secret: false });
+    )JS");
+
+    EXPECT_TRUE (scopes_.environment.at ("t").secret);
+    EXPECT_EQ (scopes_.environment.at ("t").type, "string");
+    EXPECT_TRUE (scopes_.environment.at ("u").secret);
+    EXPECT_TRUE (scopes_.environment.at ("n").secret);
+    EXPECT_EQ (scopes_.environment.at ("n").type, "number")
+    << "the type is left alone";
+    EXPECT_FALSE (scopes_.environment.at ("both").secret)
+    << "an explicit boolean wins";
+}
+
+// Today's rule, pinned: a set without options keeps the flag, the type and the
+// creation time, and ticks the row on.
+TEST_F (ScriptVariablesTest, SetWithoutOptionsKeepsTheExistingSecretFlag) {
+    scopes_.environment["t"] =
+    vayu::Variable{ "old", true, false, "number", std::int64_t{ 1784967810149 } };
+
+    run ("pm.environment.set('t', '9');");
+
+    const vayu::Variable& variable = scopes_.environment.at ("t");
+    EXPECT_TRUE (variable.secret);
+    EXPECT_EQ (variable.type, "number");
+    EXPECT_EQ (variable.created_at, 1784967810149);
+    EXPECT_TRUE (variable.enabled);
+    EXPECT_EQ (variable.value, "9");
+}
+
+// The type is applied before the text is chosen, so `{ type: 'json' }` stores
+// the document and not "[object Object]" (#2568), on a new row and on a row of
+// the default type. Mutation check: decide the text from the row's type before
+// the set and both stored values are "[object Object]".
+TEST_F (ScriptVariablesTest, SetDeclaringJsonStoresAnObjectAsJsonText) {
+    scopes_.environment["plain"] = vayu::Variable{ "x", false, true, "string" };
+
+    run (R"JS(
+        pm.environment.set('fresh', { a: 1, b: [true] }, { type: 'json' });
+        pm.environment.set('plain', [1, 2], 'array');
+        pm.environment.set('named', { k: 'v' }, 'object');
+    )JS");
+
+    EXPECT_EQ (scopes_.environment.at ("fresh").value, R"({"a":1,"b":[true]})");
+    EXPECT_EQ (scopes_.environment.at ("plain").value, "[1,2]");
+    EXPECT_EQ (scopes_.environment.at ("named").value, R"({"k":"v"})");
+
+    run (R"JS(
+        pm.expect(pm.environment.get('fresh')).to.eql({ a: 1, b: [true] });
+        pm.expect(pm.environment.get('plain')).to.eql([1, 2]);
+        pm.expect(pm.variables.replaceIn('{{named}}')).to.equal('{"k":"v"}');
+    )JS");
+}
+
+// Declaring another type on a json row retires the json text rule with it.
+TEST_F (ScriptVariablesTest, SetDeclaringAnotherTypeOnAJsonRowStoresPostmansText) {
+    scopes_.environment["j"] = vayu::Variable{ "{}", false, true, "json" };
+
+    run ("pm.environment.set('j', { a: 1 }, 'string');");
+
+    EXPECT_EQ (scopes_.environment.at ("j").type, "string");
+    EXPECT_EQ (scopes_.environment.at ("j").value, "[object Object]");
+}
+
+// A third argument that is none of the two shapes, or an object whose members
+// are the wrong kind, changes nothing but is no error either.
+TEST_F (ScriptVariablesTest, AThirdArgumentOfTheWrongShapeIsIgnored) {
+    scopes_.environment["t"] = vayu::Variable{ "old", true, true, "number" };
+
+    run (R"JS(
+        pm.environment.set('t', '1', null);
+        pm.environment.set('t', '2', undefined);
+        pm.environment.set('t', '3', 5);
+        pm.environment.set('t', '4', true);
+        pm.environment.set('t', '5', ['number']);
+        pm.environment.set('t', '6', function () {});
+        pm.environment.set('t', '7', {});
+        pm.environment.set('t', '8', { secret: 'no', type: 5 });
+        pm.environment.set('t', '9', { secret: 0 });
+        pm.environment.set('t', '10', { get type() { throw new Error('boom'); } });
+    )JS");
+
+    const vayu::Variable& variable = scopes_.environment.at ("t");
+    EXPECT_EQ (variable.value, "10");
+    EXPECT_TRUE (variable.secret);
+    EXPECT_EQ (variable.type, "number");
+
+    run ("pm.expect(pm.environment.get('t')).to.equal(10);");
+}
+
+// `pm.variables.set` is the run-local scope (#2564): it takes the argument
+// like every scope, but a flag on it is never persisted and never masked.
+TEST_F (ScriptVariablesTest, TheLocalScopeAcceptsTheThirdArgumentButIsNeverMasked) {
+    run ("pm.variables.set('t', 'local-token', { secret: true });");
+
+    run ("pm.expect(pm.variables.get('t')).to.equal('local-token');");
+    EXPECT_TRUE (vayu::http::routes::secret_variable_values (scopes_).empty ());
+}
+
 // A string carries nothing, so a later string set retires an earlier typed
 // value rather than leaving it to answer.
 TEST_F (ScriptVariablesTest, AStringSetReplacesAnEarlierTypedValue) {
@@ -671,6 +896,84 @@ TEST_F (PersistScriptVariablesTest, ATypedSetKeepsAFlagAnotherClientChanged) {
     EXPECT_EQ (stored["token"]["value"], "[1,2]"); // the row is declared json (#2568)
     EXPECT_EQ (stored["token"]["enabled"], false) << stored.dump ();
     EXPECT_EQ (stored["token"]["type"], "json");
+}
+
+// A flag a script sets changes more than the value, so the delta rule writes
+// the row whole and it reaches disk (#2664), in every scope a script can
+// write. Mutation check: drop the argv[2] read and all three stay plain.
+TEST_F (PersistScriptVariablesTest, ASecretFlagSetByAScriptIsStoredInEveryScope) {
+    const json plain = json::parse (
+    R"({"t":{"value":"old","enabled":true,"secret":false,"type":"string","createdAt":1784967810149}})");
+    const json body{ { "variables", plain } };
+    ASSERT_EQ (
+    vayu::http::routes::update_environment_response (*db_, "env_1", body).first, 200);
+    ASSERT_EQ (
+    vayu::http::routes::update_collection_response (*db_, "col_1", body).first, 200);
+    ASSERT_EQ (vayu::http::routes::save_globals_response (*db_, body).first, 200);
+
+    auto scopes = load ();
+    run_script (scopes, R"JS(
+        pm.environment.set('t', 'new', { secret: true });
+        pm.globals.set('t', 'new', { secret: true });
+        pm.collectionVariables.set('t', 'new', { secret: true });
+    )JS");
+    persist_script_variables (*db_, scopes);
+
+    for (const auto& blob : { stored_environment_variables (),
+         stored_globals_variables (), stored_collection_variables () }) {
+        const auto stored = json::parse (blob);
+        EXPECT_EQ (stored["t"]["value"], "new") << blob;
+        EXPECT_EQ (stored["t"]["secret"], true) << blob;
+        EXPECT_EQ (stored["t"]["type"], "string") << blob;
+        EXPECT_EQ (stored["t"]["createdAt"], 1784967810149LL) << blob;
+    }
+}
+
+TEST_F (PersistScriptVariablesTest, ASecretFalseSetByAScriptClearsTheStoredFlag) {
+    auto scopes = load ();
+    run_script (scopes, "pm.environment.set('token', 'abc', { secret: false });");
+    persist_script_variables (*db_, scopes);
+
+    const auto stored = json::parse (stored_environment_variables ());
+    EXPECT_EQ (stored["token"]["secret"], false);
+    EXPECT_EQ (stored["token"]["type"], "json")
+    << "a flag alone leaves the type";
+}
+
+TEST_F (PersistScriptVariablesTest, ATypeSetByAScriptIsStored) {
+    auto scopes = load ();
+    run_script (scopes, "pm.environment.set('token', 5, 'number');");
+    persist_script_variables (*db_, scopes);
+
+    const auto stored = json::parse (stored_environment_variables ());
+    EXPECT_EQ (stored["token"]["type"], "number");
+    EXPECT_EQ (stored["token"]["value"], "5");
+    EXPECT_EQ (stored["token"]["secret"], true)
+    << "a type alone leaves the flag";
+}
+
+// The flag takes effect from the next read of the scope: the run that sets it
+// does not mask, the next run's snapshot does (`secret_variable_values` reads
+// the stored scopes when a run starts).
+TEST_F (PersistScriptVariablesTest, AScriptSetSecretIsMaskedFromTheNextRunOn) {
+    auto environment = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (environment);
+    environment->variables = R"({"jwt":{"value":"old","enabled":true}})";
+    db_->save_environment (*environment);
+
+    const auto masked = [this] (const std::string& value) {
+        const auto values = vayu::http::routes::secret_variable_values (load ());
+        return std::count (values.begin (), values.end (), value);
+    };
+
+    auto scopes = load ();
+    run_script (scopes, "pm.environment.set('jwt', 'eyJ.script.set', { secret: true });");
+    EXPECT_EQ (masked ("eyJ.script.set"), 0)
+    << "the run's own snapshot predates the set";
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_EQ (masked ("eyJ.script.set"), 1);
+    EXPECT_EQ (masked ("old"), 0);
 }
 
 // `pm.variables.set` writes the run-local scope (#2564): read first, above a
