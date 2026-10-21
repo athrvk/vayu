@@ -49,10 +49,8 @@ using vayu::utils::url_decode;
 
 // Parse a token response body: JSON preferred, x-www-form-urlencoded fallback
 // (legacy GitHub-style). Returns a null json on failure, and for a JSON body
-// nested past `MAX_BODY_DEPTH` (#2413): a token response is a few flat members,
-// and a deeper tree is the same untrusted-depth body every other response
-// parse refuses. It returns here rather than throwing so the form decode below
-// never runs over text that was JSON.
+// nested past `MAX_BODY_DEPTH` (#2413). That returns rather than throws so the
+// form decode below never runs over text that was JSON.
 nlohmann::json parse_token_body (const std::string& body) {
     try {
         auto parsed = nlohmann::json::parse (body);

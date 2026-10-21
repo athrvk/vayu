@@ -16,6 +16,7 @@
  * guarding line is removed.
  */
 
+#include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_document.hpp"
@@ -310,16 +311,6 @@ TEST (ResponseSchemaRefTest, ARecursiveSchemaTerminates) {
 
 namespace {
 
-std::string nested_objects (size_t levels, std::string_view innermost) {
-    std::string text;
-    for (size_t i = 0; i < levels; ++i) {
-        text += R"({"a":)";
-    }
-    text += innermost;
-    text.append (levels, '}');
-    return text;
-}
-
 constexpr size_t BODY_DEPTH = constants::elements::MAX_BODY_DEPTH;
 
 /// Checks @p body against a schema every nesting of `a` satisfies, so the
@@ -341,13 +332,15 @@ ValidationVerdict check_against_any_depth (const std::string& body) {
 } // namespace
 
 TEST (ResponseSchemaDepthTest, ABodyAtTheBoundIsValidated) {
-    const auto verdict = check_against_any_depth (nested_objects (BODY_DEPTH, "1"));
+    const auto verdict =
+    check_against_any_depth (vayu::tests::nested_object_text (BODY_DEPTH, "1"));
     EXPECT_TRUE (verdict.checked);
     EXPECT_TRUE (verdict.valid);
 }
 
 TEST (ResponseSchemaDepthTest, ABodyOneLevelPastTheBoundIsNotJson) {
-    const auto verdict = check_against_any_depth (nested_objects (BODY_DEPTH + 1, "1"));
+    const auto verdict =
+    check_against_any_depth (vayu::tests::nested_object_text (BODY_DEPTH + 1, "1"));
     EXPECT_FALSE (verdict.checked);
     ASSERT_HAS_VALUE (verdict.reason);
     EXPECT_EQ (*verdict.reason, UncheckedReason::BodyNotJson);

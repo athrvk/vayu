@@ -573,9 +573,7 @@ TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
     EXPECT_EQ (err.provider_error_description, "bad secret");
 }
 
-// A body deeper than the bound is not handed on: the token parse treats it as
-// unparseable, so the exchange fails instead of caching a tree every later
-// copy or dump would recurse through.
+// The bound is inclusive: a token body nested exactly to it still parses.
 TEST_F (OAuthClientTest, ATokenBodyAtTheDepthBoundIsAccepted) {
     MockTokenServer idp;
     auto r = oauth::acquire_token (
@@ -584,6 +582,9 @@ TEST_F (OAuthClientTest, ATokenBodyAtTheDepthBoundIsAccepted) {
     EXPECT_EQ (std::get<vayu::db::OAuthToken> (r).access_token, "AT-DEEP");
 }
 
+// A body deeper than the bound is not handed on: the token parse treats it as
+// unparseable, so the exchange fails instead of caching a tree every later
+// copy or dump would recurse through.
 TEST_F (OAuthClientTest, ATokenBodyPastTheDepthBoundFailsCleanly) {
     MockTokenServer idp;
     const auto config = cc_config (idp, "/token-past-depth-bound");

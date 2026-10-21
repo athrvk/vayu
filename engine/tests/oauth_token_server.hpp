@@ -10,6 +10,7 @@
  * rather than three drifting copies.
  */
 
+#include "nested_json.hpp"
 #include "vayu/core/constants.hpp"
 
 #include <httplib.h>
@@ -45,13 +46,8 @@ inline std::map<std::string, std::string> parse_form (const std::string& body) {
 /// (root at depth 0, the measure `core::json_within_depth` uses): a valid
 /// `access_token` beside one `"n"` member nested to that depth.
 inline std::string token_body_nested_to (size_t depth) {
-    std::string body = R"({"access_token":"AT-DEEP","n":)";
-    for (size_t i = 1; i < depth; ++i) {
-        body += R"({"a":)";
-    }
-    body += "1";
-    body.append (depth - 1, '}');
-    return body + "}";
+    return R"({"access_token":"AT-DEEP","n":)" +
+    vayu::tests::nested_object_text (depth - 1, "1") + "}";
 }
 
 /// Mock IdP: records the last request for assertions.
