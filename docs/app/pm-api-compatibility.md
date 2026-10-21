@@ -71,7 +71,7 @@ only ever one member for `all()` to report for it.
 Variable writes persist to the scope they target (environment / collection / globals) and
 participate in [variable resolution](./variable-resolution.md). Calling `set(name, value)`
 on a variable that already exists updates its value and keeps the existing `secret` flag and
-`type`, but makes the row **enabled**: a script that sets a name means to use it, so a row
+`type` (unless the third argument names one, below), but makes the row **enabled**: a script that sets a name means to use it, so a row
 unticked in the variables editor is ticked again by the `set` (and persisted that way). A
 `set` on a new name creates it with the defaults (not secret, enabled, `type: "string"`).
 
@@ -127,7 +127,7 @@ row's value **typed**, exactly as `pm.iterationData.get` does (a number column r
 number); a column the row does not carry falls through to the three scopes as an ordinary
 name, not a failed bind. With no row bound, `pm.variables` behaves exactly as before.
 
-**`pm.variables.set(name, value)` writes Postman's *local* scope** (issue #2564), the top
+**`pm.variables.set(name, value, options?)` writes Postman's *local* scope** (issue #2564), the top
 tier, above the row: every read above answers from it first, `replaceIn` and
 `pm.sendRequest` substitute it, and a `{{name}}` composition could not answer goes out
 carrying it, so a pre-request `pm.variables.set("sig", …)` reaches a `{{sig}}` header. It

@@ -1472,7 +1472,8 @@ pm.environment.set('auth_token', 'new_token_value', { secret: true });
 ```
 
 `set()` on an existing name replaces its value and keeps the variable's `secret`,
-`type` and creation time, unless its third argument names one (below). It also turns `enabled` on (#2479): a set is a write of a
+`type` and creation time, unless its third argument names one (below). It also
+turns `enabled` on (#2479): a set is a write of a
 value the script means to use, so a row unticked in the variables editor is ticked
 again, and the script's own `get`, `has` and `replaceIn` and the `{{name}}` pass
 before the send all see it. A name that does not exist yet is
@@ -1685,7 +1686,7 @@ console.log(pm.variables.toObject()); // every tier, merged, the local scope win
 
 ### The local scope (`pm.variables.set`)
 
-`pm.variables.set(name, value)` writes Postman's *local* scope (issue #2564):
+`pm.variables.set(name, value, options?)` writes Postman's *local* scope (issue #2564):
 the strongest tier of all, above a bound data row, and never stored anywhere.
 It is for a value a script computes for this run and nothing after it - a
 signature, a nonce, a counter - which no named scope can hold without the
