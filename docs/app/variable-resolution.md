@@ -329,6 +329,13 @@ labelled a tab from the environment while the bar one row beneath it showed the
 file's value, which is the same one-bind-two-answers split as above wearing a
 different coat.
 
+A tab titled from its URL resolves it as the Params panel's **Sends** line does
+(issue #2637): `modules/request-builder/utils/sends-url.ts` is the one function
+both call, so a `:name` path row's value fills its segment, a value is encoded
+by the part of the URL it lands in, and `disableUrlEncoding` leaves it as typed.
+The title then shows only the path, through `pathLabel`, which decodes it, so
+`a%20b` still reads `a b`.
+
 The row crosses that boundary through `bound-row-store.ts`: one slot, holding
 the row the open builder is bound to **and the id of the request it is bound
 for**. One slot rather than a map because the builder binds a row for the

@@ -185,7 +185,11 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	// run recorded before the field, which then prints nothing about a file.
 	const manifest = useMemo(() => scenarioFromSnapshot(run), [run]);
 	const dataFileName = manifest?.dataFileName;
-	const dataFileStatus = useDataFileStatus(manifest?.collectionId, manifest?.dataFileHash);
+	const dataFileStatus = useDataFileStatus(
+		manifest?.collectionId,
+		manifest?.dataFileHash,
+		manifest?.dataFileCastNumbers
+	);
 
 	const [expanded, setExpanded] = useState<string | null>(null);
 	/*

@@ -177,7 +177,8 @@ TEST (ScriptApiScan, NamesRequireInBothSpellings) {
 
 // Vayu runs part of crypto-js (#2578), as the global and as a shelf module: a
 // script that stays inside what the shim defines is not named, one that reaches
-// past it is, under the one name `CryptoJS`.
+// past it is, under the one name `CryptoJS` - read off the global, an alias of
+// it, `require('crypto-js')` or a destructure of any of them (#2628).
 TEST (ScriptApiScan, CryptoJsMembersThatRunAreNotNamed) {
     EXPECT_EQ (names_in ("CryptoJS.MD5('x');"), Names{});
     EXPECT_EQ (names_in ("const sig = `sig=${CryptoJS.HmacSHA256(m, k)}`;"), Names{});
@@ -212,6 +213,76 @@ TEST (ScriptApiScan, AComputedCryptoJsMemberIsNamed) {
     EXPECT_EQ (names_in ("CryptoJS[algorithm](m);"), Names{ "CryptoJS" });
     EXPECT_EQ (names_in ("CryptoJS.enc[encoding].parse(s);"), Names{ "CryptoJS" });
     EXPECT_EQ (names_in ("CryptoJS.lib['WordArray'].create();"), Names{ "CryptoJS" });
+}
+
+// A member read through a name bound to the namespace, or a destructure of it,
+// is the same read (#2628); each form below throws at run time.
+TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberReadThroughANameIsNamed) {
+    const Names expected{ "CryptoJS" };
+    for (const char* script : { "const C = CryptoJS; C.AES.encrypt(m, k);",
+         "let C = CryptoJS; C?.AES;", "var C = require('crypto-js'); C.AES;",
+         "const C = require('crypto-js'); C.MD5(a); C.SHA3(b);", "const C = CryptoJS;\nconst D = C; D.AES;",
+         "const E = CryptoJS.enc; E.Utf16.parse(s);", "const E = CryptoJS\n  .enc; E.Base64url;",
+         "const C = CryptoJS; C['AES'];", "const C = CryptoJS; C.enc[name];" }) {
+        EXPECT_EQ (names_in (script), expected) << script;
+    }
+}
+
+TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberReadOffARequireIsNamed) {
+    const Names expected{ "CryptoJS" };
+    for (const char* script : { "require('crypto-js').AES.encrypt(m, k);",
+         "require ( \"crypto-js\" )\n  .AES;", "require('crypto-js')?.AES;",
+         "const A = require('crypto-js').AES;",
+         "require('crypto-js').enc.Utf16;", "require('crypto-js')[name];" }) {
+        EXPECT_EQ (names_in (script), expected) << script;
+    }
+}
+
+TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberInADestructureIsNamed) {
+    const Names expected{ "CryptoJS" };
+    for (const char* script :
+    { "const { AES } = CryptoJS;", "const { AES } = require('crypto-js');",
+    "let { MD5, AES } = CryptoJS;", "const { AES: aes } = CryptoJS;",
+    "var { AES = fallback } = CryptoJS;", "const { 'AES': aes } = CryptoJS;",
+    "const { enc: { Hex, Utf16 } } = CryptoJS;", "const { Utf16 } = CryptoJS.enc;",
+    "const { [name]: algorithm } = CryptoJS;", "const { MD5, ...rest } = CryptoJS; rest.AES;",
+    "const { enc } = CryptoJS; enc.Utf16.parse(s);", "const { enc: e } = CryptoJS; e.Utf16;",
+    "const { lib: { WordArray } } = CryptoJS; WordArray.random(16);",
+    "const { SHA3\n, MD5 } = require('crypto-js');" }) {
+        EXPECT_EQ (names_in (script), expected) << script;
+    }
+}
+
+TEST (ScriptApiScan, CryptoJsMembersThatRunAreNotNamedThroughANameOrADestructure) {
+    for (const char* script :
+    { "const C = CryptoJS; C.MD5(a); C.enc.Hex.stringify(w);", "const C = require('crypto-js'); C.HmacSHA256(m, k); C.lib.WordArray.create(b);",
+    "const { MD5 } = CryptoJS; MD5(a);", "const { enc: { Hex, Utf8 } } = CryptoJS;",
+    "const { MD5: md5, SHA1 = other } = CryptoJS;",
+    "const { 'MD5': md5 } = CryptoJS;", "const { enc } = CryptoJS; enc.Hex.parse(s);",
+    "const { enc: { Hex } } = require('crypto-js'); Hex.stringify(w);",
+    "const { lib: { WordArray } } = CryptoJS; WordArray.create([1], 4);",
+    "const E = CryptoJS.enc; E.Utf8.parse(s); E.Base64.stringify(w);",
+    "const C = CryptoJS; use(C); const D = C;", "require('crypto-js').MD5(a);",
+    "require('crypto-js').enc.Hex.stringify(w);", "const { enc, ...rest } = CryptoJS;",
+    "const h = CryptoJS.MD5(a); h.foo(); const { x } = h;" }) {
+        EXPECT_EQ (names_in (script), Names{}) << script;
+    }
+}
+
+TEST (ScriptApiScan, ANameThatIsNotTheNamespaceIsNotRead) {
+    // A call's result and an unrelated value hold no namespace to read members off.
+    EXPECT_EQ (names_in ("const h = CryptoJS.MD5(a); h.AES;"), Names{});
+    EXPECT_EQ (names_in ("const C = other; C.AES; const { AES } = other;"), Names{});
+    EXPECT_EQ (names_in ("const C = require('lodash'); C.AES;"), Names{ "require()" });
+    EXPECT_EQ (names_in ("const C = CryptoJS; x.C.AES; C2.AES;"), Names{});
+    EXPECT_EQ (names_in ("const C = CryptoJS; // C.AES\nconst s = 'C.AES';"), Names{});
+}
+
+TEST (ScriptApiScan, ABindingIsReadFromItsDeclarationOn) {
+    // The declaration's own name is not a read of the alias it makes.
+    EXPECT_EQ (names_in ("const C = CryptoJS; const D = 1;"), Names{});
+    // A pattern's unbalanced bracket is not one the scan can read.
+    EXPECT_EQ (names_in ("const { AES = CryptoJS;"), Names{});
 }
 
 TEST (ScriptApiScan, AnUnsupportedCryptoJsMemberIsNamedBesideSupportedOnes) {

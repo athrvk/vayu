@@ -124,8 +124,10 @@ hover card, a collection run's header and context bar, a run tab's tooltip -
 the name is followed by "(numbers read as numbers)" when the run cast them, and
 comparing two runs of one file read both ways reports a data-file difference. A
 run recorded before the setting existed reads as text, which is how every such
-run was read. Running the collection again reads the file through its binding,
-so it casts the same way unless you change the checkbox.
+run was read. A collection run's header also says "(number reading changed
+since this run)" when the file's bytes are unchanged but its binding now reads
+numbers the other way. Running the collection again reads the file through its
+binding, so it casts the same way unless you change the checkbox.
 
 This is the integer and decimal subset of what Newman's `--csv-auto-parse`
 reads. Newman is looser: it also casts `1e3`, `.5` and padded cells, so a file
@@ -603,7 +605,10 @@ line, and a run tab's tooltip ends with the name. Where the file the run's
 collection remembers now differs on disk from the one the run read, the
 collection run's header adds "(file changed since this run)": the app hashes
 the file when the tab opens and again whenever its window regains focus, so an
-edit made in another program shows up on return. A file that has moved or been
+edit made in another program shows up on return. The same bytes read the other
+way - **Read numbers as numbers** switched since the run - add "(number reading
+changed since this run)" instead, because the hash cannot tell the two apart; a
+changed file wins over a changed reading. A file that has moved or been
 deleted adds "(file no longer at that path)" instead, whether or not the run
 recorded a hash, and so does a file the app was never given by a pick, drop or
 open (a data file declared before that rule, #2357, reads again once it is

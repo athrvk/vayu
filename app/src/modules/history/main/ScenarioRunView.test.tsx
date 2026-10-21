@@ -559,6 +559,26 @@ describe("the data file the run was driven by", () => {
 		expect(screen.getByText("Data: users.csv")).toBeTruthy();
 	});
 
+	// Mutation check: classify by hash alone again and this fails (#2636).
+	it("says the number reading changed when the same file is now bound the other way", () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/data/plans.csv",
+			fileName: "plans.csv",
+			hash: HASH_A,
+			castNumbers: true,
+		});
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "plans.csv", dataFileHash: HASH_A })}
+			/>
+		);
+
+		expect(
+			screen.getByText("Data: plans.csv (number reading changed since this run)")
+		).toBeTruthy();
+		expect(screen.queryByText(/file changed/)).toBeNull();
+	});
+
 	it("says the file is no longer at its path when the main process reports it gone", async () => {
 		useDataFileStore.getState().setDataFile("col_1", {
 			path: "/data/users.csv",
