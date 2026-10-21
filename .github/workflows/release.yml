@@ -52,7 +52,9 @@ env:
 jobs:
   build:
     name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
+    # Empty on the legs that name no container, which then run on the runner.
+    container: ${{ matrix.container }}
     permissions:
       contents: read
     strategy:
@@ -63,9 +65,20 @@ jobs:
         # never an earlier one. 0.37.0 was built on 24.04 and did not start on
         # 22.04 ("version `GLIBC_2.38' not found"). The toolchain step and the
         # glibc check below hold it there; cache-warm.yml warms the same image.
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        #
+        # The 22.04 userland is the `ubuntu:22.04` container on an ubuntu-24.04
+        # runner, because the ubuntu-22.04 runner image is removed on
+        # 2027-04-17 (#2634). `os` is the leg's label and the vcpkg cache key's
+        # image component, so it names the container rather than the runner.
+        # Inside the container `github.workspace` is the host's path, not the
+        # mounted workspace (actions/runner#2058): the paths built from it
+        # below resolve to a container-local directory, consistently for every
+        # step that reads them, and the run-cmake steps take a relative path.
+        os: [container-ubuntu-22.04, windows-latest, macos-latest]
         include:
-          - os: ubuntu-22.04
+          - os: container-ubuntu-22.04
+            runner: ubuntu-24.04
+            container: ubuntu:22.04
             preset: linux-prod
           - os: windows-latest
             preset: windows-prod
@@ -74,27 +87,25 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      # The bare container has neither. Without git, actions/checkout
+      # downloads a tarball with no repository behind it. Without zstd,
+      # actions/cache compresses with gzip, and it versions an entry by its
+      # compression, so every container job must have zstd before its first
+      # cache step or it misses what another one saved. Everything else the
+      # Linux leg needs is installed by the toolchain action below.
+      - name: Install git and zstd (container)
+        if: matrix.container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ninja-build \
-            build-essential \
-            pkg-config \
-            ca-certificates \
-            autoconf \
-            autoconf-archive \
-            automake \
-            libtool
-
-      # GCC 13 on 22.04, exported as CC/CXX before vcpkg or CMake runs. See the
-      # action for why this is not the runner's own compiler.
+      # The build tools, and GCC 13 on 22.04 exported as CC/CXX before vcpkg or
+      # CMake runs. See the action for why this is not the image's own compiler.
       - name: Set up the Linux release toolchain
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-release-toolchain
@@ -139,6 +150,23 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      # The container has no CMake or Ninja; the runner image did. vcpkg pins
+      # both, hash-checked, at VCPKG_COMMIT, so this adds no new download.
+      - name: Put vcpkg's CMake and Ninja on PATH (container)
+        if: matrix.container
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in cmake ninja; do
+            exe=$("$VCPKG_ROOT/vcpkg" fetch "$tool" | tail -n 1)
+            if [ ! -x "$exe" ]; then
+              echo "::error::'vcpkg fetch $tool' answered '$exe', which is not an executable." >&2
+              exit 1
+            fi
+            "$exe" --version | head -1
+            dirname "$exe" >> "$GITHUB_PATH"
+          done
+
       # Windows used to skip both of these: sccache-action@v0.0.10 could not
       # install on the Windows Server 2025 + Visual Studio 2026 image GitHub
       # rolled across windows-latest in June 2026, failing its post-step with
@@ -182,7 +210,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: macos-prod-arm64
           buildPreset: macos-prod-arm64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
@@ -201,7 +229,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: macos-prod-x64
           buildPreset: macos-prod-x64
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"
@@ -232,7 +260,7 @@ jobs:
         if: runner.os != 'macOS'
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "['-DVAYU_BUILD_TESTS=ON']"

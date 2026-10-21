@@ -502,15 +502,39 @@ Ubuntu 22.04 or Debian 12: the engine died before `main` with
 
 So the release's Linux leg builds on **Ubuntu 22.04**, the oldest LTS still in
 standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
-21, Debian 12, Fedora 36 or later. Four pieces hold it there:
+21, Debian 12, Fedora 36 or later.
 
-- **`.github/actions/linux-release-toolchain`** installs GCC 13 from the Ubuntu
-  toolchain PPA (22.04 ships GCC 12, which cannot build C++23 here) and exports
-  it as `CC`/`CXX`, so vcpkg's ports and the engine are built by the same
-  compiler. `release.yml` uses it, `cache-warm.yml` warms the caches with it,
-  and `pr-tests.yml` runs it as the `ubuntu-22.04` engine leg on every engine
-  pull request, so a break surfaces there rather than on a tag. It refuses to
-  run on any other Ubuntu release.
+The 22.04 userland comes from the **`ubuntu:22.04` container image**, run on an
+`ubuntu-24.04` runner (`container: ubuntu:22.04` on the job), not from the
+`ubuntu-22.04` runner image, which GitHub removes on 2027-04-17 (#2634). The
+floor is the image's glibc, so it is unchanged; only where the userland comes
+from moved. The matrix labels that leg `container-ubuntu-22.04`, and the steps
+that belong to it alone gate on `matrix.container`. A bare image has none of
+the runner image's tools, so the leg installs `git` and `zstd` before checkout
+(`actions/cache` versions an entry by its compression, so a gzip-only job
+misses what a zstd job saved), the toolchain action installs the rest, and
+CMake and Ninja are the copies vcpkg pins at `VCPKG_COMMIT` (`vcpkg fetch`).
+Inside a container job `github.workspace` is the host's path, which the
+container does not see (actions/runner#2058), so the `run-cmake` steps take a
+workspace-relative `CMakeLists.txt`; the vcpkg and cache paths built from it
+resolve to the same container-local directory in every job that reads them.
+`cache-warm.yml` warms the pnpm store in the container as well as on
+`ubuntu-24.04`: setup-node's key is the same in both, but the store's path is
+not, and `actions/cache` versions an entry by its path.
+The AppImage needs no FUSE or privileged container: electron-builder writes
+it with `mksquashfs` and prepends the runtime, and never runs an AppImage.
+
+Four pieces hold the floor:
+
+- **`.github/actions/linux-release-toolchain`** installs the build tools the
+  bare image lacks and GCC 13 from the Ubuntu toolchain PPA (22.04 ships GCC
+  12, which cannot build C++23 here), and exports GCC 13 as `CC`/`CXX`, so
+  vcpkg's ports and the engine are built by the same compiler. It runs as root
+  in the container, where there is no `sudo`, and through `sudo` elsewhere.
+  `release.yml` uses it, `cache-warm.yml` warms the caches with it, and
+  `pr-tests.yml` runs it as the `container-ubuntu-22.04` engine leg on every
+  engine pull request, so a break surfaces there rather than on a tag. It
+  refuses to run on any other Ubuntu release.
 - **The C++ runtime is linked in** (`vayu_runtime` in `engine/CMakeLists.txt`,
   `-static-libstdc++ -static-libgcc` on every Linux build except the
   sanitizer ones). libstdc++ versions its symbols by compiler, and 22.04's copy
@@ -520,9 +544,12 @@ standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
 - **`scripts/check-linux-glibc.sh`** reads the built binary back: no
   `libstdc++`/`libgcc_s` among its `NEEDED` libraries, and no glibc symbol
   version above `VAYU_LINUX_GLIBC_FLOOR` (default 2.35). It runs in
-  `release.yml` and on the `ubuntu-22.04` leg of `pr-tests.yml`. The
-  `ubuntu-24.04` leg is not checked: it links against 24.04's glibc by design.
-- **The vcpkg cache key carries the runner image** (`matrix.os`). vcpkg's
+  `release.yml` and on the `container-ubuntu-22.04` leg of `pr-tests.yml`,
+  on a binary built inside the container. The `ubuntu-24.04` leg is not
+  checked: it links against 24.04's glibc by design.
+- **The vcpkg cache key carries the image** (`matrix.os`, which on the
+  release leg is the `container-ubuntu-22.04` label, so no entry an
+  `ubuntu-22.04` runner saved is ever read by the container). vcpkg's
   archives only fit the compiler that built them and `actions/cache` never
   overwrites a key, so with one `Linux` key for both images whichever saved
   first owned it and the other rebuilt every dependency from source.
@@ -537,11 +564,11 @@ A build on a newer distribution fails the glibc half of that by design; only
 the release baseline has a floor to hold.
 
 Raising the floor is a user-visible support change. When 22.04 leaves standard
-support (April 2027), move the three workflows' runner, the version check in
-the toolchain action and the script's default floor together, and update the
-supported-platform lines in `README.md` and `docs/index.md`;
-`cache-warm.yml`'s guard fails if the warmed images and `release.yml`'s drift
-apart.
+support (April 2027), move the three workflows' container image and its
+`container-ubuntu-*` label, the version check in the toolchain action and the
+script's default floor together, and update the supported-platform lines in
+`README.md` and `docs/index.md`; `cache-warm.yml`'s guard fails if the warmed
+labels and `release.yml`'s drift apart.
 
 ### macOS
 

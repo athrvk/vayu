@@ -681,7 +681,9 @@ jobs:
 
   engine:
     name: Engine on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
+    # Empty on the legs that name no container, which then run on the runner.
+    container: ${{ matrix.container }}
     needs: changes
     # `!cancelled()` because `changes` is skipped on a push, and a job whose
     # need was skipped is skipped too unless its condition says otherwise.
@@ -695,7 +697,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-24.04, container-ubuntu-22.04, windows-latest, macos-latest]
         include:
           # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
           # both legs that use it (issue #884) - a warning that only one
@@ -707,12 +709,17 @@ jobs:
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           # The Linux release's own configuration: the oldest supported Ubuntu
           # LTS and the GCC it builds with (.github/actions/linux-release-
-          # toolchain). release.yml runs only on a tag, so without this leg a
-          # change that breaks that compiler, or pulls a newer glibc symbol into
-          # the engine, would first fail with the release half-published.
-          # ubuntu-24.04 stays alongside it: the newest Ubuntu this repository
-          # has adopted, and the clang-tidy gate runs there.
-          - os: ubuntu-22.04
+          # toolchain), in the same container on the same runner as
+          # release.yml's Linux leg (#2634). release.yml runs only on a tag, so
+          # without this leg a change that breaks that compiler, or pulls a
+          # newer glibc symbol into the engine, would first fail with the
+          # release half-published. ubuntu-24.04 stays alongside it: the newest
+          # Ubuntu this repository has adopted, and the clang-tidy gate runs
+          # there. The steps that belong to this leg alone gate on
+          # `matrix.container`.
+          - os: container-ubuntu-22.04
+            runner: ubuntu-24.04
+            container: ubuntu:22.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           - os: windows-latest
@@ -735,6 +742,13 @@ jobs:
       SCCACHE_GHA_ENABLED: 'true'
 
     steps:
+      # release.yml's step, for its reasons.
+      - name: Install git and zstd (container)
+        if: matrix.container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates zstd
+
       # Depth 2, which is all the clang-tidy step below needs: `HEAD^1`, the
       # base side of the merge commit actions/checkout leaves at HEAD. It was
       # briefly full history, for a commit walk that read the pull request's own
@@ -744,8 +758,9 @@ jobs:
         with:
           fetch-depth: 2
 
+      # The container leg's tools come from the toolchain action below.
       - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !matrix.container
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -759,7 +774,7 @@ jobs:
             libtool
 
       - name: Set up the Linux release toolchain
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.container
         uses: ./.github/actions/linux-release-toolchain
 
       - name: Install system dependencies (macOS)
@@ -790,6 +805,22 @@ jobs:
           vcpkgGitCommitId: '${{ env.VCPKG_COMMIT }}'
           vcpkgJsonGlob: 'engine/vcpkg.json'
 
+      # The same CMake and Ninja release.yml's container leg builds with.
+      - name: Put vcpkg's CMake and Ninja on PATH (container)
+        if: matrix.container
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in cmake ninja; do
+            exe=$("$VCPKG_ROOT/vcpkg" fetch "$tool" | tail -n 1)
+            if [ ! -x "$exe" ]; then
+              echo "::error::'vcpkg fetch $tool' answered '$exe', which is not an executable." >&2
+              exit 1
+            fi
+            "$exe" --version | head -1
+            dirname "$exe" >> "$GITHUB_PATH"
+          done
+
       # sccache used to be skipped on Windows. sccache-action@v0.0.10 failed its
       # install step on the Windows Server 2025 + Visual Studio 2026 image
       # GitHub rolled across windows-latest in June 2026: "Unable to locate
@@ -816,10 +847,12 @@ jobs:
           echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
           echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
 
+      # Relative: in the container `github.workspace` is the host's path,
+      # which the container does not see (actions/runner#2058).
       - name: Build engine
         uses: lukka/run-cmake@5d55ea7949e25f69f0ecb516d8d572297e03a956 # v10
         with:
-          cmakeListsTxtPath: '${{ github.workspace }}/engine/CMakeLists.txt'
+          cmakeListsTxtPath: 'engine/CMakeLists.txt'
           configurePreset: ${{ matrix.preset }}
           buildPreset: ${{ matrix.preset }}
           configurePresetAdditionalArgs: "${{ matrix.configureArgs }}"
@@ -852,7 +885,7 @@ jobs:
       # ubuntu-24.04 leg links against a newer glibc by design and would fail
       # it, which is the point: only the release baseline has a floor to hold.
       - name: Verify engine glibc floor
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.container
         shell: bash
         run: ./scripts/check-linux-glibc.sh engine/build-release/vayu-engine
 
@@ -965,7 +998,7 @@ jobs:
         if: >-
           github.event_name == 'pull_request'
           && runner.os != 'macOS'
-          && matrix.os != 'ubuntu-22.04'
+          && !matrix.container
           && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
         run: |
@@ -1127,7 +1160,7 @@ jobs:
         if: >-
           github.event_name == 'pull_request'
           && runner.os != 'macOS'
-          && matrix.os != 'ubuntu-22.04'
+          && !matrix.container
           && contains(github.event.pull_request.labels.*.name, 'reformat-pr')
         shell: bash
         run: |
