@@ -9,8 +9,8 @@
 
 /**
  * @file runtime/shelf_modules.hpp
- * @brief The names `require()` answers, and the members of the one library on
- *        its shelf (#2578).
+ * @brief The names `require()` answers (#2578), and the members of crypto-js,
+ *        the one library on its shelf the import scan reads member by member.
  *
  * Header-only on purpose: `runtime/require_shelf.cpp` builds the shelf from
  * these names and only exists where QuickJS does, while the Postman import's
@@ -25,10 +25,11 @@
 namespace vayu::runtime {
 
 inline constexpr std::string_view CRYPTO_JS_MODULE = "crypto-js";
+inline constexpr std::string_view UUID_MODULE      = "uuid";
 
 /// Every name `require` accepts.
 inline constexpr auto SHELF_MODULE_NAMES =
-std::to_array<std::string_view> ({ CRYPTO_JS_MODULE });
+std::to_array<std::string_view> ({ CRYPTO_JS_MODULE, UUID_MODULE });
 
 [[nodiscard]] constexpr bool is_shelf_module (std::string_view name) {
     for (const std::string_view shelf_name : SHELF_MODULE_NAMES) {

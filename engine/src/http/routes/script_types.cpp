@@ -176,22 +176,69 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 });
 
 /**
- * @brief The modules `require()` loads (#2578), each with the global whose
- *        type it answers.
+ * @brief The modules `require()` loads (#2578, #2650): the one table the
+ *        `declare module` blocks and `require`'s signature are both written from.
  *
  * The editor checks a script as JavaScript, where `const lib =
  * require('crypto-js')` is an import TypeScript resolves as a module rather
  * than a call to the declared `require`; undeclared, that line is "Cannot find
  * module" on the very idiom Postman scripts open with. So each name is also
- * declared as a module. `script_types_test.cpp` runs `require(name)` in the
- * real script engine for every module the file declares.
+ * declared as a module, and `require` answers `typeof import(name)` for it.
+ *
+ * `body` is what sits inside `declare module '<name>' { ... }`, tab-indented
+ * and ending in the `export =` that names the module's value: a module with a
+ * global to point at is one line (crypto-js), and one with none (uuid, which
+ * has no global) carries its own declaration.
+ *
+ * `script_types_test.cpp` runs `require(name)` in the real script engine for
+ * every module declared here, and checks that every name `require` accepts
+ * (`vayu::runtime::SHELF_MODULE_NAMES`) has a row.
  */
 struct ShelfModule {
     const char* name;
-    const char* global;
+    const char* body;
 };
 constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
-{ "crypto-js", "CryptoJS" },
+{ "crypto-js", "\texport = CryptoJS;\n" },
+{ "uuid",
+// npm's own members plus the callable form (`uuid()` is a v4); the
+// signatures follow npm's, including the optional output buffer.
+"\ttype Bytes = ArrayLike<number>;\n"
+"\ttype Target = number[] | Uint8Array;\n"
+"\tinterface RandomOptions {\n"
+"\t\trandom?: Bytes;\n"
+"\t\trng?: () => Bytes;\n"
+"\t}\n"
+"\tinterface V1Options extends RandomOptions {\n"
+"\t\tnode?: Bytes;\n"
+"\t\tclockseq?: number;\n"
+"\t\tmsecs?: number | Date;\n"
+"\t\tnsecs?: number;\n"
+"\t}\n"
+"\tinterface Randomised<Options> {\n"
+"\t\t(options?: Options): string;\n"
+"\t\t<T extends Target>(options: Options | null | undefined, buffer: T, "
+"offset?: number): T;\n"
+"\t}\n"
+"\tinterface FromName {\n"
+"\t\t(name: string | Bytes, namespace: string | Bytes): string;\n"
+"\t\t<T extends Target>(name: string | Bytes, namespace: string | Bytes, "
+"buffer: T, offset?: number): T;\n"
+"\t\tDNS: string;\n"
+"\t\tURL: string;\n"
+"\t}\n"
+"\tconst uuid: Randomised<RandomOptions> & {\n"
+"\t\tv1: Randomised<V1Options>;\n"
+"\t\tv3: FromName;\n"
+"\t\tv4: Randomised<RandomOptions>;\n"
+"\t\tv5: FromName;\n"
+"\t\tNIL: string;\n"
+"\t\tparse(uuid: string): Uint8Array;\n"
+"\t\tstringify(bytes: Bytes, offset?: number): string;\n"
+"\t\tvalidate(uuid: unknown): boolean;\n"
+"\t\tversion(uuid: string): number;\n"
+"\t};\n"
+"\texport = uuid;\n" },
 });
 
 /**
@@ -812,6 +859,27 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
     out += ": never;\n";
 }
 
+/**
+ * `require`, written from SHELF_MODULES rather than from its completion entry.
+ *
+ * The entry's `detail` cannot give each module its own return type, and a pair
+ * of overloads would turn a name off the shelf from TS2345 into TS2769 "No
+ * overload matches" - the less direct message. One generic signature keyed on
+ * the names keeps the parameter a literal union (`require('lodash')` is "not
+ * assignable to 'crypto-js' | 'uuid'"). Only the entry's documentation is read.
+ */
+void render_require (std::string& out, const TypeNode& require) {
+    out += "interface VayuShelfModules {\n";
+    for (const auto& shelf_module : SHELF_MODULES) {
+        out += std::format ("\t'{0}': typeof import('{0}');\n", shelf_module.name);
+    }
+    out += "}\n\n";
+    append_doc (out, require.documentation, "");
+    out +=
+    "declare function require<N extends keyof VayuShelfModules>(name: N): "
+    "VayuShelfModules[N];\n";
+}
+
 } // namespace
 
 /**
@@ -895,6 +963,10 @@ std::string render_globals (const TypeNode& global_root) {
     std::string out;
     for (const auto& [name, child] : global_root.children) {
         out += "\n";
+        if (name == "require" && child.kind == KIND_FUNCTION) {
+            render_require (out, child);
+            continue;
+        }
         if (!child.children.empty ()) {
             append_doc (out, child.documentation, "");
             out += "declare const " + name + ": {\n";
@@ -942,8 +1014,8 @@ std::string generate_script_typedefs () {
     out += render_chain (chain_root);
     out += render_globals (global_root);
     for (const auto& shelf_module : SHELF_MODULES) {
-        out += std::format ("\ndeclare module '{}' {{\n\texport = {};\n}}\n",
-        shelf_module.name, shelf_module.global);
+        out += std::format ("\ndeclare module '{}' {{\n{}}}\n",
+        shelf_module.name, shelf_module.body);
     }
     return out;
 }

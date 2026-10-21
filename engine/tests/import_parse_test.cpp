@@ -2497,6 +2497,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     request_with_script ("Shelf",
     R"j(["const c = require('crypto-js');","const h = CryptoJS.MD5('x');"])j") +
     "," +
+    request_with_script ("Uuid",
+    R"j(["const uuid = require('uuid');","const a = uuid();","const b = uuid.v4();"])j") +
+    "," +
     request_with_script ("Cipher",
     R"j(["const c = require('crypto-js');","const e = CryptoJS.AES.encrypt('x', 'k');"])j") +
     "," +
@@ -2507,8 +2510,9 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
 
     // Postman's pre-pm.* globals and pm.visualizer run (#2577), and so do
     // the crypto-js members the shim defines (#2578), as the global and as
-    // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named;
-    // "Cipher" reaches past the shim and is.
+    // `require('crypto-js')`, so "Legacy tests" and "Shelf" are not named, and
+    // `require('uuid')` runs (#2650), so "Uuid" is not either; "Cipher" reaches
+    // past the shim and is. "Module" requires a name off the shelf and is.
     EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
     nlohmann::ordered_json::parse (R"j([
         {"request":"Library","names":["tv4"]},

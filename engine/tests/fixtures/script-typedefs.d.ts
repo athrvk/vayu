@@ -2353,13 +2353,20 @@ declare const request: {
 	url: string;
 };
 
+interface VayuShelfModules {
+	'crypto-js': typeof import('crypto-js');
+	'uuid': typeof import('uuid');
+}
+
 /**
- * Load a library Vayu bundles. The shelf is crypto-js, which answers the same object as the CryptoJS global. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
+ * Load a library Vayu bundles. On the shelf: crypto-js, uuid. crypto-js answers the same object as the CryptoJS global. uuid is npm's uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and the module is itself callable, so uuid() is a v4. Any other name throws "Cannot find module" and lists the shelf: nothing is read from disk or fetched.
  * 
  * Example:
  * const CryptoJS = require('crypto-js');
+ * const uuid = require('uuid');
+ * const id = uuid();
  */
-declare function require(name: 'crypto-js'): typeof CryptoJS;
+declare function require<N extends keyof VayuShelfModules>(name: N): VayuShelfModules[N];
 
 /**
  * The response body as text, what pm.response.text() answers.
@@ -2579,4 +2586,41 @@ declare const Backbone: never;
 
 declare module 'crypto-js' {
 	export = CryptoJS;
+}
+
+declare module 'uuid' {
+	type Bytes = ArrayLike<number>;
+	type Target = number[] | Uint8Array;
+	interface RandomOptions {
+		random?: Bytes;
+		rng?: () => Bytes;
+	}
+	interface V1Options extends RandomOptions {
+		node?: Bytes;
+		clockseq?: number;
+		msecs?: number | Date;
+		nsecs?: number;
+	}
+	interface Randomised<Options> {
+		(options?: Options): string;
+		<T extends Target>(options: Options | null | undefined, buffer: T, offset?: number): T;
+	}
+	interface FromName {
+		(name: string | Bytes, namespace: string | Bytes): string;
+		<T extends Target>(name: string | Bytes, namespace: string | Bytes, buffer: T, offset?: number): T;
+		DNS: string;
+		URL: string;
+	}
+	const uuid: Randomised<RandomOptions> & {
+		v1: Randomised<V1Options>;
+		v3: FromName;
+		v4: Randomised<RandomOptions>;
+		v5: FromName;
+		NIL: string;
+		parse(uuid: string): Uint8Array;
+		stringify(bytes: Bytes, offset?: number): string;
+		validate(uuid: unknown): boolean;
+		version(uuid: string): number;
+	};
+	export = uuid;
 }

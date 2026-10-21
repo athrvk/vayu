@@ -2756,8 +2756,8 @@ carry from one script to the next belongs in a variable scope
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
 four timer functions, Postman's legacy globals (`postman`, `tests`,
-`responseBody`, ...) and one bundled library, `crypto-js`
-([below](#the-require-shelf-crypto-js)).
+`responseBody`, ...) and two bundled libraries, `crypto-js` and `uuid`
+([below](#the-require-shelf)).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2771,7 +2771,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf-crypto-js): `require('crypto-js')` answers the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')` and `require('uuid')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
 | `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
@@ -2785,7 +2785,7 @@ silently falling back to hex.
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no asymmetric
 algorithm and no cipher (the digests are `pm.crypto.sha256` and the
-[`crypto-js` hashers](#the-require-shelf-crypto-js)), and no host I/O:
+[`crypto-js` hashers](#the-require-shelf)), and no host I/O:
 `Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
 and the timers run, on queues drained before the script ends, but nothing
 settles a promise after it has.
@@ -2794,27 +2794,30 @@ There is no `fetch`, but there **is**
 synchronous and bounded; without a callback it returns a promise that is
 already settled, not one waiting on a transfer in flight.
 
-Of the libraries Postman bundles, only `CryptoJS` runs. The others (`_`,
+Of the libraries Postman bundles, only `CryptoJS` and `uuid` run (`uuid` has no
+global, it is `require('uuid')` only). The others (`_`,
 `moment`, `tv4`, `xml2Json`, `cheerio`, `Backbone`) are absent. The editor
 declares each as unusable, so a use is underlined and the hover names the
 replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
 lists them.
 
-### The `require` shelf (`crypto-js`)
+### The `require` shelf
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name, listing what is on the shelf.
 There is no loader behind it: nothing is read from disk, nothing is fetched, and
 a relative path or a package name that is not on the shelf is the same refusal.
 The argument must be a string (anything else is a `TypeError`). Today the shelf
-holds one library, `crypto-js`, and `CryptoJS` is the same module bound as a
-global, so both spellings of a Postman signing script work:
+holds two libraries, `crypto-js` and `uuid`. `CryptoJS` is the `crypto-js`
+module bound as a global, so both spellings of a Postman signing script work:
 
 ```javascript
 const CryptoJS = require('crypto-js');
 const signature = CryptoJS.HmacSHA256(payload, secret).toString(CryptoJS.enc.Hex);
 pm.request.headers.upsert({ key: 'X-Signature', value: signature });
 ```
+
+#### `crypto-js`
 
 **It is Vayu's own code with crypto-js's shape, not the crypto-js library.** The
 source is a 6 KB JavaScript shim; the hashing runs in OpenSSL through
@@ -2853,10 +2856,46 @@ for the rest of that execution (about 22 KB of the script's 64 MB limit) and is
 freed with the context. Nothing is shared between executions, so the next script
 that uses it pays the first-use cost again.
 
-The libraries Postman also lets a script `require` - `lodash`, `moment`, `uuid`,
-`ajv`, `tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins -
-are **not** on the shelf: `require` of one throws, and a Postman import names
-the script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
+#### `uuid`
+
+`require('uuid')` is **the npm `uuid` package itself**, version 8.3.2, vendored
+unmodified (`engine/vendor/uuid/`, MIT; see
+[Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
+The module is callable, which is how Postman's own `uuid` works, and carries
+npm's members on the same value:
+
+```javascript
+const uuid = require('uuid');
+pm.environment.set('requestId', uuid());          // a v4, as in Postman
+pm.environment.set('traceId', uuid.v4());         // the same, spelled npm's way
+pm.environment.set('stable', uuid.v5('orders', uuid.v5.DNS));
+uuid.validate(pm.environment.get('requestId'));   // true
+```
+
+`v1`, `v3`, `v4`, `v5`, `NIL`, `parse`, `stringify`, `validate` and `version`
+are all there, with npm's signatures (`v3.DNS` / `v3.URL` and `v5.DNS` /
+`v5.URL` included, and the optional output buffer). There is **no `uuid`
+global** in Vayu: a script reads it with `require` only. Postman's
+`uuid()` and `uuid.v4()` draw from `Math.random`; Vayu's draw from libsodium's
+CSPRNG, so a script that works in Postman works here and the values are
+unpredictable rather than merely unlikely to collide. The bytes reach the
+library through a `crypto.getRandomValues` that exists only inside the
+library's own scope, so no script sees a `crypto` global.
+
+**Cost.** Like `crypto-js`, it is evaluated on first `require` in an execution
+and not when a context is built. First use costs about 4.5 ms in a `-O2` build
+and 18.8 ms in a Debug build, almost all of it parsing the library's single
+8 KB line ([#2657](https://github.com/athrvk/vayu/issues/2657) tracks that
+cost); a script that never requires it pays nothing, and nothing is shared
+between executions.
+
+The Postman import's script scan reads `require('uuid')` as the library it is,
+so a collection that uses it is not named in `meta.unsupportedScriptApis`.
+
+The libraries Postman also lets a script `require` - `lodash`, `moment`, `ajv`,
+`tv4`, `xml2js`, `cheerio`, `csv-parse`, `chai` and Node's built-ins - are
+**not** on the shelf: `require` of one throws, and a Postman import names the
+script that does. [The compatibility page](../app/pm-api-compatibility.md#the-require-shelf)
 has the same list from the Postman side.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
@@ -3097,7 +3136,7 @@ The **language** is current; what is missing is the **host environment**:
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: `require()` answers only the
-  [shelf](#the-require-shelf-crypto-js) (`crypto-js`); `fs`, `http`, `crypto`
+  [shelf](#the-require-shelf) (`crypto-js`, `uuid`); `fs`, `http`, `crypto`
   and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at

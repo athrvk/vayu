@@ -1576,7 +1576,8 @@ record shape, the category list, the redaction rule and the file layout
 - **sqlite3**: Embedded database
 - **sqlite-orm**: C++ ORM for SQLite
 - **QuickJS**: JavaScript engine (vendored)
-- **libsodium**: SHA-256, HMAC-SHA256, base64 and hex (ISC)
+- **libsodium**: SHA-256, HMAC-SHA256, base64 and hex, and the CSPRNG behind
+  `require('uuid')` (ISC)
 - **OpenSSL** (libcrypto): MD5, SHA-1, the SHA-2 family and their HMACs for the
   `crypto-js` shim, through `utils/digest.hpp`; already in the binary as libcurl's
   TLS backend

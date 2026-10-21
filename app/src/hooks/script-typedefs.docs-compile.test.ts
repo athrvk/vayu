@@ -306,6 +306,31 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	});
 
 	/*
+	 * uuid has no global (#2650), so its module is the whole declaration:
+	 * callable like Postman's, with npm's members, and a member npm lacks is an
+	 * error at the access.
+	 */
+	it("declares uuid as a callable module with npm's members", () => {
+		expect(
+			errorsOf(
+				[
+					"const uuid = require('uuid');",
+					"/** @type {string} */ const a = uuid();",
+					"/** @type {string} */ const b = uuid.v4();",
+					"/** @type {string} */ const c = uuid.v5('name', uuid.v5.DNS);",
+					"/** @type {boolean} */ const ok = uuid.validate(a) && uuid.version(b) === 4;",
+					"pm.environment.set('id', a + b + c + uuid.NIL + uuid.stringify(uuid.parse(a)));",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	it("reports a uuid member npm does not have, and a result of the wrong type", () => {
+		expect(errorsOf("require('uuid').nope;")).toContain("TS2339");
+		expect(errorsOf("/** @type {number} */ const n = require('uuid')();")).toContain("TS2322");
+	});
+
+	/*
 	 * Postman's pre-pm.* globals run (#2577), each declared as the value it is,
 	 * so the lines a legacy test script opens with draw nothing - and a member
 	 * the value's type does not have is still an error.

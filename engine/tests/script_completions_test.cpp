@@ -696,6 +696,27 @@ TEST (ScriptCompletions, EveryOfferedCryptoJsMemberIsBoundInTheRuntime) {
     << "the crypto-js surface changed - update this test and the docs";
 }
 
+// The `require` snippet offers a Monaco choice of exactly the shelf's names, so
+// a module added to SHELF_MODULE_NAMES is offered in the same edit (#2650).
+TEST (ScriptCompletions, TheRequireSnippetOffersEveryShelfModule) {
+    std::string choices;
+    for (const std::string_view name : vayu::runtime::SHELF_MODULE_NAMES) {
+        choices += choices.empty () ? "" : ",";
+        choices += name;
+    }
+    ASSERT_FALSE (choices.empty ());
+
+    bool found = false;
+    for (const auto& item : get_script_completions ()) {
+        if (item.value ("label", std::string{}) == "require") {
+            found = true;
+            EXPECT_EQ (item.value ("insertText", std::string{}),
+            "require('${1|" + choices + "|}')");
+        }
+    }
+    EXPECT_TRUE (found);
+}
+
 // `vayu::runtime::CRYPTO_JS_MEMBERS` is what the Postman import's script scan
 // calls supported, so it must say what the runtime defines and what the editor
 // offers: a member in the list the shim lacks is a script that throws with no

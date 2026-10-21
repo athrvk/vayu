@@ -12,8 +12,12 @@
  *
  * `require(name)` answers a library from `SHELF` and refuses every other name;
  * there is no loader behind it, so nothing reads a file or the network. A
- * library global (`CryptoJS`) is an accessor that loads its library on first
- * read and then replaces itself with the value, as `responseCookies` does.
+ * library is Vayu's own source (the crypto-js shim) or a vendored npm build
+ * compiled in by `vayu_embed_js` (`engine/cmake/embed_js.cmake`) with glue
+ * around it (`uuid`, #2650). A library global (`CryptoJS`) is an accessor that
+ * loads its library on first read and then replaces itself with the value, as
+ * `responseCookies` does; a library with no global is reached only through
+ * `require`, as in Postman.
  *
  * A library's source is evaluated on first use in an execution, never when a
  * context is built: every script gets a freshly built context
@@ -29,14 +33,20 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <sodium.h>
+
 #include "crypto_js_shim.hpp"
+#include "uuid_glue.hpp"
+#include "vayu/embedded/uuid_js.hpp"
 #include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/digest.hpp"
+#include "vayu/utils/sodium_init.hpp"
 
 namespace vayu::runtime::pm_detail {
 namespace {
@@ -95,20 +105,67 @@ JSValue crypto_js_natives (JSContext* ctx) {
 }
 
 // ============================================================================
+// uuid's natives: the bytes its crypto.getRandomValues fills
+// ============================================================================
+
+/// The most one call hands out, Web Crypto's getRandomValues quota. uuid asks
+/// for 16.
+constexpr std::uint64_t MAX_RANDOM_BYTES = 65536;
+
+/// `native.randomBytes(length)`: @p length bytes from libsodium's CSPRNG.
+JSValue js_native_random_bytes (JSContext* ctx,
+JSValueConst /*this_val*/,
+int /*argc*/,
+JSValueConst* argv) {
+    std::uint64_t length = 0;
+    if (JS_ToIndex (ctx, &length, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    if (length > MAX_RANDOM_BYTES) {
+        return JS_ThrowRangeError (ctx, "randomBytes takes at most %llu bytes, not %llu",
+        static_cast<unsigned long long> (MAX_RANDOM_BYTES),
+        static_cast<unsigned long long> (length));
+    }
+    try {
+        vayu::utils::ensure_sodium_initialized ();
+    } catch (const std::exception& error) {
+        return JS_ThrowInternalError (ctx, "%s", error.what ());
+    }
+    // One byte over, so the buffer is never empty: libsodium's parameter is
+    // nonnull and an empty vector's data () may be null.
+    std::vector<std::uint8_t> bytes (length + 1);
+    randombytes_buf (bytes.data (), length);
+    return JS_NewUint8ArrayCopy (ctx, bytes.data (), length);
+}
+
+JSValue uuid_natives (JSContext* ctx) {
+    JSValue natives = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, natives, "randomBytes",
+    JS_NewCFunction (ctx, js_native_random_bytes, "randomBytes", 1));
+    return natives;
+}
+
+// ============================================================================
 // The shelf
 // ============================================================================
 
 struct ShelfLibrary {
     /// What `require` takes.
     std::string_view name;
-    /// Evaluates to a factory that is called with `natives (ctx)` and returns
-    /// the module.
-    std::string_view source;
+    /// `open + library + close` evaluates to a factory that is called with
+    /// `natives (ctx)` and returns the module. A vendored library is the middle
+    /// piece and its glue the two around it; Vayu's own source is a whole
+    /// factory and needs neither.
+    std::string_view open;
+    std::string_view library;
+    std::string_view close;
     JSValue (*natives) (JSContext* ctx);
 };
 
+// crypto-js stays first: SHELF_GLOBALS names it by index.
 constexpr auto SHELF = std::to_array<ShelfLibrary> ({
-{ CRYPTO_JS_MODULE, CRYPTO_JS_SHIM, crypto_js_natives },
+{ CRYPTO_JS_MODULE, {}, CRYPTO_JS_SHIM, {}, crypto_js_natives },
+{ UUID_MODULE, UUID_GLUE_OPEN, vayu::runtime::embedded::UUID_JS, UUID_GLUE_CLOSE, uuid_natives },
 });
 
 // The import scan reads SHELF_MODULE_NAMES; a library here that is not there
@@ -147,9 +204,14 @@ std::string shelf_names () {
 
 /// Evaluates @p library's source and builds its module.
 JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
+    // A std::string carries the terminator JS_Eval reads past the length.
+    std::string source;
+    source.reserve (
+    library.open.size () + library.library.size () + library.close.size ());
+    source.append (library.open).append (library.library).append (library.close);
     const std::string file = "<" + std::string (library.name) + ">";
     ScopedValue factory (ctx,
-    JS_Eval (ctx, library.source.data (), library.source.size (), file.c_str (),
+    JS_Eval (ctx, source.data (), source.size (), file.c_str (),
     JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT));
     if (JS_IsException (factory.get ())) {
         return JS_EXCEPTION;
