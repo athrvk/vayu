@@ -2,7 +2,9 @@
  * @file tests/stats_route_test.cpp
  * @brief Tests for the time-series JSON core (run_time_series_response).
  *
- * This core backs GET /runs/:id/metrics. It must:
+ * This core backs GET /runs/:id/metrics, and run_monitor_series_response
+ * (GET /runs/:id/monitor, the last section) shares its envelope and its
+ * maxPoints folding. The metrics core must:
  *   - return a definitive 404 {"error": {"code", "message"}} for a missing run,
  *   - return 200 with an empty `data` array and a well-formed pagination
  *     envelope for a run that has no metrics yet,
@@ -20,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -33,14 +36,6 @@
 #include "vayu/http/routes.hpp"
 
 using nlohmann::json;
-
-namespace vayu::http::routes {
-// Defined in metrics.cpp; returns {http_status, json_body}.
-std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
-const std::string& run_id,
-int64_t limit,
-int64_t offset);
-} // namespace vayu::http::routes
 
 namespace {
 
@@ -82,6 +77,12 @@ class StatsRouteTest : public ::testing::Test {
         tick.timestamp = ts;
         tick.payload   = payload.dump ();
         db_->add_metric_tick (tick);
+    }
+
+    // Insert one monitor sample row.
+    void add_monitor_sample (const std::string& run_id, const nlohmann::json& payload) {
+        db_->add_monitor_sample (
+        { 0, run_id, payload["timestamp"].get<int64_t> (), payload.dump () });
     }
 
     // The tick the producer would persist for one second of a run.
@@ -575,6 +576,232 @@ TEST_F (StatsRouteTest, MonitorSeriesMissingRunIs404) {
     vayu::http::routes::run_monitor_series_response (*db_, "run_nope", 5000, 0);
     EXPECT_EQ (status, 404);
     EXPECT_EQ (body["error"]["message"], "Run not found");
+}
+
+// ----------------------------------------------------------------------------
+// Downsampling: maxPoints (#2611)
+// ----------------------------------------------------------------------------
+
+// Sample @p i of a scrape every second: a flat gauge, a monotone counter.
+nlohmann::json monitor_sample (int i) {
+    return vayu::core::build_monitor_sample_payload (
+    1000 + (static_cast<int64_t> (i) * 1000),
+    { { "cpu", 0.25 }, { "requests_total", static_cast<double> (i) } });
+}
+
+TEST (MonitorSampleBucket, TimestampIsTheLastSamplesAndEachSeriesIsItsMax) {
+    vayu::http::routes::MonitorSampleBucket bucket;
+    const std::vector<double> cpu = { 0.25, 0.9, 0.5 };
+    for (size_t i = 0; i < cpu.size (); ++i) {
+        auto sample             = monitor_sample (static_cast<int> (i));
+        sample["series"]["cpu"] = cpu[i];
+        bucket.add (std::move (sample));
+    }
+    const auto folded = bucket.take ();
+    EXPECT_EQ (folded["timestamp"].get<int64_t> (), 3000);
+    EXPECT_DOUBLE_EQ (folded["series"]["cpu"].get<double> (), 0.9);
+    // A monotone counter's max is its last value.
+    EXPECT_DOUBLE_EQ (folded["series"]["requests_total"].get<double> (), 2.0);
+    EXPECT_EQ (folded.size (), 2u);
+    EXPECT_TRUE (bucket.empty ());
+}
+
+// A series a scrape missed is a gap, not a zero: the fold keeps what the bucket
+// saw and invents nothing.
+TEST (MonitorSampleBucket, SeriesNoSampleCarriedAreNeverAdded) {
+    vayu::http::routes::MonitorSampleBucket bucket;
+    bucket.add ({ { "timestamp", 1000 },
+    { "series", { { "only_early", 3.0 }, { "both", 1.0 } } } });
+    bucket.add ({ { "timestamp", 2000 },
+    { "series", { { "both", 5.0 }, { "only_late", 7.0 } } } });
+    bucket.add ({ { "timestamp", 3000 }, { "series", json::object () } });
+
+    const auto folded = bucket.take ();
+    EXPECT_EQ (folded["timestamp"].get<int64_t> (), 3000);
+    EXPECT_EQ (folded["series"],
+    json ({ { "only_early", 3.0 }, { "both", 5.0 }, { "only_late", 7.0 } }));
+}
+
+TEST (MonitorSampleBucket, NonNumberValuesAreSkippedAndASampleWithoutSeriesStillCounts) {
+    vayu::http::routes::MonitorSampleBucket bucket;
+    bucket.add ({ { "timestamp", 1000 },
+    { "series", { { "cpu", "high" }, { "mem", nullptr }, { "disk", 2.0 } } } });
+    bucket.add ({ { "timestamp", 2000 } });
+
+    const auto folded = bucket.take ();
+    EXPECT_EQ (folded["timestamp"].get<int64_t> (), 2000);
+    EXPECT_EQ (folded["series"], json ({ { "disk", 2.0 } }));
+}
+
+// A bucket whose samples carried no series at all is not given an empty one.
+TEST (MonitorSampleBucket, ABucketWithNoSeriesGainsNoSeriesKey) {
+    vayu::http::routes::MonitorSampleBucket bucket;
+    bucket.add ({ { "timestamp", 1000 } });
+    bucket.add ({ { "timestamp", 2000 } });
+    EXPECT_EQ (bucket.take (), json ({ { "timestamp", 2000 } }));
+}
+
+TEST (MonitorSampleBucket, ABucketOfOneSampleIsThatSampleUnchanged) {
+    vayu::http::routes::MonitorSampleBucket bucket;
+    EXPECT_TRUE (bucket.empty ());
+    const json sample = { { "timestamp", 1000 },
+        { "series", { { "count", 7 }, { "label", "x" } } } };
+    bucket.add (sample);
+    EXPECT_FALSE (bucket.empty ());
+    EXPECT_EQ (bucket.take ().dump (), sample.dump ());
+}
+
+// The same 5005-row series as the tick test, for the same reason: bucket 454
+// straddles the 5000-row read chunk, and a spike on each side of the edge has
+// to land in it.
+TEST_F (StatsRouteTest, MonitorMaxPointsFoldsTheWholeSeriesAcrossReadChunks) {
+    const std::string id  = seed_run ();
+    constexpr int SAMPLES = 5005;
+    for (int i = 0; i < SAMPLES; ++i) {
+        auto sample = monitor_sample (i);
+        if (i == 4999) { // Last row of the first read chunk.
+            sample["series"]["mem"] = 0.8;
+        }
+        if (i == 5002) { // Same bucket, second read chunk.
+            sample["series"]["cpu"] = 0.99;
+        }
+        add_monitor_sample (id, sample);
+    }
+
+    // limit and offset are ignored once maxPoints is set.
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 2, 7, 455);
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (body["bucketed"].get<bool> ());
+    EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 11);
+    const auto& pag = body["pagination"];
+    EXPECT_EQ (pag["total"].get<int64_t> (), SAMPLES);
+    EXPECT_EQ (pag["limit"].get<int64_t> (), 455);
+    EXPECT_EQ (pag["offset"].get<int64_t> (), 0);
+    EXPECT_FALSE (pag["hasMore"].get<bool> ());
+    EXPECT_EQ (pag["returned"].get<int64_t> (), 455);
+
+    const auto& data = body["data"];
+    ASSERT_EQ (data.size (), 455u);
+    for (size_t b = 0; b < data.size (); ++b) {
+        const auto last = std::min<size_t> ((b * 11) + 10, SAMPLES - 1);
+        ASSERT_EQ (data[b]["timestamp"].get<int64_t> (),
+        1000 + (static_cast<int64_t> (last) * 1000))
+        << "bucket " << b;
+        ASSERT_DOUBLE_EQ (data[b]["series"]["requests_total"].get<double> (),
+        static_cast<double> (last))
+        << "bucket " << b;
+    }
+
+    // Rows 4994..5004 are bucket 454: both spikes land there and nowhere else.
+    EXPECT_DOUBLE_EQ (data[454]["series"]["cpu"].get<double> (), 0.99);
+    EXPECT_DOUBLE_EQ (data[453]["series"]["cpu"].get<double> (), 0.25);
+    EXPECT_DOUBLE_EQ (data[454]["series"]["mem"].get<double> (), 0.8);
+    EXPECT_FALSE (data[453]["series"].contains ("mem"));
+    EXPECT_FALSE (data[0]["series"].contains ("mem"));
+}
+
+TEST_F (StatsRouteTest, MonitorMaxPointsLeavesAShortLastBucketAndKeepsDamagedRowsInPlace) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 7; ++i) {
+        const auto sample = monitor_sample (i);
+        if (i == 1) {
+            db_->add_monitor_sample (
+            { 0, id, sample["timestamp"].get<int64_t> (), "{not json" });
+            continue;
+        }
+        add_monitor_sample (id, sample);
+    }
+
+    // ceil (7 / 3) = 3 samples a bucket: rows 0-2, 3-5 and 6 alone.
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0, 3);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 3);
+    EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 7);
+    ASSERT_EQ (body["data"].size (), 3u);
+    EXPECT_DOUBLE_EQ (body["data"][0]["series"]["requests_total"].get<double> (), 2.0);
+    EXPECT_DOUBLE_EQ (body["data"][1]["series"]["requests_total"].get<double> (), 5.0);
+    EXPECT_EQ (body["data"][2], monitor_sample (6));
+}
+
+TEST_F (StatsRouteTest, MonitorMaxPointsAtOrAboveTheSampleCountReturnsEverySampleUnchanged) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 5; ++i) {
+        add_monitor_sample (id, monitor_sample (i));
+    }
+    const auto [paged_status, paged] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (paged_status, 200);
+
+    for (const int64_t max_points : { 5, 50 }) {
+        auto [status, body] =
+        vayu::http::routes::run_monitor_series_response (*db_, id, 2, 3, max_points);
+        ASSERT_EQ (status, 200);
+        EXPECT_EQ (body["data"], paged["data"]) << "maxPoints " << max_points;
+        EXPECT_FALSE (body["bucketed"].get<bool> ());
+        EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 1);
+        EXPECT_EQ (body["pagination"],
+        json ({ { "total", 5 }, { "limit", max_points }, { "offset", 0 },
+        { "hasMore", false }, { "returned", 5 } }));
+    }
+}
+
+// The core clamps what it is handed to [1, RUN_TIME_SERIES_PAGE_MAX], the way
+// the tick core does; the route's parse_max_points already refuses a
+// non-positive value before it gets here.
+TEST_F (StatsRouteTest, MonitorMaxPointsIsClampedToTheRoutesRange) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 3; ++i) {
+        add_monitor_sample (id, monitor_sample (i));
+    }
+
+    auto [huge_status, huge] = vayu::http::routes::run_monitor_series_response (
+    *db_, id, 5000, 0, std::numeric_limits<int64_t>::max () / 2);
+    ASSERT_EQ (huge_status, 200);
+    EXPECT_EQ (huge["pagination"]["limit"].get<int64_t> (),
+    vayu::http::routes::RUN_TIME_SERIES_PAGE_MAX);
+    EXPECT_EQ (huge["data"].size (), 3u);
+
+    auto [floor_status, floor] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0, 0);
+    ASSERT_EQ (floor_status, 200);
+    EXPECT_EQ (floor["pagination"]["limit"].get<int64_t> (), 1);
+    ASSERT_EQ (floor["data"].size (), 1u);
+    EXPECT_EQ (floor["ticksPerBucket"].get<int64_t> (), 3);
+}
+
+// Without the parameter the answer is the paged envelope and nothing more.
+TEST_F (StatsRouteTest, MonitorWithoutMaxPointsTheEnvelopeGainsNoKeys) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 3; ++i) {
+        add_monitor_sample (id, monitor_sample (i));
+    }
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 2, 0, std::nullopt);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body.size (), 2u) << body.dump ();
+    EXPECT_FALSE (body.contains ("bucketed"));
+    EXPECT_FALSE (body.contains ("ticksPerBucket"));
+    EXPECT_EQ (body["pagination"],
+    json ({ { "total", 3 }, { "limit", 2 }, { "offset", 0 },
+    { "hasMore", true }, { "returned", 2 } }));
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_EQ (body["data"][1], monitor_sample (1));
+}
+
+TEST_F (StatsRouteTest, MonitorMaxPointsOnAMissingRunIs404AndOnARunWithoutSamplesIsEmpty) {
+    auto [missing_status, missing] =
+    vayu::http::routes::run_monitor_series_response (*db_, "run_nope", 5000, 0, 10);
+    EXPECT_EQ (missing_status, 404);
+    EXPECT_EQ (missing["error"]["message"], "Run not found");
+
+    const std::string id = seed_run ();
+    auto [status, body] =
+    vayu::http::routes::run_monitor_series_response (*db_, id, 5000, 0, 10);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["data"].size (), 0u);
+    EXPECT_FALSE (body["bucketed"].get<bool> ());
 }
 
 } // namespace

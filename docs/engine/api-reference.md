@@ -8996,9 +8996,11 @@ the max is then taken over those windows. A key no tick in the bucket carried
 (`http_errors` on an older row, `custom_metrics` on a run that recorded none)
 is never added.
 
-Only `GET /runs/:runId/metrics` downsamples. The run-report export
-([`POST /export/run-report`](#post-exportrun-report)), the MCP
-`get_run_timeseries` tool and `GET /runs/:runId/monitor` read the raw ticks.
+Only `GET /runs/:runId/metrics` and `GET /runs/:runId/monitor`
+([the same parameter, folded differently](#downsampling-the-monitor-series))
+downsample. The run-report export
+([`POST /export/run-report`](#post-exportrun-report)) and the MCP
+`get_run_timeseries` and `get_run_monitor` tools read the raw rows.
 
 ### GET /runs/:runId/monitor
 
@@ -9006,6 +9008,14 @@ Paginated **server vitals** scraped during the run - the samples the
 [`monitor` block](#the-monitor-block-server-vitals) collected. Same
 `{data, pagination}` envelope and the same `limit` / `offset` rules as
 `GET /runs/:runId/metrics`, so one pagination reader covers both.
+
+**Query parameters:**
+- `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
+- `offset` - skip N records (default 0, negative floored to 0).
+- `maxPoints` - return the **whole series as at most this many samples**
+  (capped at 50000; anything but a positive integer is treated as absent).
+  `limit` and `offset` are then ignored. See
+  [Downsampling the monitor series](#downsampling-the-monitor-series).
 
 Its own endpoint rather than extra keys on the tick objects: that key set is the
 `/metrics` contract, and these samples land on the user's scrape cadence rather
@@ -9042,6 +9052,39 @@ measures how long the run actually took.
 A run that configured no monitor returns `200` with an empty `data` array; only
 a run that does not exist is a `404`. Samples are deleted with the run, like
 every other child row.
+
+#### Downsampling the monitor series
+
+`maxPoints` here is the same contract as
+[on `/metrics`](#downsampling-with-maxpoints) (issue #2611), read from the
+same `monitor_samples` rows in stored order (by `timestamp`, then insertion):
+
+- Without it the answer is exactly the paged series above; no key is added.
+- With a series of at most `maxPoints` samples, every sample comes back
+  unchanged and `bucketed` is `false`.
+- Otherwise each run of `ticksPerBucket = ceil(total / maxPoints)` consecutive
+  samples is folded into one (the key keeps the tick series' name, though a
+  bucket here holds samples); the last bucket may be shorter, and a one-sample
+  bucket is that sample unchanged.
+
+The envelope is the one the tick series answers with: `pagination.total` is the
+stored sample count, `limit` echoes `maxPoints`, `offset` is `0`, `hasMore` is
+`false`, `returned` is the number of `data` entries, plus `bucketed` and
+`ticksPerBucket` on this path only.
+
+A folded sample is `{timestamp, series}` like any other:
+
+| Field | Folded value |
+|-------|--------------|
+| `timestamp` | The last sample's |
+| each `series.<name>` | The **max** over the bucket's samples that carried it |
+
+The max keeps a one-scrape spike in a gauge (cpu, memory, a queue depth) that a
+mean would flatten, and for a monotone counter it equals the last reading. A
+name no sample in the bucket carried is never added to the folded `series`, so
+a gap in the target's reporting stays a gap; a non-number value is skipped.
+The MCP `get_run_monitor` tool does not pass `maxPoints` and reads the raw
+samples.
 
 ### GET /runs/:runId/live
 
