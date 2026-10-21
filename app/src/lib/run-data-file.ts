@@ -37,6 +37,9 @@ export interface RunDataFile {
 /** The suffix a surface appends when the collection's file no longer matches the run's. */
 export const DATA_FILE_CHANGED_NOTE = "(file changed since this run)";
 
+/** The suffix when the file is the same bytes but the collection now reads its numbers the other way (#2636). */
+export const DATA_FILE_READING_CHANGED_NOTE = "(number reading changed since this run)";
+
 /** The suffix for a collection whose remembered file is no longer at its path (#2057). */
 export const DATA_FILE_MISSING_NOTE = "(file no longer at that path)";
 
@@ -94,6 +97,7 @@ export function runDataFileName(fileName: string): string | undefined {
  * the one the run read. Both hashes must be known: a run recorded before hashes
  * existed, or a location remembered before one was read, cannot be compared,
  * and saying "changed" of a file nobody can tell is worse than saying nothing.
+ * This compares bytes only; the reading is {@link classifyDataFile}'s business.
  */
 export function dataFileChanged(
 	runHash: string | undefined,
@@ -102,8 +106,12 @@ export function dataFileChanged(
 	return runHash !== undefined && rememberedHash !== undefined && runHash !== rememberedHash;
 }
 
-/** How the collection's remembered file stands against the file a run read. */
-export type DataFileStatus = "changed" | "unchanged" | "missing" | "unknown";
+/**
+ * How the collection's remembered file stands against the file a run read.
+ * `readingChanged` is the same bytes read the other way: the hash cannot tell a
+ * file read as text from one read with numbers cast (#2636).
+ */
+export type DataFileStatus = "changed" | "readingChanged" | "unchanged" | "missing" | "unknown";
 
 /**
  * Classify the remembered file against a run (#2057). `current` is the latest
@@ -113,21 +121,30 @@ export type DataFileStatus = "changed" | "unchanged" | "missing" | "unknown";
  *
  * A missing file is missing whatever the run recorded - one recorded before
  * hashes still names a file that has moved. Every other verdict needs both
- * hashes, per {@link dataFileChanged}.
+ * hashes, per {@link dataFileChanged}. Different bytes are `changed` whatever
+ * the reading; the reading only speaks for bytes that match. Each cast flag is
+ * absent when off: a run recorded before the flag, and a binding that never
+ * set it, both read numbers as text.
  */
 export function classifyDataFile(
 	runHash: string | undefined,
-	current: DataFileHashReply | undefined
+	current: DataFileHashReply | undefined,
+	runCastNumbers?: boolean,
+	bindingCastNumbers?: boolean
 ): DataFileStatus {
 	if (current === undefined) return "unknown";
 	if (current.status === "missing") return "missing";
 	if (runHash === undefined) return "unknown";
-	return dataFileChanged(runHash, current.hash) ? "changed" : "unchanged";
+	if (dataFileChanged(runHash, current.hash)) return "changed";
+	return (runCastNumbers ?? false) === (bindingCastNumbers ?? false)
+		? "unchanged"
+		: "readingChanged";
 }
 
 /** The suffix a header appends for a status, or "" when there is nothing to say. */
 export function dataFileNote(status: DataFileStatus): string {
 	if (status === "changed") return ` ${DATA_FILE_CHANGED_NOTE}`;
+	if (status === "readingChanged") return ` ${DATA_FILE_READING_CHANGED_NOTE}`;
 	if (status === "missing") return ` ${DATA_FILE_MISSING_NOTE}`;
 	return "";
 }

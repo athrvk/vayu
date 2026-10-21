@@ -28,6 +28,7 @@ import {
 	DATA_FILE_CAST_NOTE,
 	DATA_FILE_CHANGED_NOTE,
 	DATA_FILE_MISSING_NOTE,
+	DATA_FILE_READING_CHANGED_NOTE,
 	dataFileFromSnapshot,
 	dataFileFromSummary,
 	runDataFileName,
@@ -149,9 +150,46 @@ describe("classifyDataFile", () => {
 	});
 });
 
+describe("classifyDataFile (the reading, #2636)", () => {
+	const same = { status: "found", hash: A } as const;
+
+	it.each([
+		["the run read text and the binding now casts", false, true],
+		["the run cast and the binding now reads text", true, false],
+		["the run recorded no flag and the binding now casts", undefined, true],
+		["the run cast and the binding has no flag", true, undefined],
+	])("is readingChanged for the same bytes when %s", (_label, run, binding) => {
+		expect(classifyDataFile(A, same, run, binding)).toBe("readingChanged");
+	});
+
+	it.each([
+		["both cast", true, true],
+		["both read text", false, false],
+		["an old run with no flag against a binding with none", undefined, undefined],
+		["an old run with no flag against a binding that reads text", undefined, false],
+	])("is unchanged for the same bytes when %s", (_label, run, binding) => {
+		expect(classifyDataFile(A, same, run, binding)).toBe("unchanged");
+	});
+
+	it("lets different bytes win over a different reading", () => {
+		expect(classifyDataFile(A, { status: "found", hash: B }, false, true)).toBe("changed");
+	});
+
+	it("lets a missing file win over a different reading", () => {
+		expect(classifyDataFile(A, { status: "missing" }, false, true)).toBe("missing");
+	});
+
+	it("stays unknown when there is nothing to compare the reading against", () => {
+		expect(classifyDataFile(undefined, same, false, true)).toBe("unknown");
+		expect(classifyDataFile(A, undefined, false, true)).toBe("unknown");
+	});
+});
+
 describe("dataFileNote", () => {
-	it("says something only for a changed or a missing file", () => {
+	it("says something only for a changed, a re-read or a missing file", () => {
 		expect(dataFileNote("changed")).toBe(` ${DATA_FILE_CHANGED_NOTE}`);
+		expect(dataFileNote("readingChanged")).toBe(" (number reading changed since this run)");
+		expect(dataFileNote("readingChanged")).toBe(` ${DATA_FILE_READING_CHANGED_NOTE}`);
 		expect(dataFileNote("missing")).toBe(` ${DATA_FILE_MISSING_NOTE}`);
 		expect(dataFileNote("unchanged")).toBe("");
 		expect(dataFileNote("unknown")).toBe("");
