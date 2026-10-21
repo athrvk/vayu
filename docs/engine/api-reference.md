@@ -2020,7 +2020,8 @@ response. It defaults to `"import"`, which is honest for every row written
 before the column existed, and an unrecognised value is a `400` rather than a
 silent fall back - the OpenAPI spec sync (#627) may replace `"import"` rows
 wholesale and must never touch a `"user"` one, so an absorbed typo would cost a
-user their saved example.
+user their saved example. An OpenAPI export carries it on every example in
+`x-vayu-request.examples` so a re-import keeps it (#2430).
 
 **`bodyTruncated` says the body stops short** (issue #659). A mock server serves
 a stored example verbatim, with nothing in the response to say anything is
@@ -2953,8 +2954,12 @@ and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
-`verifySSL`, `stream`), every saved example with its headers, and the mock mode
-with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
+`verifySSL`, `stream`), every saved example with its headers and its `origin`
+(`"user"` or `"import"`, #2430: the importer hands it to
+[`POST /import/apply`](#post-importapply), so a re-import keeps the rows the next
+[spec sync](#post-specssync) must not touch; an `origin` that is neither is an
+unreadable example, and a document with none, as an older Vayu wrote, imports
+as `"import"`), and the mock mode with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
 folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
 folders included; `order` shares its parent's space with the requests'
@@ -3780,9 +3785,12 @@ accepted a client-supplied `id` - which they no longer do (see
   engine-generated ids, and so **do not appear in `idMap`**. Each entry takes the
   fields `POST /requests/:id/examples` accepts, through the same field applier,
   and an entry that fails validation is a per-item `400` naming the *request's*
-  `tempId`. `origin` is among those fields and an importer leaves it at its
-  `"import"` default, which is what these rows are. An entry with no `order` takes its payload position, so the stored
-  order is the order the source file listed the responses in.
+  `tempId`. `origin` is among those fields: a spec or Postman import leaves it at its
+  `"import"` default, which is what those rows are, and a Vayu OpenAPI export
+  re-imported passes through the `origin` it wrote into `x-vayu-request.examples`
+  (#2430), so a user-saved example stays `"user"`. An entry with no `order` takes
+  its payload position, so the stored order is the order the source file listed
+  the responses in.
 - A **`specs`** item carries `content` (required, non-empty) and an optional
   `sourceUrl`; its `hash` and `fetchedAt` are engine-computed and a per-item
   `400` if sent, and the size cap is the same live `maxSpecDocumentBytes` that
