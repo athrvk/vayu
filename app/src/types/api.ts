@@ -812,6 +812,11 @@ export interface StartLoadTestRequest {
 	 */
 	dataFileHash?: string;
 	/**
+	 * Whether the file's numbers were read as numbers (issue #2540). The rows
+	 * are already typed; the engine only records it. Only beside `data`.
+	 */
+	dataFileCastNumbers?: boolean;
+	/**
 	 * Who started the run (issue #1817). Stamped `{kind: "app"}` by `apiService`
 	 * on every execute and run start, so a caller never sets it; declared here
 	 * because the payload is the wire's shape.
@@ -918,6 +923,11 @@ export interface StartScenarioRunRequest {
 		dataFileName?: string;
 		/** SHA-256 of that file's bytes, 64 lowercase hex. Only beside `data`. */
 		dataFileHash?: string;
+		/**
+		 * Whether the file's numbers were read as numbers (issue #2540). The
+		 * rows are already typed; the engine only records it. Only beside `data`.
+		 */
+		dataFileCastNumbers?: boolean;
 	};
 	/** What `{{variables}}` resolve against, and whose cookie jar the run uses. */
 	environmentId?: string;

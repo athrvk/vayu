@@ -892,9 +892,11 @@ export default function RequestBuilder() {
 					// so "no data set" has to be the absent key rather than `[]`.
 					data: config.data,
 					// Which file those rows came from (issue #2051): its name and
-					// content hash, never its path. Undefined exactly when `data` is.
+					// content hash, never its path, and how it was read (issue
+					// #2540). Undefined exactly when `data` is.
 					dataFileName: config.dataFileName,
 					dataFileHash: config.dataFileHash,
+					dataFileCastNumbers: config.dataFileCastNumbers,
 					// The engine defaults this run refuses (issue #1229). A load
 					// run has to send the header set Send sends, or it measures a
 					// different request from the one the user tried.
@@ -919,6 +921,7 @@ export default function RequestBuilder() {
 						dataRowCount: config.data?.length,
 						dataFileName: config.dataFileName,
 						dataFileHash: config.dataFileHash,
+						dataFileCastNumbers: config.dataFileCastNumbers,
 					},
 					{
 						method: apiRequest.method,

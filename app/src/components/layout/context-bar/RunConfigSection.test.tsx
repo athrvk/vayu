@@ -124,6 +124,20 @@ describe("RunConfigSection", () => {
 		expect(screen.queryByText("Data file")).not.toBeInTheDocument();
 	});
 
+	// Mutation check: print `scenario.dataFileName` bare again and this fails.
+	it("says when the run read the file's numbers as numbers (#2540)", () => {
+		run = makeRun("scenario", {
+			scenario: {
+				collectionId: "col_1",
+				steps: [],
+				dataFileName: "plans.csv",
+				dataFileCastNumbers: true,
+			},
+		});
+		render(<RunConfigSection tab={TAB} />);
+		expect(screen.getByText("plans.csv (numbers read as numbers)")).toBeInTheDocument();
+	});
+
 	it("describes a collection run from its scenario block, not as unrecorded", () => {
 		run = makeRun("scenario", {
 			scenario: {

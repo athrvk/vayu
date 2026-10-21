@@ -29,7 +29,7 @@ import type { RunReport } from "@/types";
 
 function report(
 	dataRowCount: number | undefined,
-	file: { dataFileName?: string; dataFileHash?: string } = {},
+	file: { dataFileName?: string; dataFileHash?: string; dataFileCastNumbers?: boolean } = {},
 	config: { targetRps?: number; concurrency?: number } = {}
 ): RunReport {
 	return {
@@ -77,7 +77,7 @@ function report(
 
 function mount(
 	dataRowCount: number | undefined,
-	file: { dataFileName?: string; dataFileHash?: string } = {},
+	file: { dataFileName?: string; dataFileHash?: string; dataFileCastNumbers?: boolean } = {},
 	config: { targetRps?: number; concurrency?: number } = {}
 ) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -106,6 +106,15 @@ describe("LoadTestDetail data row count", () => {
 
 		expect(screen.getByText("2 rows · users.csv")).toBeInTheDocument();
 		expect(screen.queryByText(/a{64}/)).toBeNull();
+	});
+
+	// Mutation check: print `config.dataFileName` bare again and this fails (#2540).
+	it("says when the file's numbers were read as numbers", () => {
+		mount(2, { dataFileName: "plans.csv", dataFileCastNumbers: true });
+
+		expect(
+			screen.getByText("2 rows · plans.csv (numbers read as numbers)")
+		).toBeInTheDocument();
 	});
 
 	it("keeps the bare count for a run recorded without a file name", () => {

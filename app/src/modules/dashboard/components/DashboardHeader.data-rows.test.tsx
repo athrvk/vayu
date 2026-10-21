@@ -66,6 +66,15 @@ describe("DashboardHeader data row count", () => {
 		expect(screen.getByText(/ · 2 rows from users\.csv$/)).toBeInTheDocument();
 	});
 
+	// Mutation check: print `fileName` bare again and this fails (#2540).
+	it("says when the file's numbers were read as numbers", () => {
+		mount({ ...MODE, dataRowCount: 2, dataFileName: "plans.csv", dataFileCastNumbers: true });
+
+		expect(
+			screen.getByText(/ · 2 rows from plans\.csv \(numbers read as numbers\)$/)
+		).toBeInTheDocument();
+	});
+
 	it("keeps the bare count for a run that recorded no file name", () => {
 		mount({ ...MODE, dataRowCount: 2, dataFileHash: "a".repeat(64) });
 

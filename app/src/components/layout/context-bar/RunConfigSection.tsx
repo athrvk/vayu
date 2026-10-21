@@ -33,6 +33,7 @@ import {
 	formatConcurrency,
 } from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
+import { dataFileDisplayName } from "@/lib/run-data-file";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { scenarioFromSnapshot } from "./run-scenario";
 import type { ContextBarSectionProps } from "./types";
@@ -86,12 +87,13 @@ export function RunConfigSection({ tab }: ContextBarSectionProps) {
 				</Row>
 			);
 		}
-		// The file's display name (#2051), never its path; absent for a run that
-		// bound none and for one recorded before the field.
+		// The file's display name (#2051), never its path, and how it was read
+		// (#2540); absent for a run that bound none and for one recorded before
+		// the field.
 		if (scenario.dataFileName) {
 			rows.push(
 				<Row key="data-file" label="Data file">
-					{scenario.dataFileName}
+					{dataFileDisplayName(scenario.dataFileName, scenario.dataFileCastNumbers)}
 				</Row>
 			);
 		}

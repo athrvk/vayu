@@ -6,15 +6,16 @@
  */
 
 /**
- * Which file drove a run, read out of the shapes that name it (#2051), and
- * when that file counts as changed.
+ * Which file drove a run, read out of the shapes that name it (#2051), how it
+ * was read (#2540), and when that file counts as changed.
  *
  * Mutation check: make `dataFileChanged` return `runHash !== rememberedHash`
  * and the "cannot be compared" cases fail; drop the `scenario` read from either
  * extractor and the collection-run cases fail. For `classifyDataFile` (#2057),
  * require the run's hash before answering `missing` and the "recorded before
  * hashes" case fails; answer `unknown` for a missing reply and the missing
- * cases fail.
+ * cases fail. Drop `castNumbers` from `dataFileFromBlock`, or read any truthy
+ * value as cast, and the reading cases fail.
  */
 
 import { describe, it, expect } from "vitest";
@@ -22,7 +23,9 @@ import type { RunConfigSnapshot } from "@/types";
 import {
 	classifyDataFile,
 	dataFileChanged,
+	dataFileDisplayName,
 	dataFileNote,
+	DATA_FILE_CAST_NOTE,
 	DATA_FILE_CHANGED_NOTE,
 	DATA_FILE_MISSING_NOTE,
 	dataFileFromSnapshot,
@@ -39,19 +42,40 @@ describe("dataFileFromSnapshot", () => {
 			dataFileFromSnapshot({
 				scenario: { collectionId: "c", dataFileName: "users.csv", dataFileHash: A },
 			})
-		).toEqual({ fileName: "users.csv", hash: A });
+		).toEqual({ fileName: "users.csv", hash: A, castNumbers: false });
 	});
 
 	it("reads a load run's pair from the top level", () => {
 		expect(dataFileFromSnapshot({ dataFileName: "users.csv", dataFileHash: A })).toEqual({
 			fileName: "users.csv",
 			hash: A,
+			castNumbers: false,
 		});
+	});
+
+	it("reads how the run read the file, from either shape (#2540)", () => {
+		expect(
+			dataFileFromSnapshot({
+				scenario: { dataFileName: "plans.csv", dataFileHash: A, dataFileCastNumbers: true },
+			})
+		).toEqual({ fileName: "plans.csv", hash: A, castNumbers: true });
+		expect(
+			dataFileFromSnapshot({ dataFileName: "plans.csv", dataFileCastNumbers: true })
+		).toEqual({ fileName: "plans.csv", castNumbers: true });
+	});
+
+	it.each([
+		["absent, as every run recorded before the flag", {}],
+		["false", { dataFileCastNumbers: false }],
+		["a wrong-typed value", { dataFileCastNumbers: "true" }],
+	])("reads the file as text when the flag is %s", (_label, extra) => {
+		const snapshot = { dataFileName: "plans.csv", ...extra } as RunConfigSnapshot;
+		expect(dataFileFromSnapshot(snapshot)?.castNumbers).toBe(false);
 	});
 
 	it("keeps a name with no hash, and omits the hash key rather than setting it undefined", () => {
 		const file = dataFileFromSnapshot({ dataFileName: "users.csv" });
-		expect(file).toEqual({ fileName: "users.csv" });
+		expect(file).toEqual({ fileName: "users.csv", castNumbers: false });
 		expect(file && "hash" in file).toBe(false);
 	});
 
@@ -70,12 +94,13 @@ describe("dataFileFromSnapshot", () => {
 
 describe("dataFileFromSummary", () => {
 	it("reads the list row's scenario block and its top level", () => {
-		expect(dataFileFromSummary({ scenario: { dataFileName: "a.csv" } })).toEqual({
-			fileName: "a.csv",
-		});
+		expect(
+			dataFileFromSummary({ scenario: { dataFileName: "a.csv", dataFileCastNumbers: true } })
+		).toEqual({ fileName: "a.csv", castNumbers: true });
 		expect(dataFileFromSummary({ dataFileName: "b.csv", dataFileHash: B })).toEqual({
 			fileName: "b.csv",
 			hash: B,
+			castNumbers: false,
 		});
 	});
 
@@ -130,6 +155,14 @@ describe("dataFileNote", () => {
 		expect(dataFileNote("missing")).toBe(` ${DATA_FILE_MISSING_NOTE}`);
 		expect(dataFileNote("unchanged")).toBe("");
 		expect(dataFileNote("unknown")).toBe("");
+	});
+});
+
+describe("dataFileDisplayName", () => {
+	it("names the reading only when numbers were cast", () => {
+		expect(dataFileDisplayName("plans.csv", true)).toBe(`plans.csv ${DATA_FILE_CAST_NOTE}`);
+		expect(dataFileDisplayName("plans.csv", false)).toBe("plans.csv");
+		expect(dataFileDisplayName("plans.csv", undefined)).toBe("plans.csv");
 	});
 });
 

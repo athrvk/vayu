@@ -28,9 +28,9 @@ describe("loadConfigFromSnapshot", () => {
 	});
 
 	// A run an agent started is watched live too, and its dashboard names the
-	// file the same way (#2051). Mutation check: drop the three data keys from
-	// `loadConfigFromSnapshot` and both cases fail.
-	it("copies the data file's row count, name and hash, from either shape", () => {
+	// file the same way (#2051), with how it was read (#2540). Mutation check:
+	// drop the data keys from `loadConfigFromSnapshot` and both cases fail.
+	it("copies the data file's row count, name, hash and reading, from either shape", () => {
 		const hash = "a".repeat(64);
 		expect(
 			loadConfigFromSnapshot({
@@ -44,12 +44,29 @@ describe("loadConfigFromSnapshot", () => {
 			dataRowCount: 3,
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: false,
 		});
 		expect(
 			loadConfigFromSnapshot({
-				scenario: { dataRowCount: 2, dataFileName: "orders.csv", dataFileHash: hash },
+				scenario: {
+					dataRowCount: 2,
+					dataFileName: "orders.csv",
+					dataFileHash: hash,
+					dataFileCastNumbers: true,
+				},
 			})
-		).toStrictEqual({ dataRowCount: 2, dataFileName: "orders.csv", dataFileHash: hash });
+		).toStrictEqual({
+			dataRowCount: 2,
+			dataFileName: "orders.csv",
+			dataFileHash: hash,
+			dataFileCastNumbers: true,
+		});
+	});
+
+	it("carries no reading for a run that named no file", () => {
+		expect(loadConfigFromSnapshot({ mode: "constant_concurrency" })).not.toHaveProperty(
+			"dataFileCastNumbers"
+		);
 	});
 
 	it("falls back to the engine's rps key for the target rate", () => {

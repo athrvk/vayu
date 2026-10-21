@@ -186,6 +186,8 @@ export interface ScenarioArg {
 	/** The rows' file by name and content hash (issue #2051); never a path. */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/** Whether the rows were read with numbers cast (issue #2540). */
+	dataFileCastNumbers?: boolean;
 }
 
 /** The scenario block an agent passed to `start_load_run`, if it passed one. */
@@ -228,6 +230,10 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 	],
 	["dataFileName", "a collection run names its rows' file as `scenario.dataFileName`"],
 	["dataFileHash", "a collection run states its rows' file hash as `scenario.dataFileHash`"],
+	[
+		"dataFileCastNumbers",
+		"a collection run states how its rows' file was read as `scenario.dataFileCastNumbers`",
+	],
 	[
 		"disabledDefaultHeaders",
 		"the engine reads a send's default-header refusals off one request's payload, and a scenario's steps are each composed from their own saved request",
@@ -450,6 +456,9 @@ export function scenarioBlock(
 		// without `data`, by name, rather than this layer dropping it.
 		...(scenario.dataFileName !== undefined ? { dataFileName: scenario.dataFileName } : {}),
 		...(scenario.dataFileHash !== undefined ? { dataFileHash: scenario.dataFileHash } : {}),
+		...(scenario.dataFileCastNumbers !== undefined
+			? { dataFileCastNumbers: scenario.dataFileCastNumbers }
+			: {}),
 	};
 }
 

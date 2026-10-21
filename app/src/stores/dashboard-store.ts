@@ -51,6 +51,8 @@ export interface LoadTestRunConfig {
 	/** The data file's name and content hash (issue #2051); absent without one. */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/** Whether its numbers were read as numbers (issue #2540); absent means read as text. */
+	dataFileCastNumbers?: boolean;
 }
 
 /**

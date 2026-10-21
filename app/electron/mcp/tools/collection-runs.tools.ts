@@ -34,6 +34,7 @@ import {
 	scenarioDataInput,
 	dataFileNameInput,
 	dataFileHashInput,
+	dataFileCastNumbersInput,
 	scenarioRecursiveInput,
 	thresholdsInput,
 } from "./input-schemas.js";
@@ -263,6 +264,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			data: scenarioDataInput,
 			dataFileName: dataFileNameInput,
 			dataFileHash: dataFileHashInput,
+			dataFileCastNumbers: dataFileCastNumbersInput,
 			// The Run Collection dialog's checkbox, which had no MCP writer at all
 			// (issue #766). Design-mode only, because only this runner demotes a
 			// step on a schema failure - see the refusal on `start_load_run`.
@@ -305,6 +307,10 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 			const data = Array.isArray(args.data) ? (args.data as unknown[]) : undefined;
 			const dataFileName = str(args, "dataFileName");
 			const dataFileHash = str(args, "dataFileHash");
+			const dataFileCastNumbers =
+				typeof args.dataFileCastNumbers === "boolean"
+					? args.dataFileCastNumbers
+					: undefined;
 
 			let environmentId: string | undefined;
 			let plannedSteps: number;
@@ -322,7 +328,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 
 			const payload: Record<string, unknown> = {
 				scenario: scenarioBlock(
-					{ collectionId, data, dataFileName, dataFileHash },
+					{ collectionId, data, dataFileName, dataFileHash, dataFileCastNumbers },
 					recursive,
 					iterations
 				),

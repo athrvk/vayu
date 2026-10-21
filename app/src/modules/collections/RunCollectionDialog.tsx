@@ -461,12 +461,14 @@ export default function RunCollectionDialog({
 						: {}),
 					// The parsed rows themselves - the same array the preview
 					// showed, never a re-parse - and which file they came from, by
-					// name and content hash, never path (#2051).
+					// name and content hash, never path (#2051), and how it was
+					// read (#2540).
 					...(dataFile
 						? {
 								data: dataFile.parsed.rows,
 								dataFileName: runDataFileName(dataFile.fileName),
 								dataFileHash: dataFile.hash,
+								dataFileCastNumbers: dataFile.parsed.castNumbers,
 							}
 						: {}),
 				},
@@ -515,6 +517,7 @@ export default function RunCollectionDialog({
 							dataRowCount: dataFile?.parsed.rows.length,
 							dataFileName: dataFile?.fileName,
 							dataFileHash: dataFile?.hash,
+							dataFileCastNumbers: dataFile?.parsed.castNumbers,
 						});
 						loadTestService.startMonitoring(runId);
 						openTab({ type: "dashboard", entityId: null });

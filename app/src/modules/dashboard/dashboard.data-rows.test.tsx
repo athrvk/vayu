@@ -77,7 +77,7 @@ describe("the dashboard's live configuration", () => {
 		expect(configuration()?.dataRowCount).toBeUndefined();
 	});
 
-	it("passes the launch config's file name and hash to the header", () => {
+	it("passes the launch config's file name, hash and reading to the header", () => {
 		const dataFileHash = "a".repeat(64);
 		useDashboardStore.setState({
 			loadTestConfig: {
@@ -86,12 +86,14 @@ describe("the dashboard's live configuration", () => {
 				dataRowCount: 2,
 				dataFileName: "users.csv",
 				dataFileHash,
+				dataFileCastNumbers: true,
 			},
 		});
 		render(<LoadTestDashboard />);
 
 		expect(configuration()?.dataFileName).toBe("users.csv");
 		expect(configuration()?.dataFileHash).toBe(dataFileHash);
+		expect(configuration()?.dataFileCastNumbers).toBe(true);
 	});
 
 	it("passes no file name for a run launched without a data file", () => {
