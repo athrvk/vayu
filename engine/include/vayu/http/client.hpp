@@ -20,6 +20,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/default_headers.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -170,6 +171,17 @@ struct ClientConfig {
      * what they typed.
      */
     long stall_timeout_ms = 0;
+
+    /**
+     * @brief The connect-time rule for a fetch a document asked for, or none
+     *        (issue #2364).
+     *
+     * Set only by `/import/fetch` for a `$ref` (`"reference": true`), which
+     * also sends that request with redirects off. Judged on the address each
+     * connection reached, beside the reserved-port check every transfer runs;
+     * with a proxy in force that address is the proxy's.
+     */
+    std::optional<LocalPeerRule> local_peer_rule;
 };
 
 /**

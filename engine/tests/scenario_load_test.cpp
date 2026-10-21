@@ -379,7 +379,7 @@ TEST (ScenarioLoadConfig, CapacityIsRefusedForAScenario) {
     const auto refusal = vayu::core::validate_scenario_load_config (config);
     ASSERT_HAS_VALUE (refusal)
     << "capacity with a scenario must be refused: the search judges one "
-       "windowed p99 and a sequence has one per step";
+       "p99 per level and a sequence has one per step";
     EXPECT_NE (refusal->find ("capacity"), std::string::npos)
     << "the refusal must name the mode it refused: " << *refusal;
 }

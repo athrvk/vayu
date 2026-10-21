@@ -51,12 +51,15 @@ function tick(elapsed: number, codes: Record<string, number>): LoadTestMetrics {
 	};
 }
 
-/** Cumulative status maps, 0.5 s apart; `perTick` is each class' count per bucket. */
+/**
+ * Cumulative status maps at the stored cadence, a second apart from elapsed 0;
+ * `perTick` is each class' count in that second, so it is also its rate.
+ */
 function history(perTick: Record<string, number>[]): LoadTestMetrics[] {
 	const total: Record<string, number> = {};
 	return perTick.map((codes, i) => {
 		for (const [code, n] of Object.entries(codes)) total[code] = (total[code] ?? 0) + n;
-		return tick((i + 1) * 0.5, { ...total });
+		return tick(i, { ...total });
 	});
 }
 
@@ -74,18 +77,18 @@ beforeEach(() => {
 });
 
 describe("StatusCodesOverTimeChart tooltip", () => {
-	it("reads one line for a clean run: the 2xx count, with the unit", () => {
+	it("reads one line for a clean run: the 2xx rate, with the unit", () => {
 		render(<StatusCodesOverTimeChart history={history([{ "200": 9000 }, { "200": 9000 }])} />);
-		expect(hoverRows(1)).toEqual(["1.0s", "responses / 0.5 s", "2xx9000"]);
+		expect(hoverRows(1)).toEqual(["1.0s", "responses", "2xx9,000/s"]);
 	});
 
-	it("prints each present class' own count, not the stack height", () => {
+	it("prints each present class' own rate, not the stack height", () => {
 		render(
 			<StatusCodesOverTimeChart
 				history={history([{ "200": 90 }, { "200": 80, "404": 5, "500": 3 }])}
 			/>
 		);
-		expect(hoverRows(1)).toEqual(["1.0s", "responses / 0.5 s", "2xx80", "4xx5", "5xx3"]);
+		expect(hoverRows(1)).toEqual(["1.0s", "responses", "2xx80/s", "4xx5/s", "5xx3/s"]);
 	});
 
 	it("follows the history as it streams, with no rebuild of the plot", async () => {
@@ -101,6 +104,6 @@ describe("StatusCodesOverTimeChart tooltip", () => {
 			);
 		});
 		expect(instances.all).toHaveLength(1);
-		expect(hoverRows(2)).toEqual(["1.5s", "responses / 0.5 s", "5xx7"]);
+		expect(hoverRows(2)).toEqual(["2.0s", "responses", "5xx7/s"]);
 	});
 });

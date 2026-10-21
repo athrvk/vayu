@@ -400,12 +400,14 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   samples than it served. The interval recorder's phaser orders the once-per-tick reader against
   writers; it is not mutual exclusion *between* writers, so it does not make the plain write safe.
 - **One reader merges the windows**: each window the metrics thread samples is added, before the
-  recorder recycles it, into two more histograms only that thread touches, so they take plain
+  recorder recycles it, into three more histograms only that thread touches, so they take plain
   calls. One is the open second, which `take_second_percentiles()` reads and resets at the 1 Hz
   gate for the stored row and the gate frame's `second*` keys (issue #2385): percentiles cannot
   be merged after the fact, so a row built from the last 100 ms window held a tenth of its
-  second. The other is the run so far, behind the live `cumulativeP*Ms`; reading the cumulative
-  histogram itself mid-run would be a plain read racing the workers' atomic writes.
+  second. Another is the run so far, behind the live `cumulativeP*Ms`; reading the cumulative
+  histogram itself mid-run would be a plain read racing the workers' atomic writes. The third is
+  the capacity level (issue #2388), restarted by `adopt_level_epoch()` when the capacity search
+  asks and read by `level_latency()` for the published tick; see the capacity feedback path below.
 - **Per-phase histogram bank**: five more HdrHistograms (DNS, connect, TLS, first-byte, download),
   fed by every successful completion and read once after the drain, behind the report's
   `timingBreakdown.phases`. Deliberately **not** gated on the trace-retention decision: the
@@ -1047,8 +1049,10 @@ concurrency by hand.
   "sloMs": 200, "stepDuration": "5s", "duration": "5m" }
 ```
 
-Each level is held for `stepDuration`, then judged on the mean of that window's
-windowed p99 and throughput. Healthy levels step up 25% (at least +1); a single
+Each level is held for `stepDuration`, then judged on its p99 - the percentile of
+every completion sampled after its settle ticks, from one histogram, never a mean
+of 100 ms window percentiles (#2388) - and its mean throughput over the same
+ticks. Healthy levels step up 25% (at least +1); a single
 breaching window **holds** the level and re-measures rather than ending the
 search. The stop reasons are `slo_exceeded` (two consecutive breaching windows),
 `plateau` (two step-ups bought under 5% more throughput), `cap_reached`,
@@ -1130,15 +1134,26 @@ silently halve both readers' sample counts, and neither the live chart nor the
 search would look wrong; the stored rows, which `take_second_percentiles()`
 merges from the same windows, would lose the same share. So the metrics thread publishes what it already
 computed - `RunContext::publish_live_tick()`, one writer - and the strategy
-copies it out through `latest_live_tick()`. The controller therefore steers by
-exactly the numbers the dashboard is drawing. A guard in
-`capacity_controller_test.cpp` pins the single production caller of both
-calls, because the wrong version still runs; it just measures less.
+copies it out through `latest_live_tick()`. A guard in
+`capacity_controller_test.cpp` pins the single production caller of those
+calls and of the level histogram's two, because the wrong version still runs;
+it just measures less.
 
-The tick carries a `latency_samples` count for the same reason: an idle window's
-percentiles are zeros, and averaging those in with real ones would read "nothing
-completed" as "answered instantly" and climb straight past the limit the search
-exists to find. The controller's policy itself lives in
+What the tick carries for the search is the **level**: every window the metrics
+thread has sampled since the search last asked for a fresh level histogram
+(#2388). The asking crosses threads, so it is an epoch rather than a call: on
+the level's last settle tick (`SETTLE_TICKS`) the search bumps
+`RunContext::request_level_reset()`, the metrics thread compares
+`requested_level_epoch()` with the one it holds before sampling each window and
+resets the histogram on a change, and every tick publishes the epoch it applied
+beside the level's p99 and sample count. The search reads only ticks carrying
+the epoch it asked for: one produced in between still holds the settle ticks.
+Requesting on the last settle tick rather than when the level opens is what
+keeps the transition out without the metrics thread knowing `SETTLE_TICKS`.
+A level whose histogram holds no sample is not judged and stays open: an empty
+histogram's percentiles are zeros, and reading those as "answered instantly"
+would climb straight past the limit the search exists to find. The controller's
+policy itself lives in
 `core/capacity_controller.hpp` as pure functions over a level history - no clock,
 no collector, no run context - so it is unit-tested without a server.
 

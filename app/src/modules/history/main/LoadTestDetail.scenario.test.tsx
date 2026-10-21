@@ -28,13 +28,7 @@ import LoadTestDetail from "./LoadTestDetail";
 import type { RunReport, RunScenarioStepStat } from "@/types";
 
 vi.mock("@/queries/runs", () => ({
-	useRunTimeSeriesQuery: () => ({
-		data: undefined,
-		isLoading: false,
-		isFetchingNextPage: false,
-		fetchNextPage: vi.fn(),
-		hasNextPage: false,
-	}),
+	useRunTimeSeriesQuery: () => ({ data: undefined, isLoading: false }),
 	useRunMonitorSeriesQuery: () => ({
 		data: undefined,
 		isFetchingNextPage: false,

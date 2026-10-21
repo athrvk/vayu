@@ -63,7 +63,16 @@ const getSpecMeta = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
-		importFetch: (url: string, maxBytes?: number) => importFetch(url, maxBytes),
+		// The fifth argument is the `$ref` marking (issue #2364); the bound
+		// document's own fetch passes none.
+		importFetch: (
+			url: string,
+			maxBytes?: number,
+			_onProgress?: unknown,
+			_signal?: unknown,
+			options?: unknown
+		) => importFetch(url, maxBytes, options),
+		readDocument: async (text: string) => JSON.parse(text),
 		updateRequest,
 		updateCollection,
 		createRequest,
@@ -226,7 +235,45 @@ describe("SpecSync", () => {
 		// The re-fetch is spec-only, so it states the document's own live cap as
 		// the fetch's byte bound (issue #784) rather than leaving the engine to
 		// buffer whatever the URL now serves.
-		expect(importFetch).toHaveBeenCalledWith(expect.any(String), 10 * 1024 * 1024);
+		expect(importFetch).toHaveBeenCalledWith(expect.any(String), 10 * 1024 * 1024, undefined);
+	});
+
+	it("marks the fetch of a $ref as a reference and not the bound document's own", async () => {
+		const withRef = JSON.stringify({
+			openapi: "3.0.0",
+			info: { title: "Pets API" },
+			paths: {
+				"/pets": {
+					get: {
+						responses: {
+							"200": {
+								description: "ok",
+								content: {
+									"application/json": { schema: { $ref: "./pet.json#/Pet" } },
+								},
+							},
+						},
+					},
+				},
+			},
+		});
+		importFetch.mockImplementation(async (url: string) => ({
+			content: url.endsWith("pet.json") ? '{"Pet":{"type":"object"}}' : withRef,
+		}));
+		renderSync();
+
+		check();
+
+		await waitFor(() => expect(importFetch).toHaveBeenCalledTimes(2));
+		const max = 10 * 1024 * 1024;
+		expect(importFetch.mock.calls).toEqual([
+			["https://api.example.com/spec.json", max, undefined],
+			[
+				"https://api.example.com/pet.json",
+				max,
+				{ reference: true, sourceUrl: "https://api.example.com/spec.json" },
+			],
+		]);
 	});
 
 	it("sends the collection and the re-fetched bytes, and nothing else", async () => {

@@ -9,7 +9,7 @@
  * Status-class composition over time, as stacked areas, on the shared uPlot
  * primitive. Stacking is done by feeding cumulative sums and filling each class'
  * band between consecutive cumulative series (bottom 2xx fills to zero). The
- * tooltip prints each class' own count (`tipValues`), not the stack height.
+ * tooltip prints each class' own rate (`tipValues`), not the stack height.
  */
 
 import { useMemo } from "react";
@@ -17,10 +17,13 @@ import type uPlot from "uplot";
 import type { LoadTestMetrics } from "@/types";
 import { buildStatusOverTime, stackStatusPoints } from "../../../utils/metricsTransforms";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
-import { fmtCount } from "./formatters";
+import { axisRate, fmtRate } from "./formatters";
 
-/** The bucket `buildStatusOverTime` counts into; `TOOLTIPS.statusCodesOverTime` says the same. */
-const STATUS_TOOLTIP_UNIT = "responses / 0.5 s";
+/**
+ * What the tooltip's figures count; each carries its own "/s", the rate
+ * `buildStatusOverTime` returns. `TOOLTIPS.statusCodesOverTime` says the same.
+ */
+const STATUS_TOOLTIP_CAPTION = "responses";
 
 export function StatusCodesOverTimeChart({
 	history,
@@ -49,7 +52,7 @@ export function StatusCodesOverTimeChart({
 			role: "status-success",
 			kind: "area",
 			width: 0.75,
-			format: fmtCount,
+			format: fmtRate,
 			tipValues: own[0],
 		},
 		/*
@@ -70,7 +73,7 @@ export function StatusCodesOverTimeChart({
 			width: 0.75,
 			bandTo: 1,
 			bandRole: "status-redirect",
-			format: fmtCount,
+			format: fmtRate,
 			tipValues: own[1],
 		},
 		{
@@ -79,7 +82,7 @@ export function StatusCodesOverTimeChart({
 			width: 0.75,
 			bandTo: 2,
 			bandRole: "status-client-error",
-			format: fmtCount,
+			format: fmtRate,
 			tipValues: own[2],
 		},
 		{
@@ -88,7 +91,7 @@ export function StatusCodesOverTimeChart({
 			width: 0.75,
 			bandTo: 3,
 			bandRole: "status-server-error",
-			format: fmtCount,
+			format: fmtRate,
 			tipValues: own[3],
 		},
 		{
@@ -97,7 +100,7 @@ export function StatusCodesOverTimeChart({
 			width: 0.75,
 			bandTo: 4,
 			bandRole: "status-no-response",
-			format: fmtCount,
+			format: fmtRate,
 			tipValues: own[4],
 		},
 	];
@@ -109,9 +112,9 @@ export function StatusCodesOverTimeChart({
 			series={series}
 			xTime
 			height={height}
-			yFormat={(v) => `${Math.round(v)}`}
+			yFormat={axisRate}
 			isLive={!isCompleted}
-			tooltipCaption={STATUS_TOOLTIP_UNIT}
+			tooltipCaption={STATUS_TOOLTIP_CAPTION}
 			syncKey={syncKey}
 		/>
 	);

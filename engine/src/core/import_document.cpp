@@ -1099,9 +1099,8 @@ std::string to_method (const json* declared, bool* unsupported = nullptr) {
 /// What a Postman parse accumulates across its recursive walk.
 struct PostmanCounts : OAuth2ImportLosses {
     ImportOptions options;
-    int requests       = 0;
-    int folders        = 0;
-    int non_executable = 0;
+    int requests = 0;
+    int folders  = 0;
     // Whole-file bodies, imported as `binary` references the user relinks.
     int file_bodies                = 0;
     int skipped_malformed          = 0;
@@ -1853,16 +1852,12 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "certificate", &PostmanCounts::skipped_certificate },
 { "proxy_config", &PostmanCounts::skipped_proxy },
 { "protocol_behavior", &PostmanCounts::skipped_protocol_behavior },
-{ "non_executable_auth", &PostmanCounts::non_executable },
 });
 
 json pm_request (const json* item, const json& inherited, PostmanCounts& counts);
 
-/// Whether @p auth is a mode Vayu stores but does not send
-/// (`CONFIG_AUTH_TYPES`), at any level: a collection's or folder's reaches
-/// every request inheriting it, so it is counted where it is declared.
-bool is_data_only_auth (const json& auth) {
-    const std::string mode = as_string (prop (&auth, "mode"));
+/// Whether @p mode is one Vayu stores but does not send (`CONFIG_AUTH_TYPES`).
+bool is_data_only_mode (const std::string& mode) {
     return std::any_of (postman::CONFIG_AUTH_TYPES.begin (),
     postman::CONFIG_AUTH_TYPES.end (),
     [&mode] (const postman::ConfigAuthType& named) { return mode == named.vayu; });
@@ -1905,9 +1900,6 @@ json pm_request (const json* item, const json& inherited, PostmanCounts& counts)
     json auth          = with_postman_source (
     map_postman_auth (prop (rq, "auth"), counts.skipped_unsupported_auth, counts),
     prop (rq, "auth"));
-    if (is_data_only_auth (auth)) {
-        counts.non_executable += 1;
-    }
     counts.requests += 1;
     pm_certificate (prop (rq, "certificate"), url, counts);
     if (truthy (prop (rq, "proxy"))) {
@@ -2042,17 +2034,87 @@ json pm_folder (const json* node, const json& inherited, PostmanCounts& counts) 
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
     collection["auth"] =
     collection_auth (prop (node, "auth"), counts.skipped_unsupported_auth, counts);
-    if (is_data_only_auth (collection["auth"])) {
-        counts.non_executable += 1;
-        counts.named["non_executable_auth"].push_back (
-        collection["name"].get<std::string> ());
-    }
     if (counts.options.import_scripts) {
         set_event_elements (collection, events, counts);
     }
     collection["children"] = std::move (children);
     collection["requests"] = std::move (requests);
     return collection;
+}
+
+/// Who loses a data-only auth (`CONFIG_AUTH_TYPES`) in a finished Postman draft.
+struct DataOnlyAuthFound {
+    /// The requests that send without it, in document order: a folder's items
+    /// run where the folder sits, so a nested folder's requests come at its place.
+    std::vector<std::string> requests;
+    /// The sub-folders that declare one themselves, in the same order.
+    std::vector<std::string> folders;
+    /// The root collection's name, when the collection declares one itself.
+    std::optional<std::string> collection;
+};
+
+std::string auth_mode_of (const json& draft) {
+    return as_string (prop (prop (&draft, "auth"), "mode"));
+}
+
+/// The mode a folder passes down to what it holds, with the send-time rule of
+/// `resolve_inherited_auth`: `noauth` ends the walk (nothing is sent, so the
+/// empty mode), `none` or absent is transparent, anything else wins. Walking
+/// the chain nearest-first and passing the answer down are the same thing.
+/// The composer takes a DB chain of `Collection` rows, which a draft is not.
+std::string folder_mode_passed_down (const json& folder, const std::string& inherited) {
+    const std::string mode = auth_mode_of (folder);
+    if (mode == "noauth") {
+        return {};
+    }
+    return mode.empty () || mode == "none" ? inherited : mode;
+}
+
+/// A draft and whether it is a folder (else a request).
+using SiblingDraft = std::pair<const json*, bool>;
+
+/// A folder's sub-folders and requests as one list in document order, which
+/// is each draft's `order` (#2535).
+std::vector<SiblingDraft> items_in_document_order (const json& folder) {
+    std::vector<SiblingDraft> items;
+    for (const json& child : folder.at ("children")) {
+        items.emplace_back (&child, true);
+    }
+    for (const json& request : folder.at ("requests")) {
+        items.emplace_back (&request, false);
+    }
+    std::ranges::sort (items, [] (const SiblingDraft& a, const SiblingDraft& b) {
+        return a.first->at ("order").get<int> () < b.first->at ("order").get<int> ();
+    });
+    return items;
+}
+
+void walk_data_only_auth (const json& folder, const std::string& inherited, DataOnlyAuthFound& found) {
+    const std::string passed_down = folder_mode_passed_down (folder, inherited);
+    for (const auto& [node, is_folder] : items_in_document_order (folder)) {
+        const std::string name = as_string (prop (node, "name"));
+        if (is_folder) {
+            if (is_data_only_mode (auth_mode_of (*node))) {
+                found.folders.push_back (name);
+            }
+            walk_data_only_auth (*node, passed_down, found);
+            continue;
+        }
+        // A request's own `none` (its No Auth) is not `inherit`: it never walks.
+        const std::string own = auth_mode_of (*node);
+        if (is_data_only_mode (own == "inherit" ? passed_down : own)) {
+            found.requests.push_back (name);
+        }
+    }
+}
+
+DataOnlyAuthFound find_data_only_auth (const json& root) {
+    DataOnlyAuthFound found;
+    if (is_data_only_mode (auth_mode_of (root))) {
+        found.collection = as_string (prop (&root, "name"));
+    }
+    walk_data_only_auth (root, std::string{}, found);
+    return found;
 }
 
 json parse_postman (const json& parsed, const ImportOptions& options, const char* format) {
@@ -2085,17 +2147,25 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.name_dropped ("protocol_behavior_folder", counts.protocol_behavior_folders);
 
     json meta;
-    meta["format"]            = format;
-    meta["requestCount"]      = counts.requests;
-    meta["folderCount"]       = counts.folders;
-    meta["environmentCount"]  = 0;
-    meta["globalCount"]       = 0;
-    meta["exampleCount"]      = count_examples (collections);
-    meta["skipped"]           = tally.items ();
-    meta["nonExecutableAuth"] = counts.non_executable;
-    if (const auto named = counts.named.find ("non_executable_auth");
-    named != counts.named.end ()) {
-        meta["nonExecutableAuthRequests"] = named->second;
+    meta["format"]           = format;
+    meta["requestCount"]     = counts.requests;
+    meta["folderCount"]      = counts.folders;
+    meta["environmentCount"] = 0;
+    meta["globalCount"]      = 0;
+    meta["exampleCount"]     = count_examples (collections);
+    meta["skipped"]          = tally.items ();
+    // The request count is by resolved auth; the names of the sites that
+    // declare it ride beside it, each absent when empty.
+    DataOnlyAuthFound lost    = find_data_only_auth (collections.at (0));
+    meta["nonExecutableAuth"] = static_cast<int> (lost.requests.size ());
+    if (!lost.requests.empty ()) {
+        meta["nonExecutableAuthRequests"] = std::move (lost.requests);
+    }
+    if (!lost.folders.empty ()) {
+        meta["nonExecutableAuthFolders"] = std::move (lost.folders);
+    }
+    if (lost.collection) {
+        meta["nonExecutableAuthCollection"] = std::move (*lost.collection);
     }
     // Absent, not empty, when no script uses one: the member is for a notice.
     if (!counts.unsupported_script_apis.empty ()) {
