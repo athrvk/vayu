@@ -251,8 +251,8 @@ const COPY: Partial<Record<string, Copy>> = {
 	// the line is about the node that declared the setting.
 	protocol_behavior_folder: {
 		tier: "note",
-		one: "1 folder or collection has a Postman setting kept but not applied (e.g. TLS options){names}",
-		many: "{n} folders or collections have Postman settings kept but not applied (e.g. TLS options){names}",
+		one: "1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options){names}",
+		many: "{n} folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options){names}",
 	},
 	elements_invalid: {
 		tier: "action",

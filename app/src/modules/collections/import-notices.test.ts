@@ -345,7 +345,7 @@ describe("importNotices", () => {
 		const texts = (item: SkippedItem) =>
 			importNotices(meta({ skipped: [item] })).map((n) => n.text);
 		expect(texts({ kind: "protocol_behavior_folder", count: 1, names: ["Payments"] })).toEqual([
-			"1 folder or collection has a Postman setting kept but not applied (e.g. TLS options) (Payments)",
+			"1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options) (Payments)",
 		]);
 		expect(
 			texts({
@@ -354,7 +354,7 @@ describe("importNotices", () => {
 				names: ["Payments", "Billing"],
 			})
 		).toEqual([
-			"2 folders or collections have Postman settings kept but not applied (e.g. TLS options) (Payments, Billing)",
+			"2 folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options) (Payments, Billing)",
 		]);
 	});
 });
