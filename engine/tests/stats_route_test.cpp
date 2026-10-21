@@ -19,6 +19,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -330,6 +332,232 @@ TEST_F (StatsRouteTest, TickCarriesCustomMetricsWhenTheRunRecordedAny) {
     EXPECT_EQ (custom["ttfb2"]["type"], "trend");
     EXPECT_EQ (custom["ttfb2"]["count"].get<size_t> (), 7u);
     EXPECT_DOUBLE_EQ (custom["ttfb2"]["p95"].get<double> (), 40.0);
+}
+
+// ============================================================================
+// Downsampling: maxPoints (#2547)
+// ============================================================================
+
+// A cumulative tick the way the producer writes them: tick @p i of a run that
+// completes ten requests a second, all 200s.
+nlohmann::json cumulative_tick (int i) {
+    const auto completed       = 10 * (static_cast<size_t> (i) + 1);
+    auto sample                = vayu::core::MetricTickSample{};
+    sample.timestamp           = 1000 + (static_cast<int64_t> (i) * 1000);
+    sample.elapsed_seconds     = static_cast<double> (i);
+    sample.requests_completed  = completed;
+    sample.current_rps         = 10.0;
+    sample.current_concurrency = 4;
+    sample.backpressure        = 2;
+    sample.bytes_received      = completed * 100;
+    sample.status_codes        = { { 200, completed } };
+    sample.latency_p50_ms      = 5.0;
+    sample.latency_p95_ms      = 8.0;
+    sample.latency_p99_ms      = 12.0;
+    return vayu::core::build_metric_tick_payload (sample);
+}
+
+// The folding rules, on the helper alone.
+TEST (MetricTickBucket, CumulativeFieldsComeFromTheLastTick) {
+    vayu::http::routes::MetricTickBucket bucket;
+    for (int i = 0; i < 4; ++i) {
+        auto tick = cumulative_tick (i);
+        tick["custom_metrics"]["orders"] = { { "type", "counter" }, { "count", i + 1 } };
+        tick["a_key_this_engine_never_wrote"] = i;
+        bucket.add (std::move (tick));
+    }
+    const auto folded = bucket.take ();
+    EXPECT_EQ (folded["requests_completed"].get<size_t> (), 40u);
+    EXPECT_EQ (folded["bytes_received"].get<size_t> (), 4000u);
+    EXPECT_EQ (folded["timestamp"].get<int64_t> (), 4000);
+    EXPECT_DOUBLE_EQ (folded["elapsed_seconds"].get<double> (), 3.0);
+    EXPECT_EQ (folded["status_codes"], json ({ { "200", 40 } }));
+    EXPECT_EQ (folded["custom_metrics"]["orders"]["count"].get<int> (), 4);
+    EXPECT_EQ (folded["a_key_this_engine_never_wrote"].get<int> (), 3);
+    EXPECT_TRUE (bucket.empty ());
+}
+
+TEST (MetricTickBucket, PeaksAreTheMaxAndCurrentRpsIsTheMean) {
+    vayu::http::routes::MetricTickBucket bucket;
+    const std::vector<double> rps         = { 10.0, 20.0, 60.0 };
+    const std::vector<size_t> concurrency = { 1, 9, 2 };
+    const std::vector<size_t> backlog     = { 7, 0, 3 };
+    const std::vector<double> p99         = { 12.0, 900.0, 11.0 };
+    for (size_t i = 0; i < rps.size (); ++i) {
+        auto tick                   = cumulative_tick (static_cast<int> (i));
+        tick["current_rps"]         = rps[i];
+        tick["current_concurrency"] = concurrency[i];
+        tick["backpressure"]        = backlog[i];
+        tick["latency_p99_ms"]      = p99[i];
+        tick["latency_p50_ms"]      = i == 2 ? 6.0 : 5.0;
+        bucket.add (std::move (tick));
+    }
+    const auto folded = bucket.take ();
+    EXPECT_DOUBLE_EQ (folded["current_rps"].get<double> (), 30.0);
+    EXPECT_EQ (folded["current_concurrency"].get<size_t> (), 9u);
+    EXPECT_EQ (folded["backpressure"].get<size_t> (), 7u);
+    EXPECT_DOUBLE_EQ (folded["latency_p99_ms"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (folded["latency_p95_ms"].get<double> (), 8.0);
+    EXPECT_DOUBLE_EQ (folded["latency_p50_ms"].get<double> (), 6.0);
+}
+
+// A row an older engine stored lacks keys a newer one writes; folding must not
+// invent them, the peak and mean keys included.
+TEST (MetricTickBucket, KeysNoTickCarriedAreNeverAdded) {
+    vayu::http::routes::MetricTickBucket bucket;
+    for (int i = 0; i < 3; ++i) {
+        auto tick = cumulative_tick (i);
+        for (const auto* key :
+        { "http_errors", "no_response", "cancelled", "backpressure", "current_rps" }) {
+            tick.erase (key);
+        }
+        bucket.add (std::move (tick));
+    }
+    const auto folded = bucket.take ();
+    for (const auto* key : { "http_errors", "no_response", "cancelled",
+         "backpressure", "current_rps", "custom_metrics" }) {
+        EXPECT_FALSE (folded.contains (key)) << "synthesized " << key;
+    }
+    EXPECT_EQ (folded["requests_completed"].get<size_t> (), 30u);
+}
+
+TEST (MetricTickBucket, ABucketOfOneTickIsThatTickUnchanged) {
+    vayu::http::routes::MetricTickBucket bucket;
+    auto tick           = cumulative_tick (0);
+    tick["current_rps"] = 7; // An integer stays an integer.
+    bucket.add (tick);
+    EXPECT_EQ (bucket.take ().dump (), tick.dump ());
+}
+
+TEST (MetricTickBucket, MaxPointsParsesLikeTheOtherParameters) {
+    using vayu::http::routes::parse_max_points;
+    EXPECT_EQ (parse_max_points ("200"), std::optional<int64_t> (200));
+    EXPECT_EQ (parse_max_points ("1"), std::optional<int64_t> (1));
+    EXPECT_EQ (parse_max_points ("9999999"),
+    std::optional<int64_t> (vayu::http::routes::RUN_TIME_SERIES_PAGE_MAX));
+    for (const auto* raw : { "", "0", "-5", "abc", "42abc", " 7", "1.5" }) {
+        EXPECT_FALSE (parse_max_points (raw).has_value ()) << "'" << raw << "'";
+    }
+}
+
+// The wiring, through the route core. The long series is 5005 ticks because it
+// has to cross metrics.cpp's 5000-row read chunk with a bucket straddling the
+// edge; that is the smallest series that does, and the other route tests stay
+// at a handful of rows because each tick is its own insert.
+TEST_F (StatsRouteTest, MaxPointsFoldsTheWholeSeriesAcrossReadChunks) {
+    const std::string id = seed_run ();
+    constexpr int TICKS  = 5005;
+    for (int i = 0; i < TICKS; ++i) {
+        auto tick = cumulative_tick (i);
+        if (i == 4999) { // Last row of the first read chunk.
+            tick["latency_p99_ms"] = 900.0;
+        }
+        if (i == 5002) { // Same bucket, second read chunk.
+            tick["current_concurrency"] = 64;
+        }
+        add_tick (id, tick["timestamp"].get<int64_t> (), tick);
+    }
+
+    // limit and offset are ignored once maxPoints is set.
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 2, 7, 455);
+    ASSERT_EQ (status, 200);
+    EXPECT_TRUE (body["bucketed"].get<bool> ());
+    EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 11);
+    const auto& pag = body["pagination"];
+    EXPECT_EQ (pag["total"].get<int64_t> (), TICKS);
+    EXPECT_EQ (pag["limit"].get<int64_t> (), 455);
+    EXPECT_EQ (pag["offset"].get<int64_t> (), 0);
+    EXPECT_FALSE (pag["hasMore"].get<bool> ());
+    EXPECT_EQ (pag["returned"].get<int64_t> (), 455);
+
+    const auto& data = body["data"];
+    ASSERT_EQ (data.size (), 455u);
+    // Every bucket ends on its last tick's run total, so the final one is the
+    // run's total and none is a first-tick or summed figure.
+    for (size_t b = 0; b < data.size (); ++b) {
+        const auto last_tick = std::min<size_t> ((b * 11) + 10, TICKS - 1);
+        ASSERT_EQ (data[b]["requests_completed"].get<size_t> (), 10 * (last_tick + 1))
+        << "bucket " << b;
+    }
+    EXPECT_EQ (data.back ()["requests_completed"].get<size_t> (), 10u * TICKS);
+    EXPECT_EQ (data.back ()["status_codes"]["200"].get<size_t> (), 10u * TICKS);
+
+    // Rows 4994..5004 are bucket 454: the spike lands there and nowhere else.
+    EXPECT_DOUBLE_EQ (data[454]["latency_p99_ms"].get<double> (), 900.0);
+    EXPECT_DOUBLE_EQ (data[453]["latency_p99_ms"].get<double> (), 12.0);
+    EXPECT_EQ (data[454]["current_concurrency"].get<size_t> (), 64u);
+    EXPECT_EQ (data[453]["current_concurrency"].get<size_t> (), 4u);
+    EXPECT_DOUBLE_EQ (data[454]["current_rps"].get<double> (), 10.0);
+}
+
+TEST_F (StatsRouteTest, MaxPointsLeavesAShortLastBucketAndKeepsDamagedRowsInPlace) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 7; ++i) {
+        const auto tick = cumulative_tick (i);
+        if (i == 1) {
+            vayu::db::MetricTick corrupt;
+            corrupt.run_id    = id;
+            corrupt.timestamp = tick["timestamp"].get<int64_t> ();
+            corrupt.payload   = "{not json";
+            db_->add_metric_tick (corrupt);
+            continue;
+        }
+        add_tick (id, tick["timestamp"].get<int64_t> (), tick);
+    }
+
+    // ceil (7 / 3) = 3 ticks a bucket: rows 0-2, 3-5 and 6 alone.
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0, 3);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 3);
+    ASSERT_EQ (body["data"].size (), 3u);
+    EXPECT_EQ (body["data"][0]["requests_completed"].get<size_t> (), 30u);
+    EXPECT_EQ (body["data"][1]["requests_completed"].get<size_t> (), 60u);
+    EXPECT_EQ (body["data"][2], cumulative_tick (6));
+}
+
+TEST_F (StatsRouteTest, MaxPointsAtOrAboveTheTickCountReturnsEveryTickUnchanged) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 5; ++i) {
+        const auto tick = cumulative_tick (i);
+        add_tick (id, tick["timestamp"].get<int64_t> (), tick);
+    }
+    const auto [paged_status, paged] =
+    vayu::http::routes::run_time_series_response (*db_, id, 5000, 0);
+    ASSERT_EQ (paged_status, 200);
+
+    for (const int64_t max_points : { 5, 50 }) {
+        auto [status, body] =
+        vayu::http::routes::run_time_series_response (*db_, id, 2, 3, max_points);
+        ASSERT_EQ (status, 200);
+        EXPECT_EQ (body["data"], paged["data"]) << "maxPoints " << max_points;
+        EXPECT_FALSE (body["bucketed"].get<bool> ());
+        EXPECT_EQ (body["ticksPerBucket"].get<int64_t> (), 1);
+        EXPECT_EQ (body["pagination"],
+        json ({ { "total", 5 }, { "limit", max_points }, { "offset", 0 },
+        { "hasMore", false }, { "returned", 5 } }));
+    }
+}
+
+// Without the parameter the answer is the paged envelope and nothing more.
+TEST_F (StatsRouteTest, WithoutMaxPointsTheEnvelopeGainsNoKeys) {
+    const std::string id = seed_run ();
+    for (int i = 0; i < 3; ++i) {
+        const auto tick = cumulative_tick (i);
+        add_tick (id, tick["timestamp"].get<int64_t> (), tick);
+    }
+    auto [status, body] =
+    vayu::http::routes::run_time_series_response (*db_, id, 2, 0, std::nullopt);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body.size (), 2u) << body.dump ();
+    EXPECT_FALSE (body.contains ("bucketed"));
+    EXPECT_FALSE (body.contains ("ticksPerBucket"));
+    EXPECT_EQ (body["pagination"],
+    json ({ { "total", 3 }, { "limit", 2 }, { "offset", 0 },
+    { "hasMore", true }, { "returned", 2 } }));
+    ASSERT_EQ (body["data"].size (), 2u);
+    EXPECT_EQ (body["data"][1], cumulative_tick (1));
 }
 
 // ============================================================================

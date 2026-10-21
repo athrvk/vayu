@@ -361,21 +361,35 @@ export interface ImportMeta {
 	 */
 	refReport?: RefReport;
 	/**
-	 * Requests, and for Postman folders and collections, whose own auth Vayu
-	 * stores but does not execute - the `CONFIG_AUTH_TYPES` modes (aws,
-	 * digest, ntlm, hawk, oauth1, edgegrid, jwt) the engine counts
-	 * (`import_document.cpp`); oauth2 is not among them, since
+	 * Requests whose auth Vayu stores but does not execute - the
+	 * `CONFIG_AUTH_TYPES` modes (aws, digest, ntlm, hawk, oauth1, edgegrid, jwt)
+	 * the engine counts (`import_document.cpp`); oauth2 is not among them, since
 	 * `POST /oauth2/token` executes it. Counted rather than skipped: the
-	 * request imports and sends, only its credentials do not travel. Shown by
+	 * request imports and sends, only its credentials do not travel. Postman
+	 * counts a request by its resolved auth, so one that inherits the mode from a
+	 * folder or the collection counts (#2537); Insomnia counts each declaration,
+	 * folders and the workspace included, without naming the folders. Shown by
 	 * `importNotices` beside the skip counts.
 	 */
 	nonExecutableAuth: number;
 	/**
-	 * Those requests, folders and collections by name, when the walk had them
-	 * in hand (Postman and Insomnia) - so the preview names where credentials
-	 * will not travel, rather than only counting them.
+	 * Those requests by name, when the walk had them in hand (Postman and
+	 * Insomnia) - so the preview names where credentials will not travel, rather
+	 * than only counting them.
 	 */
 	nonExecutableAuthRequests?: string[];
+	/**
+	 * Postman only (#2537): the sub-folders that declare a data-only auth
+	 * themselves, by name. Beside the request names, not among them - a
+	 * declaration site is not a request that loses its auth. Absent when empty.
+	 */
+	nonExecutableAuthFolders?: string[];
+	/**
+	 * Postman only (#2537): the root collection's name when the collection
+	 * declares a data-only auth itself. Absent when it does not; the notice says
+	 * "the collection", so only its presence is read.
+	 */
+	nonExecutableAuthCollection?: string;
 	/**
 	 * Postman requests, folders and collections whose imported scripts use an API
 	 * Vayu does not run (`tests[...]`, `require()`, a bundled library, ...), with

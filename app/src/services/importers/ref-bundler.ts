@@ -35,9 +35,11 @@
  *
  * **Two intakes, because a spec arrives two ways.** A URL-sourced document
  * resolves its relative refs against that URL and fetches them through the
- * engine's existing `POST /import/fetch` - reused as-is, not widened. A
- * file-picked document reads its siblings through the `specFile:read` IPC, which
- * is gated in the main process (see `app/electron/spec-file.ts`). An absolute
+ * engine's `POST /import/fetch`, marked as a reference (`reference` plus the
+ * discovering document's URL as `sourceUrl`, issue #2364) so the engine
+ * refuses the local peers a document should not reach. A file-picked document
+ * reads its siblings through the `specFile:read` IPC, which is gated in the
+ * main process (see `app/electron/spec-file.ts`). An absolute
  * `http(s)` ref is fetchable either way. A pasted document has neither, so its
  * relative refs are unresolvable by construction - and are reported as such
  * rather than silently dropped.
@@ -67,6 +69,7 @@
 import { asRecord, asStr } from "@/lib/json-node";
 import { apiService } from "@/services/api";
 import { formatBytes } from "@/modules/settings/utils/format-size";
+import type { ImportFetchOptions } from "@/types/api";
 
 /** Root key the resolved documents are inlined under. */
 export const BUNDLE_KEY = "x-vayu-bundled";
@@ -80,8 +83,12 @@ export interface ExternalRefIntake {
 	maxBytes: number;
 	/** The URL the document was fetched from; relative refs resolve against it. */
 	sourceUrl?: string;
-	/** Fetch an absolute URL's text (the engine proxy). Absent = no URL intake. */
-	fetchUrl?: (url: string) => Promise<string>;
+	/**
+	 * Fetch an absolute URL's text (the engine proxy). Absent = no URL intake.
+	 * The bundler passes `options` for every `$ref` fetch; a caller fetching the
+	 * root document itself passes none, and a person's URL is not a reference.
+	 */
+	fetchUrl?: (url: string, options?: ImportFetchOptions) => Promise<string>;
 	/**
 	 * Read a file beside the picked document, by the path the ref wrote,
 	 * normalized. Absent = the document was not picked from disk.
@@ -454,7 +461,7 @@ export async function bundleExternalRefs(
 	// already loaded is never re-enqueued, which is what terminates a cycle.
 	while (pending.length > 0) {
 		const next = pending.shift()!;
-		const outcome = await loadTarget(next.key, intake);
+		const outcome = await loadTarget(next.key, next.base, intake);
 		if (outcome.refusal) refused.push({ target: next.key, reason: outcome.refusal });
 		const text = outcome.text;
 		if (text === undefined) {
@@ -506,9 +513,10 @@ export async function bundleExternalRefs(
  * `127.0.0.0/8` block, `::1`, `169.254.0.0/16` (cloud metadata lives there) and
  * `fe80::/10`, plus any IPv4-mapped IPv6 form of those (`::ffff:7f00:1`).
  *
- * Judged from the text only. A DNS name that resolves to a local address, and a
- * redirect that lands on one, are out of scope for a check made before any
- * connection exists.
+ * Judged from the text only, as the early refusal that names the ref in the
+ * preview. A DNS name that resolves to a local address, and a redirect that
+ * lands on one, are caught by the engine, which checks the address it connects
+ * to and follows no redirect for a reference (issue #2364).
  */
 export function isLocalAddress(url: string): boolean {
 	let host: string;
@@ -545,22 +553,30 @@ function isOwnHost(url: string, sourceUrl: string | undefined): boolean {
 	}
 }
 
-/** The text at one target, or why none came back when that was on purpose. */
+/**
+ * The text at one target, or why none came back when that was on purpose.
+ *
+ * @param base the document that named @p key. Its URL, when it has one, is the
+ * `sourceUrl` the engine judges the fetch against - for a nested ref that is
+ * the intermediate document, not necessarily the one the user fetched.
+ */
 async function loadTarget(
 	key: string,
+	base: DocumentBase,
 	intake: ExternalRefIntake
 ): Promise<{ text?: string; refusal?: string }> {
-	if (ABSOLUTE_URL.test(key)) {
-		// A spec fetched from a local address (a dev server) may reference its
-		// own host; any other local address is a document reaching for the
-		// user's machine or network edge.
-		if (isLocalAddress(key) && !isOwnHost(key, intake.sourceUrl)) {
-			return { refusal: "a loopback or link-local address is not fetched for a reference" };
-		}
+	const isUrl = ABSOLUTE_URL.test(key);
+	const sourceUrl = base.kind === "url" ? base.url : undefined;
+	// A spec fetched from a local address (a dev server) may reference its own
+	// host; any other local address is a document reaching for the user's machine
+	// or network edge. The engine enforces the same rule on the connected peer;
+	// this is the early refusal that lets the preview name the ref.
+	if (isUrl && isLocalAddress(key) && !isOwnHost(key, sourceUrl)) {
+		return { refusal: "a loopback or link-local address is not fetched for a reference" };
 	}
 	try {
-		const text = ABSOLUTE_URL.test(key)
-			? await intake.fetchUrl?.(key)
+		const text = isUrl
+			? await intake.fetchUrl?.(key, { reference: true, ...(sourceUrl ? { sourceUrl } : {}) })
 			: await intake.readSibling?.(key);
 		return { text };
 	} catch (e) {

@@ -24,6 +24,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "echo_server.hpp"
@@ -90,6 +91,108 @@ TEST (LoopbackGuardPredicate, AllowsAnotherHostOnAReservedPort) {
 TEST (LoopbackGuardPredicate, WithNoRegisteredEnginePortOnlyTheMcpPortIsReserved) {
     EXPECT_FALSE (is_reserved_loopback_target ("127.0.0.1", ENGINE_PORT, std::nullopt));
     EXPECT_TRUE (is_reserved_loopback_target ("127.0.0.1", MCP_PORT, std::nullopt));
+}
+
+// ============================================================================
+// The reference rule (#2364): every loopback and link-local peer but the source
+// ============================================================================
+
+using vayu::http::is_refused_local_peer;
+using vayu::http::LocalPeerRule;
+
+/// Every spelling of a link-local address the rule must recognise.
+constexpr auto LINK_LOCAL_SPELLINGS =
+std::to_array<const char*> ({ "169.254.0.1", "169.254.169.254", "169.254.255.255",
+"169.254.1", "0xa9.0xfe.1.1", "fe80::1", "[fe80::1]", "FE80::ABCD", "fe9a::1",
+"febf:ffff::1", "::ffff:169.254.1.1", "[::ffff:a9fe:101]" });
+
+/// Addresses beside the link-local ranges that are not in them.
+constexpr auto NEAR_LINK_LOCAL = std::to_array<const char*> ({ "169.255.0.1",
+"169.253.255.255", "fe7f::1", "fec0::1", "ff02::1", "::ffff:169.255.0.1" });
+
+/// The rule for a reference found at @p source_url; fails the test if none.
+LocalPeerRule rule_for (const std::string& source_url) {
+    const auto rule = vayu::http::local_peer_rule_for_source (source_url);
+    if (!rule) {
+        ADD_FAILURE () << "no rule for " << source_url;
+        return {};
+    }
+    return *rule;
+}
+
+TEST (LocalPeerRulePredicate, WithNoSourceRefusesEveryLoopbackAndLinkLocalPeer) {
+    for (const char* host : LOOPBACK_SPELLINGS) {
+        EXPECT_TRUE (is_refused_local_peer (host, OTHER_PORT, LocalPeerRule{})) << host;
+    }
+    for (const char* host : LINK_LOCAL_SPELLINGS) {
+        EXPECT_TRUE (is_refused_local_peer (host, OTHER_PORT, LocalPeerRule{})) << host;
+    }
+}
+
+TEST (LocalPeerRulePredicate, AllowsEveryOtherAddress) {
+    for (const char* host : ELSEWHERE) {
+        if (std::string_view (host).empty ()) {
+            continue; // not an address; see FailsClosedOnWhatIsNotAnAddress
+        }
+        EXPECT_FALSE (is_refused_local_peer (host, OTHER_PORT, LocalPeerRule{})) << host;
+    }
+    for (const char* host : NEAR_LINK_LOCAL) {
+        EXPECT_FALSE (is_refused_local_peer (host, OTHER_PORT, LocalPeerRule{})) << host;
+    }
+}
+
+TEST (LocalPeerRulePredicate, FailsClosedOnWhatIsNotAnAddress) {
+    EXPECT_TRUE (is_refused_local_peer ("", OTHER_PORT, LocalPeerRule{}));
+    EXPECT_TRUE (is_refused_local_peer ("fe80::1%eth0", OTHER_PORT, LocalPeerRule{}));
+}
+
+// A loopback source is this machine by any name, so any loopback peer on its
+// port is its own; on another port, or link-local, it is not.
+TEST (LocalPeerRulePredicate, ALoopbackSourceAllowsLoopbackOnItsOwnPortOnly) {
+    for (const char* source : { "http://127.0.0.1:3000/spec.json",
+         "http://localhost:3000/", "http://dev.localhost:3000/a.yaml",
+         "http://[::1]:3000/", "http://LOCALHOST.:3000/" }) {
+        const LocalPeerRule rule = rule_for (source);
+        EXPECT_FALSE (is_refused_local_peer ("127.0.0.1", 3000, rule)) << source;
+        EXPECT_FALSE (is_refused_local_peer ("::1", 3000, rule)) << source;
+        EXPECT_TRUE (is_refused_local_peer ("127.0.0.1", 3001, rule)) << source;
+        EXPECT_TRUE (is_refused_local_peer ("169.254.1.1", 3000, rule)) << source;
+    }
+}
+
+TEST (LocalPeerRulePredicate, TheSourcePortIsTheSchemeDefaultWhenItNamesNone) {
+    const LocalPeerRule rule = rule_for ("https://localhost/spec.json");
+    EXPECT_FALSE (is_refused_local_peer ("127.0.0.1", 443, rule));
+    EXPECT_TRUE (is_refused_local_peer ("127.0.0.1", 80, rule));
+}
+
+// A link-local peer is the source's only when the source names that address.
+TEST (LocalPeerRulePredicate, ALinkLocalSourceAllowsOnlyItsOwnAddress) {
+    const LocalPeerRule v4 = rule_for ("http://169.254.10.20:8080/spec.json");
+    EXPECT_FALSE (is_refused_local_peer ("169.254.10.20", 8080, v4));
+    EXPECT_TRUE (is_refused_local_peer ("169.254.10.21", 8080, v4));
+    EXPECT_TRUE (is_refused_local_peer ("169.254.10.20", 8081, v4));
+    EXPECT_TRUE (is_refused_local_peer ("127.0.0.1", 8080, v4));
+
+    const LocalPeerRule v6 = rule_for ("http://[fe80::1]:8080/spec.json");
+    EXPECT_FALSE (is_refused_local_peer ("fe80::1", 8080, v6));
+    EXPECT_FALSE (is_refused_local_peer ("FE80:0:0::1", 8080, v6));
+    EXPECT_TRUE (is_refused_local_peer ("fe80::2", 8080, v6));
+}
+
+// A source named by a host name earns nothing on loopback, even on its own
+// port: a name that resolves there is what a rebinding DNS answer looks like.
+TEST (LocalPeerRulePredicate, ASourceNamedByAHostNameEarnsNothing) {
+    const LocalPeerRule rule =
+    rule_for ("http://specs.example.com:3000/spec.json");
+    EXPECT_TRUE (is_refused_local_peer ("127.0.0.1", 3000, rule));
+    EXPECT_TRUE (is_refused_local_peer ("169.254.1.1", 3000, rule));
+    EXPECT_FALSE (is_refused_local_peer ("93.184.215.14", 3000, rule));
+}
+
+TEST (LocalPeerRulePredicate, ASourceUrlNamingNoHostHasNoRule) {
+    EXPECT_FALSE (vayu::http::local_peer_rule_for_source ("http://").has_value ());
+    EXPECT_FALSE (vayu::http::local_peer_rule_for_source ("").has_value ());
 }
 
 // ============================================================================
@@ -332,6 +435,47 @@ TEST_F (LoopbackGuardTransport, AnotherLoopbackPortIsStillReachedByEveryDriver) 
         EXPECT_FALSE (response.has_error ()) << driver_name (driver);
     }
     EXPECT_EQ (local.requests_seen (), 3);
+}
+
+// The reference rule rides the same callback as the reserved ports, on the
+// single-request client that `/import/fetch` sends with.
+
+/// One GET to @p url through a client carrying @p rule, proxy off.
+vayu::Response send_with_rule (const std::string& url, const LocalPeerRule& rule) {
+    vayu::http::ClientConfig config;
+    config.transport.proxy_mode = vayu::http::ProxyMode::Off;
+    config.local_peer_rule      = rule;
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = url;
+    return vayu::http::Client{ config }.send (request).value ();
+}
+
+TEST_F (LoopbackGuardTransport, TheReferenceRuleRefusesAPeerAndNamesItself) {
+    vayu::tests::EchoServer local;
+    const vayu::Response response = send_with_rule (local.url (), LocalPeerRule{});
+
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
+    EXPECT_EQ (response.error_message,
+    "Cannot send this request: " + vayu::http::local_peer_refusal ());
+    EXPECT_EQ (local.requests_seen (), 0);
+}
+
+// The reference rule is added to the reserved ports, never in place of them:
+// a source on the engine's own port does not make that port reachable, and the
+// refusal is the engine-port sentence.
+TEST_F (LoopbackGuardTransport, TheReferenceRuleNeverOpensAReservedPort) {
+    const auto& stand_in          = vayu::tests::engine_port_stand_in ();
+    const int seen_before         = stand_in.requests_seen ();
+    const std::string url         = on_reserved_port ("vayu-guard.localhost");
+    const vayu::Response response = send_with_rule (url, rule_for (url));
+
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
+    EXPECT_NE (response.error_message.find ("own engine port " + std::to_string (reserved_port)),
+    std::string::npos)
+    << response.error_message;
+    EXPECT_EQ (stand_in.requests_seen (), seen_before);
 }
 
 } // namespace

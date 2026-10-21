@@ -17,6 +17,7 @@ import {
 	spansMultipleBuckets,
 } from "./metricsTransforms";
 import { hasSecondPercentiles } from "./tickPercentiles";
+import { STORED_RPS, foldLikeEngine, storedTicks } from "./downsample.testkit";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -315,25 +316,58 @@ describe("buildPercentileChartData on a live series (issue #2385)", () => {
 	});
 });
 
+/*
+ * Per-second rates whatever the source's spacing (#2547). Mutation check: drop
+ * the division by the elapsed gap and the live and downsampled cases redden,
+ * while the stored-cadence ones stay green - a stored tick closes one second,
+ * so its rate is its count and the History chart of a raw run is unchanged.
+ */
 describe("buildStatusOverTime", () => {
-	it("classifies and diffs cumulative status maps into per-interval counts", () => {
+	it("classifies and diffs a stored series' cumulative maps into per-second rates", () => {
 		const out = buildStatusOverTime([
-			tick({ elapsed_seconds: 0.5, status_codes: { "200": 100, "404": 5 } }),
-			tick({ elapsed_seconds: 1.0, status_codes: { "200": 180, "404": 7, "500": 3 } }),
+			tick({ elapsed_seconds: 0, status_codes: { "200": 100, "404": 5 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "200": 180, "404": 7, "500": 3 } }),
 		]);
 		expect(out).toHaveLength(2);
-		// First interval = cumulative-so-far; second = diff from first.
-		expect(out[0]).toMatchObject({ time: 0.5, c2xx: 100, c4xx: 5, c5xx: 0 });
-		expect(out[1]).toMatchObject({ time: 1.0, c2xx: 80, c4xx: 2, c5xx: 3 });
+		// The first stored tick closes the second before elapsed 0; the second
+		// is the diff from the first, over one second.
+		expect(out[0]).toMatchObject({ time: 0, c2xx: 100, c4xx: 5, c5xx: 0 });
+		expect(out[1]).toMatchObject({ time: 1, c2xx: 80, c4xx: 2, c5xx: 3 });
 	});
 
 	it("treats status code 0 as connection error and clamps diffs >= 0", () => {
 		const out = buildStatusOverTime([
-			tick({ elapsed_seconds: 0.5, status_codes: { "0": 4 } }),
-			tick({ elapsed_seconds: 1.0, status_codes: { "0": 4 } }),
+			tick({ elapsed_seconds: 0, status_codes: { "0": 4 } }),
+			tick({ elapsed_seconds: 1, status_codes: { "0": 4 } }),
 		]);
 		expect(out[0].cErr).toBe(4);
 		expect(out[1].cErr).toBe(0);
+	});
+
+	it("rates a live series' half-second buckets per second, counted from load start", () => {
+		const out = buildStatusOverTime([
+			tick({ live: true, elapsed_seconds: 0.5, status_codes: { "200": 100 } }),
+			tick({ live: true, elapsed_seconds: 1.0, status_codes: { "200": 180 } }),
+		]);
+		expect(out.map((p) => p.c2xx)).toEqual([200, 160]);
+	});
+
+	it("rates a downsampled series per second, as the raw series it folds", () => {
+		const raw = storedTicks(600, (s) =>
+			s >= 300 ? { status: { "200": STORED_RPS - 10, "503": 10 } } : {}
+		);
+		const folded = foldLikeEngine(raw, 10);
+		expect(folded.ticksPerBucket).toBe(60);
+
+		const fromRaw = buildStatusOverTime(raw);
+		const fromFolded = buildStatusOverTime(folded.data);
+		expect(fromRaw).toHaveLength(600);
+		expect(fromFolded).toHaveLength(10);
+		expect(new Set(fromRaw.map((p) => p.c2xx + p.c5xx))).toEqual(new Set([STORED_RPS]));
+		for (const p of fromFolded) expect(p.c2xx + p.c5xx).toBeCloseTo(STORED_RPS);
+		// The 503s start on a bucket edge, so each half reads its own rate.
+		expect(fromFolded.slice(0, 5).map((p) => p.c5xx)).toEqual([0, 0, 0, 0, 0]);
+		for (const p of fromFolded.slice(5)) expect(p.c5xx).toBeCloseTo(10);
 	});
 
 	it("returns [] when no tick carries a status map", () => {
@@ -343,8 +377,8 @@ describe("buildStatusOverTime", () => {
 
 describe("stackStatusPoints", () => {
 	const cleanRun = [
-		tick({ elapsed_seconds: 0.5, status_codes: { "200": 9000 } }),
-		tick({ elapsed_seconds: 1.0, status_codes: { "200": 18000 } }),
+		tick({ elapsed_seconds: 0, status_codes: { "200": 9000 } }),
+		tick({ elapsed_seconds: 1, status_codes: { "200": 18000 } }),
 	];
 
 	it("gives a 200s-only run its interval count in 2xx and zero in every other class", () => {
@@ -361,14 +395,14 @@ describe("stackStatusPoints", () => {
 	it("stacks the same counts cumulatively, bottom to top, for plotting", () => {
 		const { times, stacked } = stackStatusPoints(
 			buildStatusOverTime([
-				tick({ elapsed_seconds: 0.5, status_codes: { "200": 100, "404": 5 } }),
+				tick({ elapsed_seconds: 0, status_codes: { "200": 100, "404": 5 } }),
 				tick({
-					elapsed_seconds: 1.0,
+					elapsed_seconds: 1,
 					status_codes: { "200": 180, "404": 7, "500": 3, "0": 1 },
 				}),
 			])
 		);
-		expect(times).toEqual([0.5, 1.0]);
+		expect(times).toEqual([0, 1]);
 		// 2xx, +3xx, +4xx, +5xx, +err
 		expect(stacked).toEqual([
 			[100, 80],

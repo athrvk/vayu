@@ -18,6 +18,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -26,6 +27,22 @@ namespace vayu::http::detail {
 // Forward declaration
 struct TransferData;
 class DnsCache;
+
+/**
+ * @brief One transfer's connect-time state beyond the process-wide reserved
+ *        ports: what `apply_transport_policy` hands libcurl as
+ *        `CURLOPT_PREREQDATA`, so it must outlive `curl_easy_perform`.
+ *
+ * Only the single-request client builds one, for a `/import/fetch` reference
+ * (#2364); every other transfer passes none.
+ */
+struct ConnectedPeerCheck {
+    /// The rule a reference fetch runs under, or null for none.
+    const LocalPeerRule* local_peers = nullptr;
+    /// Set by the callback when `local_peers` refused the connection, so
+    /// `curl_to_error` can name that rule rather than libcurl's abort.
+    bool refused_local_peer = false;
+};
 
 /**
  * @brief Convert CURL error code to vayu Error
@@ -48,11 +65,16 @@ class DnsCache;
  *                it is named, and the toggle that would send it as typed is
  *                suggested only while `disableUrlEncoding` is off. May be null,
  *                and then libcurl's own text stands.
+ *
+ * @param peer_check The state the transfer's `apply_transport_policy` was
+ *                   handed, read to word a `LocalPeerRule` refusal as that
+ *                   rule. Null where the transfer carried none.
  */
 Error curl_to_error (CURL* curl,
 CURLcode code,
 const CurlErrorBuffer& errors,
-const Request* request = nullptr);
+const Request* request               = nullptr,
+const ConnectedPeerCheck* peer_check = nullptr);
 
 /**
  * @brief Put the transport policy on a handle: the protocols it may speak, TLS
@@ -69,10 +91,14 @@ const Request* request = nullptr);
  * recycles them across transfers), so a branch that left the option alone
  * would inherit whatever the previous policy put there.
  *
- * `CURLOPT_PREREQFUNCTION` is on every handle too: the connected-address
- * half of the loopback guard (`http/loopback_guard.hpp`), which refuses a
- * redirect or a resolved name that lands on Vayu's own port. `curl_to_error`
- * reports that abort as the same refusal `validate_transferable` gives.
+ * `CURLOPT_PREREQFUNCTION` is on every handle too, set here and nowhere else:
+ * the connected-address half of the loopback guard (`http/loopback_guard.hpp`),
+ * which refuses a redirect or a resolved name that lands on Vayu's own port.
+ * `curl_to_error` reports that abort as the same refusal
+ * `validate_transferable` gives. @p peer_check adds a `LocalPeerRule` on top
+ * for one transfer (#2364); `CURLOPT_PREREQDATA` is written on every call,
+ * null included, so a pooled handle never keeps a previous transfer's state.
+ * With a proxy in force the peer judged is the proxy, for both rules.
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
@@ -86,6 +112,8 @@ const Request* request = nullptr);
  *            typed text can name another scheme or host (#2465). Parsed only
  *            when the registry is non-empty, so the load path pays nothing for
  *            a feature it is not using.
+ * @param peer_check This transfer's connect-time state, or null. Must outlive
+ *                   the transfer; the callback writes its refusal into it.
  * @return The registry entry whose certificate was put on the handle, or null
  *         when none matched. Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the
@@ -94,7 +122,8 @@ const Request* request = nullptr);
 const ClientCertRule* apply_transport_policy (CURL* curl,
 const TransportPolicy& policy,
 bool verify_ssl,
-const std::string& url);
+const std::string& url,
+ConnectedPeerCheck* peer_check = nullptr);
 
 /**
  * @brief Get HTTP status text from status code

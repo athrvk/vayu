@@ -115,6 +115,11 @@ export const queryKeys = {
 		detail: (id: string) => [...queryKeys.runs.details(), id] as const,
 		report: (id: string) => [...queryKeys.runs.all, "report", id] as const,
 		timeSeries: (id: string) => [...queryKeys.runs.all, "timeSeries", id] as const,
+		// The History charts' one `maxPoints` read (#2547). Under `timeSeries(id)`
+		// so the run-scoped invalidation and removal reach it, and keyed by the
+		// point count so no read of another shape is ever answered from it.
+		timeSeriesDownsampled: (id: string, maxPoints: number) =>
+			[...queryKeys.runs.timeSeries(id), { maxPoints }] as const,
 		// The run's scraped server vitals - its own family, cached like the time
 		// series (a finished run's samples never change).
 		monitorSeries: (id: string) => [...queryKeys.runs.all, "monitorSeries", id] as const,
