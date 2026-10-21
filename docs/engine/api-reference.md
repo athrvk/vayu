@@ -3566,7 +3566,11 @@ server URL, a malformed section) has none. **`names`**, when present, names
 what the count dropped, never its value: `oauth2_unmapped_param`, whose
 `names` are the keys of the OAuth 2.0 request parameters a Postman parse did
 not carry, and `protocol_behavior_folder`, whose `names` are the folders or
-collection that declared a setting Vayu cannot apply.
+collection that declared a setting Vayu cannot apply. A Postman parse also
+counts `body_on_get` (#2540), named under `requests`: a GET or HEAD whose
+mapped body is not empty and whose resolved
+`protocolProfileBehavior.disableBodyPruning` is not boolean `true`, a body
+Postman drops before sending and Vayu sends. The parse maps the body as written.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
