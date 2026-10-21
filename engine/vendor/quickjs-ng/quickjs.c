@@ -22418,6 +22418,11 @@ typedef struct JSParseState {
     const uint8_t *buf_end;
     const uint8_t *eol;  // most recently seen end-of-line character
     const uint8_t *mark; // first token character, invariant: eol < mark
+    /* vayu patch (#2657): memo of the last identifier_line_start() answer;
+       NULL (zeroed by js_parse_init) means buf_start. Never saved or
+       restored with the parse state: it is only an accelerator. */
+    const uint8_t *line_cache_pos;
+    const uint8_t *line_cache_start;
 
     /* current function code */
     JSFunctionDef *cur_func;
@@ -24017,6 +24022,37 @@ static void emit_u16(JSParseState *s, uint16_t val)
 static void emit_u32(JSParseState *s, uint32_t val)
 {
     dbuf_put_u32(&s->cur_func->byte_code, val);
+}
+
+/* vayu patch (#2657): the start of the line holding ptr, for an identifier's
+   column. Scanning back to the line start for every identifier is quadratic
+   on a one-line (minified) file, so the previous answer is reused: a ptr in
+   [line_cache_start, line_cache_pos) is on the cached line, and a ptr at or
+   after line_cache_pos scans back only as far as line_cache_pos. Same result
+   as the full scan for every input: '\n' and '\r' both end a line, as in
+   js_parse_error. Retire when the vendored quickjs-ng carries upstream's
+   s->line_start tracking. */
+static const uint8_t *identifier_line_start(JSParseState *s, const uint8_t *ptr)
+{
+    const uint8_t *stop = s->buf_start;
+    const uint8_t *base = s->buf_start;
+    const uint8_t *p = ptr;
+
+    if (s->line_cache_pos) {
+        if (s->line_cache_start <= ptr && ptr < s->line_cache_pos)
+            return s->line_cache_start;
+        if (s->line_cache_pos <= ptr) {
+            stop = s->line_cache_pos;
+            base = s->line_cache_start;
+        }
+    }
+    while (p > stop && p[-1] != '\n' && p[-1] != '\r')
+        p--;
+    if (p == stop)
+        p = base;
+    s->line_cache_pos = ptr;
+    s->line_cache_start = p;
+    return p;
 }
 
 static void emit_source_loc_at(JSParseState *s, int line_num, int col_num)
@@ -27189,13 +27225,9 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
         {
             JSAtom name;
             int identifier_line_num = s->token.line_num;
-            const uint8_t *identifier_line_start = s->token.ptr;
-            while (identifier_line_start > s->buf_start &&
-                   identifier_line_start[-1] != '\n' &&
-                   identifier_line_start[-1] != '\r')
-                identifier_line_start--;
             int identifier_col_num =
-                (int)(s->token.ptr - identifier_line_start) + 1;
+                (int)(s->token.ptr -
+                      identifier_line_start(s, s->token.ptr)) + 1;
             if (s->token.u.ident.is_reserved) {
                 return js_parse_error_reserved_identifier(s);
             }
