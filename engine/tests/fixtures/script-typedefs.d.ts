@@ -842,10 +842,12 @@ declare const pm: {
 		/**
 		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.collectionVariables.set('base_url', 'https://api.example.com');
+		 * pm.collectionVariables.set('token', t, { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled collection variable, each value read as pm.collectionVariables.get() would answer it.
 		 * 
@@ -985,10 +987,12 @@ declare const pm: {
 		/**
 		 * Set an environment variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.environment.set('auth_token', response.token);
+		 * pm.environment.set('auth_token', response.token, { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled environment variable, each value read as pm.environment.get() would answer it.
 		 * 
@@ -1081,10 +1085,12 @@ declare const pm: {
 		/**
 		 * Set a global variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
+		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
+		 * 
 		 * Example:
-		 * pm.globals.set('api_key', 'new_key');
+		 * pm.globals.set('api_key', 'new_key', { secret: true });
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * A plain object of every enabled global variable, each value read as pm.globals.get() would answer it.
 		 * 
@@ -2234,10 +2240,12 @@ declare const pm: {
 		/**
 		 * Set a local variable: read before every other scope by pm.variables and {{name}} for the rest of the run, and never stored. Later reads answer the value as set; its string form is what {{name}} substitutes.
 		 * 
+		 * The optional third argument is read as on the other scopes, but this scope is never stored or masked, so a secret flag on it has no effect.
+		 * 
 		 * Example:
 		 * pm.variables.set('signature', sig);
 		 */
-		set(name: string, value: any): void;
+		set(name: string, value: any, options?: string | { type?: string; secret?: boolean }): void;
 		/**
 		 * Every enabled variable from every tier, merged in precedence order - each name resolves to what pm.variables.get() would answer.
 		 */
