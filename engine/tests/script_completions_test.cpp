@@ -667,6 +667,33 @@ TEST (ScriptCompletions, EveryOfferedCryptoMemberIsCallableInTheRuntime) {
     << "the signing surface changed - update this test and the docs it backs";
 }
 
+// `require` and crypto-js (#2578): every offered member is there at run time,
+// reached the way the label spells it.
+TEST (ScriptCompletions, EveryOfferedCryptoJsMemberIsBoundInTheRuntime) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label != "require" && label != "CryptoJS" && label.rfind ("CryptoJS.", 0) != 0) {
+            continue;
+        }
+        offered++;
+        const auto result = engine.execute_test (
+        "if (typeof " + label + " === 'undefined') throw new Error('not bound');",
+        request, response, env);
+        EXPECT_TRUE (result.success) << label << ": " << result.error_message;
+    }
+    EXPECT_EQ (offered, 30)
+    << "the crypto-js surface changed - update this test and the docs";
+}
+
 // The timers (#2577): every one offered is a function the runtime binds, and a
 // timer it queues runs before the script ends.
 TEST (ScriptCompletions, EveryOfferedTimerIsBoundAndRunsBeforeTheScriptEnds) {

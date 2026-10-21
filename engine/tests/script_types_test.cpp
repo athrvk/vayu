@@ -461,8 +461,8 @@ TEST (ScriptTypesTest, UnparseableParameterListsFallBackRatherThanBreakTheFile) 
     EXPECT_TRUE (contains (dts, "add(...args: any[])"));
 }
 
-// The declarations name the globals the sandbox lacks (`fetch`, `require`,
-// Postman's bundled `CryptoJS`, ...) so that using one is an error the editor can
+// The declarations name the globals the sandbox lacks (`fetch`, `process`,
+// Postman's bundled `moment`, ...) so that using one is an error the editor can
 // explain, rather than the silence the app's suppression of "Cannot find name"
 // would otherwise leave.
 //
@@ -515,6 +515,39 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 #endif
 }
 
+// The other direction (#2578): every module the declarations say `require()`
+// loads, the real script engine loads, so the editor cannot type a line the
+// runtime refuses.
+TEST (ScriptTypesTest, EveryDeclaredModuleLoadsInTheRuntime) {
+#ifdef VAYU_HAS_QUICKJS
+    const std::string dts = generate_script_typedefs ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+
+    const std::string declare = "declare module '";
+    size_t checked            = 0;
+    for (size_t pos = dts.find (declare); pos != std::string::npos;
+    pos             = dts.find (declare, pos + 1)) {
+        const size_t start = pos + declare.size ();
+        const std::string name = dts.substr (start, dts.find ('\'', start) - start);
+        const auto result = engine.execute ("if (typeof require('" + name +
+        "') !== 'object') throw new Error('not a module');",
+        ctx);
+        EXPECT_TRUE (result.success)
+        << "'" << name << "' is declared loadable but require() refuses it ("
+        << result.error_message << ")";
+        checked++;
+    }
+    EXPECT_GE (checked, 1u)
+    << "no module declaration was found - the scan read nothing";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
 /**
  * @brief The documentation comment directly above @p declaration, or empty.
  *
@@ -535,7 +568,8 @@ std::string documentation_above (const std::string& dts, const std::string& decl
 // itself names (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox). A script
 // imported from Postman reaches for these by habit, and the editor says what
 // to write instead on hover. Postman's pre-`pm.*` globals left this list when
-// they started running (#2577).
+// they started running (#2577), and `CryptoJS` when the require() shelf did
+// (#2578).
 //
 // The pairs are pinned here rather than read from the table, so a name dropped
 // from it, or reworded until it no longer names the replacement, fails. A name
@@ -549,7 +583,6 @@ TEST (ScriptTypesTest, EveryPostmanBundledLibraryIsAbsentAndNamesItsReplacement)
     };
     constexpr auto globals = std::to_array<Legacy> ({
     { "_", "require('lodash')" },
-    { "CryptoJS", "crypto" },
     { "tv4", "require('ajv')" },
     { "xml2Json", "require('xml2js')" },
     { "cheerio", "require('cheerio')" },
@@ -634,7 +667,34 @@ TEST (ScriptTypesTest, ThePostmanLegacyGlobalsAreDeclaredAsTheValuesTheyAre) {
     EXPECT_TRUE (contains (dts, "\turl: string;\n"));
     // What stays absent stays `never`.
     EXPECT_TRUE (contains (dts, "declare const fetch: never;\n"));
-    EXPECT_TRUE (contains (dts, "declare const CryptoJS: never;\n"));
+    EXPECT_TRUE (contains (dts, "declare const moment: never;\n"));
+}
+
+// `require` and crypto-js run (#2578), so they are declared as what they are:
+// `require('crypto-js')` answers the `CryptoJS` global's type, a name off the
+// shelf is a type error at the call, and a hasher's result has the
+// `toString(encoder)` every signing script calls.
+TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
+    const std::string dts = generate_script_typedefs ();
+
+    const std::string require =
+    "declare function require(name: 'crypto-js'): typeof CryptoJS;\n";
+    EXPECT_TRUE (contains (dts, require));
+    EXPECT_FALSE (contains (documentation_above (dts, require),
+    "Not available in the Vayu script sandbox."));
+
+    const std::string crypto_js = "declare const CryptoJS: {\n";
+    EXPECT_TRUE (contains (dts, crypto_js));
+    EXPECT_FALSE (contains (documentation_above (dts, crypto_js),
+    "Not available in the Vayu script sandbox."));
+    EXPECT_TRUE (contains (dts,
+    "\tHmacSHA256(message: string | object, key: string | object): { words: "
+    "number[], sigBytes: number, toString(encoder?: { stringify(wordArray: "
+    "any): "
+    "string }): string,"));
+    EXPECT_TRUE (contains (dts, "\t\tBase64: {\n"));
+    // `const lib = require('crypto-js')`, which the editor reads as an import.
+    EXPECT_TRUE (contains (dts, "declare module 'crypto-js' {\n\texport = CryptoJS;\n}\n"));
 }
 
 // `pm.cookies.jar` is listed in its own right *and* is the parent of the

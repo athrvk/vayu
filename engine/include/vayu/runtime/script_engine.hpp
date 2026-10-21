@@ -536,6 +536,16 @@ class ScriptEngine {
      */
     [[nodiscard]] size_t idle_runtime_count () const;
 
+    /**
+     * @brief How many times this process has evaluated the source of a
+     *        library `require()` loads (#2578).
+     *
+     * A library is evaluated on its first use in an execution and never when
+     * a context is built, which every script pays for; this is how a test
+     * tells the two apart.
+     */
+    [[nodiscard]] static size_t shelf_library_loads ();
+
     private:
     class Impl;
     std::unique_ptr<Impl> impl_;

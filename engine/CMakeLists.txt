@@ -690,6 +690,7 @@ if(QUICKJS_FOUND)
     # script_engine.cpp (issue #2092); they share pm/pm_internal.hpp.
     set(VAYU_QUICKJS_SOURCES
         src/runtime/script_engine.cpp
+        src/runtime/require_shelf.cpp
         src/runtime/pm/pm_cookies.cpp
         src/runtime/pm/pm_execution_metrics.cpp
         src/runtime/pm/pm_expect.cpp
