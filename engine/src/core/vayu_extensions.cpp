@@ -799,8 +799,7 @@ bool is_example_origin (const Json& value) {
     origin == constants::request_example::ORIGIN_USER;
 }
 
-/// One saved example as `POST /import/apply` takes it, or nothing. An absent
-/// `origin` stays absent, which the apply route reads as `import`.
+/// One saved example as `POST /import/apply` takes it, or nothing.
 std::optional<Json> example_of (const Json& example) {
     if (!example.is_object () || !is_string_member (example, "name")) {
         return std::nullopt;

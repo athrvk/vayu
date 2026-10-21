@@ -2955,11 +2955,10 @@ row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
 `verifySSL`, `stream`), every saved example with its headers and its `origin`
-(`"user"` or `"import"`, #2430: the importer hands it to
-[`POST /import/apply`](#post-importapply), so a re-import keeps the rows the next
-[spec sync](#post-specssync) must not touch; an `origin` that is neither is an
-unreadable example, and a document with none, as an older Vayu wrote, imports
-as `"import"`), and the mock mode with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
+(`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
+and a document with none, as an older Vayu wrote, imports as `"import"`), and
+the mock mode with the index of a `fixed` target. At the root,
+`x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
 folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
 folders included; `order` shares its parent's space with the requests'
