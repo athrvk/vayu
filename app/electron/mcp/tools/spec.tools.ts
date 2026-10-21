@@ -599,7 +599,7 @@ export const SPEC_TOOLS: McpTool[] = [
 	{
 		name: "unbind_spec",
 		category: "write",
-		invalidates: ["collection"],
+		invalidates: ["collectionRow"],
 		description: (config) =>
 			"Detach a collection from the OpenAPI document it is bound to. " +
 			GUARDED_WRITE_SENTENCE +

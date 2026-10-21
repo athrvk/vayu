@@ -3469,7 +3469,10 @@ export interface McpConnectResult {
  * `electron/mcp/data-changed.conformance.test.ts`.
  */
 export type McpDataEntity =
+	/** Collections, and anything under them: request lists, trash, compositions. */
 	| "collection"
+	/** One collection row and nothing under it: a create, an update, an unbind. */
+	| "collectionRow"
 	| "request"
 	| "environment"
 	| "run"

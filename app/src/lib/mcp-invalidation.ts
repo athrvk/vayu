@@ -60,21 +60,36 @@ const INVALIDATORS: Record<
 	 * section composes at all (the section is unmounted while collapsed), so the
 	 * cost is one round trip per open snippet.
 	 *
-	 * `prefetch.allRequests` for the reason its key comment gives: the warm-cache
-	 * pass succeeds once and would stay fresh forever, so a collection an agent
-	 * created mid-session never gets one - the same invalidation
-	 * `useCreateCollectionMutation` and `useRestoreTrashMutation` already do. The
-	 * pass is one `GET /requests` for the whole workspace, invalidated ahead of
-	 * `requests.all` so the mounted lists that refetch join it rather than each
-	 * making a call of their own (`requestsForCollection`). This family's tools
-	 * are the coarse, occasional ones (a create, an import, a spec sync), not the
-	 * ones an agent loops over row by row - which is exactly why the `request`
-	 * family below does *not* take this key.
+	 * The lists go through `invalidateAllRequestLists`, so the mounted ones that
+	 * refetch join one `GET /requests` for the whole workspace rather than each
+	 * making a call of their own. That is still a workspace-wide read, which is
+	 * why this family is only for the occasional tools (a delete, a move, an
+	 * import, a spec bind or sync, a trash restore or purge) and the per-row
+	 * collection writes an agent loops over declare `collectionRow` instead.
+	 *
+	 * The event's `collectionId` is not read here: each of these tools names a
+	 * different collection by it (the one deleted, a move's destination, a spec's
+	 * binder), and none of them changes that collection's list alone.
 	 */
 	collection: (queryClient) => {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 		invalidateAllRequestLists(queryClient);
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
+		invalidateCompositions(queryClient);
+	},
+
+	/*
+	 * `create_collection`, `update_collection` and `unbind_spec` write one
+	 * collection row and nothing beneath it, so no request list and no trash row
+	 * can have moved: a new collection holds no requests (its list is fetched
+	 * when the tree first mounts it), an update cannot reach a trashed row, and
+	 * an unbind leaves the requests' operation stamps in place. The same two
+	 * reads `useUpdateCollectionMutation` refreshes: the collections, and every
+	 * composition, because a collection's auth, headers, scripts and variables
+	 * are what its descendant requests compose against.
+	 */
+	collectionRow: (queryClient) => {
+		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 		invalidateCompositions(queryClient);
 	},
 

@@ -45,7 +45,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 	{
 		name: "create_collection",
 		category: "write",
-		invalidates: ["collection"],
+		invalidates: ["collectionRow"],
 		description: (config) =>
 			"Create a collection (the folder saved requests live in), with the variables, auth and elements (extractors, assertions, timers, scripts) every request inside it composes against. " +
 			GUARDED_WRITE_SENTENCE +
@@ -121,7 +121,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 	{
 		name: "update_collection",
 		category: "write",
-		invalidates: ["collection"],
+		invalidates: ["collectionRow"],
 		description: (config) =>
 			"Change a collection: its name, description, variables, auth or elements (extractors, assertions, timers, scripts) - the state every request inside it composes against. " +
 			GUARDED_WRITE_SENTENCE +

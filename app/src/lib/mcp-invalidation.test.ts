@@ -202,11 +202,39 @@ describe("invalidateForMcpEvent", () => {
 	});
 
 	test("a collection change re-runs the warm-cache pass", () => {
-		// The pass succeeds once and would stay fresh forever, so a collection an
-		// agent created mid-session never gets one - the same invalidation
-		// `useCreateCollectionMutation` and `useRestoreTrashMutation` do.
+		// Ahead of `requests.all`, so the mounted lists join one workspace call
+		// rather than each fetching (`invalidateAllRequestLists`).
 		const { keys } = keysFor({ entity: "collection" });
 		expect(keys).toContainEqual(queryKeys.prefetch.allRequests());
+	});
+
+	test("a coarse collection change ignores the collection it names", () => {
+		// `delete_collection`, `move_item` and the spec tools name a collection
+		// whose own list is not the only one they change. Mutation check: narrow
+		// this family to `listByCollection(event.collectionId)` and a cascade
+		// delete leaves every descendant's list fresh.
+		const { keys } = keysFor({ entity: "collection", collectionId: "col_1" });
+		expect(familyOf(keys, queryKeys.requests.all)).toEqual([queryKeys.requests.all]);
+		expect(keys).toContainEqual(queryKeys.prefetch.allRequests());
+	});
+
+	test("a collection-row write refetches the collections and their compositions", () => {
+		// The two reads `useUpdateCollectionMutation` refreshes: the row, and the
+		// chain every request below it composes against.
+		const { handled, keys } = keysFor({ entity: "collectionRow", collectionId: "col_1" });
+		expect(handled).toBe(true);
+		expect(keys).toEqual([queryKeys.collections.all, queryKeys.compose.all]);
+	});
+
+	test("a collection-row write takes no request, trash or warm-cache key", () => {
+		// Create, update and unbind change nothing under the row, so an agent
+		// renaming every collection in turn must not refetch the workspace's
+		// request lists once per call. Mutation check: call
+		// `invalidateAllRequestLists` from this family and both keys appear.
+		const { keys } = keysFor({ entity: "collectionRow", collectionId: "col_1" });
+		expect(familyOf(keys, queryKeys.requests.all)).toEqual([]);
+		expect(keys).not.toContainEqual(queryKeys.prefetch.allRequests());
+		expect(keys).not.toContainEqual(queryKeys.trash.all);
 	});
 
 	test("a request change leaves the warm-cache pass alone", () => {

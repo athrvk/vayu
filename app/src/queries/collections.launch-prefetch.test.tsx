@@ -34,6 +34,7 @@ import {
 	usePrefetchCollectionsAndRequests,
 } from "./collections";
 import { useImportMutation } from "./import";
+import { invalidateForMcpEvent } from "@/lib/mcp-invalidation";
 import { queryKeys } from "./keys";
 import { useBindSpecMutation, useSyncSpecMutation } from "./specs";
 import { QUERY_CACHE } from "@/config/cache";
@@ -345,6 +346,40 @@ describe("a collection write that changes no request", () => {
 		// invalidate the pass on create again and it is a workspace call.
 		expect(listRequestSummaries).not.toHaveBeenCalled();
 		expect(listRequests).not.toHaveBeenCalled();
+	});
+
+	it("fifty agent renames refetch the collections and no request list", async () => {
+		const client = await launched();
+		listCollections.mockClear();
+
+		act(() => {
+			for (let i = 0; i < 50; i++) {
+				invalidateForMcpEvent(client, {
+					entity: "collectionRow",
+					collectionId: THREE[i % THREE.length].id,
+				});
+			}
+		});
+		await waitFor(() => expect(listCollections).toHaveBeenCalled());
+		await waitFor(() => expect(client.isFetching()).toBe(0));
+
+		// Mutation check: have the `collectionRow` family call
+		// `invalidateAllRequestLists` and every rename is a workspace call.
+		expect(listRequestSummaries).not.toHaveBeenCalled();
+		expect(listRequests).not.toHaveBeenCalled();
+	});
+
+	it("leaves a coarse collection event refetching every list, in one call", async () => {
+		// A move, an import or a trash restore: the named collection's list is not
+		// the only one that changed.
+		const client = await launched();
+
+		act(() => {
+			invalidateForMcpEvent(client, { entity: "collection", collectionId: "c1" });
+		});
+		await settle(client);
+
+		expect(listRequestSummaries.mock.calls).toEqual([[]]);
 	});
 });
 

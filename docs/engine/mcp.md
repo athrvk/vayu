@@ -2473,8 +2473,8 @@ collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools/*.tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
 family after a call that did **not** return an error. The event names a family
-(`collection`, `request`, `environment`, `run`, `cookie`, `config`, `service`,
-`oauth`, `variables`)
+(`collection`, `collectionRow`, `request`, `environment`, `run`, `cookie`,
+`config`, `service`, `oauth`, `variables`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call
 itself named; it carries no engine data, so the
 renderer still reads every row through its query layer. The five hints are read
@@ -2503,7 +2503,14 @@ runners - `run_request`, `run_collection_smoke` and `run_collection` - because
 a script or extractor that sets a variable has the engine write it back to the
 environment, globals or collection row once the send finishes. It carries no
 hint: the event cannot say which of the three scopes moved. `start_load_run`
-persists nothing and stays `run` alone.
+persists nothing and stays `run` alone. `collectionRow` (issue #2546) is
+declared by `create_collection`, `update_collection` and `unbind_spec`, the
+writes that touch one collection row and nothing beneath it; the renderer
+refetches the collections and their compositions and no request list. Every
+other collection write (`delete_collection`, `move_item`, `import_document`,
+`bind_spec`, `sync_spec`, the two trash tools) declares `collection`, which
+refetches every request list, because what it changes reaches past the
+collection it names.
 
 **One field on the event is not a hint at all.** `startedRun` rides the `run`
 event of the two tools that *create* a run - `start_load_run` and
