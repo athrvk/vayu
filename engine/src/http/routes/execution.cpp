@@ -2869,14 +2869,7 @@ httplib::Response& res) {
     auto parsed =
     parse_request_json (req.body, "invalid_run_config", refuse_overdeep_run_data);
     if (!parsed) {
-        vayu::utils::log_warning (
-        "http", "POST /runs - " + error_message_of (parsed.error ().body));
-        res.status = parsed.error ().status;
-        // `replace`, as `send_error` dumps: a parse error quotes the bytes it
-        // stopped at, which need not be UTF-8.
-        res.set_content (parsed.error ().body.dump (-1, ' ', false,
-                         nlohmann::json::error_handler_t::replace),
-        "application/json");
+        refuse_request_body (res, "POST /runs", parsed.error ());
         return;
     }
     nlohmann::json json = std::move (*parsed);

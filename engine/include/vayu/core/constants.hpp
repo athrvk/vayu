@@ -1161,9 +1161,10 @@ static_assert (MAX_BYTES > scenario::MAX_CONFIGURABLE_DATA_BYTES + IMPORT_HEADRO
 "a collection run carrying the largest data set maxScenarioDataBytes allows "
 "must still fit under the body ceiling");
 
-/// Deepest a `POST /runs` or `POST /execute` body may nest (#2417). A stack
-/// bound, not a policy: nlohmann parses iteratively but `dump ()` and the copy
-/// constructor recurse, and both routes do each to the whole body. A data cell
+/// Deepest a JSON request body may nest where `parse_request_json` reads it
+/// (#2417). A stack bound, not a policy: nlohmann parses iteratively but
+/// `dump ()` and the copy constructor recurse, and the routes do each to the
+/// whole body or to a field of it. A data cell
 /// (`spec_document::MAX_READ_DEPTH`, #2362) sits up to four levels below the
 /// body (`scenario` > `data` > row > cell), so a cell at its own bound must
 /// still fit under this one.
