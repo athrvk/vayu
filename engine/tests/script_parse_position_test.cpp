@@ -64,31 +64,32 @@ class ScriptParsePositionTest : public ::testing::Test {
 };
 
 /** Throws a `ReferenceError` on the identifier `missing` and keeps its stack. */
-const std::string CATCH_MISSING =
+constexpr const char* CATCH_MISSING =
 "try { missing; } catch (e) { pm.environment.set('stack', e.stack); }";
 
 TEST_F (ScriptParsePositionTest, AnErrorOnALaterLineNamesItsLineAndColumn) {
-    EXPECT_EQ (stack_of ("var a=1;\nvar b=2;\n  " + CATCH_MISSING),
+    EXPECT_EQ (stack_of (std::string ("var a=1;\nvar b=2;\n  ") + CATCH_MISSING),
     "    at <anonymous> (<script>:3:9)\n    at <eval> (<script>:4:1)\n");
 }
 
 // Both characters end a line for the column, as they do for the line number.
 TEST_F (ScriptParsePositionTest, CarriageReturnLineEndingsGiveTheSamePosition) {
-    EXPECT_EQ (stack_of ("var a=1;\r\nvar b=2;\r\n  " + CATCH_MISSING),
+    EXPECT_EQ (stack_of (std::string ("var a=1;\r\nvar b=2;\r\n  ") + CATCH_MISSING),
     "    at <anonymous> (<script>:3:9)\n    at <eval> (<script>:4:1)\n");
-    EXPECT_EQ (stack_of ("var a=1;\rvar b=2;\r  " + CATCH_MISSING),
+    EXPECT_EQ (stack_of (std::string ("var a=1;\rvar b=2;\r  ") + CATCH_MISSING),
     "    at <anonymous> (<script>:3:9)\n    at <eval> (<script>:4:1)\n");
 }
 
 TEST_F (ScriptParsePositionTest, AnErrorOnAOneLineScriptNamesItsColumn) {
-    EXPECT_EQ (stack_of ("var a=1;var b=2;a=b+a;" + CATCH_MISSING),
+    EXPECT_EQ (stack_of (std::string ("var a=1;var b=2;a=b+a;") + CATCH_MISSING),
     "    at <anonymous> (<script>:1:49)\n    at <eval> (<script>:2:1)\n");
 }
 
 // An arrow function's parameter list is scanned ahead and then parsed again,
 // so the parser revisits earlier source after later source was measured.
 TEST_F (ScriptParsePositionTest, AnArrowFunctionOnOneLineKeepsItsPositions) {
-    EXPECT_EQ (stack_of ("var f=(a,b)=>a+b;var g=(p)=>p;f(1,2);g(3);" + CATCH_MISSING),
+    EXPECT_EQ (
+    stack_of (std::string ("var f=(a,b)=>a+b;var g=(p)=>p;f(1,2);g(3);") + CATCH_MISSING),
     "    at <anonymous> (<script>:1:69)\n    at <eval> (<script>:2:1)\n");
     EXPECT_EQ (stack_of ("var f=(a,b)=>a+b+missing;try{f(1,2)}catch(e){"
                          "pm.environment.set('stack',e.stack)}"),
@@ -103,7 +104,7 @@ TEST_F (ScriptParsePositionTest, ALongLineAfterALineBreakIsMeasuredFromItsOwnSta
     for (int i = 0; i < 50; ++i) {
         script += "a=a+a;";
     }
-    EXPECT_EQ (stack_of (script + CATCH_MISSING),
+    EXPECT_EQ (stack_of (script + std::string (CATCH_MISSING)),
     "    at <anonymous> (<script>:2:307)\n    at <eval> (<script>:3:1)\n");
 }
 
@@ -115,7 +116,7 @@ TEST_F (ScriptParsePositionTest, ALongLineAfterALineBreakIsMeasuredFromItsOwnSta
 TEST_F (ScriptParsePositionTest, ALongOneLineScriptParsesInLinearTime) {
     constexpr std::size_t STATEMENTS = 70'000;
     std::string script               = "var a=1,b=2,c=3;";
-    script.reserve (STATEMENTS * 6 + 64);
+    script.reserve ((STATEMENTS * 6) + 64);
     for (std::size_t i = 0; i < STATEMENTS; ++i) {
         script += "a=b+c;";
     }
