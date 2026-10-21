@@ -423,7 +423,8 @@ High-performance in-memory metrics collection optimized for 60k+ RPS:
   gave up. A request a Stop cancelled or one refused before the wire (the `maxInFlight` cap,
   an invalid URL, a refused header, a data-binding failure) has no duration and is not a
   sample. The percentiles, the max and the mean share this one population (the mean divides
-  by the sample count, not by successes); see
+  by the sample count, not by successes). A stored error row (`results.latency_ms`) carries
+  the same duration, and `0` where there is none; see
   [Latency population](api-reference.md#latency-population).
 - **Rich counters**: bytes sent/received, dropped requests (backpressure), queue-wait average,
   peak in-flight, and a full per-status-code distribution

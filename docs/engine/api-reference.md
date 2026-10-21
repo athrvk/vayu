@@ -8930,6 +8930,20 @@ stay answered-only: a request that failed has no connect, TLS or first-byte
 split to report. A scenario step's histogram follows the same rule as the
 run's.
 
+A stored error row carries the same duration (#2412): its `latencyMs` in
+`results[]`, the Samples tab, and the `results.latency_ms` column hold the
+time until the transfer gave up, so a request that timed out at 2000 ms is
+stored at about 2000 ms. A request with no duration (refused before the wire,
+or cancelled at a run's natural end) is stored at `0`. The row has no other
+way to say "no duration", and `0` can also be a real reading under a coarse
+clock, so the two cannot be told apart from a stored row; a load run stored by
+an engine before #2412 holds `0` for every error. That bounds one report: a
+run with **no summary** (still running, or the engine died before writing one)
+is reported from its stored rows alone, and there every stored row, a `0`
+included, is in the percentiles and the mean, which divides by the rows stored
+rather than by this population. A run that reached a terminal status reports
+from its summary, which this does not affect.
+
 The sequential collection runner follows the same population, with two differences:
 its `latency` block is computed **exact nearest-rank** over every sent step's duration
 rather than from an HDR histogram, and a run in which no step sent stores a count of `0`

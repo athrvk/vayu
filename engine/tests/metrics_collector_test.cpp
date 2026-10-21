@@ -9,10 +9,13 @@
 
 #include <atomic>
 #include <map>
+#include <memory>
 #include <thread>
 #include <vector>
 
 #include "optional_assert.hpp"
+#include "temp_database.hpp"
+#include "vayu/db/database.hpp"
 
 using namespace vayu::core;
 
@@ -751,6 +754,66 @@ TEST_F (MetricsCollectorTest, StoresAllErrors) {
     EXPECT_EQ (errors[0].error_message, "Timeout error");
     EXPECT_EQ (errors[1].error_code, vayu::ErrorCode::ConnectionFailed);
     EXPECT_EQ (errors[2].error_code, vayu::ErrorCode::DnsError);
+}
+
+// A stored error row carries the same duration the latency population
+// counted, so the Samples tab and the no-summary report read it too (#2412).
+class MetricsCollectorFlushTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH  = "test_metrics_collector_flush.db";
+    static constexpr const char* RUN_ID   = "run_flush";
+    static constexpr double TIMEOUT_MS    = 2000.0;
+    static constexpr double QUEUE_WAIT_MS = 30.0;
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+
+        vayu::db::Run run;
+        run.id              = RUN_ID;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Completed;
+        run.config_snapshot = R"({"url":"https://x.test/","method":"GET"})";
+        run.start_time      = 100;
+        run.end_time        = 200;
+        db_->create_run (run);
+    }
+
+    void TearDown () override {
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    /// The run's stored rows, after the collector has flushed them.
+    std::vector<vayu::db::Result> flushed (MetricsCollector& collector) {
+        collector.flush_to_database (*db_);
+        return db_->get_results (RUN_ID);
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+};
+
+TEST_F (MetricsCollectorFlushTest, ATimedOutTransferIsStoredAtItsDuration) {
+    MetricsCollector collector (RUN_ID);
+    collector.record_error (vayu::ErrorCode::Timeout, "timed out", "{}",
+    nullptr, AttemptDuration{ TIMEOUT_MS, QUEUE_WAIT_MS });
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].status_code, 0);
+    EXPECT_EQ (rows[0].error, "timed out");
+    EXPECT_DOUBLE_EQ (rows[0].latency_ms, TIMEOUT_MS);
+}
+
+TEST_F (MetricsCollectorFlushTest, AnErrorThatNeverLeftIsStoredWithNoDuration) {
+    MetricsCollector collector (RUN_ID);
+    collector.record_error (vayu::ErrorCode::InvalidUrl, "refused", "{}");
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), 1u);
+    EXPECT_EQ (rows[0].error, "refused");
+    EXPECT_DOUBLE_EQ (rows[0].latency_ms, 0.0);
 }
 
 // ============================================================================

@@ -771,6 +771,9 @@ std::optional<AttemptDuration> attempt) {
         std::lock_guard<std::mutex> lock (errors_mutex_);
         if (config_.max_errors == 0 || errors_.size () < config_.max_errors) {
             ResultRecord record (now_ms (), code, message);
+            if (attempt) {
+                record.latency_ms = attempt->latency_ms;
+            }
             record.trace_data = trace_data;
             record.capture    = std::move (captured);
             errors_.push_back (std::move (record));
@@ -1172,7 +1175,7 @@ size_t MetricsCollector::flush_to_database (db::Database& db) {
             db_result.timestamp   = error.timestamp;
             db_result.status_code = 0;
             db_result.status_text = vayu::http::status_text (0);
-            db_result.latency_ms  = 0.0;
+            db_result.latency_ms  = error.latency_ms;
             db_result.error       = error.error_message;
             db_result.trace_data  = error.trace_data;
             batch.push_back (std::move (db_result));

@@ -1780,7 +1780,7 @@ Individual request outcomes - all errors plus sampled successes (sampling is con
 | `timestamp`   | INTEGER    | Unix ms                                                      |
 | `status_code` | INTEGER    | HTTP status, or **0 for transport errors** (so totals reconcile) |
 | `status_text` | TEXT       | Wire reason phrase or canonical IANA text                    |
-| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time |
+| `latency_ms`  | REAL       | **Perceived** latency (`completion − submitted_at`), not wire time. On a load run's error row, the time until the transfer gave up (#2412); `0` for a request with no duration, which a real `0` reading cannot be told apart from (see [Latency population](api-reference.md#latency-population)) |
 | `error`       | TEXT       | Error message for failures; empty on success                 |
 | `trace_data`  | TEXT       | JSON (headers/body/timing breakdown) - design mode + errors + slow samples |
 
