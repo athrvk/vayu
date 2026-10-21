@@ -22,21 +22,28 @@
  * bearer token typed literally is exactly as sensitive as one that came from a
  * `{{token}}`.
  *
+ * **It composes the editor, not the saved row** (#2638), the way Send does:
+ * see `code-composition.ts`. Templated mode stays on the saved row - there is
+ * no RequestState-to-Request mapping to feed it the draft without a second
+ * field list - and both saved-row cases say so under the snippet.
+ *
  * Composing happens when the section is expanded, when the user asks for it
- * again, and when a committed write (the renderer's own PUT or an MCP agent's)
- * lands on this request, never per keystroke: the section is only mounted
- * while expanded (see `Section.tsx`) and the query is `staleTime: Infinity`
- * behind an explicit refresh or an invalidation (see
- * `queries/compose-invalidation.ts`).
+ * again, when a builder takes the request on (a new key), and when a committed
+ * write (the renderer's own PUT or an MCP agent's) lands on this request, never
+ * per keystroke: the section is only mounted while expanded (see `Section.tsx`)
+ * and the query is `staleTime: Infinity` behind an explicit refresh or an
+ * invalidation (see `queries/compose-invalidation.ts`). The autosave PUT's
+ * invalidation runs the same query function, which reads the draft again, so
+ * an editor-composed snippet follows the editor to within the autosave delay.
  */
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, RefreshCw, Eye, EyeOff } from "lucide-react";
-import { apiService } from "@/services/api";
 import { queryKeys } from "@/queries/keys";
 import { useRequestQuery, useCollectionAncestors } from "@/queries";
 import { useSessionStore } from "@/stores";
+import { useLiveCommandSurfaceStore } from "@/lib/commands/live-surfaces";
 import { useCopy } from "@/hooks/useCopy";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
 import {
@@ -59,10 +66,14 @@ import {
 } from "@/services/codegen";
 import type { SnippetRequest } from "@/services/codegen";
 import { SectionEmpty, SectionLoading } from "./Section";
+import { composeForCode } from "./code-composition";
 import { templatedRequest } from "./templated-request";
 import type { ContextBarSectionProps } from "./types";
 
 type Mode = "resolved" | "templated";
+
+/** Shown under a snippet built from the saved row, which trails the editor. */
+const SAVED_ROW_NOTE = "From the saved request. Unsaved changes are not in this snippet.";
 
 export function CodeSection({ tab }: ContextBarSectionProps) {
 	const [target, setTarget] = useState<CodeTargetId>("curl");
@@ -77,14 +88,21 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 		collectionId: request?.collectionId || undefined,
 	});
 
+	const requestId = request?.id ?? "";
+	// Flips when a builder takes this request on or lets it go, not per keystroke:
+	// the slot is rewritten only when the builder's request id changes.
+	const editorHeld = useLiveCommandSurfaceStore(
+		(s) => !!requestId && s.editorDraft?.requestId === requestId
+	);
+
 	const composed = useQuery({
-		queryKey: queryKeys.compose.forRequest(request?.id ?? "", activeEnvironmentId),
-		queryFn: () =>
-			apiService.composeRequest({
-				requestId: request!.id,
-				...(activeEnvironmentId ? { environmentId: activeEnvironmentId } : {}),
-			}),
-		enabled: mode === "resolved" && !!request?.id,
+		queryKey: queryKeys.compose.forRequest(
+			requestId,
+			activeEnvironmentId,
+			editorHeld ? "editor" : "saved"
+		),
+		queryFn: () => composeForCode(requestId, activeEnvironmentId),
+		enabled: mode === "resolved" && !!requestId,
 		// Never refetched on its own: a compose is a round trip, and the section
 		// would otherwise pay one per keystroke behind it (#1310). It is refreshed
 		// by an explicit act instead - the user's refresh button, or an
@@ -104,14 +122,16 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 	 * because `POST /compose` deliberately does not carry the flag (see the
 	 * `stream` column in engine types.hpp): a composed payload is handed
 	 * straight to `/execute` by callers that would then get a `202` they never
-	 * asked to parse. The setting lives on the row, which this component
-	 * already has, so the snippet reads it from there in both modes.
+	 * asked to parse. It comes from whatever the payload was composed from -
+	 * the draft, or else the row - and the jar note below reads the same.
 	 */
+	const editorSettings = mode === "resolved" ? composed.data?.editorSettings : null;
+	const settings = editorSettings ?? request;
 	const source: SnippetRequest | null =
 		mode === "templated"
 			? templatedRequest(request, ancestors)
 			: composed.data
-				? { ...(composed.data as SnippetRequest), stream: request.stream }
+				? { ...(composed.data.payload as SnippetRequest), stream: settings.stream }
 				: null;
 
 	const secrets = collectSecrets(getAllVariables(), source?.auth);
@@ -217,6 +237,9 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 							/>
 						</div>
 					</div>
+					{!editorSettings && (
+						<p className="text-label text-muted-foreground m-0">{SAVED_ROW_NOTE}</p>
+					)}
 					{snippet.masked && (
 						<p className="text-label text-muted-foreground m-0">
 							Secrets are hidden. Reveal them before running this.
@@ -235,7 +258,7 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 					 * exactly what the snippet shows, so it says that instead.
 					 */}
 					<p className="text-label text-muted-foreground m-0">
-						{request.disableCookies
+						{settings.disableCookies
 							? "The cookie jar is off for this request, so Vayu attaches no cookies beyond the headers shown."
 							: "Cookies from the jar are attached when the request is sent and are not part of this snippet."}
 					</p>

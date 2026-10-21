@@ -194,7 +194,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Variables used (`variables`) | `VariablesSection.tsx` - the variables this request references, resolved or not, with the full in-scope set behind a disclosure and a quick editor over them (below). The `id` stays `variables` - it keys the collapsed state. Quiet (`{empty:"none"}`) only when the request references nothing *and* nothing else is in scope; a request that references none while the workspace defines some still gets the disclosure, so it stays `"content"`. |
 | Auth (`auth`) | `AuthContextSection.tsx` - the effective auth mode and where it came from, via the shared `resolveAuthSource` walk, so it cannot disagree with what is sent. For OAuth 2.0 it embeds `TokenStatusRow` (the Auth tab's own control) for token state, fetch and clear. Declares no `useRelevance`, always `"content"`. |
 | Cookies for this host (`cookies`) | `CookiesSection.tsx` - the active environment's jar filtered to the request's host, with a per-scope clear. Host filtering is an **approximation**, stated in the UI: libcurl applies the real domain/path/secure rules at transfer time. Hidden before the URL resolves to a host; quiet (`{empty:"none"}`) for a host with an empty jar. |
-| Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below). Declares no `useRelevance`: it is the one section whose answer costs a `POST /compose` round trip, so a hook that decided whether it had anything to say would have to compose to find out, on every request tab, for a section that is collapsed by default (see above). |
+| Code (`code`) | `CodeSection.tsx` - copy-as-curl / copy-as-fetch (below), composed from the editor's draft as Send composes it. Declares no `useRelevance`: it is the one section whose answer costs a `POST /compose` round trip, so a hook that decided whether it had anything to say would have to compose to find out, on every request tab, for a section that is collapsed by default (see above). |
 | GraphQL (`graphql`) | `GraphQLSection.tsx` - schema status, the age of the schema in hand, the endpoint, and an outline of the operations the stored document defines. It carries **no Refresh**: the one it had stood beside the Query header's whenever the body panel was on screen with the bar open, and could never stand without it, since the button was gated on a schema-cache field only `GraphQLBody` set, and only for a non-empty URL (#1224). Status belongs in the bar; *browsing* the schema does not - that is the explorer docked beside the query editor (below). `appliesTo` sees only the tab, which carries no body mode, so it still applies to every request tab; `useGraphQLRelevance` narrows that afterward and hides the section outright off a non-GraphQL body, rather than rendering to say the request is not GraphQL. Because that verdict answers from the same `useRequestQuery` data the section itself reads, a REST tab never requests the section's lazy ~320KB chunk (#1146) at all - it used to arrive the moment the expanded section mounted just to say so (#1310). The outline reads the **stored** request, since the bar sits outside `RequestBuilderProvider` and cannot see the editor's live buffer; autosave keeps the two within a second or two. Each outline row is a button that **scrolls the query editor to that operation** and focuses it, from a hidden Body tab too - the provider brings the tab forward first, because the editor is unmounted anywhere else and revealing into an editor nobody can see is the silent-failure alternative. The row sends the operation's *name*, not the line it drew, and `findOperationLine` resolves it against the live buffer; an operation renamed since the outline was drawn reaches the polite live region instead of scrolling to whatever now sits on that line. The channel is `lib/graphql/reveal-store.ts` (below). |
 | Recent sends (`recent-sends`) | `RecentSendsSection.tsx` - the last five design runs of this request, newest first: status chip, latency and age, each row opening that run in a History tab. One `GET /runs` call and no report fetch - status and latency ride on each row as `resultSummary` (see below). A run with no stored result reads "Sending…" or "No result" rather than a status-0 chip, which the wire uses for "reached no server". Quiet (`{empty:"not sent yet"}`) when nothing has been sent - the list query behind the verdict is the section's own, the one page of `GET /runs` it would make on expansion anyway, so a collapsed section costs one list call and an expanded one costs nothing extra. |
 
@@ -239,7 +239,7 @@ The row and the commit are shared, not per section: `VariableRow.tsx` draws it (
 
 #### Code section and `services/codegen/`
 
-Snippets are generated from **`POST /compose`'s output** - the request with `{{variables}}` substituted and `inherit` auth walked by the engine that will send it - so what you paste is what Vayu would put on the wire. A **Templated** mode generates from the stored request instead, references intact, for pasting into a bug report. Composing happens on expand and on an explicit recompose, never per keystroke (the section only mounts while expanded, and the query is `staleTime: Infinity`).
+Snippets are generated from **`POST /compose`'s output** - the request with `{{variables}}` substituted and `inherit` auth walked by the engine that will send it - so what you paste is what Vayu would put on the wire. **What is composed is the editor's draft, not the saved row** (#2638): the bar sits outside `RequestBuilderProvider`, so the builder publishes its draft and collection chain through the `editorDraft` live surface (`EditorDraftSurface.tsx`, see [the command registry](#command-registry-libcommands) below), and `code-composition.ts` builds the inline body with `buildComposeBody` from the inputs Send gives it - the same request, unsaved edits included, and the `stream` flag and jar note read from the draft too. With no builder holding the request (one still mounting, or a deleted request kept on screen for its draft) it composes the stored row by id and says under the snippet that it is the saved request's, since that trails the editor. A **Templated** mode generates from the stored request instead, references intact, for pasting into a bug report; it stays on the stored row (there is no `RequestState` to `Request` mapping to feed it the draft without a second field list) and carries the same saved-request note. Composing happens on expand, on an explicit recompose, when a builder takes the request on, and on a committed write's invalidation (the autosave PUT included, which re-reads the draft), never per keystroke (the section only mounts while expanded, and the query is `staleTime: Infinity`).
 
 `services/codegen/` holds the generators, closing the symmetry with `services/curl/`, which parses curl *in* and generated nothing out. Each target is a pure function of a `SnippetRequest`; `CODE_TARGETS` is the registry, and adding a target is one entry plus one function. Auth is flattened into headers/query/`-u` in `prepare.ts` rather than per target, because the engine keeps `auth` beside the request and applies it at send time: a snippet built from the composed *headers* alone would authenticate in Vayu and 401 in a terminal. Modes no static command can reproduce produce a note instead of a silent drop: OAuth 2.0 (the engine fetches the token at send time) and the modes Vayu does not send at all (digest, AWS, NTLM, Hawk, OAuth 1.0, EdgeGrid, JWT bearer), which the note names with their registry label and says Vayu does not send, so the snippet matches the request Vayu sends without auth (issue #2474). `prepare.ts` skips an auth header the request already carries (bearer or basic over a typed `Authorization`, an API-key header over a typed header of that name, matched case-insensitively and leaving `basicAuth` empty so `-u`, `-a`, `auth=` and `btoa` stay unused), as the engine's `apply_auth` does, so a snippet never sends two lines where Vayu sends one (issue #2475; pinned by `engine/tests/fixtures/auth-header-precedence.json`). The fetch and Python targets add a note when a header value (an auth-derived one included) holds a character above U+00FF, which those clients cannot send, or one in U+0080 to U+00FF, which they send as Latin-1 where Vayu sends UTF-8; the value is never transcoded, and curl carries no such note. `prepare.ts`'s implied Content-Type table mirrors the engine's exactly - `json`, GraphQL and JSON-RPC as `application/json`, XML as `application/xml` - so a snippet of a json-mode body carries the header the engine would add, and pasting it back through `parseCurl` reads it as json rather than text (issue #1445). `SnippetRequest.params` carries a request's path rows (issue #1764), and `prepare.ts` fills the URL's `:name` segments from them with `substitutePathVariables` - the engine's rule: the last enabled row with the key answers, and its value is percent-encoded with Postman's path encode set (`postman-url-encoder`'s `PATH_ENCODE_SET`: controls, non-ASCII, space, `"`, `<`, `>`, `` ` ``, `#`, `?`, `{`, `}`; a `/` makes more segments, `@ : % !'()*` and the rest go out as typed, and a `{{variable}}` token is kept verbatim); an empty value or no enabled row leaves `:name` literal, and a `.suffix` after the name stays. The templated view and the builder's Copy as cURL pass the rows; the resolved view's composed URL is already substituted. `prepare.ts` then runs `resolveUrlTemplate` over the substituted URL with the `{{token}}`s left in place (issue #2465), so the snippet carries the line Vayu sends - the literal text around a token encoded by its component's set, a head backslash a `/`, the host lowercased and punycoded - and under `disableUrlEncoding` the URL as typed. A request with `disableUrlEncoding` (issue #1765) passes the flag on `SnippetRequest`, and `prepare.ts` then substitutes each value as typed - no path encode set at all, as Postman's `toNodeUrl (url, disableEncoding)` skips `encodePath` - and appends a query-located API key raw, as the engine does; otherwise that key and value are written with Postman's query rule (`encodeQueryComponent`, issue #1771: `|`, `+` and `=` in a value go out raw), the engine's `append_query_param`; the Code section's jar note says the jar is off for a request with `disableCookies`, since the snippet is then the whole request. `followRedirects` is the same split curl's own default forces the other way from `verifySSL`: curl does not follow unless told to, so `-L` is emitted for the common (following) case rather than only the departure from it.
 
@@ -1393,9 +1393,10 @@ in step or could enumerate them.
   a section added there appears here without an edit and cannot be named differently.
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
-- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Three
-  named slots: start-load-test and send, contributed by the mounted request builder, and
-  export-run, contributed by a finished load run's Export menu.
+- **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Four
+  named slots: start-load-test and send, contributed by the mounted request builder,
+  export-run, contributed by a finished load run's Export menu, and the builder's editor draft,
+  read by the context bar's Code section rather than by a command.
 
 Two rules make it work without a dependency-injection tangle:
 
@@ -1444,17 +1445,28 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
   run tab's menu and the dashboard's never hold the slot at once; the identity-checked clear
   covers the hand-over.
 
+  The fourth slot, `editorDraft` (#2638), is a read rather than a command, and is not on
+  `CommandSurfaces`. The context bar's Code section has Send's live-draft problem - a snippet of
+  the saved row is the old URL after an edit - so the builder publishes a getter over its draft
+  and the collection chain it composes Send with (`useRegisterEditorDraftSurface`, mounted by
+  `modules/request-builder/components/EditorDraftSurface.tsx`), and the section builds its compose
+  body from it with `buildComposeBody`, the builder Send uses. The draft sits in a ref behind the
+  getter, so typing writes no store; the slot is republished only when the builder's request id
+  changes, and `editorDraftFor(requestId)` answers only for the draft whose own id matches.
+
 The rejected alternative is worth naming, because it is the tempting one: reading the draft out
 of the provider from outside it, or recomposing the payload inside the command, would be a second
 copy of `buildExecBody` and of the run policy - the "hand-rolled copy of a primitive" defect this
-registry exists to remove.
+registry exists to remove. The `editorDraft` read does not reopen that door: what it hands out is
+the builder's state, and the body is still built by the one shared builder.
 
 The channel is deliberately a **closed union of named slots**, not a registry of arbitrary named
 surfaces. Send had the same live-draft problem, and #1243 gave it the second slot rather than a
-second channel; #2139 gave the run export the third. `LiveSurfaceSlot` is the keys of one handler
-table in `live-surfaces.ts` - `"startLoadTest" | "sendRequest" | "exportRun"` - and nothing else,
-so a fourth feature with this problem is a decision taken there, not a name a caller can invent by
-passing a string.
+second channel; #2139 gave the run export the third and #2638 the editor draft the fourth.
+`LiveSurfaceSlot` is the keys of one handler table in `live-surfaces.ts` -
+`"startLoadTest" | "sendRequest" | "exportRun" | "editorDraft"` - and nothing else, so a fifth
+feature with this problem is a decision taken there, not a name a caller can invent by passing a
+string.
 
 Consumers: `modules/palette/sources/commandItems.ts` (the Commands and Settings groups) and
 `hooks/useMenuActions.ts` (Preferences… → `open-settings`). `lib/commands/registry.test.ts` walks
@@ -1467,6 +1479,10 @@ absent while the URL is empty, while a send is already in flight, and while this
 stream is open. `modules/history/main/components/RunExportMenu.test.tsx` holds the export slot:
 filled while the menu is mounted, cleared on unmount, withdrawn while an export is in flight, and
 delivering with the menu's comparison toggle.
+`modules/request-builder/editor-draft-surface.test.tsx` holds the draft slot: the read is the draft
+as edited with its chain, one publication across edits, republished on a request switch, refused
+for another request, cleared on unmount. `code-section-send-parity.test.tsx` beside it drives Send
+and the Code section with one draft and asserts the two compose bodies are equal.
 
 ## Tab Breadcrumb (`components/shared/TabBreadcrumb.tsx`)
 

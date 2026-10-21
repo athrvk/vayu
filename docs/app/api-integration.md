@@ -1361,8 +1361,9 @@ export const API_ENDPOINTS = {
    client-side `{{variable}}` resolution), built by `buildComposeBody`
    (`modules/request-builder/utils/compose-body.ts`, issue #2638). It is the
    one writer of the inline compose body: Send, the streaming Send, the load
-   run and the History replay all build through it, so a field added there
-   reaches every one of them
+   run and the History replay all build through it, and so does the context
+   bar's Code section for the editor's draft, so a field added there reaches
+   every one of them
 3. **Composition**: `apiService.composeRequest()` → `POST /compose` - the
    engine resolves `{{variables}}` and `inherit` auth against the request's
    `collectionId` chain and the active `environmentId`, and returns the

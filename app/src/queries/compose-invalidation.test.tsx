@@ -43,8 +43,8 @@ vi.mock("@/services/api", () => ({
 	},
 }));
 
-const first = queryKeys.compose.forRequest("req_1", "env_1");
-const second = queryKeys.compose.forRequest("req_2", "env_1");
+const first = queryKeys.compose.forRequest("req_1", "env_1", "editor");
+const second = queryKeys.compose.forRequest("req_2", "env_1", "editor");
 
 function makeClient() {
 	const client = new QueryClient({

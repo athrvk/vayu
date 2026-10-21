@@ -126,8 +126,8 @@ describe("useUpdateRequestMutation invalidates only the affected lists", () => {
 		updateRequest.mockResolvedValue(req("req_1", "col_a"));
 		const client = makeClient();
 		seed(client);
-		const written = queryKeys.compose.forRequest("req_1", "env_1");
-		const other = queryKeys.compose.forRequest("req_2", "env_1");
+		const written = queryKeys.compose.forRequest("req_1", "env_1", "editor");
+		const other = queryKeys.compose.forRequest("req_2", "env_1", "editor");
 		client.setQueryData(written, {});
 		client.setQueryData(other, {});
 

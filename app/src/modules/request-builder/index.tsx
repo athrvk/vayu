@@ -27,6 +27,7 @@ import RequestBuilderLayout from "./components/RequestBuilderLayout";
 import LoadTestConfigDialog from "./components/LoadTestConfigDialog";
 import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
+import EditorDraftSurface from "./components/EditorDraftSurface";
 import {
 	useTabsStore,
 	useSessionStore,
@@ -947,12 +948,13 @@ export default function RequestBuilder() {
 				) : (
 					<>
 						<RequestBuilderLayout />
-						{/* Render nothing. They publish this builder's live draft to the
-						    command registry, so the palette's "Load test …" and "Send …"
-						    act on the request as currently edited rather than as last
-						    saved. */}
+						{/* Render nothing. They publish this builder's live draft, so the
+						    palette's "Load test …" and "Send …" and the context bar's
+						    Code section act on the request as currently edited rather
+						    than as last saved. */}
 						<LoadTestCommandSurface />
 						<SendRequestCommandSurface />
+						<EditorDraftSurface />
 					</>
 				)}
 			</RequestBuilderProvider>
