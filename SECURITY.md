@@ -152,7 +152,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   refuse any host that is not explicitly allowlisted. The check runs against the
   **resolved** host (after `{{variable}}` substitution), so a variable-built URL
   cannot slip past it. A fresh install cannot be used to send traffic anywhere until the user opts
-  in per host.
+  in per host. A run's `monitor.url` is a second host with its own check: a
+  loopback or private-network endpoint needs no entry, but link-local
+  (`169.254.0.0/16`, `fe80::/10`) and cloud-metadata addresses
+  (`169.254.169.254`, `fd00:ec2::254`) do, like any public host.
 - **Hard load caps (enforcement).** `start_load_run` rejects requests whose RPS,
   concurrency, or duration exceed configured ceilings. Together with the
   allowlist, these are the real limits on what load an agent can generate.

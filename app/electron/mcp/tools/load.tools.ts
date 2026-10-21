@@ -271,7 +271,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					url: z
 						.string()
 						.describe(
-							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one is checked against the allowlist like the target URL is."
+							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one, or a link-local or cloud-metadata one (169.254.0.0/16, fe80::/10, fd00:ec2::254), is checked against the allowlist like the target URL is."
 						),
 					intervalMs: z
 						.number()
