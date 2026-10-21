@@ -374,15 +374,19 @@ dialog can pre-fill it instead of asking for it every run (issue #599).
 **State:**
 ```typescript
 {
-  locations: Record<string, { path: string; fileName: string; hash?: string }>  // keyed by collection id
+  locations: Record<string, {
+    path: string; fileName: string; hash?: string; castNumbers?: boolean
+  }>  // keyed by collection id
 }
 ```
 
 **Key Methods:**
 ```typescript
-const { setDataFile, clearDataFile, recordDataFileHash } = useDataFileStore();
-setDataFile(collectionId, { path, fileName, hash });
+const { setDataFile, clearDataFile, recordDataFileHash, setDataFileCastNumbers } =
+  useDataFileStore();
+setDataFile(collectionId, { path, fileName, hash, castNumbers });
 recordDataFileHash(path, hash);  // every location at that path
+setDataFileCastNumbers(collectionId, path, true);  // only while the binding names path
 ```
 
 **Persistence:** `vayu.data-files` (v1)
@@ -418,6 +422,17 @@ recorded has none until its next read. Nothing that only *compares* writes it:
 file's current digest (`dataFile:hash`, which answers `{ status: "found", hash }`
 or `{ status: "missing" }` for a file that has moved) and fall back to this one
 only when they cannot.
+
+`castNumbers` is how the file's CSV/TSV values are read (issue #2540), the
+picker's **Read numbers as numbers**: absent or `false` reads every cell as
+text, `true` reads an unquoted integer or decimal as a number. It describes
+*this* file, so a pick writes it as the picker read the file (off for a fresh
+pick) and Remove takes it with the path. Toggling the checkbox writes it
+through `useDataContractWriter`'s `rememberReading`, which changes nothing
+unless the binding still names the toggled file's path; a hash refresh keeps
+it. Every re-read (`readDeclaredDataFile`, which requires the flag) parses
+with it, so the Run dialog's pre-fill, the load dialog's, Send-with-row and
+the Data tab all read the file the way the user last chose.
 
 The persisted payload is normalized through **both** `migrate` and `merge`:
 `migrate` runs only on a version mismatch, and the common case is a

@@ -37,10 +37,10 @@ const { useDataContractWriter } = await import("./useDataContractWriter");
 
 const HASH = "c".repeat(64);
 
-function file(path?: string): SelectedDataFile {
+function file(path?: string, castNumbers = false): SelectedDataFile {
 	return {
 		fileName: "plans.csv",
-		parsed: parseDataFile("plan,price\nfree,0", "plans.csv"),
+		parsed: parseDataFile("plan,price\nfree,0", "plans.csv", { castNumbers }),
 		hash: HASH,
 		path,
 	};
@@ -81,7 +81,30 @@ describe("useDataContractWriter", () => {
 			path: "/home/u/plans.csv",
 			fileName: "plans.csv",
 			hash: HASH,
+			castNumbers: false,
 		});
+	});
+
+	it("remembers how the declared file was read (#2540)", () => {
+		const { result } = renderHook(() => useDataContractWriter("col_1"));
+
+		result.current.declare(file("/home/u/plans.csv", true));
+		succeed();
+
+		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
+	});
+
+	it("changes how the bound file is read without writing the contract", () => {
+		const { result } = renderHook(() => useDataContractWriter("col_1"));
+
+		act(() => result.current.rememberReading(file("/home/u/users.csv", true)));
+		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
+		expect(mutation.mutate).not.toHaveBeenCalled();
+
+		// A file the binding does not name, or one with no path, leaves it be.
+		act(() => result.current.rememberReading(file("/home/u/plans.csv", false)));
+		act(() => result.current.rememberReading(file(undefined, false)));
+		expect(useDataFileStore.getState().locations.col_1.castNumbers).toBe(true);
 	});
 
 	it("forgets the remembered path when the declared file carries none", () => {

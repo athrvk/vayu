@@ -105,18 +105,25 @@ export async function hashDeclaredDataFile(path: string): Promise<DataFileHashRe
 	return await hash(path);
 }
 
-/** What a re-read has to be measured against, beyond parsing. */
-export interface DeclaredDataFileLimits {
+/** How a re-read is parsed, and what it has to be measured against. */
+export interface DeclaredDataFileOptions {
 	/**
 	 * The live `maxScenarioDataRows`, from {@link useDataFileLimits}. Never a
 	 * constant: a user who raises the setting must get the file on the next
 	 * re-read, without restarting anything.
 	 */
 	maxRows: number;
+	/**
+	 * The binding's `castNumbers` (#2540). Required for the same reason as
+	 * `maxRows`: a caller that omitted it would read the file as text while the
+	 * picker, with the same file, read numbers.
+	 */
+	castNumbers: boolean;
 }
 
 /**
- * Read, decode and parse the file at `path`, refusing a set over `maxRows`.
+ * Read, decode and parse the file at `path` the way its binding reads it,
+ * refusing a set over `maxRows`.
  *
  * Rejects with `NoDataFileBridgeError` outside Electron, and with
  * `DataFileError` (or whatever the bridge threw) when the file is gone, moved,
@@ -125,7 +132,7 @@ export interface DeclaredDataFileLimits {
  */
 export async function readDeclaredDataFile(
 	path: string,
-	{ maxRows }: DeclaredDataFileLimits
+	{ maxRows, castNumbers }: DeclaredDataFileOptions
 ): Promise<DeclaredDataFile> {
 	const read = window.electronAPI?.readDataFile;
 	if (!read) throw new NoDataFileBridgeError();
@@ -135,7 +142,7 @@ export async function readDeclaredDataFile(
 	// The same decode and the same parser the picker runs, so a file re-read
 	// here cannot disagree with the file as it was declared.
 	const { text } = decodeDataFile(bytes.buffer as ArrayBuffer);
-	const parsed = parseDataFile(text, fileName);
+	const parsed = parseDataFile(text, fileName, { castNumbers });
 
 	// The picker's own refusal, thrown rather than returned: every caller here
 	// already shows a failed re-read as a note beside a usable picker, which is

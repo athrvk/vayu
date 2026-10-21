@@ -149,6 +149,79 @@ describe("data-file-store", () => {
 		expect(locations.col_3).not.toHaveProperty("hash");
 	});
 
+	it("persists how the file's values are read beside its path (#2540)", () => {
+		useDataFileStore.getState().setDataFile("col_1", {
+			path: "/home/u/users.csv",
+			fileName: "users.csv",
+			castNumbers: true,
+		});
+
+		expect(persisted().state.locations.col_1).toEqual({
+			path: "/home/u/users.csv",
+			fileName: "users.csv",
+			castNumbers: true,
+		});
+	});
+
+	it("keeps castNumbers across a rehydrate, reads a legacy entry as off, and drops a non-boolean", async () => {
+		localStorage.setItem(
+			STORAGE_KEYS.DATA_FILE_STORE,
+			JSON.stringify({
+				version: 1,
+				state: {
+					locations: {
+						col_1: { path: "/p/a.csv", fileName: "a.csv", castNumbers: true },
+						col_2: { path: "/p/b.csv", fileName: "b.csv" },
+						col_3: { path: "/p/c.csv", fileName: "c.csv", castNumbers: "yes" },
+					},
+				},
+			})
+		);
+
+		await useDataFileStore.persist.rehydrate();
+
+		// Mutation check: drop `castNumbers` from `normalizeDataFiles` and col_1
+		// comes back as text on every launch.
+		const { locations } = useDataFileStore.getState();
+		expect(locations.col_1).toEqual({ path: "/p/a.csv", fileName: "a.csv", castNumbers: true });
+		expect(locations.col_2.castNumbers ?? false).toBe(false);
+		expect(locations.col_3).toEqual({ path: "/p/c.csv", fileName: "c.csv" });
+	});
+
+	it("keeps castNumbers when a re-read records a new hash", () => {
+		const { setDataFile, recordDataFileHash } = useDataFileStore.getState();
+		setDataFile("col_1", { path: "/p/users.csv", fileName: "users.csv", castNumbers: true });
+
+		recordDataFileHash("/p/users.csv", "d".repeat(64));
+
+		expect(useDataFileStore.getState().locations.col_1).toEqual({
+			path: "/p/users.csv",
+			fileName: "users.csv",
+			hash: "d".repeat(64),
+			castNumbers: true,
+		});
+	});
+
+	it("changes castNumbers only on a binding that still names the file", () => {
+		const { setDataFile, setDataFileCastNumbers } = useDataFileStore.getState();
+		setDataFile("col_1", { path: "/p/users.csv", fileName: "users.csv", hash: "a".repeat(64) });
+
+		setDataFileCastNumbers("col_1", "/p/users.csv", true);
+		expect(useDataFileStore.getState().locations.col_1).toEqual({
+			path: "/p/users.csv",
+			fileName: "users.csv",
+			hash: "a".repeat(64),
+			castNumbers: true,
+		});
+
+		// Another file's toggle, or a collection with no binding, writes nothing.
+		const before = useDataFileStore.getState().locations;
+		setDataFileCastNumbers("col_1", "/p/plans.csv", false);
+		setDataFileCastNumbers("col_2", "/p/users.csv", true);
+		setDataFileCastNumbers("col_1", "/p/users.csv", true);
+		expect(useDataFileStore.getState().locations).toBe(before);
+	});
+
 	it("leaves the map untouched when the hash has not changed", () => {
 		const { setDataFile, recordDataFileHash } = useDataFileStore.getState();
 		setDataFile("col_1", { path: "/p/users.csv", fileName: "users.csv", hash: "a".repeat(64) });

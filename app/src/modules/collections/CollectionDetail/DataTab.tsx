@@ -125,11 +125,14 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * so a read would be work in service of no question.
 	 */
 	useEffect(() => {
-		const path = useDataFileStore.getState().locations[collection.id]?.path;
-		if (!willReadRemembered(collection) || !path) return;
+		const location = useDataFileStore.getState().locations[collection.id];
+		if (!willReadRemembered(collection) || !location?.path) return;
 
 		let cancelled = false;
-		void readDeclaredDataFile(path, { maxRows })
+		void readDeclaredDataFile(location.path, {
+			maxRows,
+			castNumbers: location.castNumbers ?? false,
+		})
 			.then((read) => {
 				if (cancelled) return;
 				// `?? read`: a file the user picked while this was in flight is

@@ -139,6 +139,8 @@ describe("declaring a contract", () => {
 			// SHA-256 of the picked bytes (issue #2051), so MCP can name the
 			// file's content beside its path.
 			hash: "88e94c0d2bbe183d98748a0fb71c5704bcb28e216797d6cd71855ca88378ab1a",
+			// A pick is a new file, read as text until the user says otherwise.
+			castNumbers: false,
 		});
 	});
 
@@ -245,6 +247,7 @@ describe("removing the file", () => {
 			path: "/home/u/plans.csv",
 			fileName: "plans.csv",
 			hash: "b7359bc0b274253135286ab911139026c671d4a11f8df272d20bd5342fa265c0",
+			castNumbers: false,
 		});
 	});
 
@@ -369,6 +372,21 @@ describe("the remembered file", () => {
 		expect(screen.queryByText(/Nothing to compare yet/i)).toBeNull();
 		// Opening the tab compares; it is never a declaration.
 		expect(mutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("reads the remembered file the way its binding says (#2540)", async () => {
+		useDataFileStore.setState({
+			locations: {
+				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
+			},
+		});
+		const read = bridge(() => csv("id\n007", "users.csv"));
+		vi.stubGlobal("electronAPI", { readDataFile: read, getFilePath: () => "" });
+
+		render(<DataTab collection={collection({ columns: ["id"] })} />);
+
+		await waitFor(() => expect(screen.getByText(/Numbers are read as numbers/)).toBeTruthy());
+		expect(screen.getByRole("cell", { name: "7" })).toBeTruthy();
 	});
 
 	it("says it is reading rather than claiming there is nothing to compare", async () => {

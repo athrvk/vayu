@@ -96,6 +96,9 @@ export function useSendWithRow(
 
 	const path = location?.path;
 	const fileName = location?.fileName;
+	// Read the way the binding says, so the row a Send binds is the row a run
+	// would (#2540).
+	const castNumbers = location?.castNumbers ?? false;
 
 	const load = useCallback(() => {
 		if (!path) return;
@@ -108,7 +111,7 @@ export function useSendWithRow(
 		}
 		setStatus("loading");
 		setError(null);
-		void readDeclaredDataFile(path, { maxRows })
+		void readDeclaredDataFile(path, { maxRows, castNumbers })
 			.then((read) => {
 				setParsed(read.parsed);
 				setStatus("ready");
@@ -122,7 +125,7 @@ export function useSendWithRow(
 						: `The declared file is no longer at ${fileName ?? "its recorded path"} - pick it again in the Data tab.`
 				);
 			});
-	}, [path, fileName, maxRows]);
+	}, [path, fileName, castNumbers, maxRows]);
 
 	return {
 		available: !!contract && !!path,

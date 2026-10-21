@@ -71,6 +71,25 @@ describe("loading the declared file", () => {
 		expect(result.current.error).toBeNull();
 	});
 
+	it("reads the file the way its binding does (#2540)", async () => {
+		const read = vi.fn(() =>
+			Promise.resolve({ bytes: new TextEncoder().encode("user\n42"), fileName: "users.csv" })
+		);
+		vi.stubGlobal("electronAPI", { readDataFile: read });
+		useDataFileStore.setState({
+			locations: {
+				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
+			},
+		});
+
+		const { result } = renderHook(() => useSendWithRow(CONTRACT, NO_CAP_IN_PLAY));
+		act(() => result.current.load());
+
+		// The row a Send binds is the row a run would.
+		await waitFor(() => expect(result.current.status).toBe("ready"));
+		expect(result.current.parsed?.rows).toEqual([{ user: 42 }]);
+	});
+
 	it("touches the filesystem only when the picker asks", () => {
 		const read = stubBridge(2);
 
