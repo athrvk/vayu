@@ -32,9 +32,11 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "vayu/http/routes.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/diagnostics.hpp"
 
 namespace vayu::http::routes {
@@ -533,8 +535,10 @@ TEST (ScriptTypesTest, EveryDeclaredModuleLoadsInTheRuntime) {
     pos             = dts.find (declare, pos + 1)) {
         const size_t start = pos + declare.size ();
         const std::string name = dts.substr (start, dts.find ('\'', start) - start);
-        const auto result = engine.execute ("if (typeof require('" + name +
-        "') !== 'object') throw new Error('not a module');",
+        // crypto-js is an object; uuid is callable, as Postman's is.
+        const auto result = engine.execute ("const type = typeof require('" + name +
+        "'); if (type !== 'object' && type !== 'function') "
+        "throw new Error('not a module');",
         ctx);
         EXPECT_TRUE (result.success)
         << "'" << name << "' is declared loadable but require() refuses it ("
@@ -546,6 +550,17 @@ TEST (ScriptTypesTest, EveryDeclaredModuleLoadsInTheRuntime) {
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif
+}
+
+// The first direction above cannot see a module `require()` loads that the
+// declarations omit: it would read clean in the engine and be "Cannot find
+// module" in the editor. Every name the runtime accepts has a block.
+TEST (ScriptTypesTest, EveryRuntimeShelfModuleIsDeclaredAsAModule) {
+    const std::string dts = generate_script_typedefs ();
+    for (const std::string_view name : vayu::runtime::SHELF_MODULE_NAMES) {
+        EXPECT_TRUE (contains (dts, "\ndeclare module '" + std::string (name) + "' {\n"))
+        << "require('" << name << "') loads but the editor has no module for it";
+    }
 }
 
 /**
@@ -677,11 +692,17 @@ TEST (ScriptTypesTest, ThePostmanLegacyGlobalsAreDeclaredAsTheValuesTheyAre) {
 TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     const std::string dts = generate_script_typedefs ();
 
+    // One signature keyed on the shelf's names, so a name off the shelf is a
+    // type error at the call, and each module answers its own declaration.
     const std::string require =
-    "declare function require(name: 'crypto-js'): typeof CryptoJS;\n";
+    "declare function require<N extends keyof VayuShelfModules>(name: N): "
+    "VayuShelfModules[N];\n";
     EXPECT_TRUE (contains (dts, require));
     EXPECT_FALSE (contains (documentation_above (dts, require),
     "Not available in the Vayu script sandbox."));
+    EXPECT_TRUE (contains (dts,
+    "interface VayuShelfModules {\n\t'crypto-js': typeof import('crypto-js');\n"
+    "\t'uuid': typeof import('uuid');\n}\n"));
 
     const std::string crypto_js = "declare const CryptoJS: {\n";
     EXPECT_TRUE (contains (dts, crypto_js));
@@ -695,6 +716,56 @@ TEST (ScriptTypesTest, TheRequireShelfIsDeclaredAsWhatItLoads) {
     EXPECT_TRUE (contains (dts, "\t\tBase64: {\n"));
     // `const lib = require('crypto-js')`, which the editor reads as an import.
     EXPECT_TRUE (contains (dts, "declare module 'crypto-js' {\n\texport = CryptoJS;\n}\n"));
+}
+
+// uuid has no global to point at (#2650), so its module carries the whole
+// declaration: callable, with npm's members on it. Each member is pinned to
+// the kind the runtime gives it, so a declared member the module lacks (or a
+// function declared as a constant) fails here rather than in a script.
+TEST (ScriptTypesTest, TheUuidModuleDeclaresWhatTheRuntimeGivesIt) {
+    const std::string dts = generate_script_typedefs ();
+    const size_t open     = dts.find ("declare module 'uuid' {\n");
+    ASSERT_NE (open, std::string::npos);
+    const std::string body = dts.substr (open, dts.find ("\n}\n", open) - open);
+
+    EXPECT_TRUE (contains (body, "\tconst uuid: Randomised<RandomOptions> & {"));
+    EXPECT_TRUE (contains (body, "\texport = uuid;"));
+
+    struct Member {
+        const char* declaration;
+        const char* name;
+        const char* runtime_type;
+    };
+    constexpr auto members = std::to_array<Member> ({
+    { "\t\tv1: ", "v1", "function" },
+    { "\t\tv3: FromName;", "v3", "function" },
+    { "\t\tv4: ", "v4", "function" },
+    { "\t\tv5: FromName;", "v5", "function" },
+    { "\t\tNIL: string;", "NIL", "string" },
+    { "\t\tparse(uuid: string): Uint8Array;", "parse", "function" },
+    { "\t\tstringify(bytes: Bytes, offset?: number): string;", "stringify", "function" },
+    { "\t\tvalidate(uuid: unknown): boolean;", "validate", "function" },
+    { "\t\tversion(uuid: string): number;", "version", "function" },
+    });
+#ifdef VAYU_HAS_QUICKJS
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+#endif
+    for (const auto& member : members) {
+        EXPECT_TRUE (contains (body, member.declaration))
+        << member.declaration << " is not declared";
+#ifdef VAYU_HAS_QUICKJS
+        const auto result =
+        engine.execute (std::string ("if (typeof require('uuid').") + member.name +
+        " !== '" + member.runtime_type + "') throw new Error('wrong kind');",
+        ctx);
+        EXPECT_TRUE (result.success)
+        << "uuid." << member.name << " is not a " << member.runtime_type
+        << " at run time (" << result.error_message << ")";
+#endif
+    }
 }
 
 // `pm.cookies.jar` is listed in its own right *and* is the parent of the

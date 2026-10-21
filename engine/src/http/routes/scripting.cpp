@@ -17,9 +17,26 @@
 #include <vector>
 
 #include "vayu/http/routes.hpp"
+#include "vayu/runtime/shelf_modules.hpp"
 #include "vayu/utils/logger.hpp"
 
 namespace vayu::http::routes {
+
+namespace {
+
+/// The names `require` accepts, each wrapped in @p quote and joined by @p separator.
+std::string shelf_names (std::string_view quote, std::string_view separator) {
+    std::string joined;
+    for (const std::string_view name : vayu::runtime::SHELF_MODULE_NAMES) {
+        if (!joined.empty ()) {
+            joined += separator;
+        }
+        joined += std::format ("{0}{1}{0}", quote, name);
+    }
+    return joined;
+}
+
+} // namespace
 
 /**
  * @brief Get script engine completions for UI autocomplete
@@ -2011,14 +2028,21 @@ nlohmann::json get_script_completions () {
     // ========================================
     // require() and the library it loads (#2578)
     // ========================================
+    // One entry for every module. `detail` is display text (the return type is
+    // the module itself, which differs per name); script_types.cpp declares
+    // `require` from its module table and reads only the documentation here.
     completions.push_back ({ { "label", "require" }, { "kind", KIND_FUNCTION },
-    { "insertText", "require('${1:crypto-js}')" }, { "insertTextRules", INSERT_AS_SNIPPET },
-    { "detail", "require(name: 'crypto-js'): typeof CryptoJS" },
+    { "insertText", "require('${1|" + shelf_names ("", ",") + "|}')" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "require(name: " + shelf_names ("'", " | ") + "): module" },
     { "documentation",
-    "Load a library Vayu bundles. The shelf is crypto-js, which answers the "
-    "same object as the CryptoJS global. Any other name throws \"Cannot find "
-    "module\" and lists the shelf: nothing is read from disk or fetched.\n\n"
-    "Example:\nconst CryptoJS = require('crypto-js');" },
+    "Load a library Vayu bundles. On the shelf: " + shelf_names ("", ", ") +
+    ". crypto-js answers the same object as the CryptoJS global. uuid is npm's "
+    "uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and "
+    "the module is itself callable, so uuid() is a v4. Any other name throws "
+    "\"Cannot find module\" and lists the shelf: nothing is read from disk or "
+    "fetched.\n\nExample:\nconst CryptoJS = require('crypto-js');\n"
+    "const uuid = require('uuid');\nconst id = uuid();" },
     { "sortText", "2_require" } });
 
     completions.push_back ({ { "label", "CryptoJS" }, { "kind", KIND_VARIABLE },

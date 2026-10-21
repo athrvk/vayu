@@ -37,7 +37,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
-| Modules             | `require('crypto-js')` and the `CryptoJS` global - a Vayu-written shim, any other module throws; see [The `require` shelf](#the-require-shelf) |
+| Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim) and `require('uuid')` (npm's `uuid`, vendored; callable) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
 | Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
@@ -398,8 +398,9 @@ and the other SHA-2 hashers are the `crypto-js` shelf's, see
 
 `require(name)` answers a **fixed shelf** of libraries Vayu bundles and throws
 `Cannot find module '<name>'` for any other name; it reads no file and fetches
-nothing. The shelf holds one library, `crypto-js`, which is also bound as the
-global `CryptoJS`, so both spellings of Postman's signing scripts run:
+nothing. The shelf holds two libraries, `crypto-js` and `uuid`. `crypto-js` is
+also bound as the global `CryptoJS`, so both spellings of Postman's signing
+scripts run:
 
 ```javascript
 const CryptoJS = require('crypto-js');
@@ -432,7 +433,28 @@ It costs nothing until used: the shim is evaluated the first time a script reads
 0.75 ms and about 22 KB of the script's memory, per execution; the engine binary
 grew by 0.2 % (debug build) for it.
 
-**Not on the shelf:** `lodash` (`_`), `moment`, `uuid`, `ajv` and `tv4`, `xml2js`
+**`uuid`** is npm's `uuid` package (8.3.2), vendored unmodified, so it is the
+library rather than a Vayu-written shape. The module is callable and has npm's
+members on the same value:
+
+```javascript
+const uuid = require('uuid');
+const id = uuid();               // a v4, as in Postman
+const same = uuid.v4();          // the same, spelled npm's way
+const stable = uuid.v5('orders', uuid.v5.DNS);
+uuid.validate(id);               // true
+```
+
+`v1`, `v3`, `v4`, `v5`, `NIL`, `parse`, `stringify`, `validate` and `version`
+are all there. Postman's own `uuid` is `uuid()` and `uuid.v4()`, drawn from
+`Math.random`; Vayu's is a superset of that backed by a CSPRNG, so every Postman
+use runs unchanged. Vayu has no `uuid` global, only `require`.
+First use costs about 4.5 ms (`-O2`) to 18.8 ms (Debug build) per execution,
+nothing until a script requires it. The import's notice does not name a
+`require('uuid')`. The engine-side detail is in
+[scripting.md](../engine/scripting.md#the-require-shelf).
+
+**Not on the shelf:** `lodash` (`_`), `moment`, `ajv` and `tv4`, `xml2js`
 (`xml2Json`), `cheerio`, `csv-parse`, `chai` and Node's built-ins (`crypto`, `fs`,
 `buffer`, ...). `require` of one throws, the editor underlines `_`, `moment`,
 `tv4`, `xml2Json`, `cheerio` and `Backbone` as unusable, and a Postman import
@@ -1351,7 +1373,7 @@ These Postman APIs are **not** implemented - scripts that rely on them will fail
   warn, as [above](#visualizer-pmvisualizer), but there is no Visualize tab to
   show the template in
 - `pm.test.skip`, `pm.require` and `pm.execution.runRequest`
-- **`require(...)` of anything but `crypto-js`, `script.packages` and the
+- **`require(...)` of anything but `crypto-js` and `uuid`, `script.packages` and the
   libraries Postman bundles beyond `CryptoJS`** - `_` (lodash), `tv4`,
   `xml2Json`, `cheerio`, `moment` and `Backbone`. The sandbox has no module
   system, only [the `require` shelf](#the-require-shelf); the shelf's `crypto-js`
@@ -1643,7 +1665,9 @@ What suppressing it costs is that an undeclared name draws nothing. So the engin
 - the libraries Postman bundles that the [`require` shelf](#the-require-shelf)
   does not carry: `_`, `tv4`, `xml2Json`, `cheerio`, `moment` and `Backbone`
   (`CryptoJS` and `require` are declared as the real thing, with
-  `declare module 'crypto-js'` so `require('crypto-js')` types)
+  `declare module 'crypto-js'` and `declare module 'uuid'` so `require('crypto-js')`
+  and `require('uuid')` type; both come from the one `SHELF_MODULES` table in
+  `script_types.cpp`, and `require` takes only the names on it)
 
 Hover names the replacement Postman itself gives: `_` is `require('lodash')`, and
 says what Vayu has instead. The `postman` object is
