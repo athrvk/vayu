@@ -232,7 +232,9 @@ UrlOmitted& omitted);
  */
 [[nodiscard]] std::optional<Json> settings_of (const Json& value);
 
-/// Saved examples as `POST /import/apply` takes them, or nothing.
+/// Saved examples as `POST /import/apply` takes them, or nothing. A member
+/// that route would refuse (`status`, `origin`, ...) is nothing; an absent
+/// `origin` stays absent and the route reads it as `import`.
 [[nodiscard]] std::optional<Json> examples_of (const Json& value);
 
 /// A collection's data contract (`columns`, `declaredAt`, `fileName`) inside

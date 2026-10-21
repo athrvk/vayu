@@ -224,9 +224,9 @@ struct ScriptContext {
      *
      * A streaming run's post-request script is the only caller that sets it:
      * it runs once, after the stream has terminated, over the bounded stored
-     * list. The sandbox is synchronous with no event loop (see
-     * `ABSENT_GLOBALS` in script_types.cpp), so a live per-event callback is
-     * not a feature that was skipped - it is one the runtime cannot have.
+     * list. A live per-event callback is not a feature that was skipped: the
+     * transfer has ended before any script runs, so there is nothing to hand
+     * one.
      */
     const nlohmann::json* response_events = nullptr;
 

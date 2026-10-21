@@ -1042,17 +1042,73 @@ TEST_F (SendRequestTest, AnUnknownMethodIsRejected) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
-// There is no promise form (#2527), so a missing callback has to say that
-// rather than return one.
-TEST_F (SendRequestTest, ACallbackIsRequired) {
+// ============================================================================
+// The promise form: no callback, a promise already settled (#2577)
+// ============================================================================
+
+TEST_F (SendRequestTest, WithoutACallbackItReturnsAPromiseOfTheResponse) {
     SendRequestServer server;
 
-    auto result = run ("pm.sendRequest('" + server.url ("/token") + "');");
+    auto result = run ("const res = await pm.sendRequest('" + server.url ("/token") +
+    "'); "
+    "const viaThen = await pm.sendRequest('" +
+    server.url ("/token") +
+    "', undefined).then((r) => r.code); "
+    "pm.test('awaited', function () { "
+    "  pm.expect(res.code).to.equal(200); "
+    "  pm.expect(res.json().access_token).to.equal('tok_123'); "
+    "  pm.expect(viaThen).to.equal(200); "
+    "});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_EQ (server.hit_count (), 2);
+}
+
+// A transport failure rejects with the same Error the callback form passes.
+TEST_F (SendRequestTest, ATransportFailureRejectsThePromise) {
+    auto result = run ("let caught = null; "
+                       "try { await pm.sendRequest('" +
+    std::string (REFUSED_URL) +
+    "'); } catch (e) { caught = e; } "
+    "pm.test('refused', function () { "
+    "  pm.expect(caught).to.be.an('error'); "
+    "  pm.expect(caught.code).to.equal('CONNECTION_FAILED'); "
+    "});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+}
+
+// Nothing handled the rejection, so the script says so.
+TEST_F (SendRequestTest, ARejectionNothingHandlesIsAScriptError) {
+    auto result = run ("pm.sendRequest('" + std::string (REFUSED_URL) + "');");
 
     EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("callback"), std::string::npos)
+    EXPECT_EQ (
+    result.error_message.rfind ("Unhandled promise rejection: Error: ", 0), 0u)
+    << result.error_message;
+}
+
+// The script's own mistakes still throw in the promise form, before anything
+// is sent.
+TEST_F (SendRequestTest, APromiseFormMistakeThrows) {
+    SendRequestServer server;
+
+    auto result = run ("await pm.sendRequest({ url: '" + server.url ("/token") +
+    "', method: 'FETCH' });");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("TypeError"), std::string::npos)
     << result.error_message;
     EXPECT_EQ (server.hit_count (), 0);
+
+    result = run ("pm.sendRequest();");
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "TypeError: pm.sendRequest requires a URL (or options object)");
 }
 
 TEST_F (SendRequestTest, ANonFunctionCallbackIsRejected) {
@@ -1061,7 +1117,7 @@ TEST_F (SendRequestTest, ANonFunctionCallbackIsRejected) {
     auto result = run ("pm.sendRequest('" + server.url ("/token") + "', 'not a function');");
 
     EXPECT_FALSE (result.success);
-    EXPECT_NE (result.error_message.find ("promise form"), std::string::npos)
+    EXPECT_NE (result.error_message.find ("must be a callback function"), std::string::npos)
     << result.error_message;
     EXPECT_EQ (server.hit_count (), 0);
 }

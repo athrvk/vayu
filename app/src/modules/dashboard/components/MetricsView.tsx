@@ -29,6 +29,7 @@ import { Activity } from "lucide-react";
 import { formatNumber, formatPercent, formatRate } from "@/lib/format-number";
 import { CONCURRENCY_UNIT } from "@/constants/load-test-modes";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/shared/EmptyState";
 import { useDashboardStore } from "@/stores";
 import { useHostSleeps } from "@/stores/host-sleep-store";
 import type { MetricsViewProps, DashboardDerived } from "../types";
@@ -279,12 +280,7 @@ function MetricsView({
 	]);
 
 	if (!derived) {
-		return (
-			<div className="p-5 text-center py-12 text-muted-foreground">
-				<Activity className="w-12 h-12 mx-auto mb-3 text-muted-foreground/30" />
-				<p>Waiting for metrics…</p>
-			</div>
-		);
+		return <EmptyState icon={Activity} title="Waiting for metrics…" />;
 	}
 
 	return (

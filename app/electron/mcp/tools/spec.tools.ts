@@ -330,7 +330,7 @@ export const SPEC_TOOLS: McpTool[] = [
 		category: "read",
 		invalidates: [],
 		description:
-			"Read a collection, environment or API spec document the way import_document would, and store nothing: the collections it would create (names, folder and request counts), the environments, the number of globals, and `meta` - the format, the counts, and `meta.skipped`, what the document declares that Vayu cannot carry, each with the requests it applies to. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose scripts use a Postman API Vayu does not run (`tests[]`, `require()`, a bundled library such as CryptoJS, ...); those scripts import either way and throw when they run. Takes exactly import_document's arguments, so preview first, show the user what would be left out, then import. Available with writes off.",
+			"Read a collection, environment or API spec document the way import_document would, and store nothing: the collections it would create (names, folder and request counts), the environments, the number of globals, and `meta` - the format, the counts, and `meta.skipped`, what the document declares that Vayu cannot carry, each with the requests it applies to. For a Postman collection, `meta.unsupportedScriptApis` (present only when non-empty) names each request, folder or collection whose scripts use a Postman API Vayu does not run (`require()`, a bundled library such as CryptoJS, ...); those scripts import either way and throw when they run. Takes exactly import_document's arguments, so preview first, show the user what would be left out, then import. Available with writes off.",
 		annotations: {
 			title: "Preview an import",
 			readOnlyHint: true,

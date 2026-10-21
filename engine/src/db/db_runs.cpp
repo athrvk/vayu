@@ -25,6 +25,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -92,20 +93,29 @@ std::vector<Run> Database::get_all_runs () {
 }
 
 namespace {
-// Compose the sqlite_orm WHERE for a RunFilter. Each optional filter becomes
-// `(column == value) OR <inactive>`, where <inactive> is a bound `true` when
-// the filter is unset - so an unset field is a wildcard and the same compiled
-// expression serves every filter combination (no per-combination branching).
-// `q` is a substring LIKE over config_snapshot (see RunFilter's contract).
+// `CASE WHEN <unset> THEN 1 ELSE <test> END`: true for every row when the
+// filter is unset, and <test> is never evaluated then, because SQLite
+// evaluates only the CASE branch it selects (#2548). That matters for more
+// than the snapshot's LIKE and JSON parse: `origin` sits past config_snapshot
+// in the stored row, so reading it walks the snapshot's overflow pages. An
+// `OR` with the bound flag would leave which operand runs first to the
+// planner, which is not ours to depend on.
+template <class Test> auto unless_unset (bool unset, Test test) {
+    return c (case_<bool> ().when (unset, then (true)).else_ (std::move (test)).end ());
+}
+
+// Compose the sqlite_orm WHERE for a RunFilter, one `unless_unset` term per
+// optional filter, so the same compiled expression serves every filter
+// combination (no per-combination branching). `q` is a substring LIKE over
+// config_snapshot (see RunFilter's contract).
 //
 // `collection_id` reads the snapshot as JSON instead. `json_extract` raises a
 // SQL error - not NULL - on text that is not JSON, and `sanitize_config_snapshot`
 // stores an unparseable body verbatim, so handing it the column directly would
-// turn one malformed row into a 500 for the whole page. The CASE is the guard:
-// SQLite evaluates only the branch it selects, so `json_extract` is never
+// turn one malformed row into a 500 for the whole page. The inner CASE is the
+// guard, on the same only-the-selected-branch rule: `json_extract` is never
 // applied to anything but valid JSON. A boolean `json_valid(...) AND ...` guard
-// would rely on the planner's evaluation order for the same protection, which
-// is not ours to depend on.
+// would rely on the planner's evaluation order for the same protection.
 //
 // A missing `$.scenario.collectionId` extracts as SQL NULL, and NULL equals no
 // id, so design and load runs (and a scenario run stored before the snapshot
@@ -135,14 +145,15 @@ auto run_filter_where (const RunFilter& filter) {
     .else_ (std::string{ "{}" })
     .end ();
 
-    return where ((c (&Run::type) == type_val || no_type) &&
-    (c (&Run::status) == status_val || no_status) &&
-    (c (&Run::request_id) == req_val || no_req) &&
-    (like (&Run::config_snapshot, q_pat) || no_q) &&
-    (c (&Run::baseline) == baseline_val || no_baseline) &&
-    (c (&Run::origin) == origin_val || no_origin) &&
-    (json_extract<std::string> (snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val ||
-    no_collection));
+    return where (unless_unset (no_type, c (&Run::type) == type_val) &&
+    unless_unset (no_status, c (&Run::status) == status_val) &&
+    unless_unset (no_req, c (&Run::request_id) == req_val) &&
+    unless_unset (no_q, like (&Run::config_snapshot, q_pat)) &&
+    unless_unset (no_baseline, c (&Run::baseline) == baseline_val) &&
+    unless_unset (no_origin, c (&Run::origin) == origin_val) &&
+    unless_unset (no_collection,
+    json_extract<std::string> (
+    snapshot_json, std::string{ "$.scenario.collectionId" }) == collection_val));
 }
 } // namespace
 
@@ -159,9 +170,10 @@ int64_t Database::count_runs (const RunFilter& filter) {
 }
 
 // The run cascade in one place: every child table a run owns, deleted before
-// the run row itself. delete_run and prune_runs both go through this, so a new
-// child table cannot be added to one and forgotten in the other (metric_ticks
-// was added to both by editing only this function). Caller holds the mutex.
+// the run row itself. delete_run and remove_unexempt_runs both go through this,
+// so a new child table cannot be added to one and forgotten in another
+// (metric_ticks was added to both by editing only this function). Caller holds
+// the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
     impl_->storage.remove_all<MonitorSample> (where (c (&MonitorSample::run_id) == id));
@@ -230,21 +242,59 @@ std::optional<Run> Database::set_run_baseline (const std::string& id, bool basel
 }
 
 namespace {
-// What retention never deletes and never counts toward the cap: a run still
+// What retention never deletes and never counts toward a cap: a run still
 // in flight, and a run pinned as a baseline. Read at selection and again,
 // per row, under each delete batch's lock.
 bool exempt_from_retention (const Run& run) {
     return run.baseline || run.status == RunStatus::Running ||
     run.status == RunStatus::Pending;
 }
+
+// One count cap and how many runs it has kept so far. Retention keeps one per
+// kind (#2429): a design Send is cheap and frequent, and counted with the load
+// and collection runs it evicted them within an afternoon.
+struct CountCap {
+    int limit = 0; // 0 = unlimited
+    int kept  = 0;
+
+    bool full () const {
+        return limit > 0 && kept >= limit;
+    }
+};
+
+// Newest first in, victims out: a run is a victim once its kind's cap is full
+// or it is older than @p age_cutoff (0 = no age cap).
+std::vector<std::string> select_retention_victims (const std::vector<Run>& newest_first,
+CountCap compared,
+CountCap design,
+int64_t age_cutoff) {
+    std::vector<std::string> victims;
+    for (const auto& run : newest_first) {
+        // Skipped rather than merely spared: counting an exempt run toward
+        // the cap would let a handful of pins evict the recent history the
+        // cap exists to keep.
+        if (exempt_from_retention (run)) {
+            continue;
+        }
+        CountCap& cap      = run.type == RunType::Design ? design : compared;
+        const bool too_old = age_cutoff > 0 && run.start_time < age_cutoff;
+        if (cap.full () || too_old) {
+            victims.push_back (run.id);
+        } else {
+            ++cap.kept;
+        }
+    }
+    return victims;
+}
 } // namespace
 
-// Retention: drop runs beyond the count cap and/or older than the age cap.
+// Retention: drop runs beyond their kind's count cap and/or older than the age cap.
 void Database::prune_runs (int max_runs,
 int max_age_days,
-const std::function<void ()>& after_selection) {
-    // Both limits off - nothing to do (0 = unlimited for each).
-    if (max_runs <= 0 && max_age_days <= 0) {
+const std::function<void ()>& after_selection,
+int max_design_runs) {
+    // Every limit off - nothing to do (0 = unlimited for each).
+    if (max_runs <= 0 && max_design_runs <= 0 && max_age_days <= 0) {
         return;
     }
 
@@ -265,22 +315,8 @@ const std::function<void ()>& after_selection) {
         now - (static_cast<int64_t> (max_age_days) * 86'400'000LL) :
         0;
 
-        int kept = 0;
-        for (const auto& run : runs) {
-            // Skipped rather than merely spared: counting an exempt run toward
-            // the cap would let a handful of pins evict the recent history the
-            // cap exists to keep.
-            if (exempt_from_retention (run)) {
-                continue;
-            }
-            const bool over_count = (max_runs > 0) && (kept >= max_runs);
-            const bool too_old = (max_age_days > 0) && (run.start_time < age_cutoff);
-            if (over_count || too_old) {
-                victims.push_back (run.id);
-            } else {
-                ++kept;
-            }
-        }
+        victims = select_retention_victims (runs, CountCap{ .limit = max_runs },
+        CountCap{ .limit = max_design_runs }, age_cutoff);
     }
 
     if (victims.empty ()) {
@@ -290,35 +326,57 @@ const std::function<void ()>& after_selection) {
         after_selection ();
     }
 
-    // 2. Delete via the delete_run cascade, batched so a huge backlog does not
-    //    hold the DB mutex for seconds. The lock is re-taken per batch and
-    //    released between them, letting /health, SSE and the runs poll interleave.
-    //    Each victim is re-read under its batch's lock (#1906): a run pinned
-    //    since selection (`set_run_baseline`) answered its caller 200, and
-    //    the selection's copy of the row no longer says so.
-    constexpr size_t BATCH_SIZE = 100;
-    size_t pruned               = 0;
-    for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
-        const size_t end = std::min (start + BATCH_SIZE, victims.size ());
-        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-        impl_->storage.transaction ([&] {
-            for (size_t i = start; i < end; ++i) {
-                const auto current = get_run (victims[i]);
-                if (!current || exempt_from_retention (*current)) {
-                    continue;
-                }
-                remove_run_cascade_locked (victims[i]);
-                ++pruned;
-            }
-            return true; // Commit
-        });
-    }
-
+    const size_t pruned = remove_unexempt_runs (victims).size ();
     if (pruned == 0) {
         return;
     }
     vayu::utils::log_info ("db", "Pruned old runs",
-    { { "count", pruned }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
+    { { "count", pruned }, { "maxRuns", max_runs },
+    { "maxDesignRuns", max_design_runs }, { "maxAgeDays", max_age_days } });
+}
+
+// Batched so a huge backlog does not hold the DB mutex for seconds: the lock is
+// re-taken per batch and released between them, letting /health, SSE and the
+// runs poll interleave. Each id is re-read under its batch's lock (#1906): a
+// run pinned since the caller chose it (`set_run_baseline`) answered its
+// caller 200, and the caller's copy of the row no longer says so.
+std::vector<std::string> Database::remove_unexempt_runs (
+const std::vector<std::string>& ids) {
+    constexpr size_t BATCH_SIZE = 100;
+    std::vector<std::string> removed;
+    for (size_t start = 0; start < ids.size (); start += BATCH_SIZE) {
+        const size_t end = std::min (start + BATCH_SIZE, ids.size ());
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        impl_->storage.transaction ([&] {
+            for (size_t i = start; i < end; ++i) {
+                const auto current = get_run (ids[i]);
+                if (!current || exempt_from_retention (*current)) {
+                    continue;
+                }
+                remove_run_cascade_locked (ids[i]);
+                removed.push_back (ids[i]);
+            }
+            return true; // Commit
+        });
+    }
+    return removed;
+}
+
+RunHistoryCleared Database::clear_runs () {
+    std::vector<std::string> ids;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        ids = impl_->storage.select (&Run::id);
+    }
+
+    RunHistoryCleared cleared;
+    cleared.deleted_ids = remove_unexempt_runs (ids);
+    RunFilter pinned;
+    pinned.baseline     = true;
+    cleared.kept_pinned = count_runs (pinned);
+    vayu::utils::log_info ("db", "Cleared run history",
+    { { "count", cleared.deleted_ids.size () }, { "keptPinned", cleared.kept_pinned } });
+    return cleared;
 }
 
 size_t Database::reconcile_orphaned_runs () {
@@ -353,9 +411,11 @@ size_t Database::reconcile_orphaned_runs () {
 void Database::prune_runs_configured () {
     const int max_runs = get_config_int (
     "maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
-    const int max_age_days = get_config_int (
+    const int max_design_runs = get_config_int ("maxDesignRunsRetained",
+    vayu::core::constants::database::MAX_DESIGN_RUNS_RETAINED);
+    const int max_age_days    = get_config_int (
     "runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
-    prune_runs (max_runs, max_age_days);
+    prune_runs (max_runs, max_age_days, nullptr, max_design_runs);
     // A run that has just been pruned may have been the last thing naming an
     // OpenAPI document (issue #718). Retention is where that reference is
     // released, so it is where the release is noticed - and this is what puts
@@ -557,6 +617,28 @@ const std::vector<PendingResultBody>& bodies) {
 std::vector<Result> Database::get_results (const std::string& run_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     return impl_->storage.get_all<Result> (where (c (&Result::run_id) == run_id));
+}
+
+std::vector<Result> Database::get_results_without_traces (const std::string& run_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    auto rows = impl_->storage.select (
+    columns (&Result::id, &Result::timestamp, &Result::status_code,
+    &Result::status_text, &Result::latency_ms, &Result::error),
+    where (c (&Result::run_id) == run_id), order_by (&Result::id));
+
+    std::vector<Result> results;
+    results.reserve (rows.size ());
+    for (auto& [id, timestamp, status_code, status_text, latency_ms, error] : rows) {
+        Result& result     = results.emplace_back ();
+        result.id          = id;
+        result.run_id      = run_id;
+        result.timestamp   = timestamp;
+        result.status_code = status_code;
+        result.status_text = std::move (status_text);
+        result.latency_ms  = latency_ms;
+        result.error       = std::move (error);
+    }
+    return results;
 }
 
 std::unordered_map<std::string, DesignResultOutcome>

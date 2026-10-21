@@ -3567,6 +3567,11 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
   container that takes its contents with it. A call site passes `description`
   only for prose the template cannot say - a count, a conditional clause -
   never to restate what `name`/`scope` already produce.
+- **A refusal goes in the `error` slot.** A delete the engine refused is a
+  `<Callout severity="blocking">` passed as `error`, rendered between the
+  description and the actions. It is a slot of its own because
+  `DialogDescription` is a `<p>` and a `Callout` is a `<div>`; a bare red
+  `<span>` inside `description` is the shape this replaced.
 
 ### URL Bar (Flat Style)
 

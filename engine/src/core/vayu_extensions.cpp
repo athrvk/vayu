@@ -789,6 +789,16 @@ std::optional<Json> settings_of (const Json& value) {
 
 namespace {
 
+/// Who wrote an example row: the two values `request_examples.origin` holds.
+bool is_example_origin (const Json& value) {
+    if (!value.is_string ()) {
+        return false;
+    }
+    const std::string& origin = value.get_ref<const std::string&> ();
+    return origin == constants::request_example::ORIGIN_IMPORT ||
+    origin == constants::request_example::ORIGIN_USER;
+}
+
 /// One saved example as `POST /import/apply` takes it, or nothing.
 std::optional<Json> example_of (const Json& example) {
     if (!example.is_object () || !is_string_member (example, "name")) {
@@ -821,6 +831,12 @@ std::optional<Json> example_of (const Json& example) {
             return std::nullopt;
         }
         kept["bodyTruncated"] = *truncated;
+    }
+    if (const auto origin = example.find ("origin"); origin != example.end ()) {
+        if (!is_example_origin (*origin)) {
+            return std::nullopt;
+        }
+        kept["origin"] = *origin;
     }
     return std::make_optional (std::move (kept));
 }

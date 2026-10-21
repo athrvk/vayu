@@ -32,7 +32,6 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
@@ -51,6 +50,7 @@
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/types.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -337,11 +337,10 @@ TEST_F (ExecuteAuthProvenanceTest, AStreamingSendAppliesLateAuthToo) {
     payload["stream"] = true;
     post_execute (payload, 202);
 
-    const auto deadline = std::chrono::steady_clock::now () + std::chrono::seconds (10);
-    while (echo.requests_seen () == 0 && std::chrono::steady_clock::now () < deadline) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (10));
-    }
-    ASSERT_GT (echo.requests_seen (), 0)
+    // `requests_seen` counts a request when it arrives, before the route
+    // records its headers; the recorded path is the sign the headers are
+    // readable.
+    ASSERT_TRUE (vayu::tests::wait_until ([&] { return !echo.path ().empty (); }))
     << "the stream never reached the server";
     EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "user:s3cret");
 }

@@ -23,10 +23,11 @@ import { useLoadedMonaco } from "@/lib/monaco-loader";
 import { useScriptTypeDefinitionsQuery } from "@/queries";
 
 /**
- * The sandbox is QuickJS plus `pm`, `console` and the two base64 globals - no
- * DOM, no Node. So the lib list is deliberately `es2022` alone: including `dom`
- * would have the editor offer `fetch`, `setTimeout` and `URL`, none of which
- * exist at runtime, and the script would fail only once it ran.
+ * The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
+ * timers - no DOM, no Node. So the lib list is deliberately `es2022` alone:
+ * including `dom` would have the editor offer `fetch` and `URL`, neither of which
+ * exists at runtime, and the script would fail only once it ran. The timers are
+ * declared by the engine's own file, with the sandbox's semantics.
  *
  * ES2022 rather than ES2020 because the runtime is quickjs-ng, where
  * `Object.hasOwn` and `Array.prototype.at` work - targeting ES2020 would mark
@@ -39,8 +40,8 @@ export const SCRIPT_LIB = ["es2022"];
  * therefore not be shown.
  *
  * - **1108** - "A 'return' statement can only be used within a function body."
- *   The engine wraps every script in an IIFE before running it, so a top-level
- *   `return` to bail out early is legal and is a documented pattern.
+ *   The engine wraps every script in an async IIFE before running it, so a
+ *   top-level `return` to bail out early is legal and is a documented pattern.
  * - **2304** - "Cannot find name 'x'." Two things make it fire on a script the
  *   engine runs:
  *   - an assignment to an undeclared name (`jsonData = pm.response.json()`)
@@ -58,9 +59,9 @@ export const SCRIPT_LIB = ["es2022"];
  *
  * What suppressing 2304 costs is every undeclared name drawing nothing. The
  * engine keeps the names a script is likeliest to reach for by declaring them
- * as `never` or `void` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`,
- * `setTimeout`, Postman's `responseBody` and `CryptoJS`), so using one is a
- * type error with the replacement on hover.
+ * as `never` (`ABSENT_GLOBALS` in `script_types.cpp`: `fetch`, `require`,
+ * Postman's bundled `CryptoJS`), so using one is a type error with the
+ * replacement on hover.
  *
  * Narrow this list rather than widening it: every code here is a real mistake
  * going unreported in exchange for not crying wolf on correct code.
@@ -100,10 +101,17 @@ export const SCRIPT_COMPILER_OPTIONS = {
 	 *
 	 * The price is TypeScript's strict-mode diagnostics on a script that runs
 	 * sloppy: `with`, `delete name`, an octal literal, `yield` or `let` as a
-	 * name, and a top-level `this`, which a module types as `undefined`. A
-	 * top-level `await` was an error before and still is.
+	 * name, and a top-level `this`, which a module types as `undefined`.
 	 */
 	moduleDetection: 3,
+	/*
+	 * 99 is `ModuleKind.ESNext`, in Monaco's bundled enum and TypeScript's alike.
+	 * The engine's wrapper is an *async* function (#2577), so a top-level `await`
+	 * runs, and a module accepts one only under a `module` of es2022 or later
+	 * (TS1378 otherwise). Nothing here imports or emits, so this decides nothing
+	 * else.
+	 */
+	module: 99,
 	/*
 	 * Off deliberately, and *set* rather than left to Monaco's default: the
 	 * default is what it is today, and a `getCompilerOptions()` that ever

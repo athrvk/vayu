@@ -12,8 +12,8 @@
  * This file interfaces with QuickJS C library and uses different coding conventions.
  *
  * The `pm` object's surfaces live in `pm/`, one file per family, sharing
- * `pm/pm_internal.hpp`; what stays here is the console, base64 and
- * `pm.crypto`, the `pm` composer and the engine itself (issue #2092).
+ * `pm/pm_internal.hpp`; what stays here is the console, base64, the timers
+ * and `pm.crypto`, the `pm` composer and the engine itself (issue #2092).
  *
  * Nothing here is linted: `engine/src/runtime/.clang-tidy` turns every check off
  * for this directory, with the reason. There used to be a file-wide
@@ -406,6 +406,79 @@ void setup_base64_globals (JSContext* ctx) {
     JS_FreeValue (ctx, global);
 }
 
+// ============================================================================
+// Timers: setTimeout, setInterval, clearTimeout, clearInterval (#2577)
+// ============================================================================
+//
+// Callbacks run on `TimerQueue`'s virtual clock, drained before the script
+// ends (`drain_async_work`), so a delay orders callbacks and never blocks the
+// thread: an inline load-run script runs where blocking is not allowed, and a
+// Postman script's `setTimeout` used as a sleep would otherwise spend the
+// script's own deadline doing nothing.
+
+enum class TimerKind : std::uint8_t { Once, Repeating };
+
+// Node's rule (`lib/internal/timers.js`), the runtime Postman scripts are
+// written against: a delay that is not a number from 1 to TIMEOUT_MAX is 1.
+constexpr double TIMER_DELAY_MAX_MS = 2147483647.0;
+
+JSValue
+js_set_timer (JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv, int magic) {
+    const char* name =
+    static_cast<TimerKind> (magic) == TimerKind::Repeating ? "setInterval" : "setTimeout";
+    if (argc < 1 || !JS_IsFunction (ctx, argv[0])) {
+        return JS_ThrowTypeError (ctx, "%s requires a function as its first argument", name);
+    }
+    double delay_ms = 1;
+    if (argc >= 2 && JS_ToFloat64 (ctx, &delay_ms, argv[1]) < 0) {
+        return JS_EXCEPTION;
+    }
+    if (!(delay_ms >= 1 && delay_ms <= TIMER_DELAY_MAX_MS)) {
+        delay_ms = 1;
+    }
+
+    auto& queue = get_context_data (ctx)->timers;
+    constexpr size_t cap = vayu::core::constants::script_engine::MAX_PENDING_TIMERS;
+    if (queue.size () >= cap) {
+        return JS_ThrowRangeError (ctx,
+        "%s: %zu timers are already pending, the most one script may hold", name, cap);
+    }
+
+    ScriptTimer timer;
+    timer.callback = JS_DupValue (ctx, argv[0]);
+    for (int i = 2; i < argc; ++i) {
+        timer.args.push_back (JS_DupValue (ctx, argv[i]));
+    }
+    if (static_cast<TimerKind> (magic) == TimerKind::Repeating) {
+        timer.interval_ms = delay_ms;
+    }
+    return JS_NewInt64 (ctx, queue.schedule (std::move (timer), delay_ms));
+}
+
+// clearTimeout and clearInterval share one id space, as in Node and on the web.
+JSValue js_clear_timer (JSContext* ctx, JSValueConst /*this_val*/, int argc, JSValueConst* argv) {
+    int64_t id = 0;
+    if (argc >= 1 && JS_IsNumber (argv[0]) && JS_ToInt64 (ctx, &id, argv[0]) == 0) {
+        get_context_data (ctx)->timers.cancel (ctx, id);
+    }
+    return JS_UNDEFINED;
+}
+
+void setup_timers (JSContext* ctx) {
+    JSValue global = JS_GetGlobalObject (ctx);
+    JS_SetPropertyStr (ctx, global, "setTimeout",
+    JS_NewCFunctionMagic (ctx, js_set_timer, "setTimeout", 2,
+    JS_CFUNC_generic_magic, static_cast<int> (TimerKind::Once)));
+    JS_SetPropertyStr (ctx, global, "setInterval",
+    JS_NewCFunctionMagic (ctx, js_set_timer, "setInterval", 2,
+    JS_CFUNC_generic_magic, static_cast<int> (TimerKind::Repeating)));
+    JS_SetPropertyStr (ctx, global, "clearTimeout",
+    JS_NewCFunction (ctx, js_clear_timer, "clearTimeout", 1));
+    JS_SetPropertyStr (ctx, global, "clearInterval",
+    JS_NewCFunction (ctx, js_clear_timer, "clearInterval", 1));
+    JS_FreeValue (ctx, global);
+}
+
 void setup_pm_crypto (JSContext* ctx, JSValue pm) {
     JSValue crypto = JS_NewObject (ctx);
     JS_SetPropertyStr (
@@ -499,6 +572,9 @@ void setup_pm_object (JSContext* ctx) {
     // same way and for the same reason as pm.execution above.
     setup_pm_metrics (ctx, pm);
 
+    // pm.visualizer - Postman's calls, accepted and not rendered (#2577).
+    setup_pm_visualizer (ctx, pm);
+
     // pm.sendRequest - always bound, even when the capability is off, so a
     // script that calls it gets a sentence explaining why rather than
     // "not a function".
@@ -528,6 +604,74 @@ std::mutex& class_id_registration_mutex () {
 }
 
 } // anonymous namespace
+
+void free_script_timer (JSContext* ctx, ScriptTimer& timer) {
+    JS_FreeValue (ctx, timer.callback);
+    timer.callback = JS_UNDEFINED;
+    for (JSValue arg : timer.args) {
+        JS_FreeValue (ctx, arg);
+    }
+    timer.args.clear ();
+}
+
+int64_t TimerQueue::schedule (ScriptTimer timer, double delay_ms) {
+    const int64_t id = next_id_++;
+    place (id, Entry{ std::move (timer), {} }, now_ms_ + delay_ms);
+    return id;
+}
+
+void TimerQueue::place (int64_t id, Entry entry, double due_ms) {
+    entry.slot = { due_ms, next_seq_++ };
+    order_.emplace (entry.slot, id);
+    timers_.insert_or_assign (id, std::move (entry));
+}
+
+void TimerQueue::cancel (JSContext* ctx, int64_t id) {
+    auto found = timers_.find (id);
+    if (found == timers_.end ()) {
+        return;
+    }
+    order_.erase (found->second.slot);
+    free_script_timer (ctx, found->second.timer);
+    timers_.erase (found);
+}
+
+ScriptTimer TimerQueue::take_next (JSContext* ctx) {
+    if (order_.empty ()) {
+        return {};
+    }
+    const auto [slot, id] = *order_.begin ();
+    order_.erase (order_.begin ());
+    now_ms_ = slot.first;
+
+    auto found = timers_.find (id);
+    if (found == timers_.end ()) {
+        return {};
+    }
+    Entry entry = std::move (found->second);
+    timers_.erase (found);
+    if (!entry.timer.interval_ms) {
+        return std::move (entry.timer);
+    }
+
+    ScriptTimer call;
+    call.callback = JS_DupValue (ctx, entry.timer.callback);
+    for (JSValue arg : entry.timer.args) {
+        call.args.push_back (JS_DupValue (ctx, arg));
+    }
+    const double period = *entry.timer.interval_ms;
+    place (id, std::move (entry), now_ms_ + period);
+    return call;
+}
+
+void TimerQueue::clear (JSContext* ctx) {
+    for (auto& queued : timers_) {
+        free_script_timer (ctx, queued.second.timer);
+    }
+    timers_.clear ();
+    order_.clear ();
+}
+
 } // namespace pm_detail
 
 // `ScriptEngine::Impl` below reads the shared state and every installer.
@@ -550,6 +694,22 @@ extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
     return 1;
 }
 
+namespace {
+
+/// Takes @p promise off the unhandled list, freeing the tracker's reference.
+void forget_rejection (JSContext* ctx, RuntimeState& state, JSValueConst promise) {
+    auto& rejections = state.unhandled_rejections;
+    for (auto it = rejections.begin (); it != rejections.end (); ++it) {
+        if (JS_IsStrictEqual (ctx, *it, promise)) {
+            JS_FreeValue (ctx, *it);
+            rejections.erase (it);
+            return;
+        }
+    }
+}
+
+} // namespace
+
 // QuickJS reports a promise rejected with no handler (`is_handled` false), and
 // reports it again if a handler is attached later (true). What is still listed
 // once the job queue has drained is a rejection the script never observed.
@@ -561,18 +721,11 @@ void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state)
         return;
-    auto& rejections = state->unhandled_rejections;
     if (!is_handled) {
-        rejections.push_back (JS_DupValue (ctx, promise));
+        state->unhandled_rejections.push_back (JS_DupValue (ctx, promise));
         return;
     }
-    for (auto it = rejections.begin (); it != rejections.end (); ++it) {
-        if (JS_IsStrictEqual (ctx, *it, promise)) {
-            JS_FreeValue (ctx, *it);
-            rejections.erase (it);
-            return;
-        }
-    }
+    forget_rejection (ctx, *state, promise);
 }
 
 class ScriptEngine::Impl {
@@ -676,7 +829,9 @@ class ScriptEngine::Impl {
     }
 
     /// A context with the standard intrinsics and the sandbox globals
-    /// (`console`, `btoa`/`atob`, `pm`) and nothing else.
+    /// (`console`, `btoa`/`atob`, the timers, `pm`) and nothing else; `execute`
+    /// binds the legacy globals (`postman`, `tests`, ...) once the execution's
+    /// data is in place.
     JSContext* build_context (JSRuntime* rt) {
         JSContext* ctx = JS_NewContext (rt);
         if (!ctx) {
@@ -686,6 +841,7 @@ class ScriptEngine::Impl {
             setup_console (ctx);
         }
         setup_base64_globals (ctx);
+        setup_timers (ctx);
         setup_pm_object (ctx);
         return ctx;
     }
@@ -701,13 +857,15 @@ class ScriptEngine::Impl {
     /// Unless a promise job is still queued (#1823): each job holds functions
     /// that pin their context, so `JS_FreeContext` would free nothing and the
     /// runtime would fill with dead contexts until its memory limit failed a
-    /// later script. `drain_promise_jobs` empties the queue, so a job is left
+    /// later script. `drain_async_work` empties the queue, so a job is left
     /// only when the drain stopped at the deadline or the job cap, and that
     /// job must never run: it is user code past its budget, against a context
     /// whose `ContextData` is gone. `JS_FreeRuntime` drops it unrun, which
     /// releases the context. Every value the execution itself held must be
-    /// freed before this call (`release_promise_references`), for the same
-    /// pinning reason.
+    /// freed before this call (`release_held_references`), for the same
+    /// pinning reason. A timer left queued is one of those values rather than
+    /// a reason to discard the runtime: the queue is the engine's, so freeing
+    /// it drops the timer unrun.
     void release_context (ContextPair pair) {
         if (!pair.first || !pair.second)
             return;
@@ -762,32 +920,45 @@ class ScriptEngine::Impl {
         return message;
     }
 
-    /// Runs the promise jobs the script queued, so `.then` callbacks and the
-    /// code after an `await` run inside the execution (#2531). The deadline
-    /// is checked before each job as well as by the interrupt handler inside
-    /// one, because the handler polls only every few thousand bytecode
-    /// operations and a native job polls not at all: without the check, a
-    /// script the deadline already stopped would still run a short job. With
-    /// no deadline the job cap bounds the drain instead.
-    ///
-    /// @return why the drain stopped with jobs still queued, or nullopt once
-    ///         the queue is empty.
+    /// Why the drain must stop before running one more job or timer callback,
+    /// or nullopt while it may go on. The deadline is checked here as well as
+    /// by the interrupt handler inside a callback, because the handler polls
+    /// only every few thousand bytecode operations and a native job polls not
+    /// at all: without the check, a script the deadline already stopped would
+    /// still run a short job. With no deadline the cap bounds the drain.
     [[nodiscard]] std::optional<std::string>
-    drain_promise_jobs (JSRuntime* rt, const RuntimeState& state) const {
-        constexpr size_t job_cap =
-        vayu::core::constants::script_engine::MAX_PROMISE_JOBS_WITHOUT_TIMEOUT;
-        size_t jobs_run = 0;
+    async_budget_spent (const RuntimeState& state, size_t steps_run) const {
+        constexpr size_t cap =
+        vayu::core::constants::script_engine::MAX_ASYNC_JOBS_WITHOUT_TIMEOUT;
+        if (state.enabled && std::chrono::steady_clock::now () > state.deadline) {
+            return timeout_message ();
+        }
+        if (!state.enabled && steps_run == cap) {
+            // Built in place: returning the concatenation by value trips a
+            // GCC 13 -Warray-bounds false positive on the optional's move.
+            std::optional<std::string> message;
+            message.emplace ("Script stopped after running ");
+            message->append (std::to_string (cap));
+            message->append (
+            " promise jobs and timer callbacks: with no script timeout "
+            "(scriptTimeout 0) that is the limit on asynchronous work, and the "
+            "rest were not run");
+            return message;
+        }
+        return std::nullopt;
+    }
+
+    /// Runs every queued promise job, so `.then` callbacks and the code after
+    /// an `await` run inside the execution (#2531). @p steps_run counts each
+    /// job against the budget the timers share.
+    [[nodiscard]] std::optional<std::string>
+    drain_promise_jobs (JSRuntime* rt, const RuntimeState& state, size_t& steps_run) const {
         while (JS_IsJobPending (rt)) {
-            if (state.enabled && std::chrono::steady_clock::now () > state.deadline) {
-                return timeout_message ();
-            }
-            if (!state.enabled && jobs_run == job_cap) {
-                return "Script stopped after running " + std::to_string (job_cap) +
-                " promise jobs: with no script timeout (scriptTimeout 0) that "
-                "is the limit on asynchronous work, and the rest were not run";
+            if (auto stop = async_budget_spent (state, steps_run)) {
+                return stop;
             }
             JSContext* job_ctx = nullptr;
-            ++jobs_run;
+            ++steps_run;
             if (JS_ExecutePendingJob (rt, &job_ctx) < 0) {
                 return take_exception_message (job_ctx);
             }
@@ -795,14 +966,83 @@ class ScriptEngine::Impl {
         return std::nullopt;
     }
 
+    /// Calls the timer due first. A callback's throw is the script's error
+    /// and the queue drains on, as an event loop would, which is the rule a
+    /// throw in the script body already follows.
+    void fire_next_timer (JSContext* js_ctx, ContextData& data, ScriptResult& result) const {
+        ScriptTimer timer = data.timers.take_next (js_ctx);
+        JSValue returned  = JS_Call (js_ctx, timer.callback, JS_UNDEFINED,
+         static_cast<int> (timer.args.size ()), timer.args.data ());
+        if (JS_IsException (returned)) {
+            record_script_error (result, take_exception_message (js_ctx));
+        }
+        JS_FreeValue (js_ctx, returned);
+        free_script_timer (js_ctx, timer);
+    }
+
+    /// Reports the script body's throw as the throw itself, the message a
+    /// synchronous script has always reported, rather than as an unhandled
+    /// rejection of the wrapper's promise.
+    static void record_body_rejection (JSContext* js_ctx,
+    RuntimeState& state,
+    ContextData& data,
+    ScriptResult& result) {
+        if (JS_PromiseState (js_ctx, data.script_body) != JS_PROMISE_REJECTED) {
+            return;
+        }
+        forget_rejection (js_ctx, state, data.script_body);
+        JSValue reason = JS_PromiseResult (js_ctx, data.script_body);
+        record_script_error (result, js_to_string (js_ctx, reason));
+        JS_FreeValue (js_ctx, reason);
+        JS_FreeValue (js_ctx, data.script_body);
+        data.script_body = JS_UNDEFINED;
+    }
+
+    /// Runs what the script left to run later: the promise jobs, then the
+    /// timer due first, then the jobs that callback queued, until both queues
+    /// are empty (#2531, #2577).
+    ///
+    /// The body's rejection is read after every round of jobs, the only place
+    /// it can have happened since the last read, so its throw is ordered
+    /// against a timer callback's as the two happened.
+    ///
+    /// @return why the drain stopped with work still queued, or nullopt once
+    ///         both queues are empty.
+    [[nodiscard]] std::optional<std::string> drain_async_work (JSRuntime* rt,
+    JSContext* js_ctx,
+    RuntimeState& state,
+    ContextData& data,
+    ScriptResult& result) const {
+        size_t steps_run = 0;
+        while (true) {
+            auto stop = drain_promise_jobs (rt, state, steps_run);
+            record_body_rejection (js_ctx, state, data, result);
+            if (stop) {
+                return stop;
+            }
+            if (data.timers.empty ()) {
+                return std::nullopt;
+            }
+            if (auto spent = async_budget_spent (state, steps_run)) {
+                return spent;
+            }
+            ++steps_run;
+            fire_next_timer (js_ctx, data, result);
+        }
+    }
+
     /// The first promise the script left unobserved once the queue drained:
-    /// a rejection nothing handled, then a `pm.test` promise that never
-    /// settled. nullopt when there is none.
+    /// a rejection nothing handled, then a body or a `pm.test` promise that
+    /// never settled. nullopt when there is none.
     static std::optional<std::string> unobserved_promise_error (JSContext* js_ctx,
     const RuntimeState& state,
     const ContextData& data) {
         if (!state.unhandled_rejections.empty ()) {
             return unhandled_rejection_message (js_ctx, state.unhandled_rejections, data);
+        }
+        if (JS_PromiseState (js_ctx, data.script_body) == JS_PROMISE_PENDING) {
+            return "The script did not finish: it was still awaiting a promise "
+                   "that never settled";
         }
         for (const auto& [promise, test_name] : data.async_tests) {
             if (JS_PromiseState (js_ctx, promise) == JS_PROMISE_PENDING) {
@@ -838,18 +1078,23 @@ class ScriptEngine::Impl {
         return message;
     }
 
-    /// Frees every promise the execution held a reference to, which
+    /// Frees every promise and timer the execution held a reference to, which
     /// `release_context` needs first.
     static void
-    release_promise_references (JSContext* js_ctx, RuntimeState& state, ContextData& data) {
+    release_held_references (JSContext* js_ctx, RuntimeState& state, ContextData& data) {
         for (JSValue promise : state.unhandled_rejections) {
             JS_FreeValue (js_ctx, promise);
         }
         state.unhandled_rejections.clear ();
+        JS_FreeValue (js_ctx, data.script_body);
+        data.script_body = JS_UNDEFINED;
+        JS_FreeValue (js_ctx, data.legacy_tests);
+        data.legacy_tests = JS_UNDEFINED;
         for (auto& entry : data.async_tests) {
             JS_FreeValue (js_ctx, entry.first);
         }
         data.async_tests.clear ();
+        data.timers.clear (js_ctx);
     }
 
     /// The first error an execution meets is the one it reports.
@@ -922,7 +1167,8 @@ class ScriptEngine::Impl {
         JS_SetContextOpaque (js_ctx, &ctx_data);
 
         // Refresh pm.request, pm.response, pm.info and pm.iterationData with
-        // new data
+        // new data, then bind Postman's legacy globals over them: the response
+        // ones exist only where there is a response.
         JSValue global = JS_GetGlobalObject (js_ctx);
         JSValue pm     = JS_GetPropertyStr (js_ctx, global, "pm");
         if (!JS_IsUndefined (pm)) {
@@ -930,33 +1176,44 @@ class ScriptEngine::Impl {
             setup_pm_request (js_ctx, pm);
             setup_pm_info (js_ctx, pm);
             setup_pm_iteration_data (js_ctx, pm);
+            setup_postman_legacy (js_ctx, global, pm);
         }
         JS_FreeValue (js_ctx, pm);
         JS_FreeValue (js_ctx, global);
 
-        // Wrap script in IIFE to avoid global scope pollution
-        std::string wrapped_script = "(function() { " + script + " \n})()";
+        // A function body, so a top-level `return` works, and an async one, so
+        // a top-level `await` does, as Postman wraps every script (#2577). The
+        // prefix adds no line, so a line number in a stack is the script's own.
+        // JS_EVAL_FLAG_ASYNC is not the same: it evaluates global code, where
+        // `return` is a syntax error.
+        const std::string wrapped_script = "(async function() { " + script + " \n})()";
 
-        // Execute script
         JSValue eval_result = JS_Eval (js_ctx, wrapped_script.c_str (),
         wrapped_script.size (), "<script>", JS_EVAL_TYPE_GLOBAL);
 
+        // A syntax error, or the deadline: an interrupt is uncatchable, so it
+        // leaves the call as an exception rather than rejecting the promise.
         result.success = true;
         if (JS_IsException (eval_result)) {
             record_script_error (result, take_exception_message (js_ctx));
+        } else {
+            ctx_data.script_body = eval_result;
         }
-        JS_FreeValue (js_ctx, eval_result);
 
-        // Drained even after a throw, as Postman's event loop would: a job the
-        // script queued before throwing still runs, and the throw stays the
-        // reported error. A script the deadline already stopped runs no job.
-        auto async_error = drain_promise_jobs (rt, rt_state);
+        // Drained even after a throw, as Postman's event loop would: a job or
+        // timer the script queued before throwing still runs, and the throw
+        // stays the reported error. A script the deadline already stopped runs
+        // no job.
+        auto async_error = drain_async_work (rt, js_ctx, rt_state, ctx_data, result);
         if (!async_error) {
             async_error = unobserved_promise_error (js_ctx, rt_state, ctx_data);
         }
         if (async_error) {
             record_script_error (result, std::move (*async_error));
         }
+        // After the pm.test rows, as Postman appends the legacy ones, and even
+        // after a throw: what the script assigned before it threw was assigned.
+        record_legacy_tests (js_ctx, ctx_data);
 
         // Apply the script's pm.request edits to the request that is about to
         // be sent. Deliberately runs even when the script threw: the edits it
@@ -989,7 +1246,7 @@ class ScriptEngine::Impl {
 
         // Last before the release: the write-back above reads script objects
         // too, and a promise it caused to reject is tracked like any other.
-        release_promise_references (js_ctx, rt_state, ctx_data);
+        release_held_references (js_ctx, rt_state, ctx_data);
         release_context (pair);
         return result;
     }

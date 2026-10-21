@@ -59,6 +59,7 @@ import type {
 	StartScenarioRunRequest,
 	GetRunReportResponse,
 	StopRunResponse,
+	ClearRunsResponse,
 	GetHealthResponse,
 	GetCookiesResponse,
 	ClearCookiesResponse,
@@ -972,6 +973,14 @@ export const apiService = {
 
 	async deleteRun(id: string): Promise<void> {
 		await httpClient.delete(API_ENDPOINTS.RUN_BY_ID(id));
+	},
+
+	/**
+	 * Clear the run history in one engine pass. Pinned baselines and runs still
+	 * in flight are kept (#2429); the answer names the ids that went.
+	 */
+	async clearRuns(): Promise<ClearRunsResponse> {
+		return await httpClient.delete<ClearRunsResponse>(API_ENDPOINTS.RUNS);
 	},
 
 	/**

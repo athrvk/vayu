@@ -935,7 +935,8 @@ governs what a run measures rather than what it keeps:
 | `maxSampleBytes`    | `2097152` | 0–1073741824 | Total captured body bytes one load run may store. Once spent, samples keep their headers and metadata and only their bodies are dropped; the report counts them as `sampling.sampleBodiesDropped`. |
 | `maxResponseSampleBytes` | `268435456` | 0–1073741824 | Total response-body bytes one load run may hold for its post-run test scripts and schema checks. Two orders of magnitude above `maxSampleBytes` because these bodies are kept **whole** - a truncated one would fail a check the target passed - so past the budget whole samples are dropped instead, counted as `sampling.responseSamplesDropped`. `0` retains no sample that has a body. |
 | `phaseHistograms`   | `true`    | boolean      | Record DNS/connect/TLS/first-byte/download times for **every** load-test completion into five HdrHistograms, so the report can carry `timingBreakdown.phases` percentiles instead of averages over the retained trace sample. Costs five atomic histogram writes per completion; see [benchmarks](benchmarks.md). |
-| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent runs; older runs (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
+| `maxRunsRetained`   | `200`     | 0–100000     | Keep at most this many most-recent **load and collection** runs; older ones (and their metrics/results, **including captured response bodies**) are pruned at startup and after each run finishes. Design Sends are counted under `maxDesignRunsRetained` instead and never evict these. `0` = unlimited. Captured data is stored verbatim, so this doubles as its expiry. |
+| `maxDesignRunsRetained` | `100` | 0–100000     | Keep at most this many most-recent **design Sends** (`POST /execute` runs); older ones and their stored exchange are pruned at startup and after each Send. Counted apart from `maxRunsRetained`, so Sends never evict a load or collection run (#2429). `0` = unlimited. |
 | `runRetentionDays`  | `30`      | 0–3650       | Delete runs older than this many days. `0` = unlimited. |
 | `trashRetentionDays` | `30`     | 0–3650       | Destroy collections and requests deleted more than this many days ago, swept at startup. Until then they are restorable - see [Trash](#trash). `0` keeps the trash forever. |
 | `monitorIntervalMs` | `1000`    | 250–60000    | Scrape cadence for a [`monitor` block](#the-monitor-block-server-vitals) that names no `intervalMs` of its own. Read per run, so a change applies to the next run started. The *bounds* on a block's own `intervalMs` are fixed at 250–60000 either way - they exist to stop a cadence that measures the scraper rather than the target. |
@@ -1183,7 +1184,9 @@ proxy certificate that is refused is an `SSL_ERROR` whose message says the
 In-progress (`running`/`pending`) runs are never pruned, and neither are runs
 pinned as baselines (see
 [PUT /runs/:runId/baseline](#put-runsrunidbaseline)); neither kind counts
-toward `maxRunsRetained`.
+toward `maxRunsRetained` or `maxDesignRunsRetained`. Each cap counts only its
+own kind: load and collection runs under `maxRunsRetained`, design Sends under
+`maxDesignRunsRetained`; `runRetentionDays` applies to every kind.
 
 ### GET /request-defaults
 
@@ -2020,7 +2023,8 @@ response. It defaults to `"import"`, which is honest for every row written
 before the column existed, and an unrecognised value is a `400` rather than a
 silent fall back - the OpenAPI spec sync (#627) may replace `"import"` rows
 wholesale and must never touch a `"user"` one, so an absorbed typo would cost a
-user their saved example.
+user their saved example. An OpenAPI export carries it on every example in
+`x-vayu-request.examples` so a re-import keeps it (#2430).
 
 **`bodyTruncated` says the body stops short** (issue #659). A mock server serves
 a stored example verbatim, with nothing in the response to say anything is
@@ -2953,8 +2957,11 @@ and all), `order`, the `folder` path it is filed under, every Params and Headers
 row as typed (`Authorization` and `Content-Type` rows, toggles, duplicates and
 all), the body in its own mode, the auth exactly as set (`inherit` included),
 the non-default `settings` (`followRedirects`, `maxRedirects`, `httpVersion`,
-`verifySSL`, `stream`), every saved example with its headers, and the mock mode
-with the index of a `fixed` target. At the root, `x-vayu-collection` holds the
+`verifySSL`, `stream`), every saved example with its headers and its `origin`
+(`"user"` or `"import"`, #2430; one that is neither is an unreadable example,
+and a document with none, as an older Vayu wrote, imports as `"import"`), and
+the mock mode with the index of a `fixed` target. At the root,
+`x-vayu-collection` holds the
 collection's `variables` (`baseUrl` included), `auth` and `dataSchema`, every
 folder (`path`, `order`, `description`, `variables`, `auth`, `elements`, empty
 folders included; `order` shares its parent's space with the requests'
@@ -3535,7 +3542,7 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
     "environmentCount": 0, "globalCount": 0, "exampleCount": 0,
     "skipped": [ { "kind": "unsupported_auth", "count": 1, "requests": ["Get user"] } ],
     "nonExecutableAuth": 0, "unattachedFileParts": 0,
-    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["tests[]", "CryptoJS"] } ]
+    "unsupportedScriptApis": [ { "request": "Sign in", "names": ["require()", "CryptoJS"] } ]
   }
 }
 ```
@@ -3543,9 +3550,9 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 **`meta.unsupportedScriptApis`** (Postman only, issue
 [#2576](https://github.com/athrvk/vayu/issues/2576)) is `[{request, names}]`:
 each request, folder or collection (by its name) whose imported scripts use a
-Postman script API Vayu does not run, and which ones - `tests[]`,
-`responseBody`, `postman.*`, `require()`, `script.packages`, a bundled library
-such as `CryptoJS`, and the other rows of the table in
+Postman script API Vayu does not run, and which ones - `require()`,
+`script.packages`, a bundled library such as `CryptoJS`, and the other rows of
+the table in
 `engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
@@ -3826,9 +3833,12 @@ accepted a client-supplied `id` - which they no longer do (see
   engine-generated ids, and so **do not appear in `idMap`**. Each entry takes the
   fields `POST /requests/:id/examples` accepts, through the same field applier,
   and an entry that fails validation is a per-item `400` naming the *request's*
-  `tempId`. `origin` is among those fields and an importer leaves it at its
-  `"import"` default, which is what these rows are. An entry with no `order` takes its payload position, so the stored
-  order is the order the source file listed the responses in.
+  `tempId`. `origin` is among those fields: a spec or Postman import leaves it at its
+  `"import"` default, which is what those rows are, and a Vayu OpenAPI export
+  re-imported passes through the `origin` it wrote into `x-vayu-request.examples`
+  (#2430), so a user-saved example stays `"user"`. An entry with no `order` takes
+  its payload position, so the stored order is the order the source file listed
+  the responses in.
 - A **`specs`** item carries `content` (required, non-empty) and an optional
   `sourceUrl`; its `hash` and `fetchedAt` are engine-computed and a per-item
   `400` if sent, and the size cap is the same live `maxSpecDocumentBytes` that
@@ -6467,9 +6477,9 @@ did. The pre-request script runs before the transfer starts, exactly as on a
 buffered send, so its `pm.request` edits reach the wire. The post-request script
 runs **once, after the stream has terminated**, and reads the bounded stored
 list as `pm.response.events` with `pm.response.totalEvents` and
-`pm.response.eventsTruncated` beside it - the sandbox is synchronous with no
-event loop, so a live per-event callback is not a feature that was skipped but
-one the runtime cannot have. See
+`pm.response.eventsTruncated` beside it - a script runs to completion, its
+timers included, before anything is reported, so a live per-event callback is
+not a feature that was skipped but one the runtime cannot have. See
 [Scripting](scripting.md#pmresponseevents---a-streamed-runs-events).
 
 Because the route has already answered `202`, a streaming run's script output
@@ -8308,7 +8318,7 @@ row exists:
 | Input | Rejected because |
 |-------|------------------|
 | `mode: "constant_rps"` with a `scenario` | An open-loop arrival rate over a multi-step sequence is an arrival-rate executor, which Vayu does not implement. Refused rather than silently run closed-loop. |
-| `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
+| `mode: "capacity"` with a `scenario` | The search judges one p99 per level and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
 
@@ -8707,10 +8717,14 @@ therefore what `targetRps × duration` asked for.
 
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
-that window's windowed p99 and throughput, and then steps up by 25% (at least
-+1) while the level stayed inside `sloMs`. It stops - and names the reason in
-the report - when p99 exceeds `sloMs` across **two consecutive** windows
-(`slo_exceeded`; one breaching window re-measures the same level rather than
+the level, and then steps up by 25% (at least +1) while the level stayed inside
+`sloMs`. A level's `p99_ms` is the percentile of every completion at the level
+after its first three live ticks, which measure the transition to the new
+target, read from one histogram; it is not a mean of 100 ms window percentiles,
+which a level with a periodic pause would pass. Its `rps` is the mean throughput
+over the same ticks. It stops - and names the reason in
+the report - when p99 exceeds `sloMs` across **two consecutive** judged levels
+(`slo_exceeded`; one breaching measurement re-measures the same level rather than
 ending the search), when two step-ups buy under 5% more throughput
 (`plateau`), when `concurrency` is reached (`cap_reached`), when `duration`
 runs out (`deadline`), or when the operator stops the run (`stopped`).
@@ -8722,17 +8736,16 @@ ends `deadline` rather than finding anything. Any client enforcing its own
 duration ceiling has to account for that per-mode default rather than assuming
 one number - the MCP tool's cap does.
 
-The search steers by the published metric tick - the same numbers `GET
-/runs/:id/live` streams - rather than sampling the collector itself, so the
-controller and the dashboard cannot disagree about a level. Windows in which
-no request was timed are not judged: their percentiles are the empty-window
-zeros and reading those as "answered instantly" would climb straight past the
-limit. A request that timed out is timed (see [Latency
-population](#latency-population)), so a window of nothing but timeouts has
-samples, is judged, and reports a p99 near the timeout - the level fails its
-latency limit, which is the right verdict.
+The search steers by what the metrics thread publishes each live tick rather
+than sampling the collector itself, so it takes nothing away from what `GET
+/runs/:id/live` streams. A level in which no request was timed is not judged and
+stays open: its percentiles are the empty-histogram zeros and reading those as
+"answered instantly" would climb straight past the limit. A request that timed
+out is timed (see [Latency population](#latency-population)), so a level of
+nothing but timeouts has samples, is judged, and reports a p99 near the timeout -
+the level fails its latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
-windowed p99 and a sequence has one per step.
+p99 per level and a sequence has one per step.
 
 **Ramp semantics.** `ramp_up` interpolates linearly from `startConcurrency` to
 `concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of
@@ -9772,10 +9785,20 @@ the engine died mid-run; its report is built from those sampled `results` alone 
 erroring. **The response shape is the same either way.**
 
 A report read while the run is `pending` or `running` is therefore **partial**: its aggregates
-come from whatever results have been sampled so far, `metadata.status` says the run is still in
+come from whatever results have been stored so far, `metadata.status` says the run is still in
 flight, and `thresholdValidation` is absent even when the run declared budgets, because the
 verdict is computed from the summary written at the end. Read `metadata.status` before treating a
 report as final.
+
+A run stores its `results` rows as it finishes, so a run in flight usually has none yet. A
+partial report of a **load** run also never reads the rows' stored traces (issue #2548), because
+it is the one a client re-reads on a timer (a design or scenario run stores its rows just before
+the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
+traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
+`errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
+unless the run recorded `phases`) and `slowRequests` is absent. The status distribution, latency
+percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
+a finished run.
 
 **`metadata.openapi`** appears only for a run whose collection was
 [bound to a spec](#post-collections) when the run was planned (issue #637). It is
@@ -10509,10 +10532,11 @@ endpoint is new.
 
 Two things follow from a pin, and both are the point of it:
 
-- **Retention never expires it.** `prune_runs` skips a baseline under both the
-  count cap and the age cap, and a pinned run does not count toward
-  `maxRunsRetained` either - a pin the cap could expire is not a pin, and pins
-  crowding the cap would evict the recent history the cap exists to keep.
+- **Retention never expires it.** `prune_runs` skips a baseline under both
+  count caps and the age cap, and a pinned run does not count toward
+  `maxRunsRetained` or `maxDesignRunsRetained` either - a pin a cap could
+  expire is not a pin, and pins crowding a cap would evict the recent history
+  the cap exists to keep.
 - **Clients can find it**: `GET /runs?baseline=true&requestId=<id>&limit=1`.
 
 The engine's own meaning of the flag stops there - it holds no opinion about
@@ -10546,6 +10570,39 @@ field, so ignoring it would answer `200` to a request that changed nothing.
 ```
 
 **`404`** when no run has that id.
+
+### DELETE /runs
+
+Clear run history: delete every run - design, load and scenario alike - except
+the ones retention never deletes either (issue #2429):
+
+- a run **pinned as a baseline** (see
+  [PUT /runs/:runId/baseline](#put-runsrunidbaseline)) is kept - the pin is a
+  promise to keep the run, and a bulk clear does not break it. Unpin first, or
+  name the run in [DELETE /runs/:runId](#delete-runsrunid), to remove one;
+- a run whose stored status is still **`running` or `pending`** is kept and
+  left running. Stop it, then clear again.
+
+Each run goes with its metrics, results and captured bodies, through the same
+cascade and the same batched pass as retention: batches of 100, each in its own
+transaction, and each row re-read under that batch's lock, so a run pinned or
+started while the clear is under way is spared. A deleted run is gone for good;
+runs have no trash. The call takes no body and no query parameters.
+
+**Response `200`:**
+```json
+{
+  "deleted": 2,
+  "keptPinned": 1,
+  "deletedIds": ["run_1712345678901", "run_1712345678902"]
+}
+```
+
+`deleted` is the length of `deletedIds`, the runs this call removed, so a
+client can close whatever was showing one. `keptPinned` counts the pinned
+baselines stored once the clear finished; a run kept for being in flight is in
+neither number. An empty history answers `{"deleted": 0, "keptPinned": 0,
+"deletedIds": []}`.
 
 ### DELETE /runs/:runId
 
@@ -10650,21 +10707,18 @@ so a client may cache on `version`.
 
 The file also declares the names a script may reach for that the sandbox
 **lacks**, with the reason as documentation: the host globals of a browser or
-Node (`setTimeout`, `fetch`, `require`, `URL`, ...), and Postman's pre-`pm.*`
-globals and bundled libraries (`tests`, `responseBody`, `responseCode`,
-`postman.*`, `CryptoJS`, `_`, ...), whose hover names the replacement Postman
-itself gives (`responseBody` is `pm.response.text()`,
-`postman.setEnvironmentVariable` is `pm.environment.set()`).
+Node (`fetch`, `require`, `URL`, `Buffer`, ...), and the libraries Postman
+bundles (`CryptoJS`, `_`, ...), whose hover names the replacement Postman itself
+gives (`_` is `require('lodash')`). Postman's `postman` object and its pre-`pm.*`
+globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
+run (#2577), and are declared from the completion table like `pm` itself, each
+as the value it is.
 
 That is not padding: the app suppresses "Cannot find name" (2304), so a name that
 is merely undeclared draws nothing. A name typed `never` makes the call, member
 access or assignment that follows an error ("not callable", "property does not
 exist"). `never` is assignable to everything, so a bare read passes
-(`JSON.parse(responseBody)`); the three legacy names used only as bare values
-(`responseBody`, `responseTime`, `iteration`) are `void` instead. A dotted entry
-(`postman.setEnvironmentVariable`) is a member of the entry before the dot, which
-is then an object type holding it, so hover over the method names that method's
-replacement.
+(`console.log(moment)`).
 
 Declaring a name does not reserve it: the app compiles each script as a module
 (`moduleDetection`), so a script's own `const data = ...` shadows the declared

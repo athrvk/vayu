@@ -1209,6 +1209,18 @@ int64_t stop_wait_ms) {
 }
 
 /**
+ * Testable core of DELETE /runs (#2429): "Clear run history", which keeps what
+ * retention keeps - pinned baselines and runs still in flight. The deleted ids
+ * travel back so a client can close whatever was showing one.
+ */
+std::pair<int, nlohmann::json> clear_runs_response (vayu::db::Database& db) {
+    const auto cleared = db.clear_runs ();
+    return { 200,
+        nlohmann::json{ { "deleted", cleared.deleted_ids.size () },
+        { "keptPinned", cleared.kept_pinned }, { "deletedIds", cleared.deleted_ids } } };
+}
+
+/**
  * Rate fidelity as the pacer counts it (#2392): requests sent over requests
  * expected, and the achieved rate over the sending window, which the
  * end-of-run drain is not part of. Leaves the completed-over-wall-time figures
@@ -1732,7 +1744,19 @@ run_report_response (vayu::db::Database& db, const std::string& run_id) {
         return { 404, error_body (404, "Run not found") };
     }
 
-    auto results = db.get_results (run_id);
+    // A load run that is not terminal is read without its traces (#2548): a
+    // client re-reads this report on a timer until the run ends, and the
+    // trace-derived parts (`errors.types`, the phase averages, `slowRequests`,
+    // `results[].trace`) then take their no-trace answers. Decided from the
+    // same row `metadata.status` reports, so a run that turns terminal before
+    // the results read is answered as the running run this report says it is.
+    // Design and scenario runs store their rows just before the status flips,
+    // and their one-shot readers (response restore, the step list) need
+    // `trace` from a report fetched in that gap, so they always read it.
+    const bool live_load =
+    run->type == vayu::RunType::Load && !vayu::is_terminal (run->status);
+    const auto results =
+    live_load ? db.get_results_without_traces (run_id) : db.get_results (run_id);
 
     double duration_s = 0;
     if (run->start_time > 0) {
@@ -1901,6 +1925,18 @@ void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib:
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "DELETE /runs/:id - Error deleting run " + run_id + ": " + e.what ());
+        send_error (res, 500, e.what ());
+    }
+}
+
+void handle_clear_runs (RouteContext& ctx, httplib::Response& res) {
+    try {
+        auto [status, body] = clear_runs_response (ctx.db);
+        res.status          = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("run",
+        "DELETE /runs - Error clearing run history: " + std::string (e.what ()));
         send_error (res, 500, e.what ());
     }
 }
@@ -2123,6 +2159,16 @@ void register_run_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/runs/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_get_run (ctx, req, res);
+    });
+
+    /**
+     * DELETE /runs
+     * Clears run history: every run except pinned baselines and runs still in
+     * flight, answering {deleted, keptPinned, deletedIds}. See
+     * clear_runs_response.
+     */
+    ctx.server.Delete ("/runs", [&ctx] (const httplib::Request&, httplib::Response& res) {
+        handle_clear_runs (ctx, res);
     });
 
     /**

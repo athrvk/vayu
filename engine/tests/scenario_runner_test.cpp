@@ -1497,6 +1497,58 @@ TEST_F (ScenarioRunnerTest, SetNextRequestChangesTheExecutedSequence) {
     EXPECT_EQ (json::parse (rows[1].trace_data)["stepIndex"].get<size_t> (), 2u);
 }
 
+// Postman's legacy spelling is an alias of the same call (#2577), so it steers
+// the run the same way.
+TEST_F (ScenarioRunnerTest, LegacyPostmanSetNextRequestChangesTheExecutedSequence) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "", R"(postman.setNextRequest("Checkout");)");
+    seed_request ("req_b", 1, "/login");
+    seed_request ("req_c", 2, "/observe", "", "", "", "Checkout");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[0].path, "/ok");
+    EXPECT_EQ (seen[1].path, "/observe");
+}
+
+// The opening test script of a collection written before pm.* (#2577): a
+// legacy assertion, then a legacy setter the next step reads. Every line used
+// to throw at the first, so the step errored and the variable never reached
+// step 1. Mutation check: drop the `tests` binding in pm_legacy.cpp and the
+// step errors with the marker unset.
+TEST_F (ScenarioRunnerTest, ALegacyTestScriptPassesAndItsVariableReachesTheNextStep) {
+    seed_collection ("col_1");
+    seed_environment ("env_1", "[]");
+    seed_request ("req_a", 0, "/ok", "", R"(
+        tests["Status code is 200"] = responseCode.code === 200;
+        var jsonData = JSON.parse(responseBody);
+        postman.setEnvironmentVariable("token", "from-legacy");
+    )");
+    seed_request ("req_b", 1, "/observe",
+    R"(pm.request.headers.add({key: "X-Marker", value: pm.environment.get("token")});)");
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].marker, "from-legacy");
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 2u);
+    const auto first = json::parse (rows[0].trace_data);
+    EXPECT_EQ (first["outcome"].get<std::string> (), "passed") << first.dump ();
+    ASSERT_TRUE (first.contains ("scripts") && first["scripts"].contains ("testResults"))
+    << first.dump ();
+    const auto& tests = first["scripts"]["testResults"];
+    ASSERT_EQ (tests.size (), 1u) << first.dump ();
+    EXPECT_EQ (tests[0]["name"].get<std::string> (), "Status code is 200");
+    EXPECT_TRUE (tests[0]["passed"].get<bool> ());
+}
+
 // A jump backwards is the point of the feature - a retry loop is one - and it
 // is also what the cycle bound below exists to survive.
 TEST_F (ScenarioRunnerTest, SetNextRequestCanSendTheIterationBackwards) {

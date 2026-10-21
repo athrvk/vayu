@@ -142,7 +142,7 @@ export function CustomBudgetRows({
 					)}
 					<Button
 						type="button"
-						variant="ghost"
+						variant="rowActionDestructive"
 						size="icon"
 						className="shrink-0"
 						aria-label={`Remove custom budget ${index + 1}`}

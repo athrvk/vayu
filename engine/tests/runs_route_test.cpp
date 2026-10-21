@@ -19,11 +19,13 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
@@ -58,6 +60,8 @@ const std::string& run_id,
 const std::string& body);
 // Defined in runs.cpp; the GET /runs filters off the query string.
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
+// Defined in runs.cpp; DELETE /runs, returns {http_status, json_body}.
+std::pair<int, nlohmann::json> clear_runs_response (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace {
@@ -129,6 +133,22 @@ class RunsRouteTest : public ::testing::Test {
         db_->add_result (result);
     }
     VAYU_DIAGNOSTIC_POP
+
+    /// One stored result carrying @p trace_data as written, parseable or not.
+    void seed_traced_result (const std::string& run_id,
+    int status_code,
+    double latency_ms,
+    const std::string& trace_data) {
+        vayu::db::Result result;
+        result.run_id      = run_id;
+        result.timestamp   = 1000;
+        result.status_code = status_code;
+        result.status_text = "OK";
+        result.latency_ms  = latency_ms;
+        result.error       = status_code == 0 ? "timed out" : "";
+        result.trace_data  = trace_data;
+        db_->add_result (result);
+    }
 
     std::unique_ptr<vayu::db::Database> db_;
     /// One per test, like the database beside it: the cache is keyed by run id
@@ -1093,6 +1113,181 @@ TEST_F (RunsRouteTest, DbCountMatchesFilter) {
     EXPECT_EQ (db_->count_runs ({}), 3); // no filter -> everything
 }
 
+// The three SQL functions the snapshot filters call, counted (#2548).
+struct SnapshotPredicateCalls {
+    int like         = 0;
+    int json_valid   = 0;
+    int json_extract = 0;
+};
+
+SnapshotPredicateCalls& snapshot_predicate_calls () {
+    static SnapshotPredicateCalls calls;
+    return calls;
+}
+
+// Each stand-in answers "no match" (no LIKE hit, not JSON, no such key), so a
+// statement it runs in can only find less than the built-in would.
+void count_like (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().like;
+    sqlite3_result_int (context, 0);
+}
+void count_json_valid (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().json_valid;
+    sqlite3_result_int (context, 0);
+}
+void count_json_extract (sqlite3_context* context, int /*argc*/, sqlite3_value** /*argv*/) {
+    ++snapshot_predicate_calls ().json_extract;
+    sqlite3_result_null (context);
+}
+
+struct FunctionOverride {
+    const char* name                                      = nullptr;
+    int arity                                             = 0;
+    void (*body) (sqlite3_context*, int, sqlite3_value**) = nullptr;
+};
+
+// An auto-extension entry point: overrides the built-ins on a connection as
+// it opens. The arities are the ones run_filter_where calls with (`X LIKE Y`
+// is `like(Y, X)`): a function of the same name and arity replaces the
+// built-in, and an exact arity outranks json_extract's variadic one.
+int install_snapshot_predicate_counters (sqlite3* db,
+char** /*error*/,
+const sqlite3_api_routines* /*api*/) {
+    const auto overrides = std::to_array<FunctionOverride> ({
+    { "like", 2, &count_like },
+    { "json_valid", 1, &count_json_valid },
+    { "json_extract", 2, &count_json_extract },
+    });
+    for (const auto& [name, arity, body] : overrides) {
+        const int rc = sqlite3_create_function (
+        db, name, arity, SQLITE_UTF8, nullptr, body, nullptr, nullptr);
+        if (rc != SQLITE_OK) {
+            return rc;
+        }
+    }
+    return SQLITE_OK;
+}
+
+// sqlite3_auto_extension takes its entry point type-erased and casts it back
+// to `sqlite3_loadext_entry` before calling it.
+auto snapshot_predicate_counters_entry () {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return reinterpret_cast<void (*) ()> (&install_snapshot_predicate_counters);
+}
+
+// Installs the counters on every connection opened while this lives. A test
+// cannot reach the storage's own connection, so it reopens the database
+// inside one. Cancelled on scope exit because a direct run of the binary
+// (no ctest) keeps one process for every test after this one.
+class SnapshotPredicateCounters {
+    public:
+    SnapshotPredicateCounters ()
+    : registered (sqlite3_auto_extension (snapshot_predicate_counters_entry ())) {
+        snapshot_predicate_calls () = {};
+    }
+    ~SnapshotPredicateCounters () {
+        sqlite3_cancel_auto_extension (snapshot_predicate_counters_entry ());
+    }
+    SnapshotPredicateCounters (const SnapshotPredicateCounters&) = delete;
+    SnapshotPredicateCounters& operator= (const SnapshotPredicateCounters&) = delete;
+    SnapshotPredicateCounters (SnapshotPredicateCounters&&)            = delete;
+    SnapshotPredicateCounters& operator= (SnapshotPredicateCounters&&) = delete;
+
+    const int registered;
+};
+
+// The 5 s History poll lists and counts with no `q` and no collection, so
+// neither filter's predicate may touch a snapshot then; each set filter must
+// still reach its function once per row, which is also what proves the
+// counters are installed on the connection the queries run on.
+TEST_F (RunsRouteTest, AnUnfilteredListNeverEvaluatesTheSnapshotPredicates) {
+    constexpr int RUNS = 500;
+    for (int i = 0; i < RUNS; ++i) {
+        seed ({ .id      = "run_" + std::to_string (i),
+        .type            = vayu::RunType::Scenario,
+        .start_time      = i,
+        .config_snapshot = scenario_snapshot ("col_A") });
+    }
+
+    db_.reset ();
+    const SnapshotPredicateCounters counters;
+    ASSERT_EQ (counters.registered, SQLITE_OK);
+    // No `init ()`: its retention pass would prune the set to maxRunsRetained.
+    db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+
+    auto& calls = snapshot_predicate_calls ();
+    calls       = {};
+    EXPECT_EQ (db_->count_runs ({}), RUNS);
+    EXPECT_EQ (db_->get_runs_paginated ({}, 50, 0).size (), 50u);
+    EXPECT_EQ (calls.like, 0);
+    EXPECT_EQ (calls.json_valid, 0);
+    EXPECT_EQ (calls.json_extract, 0);
+
+    vayu::db::RunFilter by_text;
+    by_text.q = "col_A";
+    calls     = {};
+    EXPECT_EQ (db_->count_runs (by_text), 0); // the stand-in never matches
+    EXPECT_EQ (calls.like, RUNS);
+
+    vayu::db::RunFilter by_collection;
+    by_collection.collection_id = "col_A";
+    calls                       = {};
+    EXPECT_EQ (db_->count_runs (by_collection), 0);
+    EXPECT_EQ (calls.json_valid, RUNS);
+    EXPECT_EQ (calls.json_extract, RUNS);
+}
+
+// Every combination of the two snapshot filters over one mixed set, through
+// both reads: `q` is a substring of the stored text (a malformed snapshot
+// included), the collection is the parsed key (a design run naming it in its
+// URL excluded), and the two together intersect.
+TEST_F (RunsRouteTest, TextAndCollectionFiltersComposeOverOneSet) {
+    seed ({ .id = "orders_A",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 5,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_A"},"name":"orders"})" });
+    seed ({ .id = "users_A",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 4,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_A"},"name":"users"})" });
+    seed ({ .id = "orders_B",
+    .type       = vayu::RunType::Scenario,
+    .start_time = 3,
+    .config_snapshot = R"({"scenario":{"collectionId":"col_B"},"name":"orders"})" });
+    seed ({ .id      = "orders_design",
+    .type            = vayu::RunType::Design,
+    .start_time      = 2,
+    .config_snapshot = R"({"url":"https://api/col_A/orders"})" });
+    seed ({ .id = "orders_malformed", .start_time = 1, .config_snapshot = "orders {{{" });
+
+    const auto ids_of = [this] (const vayu::db::RunFilter& filter) {
+        std::vector<std::string> ids;
+        for (const auto& run : db_->get_runs_paginated (filter, 50, 0)) {
+            ids.push_back (run.id);
+        }
+        EXPECT_EQ (db_->count_runs (filter), static_cast<int64_t> (ids.size ()));
+        return ids;
+    };
+    using Ids = std::vector<std::string>;
+
+    vayu::db::RunFilter by_text;
+    by_text.q = "orders";
+    EXPECT_EQ (ids_of (by_text),
+    (Ids{ "orders_A", "orders_B", "orders_design", "orders_malformed" }));
+
+    vayu::db::RunFilter by_collection;
+    by_collection.collection_id = "col_A";
+    EXPECT_EQ (ids_of (by_collection), (Ids{ "orders_A", "users_A" }));
+
+    vayu::db::RunFilter both = by_collection;
+    both.q                   = "orders";
+    EXPECT_EQ (ids_of (both), (Ids{ "orders_A" }));
+
+    vayu::db::RunFilter empty_text;
+    empty_text.q = "";
+    EXPECT_EQ (ids_of (empty_text).size (), 5u); // an empty `q` is no filter
+}
+
 // GET /runs/:id/report's `configuration` object: same nine-key extension as
 // the list-row summary (mode/duration/concurrency/startConcurrency/
 // rampUpDuration/timeout/comment + httpVersion/followRedirects/maxRedirects),
@@ -1735,6 +1930,104 @@ TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     EXPECT_EQ (done["metadata"]["status"].get<std::string> (), "completed");
     ASSERT_TRUE (done.contains ("thresholdValidation"));
     EXPECT_EQ (done["thresholdValidation"]["verdict"].get<std::string> (), "passed");
+}
+
+// #2548: a report polled while the run is in flight never reads `trace_data`.
+// The same rows, once the run is terminal, are read with their traces, so the
+// two reports differ in exactly what only a trace can say.
+TEST_F (RunsRouteTest, ALiveRunsReportReadsNoTraceAndTheFinishedOneDoes) {
+    seed ({ .id = "run_traced", .status = vayu::RunStatus::Running, .start_time = 1000 });
+    seed_traced_result ("run_traced", 200, 10.0,
+    R"({"dnsMs":1,"connectMs":2,"tlsMs":3,"firstByteMs":4,"downloadMs":5,"isSlow":true,"thresholdMs":8})");
+    seed_traced_result ("run_traced", 0, 0.0, R"({"error_type":"timeout"})");
+    // Not JSON: a report that read this column would carry it back as a string.
+    constexpr std::string_view UNPARSEABLE = "not json {";
+    seed_traced_result ("run_traced", 503, 30.0, std::string (UNPARSEABLE));
+
+    auto [live_status, live] = vayu::http::routes::run_report_response (*db_, "run_traced");
+    ASSERT_EQ (live_status, 200);
+    EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
+    EXPECT_TRUE (live["errors"]["types"].empty ());
+    EXPECT_EQ (live["errors"]["withDetails"].get<size_t> (), 0u);
+    EXPECT_FALSE (live.contains ("timingBreakdown"));
+    EXPECT_FALSE (live.contains ("slowRequests"));
+    ASSERT_EQ (live["results"].size (), 3u);
+    for (const auto& row : live["results"]) {
+        EXPECT_FALSE (row.contains ("trace")) << row.dump ();
+    }
+
+    db_->update_run_status ("run_traced", vayu::RunStatus::Completed);
+    auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_traced");
+    ASSERT_EQ (done_status, 200);
+    EXPECT_EQ (done["errors"]["types"]["timeout"].get<size_t> (), 1u);
+    EXPECT_EQ (done["errors"]["withDetails"].get<size_t> (), 1u);
+    EXPECT_DOUBLE_EQ (done["timingBreakdown"]["avgDnsMs"].get<double> (), 1.0);
+    EXPECT_EQ (done["slowRequests"]["count"].get<size_t> (), 1u);
+    ASSERT_EQ (done["results"].size (), 3u);
+    for (const auto& row : done["results"]) {
+        EXPECT_TRUE (row.contains ("trace")) << row.dump ();
+    }
+    EXPECT_EQ (done["results"][2]["trace"].get<std::string> (), UNPARSEABLE);
+
+    // Everything else is the same report: the status distribution, the latency
+    // percentiles, the selected rows and the stored count. `end_time` and the
+    // duration derived from it moved when the status did.
+    auto expected                     = done;
+    expected["metadata"]["status"]    = "running";
+    expected["errors"]["types"]       = nlohmann::json::object ();
+    expected["errors"]["withDetails"] = 0;
+    expected.erase ("timingBreakdown");
+    expected.erase ("slowRequests");
+    for (auto& row : expected["results"]) {
+        row.erase ("trace");
+    }
+    for (auto* report : { &live, &expected }) {
+        (*report)["metadata"].erase ("endTime");
+        for (const char* key : { "avgRps", "testDuration", "totalDurationSeconds" }) {
+            (*report)["summary"].erase (key);
+        }
+    }
+    EXPECT_EQ (live, expected);
+}
+
+// #2548: only a load run is read trace-free. A design or scenario run stores
+// its rows just before the status flips, and a one-shot reader (response
+// restore, the step list) fetching in that gap needs `trace`.
+TEST_F (RunsRouteTest, ARunningScenarioOrDesignRunsReportKeepsItsTraces) {
+    for (const auto type : { vayu::RunType::Scenario, vayu::RunType::Design }) {
+        const std::string id = std::string ("run_traced_") + vayu::to_string (type);
+        seed ({ .id = id, .type = type, .status = vayu::RunStatus::Running, .start_time = 1000 });
+        seed_traced_result (id, 200, 10.0, R"({"dnsMs":1.0})");
+        auto [status, report] = vayu::http::routes::run_report_response (*db_, id);
+        ASSERT_EQ (status, 200);
+        ASSERT_EQ (report["results"].size (), 1u);
+        EXPECT_TRUE (report["results"][0].contains ("trace")) << id;
+    }
+}
+
+TEST_F (RunsRouteTest, ResultsWithoutTracesKeepEveryOtherColumnInIdOrder) {
+    seed ({ .id = "run_cols" });
+    seed_traced_result ("run_cols", 0, 0.0, R"({"error_type":"timeout"})");
+    seed_traced_result ("run_cols", 201, 7.5, R"({"dnsMs":1})");
+    seed_traced_result ("other_run", 200, 1.0, R"({"dnsMs":1})");
+
+    const auto full    = db_->get_results ("run_cols");
+    const auto without = db_->get_results_without_traces ("run_cols");
+    ASSERT_EQ (full.size (), 2u);
+    ASSERT_EQ (without.size (), full.size ());
+    for (size_t i = 0; i < full.size (); ++i) {
+        EXPECT_FALSE (full[i].trace_data.empty ());
+        EXPECT_TRUE (without[i].trace_data.empty ());
+        EXPECT_EQ (without[i].id, full[i].id);
+        EXPECT_EQ (without[i].run_id, full[i].run_id);
+        EXPECT_EQ (without[i].timestamp, full[i].timestamp);
+        EXPECT_EQ (without[i].status_code, full[i].status_code);
+        EXPECT_EQ (without[i].status_text, full[i].status_text);
+        EXPECT_DOUBLE_EQ (without[i].latency_ms, full[i].latency_ms);
+        EXPECT_EQ (without[i].error, full[i].error);
+    }
+    EXPECT_LT (without[0].id, without[1].id);
+    EXPECT_EQ (without[0].error, "timed out");
 }
 
 // This run's custom trends, counters and rates (issue #1500), round-tripped
@@ -2615,6 +2908,47 @@ TEST_F (RunsRouteTest, SingleRunPayloadCarriesTheBaselineFlag) {
     auto run = db_->get_run ("run_a");
     ASSERT_HAS_VALUE (run);
     EXPECT_TRUE (vayu::json::serialize (*run)["baseline"].get<bool> ());
+}
+
+// ============================================================================
+// DELETE /runs (clear_runs_response, #2429)
+// ============================================================================
+
+// "Clear run history" keeps pinned baselines and runs still in flight, and
+// says what it did: how many went, which ones, and how many pins it kept.
+TEST_F (RunsRouteTest, ClearRunsKeepsPinnedAndInFlightRunsAndReportsWhatWent) {
+    seed ({ .id = "load_done", .start_time = 100 });
+    seed ({ .id = "send_done", .type = vayu::RunType::Design, .start_time = 200 });
+    seed ({ .id = "pinned_load", .start_time = 300 });
+    seed ({ .id = "pinned_send", .type = vayu::RunType::Design, .start_time = 400 });
+    seed ({ .id = "running", .status = vayu::RunStatus::Running, .start_time = 500 });
+    seed ({ .id = "pending", .status = vayu::RunStatus::Pending, .start_time = 600 });
+    ASSERT_HAS_VALUE (db_->set_run_baseline ("pinned_load", true));
+    ASSERT_HAS_VALUE (db_->set_run_baseline ("pinned_send", true));
+
+    auto [status, body] = vayu::http::routes::clear_runs_response (*db_);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["deleted"].get<int64_t> (), 2);
+    EXPECT_EQ (body["keptPinned"].get<int64_t> (), 2);
+    ASSERT_TRUE (body["deletedIds"].is_array ());
+    auto deleted_ids = body["deletedIds"].get<std::vector<std::string>> ();
+    std::ranges::sort (deleted_ids);
+    EXPECT_EQ (deleted_ids, (std::vector<std::string>{ "load_done", "send_done" }));
+
+    for (const char* kept : { "pinned_load", "pinned_send", "running", "pending" }) {
+        EXPECT_TRUE (db_->get_run (kept).has_value ()) << "the clear deleted " << kept;
+    }
+    EXPECT_FALSE (db_->get_run ("load_done").has_value ());
+    EXPECT_FALSE (db_->get_run ("send_done").has_value ());
+}
+
+TEST_F (RunsRouteTest, ClearRunsOnAnEmptyHistoryAnswersZero) {
+    auto [status, body] = vayu::http::routes::clear_runs_response (*db_);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body,
+    (json{ { "deleted", 0 }, { "keptPinned", 0 }, { "deletedIds", json::array () } }));
 }
 
 // ============================================================================

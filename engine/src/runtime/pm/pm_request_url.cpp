@@ -336,8 +336,10 @@ std::string script_body_view (const Body& body) {
                                          body.content;
 }
 
+} // namespace
+
 /**
- * Which header map `pm.request.headers` shows.
+ * Which of the request's header records a script shows.
  *
  * Two records of "the request's headers" exist and they are not the same set
  * (issue #483). `request->headers` is what the request was *composed* with;
@@ -364,16 +366,21 @@ std::string script_body_view (const Body& body) {
  * empty map would take `pm.request.headers` from "missing the two derived
  * entries" to "empty", a worse answer than the one this fixes. An empty sent
  * record means nothing was recorded, never that nothing was sent.
- *
- * Either set is shown folded, one value per name (`HeaderList::folded`): the
- * scripting API is single-valued, so a repeated header reads as its values
- * joined (issue #2466).
  */
-Headers script_request_header_view (const ContextData& data) {
+const HeaderList& script_request_header_lines (const ContextData& data) {
     if (data.response != nullptr && !data.response->request_headers.empty ()) {
-        return data.response->request_headers.folded ();
+        return data.response->request_headers;
     }
-    return data.request->headers.folded ();
+    return data.request->headers;
+}
+
+namespace {
+
+// `pm.request.headers` shows that set folded, one value per name
+// (`HeaderList::folded`): the scripting API is single-valued, so a repeated
+// header reads as its values joined (issue #2466).
+Headers script_request_header_view (const ContextData& data) {
+    return script_request_header_lines (data).folded ();
 }
 
 // ============================================================================

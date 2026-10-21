@@ -1875,8 +1875,8 @@ struct Run {
     // runs may carry the flag at once.
     //
     // Retention reads it: `prune_runs` never deletes a baseline and never
-    // counts one toward the retained-run cap, because a pin the cap can expire
-    // is not a pin. Defaulted (and stored with a `default_value`) so
+    // counts one toward either retained-run cap, because a pin a cap can
+    // expire is not a pin. Defaulted (and stored with a `default_value`) so
     // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
     // the same pattern as `summary` above and `requests.follow_redirects`.
     bool baseline = false; // INTEGER NOT NULL DEFAULT 0
@@ -1952,8 +1952,9 @@ struct Result {
     // JSON. Design mode stores the whole exchange here (request + response,
     // nested). A load run stores only the timing breakdown - never a body -
     // because `calculate_detailed_report` parses every row of this column on
-    // every report fetch, and the dashboard polls that. Load-run bodies live in
-    // `result_bodies`/`body_blobs` instead, read only by GET /runs/:id/samples.
+    // every report fetch of a finished run (a live run's report skips the
+    // column, #2548). Load-run bodies live in `result_bodies`/`body_blobs`
+    // instead, read only by GET /runs/:id/samples.
     std::string trace_data;
 };
 

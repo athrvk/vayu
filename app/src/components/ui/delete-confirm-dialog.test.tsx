@@ -85,6 +85,29 @@ describe("DeleteConfirmDialog", () => {
 		expect(confirm.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
 	});
 
+	// The slot sits outside `DialogDescription` (a `<p>`), because the Callout a
+	// refusal uses is a `<div>`.
+	describe("the error slot", () => {
+		it("renders a refusal between the description and the actions, outside the description", () => {
+			open({ error: <div data-testid="refusal">Engine said no</div> });
+			const refusal = screen.getByTestId("refusal");
+			expect(refusal.closest("p")).toBeNull();
+			expect(refusal.closest('[data-slot="dialog-description"]')).toBeNull();
+			const description = screen.getByText("This cannot be undone.");
+			expect(description.compareDocumentPosition(refusal)).toBe(
+				Node.DOCUMENT_POSITION_FOLLOWING
+			);
+			expect(refusal.compareDocumentPosition(btn(/^Cancel$/))).toBe(
+				Node.DOCUMENT_POSITION_FOLLOWING
+			);
+		});
+
+		it("renders nothing extra without one", () => {
+			open();
+			expect(screen.queryByTestId("refusal")).toBeNull();
+		});
+	});
+
 	// Issue #1689: one template produces the sentence, so every call site that
 	// passes `name` instead of writing its own prose reads the same shape.
 	describe("the generated {name, scope} sentence", () => {

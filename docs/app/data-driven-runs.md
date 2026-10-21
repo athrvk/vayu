@@ -563,5 +563,8 @@ The run's step view carries that disclosure where the steps are listed, and
 names the data file when the run's snapshot recorded one.
 
 The expiry is the run's: step rows are deleted when their run is, so
-`maxRunsRetained` and `runRetentionDays` (Settings, Data & retention) are what
-bound how long a bound cell lives. Deleting the run deletes them immediately.
+`maxRunsRetained` (a collection run counts under it; design Sends have their own
+cap, `maxDesignRunsRetained`) and `runRetentionDays` (Settings, Data & retention)
+are what bound how long a bound cell lives. A run pinned as a baseline is outside
+both, and Settings' *Clear run history* keeps it too. Deleting the run by name
+deletes its rows immediately, pinned or not.

@@ -1950,7 +1950,8 @@ Json redacted_variables (const nlohmann::json& stored, ExportNotes& notes) {
 /// The saved examples as `x-vayu-request.examples` writes them: the response
 /// headers a server sent (`Set-Cookie`, ...) blanked and counted - each
 /// example is its own source - and the body untouched, since a body cannot be
-/// judged.
+/// judged. `origin` rides on every row: a re-import that lost it would read a
+/// user-saved example as one the next spec sync may replace (#2430).
 Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
     Json examples = Json::array ();
     for (const ExportExample& example : entry.examples) {
@@ -1958,7 +1959,10 @@ Json examples_object_of (const ExportRequest& entry, ExportNotes& notes) {
         ext::blank_credential_rows (headers, {}, notes.secrets_omitted);
         Json row{ { "name", example.name }, { "status", example.status },
             { "contentType", example.content_type },
-            { "headers", std::move (headers) }, { "body", example.body } };
+            { "headers", std::move (headers) }, { "body", example.body },
+            { "origin",
+            example.from_import ? constants::request_example::ORIGIN_IMPORT :
+                                  constants::request_example::ORIGIN_USER } };
         if (example.body_truncated) {
             row["bodyTruncated"] = true;
         }

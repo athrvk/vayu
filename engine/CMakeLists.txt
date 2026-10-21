@@ -661,7 +661,7 @@ target_link_libraries(vayu_core PUBLIC
 # in unconditionally by SQLite itself since 3.38), so the functions are there -
 # the header just will not declare them until it is told. PUBLIC so every
 # translation unit that pulls in sqlite_orm sees the same header.
-# Reader: GET /runs?collectionId= (db/database.cpp, run_filter_where).
+# Reader: GET /runs?collectionId= (db/db_runs.cpp, run_filter_where).
 target_compile_definitions(vayu_core PUBLIC SQLITE_ENABLE_JSON1)
 
 # Windows-specific libraries
@@ -687,10 +687,12 @@ if(QUICKJS_FOUND)
         src/runtime/pm/pm_cookies.cpp
         src/runtime/pm/pm_execution_metrics.cpp
         src/runtime/pm/pm_expect.cpp
+        src/runtime/pm/pm_legacy.cpp
         src/runtime/pm/pm_request_url.cpp
         src/runtime/pm/pm_response.cpp
         src/runtime/pm/pm_scopes.cpp
         src/runtime/pm/pm_send_request.cpp
+        src/runtime/pm/pm_visualizer.cpp
     )
     target_sources(vayu_core PRIVATE ${VAYU_QUICKJS_SOURCES})
     target_link_libraries(vayu_core PUBLIC quickjs)
