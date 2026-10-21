@@ -6,6 +6,11 @@
 # shellcheck disable=SC2329,SC2317  # the stubs below are called by the installer, not from this file
 #   (the two codes are the same finding: 0.9/0.10 report it as SC2317, 0.11 as SC2329)
 set -euo pipefail
+# Under pipefail, `echo "$out" | grep -q x` is a race: grep -q exits at its
+# first match, echo can still be writing, and the broken pipe fails the
+# pipeline even though grep matched (seen on the macOS runner). Every check
+# here reads its text from a here-string, `grep -q x <<<"$out"`, which bash
+# writes before grep starts, so there is no writer left to break.
 
 # Source the installer (at repo root) in test mode so main() does not run.
 VAYU_TEST=1
@@ -138,25 +143,25 @@ want="https://github.com/athrvk/vayu/releases/download/v0.1.3/Vayu-0.1.3-univers
 
 # do_install in dry-run prints the key steps without touching the system
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-echo "$out" | grep -q "codesign --force --sign - .*${APP_NAME}.app/Contents/Resources/bin/vayu-engine" \
+grep -q "codesign --force --sign - .*${APP_NAME}.app/Contents/Resources/bin/vayu-engine" <<<"$out" \
 	|| fail "install should ad-hoc sign the sidecar"
-echo "$out" | grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" \
+grep -q "codesign --force --deep --sign - .*${APP_NAME}.app" <<<"$out" \
 	|| fail "install should ad-hoc sign the app bundle"
-echo "$out" | grep -q "xattr -cr .*${APP_NAME}.app" \
+grep -q "xattr -cr .*${APP_NAME}.app" <<<"$out" \
 	|| fail "install should strip quarantine on the staged app"
 # ditto, not unzip: Apple's own extractor for these archives, and the one that
 # preserves the symlinks and permissions inside an .app bundle.
-echo "$out" | grep -q "ditto -x -k .*vayu.zip" || fail "the zip should be extracted with ditto"
+grep -q "ditto -x -k .*vayu.zip" <<<"$out" || fail "the zip should be extracted with ditto"
 # Copied in beside the installed bundle and swapped in by rename, so there is no
 # moment at which neither exists. The strong form of that is the last assertion:
 # a working install is *moved aside*, never deleted, until the new one is in
 # place - deleting first leaves the user with no Vayu at all if anything fails
 # afterwards.
-echo "$out" | grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}.new" \
+grep -q "sudo ditto .*${APP_NAME}.app ${APP_PATH}.new" <<<"$out" \
 	|| fail "install should ditto the signed app in beside the existing one"
-echo "$out" | grep -q "sudo mv ${APP_PATH}.new ${APP_PATH}$" \
+grep -q "sudo mv ${APP_PATH}.new ${APP_PATH}$" <<<"$out" \
 	|| fail "install should swap the new bundle into place"
-if echo "$out" | grep -q "sudo rm -rf ${APP_PATH}$"; then
+if grep -q "sudo rm -rf ${APP_PATH}$" <<<"$out"; then
 	fail "the installed bundle must be moved aside, never deleted before the swap"
 fi
 
@@ -176,21 +181,21 @@ APP_PATH="$APP_PATH_SAVED"
 
 # uninstall (no purge): removes the app, keeps + reports data dirs
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf ${APP_PATH}" || fail "uninstall should remove the app bundle"
-echo "$out" | grep -q "Application Support/Vayu$" || fail "uninstall should mention the data dir"
-echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
+grep -q "rm -rf ${APP_PATH}" <<<"$out" || fail "uninstall should remove the app bundle"
+grep -q "Application Support/Vayu$" <<<"$out" || fail "uninstall should mention the data dir"
+grep -qi "kept" <<<"$out" || fail "uninstall (no purge) should say data was kept"
 # The hint has to be a command that works: `--purge` on its own is rejected,
 # so printing it alone sent people at an error.
-echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should name a runnable command"
+grep -q -- "--uninstall --purge" <<<"$out" || fail "the purge hint should name a runnable command"
 
 # uninstall --purge: also removes data dirs
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf .*Application Support/Vayu'$" || fail "purge should remove the data dir"
-echo "$out" | grep -q "rm -f .*io.github.athrvk.vayu.plist" || fail "purge should remove prefs"
+grep -q "rm -rf .*Application Support/Vayu'$" <<<"$out" || fail "purge should remove the data dir"
+grep -q "rm -f .*io.github.athrvk.vayu.plist" <<<"$out" || fail "purge should remove prefs"
 # The identifier builds before the rename ran under. macOS keyed their prefs,
 # caches and saved state by it, so a purge that only knew the current id would
 # leave that state on disk with nothing left to ever remove it.
-echo "$out" | grep -q "rm -f .*com.vayu.client.plist" || fail "purge should remove the pre-rename prefs too"
+grep -q "rm -f .*com.vayu.client.plist" <<<"$out" || fail "purge should remove the pre-rename prefs too"
 
 printf 'PASS: macOS uninstall dry-run\n'
 
@@ -237,8 +242,8 @@ mkdir -p "$TMPROOT/system/${APP_NAME}.app"
 out="$(adopt_install_target 2>&1)"
 [ "$(resolved_install_path)" = "$TMPROOT/system/${APP_NAME}.app" ] \
 	|| fail "the first search dir should win, got $(resolved_install_path)"
-echo "$out" | grep -q "more than one place" || fail "a second copy should be reported"
-echo "$out" | grep -q "$TMPROOT/home/${APP_NAME}.app" || fail "the report should name the other copy"
+grep -q "more than one place" <<<"$out" || fail "a second copy should be reported"
+grep -q "$TMPROOT/home/${APP_NAME}.app" <<<"$out" || fail "the report should name the other copy"
 
 # do_install has to actually adopt the target - computing the right path and
 # then installing over the default one would pass every assertion above.
@@ -249,19 +254,19 @@ echo "$out" | grep -q "$TMPROOT/home/${APP_NAME}.app" || fail "the report should
 INSTALL_DIR="$INSTALL_DIR_SAVED"
 APP_PATH="$APP_PATH_SAVED"
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-echo "$out" | grep -q "sudo ditto .* $TMPROOT/system/${APP_NAME}.app.new" \
+grep -q "sudo ditto .* $TMPROOT/system/${APP_NAME}.app.new" <<<"$out" \
 	|| fail "do_install should install to the resolved target, not the default"
 # An existing bundle is renamed out of the way and only deleted once the new one
 # has landed, so an interrupted swap can be undone.
-echo "$out" | grep -q "sudo mv $TMPROOT/system/${APP_NAME}.app $TMPROOT/system/${APP_NAME}.app.old" \
+grep -q "sudo mv $TMPROOT/system/${APP_NAME}.app $TMPROOT/system/${APP_NAME}.app.old" <<<"$out" \
 	|| fail "the existing bundle should be moved aside, not deleted"
-echo "$out" | grep -q "sudo rm -rf $TMPROOT/system/${APP_NAME}.app.old$" \
+grep -q "sudo rm -rf $TMPROOT/system/${APP_NAME}.app.old$" <<<"$out" \
 	|| fail "the previous bundle should be removed only after the swap"
 
 # Uninstall clears every copy it can find, not just the default one.
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf $TMPROOT/system/${APP_NAME}.app" || fail "uninstall should remove the system copy"
-echo "$out" | grep -q "rm -rf $TMPROOT/home/${APP_NAME}.app" || fail "uninstall should remove the home copy"
+grep -q "rm -rf $TMPROOT/system/${APP_NAME}.app" <<<"$out" || fail "uninstall should remove the system copy"
+grep -q "rm -rf $TMPROOT/home/${APP_NAME}.app" <<<"$out" || fail "uninstall should remove the home copy"
 
 INSTALL_DIR="$INSTALL_DIR_SAVED"
 APP_PATH="$APP_PATH_SAVED"
@@ -293,32 +298,32 @@ touch "$LINUX_APP_BIN" && chmod +x "$LINUX_APP_BIN"
 
 # Same version -> no download at all.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-echo "$out" | grep -q "already installed" || fail "a matching version should skip the install"
-if echo "$out" | grep -q "curl -fL"; then fail "a skipped install should not download anything"; fi
+grep -q "already installed" <<<"$out" || fail "a matching version should skip the install"
+if grep -q "curl -fL" <<<"$out"; then fail "a skipped install should not download anything"; fi
 
 # --force reinstalls the same version.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 FORCE=1 do_install 2>&1)"
-echo "$out" | grep -q "curl -fL" || fail "--force should download even at the same version"
+grep -q "curl -fL" <<<"$out" || fail "--force should download even at the same version"
 
 # A newer version updates, and says so.
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-echo "$out" | grep -q "Updating Vayu 0.1.3 to 0.2.0" || fail "an existing install should be reported as an update"
-echo "$out" | grep -q "chmod +x ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part" \
+grep -q "Updating Vayu 0.1.3 to 0.2.0" <<<"$out" || fail "an existing install should be reported as an update"
+grep -q "chmod +x ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part" <<<"$out" \
 	|| fail "the AppImage has to be made executable"
 # Staged in the destination directory, not the temp dir: a cross-filesystem mv
 # copies through the destination instead of renaming, so an interrupt would
 # leave the half-written executable the rename exists to prevent.
-echo "$out" | grep -q "mv -f ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part ${LINUX_APP_BIN}" \
+grep -q "mv -f ${LINUX_APP_DIR}/\\.${APP_NAME}.AppImage.part ${LINUX_APP_BIN}" <<<"$out" \
 	|| fail "the AppImage should be renamed into place from beside its destination"
-echo "$out" | grep -q "write ${LINUX_VERSION_FILE}" || fail "the installed version should be stamped"
-echo "$out" | grep -q "write ${LINUX_DESKTOP_FILE}" || fail "a desktop entry should be registered"
+grep -q "write ${LINUX_VERSION_FILE}" <<<"$out" || fail "the installed version should be stamped"
+grep -q "write ${LINUX_DESKTOP_FILE}" <<<"$out" || fail "a desktop entry should be registered"
 
 # Nothing on Linux touches root: everything it writes is under $HOME. A sudo
 # here would be a password prompt for no reason, and on a machine without sudo
 # it would fail the install outright.
 # Matches a command the script would run, not the libfuse advice below, which
 # legitimately tells the user to run apt with sudo themselves.
-if echo "$out" | grep -q '^\[dry-run\] sudo'; then fail "the Linux install must not run sudo"; fi
+if grep -q '^\[dry-run\] sudo' <<<"$out"; then fail "the Linux install must not run sudo"; fi
 
 printf 'PASS: Linux install dry-run\n'
 
@@ -328,13 +333,13 @@ entry="$(desktop_entry)"
 # Quoted: the Desktop Entry spec word-splits Exec, so an unquoted path with a
 # space anywhere in $HOME makes the launcher try to run the first word and the
 # menu entry silently does nothing.
-echo "$entry" | grep -q "^Exec=\"${LINUX_APP_BIN}\" %U$" \
+grep -q "^Exec=\"${LINUX_APP_BIN}\" %U$" <<<"$entry" \
 	|| fail "Exec should be the quoted path to the installed AppImage"
-echo "$entry" | grep -q "^Type=Application$" || fail "desktop entry needs a Type"
-echo "$entry" | grep -q "^Categories=Development;" || fail "desktop entry should be filed under Development"
+grep -q "^Type=Application$" <<<"$entry" || fail "desktop entry needs a Type"
+grep -q "^Categories=Development;" <<<"$entry" || fail "desktop entry should be filed under Development"
 # Without this the running window is a second, nameless icon in the dock rather
 # than the one that launched it.
-echo "$entry" | grep -q "^StartupWMClass=Vayu$" || fail "desktop entry needs StartupWMClass"
+grep -q "^StartupWMClass=Vayu$" <<<"$entry" || fail "desktop entry needs StartupWMClass"
 
 # The `vayu` command is linked only when ~/.local/bin is somewhere the shell
 # will look - a link nothing can find is just a file to clean up later.
@@ -344,11 +349,11 @@ HOME="$TMPROOT"
 LINUX_BIN_LINK="$HOME/.local/bin/vayu"
 PATH="$HOME/.local/bin:$PATH_SAVED"
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-echo "$out" | grep -q "ln -sf ${LINUX_APP_BIN} ${LINUX_BIN_LINK}" || fail "should link vayu when ~/.local/bin is on PATH"
+grep -q "ln -sf ${LINUX_APP_BIN} ${LINUX_BIN_LINK}" <<<"$out" || fail "should link vayu when ~/.local/bin is on PATH"
 PATH="$PATH_SAVED"
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-if echo "$out" | grep -q "ln -sf"; then fail "should not link vayu when ~/.local/bin is not on PATH"; fi
-echo "$out" | grep -q "not on PATH" || fail "should say why no command was linked"
+if grep -q "ln -sf" <<<"$out"; then fail "should not link vayu when ~/.local/bin is not on PATH"; fi
+grep -q "not on PATH" <<<"$out" || fail "should say why no command was linked"
 HOME="$HOME_SAVED"
 PATH="$PATH_SAVED"
 
@@ -356,28 +361,28 @@ printf 'PASS: Linux desktop integration\n'
 
 # Uninstall removes what the install created, and nothing else.
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf ${LINUX_APP_DIR}" || fail "uninstall should remove the AppImage directory"
-echo "$out" | grep -q "rm -f ${LINUX_DESKTOP_FILE}" || fail "uninstall should remove the desktop entry"
-echo "$out" | grep -q "rm -f ${LINUX_ICON_FILE}" || fail "uninstall should remove the icon"
-echo "$out" | grep -qi "kept" || fail "uninstall (no purge) should say data was kept"
+grep -q "rm -rf ${LINUX_APP_DIR}" <<<"$out" || fail "uninstall should remove the AppImage directory"
+grep -q "rm -f ${LINUX_DESKTOP_FILE}" <<<"$out" || fail "uninstall should remove the desktop entry"
+grep -q "rm -f ${LINUX_ICON_FILE}" <<<"$out" || fail "uninstall should remove the icon"
+grep -qi "kept" <<<"$out" || fail "uninstall (no purge) should say data was kept"
 # The hint has to be a command that works: `--purge` on its own is rejected,
 # so printing it alone sent people at an error.
-echo "$out" | grep -q -- "--uninstall --purge" || fail "the purge hint should name a runnable command"
-if echo "$out" | grep -q '^\[dry-run\] sudo'; then fail "Linux uninstall must not run sudo"; fi
+grep -q -- "--uninstall --purge" <<<"$out" || fail "the purge hint should name a runnable command"
+if grep -q '^\[dry-run\] sudo' <<<"$out"; then fail "Linux uninstall must not run sudo"; fi
 
 out="$(VAYU_DRYRUN=1 PURGE=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -rf .*/Vayu$" || fail "purge should remove the config dir"
+grep -q "rm -rf .*/Vayu$" <<<"$out" || fail "purge should remove the config dir"
 
 # The Start at login entry is the app's own file, so a plain uninstall removes it
 # too: left behind it launches a deleted AppImage at every login. It follows
 # XDG_CONFIG_HOME, and falls back to ~/.config.
 out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME="$TMPROOT/xdg-config" do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -f $TMPROOT/xdg-config/autostart/vayu.desktop" \
+grep -q "rm -f $TMPROOT/xdg-config/autostart/vayu.desktop" <<<"$out" \
 	|| fail "uninstall should remove the autostart entry under XDG_CONFIG_HOME"
 # Spelled through a variable for the data-directory lint in pr-tests.yml (see install_e2e.sh).
 cfg_home=.config
 out="$(VAYU_DRYRUN=1 XDG_CONFIG_HOME="" HOME="$TMPROOT/fake-home" do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -f $TMPROOT/fake-home/$cfg_home/autostart/vayu.desktop" \
+grep -q "rm -f $TMPROOT/fake-home/$cfg_home/autostart/vayu.desktop" <<<"$out" \
 	|| fail "uninstall should remove the autostart entry under ~/.config by default"
 
 # A `vayu` on PATH that someone else put there must survive an uninstall.
@@ -385,12 +390,12 @@ mkdir -p "$TMPROOT/bin"
 LINUX_BIN_LINK="$TMPROOT/bin/vayu"
 ln -sf /bin/true "$LINUX_BIN_LINK"
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
-if echo "$out" | grep -q "rm -f ${LINUX_BIN_LINK}"; then
+if grep -q "rm -f ${LINUX_BIN_LINK}" <<<"$out"; then
 	fail "uninstall must not remove a vayu link pointing somewhere else"
 fi
 ln -sf "$LINUX_APP_BIN" "$LINUX_BIN_LINK"
 out="$(VAYU_DRYRUN=1 do_uninstall 2>&1)"
-echo "$out" | grep -q "rm -f ${LINUX_BIN_LINK}" || fail "uninstall should remove its own vayu link"
+grep -q "rm -f ${LINUX_BIN_LINK}" <<<"$out" || fail "uninstall should remove its own vayu link"
 
 printf 'PASS: Linux uninstall dry-run\n'
 
@@ -483,7 +488,7 @@ curl() {
 }
 (download_asset "https://example.invalid/asset" "$dest" "9.9.9") >/dev/null 2>&1 || true
 unset -f curl
-grep '\.sha256' "$TMPROOT/curl.log" | grep -q -- '--retry 3' \
+grep -q -- '--retry 3' <<<"$(grep '\.sha256' "$TMPROOT/curl.log")" \
 	|| fail "the checksum sidecar fetch must retry transient failures"
 
 version_at_least 0.40.0 0.33.0 || fail "0.40.0 is at least 0.33.0"
@@ -563,8 +568,8 @@ for macos in 13.2 12.7.6 10.15.7; do
 	out="$(VAYU_DRYRUN=0 require_supported_os 2>&1)" || status=$?
 	[ "$status" = "$EXIT_UNSUPPORTED" ] \
 		|| fail "macOS $macos should be refused with exit $EXIT_UNSUPPORTED, got $status"
-	echo "$out" | grep -q "13\.3" || fail "the refusal for macOS $macos should name 13.3: $out"
-	echo "$out" | grep -q "$macos" || fail "the refusal should say which macOS this is: $out"
+	grep -q "13\.3" <<<"$out" || fail "the refusal for macOS $macos should name 13.3: $out"
+	grep -q "$macos" <<<"$out" || fail "the refusal should say which macOS this is: $out"
 done
 for macos in 13.3 13.6.1 14.5 26.0; do
 	sw_vers() { printf '%s\n' "$macos"; }
@@ -676,7 +681,7 @@ fi
 # Captured, not piped: under `set -o pipefail` the refusal's own non-zero exit
 # becomes the pipeline's status, so `… | grep -q` fails even when grep matches.
 out="$( (VAYU_DRYRUN=1 privileged rm -rf /nowhere) 2>&1 || true)"
-echo "$out" | grep -q 'before authorize' || fail "refusing should say why, got: $out"
+grep -q 'before authorize' <<<"$out" || fail "refusing should say why, got: $out"
 AUTHORIZED=1
 (VAYU_DRYRUN=1 privileged rm -rf /nowhere) >/dev/null 2>&1 \
 	|| fail "a privileged command should run once authorized"
@@ -720,7 +725,7 @@ platform() { printf 'Linux\n'; }
 mkdir -p "$LINUX_APP_DIR"
 touch "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
 out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
-echo "$out" | grep -q "rm -f ${LINUX_APP_DIR}/.${APP_NAME}.AppImage.part" \
+grep -q "rm -f ${LINUX_APP_DIR}/.${APP_NAME}.AppImage.part" <<<"$out" \
 	|| fail "a part-downloaded AppImage should be swept"
 rm -f "$LINUX_APP_DIR/.${APP_NAME}.AppImage.part"
 
@@ -738,13 +743,13 @@ APP_PATH_SAVED="$APP_PATH"
 APP_PATH="$TMPROOT/sweep/${APP_NAME}.app"
 mkdir -p "$TMPROOT/sweep/${APP_NAME}.app.old"
 out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
-echo "$out" | grep -q "mv ${APP_PATH}.old ${APP_PATH}$" \
+grep -q "mv ${APP_PATH}.old ${APP_PATH}$" <<<"$out" \
 	|| fail "an interrupted swap should put the previous version back"
 mkdir -p "$APP_PATH"
 out="$(VAYU_DRYRUN=1 sweep_staging 2>&1)"
-echo "$out" | grep -q "rm -rf ${APP_PATH}.old" \
+grep -q "rm -rf ${APP_PATH}.old" <<<"$out" \
 	|| fail "with the install present, the old bundle is just debris"
-if echo "$out" | grep -q "mv ${APP_PATH}.old"; then
+if grep -q "mv ${APP_PATH}.old" <<<"$out"; then
 	fail "the old bundle must not be restored over a good install"
 fi
 APP_PATH="$APP_PATH_SAVED"
@@ -810,7 +815,7 @@ fi
 
 # Dry-run names the offer and does not make it.
 out="$(VAYU_DRYRUN=1 offer_open_after_install 2>&1)"
-echo "$out" | grep -q '^\[dry-run\] would offer to open Vayu$' || fail "dry-run should name the offer: $out"
+grep -q '^\[dry-run\] would offer to open Vayu$' <<<"$out" || fail "dry-run should name the offer: $out"
 [ ! -e "$LAUNCHED" ] || fail "dry-run must not launch"
 
 unset -f offered env_run
@@ -830,20 +835,20 @@ platform() { printf 'Darwin\n'; }
 running_pids() { printf '99999\n'; }
 
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-echo "$out" | grep -q "Quitting Vayu" || fail "a running app should be quit before it is replaced"
-echo "$out" | grep -q "osascript" \
+grep -q "Quitting Vayu" <<<"$out" || fail "a running app should be quit before it is replaced"
+grep -q "osascript" <<<"$out" \
 	|| fail "quit should go through an Apple Event, so the app flushes saves and stops the engine"
-echo "$out" | grep -q "sudo ditto" || fail "install should still proceed after the app quits"
-echo "$out" | grep -q "launch ${APP_PATH}" || fail "an app quit by the installer should be reopened"
+grep -q "sudo ditto" <<<"$out" || fail "install should still proceed after the app quits"
+grep -q "launch ${APP_PATH}" <<<"$out" || fail "an app quit by the installer should be reopened"
 
 # Linux has no Apple Event, so the polite form is a signal - and it is only
 # polite because main.ts handles SIGTERM (electron/quit-signals.ts). SIGKILL
 # first would lose exactly the saves the quit is protecting.
 platform() { printf 'Linux\n'; }
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-echo "$out" | grep -q "kill -TERM 99999" || fail "Linux should ask the app to quit with SIGTERM"
-if echo "$out" | grep -q "kill -KILL"; then fail "SIGKILL should only follow an ignored SIGTERM"; fi
-echo "$out" | grep -q "launch ${LINUX_APP_BIN}" || fail "an app quit by the installer should be reopened"
+grep -q "kill -TERM 99999" <<<"$out" || fail "Linux should ask the app to quit with SIGTERM"
+if grep -q "kill -KILL" <<<"$out"; then fail "SIGKILL should only follow an ignored SIGTERM"; fi
+grep -q "launch ${LINUX_APP_BIN}" <<<"$out" || fail "an app quit by the installer should be reopened"
 
 # That last assertion is weaker than it looks on its own: wait_for_exit returns
 # immediately under VAYU_DRYRUN, so the escalation is unreachable in every other
@@ -853,10 +858,10 @@ wait_for_exit() { return 1; }
 if out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"; then
 	fail "an app that will not quit should abort the install"
 fi
-echo "$out" | grep -q "kill -TERM 99999" || fail "the polite signal should come first"
-echo "$out" | grep -q "kill -KILL 99999" || fail "an ignored SIGTERM should escalate to SIGKILL"
-echo "$out" | grep -q "Could not stop Vayu" || fail "a Vayu that will not die should say so"
-if echo "$out" | grep -q "mv -f"; then fail "nothing should be replaced when the app is still running"; fi
+grep -q "kill -TERM 99999" <<<"$out" || fail "the polite signal should come first"
+grep -q "kill -KILL 99999" <<<"$out" || fail "an ignored SIGTERM should escalate to SIGKILL"
+grep -q "Could not stop Vayu" <<<"$out" || fail "a Vayu that will not die should say so"
+if grep -q "mv -f" <<<"$out"; then fail "nothing should be replaced when the app is still running"; fi
 unset -f wait_for_exit
 
 # Declining leaves the install untouched: nothing replaced, non-zero exit.
@@ -864,7 +869,7 @@ confirm() { return 1; }
 if out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"; then
 	fail "declining the quit should abort the install"
 fi
-if echo "$out" | grep -q "mv -f"; then
+if grep -q "mv -f" <<<"$out"; then
 	fail "declining the quit must not replace the AppImage"
 fi
 platform() { printf 'Darwin\n'; }
@@ -873,10 +878,10 @@ if out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"; then
 fi
 # Anchored: the staging sweep legitimately removes "${APP_PATH}.new" before any
 # of this, and an unanchored match reads that as deleting the install itself.
-if echo "$out" | grep -q "sudo rm -rf ${APP_PATH}$"; then
+if grep -q "sudo rm -rf ${APP_PATH}$" <<<"$out"; then
 	fail "declining the quit must not delete the running app"
 fi
-if echo "$out" | grep -q "ditto"; then
+if grep -q "ditto" <<<"$out"; then
 	fail "declining the quit must not replace the bundle"
 fi
 
@@ -887,12 +892,14 @@ platform() { printf 'Darwin\n'; }
 unset -f confirm
 quit_running_app() { printf 'QUIT-MARK\n'; return 0; }
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.1.3 do_install 2>&1)"
-[ "$(echo "$out" | grep -c 'QUIT-MARK')" = "2" ] \
+[ "$(grep -c 'QUIT-MARK' <<<"$out")" = "2" ] \
 	|| fail "the app should be checked twice: before the download and before the swap"
-first_quit="$(echo "$out" | grep -n 'QUIT-MARK' | head -1 | cut -d: -f1)"
-download="$(echo "$out" | grep -n 'Downloading' | head -1 | cut -d: -f1)"
-last_quit="$(echo "$out" | grep -n 'QUIT-MARK' | tail -1 | cut -d: -f1)"
-swap="$(echo "$out" | grep -n 'sudo ditto' | head -1 | cut -d: -f1)"
+# awk reads to the end and picks the line itself: `grep | head -1` closes the
+# pipe early, and under pipefail grep's SIGPIPE fails the assignment.
+first_quit="$(awk '/QUIT-MARK/ { print NR; exit }' <<<"$out")"
+download="$(awk '/Downloading/ { print NR; exit }' <<<"$out")"
+last_quit="$(awk '/QUIT-MARK/ { n = NR } END { print n }' <<<"$out")"
+swap="$(awk '/sudo ditto/ { print NR; exit }' <<<"$out")"
 [ "$first_quit" -lt "$download" ] || fail "the first check belongs before the download"
 if [ "$last_quit" -ge "$swap" ] || [ "$last_quit" -le "$download" ]; then
 	fail "the second check belongs after the download and before the bundle is replaced"
@@ -906,12 +913,12 @@ printf 'PASS: running-app guard\n'
 running_pids() { :; }
 platform() { printf 'Linux\n'; }
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-echo "$out" | grep -q "would offer to open Vayu" || fail "a fresh install should offer to open Vayu"
+grep -q "would offer to open Vayu" <<<"$out" || fail "a fresh install should offer to open Vayu"
 running_pids() { printf '99999\n'; }
 out="$(VAYU_DRYRUN=1 VAYU_VERSION=0.2.0 do_install 2>&1)"
-if echo "$out" | grep -q "would offer to open Vayu"; then
+if grep -q "would offer to open Vayu" <<<"$out"; then
 	fail "an app the installer quit is reopened, not offered"
 fi
-echo "$out" | grep -q "Reopening Vayu" || fail "the update path should keep reopening"
+grep -q "Reopening Vayu" <<<"$out" || fail "the update path should keep reopening"
 
 printf 'PASS: launch offer wiring\n'

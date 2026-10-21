@@ -126,7 +126,8 @@ json snapshot (vayu::db::Database& db, const std::string& root_id, bool is_root 
             { "body", example.body }, { "contentType", example.content_type },
             { "headers", column (example.headers) },
             { "truncated", example.body_truncated }, { "origin", example.origin } });
-            if (row.mock_example_id && *row.mock_example_id == example.id) {
+            // An empty optional equals no id, so no access needs a guard.
+            if (row.mock_example_id == example.id) {
                 fixed = static_cast<int> (at);
             }
         }

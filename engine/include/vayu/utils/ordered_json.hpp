@@ -59,4 +59,16 @@ void append_unique_member (nlohmann::ordered_json& object,
 std::string key,
 nlohmann::ordered_json value);
 
+/**
+ * Makes room in @p object for @p count more members, so the
+ * `append_unique_member` calls that follow never reallocate. `ordered_json`
+ * keeps its members as `std::pair<const std::string, ordered_json>`, which the
+ * `const` key makes not nothrow-movable, so every reallocation copies every
+ * member already there, nested values included. A loop that knows how many
+ * members it is about to append reserves them first.
+ *
+ * @p object must be a JSON object.
+ */
+void reserve_members (nlohmann::ordered_json& object, size_t count);
+
 } // namespace vayu::utils

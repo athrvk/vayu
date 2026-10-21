@@ -200,7 +200,7 @@ vayu::db::Database* db) {
     plan.config        = config;
     plan.header_name   = "Authorization";
     plan.header_value  = oauth2_header_value (config, cached->access_token);
-    plan.expires_at_ms = cached->created_at + cached->expires_in * 1000;
+    plan.expires_at_ms = cached->created_at + (cached->expires_in * 1000);
 
     // A user-supplied Authorization header wins over the token (see
     // resolve_oauth2), and this run is sending that one - swapping the token

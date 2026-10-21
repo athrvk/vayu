@@ -20,7 +20,7 @@ permissions:
 jobs:
   lint:
     name: Conventional title
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Skipped for bots, and the `if` is on the step rather than the job on
       # purpose. Skipping the job means the check never reports, and a required

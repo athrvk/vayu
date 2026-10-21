@@ -52,7 +52,7 @@ name: Warm build cache
 # do not. sccache keys an object on its whole compile command, and the
 # pull-request engine legs compile another one on three of four: they add
 # `-DVAYU_WERROR=ON` (Linux and macOS), build `macos-prod` rather than
-# `macos-prod-arm64`, and run an ubuntu-latest leg this job never warms. Run
+# `macos-prod-arm64`, and run an ubuntu-24.04 leg this job never warms. Run
 # 39181878500, the first push of a one-file pull request, read 28 hits against
 # 371 misses on both Linux legs and macOS. Only Windows (`windows-prod`, no
 # extra flag) happens to match. The pull-request legs' entries are written by
@@ -121,7 +121,7 @@ jobs:
   # trusted to stay in step by hand.
   guard:
     name: Cache key agreement
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -149,10 +149,10 @@ jobs:
           # everything else.
           #
           # The key also carries the runner image (`matrix.os`, with
-          # `ubuntu-latest` for the one job that has no matrix, codeql.yml's).
+          # `ubuntu-24.04` for the one job that has no matrix, codeql.yml's).
           # vcpkg's archives are only valid for the compiler that built them,
           # and actions/cache never overwrites a key, so while the Linux release
-          # built on ubuntu-22.04 and every other Linux job on ubuntu-latest
+          # built on ubuntu-22.04 and every other Linux job on ubuntu-24.04
           # shared one key, whichever saved first owned it and the other always
           # rebuilt its dependencies from source.
           # sanitizers.yml and engine-tidy-scan.yml carry the same pin and were
@@ -355,7 +355,7 @@ jobs:
       matrix:
         # The runner images release.yml builds on, not the pull-request matrix's:
         # the vcpkg key carries the image (see the guard), so warming
-        # ubuntu-latest would fill a key the Linux release never asks for. The
+        # ubuntu-24.04 would fill a key the Linux release never asks for. The
         # guard asserts this list and release.yml's stay equal.
         os: [ubuntu-22.04, windows-latest, macos-latest]
         include:
@@ -417,10 +417,10 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -533,7 +533,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     timeout-minutes: 20
 
     steps:

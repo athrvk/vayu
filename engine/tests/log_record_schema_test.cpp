@@ -168,7 +168,7 @@ TEST (LogRecordSchemaTest, AConvertedCallSiteFieldsValidateAndMsgHasNoRawEquals)
     // Mirrors http/routes/cookies.cpp's converted call: "scope=" + scope +
     // ", cleared=" + count is now a fixed sentence with two fields.
     vayu::utils::log_info ("http", "Cleared cookies",
-    { { "scope", std::string ("all") }, { "cleared", size_t (3) } });
+    { { "scope", std::string ("all") }, { "cleared", size_t{ 3 } } });
     Logger::instance ().flush ();
 
     const auto records = read_records (dir.path ());

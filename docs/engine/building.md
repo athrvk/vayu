@@ -521,7 +521,7 @@ standard support, and the floor is **glibc 2.35**: Ubuntu 22.04, Linux Mint
   `libstdc++`/`libgcc_s` among its `NEEDED` libraries, and no glibc symbol
   version above `VAYU_LINUX_GLIBC_FLOOR` (default 2.35). It runs in
   `release.yml` and on the `ubuntu-22.04` leg of `pr-tests.yml`. The
-  `ubuntu-latest` leg is not checked: it links against 24.04's glibc by design.
+  `ubuntu-24.04` leg is not checked: it links against 24.04's glibc by design.
 - **The vcpkg cache key carries the runner image** (`matrix.os`). vcpkg's
   archives only fit the compiler that built them and `actions/cache` never
   overwrites a key, so with one `Linux` key for both images whichever saved
@@ -1183,8 +1183,9 @@ lints translation units and never a header (#940), so a **header-only pull
 request is linted by no CI job at all** - it relies on the contributor's
 pre-push hook. A header that introduces findings across the sources
 including it can reach master unlinted on either platform, and only a
-whole-tree run finds it afterwards. Linux drifts too, more slowly: it pins
-clang-tidy 19 from apt where Windows takes whatever LLVM its image ships.
+whole-tree run finds it afterwards. Both legs run the same clang-tidy 22,
+from `scripts/install-clang-tidy.sh`, so drift arrives only as a new patch on
+apt.llvm.org or a change to the config.
 `workflow_dispatch` still scans the single runner you pick, which keeps a
 targeted re-measure cheap; the schedule takes both. macOS is absent because
 the *gate* is (#940) - scanning a platform nothing gates would measure a
@@ -1278,7 +1279,9 @@ on the Linux machine most of this work happens on. `Engine tidy scan`
 (`.github/workflows/engine-tidy-scan.yml`) is that run: pick a runner, it
 builds the tree, regenerates the compile database without the precompiled
 header, lints every non-vendor translation unit whole-file with
-`-header-filter` on the command line, and reports through
+`-header-filter` on the command line (and, as the pull-request gate does,
+`-Wno-unused-command-line-argument`, without which every MSVC unit fails on
+`/Zc:preprocessor` before a check runs), and reports through
 `.github/dedupe-tidy-findings.py` - deduplicated by (file, line, column,
 check), with the translation-unit count beside it so the denominator is on the
 record. It fails when the count is not zero, so a green run *is* the claim,
@@ -1300,7 +1303,7 @@ tree, the pre-push hook lints one whenever a push changes it, and #946's
 So the re-measure command is:
 
 ```bash
-run-clang-tidy-19 -p engine/build -quiet \
+run-clang-tidy-22 -p engine/build -quiet \
   -header-filter='.*[/\\]engine[/\\](src|include|tests)[/\\].*' \
   -extra-arg=-Wno-ignored-gch <every non-vendor translation unit>
 ```
@@ -1476,7 +1479,7 @@ hook lints a pushed header directly, against the contributor's own build tree. T
 lint one by hand, point clang-tidy at a consumer:
 
 ```bash
-clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
+clang-tidy-22 --allow-no-checks -p engine/build engine/src/http/routes.cpp
 ```
 
 **`readability-function-cognitive-complexity` is on** (#1021). It was declined
@@ -1536,19 +1539,20 @@ The two gates handle it differently, on purpose:
 Either way clang-tidy falls back to including the header as text and analyses
 exactly the same translation unit.
 
-Both need **clang-tidy 19 or newer**: `engine/.clang-tidy` uses
-`ExcludeHeaderFilterRegex`, which landed in LLVM 19, and an older binary rejects
-the config file and lints nothing. The hook probes the version and warns loudly
-instead of exiting clean over an empty scan; a contributor without a current
-clang-tidy loses the early warning, not the check.
+Both run **clang-tidy 22**, the major CI lints with, and the hook treats it as a
+floor. An older binary answers differently: 19 to 21 miss checks 22 runs, and
+anything before 19 rejects `engine/.clang-tidy` (`ExcludeHeaderFilterRegex`
+landed in LLVM 19) and lints nothing. The hook probes the version and warns
+loudly instead of exiting clean over an empty scan; a contributor without a
+current clang-tidy loses the early warning, not the check.
 
-The hook looks for `clang-tidy-19` first and a plain `clang-tidy` second, for
-the reason the formatter does: `apt install clang-tidy-19` - the instruction the
-warning itself gives - leaves the plain name at Ubuntu's 18, while Homebrew's
-LLVM 19 and the Windows installer use the plain name. Probing only the plain
-name meant the most common setup installed a 19, found the 18, and was told to
-install a 19 (#918); the warning now names the nearest candidate it rejected, so
-"you have an 18" reads differently from "you have nothing".
+The hook looks for `clang-tidy-22` first and a plain `clang-tidy` second, for
+the reason the formatter does: apt.llvm.org's `clang-tidy-22` leaves the plain
+name at Ubuntu's 18, while Homebrew's LLVM and the Windows installer use the
+plain name. Probing only the plain name meant the most common setup installed
+the versioned one, found the 18, and was told to install the versioned one
+(#918); the warning now names the nearest candidate it rejected, so "you have
+an 18" reads differently from "you have nothing".
 
 **One `find_llvm_tool` in `scripts/lib/llvm-tools.sh` answers for both hooks**, with
 the comparison a parameter - `exact` for clang-format, whose pin is not a floor,
@@ -1557,29 +1561,30 @@ because that is precisely how the two halves came to disagree: the formatter
 learned about the packaging split and the linter did not. `pre-commit_test.sh`
 pins the sharing, and each hook's own suite its behaviour.
 
-CI's version differs per leg, and none of it is a free choice:
+CI runs the LLVM project's own clang-tidy 22 on both legs, installed by
+`scripts/install-clang-tidy.sh`, which the gate and the whole-tree scan both
+call so the pin lives in one place:
 
-| Leg | clang-tidy | Why |
-|-----|-----------|-----|
-| Linux | 19, from apt | What CONTRIBUTING.md tells contributors to install, so a local run and CI answer the same |
-| Windows | 20.1.8, shipped by the image | chocolatey refuses to downgrade from the preinstalled version, and the image's copy costs no install time |
+| Leg | Source | Pinned by |
+|-----|--------|-----------|
+| Linux | `clang-tidy-22` from [apt.llvm.org](https://apt.llvm.org/), the LLVM project's apt repository | The major; apt.llvm.org carries only the newest 22.x patch. Its signing key is checked against the published fingerprint before apt trusts it |
+| Windows | `LLVM-22.1.8-win64.exe` from the LLVM GitHub release; only `clang-tidy.exe` and clang's builtin headers are extracted | The installer's SHA-256, which is the digest LLVM's release workflow attests for the tag. The extracted 73 MB is cached under the script's hash |
 
-The step asserts the 19 floor rather than trusting it, because a runner image
-is a pin somebody else controls. The cost of the spread is that a finding on one
-leg alone may be a version difference rather than a platform one - worth knowing
-when you read a failure, and much cheaper than having no coverage of the per-OS
-branches at all.
+The runner images' own LLVM is not used: it was 20.1.8 on Windows against
+apt's 19 on Linux, so a finding on one leg alone could be a version difference
+rather than a platform one, and an image moves its LLVM on its own schedule.
+The script asserts the version it installed rather than trusting the source.
 
 To lint by hand, point clang-tidy at a configured build tree:
 
 ```bash
 python build.py -e                       # writes engine/build/compile_commands.json
-clang-tidy-19 --allow-no-checks -p engine/build engine/src/http/routes.cpp
+clang-tidy-22 --allow-no-checks -p engine/build engine/src/http/routes.cpp
 
 # Or exactly what CI does, against your own changes (#946: whole changed files):
 git diff --name-only master... -- engine/src engine/include engine/tests \
   | grep -E '\.(c|cpp)$' \
-  | xargs -n 1 -P "$(nproc)" clang-tidy-19 --allow-no-checks -p engine/build
+  | xargs -n 1 -P "$(nproc)" clang-tidy-22 --allow-no-checks -p engine/build
 ```
 
 clang-tidy is deliberately **not** wired into the build itself. A

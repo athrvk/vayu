@@ -42,7 +42,7 @@ JSON
     data="$(curl -s -N --max-time 2 "$DAEMON/runs/$rid/live")"
     ml="$(echo "$data" | grep '^data:' | grep -v '"event"' | tail -1 | sed 's/^data: //')"
     [ -n "$ml" ] && last="$ml"
-    echo "$data" | grep -q "event: complete" && break
+    grep -q "event: complete" <<<"$data" && break
     sleep 0.4
   done
   echo "$last" | python3 -c "import sys,json;d=json.load(sys.stdin);print(round(d['totalRequests']/d['elapsedSeconds']))"

@@ -173,7 +173,7 @@ std::span<const std::string_view> groups) {
             bool has_digits = false;
             while (j < tpl.size () &&
             std::isdigit (static_cast<unsigned char> (tpl[j])) != 0) {
-                group = group * 10 + static_cast<size_t> (tpl[j] - '0');
+                group = (group * 10) + static_cast<size_t> (tpl[j] - '0');
                 ++j;
                 has_digits = true;
             }

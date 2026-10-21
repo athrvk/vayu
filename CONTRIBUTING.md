@@ -122,16 +122,20 @@ vayu/
   The bulk-format commit that made it clean is in `.git-blame-ignore-revs`; run
   `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone and
   `git blame` keeps attributing lines to whoever wrote them.
-- **Linting:** clang-tidy, **19 or newer**. `engine/.clang-tidy` uses
-  `ExcludeHeaderFilterRegex`, which landed in LLVM 19; an older binary rejects
-  the config file outright and lints nothing. The `scripts/pre-push` hook
-  probes the version and says so rather than passing silently - if you see that
-  warning, install a newer clang-tidy (Ubuntu 24.04 ships 18 by default;
-  `apt install clang-tidy-19` is what CI uses) or lean on CI, which lints the
-  engine sources your pull request changes on clang-tidy 19.
+- **Linting:** clang-tidy **22**, the LLVM project's own build: CI installs it
+  with `scripts/install-clang-tidy.sh` (`clang-tidy-22` from
+  [apt.llvm.org](https://apt.llvm.org/) on Linux, the LLVM 22.1.8 release
+  installer on Windows), and the `scripts/pre-push` hook asks for the same
+  major. An older binary answers differently - 19 to 21 miss checks 22 runs,
+  and anything before 19 rejects `engine/.clang-tidy` outright and lints
+  nothing - so the hook probes the version and says so rather than passing
+  silently. If you see that warning, install it (on Ubuntu, add apt.llvm.org's
+  `llvm-toolchain-<codename>-22` source and `apt install clang-tidy-22`; on
+  macOS, `brew install llvm@22`; on Windows, the LLVM 22 installer) or lean on
+  CI, which lints the engine sources your pull request changes on clang-tidy 22.
 
   The hook finds what that install gives you: like the formatter above, it looks
-  for `clang-tidy-19` first and a plain `clang-tidy` second, because apt leaves
+  for `clang-tidy-22` first and a plain `clang-tidy` second, because apt leaves
   the plain name at the distribution's 18 while Homebrew's LLVM and the Windows
   installer use it (#918). Both tools share one lookup, so the two cannot drift
   apart again.

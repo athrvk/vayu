@@ -47,6 +47,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "vayu/utils/reentrant.hpp"
@@ -159,11 +160,12 @@ bool write_pid_to_lock (LockHandle handle) {
     ssize_t written = write (handle.file, pid.c_str (), pid.length ());
 
     // Sync to ensure data is written to disk
-    if (written == static_cast<ssize_t> (pid.length ())) {
+    const bool whole = std::cmp_equal (written, pid.length ());
+    if (whole) {
         fsync (handle.file);
     }
 
-    return written == static_cast<ssize_t> (pid.length ());
+    return whole;
 }
 
 bool read_pid_from_lock (const std::string& path, int& pid) {

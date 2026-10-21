@@ -1312,7 +1312,7 @@ int default_max_per_host) {
     // Configure EventLoop
     vayu::http::EventLoopConfig loop_config;
     loop_config.num_workers = static_cast<size_t> (configured_workers); // Already resolved (see resolve_worker_count)
-    loop_config.max_concurrent    = std::max (concurrency, size_t (100));
+    loop_config.max_concurrent    = std::max (concurrency, size_t{ 100 });
     loop_config.max_per_host      = static_cast<size_t> (default_max_per_host);
     loop_config.target_rps        = target_rps;
     loop_config.burst_size        = target_rps > 0 ? target_rps * 2.0 : 0.0;

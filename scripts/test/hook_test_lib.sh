@@ -87,11 +87,11 @@ make_sandbox_path() {
 # would pass whether or not the hook computed one, which is the whole question.
 #
 # $4, when given, is the single binary name to install it under. By default it
-# goes in under **both** `clang-tidy` and `clang-tidy-19` - the shape of a
+# goes in under **both** `clang-tidy` and `clang-tidy-22` - the shape of a
 # Homebrew or Windows LLVM, where one install answers to both names, and the
 # only way a case stays a statement about the hook now that it looks under the
 # versioned name first (issue #918): a machine or runner image carrying a real
-# `clang-tidy-19` would otherwise answer instead of the stub, exactly as
+# `clang-tidy-22` would otherwise answer instead of the stub, exactly as
 # `make_sandbox_path` keeps a real clang-format out of the format cases.
 make_stub() {
     local version="$1" flagged="${2:-}" line="${3:-1}" only_name="${4:-}" dir
@@ -148,7 +148,7 @@ exit 0
 EOF
     chmod +x "$dir/clang-tidy"
     if [ -z "$only_name" ]; then
-        cp "$dir/clang-tidy" "$dir/clang-tidy-19"
+        cp "$dir/clang-tidy" "$dir/clang-tidy-22"
     elif [ "$only_name" != "clang-tidy" ]; then
         mv "$dir/clang-tidy" "$dir/$only_name"
     fi

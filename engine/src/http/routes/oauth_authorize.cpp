@@ -254,7 +254,7 @@ void OAuth2AuthorizeManager::reap_timed_out_locked () {
                 teardown_locked (attempt);
             }
             ++it;
-        } else if (is_settled (state) && now > attempt.created_at + 2 * kAttemptTtlMs) {
+        } else if (is_settled (state) && now > attempt.created_at + (2 * kAttemptTtlMs)) {
             // Terminal and well past the polling window → drop the record so the
             // map does not grow unbounded on a long-lived daemon.
             teardown_locked (attempt);

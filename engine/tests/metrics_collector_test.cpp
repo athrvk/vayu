@@ -106,7 +106,8 @@ TEST_F (MetricsCollectorTest, FailedTransfersWithADurationJoinTheLatencyPopulati
     EXPECT_EQ (collector->success_count (), 95u);
     EXPECT_EQ (collector->latency_count (), 100);
     EXPECT_EQ (collector->latency_samples (), 100u);
-    EXPECT_DOUBLE_EQ (collector->average_latency (), (95.0 * 10.0 + 5.0 * 2000.0) / 100.0);
+    EXPECT_DOUBLE_EQ (
+    collector->average_latency (), ((95.0 * 10.0) + (5.0 * 2000.0)) / 100.0);
 
     const auto percentiles = collector->calculate_percentiles ();
     EXPECT_EQ (percentiles.count, 100u);
@@ -1010,7 +1011,7 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsCountsHttpErrorsAsErrors) {
     // The average divides the latency sum by the requests that recorded one,
     // which an HTTP error does: redefining the error count must not move it.
     const double average_before = collector->average_latency ();
-    EXPECT_DOUBLE_EQ (average_before, (85.0 * 10.0 + 15.0 * 30.0) / 100.0);
+    EXPECT_DOUBLE_EQ (average_before, ((85.0 * 10.0) + (15.0 * 30.0)) / 100.0);
 
     for (int i = 0; i < 5; ++i) {
         collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");

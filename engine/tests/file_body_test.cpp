@@ -141,7 +141,7 @@ class ScratchDir {
 std::string binary_payload (std::size_t size) {
     std::string out (size, '\0');
     for (std::size_t i = 0; i < size; ++i) {
-        out[i] = static_cast<char> ((i * 131 + 7) % 256);
+        out[i] = static_cast<char> (((i * 131) + 7) % 256);
     }
     return out;
 }
