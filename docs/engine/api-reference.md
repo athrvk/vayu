@@ -8255,7 +8255,7 @@ row exists:
 | Input | Rejected because |
 |-------|------------------|
 | `mode: "constant_rps"` with a `scenario` | An open-loop arrival rate over a multi-step sequence is an arrival-rate executor, which Vayu does not implement. Refused rather than silently run closed-loop. |
-| `mode: "capacity"` with a `scenario` | The search judges one windowed p99 and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
+| `mode: "capacity"` with a `scenario` | The search judges one p99 per level and a sequence has one per step, so which of them the knee is measured against is a question the mode does not answer. |
 | `rps` / `targetRps` above zero, on any mode | It is what selects the open-loop path regardless of the declared mode. |
 | An unknown `mode` | |
 
@@ -8654,8 +8654,12 @@ therefore what `targetRps × duration` asked for.
 
 **Capacity semantics.** `capacity` is the one mode whose target is not a
 function of elapsed time. It holds `startConcurrency` for `stepDuration`, judges
-that window's windowed p99 and throughput, and then steps up by 25% (at least
-+1) while the level stayed inside `sloMs`. It stops - and names the reason in
+the level, and then steps up by 25% (at least +1) while the level stayed inside
+`sloMs`. A level's `p99_ms` is the percentile of every completion at the level
+after its first three live ticks, which measure the transition to the new
+target, read from one histogram; it is not a mean of 100 ms window percentiles,
+which a level with a periodic pause would pass. Its `rps` is the mean throughput
+over the same ticks. It stops - and names the reason in
 the report - when p99 exceeds `sloMs` across **two consecutive** windows
 (`slo_exceeded`; one breaching window re-measures the same level rather than
 ending the search), when two step-ups buy under 5% more throughput
@@ -8669,17 +8673,16 @@ ends `deadline` rather than finding anything. Any client enforcing its own
 duration ceiling has to account for that per-mode default rather than assuming
 one number - the MCP tool's cap does.
 
-The search steers by the published metric tick - the same numbers `GET
-/runs/:id/live` streams - rather than sampling the collector itself, so the
-controller and the dashboard cannot disagree about a level. Windows in which
-no request was timed are not judged: their percentiles are the empty-window
-zeros and reading those as "answered instantly" would climb straight past the
-limit. A request that timed out is timed (see [Latency
-population](#latency-population)), so a window of nothing but timeouts has
-samples, is judged, and reports a p99 near the timeout - the level fails its
-latency limit, which is the right verdict.
+The search steers by what the metrics thread publishes each live tick rather
+than sampling the collector itself, so it takes nothing away from what `GET
+/runs/:id/live` streams. A level in which no request was timed is not judged and
+stays open: its percentiles are the empty-histogram zeros and reading those as
+"answered instantly" would climb straight past the limit. A request that timed
+out is timed (see [Latency population](#latency-population)), so a level of
+nothing but timeouts has samples, is judged, and reports a p99 near the timeout -
+the level fails its latency limit, which is the right verdict.
 `capacity` is rejected on a **scenario** run with a `400`: the search judges one
-windowed p99 and a sequence has one per step.
+p99 per level and a sequence has one per step.
 
 **Ramp semantics.** `ramp_up` interpolates linearly from `startConcurrency` to
 `concurrency` over `rampUpDuration`, then holds `concurrency` for the rest of

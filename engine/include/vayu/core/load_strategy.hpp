@@ -13,7 +13,9 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -162,6 +164,61 @@ const std::function<size_t (int64_t)>& target_fn,
 const std::function<size_t ()>& budget_fn,
 const std::function<bool (int64_t)>& should_continue,
 const std::function<std::optional<int64_t> ()>& deferred_wait_ms_fn = {});
+
+/**
+ * The moving parts of a capacity search that the pure controller deliberately
+ * does not hold: the clock, the tick feed, and the level being measured.
+ * Declared here rather than kept file-local so a test can drive it with ticks
+ * it publishes itself.
+ *
+ * All of it is touched from the `maintain_concurrency` closures, which run on
+ * the strategy thread and nowhere else - `target_fn` is evaluated inside the
+ * refill condition-variable predicate, but a predicate runs on the waiting
+ * thread, so there is one thread here and no lock is owed.
+ */
+class CapacitySearch {
+    public:
+    CapacitySearch (CapacityConfig config, std::shared_ptr<RunContext> context);
+
+    /// The level to hold right now. Zero before the first level opens, which
+    /// only happens if `advance` has not been called yet.
+    [[nodiscard]] size_t level () const {
+        return current_;
+    }
+
+    /**
+     * Drive the search one step. Returns whether the run should keep going -
+     * this is `maintain_concurrency`'s `should_continue`, so returning false
+     * ends the run.
+     */
+    bool advance (int64_t elapsed_ms);
+
+    /// What the search found. The level still being measured when the run ended
+    /// is dropped: `levels[]` holds judged windows only, and a partial one
+    /// would sit in the audit trail looking like a measurement.
+    [[nodiscard]] CapacitySummary finish () const;
+
+    private:
+    void open_level (size_t level, int64_t now_ms);
+    void collect_tick ();
+
+    CapacityConfig config_;
+    std::shared_ptr<RunContext> context_;
+    std::vector<CapacityWindow> history_;
+    size_t current_           = 0;
+    int64_t level_started_ms_ = 0;
+    uint64_t last_sequence_   = 0;
+    size_t ticks_seen_        = 0;
+    size_t rps_windows_       = 0;
+    double rps_sum_           = 0.0;
+    /// The epoch this level's reset request was answered with; 0 until the
+    /// level has settled and asked for one.
+    uint64_t level_epoch_ = 0;
+    /// The newest tick's level latency under `level_epoch_`.
+    size_t level_samples_    = 0;
+    double level_p99_ms_     = 0.0;
+    const char* stop_reason_ = nullptr;
+};
 
 /**
  * @brief Read a run-config duration field ("30s", "500ms", "5m", "2h") as
