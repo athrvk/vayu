@@ -1277,7 +1277,9 @@ on the Linux machine most of this work happens on. `Engine tidy scan`
 (`.github/workflows/engine-tidy-scan.yml`) is that run: pick a runner, it
 builds the tree, regenerates the compile database without the precompiled
 header, lints every non-vendor translation unit whole-file with
-`-header-filter` on the command line, and reports through
+`-header-filter` on the command line (and, as the pull-request gate does,
+`-Wno-unused-command-line-argument`, without which every MSVC unit fails on
+`/Zc:preprocessor` before a check runs), and reports through
 `.github/dedupe-tidy-findings.py` - deduplicated by (file, line, column,
 check), with the translation-unit count beside it so the denominator is on the
 record. It fails when the count is not zero, so a green run *is* the claim,
