@@ -261,6 +261,13 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 script not imported (loaded from a URL, or on an event Vayu has no phase for) - add it as a pre-request or test script",
 		many: "{n} scripts not imported (loaded from a URL, or on an event Vayu has no phase for) - add them as pre-request or test scripts",
 	},
+	// The engine names the folder or collection under `names`, not `requests`:
+	// the line is about the node that declared the setting.
+	protocol_behavior_folder: {
+		tier: "note",
+		one: "1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options){names}",
+		many: "{n} folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options){names}",
+	},
 	elements_invalid: {
 		tier: "action",
 		named: "script or check dropped (invalid)",

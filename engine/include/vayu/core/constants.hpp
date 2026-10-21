@@ -567,16 +567,27 @@ constexpr bool ENABLE_CONSOLE = true;
  */
 constexpr int SEND_REQUEST_LIMIT = 10;
 /**
- * @brief How many promise jobs one execution may run when it has no
- *        wall-clock deadline (`scriptTimeout` 0).
+ * @brief How many promise jobs and timer callbacks, together, one execution
+ *        may run when it has no wall-clock deadline (`scriptTimeout` 0).
  *
- * The queue a script leaves is drained inside its execution (#2531), and with
- * a deadline the deadline bounds that drain. Without one, a runaway
- * `while (true) await null;` would hold the thread forever, so the job count
- * bounds it instead. Provisional until #2359 settles what `scriptTimeout` 0
- * means; far above what a script awaiting a few sends queues.
+ * The queues a script leaves are drained inside its execution (#2531, #2577),
+ * and with a deadline the deadline bounds that drain. Without one, a runaway
+ * `while (true) await null;` or a `setInterval` nothing clears would hold the
+ * thread forever, so the count bounds it instead. Provisional until #2359
+ * settles what `scriptTimeout` 0 means; far above what a script awaiting a few
+ * sends queues.
  */
-constexpr size_t MAX_PROMISE_JOBS_WITHOUT_TIMEOUT = 100000;
+constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
+/**
+ * @brief How many `setTimeout` / `setInterval` registrations one execution may
+ *        hold at once (#2577).
+ *
+ * The queue lives outside the QuickJS heap, so the script's memory limit does
+ * not bound it: a loop that only queues timers would grow the engine process
+ * until the deadline, or without end under `scriptTimeout` 0. A script that
+ * waits on a few sends holds a handful.
+ */
+constexpr size_t MAX_PENDING_TIMERS = 10000;
 } // namespace script_engine
 
 /**
@@ -1242,8 +1253,14 @@ constexpr int BUSY_TIMEOUT_MS = 10000;
 /// checkpoint may be lost. FULL adds a sync per commit and loses nothing. OFF
 /// hands the file to the OS and can corrupt it on power loss or an OS crash.
 constexpr int SYNCHRONOUS = 1;
-/// Run retention: keep at most N most-recent runs (0 = unlimited).
+/// Run retention: keep at most N most-recent load and collection runs
+/// (0 = unlimited). Design Sends are counted apart, under the cap below.
 constexpr int MAX_RUNS_RETAINED = 200;
+/// Run retention: keep at most N most-recent single-request Sends
+/// (0 = unlimited, #2429). A separate count so an afternoon of Sends cannot
+/// evict the load and collection runs `MAX_RUNS_RETAINED` keeps; half that cap
+/// because a Send is cheap to repeat and a load run is not.
+constexpr int MAX_DESIGN_RUNS_RETAINED = 100;
 /// Run retention: delete runs older than N days (0 = unlimited).
 constexpr int RUN_RETENTION_DAYS = 30;
 /**

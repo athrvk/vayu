@@ -1189,6 +1189,10 @@ struct PostmanCounts : OAuth2ImportLosses {
     int skipped_protocol_behavior = 0;
     // Enabled events whose script is not imported - see `set_event_elements`.
     int skipped_script_unsupported = 0;
+    // The same, declared on a folder or the collection: counted once per
+    // declaring node and named after it, not once per request below.
+    int skipped_protocol_behavior_folder = 0;
+    std::vector<std::string> protocol_behavior_folders;
     // `client_certificates` registry candidates built from a request's own
     // `certificate` (issue #1656), one per distinct (host, port) this import
     // resolved a usable candidate for - see `pm_certificate`. Deduped by
@@ -1655,7 +1659,8 @@ void set_event_elements (json& item, const std::vector<const json*>& events, Pos
  * apply (issue #1765): a key outside the set the engine honours, with a value
  * that is not Postman's default, or a `disabledSystemHeaders` entry for a
  * header whose removal would break HTTP/1.1 framing (`host`,
- * `content-length`). Counted once per request as `protocol_behavior`.
+ * `content-length`). Counted once per request as `protocol_behavior`, or once per declaring
+ * folder or collection as `protocol_behavior_folder`.
  */
 bool names_unapplied_protocol_behavior (const json& behavior) {
     for (auto member = behavior.begin (); member != behavior.end (); ++member) {
@@ -1691,6 +1696,30 @@ bool names_unapplied_protocol_behavior (const json& behavior) {
     return false;
 }
 
+/// The `protocolProfileBehavior` keys Vayu applies to a request.
+constexpr auto APPLIED_PROTOCOL_KEYS =
+std::to_array<const char*> ({ "followRedirects", "maxRedirects", "strictSSL",
+"disableCookies", "disableUrlEncoding", "disabledSystemHeaders" });
+
+/**
+ * What a node's `protocolProfileBehavior` resolves to for the requests below
+ * it: @p inherited (its enclosing folders' and the collection's) overlaid with
+ * @p own, nearest wins, one level deep, whatever the value's type. That is how
+ * `postman-collection`'s `getProtocolProfileBehaviorResolved` merges, so a
+ * request's own `disabledSystemHeaders` replaces a folder's wholesale. Only the
+ * keys Vayu applies are kept, which also bounds the copy a deep tree makes per
+ * node.
+ */
+json inherit_protocol_behavior (const json& inherited, const json* own) {
+    json resolved = inherited;
+    for (const char* key : APPLIED_PROTOCOL_KEYS) {
+        if (const json* value = prop (own, key); value != nullptr) {
+            resolved[key] = *value;
+        }
+    }
+    return resolved;
+}
+
 /**
  * `pmRedirects(item)`: the item-level `protocolProfileBehavior`.
  *
@@ -1706,34 +1735,35 @@ bool names_unapplied_protocol_behavior (const json& behavior) {
  * names set to `true`, lowercased, in source order) - and keeps the whole
  * object as `postmanProtocolBehavior`, JSON text in source member order, for
  * the export to write back.
+ *
+ * The settings read are @p effective, the request's own object resolved
+ * through its folders (`inherit_protocol_behavior`; #2538). What is counted
+ * and carried for the export is @p own, the request's object alone: a folder's
+ * is counted where it is declared and never written onto the request.
  */
-void pm_redirects (const json* item, json& request, int& skipped_protocol_behavior) {
-    const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
-    if (behavior == nullptr) {
-        return;
-    }
-    if (names_unapplied_protocol_behavior (*behavior)) {
+void pm_redirects (const json* own, const json& effective, json& request, int& skipped_protocol_behavior) {
+    if (own != nullptr && names_unapplied_protocol_behavior (*own)) {
         skipped_protocol_behavior += 1;
     }
-    if (const json* follow = prop (behavior, "followRedirects");
+    if (const json* follow = prop (&effective, "followRedirects");
     follow != nullptr && follow->is_boolean ()) {
         request["followRedirects"] = follow->get<bool> ();
     }
-    if (const json* limit = prop (behavior, "maxRedirects"); limit != nullptr &&
+    if (const json* limit = prop (&effective, "maxRedirects"); limit != nullptr &&
     limit->is_number () && std::isfinite (limit->get<double> ())) {
         request["maxRedirects"] = *limit;
     }
-    if (const json* strict = prop (behavior, "strictSSL");
+    if (const json* strict = prop (&effective, "strictSSL");
     strict != nullptr && strict->is_boolean ()) {
         request["verifySSL"] = strict->get<bool> ();
     }
     for (const char* flag : { "disableCookies", "disableUrlEncoding" }) {
-        if (const json* value = prop (behavior, flag);
+        if (const json* value = prop (&effective, flag);
         value != nullptr && value->is_boolean ()) {
             request[flag] = value->get<bool> ();
         }
     }
-    if (const json* headers = prop (behavior, "disabledSystemHeaders");
+    if (const json* headers = prop (&effective, "disabledSystemHeaders");
     headers != nullptr && headers->is_object ()) {
         json names = json::array ();
         for (std::string& name : postman_disabled_system_headers (*headers)) {
@@ -1741,12 +1771,15 @@ void pm_redirects (const json* item, json& request, int& skipped_protocol_behavi
         }
         request["disabledSystemHeaders"] = std::move (names);
     }
+    if (own == nullptr) {
+        return;
+    }
     // Text, not an object, on the `postmanResponse` precedent: an object would
     // lose its member order the moment it crossed the engine's JSON reader
     // between the parse and the apply.
     // Over the field cap it is dropped rather than failing the whole apply;
     // the export then regenerates what the typed columns say.
-    std::string carrier = behavior->dump (-1, ' ', false, json::error_handler_t::replace);
+    std::string carrier = own->dump (-1, ' ', false, json::error_handler_t::replace);
     if (carrier.size () <= vayu::core::constants::json::MAX_FIELD_SIZE) {
         request["postmanProtocolBehavior"] = std::move (carrier);
     }
@@ -1941,7 +1974,7 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "script_unsupported", &PostmanCounts::skipped_script_unsupported },
 });
 
-json pm_request (const json* item, PostmanCounts& counts);
+json pm_request (const json* item, const json& inherited, PostmanCounts& counts);
 
 /// Whether @p mode is one Vayu stores but does not send (`CONFIG_AUTH_TYPES`).
 bool is_data_only_mode (const std::string& mode) {
@@ -1955,12 +1988,12 @@ bool is_data_only_mode (const std::string& mode) {
  * the preview can say which request to finish by hand. A diff of the counters
  * around the call rather than a name threaded into every helper that counts.
  */
-json pm_request_named (const json* item, PostmanCounts& counts) {
+json pm_request_named (const json* item, const json& inherited, PostmanCounts& counts) {
     std::array<int, PM_REQUEST_COUNTERS.size ()> before{};
     for (std::size_t i = 0; i < PM_REQUEST_COUNTERS.size (); ++i) {
         before.at (i) = counts.*(PM_REQUEST_COUNTERS.at (i).second);
     }
-    json request           = pm_request (item, counts);
+    json request           = pm_request (item, inherited, counts);
     const std::string name = as_string (&request.at ("name"));
     for (std::size_t i = 0; i < PM_REQUEST_COUNTERS.size (); ++i) {
         const auto& [kind, counter] = PM_REQUEST_COUNTERS.at (i);
@@ -1971,7 +2004,7 @@ json pm_request_named (const json* item, PostmanCounts& counts) {
     return request;
 }
 
-json pm_request (const json* item, PostmanCounts& counts) {
+json pm_request (const json* item, const json& inherited, PostmanCounts& counts) {
     // The schema's `request` is an object or a bare URL string (#1907); the
     // string is a GET to that URL and nothing else.
     const json* declared = prop (item, "request");
@@ -2018,11 +2051,11 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (unsupported_method) {
         counts.skipped_unsupported_method += 1;
     }
-    request["url"]       = url;
-    request["params"]    = params;
-    const json* behavior = as_record (prop (item, "protocolProfileBehavior"));
-    const json* system_headers =
-    behavior == nullptr ? nullptr : prop (behavior, "disabledSystemHeaders");
+    request["url"]    = url;
+    request["params"] = params;
+    const json* own_behavior = as_record (prop (item, "protocolProfileBehavior"));
+    const json behavior = inherit_protocol_behavior (inherited, own_behavior);
+    const json* system_headers      = prop (&behavior, "disabledSystemHeaders");
     const bool content_type_refused = system_headers != nullptr &&
     std::ranges::contains (postman_disabled_system_headers (*system_headers),
     std::string ("content-type"));
@@ -2033,7 +2066,7 @@ json pm_request (const json* item, PostmanCounts& counts) {
     if (counts.options.import_scripts) {
         set_event_elements (request, events, counts);
     }
-    pm_redirects (item, request, counts.skipped_protocol_behavior);
+    pm_redirects (own_behavior, behavior, request, counts.skipped_protocol_behavior);
     if (!examples.empty ()) {
         request["examples"] = std::move (examples);
     }
@@ -2056,9 +2089,21 @@ json collection_auth (const json* auth, int& skipped_unsupported_auth, OAuth2Imp
     with_postman_source (std::move (mapped), auth);
 }
 
-json pm_folder (const json* node, PostmanCounts& counts) {
-    json children = json::array ();
-    json requests = json::array ();
+/// Counts a folder's or the collection's own `protocolProfileBehavior` once,
+/// against @p name, when it names a setting Vayu cannot apply (#2538).
+void note_unapplied_folder_behavior (const json* own, const std::string& name, PostmanCounts& counts) {
+    if (own == nullptr || !names_unapplied_protocol_behavior (*own)) {
+        return;
+    }
+    counts.skipped_protocol_behavior_folder += 1;
+    counts.protocol_behavior_folders.push_back (name);
+}
+
+json pm_folder (const json* node, const json& inherited, PostmanCounts& counts) {
+    const json* own_behavior = as_record (prop (node, "protocolProfileBehavior"));
+    const json behavior = inherit_protocol_behavior (inherited, own_behavior);
+    json children       = json::array ();
+    json requests       = json::array ();
     // Postman runs a folder's items in document order, a sub-folder where it
     // sits (#2535). Each child keeps its place as its draft's `order`, so the
     // two lists below flatten back into one sibling list.
@@ -2077,10 +2122,10 @@ json pm_folder (const json* node, PostmanCounts& counts) {
             if (const json* nested = prop (entry, "item");
             nested != nullptr && nested->is_array ()) {
                 counts.folders += 1;
-                children.push_back (pm_folder (entry, counts));
+                children.push_back (pm_folder (entry, behavior, counts));
                 children.back ()["order"] = position++;
             } else if (truthy (prop (entry, "request"))) {
-                requests.push_back (pm_request_named (entry, counts));
+                requests.push_back (pm_request_named (entry, behavior, counts));
                 requests.back ()["order"] = position++;
             }
         }
@@ -2103,6 +2148,8 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     collection["name"] =
     name == nullptr || name->is_null () ? "Imported Collection" : as_string (name);
     collection["description"] = pm_description_text (text, nested);
+    note_unapplied_folder_behavior (
+    own_behavior, collection["name"].get<std::string> (), counts);
     collection["variables"] =
     to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
     collection["auth"] =
@@ -2201,7 +2248,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     const json empty = json::object ();
     json collections = json::array ();
     collections.push_back (
-    pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, counts));
+    pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, empty, counts));
 
     ImportTally tally;
     tally.add ("file_body", counts.file_bodies);
@@ -2218,10 +2265,12 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("proxy_config", counts.skipped_proxy);
     tally.add ("protocol_behavior", counts.skipped_protocol_behavior);
     tally.add ("script_unsupported", counts.skipped_script_unsupported);
+    tally.add ("protocol_behavior_folder", counts.skipped_protocol_behavior_folder);
     for (const auto& [kind, names] : counts.named) {
         tally.name_requests (kind, names);
     }
     tally.name_dropped ("oauth2_unmapped_param", counts.oauth2_unmapped_param_names);
+    tally.name_dropped ("protocol_behavior_folder", counts.protocol_behavior_folders);
 
     json meta;
     meta["format"]           = format;

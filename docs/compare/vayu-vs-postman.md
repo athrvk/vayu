@@ -118,7 +118,9 @@ those in too and they import as a Vayu environment and into the globals scope
 respectively. A file a body or form field names comes across as its path, which
 Vayu sends once you choose the file again or allow its folder in Settings, and
 Digest / AWS / NTLM auth imports as data but will not execute. Most `pm.*` test
-scripts run unmodified - [what is covered](../app/pm-api-compatibility.md), and
+scripts run unmodified, and so do the older ones written with `tests["..."]`,
+`responseBody` and `postman.setEnvironmentVariable` -
+[what is covered](../app/pm-api-compatibility.md), and
 [what carries over per format](../app/import-collections/postman.md).
 
 The road runs both ways: any Vayu collection exports as a Postman Collection

@@ -288,10 +288,10 @@ describe("importNotices", () => {
 			importNotices(meta({ unsupportedScriptApis: entries }));
 
 		it("names the one request and its APIs, as an action", () => {
-			expect(scriptApis([{ request: "Sign in", names: ["tests[]", "CryptoJS"] }])).toEqual([
+			expect(scriptApis([{ request: "Sign in", names: ["require()", "CryptoJS"] }])).toEqual([
 				{
 					tier: "action",
-					text: "Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)",
+					text: "Sign in: script uses APIs Vayu does not run yet (require(), CryptoJS)",
 					link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
 				},
 			]);
@@ -300,13 +300,13 @@ describe("importNotices", () => {
 		it("counts and names several requests, with the APIs as a deduplicated union", () => {
 			expect(
 				scriptApis([
-					{ request: "Sign in", names: ["tests[]", "CryptoJS"] },
-					{ request: "List users", names: ["tests[]"] },
+					{ request: "Sign in", names: ["require()", "CryptoJS"] },
+					{ request: "List users", names: ["require()"] },
 				])
 			).toEqual([
 				{
 					tier: "action",
-					text: "2 requests: script uses APIs Vayu does not run yet (tests[], CryptoJS) - Sign in, List users",
+					text: "2 requests: script uses APIs Vayu does not run yet (require(), CryptoJS) - Sign in, List users",
 					link: { label: "See what Vayu supports", key: "pmApiCompatibility" },
 				},
 			]);
@@ -316,7 +316,7 @@ describe("importNotices", () => {
 			const [notice] = scriptApis([
 				{
 					request: "A",
-					names: ["tests[]", "responseBody", "postman.*", "require()", "tv4"],
+					names: ["require()", "CryptoJS", "_", "Buffer", "tv4"],
 				},
 				{ request: "B", names: ["moment"] },
 				{ request: "C", names: [] },
@@ -324,7 +324,7 @@ describe("importNotices", () => {
 				{ request: "E", names: [] },
 			]);
 			expect(notice.text).toBe(
-				"5 requests: script uses APIs Vayu does not run yet (tests[], responseBody, postman.*, require(), +2 more) - A, B, C, +2 more"
+				"5 requests: script uses APIs Vayu does not run yet (require(), CryptoJS, _, Buffer, +2 more) - A, B, C, +2 more"
 			);
 		});
 
@@ -346,7 +346,7 @@ describe("importNotices", () => {
 						{ kind: "unmapped_body", count: 1 },
 						{ kind: "proxy_config", count: 1 },
 					],
-					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]"] }],
+					unsupportedScriptApis: [{ request: "Sign in", names: ["require()"] }],
 				})
 			);
 			expect(notices).toHaveLength(3);
@@ -359,7 +359,7 @@ describe("importNotices", () => {
 			const notices = importNotices(
 				meta({
 					skipped: [{ kind: "proxy_config", count: 1 }],
-					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]"] }],
+					unsupportedScriptApis: [{ request: "Sign in", names: ["require()"] }],
 				})
 			);
 			expect(notices.map((n) => n.tier)).toEqual(["action", "note"]);
@@ -433,6 +433,23 @@ describe("importNotices", () => {
 		).map((n) => n.text);
 		expect(texts).toEqual([
 			"2 requests' Postman settings kept but not applied (e.g. TLS options, Host header)",
+		]);
+	});
+
+	it("names the folder or collection that declared a setting Vayu cannot apply (#2538)", () => {
+		const texts = (item: SkippedItem) =>
+			importNotices(meta({ skipped: [item] })).map((n) => n.text);
+		expect(texts({ kind: "protocol_behavior_folder", count: 1, names: ["Payments"] })).toEqual([
+			"1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options) (Payments)",
+		]);
+		expect(
+			texts({
+				kind: "protocol_behavior_folder",
+				count: 2,
+				names: ["Payments", "Billing"],
+			})
+		).toEqual([
+			"2 folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options) (Payments, Billing)",
 		]);
 	});
 });

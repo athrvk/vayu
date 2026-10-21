@@ -184,9 +184,9 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "The events a streaming request received, as { event, id, data } entries "
     "(id absent when the origin sent none; dataTruncated when one event hit "
-    "the per-event byte cap). Buffered, not live: the sandbox is synchronous "
-    "with no event loop, so a post-request script runs once, after the stream "
-    "has terminated, over this list.\n\nAbsent - not empty - for an ordinary "
+    "the per-event byte cap). Buffered, not live: a post-request script "
+    "runs once, after the stream has terminated, over this list.\n\nAbsent - "
+    "not empty - for an ordinary "
     "response, so typeof separates 'not a stream' from 'a stream with no "
     "events'. The list is bounded by sseMaxStoredEvents; check "
     "eventsTruncated before asserting over it as a whole.\n\nExample:\nconst "
@@ -1612,13 +1612,16 @@ nlohmann::json get_script_completions () {
     "string }[] }; auth?: { type: string; basic?: object; bearer?: object; "
     "apikey?: "
     "object }; timeout?: "
-    "number }, callback: (err: Error | null, res: any) => void): void" },
+    "number }, callback?: (err: Error | null, res: any) => void): "
+    "Promise<any>" },
     { "documentation",
     "Send an auxiliary request - fetching a token in a pre-request script is "
-    "what it is for.\n\nSynchronous despite the callback: the send blocks and "
-    "the callback runs inline before sendRequest returns. Postman's "
-    "promise-returning overload is not implemented, so a callback is "
-    "required.\n\nThe callback gets (err, res). "
+    "what it is for.\n\nSynchronous in both of Postman's forms: the send "
+    "blocks, then the callback runs inline before sendRequest returns, or, "
+    "with no callback, the call returns a promise already settled - resolved "
+    "with res, or rejected with err - so `const res = await "
+    "pm.sendRequest(url)` works. With a callback it returns "
+    "undefined.\n\nThe callback gets (err, res). "
     "Transport failures - refused, DNS, timeout - arrive as err with a .code; "
     "res is null then. res carries code, status (the reason phrase, as on "
     "pm.response - the number is code), responseTime, headers.get() "
@@ -1913,6 +1916,36 @@ nlohmann::json get_script_completions () {
     { "sortText", "1_pm_metrics_rate" } });
 
     // ========================================
+    // pm.visualizer - Postman's calls, accepted and not rendered (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "pm.visualizer" }, { "kind", KIND_VARIABLE },
+    { "insertText", "pm.visualizer" }, { "detail", "Postman's Visualize tab, not drawn here" },
+    { "documentation",
+    "Postman draws a template over the response in its Visualize tab. Vayu "
+    "has no such tab, so both calls are accepted - a script that has one "
+    "keeps running, tests included - and each leaves a console warning, "
+    "\"visualizer not rendered\". Nothing is kept." },
+    { "sortText", "0_pm_visualizer" } });
+
+    completions.push_back ({ { "label", "pm.visualizer.set" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.visualizer.set(\"${1:template}\", ${2:data})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.visualizer.set(template: string, data?: any, options?: any): void" },
+    { "documentation",
+    "Accepts Postman's call and draws nothing: the template must be a string "
+    "(anything else throws a TypeError), and data and options are not read. "
+    "One console warning, \"visualizer not rendered\", per call.\n\nExample:\n"
+    "pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });" },
+    { "sortText", "1_pm_visualizer_set" } });
+
+    completions.push_back ({ { "label", "pm.visualizer.clear" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.visualizer.clear()" }, { "detail", "pm.visualizer.clear(): void" },
+    { "documentation",
+    "Accepts Postman's call; there is nothing drawn to clear. One console "
+    "warning, \"visualizer not rendered\", per call." },
+    { "sortText", "1_pm_visualizer_clear" } });
+
+    // ========================================
     // pm.crypto - Hashing, and the base64 globals that go with it
     // ========================================
     completions.push_back ({ { "label", "pm.crypto" }, { "kind", KIND_VARIABLE },
@@ -1966,6 +1999,207 @@ nlohmann::json get_script_completions () {
     "Decode base64 to a binary string - one character per byte. Throws on "
     "input that is not valid base64." },
     { "sortText", "2_atob" } });
+
+    // ========================================
+    // Timers - run to completion before the script ends (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "setTimeout" }, { "kind", KIND_FUNCTION },
+    { "insertText", "setTimeout(() => {\n\t${1:// later}\n}, ${2:0});" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "setTimeout(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number" },
+    { "documentation",
+    "Call callback after the script body, in due order with the other timers; "
+    "extra arguments are passed to it. Returns the id clearTimeout takes.\n\n"
+    "Every timer runs before the script ends, within its deadline - the "
+    "request is not sent, and the test script's results are not reported, "
+    "until they have. The delay orders the callbacks and is not waited out: "
+    "nothing sleeps, and Date.now() does not advance by the delay. To delay a "
+    "request, add a "
+    "Think time element (timer.think) instead." },
+    { "sortText", "2_setTimeout" } });
+
+    completions.push_back ({ { "label", "setInterval" }, { "kind", KIND_FUNCTION },
+    { "insertText", "const ${1:timer} = setInterval(() => {\n\t${2:// each time}\n}, ${3:100});" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "setInterval(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number" },
+    { "documentation",
+    "Call callback every delay ms until clearInterval stops it. Returns the "
+    "id clearInterval takes.\n\nRuns before the script ends, on the same "
+    "clock as setTimeout. An interval nothing clears runs until the script's "
+    "deadline (scriptTimeout) stops it, which fails the script - clear it "
+    "from its own callback once it is done." },
+    { "sortText", "2_setInterval" } });
+
+    completions.push_back ({ { "label", "clearTimeout" }, { "kind", KIND_FUNCTION },
+    { "insertText", "clearTimeout(${1:id})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "clearTimeout(id?: number): void" },
+    { "documentation",
+    "Cancel a timer setTimeout or setInterval queued. An id that is not "
+    "queued, or none at all, is no error." },
+    { "sortText", "2_clearTimeout" } });
+
+    completions.push_back ({ { "label", "clearInterval" }, { "kind", KIND_FUNCTION },
+    { "insertText", "clearInterval(${1:id})" }, { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "clearInterval(id?: number): void" },
+    { "documentation",
+    "Stop an interval setInterval queued; the same as clearTimeout, which "
+    "shares its ids." },
+    { "sortText", "2_clearInterval" } });
+
+    // ========================================
+    // postman - Postman's pre-pm.* helper methods, as aliases (#2577)
+    // ========================================
+    completions.push_back ({ { "label", "postman" }, { "kind", KIND_VARIABLE },
+    { "insertText", "postman" }, { "detail", "Postman's legacy helper object" },
+    { "documentation",
+    "Postman's pre-pm.* helper methods, kept so a script imported from Postman "
+    "runs. Each is an alias of the pm.* method Postman names as its "
+    "replacement, which is what to write in a new script." },
+    { "sortText", "2_postman" } });
+
+    // One row per alias: the method, its signature, and what it is an alias of.
+    struct LegacyCompletion {
+        const char* name;
+        const char* detail;
+        const char* documentation;
+    };
+    constexpr auto LEGACY_POSTMAN = std::to_array<LegacyCompletion> ({
+    { "setEnvironmentVariable", "postman.setEnvironmentVariable(name: string, value: any): void",
+    "An alias of pm.environment.set(name, value), except that a value with a "
+    "toString() is stored as the string it returns, as Postman's legacy call "
+    "does: a number set here reads back as a string. false, 0, null and "
+    "undefined are stored as they are." },
+    { "getEnvironmentVariable", "postman.getEnvironmentVariable(name: string): any | undefined",
+    "An alias of pm.environment.get(name)." },
+    { "clearEnvironmentVariable", "postman.clearEnvironmentVariable(name: string): void",
+    "An alias of pm.environment.unset(name)." },
+    { "clearEnvironmentVariables", "postman.clearEnvironmentVariables(): void",
+    "An alias of pm.environment.clear()." },
+    { "setGlobalVariable", "postman.setGlobalVariable(name: string, value: any): void",
+    "An alias of pm.globals.set(name, value), except that a value with a "
+    "toString() is stored as the string it returns, as Postman's legacy call "
+    "does: a number set here reads back as a string. false, 0, null and "
+    "undefined are stored as they are." },
+    { "getGlobalVariable", "postman.getGlobalVariable(name: string): any | undefined",
+    "An alias of pm.globals.get(name)." },
+    { "clearGlobalVariable", "postman.clearGlobalVariable(name: string): void",
+    "An alias of pm.globals.unset(name)." },
+    { "clearGlobalVariables", "postman.clearGlobalVariables(): void", "An alias of pm.globals.clear()." },
+    { "setNextRequest", "postman.setNextRequest(name: string | null): void",
+    "An alias of pm.execution.setNextRequest(name): only inside a collection "
+    "run, and it throws elsewhere in the same words." },
+    { "getResponseHeader", "postman.getResponseHeader(name: string): string | undefined",
+    "An alias of pm.response.headers.get(name): case-insensitive, undefined "
+    "for an absent header.\n\nA test script only, as in Postman: a "
+    "pre-request script has no response, and no getResponseHeader." },
+    { "getResponseCookie",
+    "postman.getResponseCookie(name: string): { name: string, key: string, "
+    "value: string, domain: string, path: string, secure: boolean, httpOnly: "
+    "boolean, hostOnly: boolean, session: boolean, expires: Date | null } | "
+    "undefined",
+    "The cookie pm.cookies.get(name) reads, as the whole cookie object "
+    "pm.cookies.all() lists rather than its value, as Postman's legacy call "
+    "returns it - read .value for the value. undefined when the jar holds none "
+    "of that name for this URL.\n\nA test script only, as in Postman: a "
+    "pre-request script has no response, and no getResponseCookie." },
+    });
+    for (const auto& method : LEGACY_POSTMAN) {
+        const std::string name = method.name;
+        completions.push_back ({ { "label", "postman." + name },
+        { "kind", KIND_FUNCTION }, { "insertText", "postman." + name + "(${1})" },
+        { "insertTextRules", INSERT_AS_SNIPPET }, { "detail", method.detail },
+        { "documentation", method.documentation }, { "sortText", "2_postman_" + name } });
+    }
+
+    // ========================================
+    // Postman's pre-pm.* globals, read off pm when the script starts (#2577)
+    // ========================================
+    struct LegacyGlobal {
+        const char* label;
+        int kind;
+        const char* detail;
+        const char* documentation;
+    };
+    constexpr auto LEGACY_GLOBALS = std::to_array<LegacyGlobal> ({
+    { "tests", KIND_VARIABLE, "object",
+    "Postman's legacy assertion object: each property assigned is a test "
+    "result, named by its key and passed when its value is truthy.\n\n"
+    "tests[\"Status code is 200\"] = responseCode.code === 200;\n\nThe "
+    "object is read once the script has finished, in key order, after the "
+    "pm.test results: a key assigned twice is one result, with the last "
+    "value. pm.test(name, fn) is what to write in a new script." },
+    { "responseBody", KIND_VARIABLE, "string",
+    "The response body as text, what pm.response.text() answers.\n\nA test "
+    "script only, as in Postman: a pre-request script has no response, and "
+    "no responseBody." },
+    { "responseCode", KIND_VARIABLE, "object",
+    "The response status in Postman's legacy shape: code, name, detail and "
+    "standardName.\n\nA test script only, as in Postman." },
+    { "responseCode.code", KIND_FIELD, "number", "The status code, pm.response.code." },
+    { "responseCode.name", KIND_FIELD, "string", "The reason phrase, what pm.response.reason() answers." },
+    { "responseCode.detail", KIND_FIELD, "string",
+    "Always the empty string: Postman fills it with a description of the "
+    "status that Vayu does not carry." },
+    { "responseCode.standardName", KIND_FIELD, "string",
+    "The registered reason phrase for the code, whatever the server sent." },
+    { "responseHeaders", KIND_VARIABLE, "object",
+    "The response headers as an object of name to value, each name as the "
+    "server sent it, and the last value of a repeated one. The lookup is "
+    "case-sensitive, as in Postman: responseHeaders['Content-Type'] misses a "
+    "content-type header, and a load run's sampled response keeps only "
+    "lower-cased names. postman.getResponseHeader(name) and "
+    "pm.response.headers.get(name) ignore case.\n\nA test script only, as in "
+    "Postman." },
+    { "responseTime", KIND_VARIABLE, "number",
+    "The response time in milliseconds, pm.response.responseTime.\n\nA test "
+    "script only, as in Postman." },
+    { "responseCookies", KIND_VARIABLE, "object[]",
+    "The cookies the jar holds for this request's URL, the list "
+    "pm.cookies.all() answers, read when the script first uses it. Where "
+    "there is no jar to read it throws, as pm.cookies does.\n\nA test script "
+    "only, as in Postman." },
+    { "environment", KIND_VARIABLE, "object",
+    "The environment's variables as a plain object, as they were when the "
+    "script started. A snapshot: assigning to it changes no variable and "
+    "pm.environment.set does not update it, while "
+    "postman.setEnvironmentVariable and the two clear calls do, as in "
+    "Postman. pm.environment.get(name) reads the live value." },
+    { "globals", KIND_VARIABLE, "object",
+    "The global variables as a plain object, as they were when the script "
+    "started. A snapshot: assigning to it changes no variable and "
+    "pm.globals.set does not update it, while postman.setGlobalVariable and "
+    "the two clear calls do, as in Postman. pm.globals.get(name) reads the "
+    "live value." },
+    { "data", KIND_VARIABLE, "object",
+    "The iteration's data row as a plain object, what "
+    "pm.iterationData.toObject() answers; {} outside a data-driven run." },
+    { "iteration", KIND_VARIABLE, "number",
+    "Which pass this is, 0-based: pm.info.iteration, or 0 where there is no "
+    "run to count." },
+    { "request", KIND_VARIABLE, "object",
+    "The request this script belongs to, in Postman's legacy shape. A copy: "
+    "changing it changes nothing about what is sent; pm.request is the "
+    "request itself." },
+    { "request.url", KIND_FIELD, "string", "The URL, as text." },
+    { "request.method", KIND_FIELD, "string", "The method, upper-case." },
+    { "request.headers", KIND_FIELD, "object",
+    "The headers, each name lower-cased and a repeated one as the array of "
+    "its values. The headers that were sent in a test script, the request's "
+    "own before the send, as pm.request.headers reads them." },
+    { "request.data", KIND_FIELD, "any",
+    "A form body as an object of its enabled fields (a repeated one as an "
+    "array), a text body as its text, and {} for no body, a file or GraphQL." },
+    { "request.name", KIND_FIELD, "string | undefined",
+    "The request's name inside a collection, pm.info.requestName." },
+    { "request.id", KIND_FIELD, "string | undefined",
+    "The request's id inside a collection, pm.info.requestId." },
+    });
+    for (const auto& legacy : LEGACY_GLOBALS) {
+        const std::string label = legacy.label;
+        completions.push_back ({ { "label", label }, { "kind", legacy.kind },
+        { "insertText", label }, { "detail", legacy.detail },
+        { "documentation", legacy.documentation }, { "sortText", "2_legacy_" + label } });
+    }
 
     completions.push_back ({ { "label", "Sign the outgoing request" }, { "kind", KIND_SNIPPET },
     { "insertText",

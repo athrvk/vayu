@@ -215,7 +215,9 @@ describe("the import preview's notices", () => {
 				meta: {
 					format: "Postman Collection v2.1",
 					requestCount: 1,
-					unsupportedScriptApis: [{ request: "Sign in", names: ["tests[]", "CryptoJS"] }],
+					unsupportedScriptApis: [
+						{ request: "Sign in", names: ["require()", "CryptoJS"] },
+					],
 				},
 			})
 		);
@@ -224,7 +226,7 @@ describe("the import preview's notices", () => {
 		const link = await screen.findByRole("button", { name: "See what Vayu supports" });
 		const line = link.closest("span.flex");
 		expect(line?.textContent).toContain(
-			"Sign in: script uses APIs Vayu does not run yet (tests[], CryptoJS)"
+			"Sign in: script uses APIs Vayu does not run yet (require(), CryptoJS)"
 		);
 		expect(line?.className).toContain("text-warning-text");
 		fireEvent.click(link);

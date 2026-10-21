@@ -26,10 +26,13 @@
 #ifdef VAYU_HAS_QUICKJS
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -86,6 +89,66 @@ struct RuntimeState {
     /// the context exactly as a queued job does (#1823).
     std::vector<JSValue> unhandled_rejections;
 };
+
+/// One `setTimeout` / `setInterval` registration (#2577): owned references to
+/// the callback and the extra arguments it is called with.
+struct ScriptTimer {
+    JSValue callback = JS_UNDEFINED;
+    std::vector<JSValue> args;
+    /// The repeat period of a `setInterval`; nullopt for a `setTimeout`.
+    std::optional<double> interval_ms;
+};
+
+/**
+ * What `setTimeout` and `setInterval` queued, run to completion before the
+ * script ends (#2577). The clock is virtual: firing a timer moves it to that
+ * timer's due time, so the queue runs in due order without the thread ever
+ * waiting, and a tie goes to the timer queued first.
+ *
+ * Per-execution, like the rest of `ContextData`, and every reference it holds
+ * is freed by `clear` before the context is released: a held function pins its
+ * context exactly as a queued promise job does (#1823).
+ */
+class TimerQueue {
+    public:
+    /// Queues @p timer @p delay_ms after the clock's current time and returns
+    /// the id `clearTimeout` takes.
+    int64_t schedule (ScriptTimer timer, double delay_ms);
+    /// Drops the timer @p id, if one is queued; an unknown id is no error.
+    void cancel (JSContext* ctx, int64_t id);
+    /// Removes the timer due first and moves the clock to its due time. A
+    /// `setInterval` is queued again one period later under the same id
+    /// before it is returned, so its own callback can clear it; what comes back
+    /// is then a second set of references. The caller frees what it is given.
+    /// Only called on a non-empty queue.
+    ScriptTimer take_next (JSContext* ctx);
+    /// Frees every reference the queue holds and empties it.
+    void clear (JSContext* ctx);
+    [[nodiscard]] bool empty () const {
+        return timers_.empty ();
+    }
+    [[nodiscard]] std::size_t size () const {
+        return timers_.size ();
+    }
+
+    private:
+    /// (due time on the virtual clock, queue order).
+    using Slot = std::pair<double, uint64_t>;
+    struct Entry {
+        ScriptTimer timer;
+        Slot slot;
+    };
+    void place (int64_t id, Entry entry, double due_ms);
+
+    double now_ms_     = 0;
+    uint64_t next_seq_ = 0;
+    int64_t next_id_   = 1;
+    std::map<Slot, int64_t> order_;
+    std::unordered_map<int64_t, Entry> timers_;
+};
+
+/// Frees the references @p timer holds.
+void free_script_timer (JSContext* ctx, ScriptTimer& timer);
 
 // Context data stored in JS runtime
 struct ContextData {
@@ -182,6 +245,21 @@ struct ContextData {
     /// be reported (#2531). Owned references, freed with the tracker's before
     /// the context is released.
     std::vector<std::pair<JSValue, std::string>> async_tests;
+
+    /// What `setTimeout` and `setInterval` queued in this execution.
+    TimerQueue timers;
+
+    /// The promise the script's async wrapper returned (#2577), which rejects
+    /// with what the body throws, before its first `await` or after one. An
+    /// owned reference, freed before the context is released; undefined once
+    /// its rejection has been reported.
+    JSValue script_body = JS_UNDEFINED;
+
+    /// The `tests` object the legacy globals bind (#2577), read once the script
+    /// has finished. The object bound, not whatever the global names by then,
+    /// as Postman reads it. An owned reference, freed before the context is
+    /// released.
+    JSValue legacy_tests = JS_UNDEFINED;
 };
 
 // Get context data from JS context
@@ -327,6 +405,10 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
 JSValue js_pm_expect (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 JSValue js_pm_expect_fail (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
+// `pm.visualizer` (pm_visualizer.cpp): Postman's calls, accepted with a
+// console warning.
+void setup_pm_visualizer (JSContext* ctx, JSValue pm);
+
 // `pm.execution` and `pm.metrics` (pm_execution_metrics.cpp).
 void setup_pm_execution (JSContext* ctx, JSValue pm);
 void setup_pm_metrics (JSContext* ctx, JSValue pm);
@@ -353,11 +435,32 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
 void setup_pm_cookies (JSContext* ctx, JSValue pm);
 JSValue js_response_cookies (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
 
+// Postman's `cookies.one(name)`: the cookie `pm.cookies.get(name)` reads, as
+// the whole object `pm.cookies.all()` lists, or undefined. Not a member of
+// `pm.cookies`; `postman.getResponseCookie` is its one caller (pm_legacy.cpp).
+JSValue js_jar_cookies_one (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv);
+
+// Postman's pre-`pm.*` globals (pm_legacy.cpp, #2577): the `postman` object,
+// whose helper methods alias the `pm` members Postman names as their
+// replacements, and the values (`tests`, `environment`, `responseBody`, ...)
+// read off `pm` when the script starts. Installed per execution, after the
+// `pm` surfaces are refreshed, because the response globals exist only where
+// there is a response, as in Postman.
+void setup_postman_legacy (JSContext* ctx, JSValue global, JSValue pm);
+
+// Appends a result to `data.tests` for each property of the `tests` object, in
+// its key order, as Postman does once the script has finished.
+void record_legacy_tests (JSContext* ctx, ContextData& data);
+
 // `pm.request` and `pm.info` (pm_request_url.cpp), and the write-back that
 // applies a pre-request script's `pm.request` to the request about to be sent.
 void setup_pm_request (JSContext* ctx, JSValue pm);
 void setup_pm_info (JSContext* ctx, JSValue pm);
 std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& request);
+
+// The header lines a script reads as the request's: the sent record in a test
+// script, the composed request before the send (pm_request_url.cpp).
+const HeaderList& script_request_header_lines (const ContextData& data);
 
 // The state behind a `pm.request.url` Url object, or nullptr for anything
 // else - a class test, so the jar can tell a Url from a forged look-alike.

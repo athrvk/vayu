@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <regex>
 #include <set>
@@ -666,6 +667,39 @@ TEST (ScriptCompletions, EveryOfferedCryptoMemberIsCallableInTheRuntime) {
     << "the signing surface changed - update this test and the docs it backs";
 }
 
+// The timers (#2577): every one offered is a function the runtime binds, and a
+// timer it queues runs before the script ends.
+TEST (ScriptCompletions, EveryOfferedTimerIsBoundAndRunsBeforeTheScriptEnds) {
+    const auto completions = get_script_completions ();
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    response.status_code = 200;
+
+    int offered = 0;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label != "setTimeout" && label != "setInterval" &&
+        label != "clearTimeout" && label != "clearInterval") {
+            continue;
+        }
+        offered++;
+        const auto result = engine.execute_test (
+        "if (typeof " + label + " !== 'function') throw new Error('not bound');",
+        request, response, env);
+        EXPECT_TRUE (result.success) << label << ": " << result.error_message;
+    }
+    EXPECT_EQ (offered, 4)
+    << "the timer surface changed - update this test and the docs";
+
+    const auto result = engine.execute_test (
+    "setTimeout(() => pm.test('ran', () => {}), 10);", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u) << result.error_message;
+    EXPECT_TRUE (result.tests[0].passed);
+}
+
 // A different drift from the ones above: the member exists, the spelling of the
 // key does not. Response header names are lower-cased by the HTTP client and
 // indexing `pm.response.headers` is a plain property read, so an offered
@@ -961,6 +995,80 @@ TEST (ScriptCompletions, EveryPmMemberTheRuntimeBindsIsOffered) {
     << "the runtime binds these but the completion list never offers them, so "
        "no user can discover them in the editor: "
     << report;
+}
+
+// The `postman` object (#2577) both ways: every offered method is a function in
+// a test script, and every method the runtime binds is offered.
+TEST (ScriptCompletions, TheOfferedPostmanMethodsAreExactlyWhatTheRuntimeHas) {
+    const auto completions = get_script_completions ();
+    std::set<std::string> offered;
+    for (const auto& item : completions) {
+        const std::string label = item.value ("label", std::string{});
+        if (label.starts_with ("postman.")) {
+            offered.insert (label.substr (std::string ("postman.").size ()));
+        }
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    vayu::Response response;
+    vayu::Environment env;
+    const auto result = engine.execute_test (
+    "pm.environment.set('bound', Object.keys(postman).filter("
+    "k => typeof postman[k] === 'function').sort().join(','));",
+    request, response, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+
+    const auto names = split_commas (env["bound"].value);
+    const std::set<std::string> bound (names.begin (), names.end ());
+
+    EXPECT_EQ (offered.size (), 11u)
+    << "the postman surface changed - update the docs";
+    EXPECT_EQ (offered, bound);
+}
+
+// Postman's legacy globals (#2577) both ways: each one the runtime binds in a
+// test script is offered, and the members offered for the two objects the
+// editor describes (`responseCode`, `request`) are exactly what each holds.
+TEST (ScriptCompletions, TheOfferedLegacyGlobalsAreWhatTheRuntimeBinds) {
+    const auto completions = get_script_completions ();
+    constexpr auto roots   = std::to_array<const char*> (
+    { "tests", "responseBody", "responseCode", "responseHeaders", "responseTime",
+      "responseCookies", "environment", "globals", "data", "iteration", "request" });
+    std::string script;
+    for (const char* root : roots) {
+        EXPECT_NE (find_by_label (completions, root), nullptr) << root << " is not offered";
+        script += std::format ("if (!(\"{0}\" in globalThis)) throw new "
+                               "Error(\"{0} is not bound\");\n",
+        root);
+    }
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Request request;
+    request.url = "https://x.test/a";
+    vayu::Response response;
+    vayu::Environment env;
+    auto ctx = vayu::runtime::ScriptContext::for_test (request, response);
+    ctx.environment  = &env;
+    ctx.request_id   = "req_1";
+    ctx.request_name = "A";
+    for (const std::string object : { "responseCode", "request" }) {
+        std::set<std::string> offered;
+        for (const auto& item : completions) {
+            const std::string label = item.value ("label", std::string{});
+            if (label.starts_with (object + ".")) {
+                offered.insert (label.substr (object.size () + 1));
+            }
+        }
+        const auto result =
+        engine.execute (std::format ("{}pm.environment.set('keys', "
+                                     "Object.keys({}).sort().join(','));",
+                        script, object),
+        ctx);
+        ASSERT_TRUE (result.success) << result.error_message;
+        const auto names = split_commas (env["keys"].value);
+        EXPECT_EQ (offered, std::set<std::string> (names.begin (), names.end ())) << object;
+    }
 }
 
 // The widening above trades one silent hole for a noisy false positive unless

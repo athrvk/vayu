@@ -1209,6 +1209,18 @@ int64_t stop_wait_ms) {
 }
 
 /**
+ * Testable core of DELETE /runs (#2429): "Clear run history", which keeps what
+ * retention keeps - pinned baselines and runs still in flight. The deleted ids
+ * travel back so a client can close whatever was showing one.
+ */
+std::pair<int, nlohmann::json> clear_runs_response (vayu::db::Database& db) {
+    const auto cleared = db.clear_runs ();
+    return { 200,
+        nlohmann::json{ { "deleted", cleared.deleted_ids.size () },
+        { "keptPinned", cleared.kept_pinned }, { "deletedIds", cleared.deleted_ids } } };
+}
+
+/**
  * Rate fidelity as the pacer counts it (#2392): requests sent over requests
  * expected, and the achieved rate over the sending window, which the
  * end-of-run drain is not part of. Leaves the completed-over-wall-time figures
@@ -1917,6 +1929,18 @@ void handle_delete_run (RouteContext& ctx, const httplib::Request& req, httplib:
     }
 }
 
+void handle_clear_runs (RouteContext& ctx, httplib::Response& res) {
+    try {
+        auto [status, body] = clear_runs_response (ctx.db);
+        res.status          = status;
+        res.set_content (body.dump (), "application/json");
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("run",
+        "DELETE /runs - Error clearing run history: " + std::string (e.what ()));
+        send_error (res, 500, e.what ());
+    }
+}
+
 void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     try {
@@ -2135,6 +2159,16 @@ void register_run_routes (RouteContext& ctx) {
     ctx.server.Get (R"(/runs/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         handle_get_run (ctx, req, res);
+    });
+
+    /**
+     * DELETE /runs
+     * Clears run history: every run except pinned baselines and runs still in
+     * flight, answering {deleted, keptPinned, deletedIds}. See
+     * clear_runs_response.
+     */
+    ctx.server.Delete ("/runs", [&ctx] (const httplib::Request&, httplib::Response& res) {
+        handle_clear_runs (ctx, res);
     });
 
     /**

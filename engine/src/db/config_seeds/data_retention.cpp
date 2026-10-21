@@ -106,12 +106,25 @@ void seed_data_retention (ConfigSeeder& seed, int64_t now) {
 
     seed (keywords ({ "cleanup" }) (ConfigEntry{ "maxRunsRetained",
     std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED), "integer", "Max Runs Retained",
-    "Keep at most this many most-recent runs; older runs, with their metrics "
-    "and results, are pruned at startup and after each run finishes. A higher "
-    "value - or 0 for unlimited - keeps more history but grows the database "
-    "file on disk and slows down loading the run history. In-progress runs are "
-    "never pruned.",
+    "Keep at most this many most-recent load tests and collection runs; older "
+    "ones, with their metrics and results, are pruned at startup and after "
+    "each run finishes. Single-request Sends are counted separately and never "
+    "push these out. A higher value - or 0 for unlimited - keeps more history "
+    "but grows the database file on disk and slows down loading the run "
+    "history. In-progress runs and pinned baselines are never pruned.",
     "data_retention", std::to_string (vayu::core::constants::database::MAX_RUNS_RETAINED),
+    "0", "100000", std::nullopt, now }));
+
+    seed (keywords ({ "cleanup", "request history" }) (
+    ConfigEntry{ "maxDesignRunsRetained",
+    std::to_string (vayu::core::constants::database::MAX_DESIGN_RUNS_RETAINED),
+    "integer", "Max Sends Retained",
+    "Keep at most this many most-recent single-request Sends in History; "
+    "older ones, with their responses, are pruned at startup and after each "
+    "Send. Load tests and collection runs are counted separately. A higher "
+    "value - or 0 for unlimited - keeps more history but grows the database "
+    "file on disk. In-progress Sends and pinned baselines are never pruned.",
+    "data_retention", std::to_string (vayu::core::constants::database::MAX_DESIGN_RUNS_RETAINED),
     "0", "100000", std::nullopt, now }));
 
     seed (

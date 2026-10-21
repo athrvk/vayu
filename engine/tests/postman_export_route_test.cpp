@@ -274,6 +274,32 @@ TEST_F (PostmanExportRouteTest, AMalformedDisabledHeaderNameDoesNotFailTheImport
     EXPECT_EQ (exported_protocol_behavior (export_text (id), "Odd"), carried);
 }
 
+// Issue #2538: a folder's `protocolProfileBehavior` is flattened onto its
+// requests on import, so it comes back on the requests and never as a folder
+// key, and a request's own object keeps its members and their order. Mutation
+// check: stop passing the folder's behaviour into `pm_request_named` and the
+// first expectation loses its `followRedirects`.
+TEST_F (PostmanExportRouteTest, AFolderProtocolBehaviourComesBackOnItsRequestsOnly) {
+    const std::string id = import_text (postman_collection (R"(
+        {"name":"Folder","protocolProfileBehavior":{"followRedirects":false},"item":[
+            {"name":"Inherits","request":{"method":"GET","url":"https://x.com/a"}},
+            {"name":"Own","protocolProfileBehavior":{"followRedirects":true,"insecureHTTPParser":true},
+                "request":{"method":"GET","url":"https://x.com/b"}}]},
+        {"name":"Plain","protocolProfileBehavior":{"strictSSL":true,"tlsDisabledProtocols":["TLSv1"]},
+            "request":{"method":"GET","url":"https://x.com/c"}})"));
+    ASSERT_FALSE (id.empty ());
+    const ordered doc     = ordered::parse (export_text (id));
+    const ordered& folder = doc.at ("item").at (0);
+    ASSERT_EQ (folder.at ("name"), "Folder");
+    EXPECT_FALSE (folder.contains ("protocolProfileBehavior"));
+    EXPECT_EQ (folder.at ("item").at (0).at ("protocolProfileBehavior").dump (),
+    R"({"followRedirects":false})");
+    EXPECT_EQ (folder.at ("item").at (1).at ("protocolProfileBehavior").dump (),
+    R"({"followRedirects":true,"insecureHTTPParser":true})");
+    EXPECT_EQ (exported_protocol_behavior (export_text (id), "Plain"),
+    R"({"strictSSL":true,"tlsDisabledProtocols":["TLSv1"]})");
+}
+
 // The app's Duplicate sends back the record `GET /requests/:id` answered, the
 // carrier included: a duplicated import exports the same
 // `protocolProfileBehavior` bytes as its source. Mutation check: answer the

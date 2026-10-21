@@ -21,13 +21,18 @@
  * Asserted through behaviour rather than by scanning for the string: the test
  * spies on `window.confirm` and requires it to stay untouched, which also fails
  * if a future edit reintroduces it anywhere in this flow.
+ *
+ * The clear is one `DELETE /runs` call (#2429), and the engine keeps what
+ * retention keeps: a pinned baseline and a run still in flight. So the dialog
+ * counts only what will go, names what is kept, and the tabs that close are the
+ * ids the engine reports, not every run the list happened to hold.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render as renderBare, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore } from "@/stores";
+import { useTabsStore, useToastStore } from "@/stores";
 import GeneralPanel from "./GeneralPanel";
 
 /**
@@ -40,14 +45,18 @@ function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
 	return renderBare(ui, { wrapper: TooltipProvider, ...options });
 }
 
-const deleteRun = vi.fn((_id: string) => Promise.resolve());
+const clearRuns = vi.fn(() =>
+	Promise.resolve({ deleted: 0, keptPinned: 0, deletedIds: [] as string[] })
+);
+const deleteRun = vi.fn();
 const invalidateRuns = vi.fn();
 
-const twoRuns = [
+type Row = { id: string; status: string; baseline?: boolean };
+const plain: Row[] = [
 	{ id: "r1", status: "completed" },
 	{ id: "r2", status: "failed" },
 ];
-let runs = twoRuns;
+let runs: Row[] = plain;
 
 vi.mock("@/queries/runs", () => ({
 	useAllRunsQuery: () => ({ data: runs }),
@@ -55,7 +64,10 @@ vi.mock("@/queries/runs", () => ({
 }));
 
 vi.mock("@/services", () => ({
-	apiService: { deleteRun: (id: string) => deleteRun(id) },
+	apiService: {
+		clearRuns: () => clearRuns(),
+		deleteRun: (id: string) => deleteRun(id),
+	},
 }));
 
 // The real zustand stores (toast, client settings) are left in place - they are
@@ -68,10 +80,21 @@ vi.mock("./CookiesCard", () => ({ CookiesCard: () => null }));
 
 let confirmSpy: ReturnType<typeof vi.spyOn>;
 
+const toastMessages = () => useToastStore.getState().toasts.map((t) => t.message);
+
+function openTabs(...ids: string[]) {
+	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	for (const entityId of ids) useTabsStore.getState().openTab({ type: "run", entityId });
+}
+
+const openTabIds = () => useTabsStore.getState().openTabs.map((t) => t.entityId);
+
 beforeEach(() => {
-	runs = twoRuns;
+	runs = plain;
+	clearRuns.mockClear();
 	deleteRun.mockClear();
 	invalidateRuns.mockClear();
+	useToastStore.setState({ toasts: [] });
 	confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
@@ -79,63 +102,144 @@ afterEach(() => {
 	confirmSpy.mockRestore();
 });
 
+async function openDialog() {
+	fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+	return await screen.findByRole("dialog");
+}
+
 describe("GeneralPanel - clear run history", () => {
-	it("confirms in-app and never reaches for window.confirm", async () => {
+	it("confirms in-app, never reaches for window.confirm, and clears in one call", async () => {
+		clearRuns.mockResolvedValue({ deleted: 2, keptPinned: 0, deletedIds: ["r1", "r2"] });
 		render(<GeneralPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
-
-		// The in-app dialog, not the OS one.
-		expect(await screen.findByText(/clear run history\?/i)).toBeTruthy();
+		await openDialog();
+		expect(screen.getByText(/clear run history\?/i)).toBeTruthy();
 		expect(confirmSpy).not.toHaveBeenCalled();
 		// Nothing is deleted merely by asking.
-		expect(deleteRun).not.toHaveBeenCalled();
+		expect(clearRuns).not.toHaveBeenCalled();
 
 		fireEvent.click(screen.getByRole("button", { name: /^clear history$/i }));
 
-		await waitFor(() => expect(deleteRun).toHaveBeenCalledTimes(runs.length));
+		await waitFor(() => expect(clearRuns).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(toastMessages()).toEqual(["Run history cleared"]));
+		// The per-run loop is gone: the engine's pass is what spares a baseline.
+		expect(deleteRun).not.toHaveBeenCalled();
 		expect(confirmSpy).not.toHaveBeenCalled();
+		expect(invalidateRuns).toHaveBeenCalled();
 	});
 
-	it("closes the run tabs it emptied, and only those the engine accepted", async () => {
-		// r2's delete is refused (a run still stopping answers 409), so its run
-		// is still there and its tab has to stay. Tabs persist, so a tab left
-		// open for a deleted run comes back as a dead pane on the next launch.
-		deleteRun.mockImplementation((id: string) =>
-			id === "r2" ? Promise.reject(new Error("still stopping")) : Promise.resolve()
+	it("names the pinned baseline it keeps and counts only what goes", async () => {
+		runs = [
+			{ id: "r1", status: "completed" },
+			{ id: "r2", status: "completed", baseline: true },
+		];
+		render(<GeneralPanel />);
+
+		const dialog = await openDialog();
+
+		expect(dialog).toHaveTextContent(
+			"One stored run and its metrics are removed permanently. One pinned baseline is kept. This can't be undone."
 		);
-		useTabsStore.setState({ openTabs: [], activeTabId: null });
-		useTabsStore.getState().openTab({ type: "run", entityId: "r1" });
-		useTabsStore.getState().openTab({ type: "run", entityId: "r2" });
+		expect(dialog).not.toHaveTextContent(/all \d+ stored runs/i);
+	});
+
+	it("closes the tabs of the ids the engine deleted and keeps the rest", async () => {
+		runs = [
+			{ id: "r1", status: "completed" },
+			{ id: "r2", status: "completed", baseline: true },
+		];
+		clearRuns.mockResolvedValue({ deleted: 1, keptPinned: 1, deletedIds: ["r1"] });
+		openTabs("r1", "r2");
 
 		render(<GeneralPanel />);
-		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
-		fireEvent.click(await screen.findByRole("button", { name: /^clear history$/i }));
+		await openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /^clear history$/i }));
 
-		await waitFor(() =>
-			expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r2"])
-		);
+		await waitFor(() => expect(openTabIds()).toEqual(["r2"]));
 	});
 
 	it.each([
 		[1, "The one stored run and its metrics are removed permanently. This can't be undone."],
 		[2, "All 2 stored runs and their metrics are removed permanently. This can't be undone."],
 	])("agrees the verb with a count of %i", async (count, sentence) => {
-		runs = twoRuns.slice(0, count);
+		runs = plain.slice(0, count);
 		render(<GeneralPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
+		expect(await openDialog()).toHaveTextContent(sentence);
+	});
 
-		expect(await screen.findByRole("dialog")).toHaveTextContent(sentence);
+	it("agrees the pinned count's verb, and says what it kept in plural", async () => {
+		runs = [
+			{ id: "r1", status: "completed" },
+			{ id: "r2", status: "completed" },
+			{ id: "r3", status: "completed", baseline: true },
+			{ id: "r4", status: "failed", baseline: true },
+		];
+		render(<GeneralPanel />);
+
+		expect(await openDialog()).toHaveTextContent(
+			"2 stored runs and their metrics are removed permanently. 2 pinned baselines are kept. This can't be undone."
+		);
+	});
+
+	it("does not claim every run goes while one is still in progress", async () => {
+		runs = [
+			{ id: "r1", status: "completed" },
+			{ id: "r2", status: "running" },
+		];
+		render(<GeneralPanel />);
+
+		const dialog = await openDialog();
+
+		expect(dialog).toHaveTextContent(
+			"One stored run and its metrics are removed permanently. One run still in progress is kept."
+		);
+		expect(dialog).not.toHaveTextContent(/\ball\b/i);
+	});
+
+	it("disables the button, with the reason, when only pinned runs are stored", async () => {
+		runs = [{ id: "r1", status: "completed", baseline: true }];
+		render(<GeneralPanel />);
+
+		const button = screen.getByRole("button", { name: /clear run history/i });
+		expect(button).toBeDisabled();
+
+		const hint = document.querySelector<HTMLElement>('[data-slot="disabled-hint"]');
+		expect(hint, "the disabled button carries no reason").not.toBeNull();
+		hint!.focus();
+		fireEvent.focus(hint!);
+		await waitFor(() =>
+			expect(
+				screen.getAllByText("Only pinned baselines and runs in progress are stored").length
+			).toBeGreaterThan(0)
+		);
+		expect(clearRuns).not.toHaveBeenCalled();
 	});
 
 	it("deletes nothing when the dialog is cancelled", async () => {
 		render(<GeneralPanel />);
 
-		fireEvent.click(screen.getByRole("button", { name: /clear run history/i }));
-		fireEvent.click(await screen.findByRole("button", { name: /cancel/i }));
+		await openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
 
 		await waitFor(() => expect(screen.queryByText(/clear run history\?/i)).toBeNull());
+		expect(clearRuns).not.toHaveBeenCalled();
 		expect(deleteRun).not.toHaveBeenCalled();
+	});
+
+	it("shows the failure and keeps every tab when the call is rejected", async () => {
+		clearRuns.mockRejectedValue(new Error("engine unreachable"));
+		openTabs("r1", "r2");
+
+		render(<GeneralPanel />);
+		await openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /^clear history$/i }));
+
+		await waitFor(() =>
+			expect(toastMessages()).toEqual(["Couldn't clear the run history - engine unreachable"])
+		);
+		expect(openTabIds()).toEqual(["r1", "r2"]);
+		// Batches the engine committed before failing are real, so the list is re-read.
+		expect(invalidateRuns).toHaveBeenCalled();
 	});
 });
