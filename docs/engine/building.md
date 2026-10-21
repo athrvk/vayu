@@ -486,6 +486,31 @@ The build script will:
 All platforms script with the same vendored engine: QuickJS-NG
 (`engine/vendor/quickjs-ng`, built via its own CMake as the `qjs` target).
 
+### Vendored patches
+
+`engine/vendor/quickjs-ng/quickjs.c` carries one local patch, marked `vayu
+patch (#2657)` at both of its sites. Its exit is on record here: re-vendoring
+must either keep it or drop it deliberately, never lose it by overwriting the
+file.
+
+- **What**: the parser computed an identifier's column by scanning back to the
+  start of its line, once per identifier, so a one-line (minified) script took
+  time quadratic in its length: a 74 KB single-line script of plain
+  identifiers parsed in about 0.7 s at `-O2`, 150 KB in 2.8 s (9 and 20 ms
+  patched). `JSParseState` gains `line_cache_pos` / `line_cache_start`, the
+  previous answer, and `identifier_line_start` scans back only as far as that
+  position. The result is identical to the old scan for every input (`\n` and
+  `\r` both end a line); the cache is an accelerator and is not part of the
+  saved parse state.
+- **Guard**: `tests/script_parse_position_test.cpp` holds the time of a
+  400 KB one-line script and the reported `line:column` across `\n`, `\r\n`,
+  lone `\r`, one-line and arrow-function sources.
+- **Exit**: retire the patch at the first quickjs-ng upgrade whose parser
+  tracks the line start itself (upstream's `s->line_start`). Whether the
+  upstream release the engine would move to carries that is **unverified**:
+  it could not be checked offline when the patch landed, so read that
+  release's `quickjs.c` before the upgrade rather than assuming it.
+
 ### Linux
 
 - Requires development headers: `libcurl-dev`, `sqlite3-dev`
