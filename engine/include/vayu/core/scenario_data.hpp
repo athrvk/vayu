@@ -147,6 +147,22 @@
 
 namespace vayu::core {
 
+/**
+ * Which file a run's `data` rows came from, and how the client read it, as the
+ * caller stated it (`read_data_file_fields`, `scenario_plan.hpp`). Recorded in
+ * the run's snapshot and never read by the run: the engine opens no file and
+ * the rows arrive already typed.
+ */
+struct DataFileProvenance {
+    /// A display name, never a path (issue #2051). Empty when none was named.
+    std::string name;
+    /// The SHA-256 of the file's bytes as 64 lowercase hex characters.
+    std::string hash;
+    /// The client cast the file's unquoted numeric cells to numbers (issue
+    /// #2540). The hash is of the bytes, so it cannot tell two readings apart.
+    bool cast_numbers = false;
+};
+
 /** Whether a row bound cleanly, and what was wrong when it did not. */
 struct DataBindResult {
     bool ok = false;

@@ -431,13 +431,13 @@ TEST_F (RunsRouteTest, SummaryTargetRpsIsTheRateTheEnginePacedAt) {
 // itself stays off the row: it is the size of the plan, and the row is the part
 // that has to stay cheap as history grows.
 //
-// Which data file drove the run rides the descriptor too (issue #2051).
-// Mutation check: drop `dataFileName` from `add_scenario`'s key list and this
-// reds.
+// Which data file drove the run rides the descriptor too (issue #2051), and
+// how it was read (issue #2540). Mutation check: drop `dataFileName` or
+// `dataFileCastNumbers` from `add_scenario`'s key list and this reds.
 TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
     seed ({ .id = "run_scenario", .type = vayu::RunType::Scenario, .config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
     "recursive":true,"iterations":3,"dataRowCount":2,"dataFileName":"users.csv",
-    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","dataFileCastNumbers":true,
     "steps":[{"index":0,"requestId":"req_1","name":"login","method":"POST","url":"https://a/login"},
              {"index":1,"requestId":"req_2","name":"checkout","method":"GET","url":"https://a/cart"}]}})" });
 
@@ -458,6 +458,7 @@ TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
     EXPECT_FALSE (scenario.contains ("steps"));
     EXPECT_EQ (scenario.value ("dataFileName", ""), "users.csv");
     EXPECT_EQ (scenario.value ("dataFileHash", ""), DATA_FILE_HASH);
+    EXPECT_EQ (scenario.value ("dataFileCastNumbers", false), true);
     // A scenario has no url/method/mode to report, and nothing invents one.
     EXPECT_FALSE (summary.contains ("url"));
     EXPECT_FALSE (summary.contains ("method"));
@@ -468,11 +469,12 @@ TEST_F (RunsRouteTest, SummaryCarriesScenarioDescriptorWithoutTheStepManifest) {
 
 // A single-request load run's file sits at the snapshot's top level, beside
 // `dataRowCount`, and so does its row's (issue #2051); a run without one has
-// neither key. Mutation check: drop `dataFileName` from `build_run_summary`'s
-// key list and this reds.
+// neither key. Mutation check: drop `dataFileName` or `dataFileCastNumbers`
+// (issue #2540) from `build_run_summary`'s key list and this reds.
 TEST_F (RunsRouteTest, SummaryCarriesALoadRunsDataFileOnlyWhenItNamedOne) {
     seed ({ .id = "run_data", .config_snapshot = R"({"url":"https://a/","mode":"constant","dataRowCount":2,
-    "dataFileName":"users.csv","dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})" });
+    "dataFileName":"users.csv","dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "dataFileCastNumbers":true})" });
     seed ({ .id = "run_plain", .start_time = 1, .config_snapshot = R"({"url":"https://b/","mode":"constant"})" });
 
     auto [_, body] = vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
@@ -480,11 +482,13 @@ TEST_F (RunsRouteTest, SummaryCarriesALoadRunsDataFileOnlyWhenItNamedOne) {
     EXPECT_EQ (body["data"][0]["id"], "run_plain");
     EXPECT_FALSE (body["data"][0]["summary"].contains ("dataFileName"));
     EXPECT_FALSE (body["data"][0]["summary"].contains ("dataFileHash"));
+    EXPECT_FALSE (body["data"][0]["summary"].contains ("dataFileCastNumbers"));
 
     EXPECT_EQ (body["data"][1]["id"], "run_data");
     const auto& summary = body["data"][1]["summary"];
     EXPECT_EQ (summary.value ("dataFileName", ""), "users.csv");
     EXPECT_EQ (summary.value ("dataFileHash", ""), DATA_FILE_HASH);
+    EXPECT_EQ (summary.value ("dataFileCastNumbers", false), true);
     EXPECT_FALSE (summary.contains ("scenario"));
 }
 
@@ -1363,21 +1367,24 @@ TEST (RunReportConfigTest, CarriesExpectContinueWhenSnapshotHasItAndOmitsItOther
 }
 
 // A single-request run's data file, beside the row count it describes (issue
-// #2051). Mutation check: drop `dataFileName` from `build_run_report_config`'s
-// key list and this reds.
+// #2051), and how it was read (issue #2540). Mutation check: drop
+// `dataFileName` or `dataFileCastNumbers` from `build_run_report_config`'s key
+// list and this reds.
 TEST (RunReportConfigTest, CarriesTheDataFileBesideTheRowCount) {
     auto config = json::parse (R"({"mode":"once","dataRowCount":2,"dataFileName":"users.csv",
-    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"})");
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","dataFileCastNumbers":true})");
 
     const auto config_obj = vayu::http::routes::build_run_report_config (config);
     EXPECT_EQ (config_obj.value ("dataRowCount", 0), 2);
     EXPECT_EQ (config_obj.value ("dataFileName", ""), "users.csv");
     EXPECT_EQ (config_obj.value ("dataFileHash", ""), DATA_FILE_HASH);
+    EXPECT_EQ (config_obj.value ("dataFileCastNumbers", false), true);
 
     const auto unnamed = vayu::http::routes::build_run_report_config (
     json::parse (R"({"mode":"once","dataRowCount":2})"));
     EXPECT_FALSE (unnamed.contains ("dataFileName"));
     EXPECT_FALSE (unnamed.contains ("dataFileHash"));
+    EXPECT_FALSE (unnamed.contains ("dataFileCastNumbers"));
 }
 
 // An iterations run's count, beside the other tuning knobs (issue #2437).
@@ -1440,14 +1447,15 @@ TEST (RunReportConfigTest, CarriesTheCarriedBudgetsAndOmitsThemWhenAbsent) {
 
 // A collection run's file is in its manifest, not the snapshot's top level, so
 // `metadata.configuration` reaches into `scenario` for it and every report that
-// had a file names it in one place (issue #2051). Mutation check: drop the
-// fallback loop in `build_report_metadata` and this reds.
+// had a file names it in one place (issue #2051), with how it was read (issue
+// #2540). Mutation check: drop the fallback loop in `build_report_metadata`,
+// or `dataFileCastNumbers` from its keys, and this reds.
 TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
     vayu::db::Run run;
     run.type = vayu::RunType::Scenario;
     run.config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
     "dataRowCount":2,"dataFileName":"users.csv",
-    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "dataFileHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","dataFileCastNumbers":true,
     "steps":[]}})";
 
     const auto metadata = vayu::http::routes::build_report_metadata ("run_1", run);
@@ -1455,6 +1463,7 @@ TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
     const auto& configuration = metadata["configuration"];
     EXPECT_EQ (configuration.value ("dataFileName", ""), "users.csv");
     EXPECT_EQ (configuration.value ("dataFileHash", ""), DATA_FILE_HASH);
+    EXPECT_EQ (configuration.value ("dataFileCastNumbers", false), true);
 
     run.config_snapshot = R"({"scenario":{"source":"collection","collectionId":"col_1",
     "dataRowCount":0,"steps":[]}})";
@@ -1462,6 +1471,7 @@ TEST (RunReportMetadataTest, ConfigurationNamesACollectionRunsDataFile) {
     ASSERT_TRUE (unnamed.contains ("configuration")) << unnamed.dump ();
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileName"));
     EXPECT_FALSE (unnamed["configuration"].contains ("dataFileHash"));
+    EXPECT_FALSE (unnamed["configuration"].contains ("dataFileCastNumbers"));
 }
 
 // ============================================================================

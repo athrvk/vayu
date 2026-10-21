@@ -1437,8 +1437,9 @@ struct LoadDataRows {
  * @p is_scenario refuses the field by name: a collection run states its rows as
  * `scenario.data`, where they are bound per iteration and shared by every step,
  * and a payload carrying both would have one of the two silently dropped. The
- * same holds for `dataFileName` / `dataFileHash` (issue #2051), which otherwise
- * ride the set through `core::read_data_file_fields`.
+ * same holds for `dataFileName` / `dataFileHash` (issue #2051) and
+ * `dataFileCastNumbers` (issue #2540), which otherwise ride the set through
+ * `core::read_data_file_fields`.
  *
  * Extracted from the handler (execution.cpp) so load_data_test.cpp can
  * drive it directly, matching the suite's other route-core tests.

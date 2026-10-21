@@ -125,8 +125,8 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     const auto& scenario = src["scenario"];
 
     nlohmann::json row = nlohmann::json::object ();
-    for (const char* key :
-    { "collectionId", "iterations", "recursive", "dataFileName", "dataFileHash" }) {
+    for (const char* key : { "collectionId", "iterations", "recursive",
+         "dataFileName", "dataFileHash", "dataFileCastNumbers" }) {
         add_if_present (row, scenario, key);
     }
     if (scenario.contains ("steps") && scenario["steps"].is_array ()) {
@@ -137,15 +137,16 @@ void add_scenario (nlohmann::json& dst, const nlohmann::json& src) {
     }
 }
 
-// The compact list-row summary: exactly the sixteen keys the history/dashboard
+// The compact list-row summary: exactly the seventeen keys the history/dashboard
 // list UIs read (`targetRps` is `rps` renamed, see add_target_rps), each
 // omitted when absent from the snapshot (httpVersion excepted - see
 // add_http_version), plus `acceptEncoding` (issue #1488) and
 // `scenario` on a collection run only, both omitted rather than defaulted
 // when the snapshot carries neither. `dataFileName` / `dataFileHash` (issue
-// #2051) are a single-request run's; a collection run's ride `scenario`. The
-// ramp-up knobs `startConcurrency` / `rampUpDuration` (issue #1935) are in the
-// list so a row agrees with the report's `configuration`
+// #2051) and `dataFileCastNumbers` (issue #2540) are a single-request run's; a
+// collection run's ride `scenario`. The ramp-up knobs `startConcurrency` /
+// `rampUpDuration` (issue #1935) are in the list so a row agrees with the
+// report's `configuration`
 // (build_run_report_config). A malformed config_snapshot yields an empty
 // object, never an error. This builds the list rows and the
 // PUT /runs/:id/baseline row; GET /runs/:id does not use it and returns the
@@ -170,9 +171,10 @@ nlohmann::json build_run_summary (const std::string& config_snapshot) {
     try {
         auto config = nlohmann::json::parse (config_snapshot);
         if (config.is_object ()) {
-            for (const char* key : { "url", "method", "mode", "duration", "concurrency",
-                 "iterations", "startConcurrency", "rampUpDuration", "comment", "followRedirects",
-                 "maxRedirects", "requestName", "dataFileName", "dataFileHash" }) {
+            for (const char* key : { "url", "method", "mode", "duration",
+                 "concurrency", "iterations", "startConcurrency", "rampUpDuration",
+                 "comment", "followRedirects", "maxRedirects", "requestName",
+                 "dataFileName", "dataFileHash", "dataFileCastNumbers" }) {
                 add_if_present (summary, config, key);
             }
             add_target_rps (summary, config);
@@ -1089,8 +1091,9 @@ nlohmann::json build_run_report_config (const nlohmann::json& config) {
          // metadata prints it, so "this run was data-driven, over N rows" is
          // recoverable from the report rather than only from the payload the
          // caller no longer has. The file's name and content hash beside it
-         // (issue #2051), never its path.
-         "dataRowCount", "dataFileName", "dataFileHash",
+         // (issue #2051), never its path, and whether its numbers were read
+         // as numbers (issue #2540), which the hash cannot tell apart.
+         "dataRowCount", "dataFileName", "dataFileHash", "dataFileCastNumbers",
          // The metric keys whose budgets were carried over from an earlier
          // run rather than set for this one (issue #2195): the thresholds
          // alone cannot say which is which, so a verdict needs this to.
@@ -1359,7 +1362,7 @@ nlohmann::json build_report_metadata (const std::string& run_id, const vayu::db:
             // A collection run's data file sits in its manifest, not at the
             // snapshot's top level (issue #2051); `configuration` names it for
             // every shape, so a reader looks in one place.
-            for (const char* key : { "dataFileName", "dataFileHash" }) {
+            for (const char* key : { "dataFileName", "dataFileHash", "dataFileCastNumbers" }) {
                 if (auto value = scenario->find (key);
                 value != scenario->end () && !value->is_null ()) {
                     metadata["configuration"][key] = *value;
@@ -2126,8 +2129,9 @@ void register_run_routes (RouteContext& ctx) {
      * first. Rows carry a compact `summary` (url/method/mode/duration/
      * concurrency/iterations/targetRps/startConcurrency/rampUpDuration/comment/
      * httpVersion/followRedirects/maxRedirects/requestName/dataFileName/
-     * dataFileHash, plus acceptEncoding and scenario when recorded) instead of the full
-     * config_snapshot, wrapped in the `{data, pagination}` envelope.
+     * dataFileHash/dataFileCastNumbers, plus acceptEncoding and scenario when
+     * recorded) instead of the full config_snapshot, wrapped in the
+     * `{data, pagination}` envelope.
      * See build_run_summary for the authoritative key list - keep this in step
      * with it. A design run's row also carries `resultSummary`
      * (statusCode + latencyMs), a terminal load run's carries

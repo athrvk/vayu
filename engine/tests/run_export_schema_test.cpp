@@ -164,16 +164,17 @@ class RunExportSchemaTest : public ::testing::Test {
 
     void seed (const std::string& id, vayu::RunStatus status, const json& summary) {
         vayu::db::Run run;
-        run.id     = id;
-        run.type   = vayu::RunType::Load;
-        run.status = status;
-        run.config_snapshot = json{ { "url", "https://u:p@api.test/v1?api_key=k&page=2" },
-            { "method", "GET" }, { "headers", { { "Accept", "*/*" } } },
-            { "body", { { "mode", "none" } } }, { "auth", { { "mode", "none" } } },
-            { "requestName", "Orders" }, { "mode", "constant_rps" },
-            { "duration", "10s" }, { "concurrency", 5 }, { "rps", 10 },
-            { "dataRowCount", 2 }, { "dataFileName", "users.csv" } }
-                              .dump ();
+        run.id              = id;
+        run.type            = vayu::RunType::Load;
+        run.status          = status;
+        run.config_snapshot = json{
+            { "url", "https://u:p@api.test/v1?api_key=k&page=2" }, { "method", "GET" },
+            { "headers", { { "Accept", "*/*" } } }, { "body", { { "mode", "none" } } },
+            { "auth", { { "mode", "none" } } }, { "requestName", "Orders" },
+            { "mode", "constant_rps" }, { "duration", "10s" },
+            { "concurrency", 5 }, { "rps", 10 }, { "dataRowCount", 2 },
+            { "dataFileName", "users.csv" }, { "dataFileCastNumbers", true }
+        }.dump ();
         run.start_time = START_MS;
         run.end_time   = START_MS + 10000;
         db_->create_run (run);

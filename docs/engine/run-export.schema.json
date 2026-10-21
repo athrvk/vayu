@@ -95,6 +95,7 @@
             "dataRowCount": {"type": "number"},
             "dataFileName": {"type": "string"},
             "dataFileHash": {"type": "string"},
+            "dataFileCastNumbers": {"type": "boolean"},
             "carriedBudgets": {"$ref": "#/definitions/names"}
           }
         }

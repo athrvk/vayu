@@ -141,6 +141,18 @@ class RunExportTest : public ::testing::Test {
         json{ { "total_requests", 10 }, { "test_duration", 60.0 } });
     }
 
+    /// A data-driven run over one file, read with its numbers cast or not.
+    void seed_data_file_run (const std::string& id, bool cast_numbers) {
+        json snapshot = { { "url", "https://x.test/a" }, { "method", "GET" },
+            { "dataRowCount", 2 }, { "dataFileName", "users.csv" },
+            { "dataFileHash", std::string (64, 'a') } };
+        if (cast_numbers) {
+            snapshot["dataFileCastNumbers"] = true;
+        }
+        seed_run (id, vayu::RunType::Load, vayu::RunStatus::Completed, snapshot,
+        json{ { "total_requests", 10 }, { "test_duration", 60.0 } });
+    }
+
     /// The leak fixture: credentials and payload in the snapshot, a trace
     /// carrying the sent `Authorization`, a captured `Set-Cookie`, and one
     /// metric tick.
@@ -383,6 +395,29 @@ TEST_F (RunExportTest, TheConfigurationNamesWhetherExpectContinueWasAllowed) {
     EXPECT_EQ (configuration ("run_allowed").at ("expectContinue"), true);
     EXPECT_EQ (configuration ("run_refused").at ("expectContinue"), false);
     EXPECT_FALSE (configuration ("run_old").contains ("expectContinue"));
+}
+
+// One file read two ways is two data sets (issue #2540): the export names the
+// reading, and a comparison says it differs although the hash agrees.
+// Mutation check: drop `dataFileCastNumbers` from `CONFIGURATION_KEYS` and the
+// configuration half reds; compare only the hashes in `data_file_difference`
+// and the comparison half does.
+TEST_F (RunExportTest, ADataFileReadWithNumbersCastIsNamedAndComparesAsADifferentFile) {
+    seed_data_file_run ("run_text", false);
+    seed_data_file_run ("run_cast", true);
+
+    const auto configuration = [this] (const char* run) {
+        return export_ok (json{ { "runId", run } }).second["config"]["configuration"];
+    };
+    EXPECT_EQ (configuration ("run_cast").value ("dataFileCastNumbers", false), true);
+    EXPECT_FALSE (configuration ("run_text").contains ("dataFileCastNumbers"));
+
+    const json differences =
+    export_ok (json{ { "runId", "run_cast" }, { "baseRunId", "run_text" } }).second["comparison"]["differences"];
+    const json expected =
+    json::array ({ json{ { "field", "data_file" }, { "base", "users.csv (aaaaaaaa)" },
+    { "target", "users.csv (aaaaaaaa), numbers read as numbers" } } });
+    EXPECT_EQ (differences, expected);
 }
 
 TEST_F (RunExportTest, ABaseRunsCredentialsStayOutOfTheComparison) {

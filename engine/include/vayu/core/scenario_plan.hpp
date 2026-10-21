@@ -222,8 +222,7 @@ struct ScenarioRequest {
     size_t data_row_count = 0;
     /// The file `data` came from, as the caller named it - see
     /// @ref read_data_file_fields. Empty when none was named.
-    std::string data_file_name;
-    std::string data_file_hash;
+    DataFileProvenance data_file;
 };
 
 /**
@@ -483,11 +482,12 @@ refuse_overdeep_data (const nlohmann::json& data, std::string_view field);
 
 /**
  * Read which file a run's `data` rows came from (issue #2051): `dataFileName`,
- * a display name, and `dataFileHash`, the SHA-256 of the file's bytes as 64
- * lowercase hex characters. Each is optional and independent of the other;
- * absent or `null` leaves its output empty. Both are stored verbatim and never
- * opened; a name holding a `/` or `\` is refused, so the engine never stores
- * a path.
+ * a display name, `dataFileHash`, the SHA-256 of the file's bytes as 64
+ * lowercase hex characters, and `dataFileCastNumbers` (issue #2540), a boolean
+ * saying the client read the file's unquoted numeric cells as numbers. Each is
+ * optional and independent of the others; absent or `null` leaves its output
+ * empty (false for the flag). All are stored verbatim and never acted on; a
+ * name holding a `/` or `\` is refused, so the engine never stores a path.
  *
  * One reader for both shapes, like @ref read_data_rows: @p prefix is
  * `"scenario."` for a collection run's block and empty for a single-request
@@ -497,15 +497,13 @@ refuse_overdeep_data (const nlohmann::json& data, std::string_view field);
 [[nodiscard]] std::optional<std::string> read_data_file_fields (const nlohmann::json& block,
 std::string_view prefix,
 bool has_data,
-std::string& name_out,
-std::string& hash_out);
+DataFileProvenance& out);
 
-/// Write @p name and @p hash into @p snapshot as `dataFileName` /
-/// `dataFileHash`, each only when non-empty: absent for a run that named no
-/// file, never `null`.
-void stamp_data_file_fields (nlohmann::json& snapshot,
-const std::string& name,
-const std::string& hash);
+/// Write @p file into @p snapshot as `dataFileName` / `dataFileHash`, each only
+/// when non-empty, and `dataFileCastNumbers` only when true: absent for a run
+/// that named no file or read none as numbers, never `null` or `false`. A false
+/// flag erases the key, so a body's own copy cannot outlive the validated one.
+void stamp_data_file_fields (nlohmann::json& snapshot, const DataFileProvenance& file);
 
 /**
  * Validate a `scenario` block and resolve it into a plan.
