@@ -8854,6 +8854,7 @@ the same way). The set feeds the report's `latency` block (`p50` to `p999`,
 `max`), the live tick's windowed `latencyP50Ms` / `latencyP95Ms` /
 `latencyP99Ms`, its per-second `secondP*Ms` and cumulative `cumulativeP*Ms`,
 the stored ticks' `latency_p*_ms`, `avgLatencyMs` and `avgQueueWaitMs`, the
+trailing-window means (`windowAvg*Ms` live, `window_avg_*_ms` stored), the
 exports, and the
 `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` [budgets](#the-thresholds-block-passfail-budgets).
 The mean is the sum over the set divided by the set's size, so it agrees
@@ -8920,6 +8921,9 @@ instead.
       "no_response": 0,
       "cancelled": 0,
       "current_rps": 150.5,
+      "current_send_rate": 151.0,
+      "window_avg_latency_ms": 44.8,
+      "window_avg_queue_wait_ms": 0.3,
       "current_concurrency": 100,
       "send_rate": 150.0,
       "throughput": 149.5,
@@ -8948,6 +8952,22 @@ outside all three (issue #2136); a tick stored before that issue has no
 rows came back in, and reported 0 failed requests for every bucket of every run.
 A tick an engine older than issue #2124 stored has no `http_errors` /
 `no_response`, and its `requests_failed` counted no-response failures only.
+
+`current_rps` and `current_send_rate` are completions and dispatches per
+second over the **trailing window** ending at the row's tick (issue #2393):
+at least the last second, divided by the window's actual span (one second
+plus up to one tick interval), and until a run has a second of ticks,
+everything since its first tick. `window_avg_latency_ms` and
+`window_avg_queue_wait_ms` are the mean latency and queue wait of the
+[latency population](#latency-population) that completed in the same window,
+`null` when nothing did. The live frame of the same tick carries the same
+four values as `currentRps`, `currentSendRate`, `windowAvgLatencyMs` and
+`windowAvgQueueWaitMs`. `send_rate` and `throughput` are **cumulative**:
+requests sent and completed since load start, divided by the time since load
+start, so they flatten a change of rate the window shows within a second. A
+tick stored before issue #2393 has none of the three new keys, and its
+`current_rps` divided the completions since the previous row by the time
+since it.
 
 A missing run returns `404` with the message `Run not found`.
 
@@ -9001,6 +9021,8 @@ a folded tick is its bucket's **last** tick, with a few keys replaced:
 | `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` | The **max** over the bucket, its worst second |
 | `current_concurrency`, `backpressure` | The max over the bucket |
 | `current_rps` | The mean over the bucket's ticks |
+| `current_send_rate` | The mean over the bucket's ticks (#2393) |
+| `window_avg_latency_ms`, `window_avg_queue_wait_ms` | The mean over the bucket's ticks that carried a number, `null` when none did (#2393) |
 | Any other key | The last tick's |
 
 The latency fields are never averaged: each row's percentile is of its own
@@ -9078,9 +9100,11 @@ id: 0
 data: {"runId":"...","timestamp":1234567890,"elapsedSeconds":10.5,
        "totalRequests":1500,"totalSuccess":1495,"totalErrors":5,"errorRate":0.33,
        "httpErrors":5,"noResponse":0,"cancelled":0,
-       "currentRps":150.5,"sendRate":150.0,"throughput":149.5,
+       "currentRps":150.5,"currentSendRate":151.0,
+       "sendRate":150.0,"throughput":149.5,
        "activeConnections":100,"backpressure":0,"droppedRequests":0,
        "avgLatencyMs":45.2,"avgQueueWaitMs":0.4,
+       "windowAvgLatencyMs":44.8,"windowAvgQueueWaitMs":0.3,
        "latencyP50Ms":38.5,"latencyP95Ms":95.1,"latencyP99Ms":156.7,
        "cumulativeP50Ms":36.0,"cumulativeP95Ms":90.2,"cumulativeP99Ms":160.4,
        "bytesSent":48000,"bytesReceived":1920000,
@@ -9111,7 +9135,11 @@ no `status` at all.
 Until then the run is still setting up, and every frame carries
 `elapsedSeconds: 0` with `sendRate` and `throughput` at `0`, because both divide
 by it. The last frame, published just after load ends, therefore reads within
-a fraction of a second of the report's `testDuration`. An engine older than that issue
+a fraction of a second of the report's `testDuration`. `currentRps` and
+`currentSendRate` do not divide by it: they divide by the trailing window's own
+span on the monotonic clock (issue #2393), so they read `0` while nothing is
+sent, and a window that reaches back before load start counts that idle time in
+its span. An engine older than that issue
 counted from when the run was registered, so a slow setup ran its live clock
 ahead of the report and dragged the rates down. The last frame's `sendRate` is
 still not the report's: the report divides requests sent by the sending
@@ -9213,7 +9241,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the `second*` keys, which the metrics thread adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys, which the metrics thread adds on every tick, and the `second*` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -9221,14 +9249,15 @@ no frame.
 | `httpErrors` / `noResponse` | `totalErrors` split: an error status came back, or no response did |
 | `cancelled` | Requests a Stop cancelled before they answered; in none of the counts above ([issue #2136](#what-counts-as-an-error)) |
 | `errorRate` | `totalErrors` as a percentage of the status-code distribution's total |
-| `currentRps` | Instantaneous RPS (delta over the tick window) |
-| `sendRate` | Rate requests are dispatched (open model) |
-| `throughput` | Rate responses are received |
+| `currentRps` / `currentSendRate` | Completions / dispatches per second over the **trailing window** (issue #2393): at least the last second (`LIVE_RATE_WINDOW_MS`), divided by its actual span, and everything since the first frame until the stream has a second of frames. `0` for a window with nothing in it. A gate frame's pair is its [stored row](#get-runsrunidmetrics)'s `current_rps` / `current_send_rate` |
+| `sendRate` | Requests dispatched per second, **cumulative**: `requestsSent` over the time since load start |
+| `throughput` | Responses received per second, **cumulative**: `totalRequests` over the time since load start |
 | `activeConnections` | Current in-flight requests |
 | `backpressure` | In flight: requests sent but not yet answered, plus every slot a `timer.think` wait still holds (`RunContext::in_flight`). The same figure as the stored tick's `backpressure` and the high-water mark behind the report's `peakConcurrency`, so on a think-timer run it exceeds `requestsSent - totalRequests`, and once a Stop has cancelled requests it is `requestsSent - totalRequests - cancelled` |
 | `droppedRequests` | Requests discarded at the `maxInFlight` cap (never sent) |
 | `avgLatencyMs` | Mean **perceived** latency over the same requests as the percentiles and the max ([Latency population](#latency-population)): answered requests plus those that failed after their transfer ran |
 | `avgQueueWaitMs` | Mean time queued inside the generator before the wire, over the same requests as `avgLatencyMs` ([Latency population](#latency-population)) |
+| `windowAvgLatencyMs` / `windowAvgQueueWaitMs` | The same two means over only the requests that completed in the trailing window `currentRps` covers (issue #2393), from the difference of the run's sums and counts across it; `null` when nothing completed in it. A gate frame's pair is its stored row's `window_avg_latency_ms` / `window_avg_queue_wait_ms` |
 | `latencyP50Ms` / `latencyP95Ms` / `latencyP99Ms` | Live **windowed** percentiles over the [latency population](#latency-population) - the last tick's window (100 ms at the default cadence) sampled from a phaser-based `hdr_interval_recorder`; `0` for a window with no completion. The capacity search steers by these |
 | `cumulativeP50Ms` / `cumulativeP95Ms` / `cumulativeP99Ms` | The same percentiles over **every completion so far**, the span `avgLatencyMs` covers, merged from every window sampled up to this tick; on every frame, `null` until something has completed. The final report's `latency` block is the same population read from the run's own histogram |
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |

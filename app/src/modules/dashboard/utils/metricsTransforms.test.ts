@@ -11,6 +11,7 @@ import {
 	customMetricNames,
 	customMetricSeriesLabel,
 	hasPercentileSignal,
+	hasWindowLatency,
 	hasStatusCodes,
 	hasCustomMetrics,
 	latestThroughputMbps,
@@ -49,29 +50,85 @@ describe("isRateLimitedRun", () => {
 });
 
 describe("buildLatencyChartData", () => {
-	it("derives wire = latency - queue_wait, clamped >= 0", () => {
+	it("derives wire = window latency - window queue_wait, clamped >= 0", () => {
 		const data = buildLatencyChartData([
-			tick({ elapsed_seconds: 1, avg_latency_ms: 50, avg_queue_wait_ms: 10 }),
-			tick({ elapsed_seconds: 2, avg_latency_ms: 80, avg_queue_wait_ms: 30 }),
+			tick({ elapsed_seconds: 1, window_avg_latency_ms: 50, window_avg_queue_wait_ms: 10 }),
+			tick({ elapsed_seconds: 2, window_avg_latency_ms: 80, window_avg_queue_wait_ms: 30 }),
+			tick({ elapsed_seconds: 3, window_avg_latency_ms: 5, window_avg_queue_wait_ms: 9 }),
 		]);
-		expect(data).toHaveLength(2);
+		expect(data).toHaveLength(3);
 		expect(data[0]).toMatchObject({ time: 1, latencyMs: 50, wireMs: 40, queueWaitMs: 10 });
 		expect(data[1]).toMatchObject({ time: 2, latencyMs: 80, wireMs: 50, queueWaitMs: 30 });
+		expect(data[2]).toMatchObject({ latencyMs: 5, wireMs: 0, queueWaitMs: 9 });
 	});
 
-	it("treats missing queue_wait as 0 (older runs) so wire == latency", () => {
-		const data = buildLatencyChartData([tick({ elapsed_seconds: 1, avg_latency_ms: 42 })]);
+	it("reads the window means, never the run-cumulative ones (#2393)", () => {
+		// A run that was slow early and recovered: the cumulative mean still says 400.
+		const data = buildLatencyChartData([
+			tick({
+				elapsed_seconds: 60,
+				avg_latency_ms: 400,
+				avg_queue_wait_ms: 100,
+				window_avg_latency_ms: 20,
+				window_avg_queue_wait_ms: 2,
+			}),
+		]);
+		expect(data[0]).toMatchObject({ latencyMs: 20, wireMs: 18, queueWaitMs: 2 });
+	});
+
+	it("omits a tick whose window completed nothing, as the percentile series omits an idle second", () => {
+		const data = buildLatencyChartData([
+			tick({ elapsed_seconds: 1, window_avg_latency_ms: 30, window_avg_queue_wait_ms: 0 }),
+			tick({
+				elapsed_seconds: 2,
+				avg_latency_ms: 30,
+				window_avg_latency_ms: null,
+				window_avg_queue_wait_ms: null,
+			}),
+			tick({ elapsed_seconds: 3, window_avg_latency_ms: 35, window_avg_queue_wait_ms: 0 }),
+		]);
+		expect(data.map((d) => d.time)).toEqual([1, 3]);
+	});
+
+	it("plots nothing for a run stored before the window existed, not its cumulative mean", () => {
+		const stored = [1, 2, 3].map((t) =>
+			tick({ elapsed_seconds: t, avg_latency_ms: 42, avg_queue_wait_ms: 5 })
+		);
+		expect(buildLatencyChartData(stored)).toEqual([]);
+	});
+
+	it("keeps a measured 0 ms window, which is not an idle one", () => {
+		const data = buildLatencyChartData([
+			tick({ elapsed_seconds: 1, window_avg_latency_ms: 0, window_avg_queue_wait_ms: 0 }),
+		]);
+		expect(data).toHaveLength(1);
+		expect(data[0]).toMatchObject({ latencyMs: 0, wireMs: 0, queueWaitMs: 0 });
+	});
+
+	it("treats a latency mean with no queue-wait mean as no wait, so wire == latency", () => {
+		const data = buildLatencyChartData([
+			tick({ elapsed_seconds: 1, window_avg_latency_ms: 42 }),
+		]);
 		expect(data[0]).toMatchObject({ latencyMs: 42, wireMs: 42, queueWaitMs: 0 });
 	});
 
 	it("buckets ticks to 0.5s, last-write-wins, sorted by time", () => {
 		const data = buildLatencyChartData([
-			tick({ elapsed_seconds: 1.1, avg_latency_ms: 10 }),
-			tick({ elapsed_seconds: 1.2, avg_latency_ms: 20 }),
-			tick({ elapsed_seconds: 0.6, avg_latency_ms: 5 }),
+			tick({ elapsed_seconds: 1.1, window_avg_latency_ms: 10 }),
+			tick({ elapsed_seconds: 1.2, window_avg_latency_ms: 20 }),
+			tick({ elapsed_seconds: 0.6, window_avg_latency_ms: 5 }),
 		]);
 		expect(data.map((d) => d.time)).toEqual([0.5, 1.0]);
 		expect(data[1].latencyMs).toBe(20);
+	});
+});
+
+describe("hasWindowLatency", () => {
+	it("is true for a number, 0 included, and false for null and for an absent key", () => {
+		expect(hasWindowLatency(tick({ window_avg_latency_ms: 12 }))).toBe(true);
+		expect(hasWindowLatency(tick({ window_avg_latency_ms: 0 }))).toBe(true);
+		expect(hasWindowLatency(tick({ window_avg_latency_ms: null }))).toBe(false);
+		expect(hasWindowLatency(tick({ avg_latency_ms: 12 }))).toBe(false);
 	});
 });
 
@@ -407,7 +464,9 @@ describe("spansMultipleBuckets", () => {
 		for (let run = 0; run < 200; run++) {
 			const history = randomHistory(rng);
 			const spans = spansMultipleBuckets(history);
-			expect(spans).toBe(buildLatencyChartData(history).length > 1);
+			expect(spansMultipleBuckets(history, hasWindowLatency)).toBe(
+				buildLatencyChartData(history).length > 1
+			);
 			expect(spans).toBe(buildPercentileChartData(history).length > 1);
 			expect(spansMultipleBuckets(history, hasStatusCodes)).toBe(
 				buildStatusOverTime(history).length > 1
@@ -421,12 +480,13 @@ describe("spansMultipleBuckets", () => {
 	});
 
 	it("is false for ticks that share one 0.5s bucket, true once one leaves it", () => {
-		const sameBucket = [tick({ elapsed_seconds: 1.0 }), tick({ elapsed_seconds: 1.1 })];
-		expect(spansMultipleBuckets(sameBucket)).toBe(false);
+		const windowed = (t: number) => tick({ elapsed_seconds: t, window_avg_latency_ms: 5 });
+		const sameBucket = [windowed(1.0), windowed(1.1)];
+		expect(spansMultipleBuckets(sameBucket, hasWindowLatency)).toBe(false);
 		expect(buildLatencyChartData(sameBucket)).toHaveLength(1);
 
-		const twoBuckets = [...sameBucket, tick({ elapsed_seconds: 1.4 })];
-		expect(spansMultipleBuckets(twoBuckets)).toBe(true);
+		const twoBuckets = [...sameBucket, windowed(1.4)];
+		expect(spansMultipleBuckets(twoBuckets, hasWindowLatency)).toBe(true);
 		expect(buildLatencyChartData(twoBuckets)).toHaveLength(2);
 	});
 
@@ -672,6 +732,13 @@ function seeded(seed: number): () => number {
  * ticks inside one 0.5s bucket, ticks spanning buckets, ticks with and without
  * a status map, and p99 zero on some ticks (a tick with no completions).
  */
+function windowLatency(rng: () => number): Partial<LoadTestMetrics> {
+	const pick = rng();
+	if (pick < 0.3) return {};
+	if (pick < 0.5) return { window_avg_latency_ms: null, window_avg_queue_wait_ms: null };
+	return { window_avg_latency_ms: Math.round(rng() * 100), window_avg_queue_wait_ms: 1 };
+}
+
 function randomHistory(rng: () => number): LoadTestMetrics[] {
 	const n = Math.floor(rng() * 12);
 	let elapsed = rng() * 2;
@@ -680,6 +747,8 @@ function randomHistory(rng: () => number): LoadTestMetrics[] {
 		return tick({
 			elapsed_seconds: Math.round(elapsed * 100) / 100,
 			latency_p99_ms: rng() < 0.4 ? 0 : Math.round(rng() * 200),
+			// A mean, an idle window, or a tick stored before the window existed.
+			...windowLatency(rng),
 			status_codes: rng() < 0.5 ? undefined : { "200": Math.floor(rng() * 100) },
 		});
 	});

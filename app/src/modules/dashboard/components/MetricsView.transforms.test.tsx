@@ -67,6 +67,9 @@ function history(n: number): LoadTestMetrics[] {
 		latency_p99_ms: 80 + i * 8,
 		avg_latency_ms: 25 + i,
 		avg_queue_wait_ms: i * 0.5,
+		current_send_rate: 105 + i * 10,
+		window_avg_latency_ms: 25 + i,
+		window_avg_queue_wait_ms: i * 0.5,
 		bytes_sent: i * 1000,
 		bytes_received: i * 5000,
 		status_codes: { "200": i * 90, "500": i * 3 },
@@ -139,6 +142,15 @@ describe("MetricsView series transforms", () => {
 		expect(getByText("Latency over time")).toBeTruthy();
 		expect(getByText("Response time percentiles over time")).toBeTruthy();
 		expect(getByText("Status codes over time")).toBeTruthy();
+	});
+
+	it("keeps the latency card away from ticks that hold no window mean (#2393)", () => {
+		// Its cumulative `avg_latency_ms` is still there, and is not what the card plots.
+		const idle = history(6).map((m) => ({ ...m, window_avg_latency_ms: null }));
+		const { queryByText } = renderView(idle);
+		expect(queryByText("Latency over time")).toBeNull();
+		expect(spies.buildLatencyChartData).not.toHaveBeenCalled();
+		expect(queryByText("Status codes over time")).not.toBeNull();
 	});
 
 	it("builds nothing while a run has one bucket of ticks", () => {

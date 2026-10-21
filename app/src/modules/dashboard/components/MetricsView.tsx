@@ -45,6 +45,7 @@ import {
 	hasCustomMetrics,
 	latestThroughputMbps,
 	spansMultipleBuckets,
+	hasWindowLatency,
 } from "../utils/metricsTransforms";
 import { createAnomalyDetector, wholeSecondTicks } from "../utils/detectAnomalies";
 import { cumulativePercentiles, hasSecondPercentiles } from "../utils/tickPercentiles";
@@ -72,6 +73,7 @@ import {
 	SCATTER_LEGEND,
 	type LegendEntry,
 } from "./charts/uplot/legend";
+import { hasSendRate } from "./charts/uplot/buildData";
 import { TimingWaterfall } from "./charts/TimingWaterfall";
 
 /** The HDR card's footer figures, drawn as dashes until the report has them. */
@@ -81,12 +83,19 @@ const LATENCY_ENTRIES: readonly LegendEntry[] = Object.values(LATENCY_LEGEND);
 const PERCENTILE_ENTRIES: readonly LegendEntry[] = Object.values(PERCENTILE_LEGEND);
 const SCATTER_ENTRIES: readonly LegendEntry[] = Object.values(SCATTER_LEGEND);
 
-/** The throughput card's key: the target line only when the chart draws one, the ramp pair only on a ramp. */
-function throughputLegend(targetRps: number | undefined, hasRamp: boolean): LegendEntry[] {
+/**
+ * The throughput card's key: the send-rate entry only when the chart draws that
+ * line, the target line only when it draws one, the ramp pair only on a ramp.
+ */
+function throughputLegend(
+	targetRps: number | undefined,
+	hasRamp: boolean,
+	hasSend: boolean
+): LegendEntry[] {
 	const { throughput, sendRate, target, configured, achieved } = THROUGHPUT_LEGEND;
 	return [
 		throughput,
-		sendRate,
+		...(hasSend ? [sendRate] : []),
 		...(targetRps && targetRps > 0
 			? [{ ...target, label: `target ${formatRate(targetRps)} req/s` }]
 			: []),
@@ -119,7 +128,16 @@ function MetricsView({
 	// reads), so these gates ask the cheap question - is there more than one
 	// 0.5s bucket to plot - rather than building the series a second time here
 	// and throwing it away (#1152).
-	const hasMultiplePoints = useMemo(() => spansMultipleBuckets(chartWindow), [chartWindow]);
+	// The latency chart plots the ticks that hold a window mean (an idle window
+	// and a run stored before the window existed hold none), so it is gated on
+	// those, not on every tick.
+	const hasLatencyPoints = useMemo(
+		() => spansMultipleBuckets(chartWindow, hasWindowLatency),
+		[chartWindow]
+	);
+	// The chart and its legend read the same answer, so a send-rate entry never
+	// labels a line the chart did not draw.
+	const hasSend = useMemo(() => hasSendRate(chartWindow), [chartWindow]);
 	const hasPercentileData = useMemo(() => hasPercentileSignal(chartWindow), [chartWindow]);
 	// The percentile series is one point a second (a live frame between gates
 	// holds none), so its own count gates the card, not the latency chart's.
@@ -278,7 +296,9 @@ function MetricsView({
 							Throughput over time
 							<InfoChip tip={TOOLTIPS.throughputOverTime} />
 						</h3>
-						<ChartLegend entries={throughputLegend(targetRps, rampOverlay != null)} />
+						<ChartLegend
+							entries={throughputLegend(targetRps, rampOverlay != null, hasSend)}
+						/>
 					</div>
 					<RequestRateChart
 						history={chartWindow}
@@ -318,7 +338,7 @@ function MetricsView({
 			)}
 
 			{/* Row 2.5 - Latency over time (perceived vs wire, queue-wait gap) */}
-			{hasMultiplePoints && (
+			{hasLatencyPoints && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
 						<h3 className="text-xs font-semibold text-foreground">

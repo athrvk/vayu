@@ -435,6 +435,11 @@ constexpr size_t OWN_MAPPING_MIN_BYTES = size_t{ 4 } * 1024 * 1024;
 constexpr size_t RELEASE_HEAP_AFTER_BODY_BYTES = size_t{ 1 } * 1024 * 1024;
 /// Interval for collecting statistics in milliseconds
 constexpr int STATS_INTERVAL_MS = 100;
+/// Shortest span the live and stored per-tick rates and window means cover
+/// (`currentRps`, `currentSendRate`, `windowAvg*`, #2393). A 100 ms delta
+/// counts four or five closed-loop batches and reads 0 between sparse
+/// completions; a second smooths both and still shows an outage within one.
+constexpr int64_t LIVE_RATE_WINDOW_MS = 1000;
 /// Default span of live SSE history retained in memory per run, in
 /// milliseconds (config key `liveReplayWindowMs`). The buffer is a ring: older
 /// ticks are evicted, so a run's memory does not grow with its duration. A

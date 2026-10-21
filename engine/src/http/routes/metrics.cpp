@@ -101,6 +101,11 @@ constexpr auto BUCKET_MAX_KEYS =
 std::to_array<std::string_view> ({ "latency_p50_ms", "latency_p95_ms",
 "latency_p99_ms", "current_concurrency", "backpressure" });
 
+/// The tick keys a `MetricTickBucket` averages (`current_rps` since #2547, the
+/// rest since #2393).
+constexpr auto BUCKET_MEAN_KEYS = std::to_array<std::string_view> (
+{ "current_rps", "current_send_rate", "window_avg_latency_ms", "window_avg_queue_wait_ms" });
+
 /// Rows read per query while folding a downsampled series: it bounds the
 /// stored text held at once, the folded ticks being all that accumulates.
 /// stats_route_test.cpp sizes its long series to cross this edge.
@@ -174,10 +179,17 @@ void MetricTickBucket::add (nlohmann::json tick) {
             maxima_[std::string (key)] = *value;
         }
     }
-    const auto rps = tick.find ("current_rps");
-    if (rps != tick.end () && rps->is_number ()) {
-        rps_sum_ += rps->get<double> ();
-        ++rps_ticks_;
+    for (const auto key : BUCKET_MEAN_KEYS) {
+        const auto value = tick.find (key);
+        if (value == tick.end ()) {
+            continue;
+        }
+        auto& mean    = means_[std::string (key)];
+        mean.seen_key = true;
+        if (value->is_number ()) {
+            mean.sum += value->get<double> ();
+            ++mean.ticks;
+        }
     }
     last_ = std::move (tick);
     ++ticks_;
@@ -193,8 +205,12 @@ nlohmann::json MetricTickBucket::take () {
         for (const auto& item : maxima_.items ()) {
             folded[item.key ()] = item.value ();
         }
-        if (rps_ticks_ > 0) {
-            folded["current_rps"] = rps_sum_ / static_cast<double> (rps_ticks_);
+        for (const auto& [key, mean] : means_) {
+            if (mean.ticks > 0) {
+                folded[key] = mean.sum / static_cast<double> (mean.ticks);
+            } else if (mean.seen_key) {
+                folded[key] = nullptr; // Every second idle: no mean to give.
+            }
         }
     }
     *this = MetricTickBucket{};

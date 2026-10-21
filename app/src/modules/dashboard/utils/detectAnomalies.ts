@@ -173,6 +173,9 @@ type Reader = (m: LoadTestMetrics) => number;
 // whole-second figure comes through `secondPercentiles` (#2589). An idle second
 // reads 0, as its stored row does.
 const readP99: Reader = (m) => secondPercentiles(m)?.p99 ?? 0;
+// The field the throughput chart plots (`pickThroughput`) and the engine's HTML
+// export draws: the trailing-window rate, a live gate's as much as a stored
+// tick's (#2393).
 const readRps: Reader = (m) => m.current_rps ?? 0;
 const readConcurrency: Reader = (m) => m.current_concurrency ?? 0;
 
@@ -826,59 +829,18 @@ export function detectAnomalies(history: LoadTestMetrics[]): Anomaly[] {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Restated gates by source frame. The figure depends on the previous gate, which
- * a later trim can remove, so it is fixed when the gate is first seen - at the
- * buffer's tail, with its predecessor behind it - and the same frame then maps
- * to the same object on every commit, which is the identity
- * {@link createAnomalyDetector} recognises the next buffer by.
- */
-const restatedGates = new WeakMap<LoadTestMetrics, LoadTestMetrics>();
-
-/**
- * A gate with `current_rps` restated as the completions since the previous
- * gate over the time between them, the figure a stored tick holds. Its own is
- * the last ~100 ms delta. A run's first gate has no previous one and counts
- * from the start, as its stored row does. The final gate can close less than a second, which is why the
- * divisor is the interval and not 1.
- */
-function restateGate(gate: LoadTestMetrics, previous: LoadTestMetrics | null): LoadTestMetrics {
-	const cached = restatedGates.get(gate);
-	if (cached) return cached;
-	const interval = gate.elapsed_seconds - (previous?.elapsed_seconds ?? 0);
-	let restated = gate;
-	if (interval > 0) {
-		const completed = Math.max(
-			0,
-			gate.requests_completed - (previous?.requests_completed ?? 0)
-		);
-		restated = { ...gate, current_rps: completed / interval };
-	}
-	restatedGates.set(gate, restated);
-	return restated;
-}
-
-/**
  * The series the detector reads, one tick a second whatever its source: a
  * stored tick as it is, and of a live stream only the gate frames (the final
- * frame is one), each with its throughput restated by {@link restateGate}. A
- * frame between gates is dropped, never read as 0: it is a tenth of a second,
- * and every rule here counts ticks.
+ * frame is one). A frame between gates is dropped, never read as 0: it is a
+ * tenth of a second, and every rule here counts ticks.
  *
- * The other rules need nothing restated: `second_samples` gives the gate its
- * whole-second p99, the burst rule's counter deltas span gate to gate once the
- * frames between are gone, and concurrency and the status map are as of the
- * tick in both sources.
+ * Nothing is restated. A gate's `current_rps` is the trailing-window reading
+ * its stored row holds (#2393), and `second_samples` gives it its whole-second
+ * p99. The burst rule's counter deltas span gate to gate once the frames
+ * between are gone, and concurrency and the status map are as of the tick in
+ * both sources. A gate is therefore returned as the very object it came in as,
+ * the identity {@link createAnomalyDetector} recognises the next buffer by.
  */
 export function wholeSecondTicks(history: LoadTestMetrics[]): LoadTestMetrics[] {
-	const out: LoadTestMetrics[] = [];
-	let previousGate: LoadTestMetrics | null = null;
-	for (const m of history) {
-		if (!m.live) {
-			out.push(m);
-		} else if (m.second_samples !== undefined) {
-			out.push(restateGate(m, previousGate));
-			previousGate = m;
-		}
-	}
-	return out;
+	return history.filter((m) => !m.live || m.second_samples !== undefined);
 }

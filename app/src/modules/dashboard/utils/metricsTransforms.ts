@@ -171,18 +171,40 @@ export function latestThroughputMbps(history: LoadTestMetrics[]): number {
 
 export interface LatencyPoint {
 	time: number; // elapsed seconds, bucketed to 0.5s
-	latencyMs: number; // perceived (avg_latency_ms)
+	latencyMs: number; // perceived (window_avg_latency_ms)
 	wireMs: number; // latency - queue_wait, clamped >= 0
 	queueWaitMs: number; // generator-side overhead
 }
 
-/** Bucket per-tick latency to 0.5s and split into wire + queue-wait. */
+/**
+ * Whether a tick holds a window mean latency to plot: `null` is a window in
+ * which nothing completed, absent is a tick stored before the window existed.
+ * Neither is a 0 ms answer, and neither may borrow the run-cumulative
+ * `avg_latency_ms`, which is the quantity the window exists to replace (#2393).
+ */
+export function hasWindowLatency(
+	m: LoadTestMetrics
+): m is LoadTestMetrics & { window_avg_latency_ms: number } {
+	return typeof m.window_avg_latency_ms === "number";
+}
+
+/**
+ * Bucket per-tick window means to 0.5s and split into wire + queue-wait.
+ *
+ * Only a tick that {@link hasWindowLatency} contributes a point, as only a tick
+ * that holds a second contributes to {@link buildPercentileChartData}: an idle
+ * window adds nothing, and a run stored before the window existed yields no
+ * points rather than a cumulative line under a per-tick label.
+ */
 export function buildLatencyChartData(history: LoadTestMetrics[]): LatencyPoint[] {
 	const byBucket = new Map<number, LatencyPoint>();
 	for (const m of history) {
+		if (!hasWindowLatency(m)) continue;
 		const t = halfSecondBucket(m.elapsed_seconds);
-		const latency = m.avg_latency_ms ?? 0;
-		const queue = m.avg_queue_wait_ms ?? 0;
+		const latency = m.window_avg_latency_ms;
+		// The engine sets both means from one window, so a missing queue-wait mean
+		// beside a latency one is read as no wait.
+		const queue = m.window_avg_queue_wait_ms ?? 0;
 		// Clamp wire >= 0 so wire <= latency always holds; this keeps the
 		// amber gap path (latency over wire) non-self-intersecting downstream.
 		const wire = Math.max(0, latency - queue);

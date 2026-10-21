@@ -1584,7 +1584,11 @@ std::optional<int64_t> parse_max_points (std::string_view raw);
  *   the max is an upper bound on the bucket's percentile, never an estimate of
  *   it; `0` is a second with no completion.
  * - `current_concurrency`, `backpressure`: the max.
- * - `current_rps`: the mean of the bucket's ticks.
+ * - `current_rps`, `current_send_rate`: the mean of the bucket's ticks.
+ * - `window_avg_latency_ms`, `window_avg_queue_wait_ms` (#2393): the mean over
+ *   the ticks that carried a number, `null` when none did (every second idle).
+ *   The run's own mean over the bucket would weight each second by its
+ *   completions; this one weights the seconds equally, as the chart plots them.
  *
  * Any other key, recognised or not, is the last tick's. A key no tick in the
  * bucket carried is never added, and a bucket of one tick is that tick
@@ -1602,8 +1606,14 @@ class MetricTickBucket {
     nlohmann::json last_;
     nlohmann::json maxima_ = nlohmann::json::object ();
     size_t ticks_          = 0;
-    size_t rps_ticks_      = 0;
-    double rps_sum_        = 0.0;
+
+    /// A key averaged over the ticks that carried a number for it.
+    struct Mean {
+        double sum    = 0.0;
+        size_t ticks  = 0;
+        bool seen_key = false; // Present (maybe null) on some tick.
+    };
+    std::map<std::string, Mean, std::less<>> means_;
 };
 
 /**

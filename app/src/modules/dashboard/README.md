@@ -110,12 +110,31 @@ consumes it.
   reads `cumulativePercentiles` instead, the run so far, which is the span its
   mean covers. The anomaly detector reads `secondPercentiles` too, over the
   gate frames alone (below).
+- **A tick's rates and means cover its trailing second, and the run-cumulative
+  ones stay on the hero cards** (#2393). The engine reads one trailing window
+  (at least a second) per tick, and a live frame and a stored row carry the
+  same reading: `current_rps` (completions per second), `current_send_rate`
+  (dispatches per second) and the means `window_avg_latency_ms` /
+  `window_avg_queue_wait_ms`, `null` for a window in which nothing completed.
+  The throughput chart plots `current_rps` (`pickThroughput`), the send-rate
+  line `current_send_rate`, and the latency chart the two means; the cumulative
+  `throughput`, `send_rate` and `avg_latency_ms` feed the hero cards and are
+  never a fallback for a chart, because a cumulative line plotted under a
+  per-tick label lags a real step by the run's age. A tick stored before the
+  window existed has none of the new keys, and `mapSseMetrics` leaves them
+  absent rather than `0` for the same reason: the send-rate line (and its
+  legend entry, `hasSendRate`) is omitted for a data set none of whose ticks
+  has the figure, and a tick with no window latency (absent or `null`) adds no
+  point to the latency chart, as an idle second adds none to the percentile
+  chart. The ETA reads the live `current_rps`, so it follows the last second
+  rather than the last 100 ms.
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 
 The run's degradation windows - latency spikes, error bursts, throughput drops
-and the first 5xx - scanned out of the same per-tick series the charts plot,
-with fixed factors over a trailing median and nothing tunable. Two readings of
+and the first 5xx - scanned out of the same per-tick series the charts plot
+(throughput is `current_rps`, the field the throughput chart plots and the
+engine's HTML export draws, #2393), with fixed factors over a trailing median and nothing tunable. Two readings of
 one detection: the charts shade the windows, and the history Overview's
 `RunEvents` card states them in words. Both are absent for a clean run.
 
@@ -147,16 +166,15 @@ window), so a live buffer of 100 ms frames would shrink the baseline to 1.5 s
 and judge windows History never sees.
 `MetricsView` passes its buffer through `wholeSecondTicks` first, which keeps a
 stored tick as it is and, of a live stream, only the gate frames (the final
-frame included). A gate's p99 is its `second_p99_ms`, and its `current_rps`, a
-100 ms delta on the frame, is restated as completions over the interval since
-the previous gate, which is what a stored tick holds. That figure is fixed the
-first time a gate is seen and cached per frame, so a later trim of the gate
-before it changes neither the figure nor the object the detector aligns on.
+frame included). A gate's p99 is its `second_p99_ms`. Its `current_rps` needs
+no restating: it is the trailing-second reading the engine stores for the same
+tick (#2393), so a gate goes through as the very frame it arrived as, and the
+object the detector aligns on cannot change under a trim.
 
 **A long run in History is judged over buckets** (#2547). `LoadTestDetail`
 reads its series in one `maxPoints` request of `HISTORY_SERIES_MAX_POINTS`
 (2,000). A run that stored more arrives folded into buckets of `ticksPerBucket`
-seconds: p99 and concurrency the bucket's worst second, `current_rps` its mean,
+seconds: p99 and concurrency the bucket's worst second, `current_rps`, `current_send_rate` and the window latency means their mean (#2393),
 every counter and the status map its last tick. The detector and
 `computeBreakpoint` run over those buckets unchanged, on purpose: a bucket's p99
 is an upper bound on its seconds, so no second over a threshold is missed, and
