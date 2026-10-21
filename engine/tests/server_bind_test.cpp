@@ -165,7 +165,7 @@ TEST_F (ServerBindTest, AFreePortStartsAndServesWithNoRecordedError) {
 
     httplib::Client client ("127.0.0.1", port);
     auto response = client.Get ("/health");
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
 
     server.stop ();
@@ -257,7 +257,7 @@ TEST_F (ServerBindTest, AnImportBodyOverTheLimitNeverReachesTheRouteOverASocket)
         httplib::Client fresh ("127.0.0.1", port);
         within_limit = fresh.Post ("/import/parse", "[]", "application/json");
     }
-    ASSERT_TRUE (within_limit);
+    ASSERT_TRUE (within_limit) << httplib::to_string (within_limit.error ());
     EXPECT_EQ (within_limit->status, 400);
 
     server.stop ();
@@ -276,14 +276,15 @@ TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
 
     httplib::Client client ("127.0.0.1", port);
     auto health_response = client.Get ("/health");
-    ASSERT_TRUE (health_response);
+    ASSERT_TRUE (health_response) << httplib::to_string (health_response.error ());
     EXPECT_EQ (health_response->get_header_value ("Cache-Control"), "no-store");
 
     // The header comes from one call site (set_default_headers), but a second,
     // unrelated JSON route pins that it is truly a server-wide default rather
     // than something that happened to land on /health alone.
     auto collections_response = client.Get ("/collections");
-    ASSERT_TRUE (collections_response);
+    ASSERT_TRUE (collections_response)
+    << httplib::to_string (collections_response.error ());
     EXPECT_EQ (collections_response->get_header_value ("Cache-Control"), "no-store");
 
     server.stop ();
@@ -315,7 +316,7 @@ TEST_F (ServerBindTest, AResponseIsNeverCompressedForALoopbackClient) {
     // The config catalogue: JSON, and large enough that a compressing server
     // would compress it.
     auto response = client.Get ("/config", browser);
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
     ASSERT_GT (response->body.size (), 4096u)
     << "the body is too within_limit to prove anything";
@@ -350,7 +351,7 @@ TEST_F (ServerBindTest, EachCallProducesOneCentralRequestLogLine) {
     httplib::Headers headers{ { "Authorization", "Bearer secret-token-should-not-be-logged" } };
     auto response =
     client.Get ("/health?token=secret-query-should-not-be-logged", headers);
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 200);
 
     server.stop ();
@@ -389,7 +390,7 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
     httplib::Client client ("127.0.0.1", port);
     auto response =
     client.Get ("/health", httplib::Headers{ { "Origin", "https://evil.example" } });
-    ASSERT_TRUE (response);
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
     EXPECT_EQ (response->status, 403);
 
     server.stop ();
