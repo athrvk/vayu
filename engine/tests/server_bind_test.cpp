@@ -21,6 +21,12 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
+
+#if defined(__linux__)
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -30,6 +36,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -400,6 +407,64 @@ TEST_F (ServerBindTest, ARefusedCallStillProducesItsRequestLogLine) {
     EXPECT_TRUE (std::regex_search (written,
     std::regex (R"("level":"info".*GET /health 403 \d+(\.\d+)?ms \d+B)")))
     << written;
+}
+
+#if defined(__linux__)
+/// The listening socket this process holds on @p port, or -1.
+int listening_socket_on (int port) {
+    constexpr int SCANNED_DESCRIPTORS = 1024;
+    for (int fd = 0; fd < SCANNED_DESCRIPTORS; ++fd) {
+        sockaddr_in address{};
+        socklen_t length = sizeof (address);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (::getsockname (fd, reinterpret_cast<sockaddr*> (&address), &length) != 0 ||
+        address.sin_family != AF_INET ||
+        std::cmp_not_equal (ntohs (address.sin_port), port)) {
+            continue;
+        }
+        int listening      = 0;
+        socklen_t its_size = sizeof (listening);
+        if (::getsockopt (fd, SOL_SOCKET, SO_ACCEPTCONN, &listening, &its_size) == 0 &&
+        listening != 0) {
+            return fd;
+        }
+    }
+    return -1;
+}
+#endif
+
+// An accept loop that ended on its own - an accept error cpp-httplib does not
+// retry - leaves `is_running()` false, which the daemon's wait reads as a
+// reason to shut down. `stop()` must still join the listener thread: destroying
+// a joinable one terminates the process (#2667). Shutting the listening socket
+// down from outside is that error on Linux, where accept then answers EINVAL;
+// other platforms do not promise to wake accept for it, so there is nothing to
+// provoke the path with there. Mutation check: guard `stop()` with
+// `is_running_` again, and this test's process aborts.
+TEST_F (ServerBindTest, AListenerThatEndedOnItsOwnIsStillJoined) {
+#if !defined(__linux__)
+    GTEST_SKIP ()
+    << "needs a way to end the accept loop from outside the server";
+#else
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const int listener = listening_socket_on (port);
+    ASSERT_GE (listener, 0);
+
+    ASSERT_EQ (::shutdown (listener, SHUT_RDWR), 0);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&server] () { return !server.is_running (); }));
+
+    server.stop ();
+    EXPECT_FALSE (server.is_running ());
+#endif
 }
 
 } // namespace
