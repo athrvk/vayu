@@ -143,11 +143,11 @@ function lastComposeArg(): Record<string, unknown> {
 
 const SAVED_NOTE = /From the saved request/;
 
-function renderSection() {
+function renderSection(
+	client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+) {
 	return render(
-		<QueryClientProvider
-			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-		>
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<CodeSection tab={TAB} />
 			</TooltipProvider>
@@ -276,6 +276,20 @@ describe("CodeSection - it composes the editor, the way Send does (#2638)", () =
 
 		await waitFor(() => expect(snippet()).toContain("curl"));
 		expect(screen.getByText(SAVED_NOTE)).toBeInTheDocument();
+	});
+
+	it("recomposes on re-expand, so an edit made while collapsed is in the snippet", async () => {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		publishDraft(DRAFT);
+		const first = renderSection(client);
+		await waitFor(() => expect(composeRequest).toHaveBeenCalledTimes(1));
+		first.unmount();
+
+		publishDraft({ ...DRAFT, url: "https://{{host}}/v3/edited" });
+		renderSection(client);
+
+		await waitFor(() => expect(composeRequest).toHaveBeenCalledTimes(2));
+		expect(lastComposeArg()).toMatchObject({ request: { url: "https://{{host}}/v3/edited" } });
 	});
 
 	it("recomposes from the editor when a builder takes the request on after the first compose", async () => {

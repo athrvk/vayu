@@ -112,6 +112,11 @@ export function CodeSection({ tab }: ContextBarSectionProps) {
 		// refetches a mounted observer whatever its `staleTime`, so this value
 		// gates the cost without gating correctness.
 		staleTime: Infinity,
+		// The section only mounts while expanded, so this is one compose per
+		// expand, not per keystroke. A snippet cached from the editor goes stale
+		// at the next edit until autosave invalidates it; recomposing on mount
+		// keeps a collapse, edit, re-expand from serving it unlabelled.
+		refetchOnMount: editorHeld ? "always" : true,
 		retry: false,
 	});
 

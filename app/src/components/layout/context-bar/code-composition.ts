@@ -13,7 +13,7 @@
  * it (the draft, the builder's collection chain, the request as owner and its
  * collection), so the snippet is the request Send would put on the wire, edits
  * not yet autosaved included. With no builder holding the request (one still
- * mounting, a deleted request kept on screen for its draft) it composes the
+ * mounting) it composes the
  * saved row by id and says so, because that snippet trails the editor.
  */
 
