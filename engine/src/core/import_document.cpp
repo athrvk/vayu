@@ -1898,15 +1898,18 @@ json pm_request_named (const json* item, const json& inherited, PostmanCounts& c
 }
 
 /// Whether a mapped body (`pm_body`) is one Vayu puts on the wire: any content
-/// for a raw or GraphQL body, a file for a binary one, and for a urlencoded or
-/// multipart body at least one enabled field, since a disabled row is not sent.
+/// for a raw or GraphQL body, a chosen file for a binary one (Postman's
+/// unselected `file.src: null` maps to an empty `src`, which Vayu refuses to
+/// send), and for a urlencoded or multipart body at least one enabled field,
+/// since a disabled row is not sent.
 bool body_has_payload (const json& body) {
     const std::string& mode = body.at ("mode").get_ref<const std::string&> ();
     if (mode == "none") {
         return false;
     }
     if (mode == "binary") {
-        return true;
+        const std::string* src = as_str (prop (prop (&body, "file"), "src"));
+        return src != nullptr && !src->empty ();
     }
     if (mode == "form-data" || mode == "x-www-form-urlencoded") {
         return std::ranges::any_of (body.at ("fields"),

@@ -232,10 +232,10 @@ request is counted when all of these hold, judged on the *mapped* request:
 
 - its method is GET or HEAD (an unsupported verb that fell back to GET is counted as
   `unsupported_method` only);
-- its body is not empty: a raw body with content, a GraphQL body, a binary file (chosen or
-  not), or a urlencoded or form-data body with at least one **enabled** field. A body of mode
-  `none` - including one switched off with `disabled: true` - and a body whose rows are all
-  disabled send nothing, so they are not counted;
+- its body is not empty: a raw body with content, a GraphQL body, a binary file with a chosen
+  `src` (Postman's unselected `src: null` is not sent by Vayu either), or a urlencoded or form-data body with at least one **enabled** field. A body of mode
+  `none` - including one switched off with `disabled: true` - a file body with no `src`, and a
+  body whose rows are all disabled send nothing, so they are not counted;
 - `disableBodyPruning` is not `true` once resolved. It is resolved through the collection and
   folders like the applied settings (`inherit_protocol_behavior`, nearest wins), so a request
   stating `false` under a folder stating `true` is counted. Only the boolean `true` opts out; a

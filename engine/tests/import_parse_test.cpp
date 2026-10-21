@@ -3228,10 +3228,13 @@ TEST (PostmanImport, CountsAGetOrHeadThatCarriesABodyPostmanWouldPrune) {
          R"({"mode":"graphql","graphql":{"query":"{ me { id } }","variables":""}})"),
          postman_item_text ("File", "GET", R"({"mode":"file","file":{"src":"/tmp/a.bin"}})"),
          postman_item_text ("FalseSetting", "GET", raw, R"({"disableBodyPruning":false})"),
-         postman_item_text ("NotABoolean", "GET", raw, R"({"disableBodyPruning":"true"})") });
+         postman_item_text ("NotABoolean", "GET", raw, R"({"disableBodyPruning":"true"})"),
+         // The shape of the real collection's request "201": no `method` key,
+         // which Postman and `to_method` both read as GET.
+         R"({"name":"NoMethod","request":{"body":{"mode":"raw","raw":"blahblah"},"url":"https://x.com"}})" });
     EXPECT_EQ (names,
     json::array ({ "201", "Head", "Lowercase", "Urlencoded", "Formdata",
-    "Graphql", "File", "FalseSetting", "NotABoolean" }));
+    "Graphql", "File", "FalseSetting", "NotABoolean", "NoMethod" }));
 }
 
 TEST (PostmanImport, DoesNotCountABodyPostmanSendsOrVayuDoesNot) {
@@ -3245,6 +3248,10 @@ TEST (PostmanImport, DoesNotCountABodyPostmanSendsOrVayuDoesNot) {
          postman_item_text ("OnlyDisabledFields", "GET",
          R"({"mode":"urlencoded","urlencoded":[{"key":"a","value":"1","disabled":true}]})"),
          postman_item_text ("NoFields", "GET", R"({"mode":"formdata","formdata":[]})"),
+         // Postman's unselected file body; Vayu refuses to send one (#2540).
+         postman_item_text ("FileNoSrc", "GET", R"({"mode":"file","file":{"src":null}})"),
+         postman_item_text ("FileEmptySrc", "GET", R"({"mode":"file","file":{"src":""}})"),
+         postman_item_text ("FileNoMember", "GET", R"({"mode":"file"})"),
          postman_item_text ("OptedOut", "GET", raw, R"({"disableBodyPruning":true})"),
          postman_item_text ("Verb", "PROPFIND", raw) });
     EXPECT_EQ (names, json::array ());
