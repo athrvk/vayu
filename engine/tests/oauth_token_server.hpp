@@ -10,9 +10,12 @@
  * rather than three drifting copies.
  */
 
+#include "vayu/core/constants.hpp"
+
 #include <httplib.h>
 
 #include <chrono>
+#include <cstddef>
 #include <map>
 #include <string>
 #include <thread>
@@ -38,10 +41,25 @@ inline std::map<std::string, std::string> parse_form (const std::string& body) {
     return out;
 }
 
+/// A token response whose deepest node sits @p depth containers below the root
+/// (root at depth 0, the measure `core::json_within_depth` uses): a valid
+/// `access_token` beside one `"n"` member nested to that depth.
+inline std::string token_body_nested_to (size_t depth) {
+    std::string body = R"({"access_token":"AT-DEEP","n":)";
+    for (size_t i = 1; i < depth; ++i) {
+        body += R"({"a":)";
+    }
+    body += "1";
+    body.append (depth - 1, '}');
+    return body + "}";
+}
+
 /// Mock IdP: records the last request for assertions.
 ///
 /// `/token` answers `AT<hits>` with refresh token `RT1`, so every exchange
-/// yields an access token no earlier row can share.
+/// yields an access token no earlier row can share. `/token-at-depth-bound` and
+/// `/token-past-depth-bound` answer a body nested to `MAX_BODY_DEPTH` and one
+/// level past it.
 class MockTokenServer {
     public:
     MockTokenServer () {
@@ -63,6 +81,14 @@ class MockTokenServer {
                 "application/json");
             } else if (req.path == "/token-plain") {
                 res.set_content (R"({"access_token":"AT-PLAIN"})", "application/json");
+            } else if (req.path == "/token-at-depth-bound") {
+                res.set_content (
+                token_body_nested_to (vayu::core::constants::elements::MAX_BODY_DEPTH),
+                "application/json");
+            } else if (req.path == "/token-past-depth-bound") {
+                res.set_content (token_body_nested_to (
+                                 vayu::core::constants::elements::MAX_BODY_DEPTH + 1),
+                "application/json");
             } else if (req.path == "/token-legacy") {
                 // Form-encoded body with a string expires_in (legacy GitHub style)
                 res.set_content (

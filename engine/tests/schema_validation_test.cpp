@@ -30,6 +30,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using nlohmann::json;
@@ -303,6 +304,53 @@ TEST (ResponseSchemaRefTest, ARecursiveSchemaTerminates) {
     R"({"name":"a","child":{"name":"b","child":{"name":"c"}}})");
     EXPECT_TRUE (verdict.checked);
     EXPECT_TRUE (verdict.valid);
+}
+
+// ─── A body nested past the bound is not JSON ───────────────────────────────
+
+namespace {
+
+std::string nested_objects (size_t levels, std::string_view innermost) {
+    std::string text;
+    for (size_t i = 0; i < levels; ++i) {
+        text += R"({"a":)";
+    }
+    text += innermost;
+    text.append (levels, '}');
+    return text;
+}
+
+constexpr size_t BODY_DEPTH = constants::elements::MAX_BODY_DEPTH;
+
+/// Checks @p body against a schema every nesting of `a` satisfies, so the
+/// depth bound is the only thing that can turn a deep body into a non-verdict.
+ValidationVerdict check_against_any_depth (const std::string& body) {
+    const auto ref_roots = json::parse (R"({"components": {"schemas": {
+        "Any": {"additionalProperties":{"$ref":"#/components/schemas/Any"}}
+    }}})");
+    const auto index     = ResponseSchemaIndex::parse (
+    one_operation_index (json::parse (R"({"$ref":"#/components/schemas/Any"})"),
+        "200", "application/json", ref_roots));
+    if (!index) {
+        ADD_FAILURE () << "the any-depth schema did not index";
+        return {};
+    }
+    return index->check (GET_PET, 200, "application/json", body);
+}
+
+} // namespace
+
+TEST (ResponseSchemaDepthTest, ABodyAtTheBoundIsValidated) {
+    const auto verdict = check_against_any_depth (nested_objects (BODY_DEPTH, "1"));
+    EXPECT_TRUE (verdict.checked);
+    EXPECT_TRUE (verdict.valid);
+}
+
+TEST (ResponseSchemaDepthTest, ABodyOneLevelPastTheBoundIsNotJson) {
+    const auto verdict = check_against_any_depth (nested_objects (BODY_DEPTH + 1, "1"));
+    EXPECT_FALSE (verdict.checked);
+    ASSERT_HAS_VALUE (verdict.reason);
+    EXPECT_EQ (*verdict.reason, UncheckedReason::BodyNotJson);
 }
 
 // ─── Dialect honesty ────────────────────────────────────────────────────────
