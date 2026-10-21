@@ -1118,6 +1118,9 @@ struct PostmanCounts : OAuth2ImportLosses {
     // declaring node and named after it, not once per request below.
     int skipped_protocol_behavior_folder = 0;
     std::vector<std::string> protocol_behavior_folders;
+    // A GET or HEAD that carries a body Postman prunes before sending and
+    // Vayu sends - see `body_survives_pruning` (#2540).
+    int body_on_get = 0;
     // `client_certificates` registry candidates built from a request's own
     // `certificate` (issue #1656), one per distinct (host, port) this import
     // resolved a usable candidate for - see `pm_certificate`. Deduped by
@@ -1582,22 +1585,31 @@ constexpr auto APPLIED_PROTOCOL_KEYS =
 std::to_array<const char*> ({ "followRedirects", "maxRedirects", "strictSSL",
 "disableCookies", "disableUrlEncoding", "disabledSystemHeaders" });
 
+/// The one key resolved through the folders that Vayu does not apply: it only
+/// decides whether a GET or HEAD body is reported (`body_survives_pruning`),
+/// so it is not in `APPLIED_PROTOCOL_KEYS`.
+constexpr const char* BODY_PRUNING_KEY = "disableBodyPruning";
+
 /**
  * What a node's `protocolProfileBehavior` resolves to for the requests below
  * it: @p inherited (its enclosing folders' and the collection's) overlaid with
  * @p own, nearest wins, one level deep, whatever the value's type. That is how
  * `postman-collection`'s `getProtocolProfileBehaviorResolved` merges, so a
  * request's own `disabledSystemHeaders` replaces a folder's wholesale. Only the
- * keys Vayu applies are kept, which also bounds the copy a deep tree makes per
- * node.
+ * keys Vayu applies, and `BODY_PRUNING_KEY`, are kept, which also bounds the
+ * copy a deep tree makes per node.
  */
 json inherit_protocol_behavior (const json& inherited, const json* own) {
-    json resolved = inherited;
-    for (const char* key : APPLIED_PROTOCOL_KEYS) {
+    json resolved      = inherited;
+    const auto overlay = [&] (const char* key) {
         if (const json* value = prop (own, key); value != nullptr) {
             resolved[key] = *value;
         }
+    };
+    for (const char* key : APPLIED_PROTOCOL_KEYS) {
+        overlay (key);
     }
+    overlay (BODY_PRUNING_KEY);
     return resolved;
 }
 
@@ -1852,6 +1864,7 @@ std::to_array<std::pair<const char*, int PostmanCounts::*>> ({
 { "certificate", &PostmanCounts::skipped_certificate },
 { "proxy_config", &PostmanCounts::skipped_proxy },
 { "protocol_behavior", &PostmanCounts::skipped_protocol_behavior },
+{ "body_on_get", &PostmanCounts::body_on_get },
 });
 
 json pm_request (const json* item, const json& inherited, PostmanCounts& counts);
@@ -1882,6 +1895,42 @@ json pm_request_named (const json* item, const json& inherited, PostmanCounts& c
         }
     }
     return request;
+}
+
+/// Whether a mapped body (`pm_body`) is one Vayu puts on the wire: any content
+/// for a raw or GraphQL body, a file for a binary one, and for a urlencoded or
+/// multipart body at least one enabled field, since a disabled row is not sent.
+bool body_has_payload (const json& body) {
+    const std::string& mode = body.at ("mode").get_ref<const std::string&> ();
+    if (mode == "none") {
+        return false;
+    }
+    if (mode == "binary") {
+        return true;
+    }
+    if (mode == "form-data" || mode == "x-www-form-urlencoded") {
+        return std::ranges::any_of (body.at ("fields"),
+        [] (const json& field) { return field.at ("enabled").get<bool> (); });
+    }
+    const std::string* content = as_str (prop (&body, "content"));
+    return content != nullptr && !content->empty ();
+}
+
+/**
+ * Whether a GET or HEAD body is one Postman drops and Vayu sends (#2540).
+ * Postman prunes the body of those two methods unless the resolved
+ * `protocolProfileBehavior.disableBodyPruning` is the boolean `true`; a request
+ * that sets it `false` under a folder that sets it `true` is pruned again.
+ */
+bool body_survives_pruning (const std::string& method, const json& body, const json& behavior) {
+    if (method != "GET" && method != "HEAD") {
+        return false;
+    }
+    const json* opt_out = prop (&behavior, BODY_PRUNING_KEY);
+    if (opt_out != nullptr && opt_out->is_boolean () && opt_out->get<bool> ()) {
+        return false;
+    }
+    return body_has_payload (body);
 }
 
 json pm_request (const json* item, const json& inherited, PostmanCounts& counts) {
@@ -1941,6 +1990,11 @@ json pm_request (const json* item, const json& inherited, PostmanCounts& counts)
     std::string ("content-type"));
     request["headers"] = with_required_content_type (
     map_key_values (prop (rq, "header"), RowExtras::Typed), body, content_type_refused);
+    // An unsupported verb imports as a GET it never was, so it is not a body on one.
+    if (!unsupported_method &&
+    body_survives_pruning (request.at ("method").get<std::string> (), body, behavior)) {
+        counts.body_on_get += 1;
+    }
     request["body"] = std::move (body);
     request["auth"] = std::move (auth);
     if (counts.options.import_scripts) {
@@ -2140,6 +2194,7 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     tally.add ("proxy_config", counts.skipped_proxy);
     tally.add ("protocol_behavior", counts.skipped_protocol_behavior);
     tally.add ("protocol_behavior_folder", counts.skipped_protocol_behavior_folder);
+    tally.add ("body_on_get", counts.body_on_get);
     for (const auto& [kind, names] : counts.named) {
         tally.name_requests (kind, names);
     }
