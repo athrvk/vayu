@@ -154,7 +154,7 @@ chai-postman's `.postmanRequest`, `.postmanResponse` and `.postmanRequestOrRespo
 (`engine/tests/fixtures/chai-conformance.json` is the authority, and
 `script_api_scan_test.cpp` holds the table to it). `require('crypto-js')`, the
 `CryptoJS` members the shim defines (#2578), `require('uuid')` (#2650) and lodash,
-as `_` or `require('lodash')` (#2651), run, so they are not named; the rest of
+as `_` or `require('lodash')` (#2651), and `require('moment')` (#2652), run, so they are not named; the rest of
 crypto-js is, under the one name `CryptoJS` (`CryptoJS.AES`, `PBKDF2`, `SHA3`,
 `RIPEMD160`, `algo.*`, `enc.Base64url`, `lib.WordArray.random`, a computed
 `CryptoJS[name]`, ...), whether it is read off `CryptoJS`, off a name bound to it
