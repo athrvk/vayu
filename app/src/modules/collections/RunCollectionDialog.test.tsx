@@ -386,9 +386,10 @@ describe("a data file", () => {
 				{ user: "grace", id: "2" },
 			],
 			// Which file drove the run (issue #2051): its name and the SHA-256
-			// of its bytes, never its path.
+			// of its bytes, never its path - and how it was read (issue #2540).
 			dataFileName: "users.csv",
 			dataFileHash: "2db0eca7622a0202096a0e1ee4af0bf2a4f91d3f6c6a1e593900962549927551",
+			dataFileCastNumbers: false,
 		});
 		// Omitted, not computed: the engine owns "absent means one pass per row".
 		expect(mutate.mock.calls[0][0].scenario).not.toHaveProperty("iterations");
@@ -595,6 +596,7 @@ describe("running the sequence as a load test", () => {
 			dataRowCount: 2,
 			dataFileName: "users.csv",
 			dataFileHash: "eefb4557a05007a7651f212036cde499da3c25508761ba78de983a521b7446e5",
+			dataFileCastNumbers: false,
 		});
 		unmount();
 
@@ -606,6 +608,7 @@ describe("running the sequence as a load test", () => {
 		expect(useDashboardStore.getState().loadTestConfig?.dataRowCount).toBeUndefined();
 		expect(useDashboardStore.getState().loadTestConfig?.dataFileName).toBeUndefined();
 		expect(useDashboardStore.getState().loadTestConfig?.dataFileHash).toBeUndefined();
+		expect(useDashboardStore.getState().loadTestConfig?.dataFileCastNumbers).toBeUndefined();
 	});
 
 	it("describes the rows as a load run binds them, not as iterations", async () => {
@@ -1154,6 +1157,43 @@ describe("pre-filling from the declared data file", () => {
 		// A read of what was declared, not a pick: reopening the dialog writes
 		// nothing (issue #2050).
 		expect(updateCollection.mutate).not.toHaveBeenCalled();
+	});
+
+	it("sends the rows read the way the binding says (#2540)", async () => {
+		useDataFileStore.setState({
+			locations: {
+				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
+			},
+		});
+		stubReadDataFile(async () => ({ bytes: bytesOf("user,id\nada,1"), fileName: "users.csv" }));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		const box = await screen.findByRole("checkbox", { name: /Read numbers as numbers/ });
+		expect((box as HTMLInputElement).checked).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
+		// The run records the reading beside the file, so its snapshot says how
+		// the rows were typed. Mutation check: drop `dataFileCastNumbers` from
+		// `handleRun` and this fails.
+		expect(mutate.mock.calls[0][0].scenario.dataFileCastNumbers).toBe(true);
+	});
+
+	it("re-parses the sent rows on a toggle and remembers it, declaring nothing", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({ bytes: bytesOf("user,id\nada,1"), fileName: "users.csv" }));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(await screen.findByRole("checkbox", { name: /Read numbers as numbers/ }));
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
+		// Mutation check: drop `writer.rememberReading` and the next pre-fill
+		// reads the file as text again.
+		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+		// Not a pick: the pre-fill's one-pass-per-row stands.
+		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
 	});
 
 	it("warns when the pre-filled file does not match the declared columns", async () => {

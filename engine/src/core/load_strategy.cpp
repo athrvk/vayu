@@ -1255,7 +1255,7 @@ class ConstantLoadStrategy : public LoadStrategy {
 
         // Read once: the config cannot change mid-run.
         const size_t max_pending = context->config.value ("maxInFlight",
-        std::max (static_cast<size_t> (target_rps * 10.0), size_t (1000)));
+        std::max (static_cast<size_t> (target_rps * 10.0), size_t{ 1000 }));
 
         vayu::utils::log_debug ("run", "Submission config",
         { { "tickUs", tick_us }, { "maxInFlight", max_pending },

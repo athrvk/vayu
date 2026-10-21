@@ -125,11 +125,14 @@ export default function DataTab({ collection }: DataTabProps) {
 	 * so a read would be work in service of no question.
 	 */
 	useEffect(() => {
-		const path = useDataFileStore.getState().locations[collection.id]?.path;
-		if (!willReadRemembered(collection) || !path) return;
+		const location = useDataFileStore.getState().locations[collection.id];
+		if (!willReadRemembered(collection) || !location?.path) return;
 
 		let cancelled = false;
-		void readDeclaredDataFile(path, { maxRows })
+		void readDeclaredDataFile(location.path, {
+			maxRows,
+			castNumbers: location.castNumbers ?? false,
+		})
 			.then((read) => {
 				if (cancelled) return;
 				// `?? read`: a file the user picked while this was in flight is
@@ -161,6 +164,13 @@ export default function DataTab({ collection }: DataTabProps) {
 	const handleSelect = (next: SelectedDataFile | null) => {
 		setFile(next);
 		if (next) writer.declare(next);
+	};
+
+	// The same file read another way: the preview changes and the binding
+	// remembers it, but the columns, and so the contract, do not.
+	const handleCastNumbersChange = (next: SelectedDataFile) => {
+		setFile(next);
+		writer.rememberReading(next);
 	};
 
 	const handleRedeclare = () => {
@@ -220,6 +230,7 @@ export default function DataTab({ collection }: DataTabProps) {
 			<DataFilePicker
 				selected={file}
 				onSelect={handleSelect}
+				onCastNumbersChange={handleCastNumbersChange}
 				// Not through `onSelect(null)`: a refused pick reaches that too, and a
 				// file the picker turns away must leave the contract as it was.
 				onRemove={declaredContract ? writer.clear : undefined}

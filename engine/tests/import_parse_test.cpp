@@ -3597,6 +3597,129 @@ TEST (PostmanImport, AFolderOrCollectionProtocolBehaviourReachesTheRequestsBelow
     EXPECT_FALSE (skipped[0].contains ("requests"));
 }
 
+/// One Postman request item, @p behavior and @p body as JSON text (empty omits).
+std::string postman_item_text (const std::string& name,
+const std::string& method,
+const std::string& body,
+const std::string& behavior = "") {
+    return R"({"name":")" + name + "\"" +
+    (behavior.empty () ? "" : R"(,"protocolProfileBehavior":)" + behavior) +
+    R"(,"request":{"method":")" + method + "\"" +
+    (body.empty () ? "" : R"(,"body":)" + body) + R"(,"url":"https://x.com"}})";
+}
+
+std::string join_postman_items (const std::vector<std::string>& items) {
+    std::string joined;
+    for (const std::string& item : items) {
+        joined += (joined.empty () ? "" : ",") + item;
+    }
+    return joined;
+}
+
+/// A folder holding @p items, with its `protocolProfileBehavior` as JSON text.
+std::string postman_folder_text (const std::string& name,
+const std::string& behavior,
+const std::vector<std::string>& items) {
+    return R"({"name":")" + name + R"(","protocolProfileBehavior":)" +
+    behavior + R"(,"item":[)" + join_postman_items (items) + "]}";
+}
+
+/// The names `meta.skipped` lists under `body_on_get` for a collection whose
+/// top level carries @p top_level (a member list, or empty) and whose items are
+/// @p items.
+json body_on_get_names (const std::string& top_level, const std::vector<std::string>& items) {
+    const ImportParse parsed = parse_import (R"({"info":{"name":"Whole","schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},)" + top_level +
+    (top_level.empty () ? "" : ",") + R"("item":[)" + join_postman_items (items) + "]}",
+    {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    const json skipped = json::parse (parsed.result.at ("meta").at ("skipped").dump ());
+    for (const json& entry : skipped) {
+        if (entry.at ("kind") != "body_on_get") {
+            continue;
+        }
+        EXPECT_EQ (entry.at ("count"), entry.at ("requests").size ());
+        return entry.at ("requests");
+    }
+    return json::array ();
+}
+
+// Issue #2540: Postman drops the body of a GET or HEAD before sending unless
+// `protocolProfileBehavior.disableBodyPruning` is true, and Vayu sends it, so
+// each such request is counted as `body_on_get` and named. "201" is the shape
+// of Postman's own examples collection (GET, raw `blahblah`, no setting).
+// Mutation checks: drop the method gate and the POST case in the next test
+// fails; drop the `disableBodyPruning` overlay in `inherit_protocol_behavior`
+// and the folder and collection opt-outs there fail.
+TEST (PostmanImport, CountsAGetOrHeadThatCarriesABodyPostmanWouldPrune) {
+    const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
+    const json names      = body_on_get_names ("",
+         { postman_item_text ("201", "GET", raw), postman_item_text ("Head", "HEAD", raw),
+         postman_item_text ("Lowercase", "get", raw),
+         postman_item_text ("Urlencoded", "GET",
+         R"({"mode":"urlencoded","urlencoded":[{"key":"off","value":"1","disabled":true},{"key":"a","value":"1"}]})"),
+         postman_item_text ("Formdata", "GET",
+         R"({"mode":"formdata","formdata":[{"key":"f","type":"file","src":"/tmp/a.bin"}]})"),
+         postman_item_text ("Graphql", "GET",
+         R"({"mode":"graphql","graphql":{"query":"{ me { id } }","variables":""}})"),
+         postman_item_text ("File", "GET", R"({"mode":"file","file":{"src":"/tmp/a.bin"}})"),
+         postman_item_text ("FalseSetting", "GET", raw, R"({"disableBodyPruning":false})"),
+         postman_item_text ("NotABoolean", "GET", raw, R"({"disableBodyPruning":"true"})"),
+         // The shape of the real collection's request "201": no `method` key,
+         // which Postman and `to_method` both read as GET.
+         R"({"name":"NoMethod","request":{"body":{"mode":"raw","raw":"blahblah"},"url":"https://x.com"}})" });
+    EXPECT_EQ (names,
+    json::array ({ "201", "Head", "Lowercase", "Urlencoded", "Formdata",
+    "Graphql", "File", "FalseSetting", "NotABoolean", "NoMethod" }));
+}
+
+TEST (PostmanImport, DoesNotCountABodyPostmanSendsOrVayuDoesNot) {
+    const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
+    const json names      = body_on_get_names ("",
+         { postman_item_text ("Post", "POST", raw),
+         postman_item_text ("Put", "PUT", raw), postman_item_text ("NoBody", "GET", ""),
+         postman_item_text ("EmptyRaw", "GET", R"({"mode":"raw","raw":""})"),
+         postman_item_text ("ModeNone", "GET", R"({"mode":"none"})"),
+         postman_item_text ("Disabled", "GET", R"({"mode":"raw","raw":"x","disabled":true})"),
+         postman_item_text ("OnlyDisabledFields", "GET",
+         R"({"mode":"urlencoded","urlencoded":[{"key":"a","value":"1","disabled":true}]})"),
+         postman_item_text ("NoFields", "GET", R"({"mode":"formdata","formdata":[]})"),
+         // Postman's unselected file body; Vayu refuses to send one (#2540).
+         postman_item_text ("FileNoSrc", "GET", R"({"mode":"file","file":{"src":null}})"),
+         postman_item_text ("FileEmptySrc", "GET", R"({"mode":"file","file":{"src":""}})"),
+         postman_item_text ("FileNoMember", "GET", R"({"mode":"file"})"),
+         postman_item_text ("OptedOut", "GET", raw, R"({"disableBodyPruning":true})"),
+         postman_item_text ("Verb", "PROPFIND", raw) });
+    EXPECT_EQ (names, json::array ());
+}
+
+TEST (PostmanImport, ABodyPruningOptOutIsResolvedThroughFoldersNearestWinning) {
+    const std::string raw     = R"({"mode":"raw","raw":"blahblah"})";
+    const std::string opt_out = R"({"disableBodyPruning":true})";
+    const std::string opt_in  = R"({"disableBodyPruning":false})";
+    const json names =
+    body_on_get_names (R"("protocolProfileBehavior":{"disableBodyPruning":true})",
+    { postman_folder_text ("Opted", opt_out,
+      { postman_item_text ("InFolder", "GET", raw),
+      postman_folder_text ("Nested", "{}", { postman_item_text ("InNested", "GET", raw) }),
+      postman_item_text ("Overrides", "GET", raw, opt_in) }),
+    postman_item_text ("InCollection", "GET", raw),
+    postman_folder_text ("Reverts", opt_in,
+    { postman_item_text ("InReverted", "GET", raw),
+    postman_item_text ("Restored", "GET", raw, opt_out) }) });
+    // The collection opts out everywhere, so only a nearer `false` is counted.
+    EXPECT_EQ (names, json::array ({ "Overrides", "InReverted" }));
+}
+
+TEST (PostmanImport, AFolderBodyPruningOptOutDoesNotReachItsSiblings) {
+    const std::string raw = R"({"mode":"raw","raw":"blahblah"})";
+    const json names      = body_on_get_names ("",
+         { postman_folder_text ("Opted", R"({"disableBodyPruning":true})",
+           { postman_item_text ("Inside", "GET", raw) }),
+         postman_item_text ("Outside", "GET", raw) });
+    EXPECT_EQ (names, json::array ({ "Outside" }));
+}
+
 // A GraphQL body's Content-Type is Postman's system header (issue #1765): the
 // importer writes it as the body mode's own row, marked the way the Body panel
 // marks it, and writes none for a request that refuses `content-type` - as

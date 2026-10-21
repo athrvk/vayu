@@ -933,6 +933,19 @@ def setup_environment(project_root: Path):
         except Exception:
             pass
 
+        # The pre-push hook's clang-tidy, through the one script CI installs it
+        # with: the hook's floor is the major CI lints with, and Ubuntu's own
+        # archive does not carry it. The script returns at once when it is
+        # already installed. Non-fatal, because without it the hook warns and
+        # CI still lints the change.
+        log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking clang-tidy...')
+        installer = project_root / "scripts" / "install-clang-tidy.sh"
+        result = subprocess.run(["bash", str(installer)], stdout=subprocess.DEVNULL, check=False)
+        if result.returncode == 0:
+            log(f'{Style.GREEN}{Style.CHECK}{Style.RESET} clang-tidy ready for the pre-push hook')
+        else:
+            log_dim('clang-tidy could not be installed; the pre-push hook will warn and CI still lints')
+
     elif system_name == "macOS":
         log(f'{Style.CYAN}{Style.ARROW}{Style.RESET} Checking Homebrew packages...')
         if not shutil.which("brew"):

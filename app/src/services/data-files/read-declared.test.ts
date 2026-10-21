@@ -60,8 +60,8 @@ function bridge(
 	return vi.fn(() => Promise.resolve({ bytes, fileName, hash }));
 }
 
-/** A cap no case below is testing, so the read turns on the file alone. */
-const LIMITS = { maxRows: 1000 };
+/** A cap no case below is testing, and the default reading, so the read turns on the file alone. */
+const LIMITS = { maxRows: 1000, castNumbers: false };
 
 /** A CSV with `count` data rows under a single `user` column. */
 function csvOfRows(count: number): string {
@@ -136,6 +136,21 @@ describe("readDeclaredDataFile", () => {
 			DataFileError
 		);
 	});
+
+	it("parses with the binding's castNumbers, so the re-read matches the picked file (#2540)", async () => {
+		vi.stubGlobal("electronAPI", { readDataFile: bridge('id,zip\n7,"007"', "users.csv") });
+
+		const cast = await readDeclaredDataFile("/home/u/users.csv", {
+			...LIMITS,
+			castNumbers: true,
+		});
+		const text = await readDeclaredDataFile("/home/u/users.csv", LIMITS);
+
+		// Mutation check: parse without the option and the cast read is text.
+		expect(cast.parsed.castNumbers).toBe(true);
+		expect(cast.parsed.rows).toEqual([{ id: 7, zip: "007" }]);
+		expect(text.parsed.rows).toEqual([{ id: "7", zip: "007" }]);
+	});
 });
 
 describe("the row cap on a re-read", () => {
@@ -144,13 +159,13 @@ describe("the row cap on a re-read", () => {
 
 		// The picker's sentence, not a second one: a user who has read
 		// "raise maxScenarioDataRows" once should not meet a paraphrase of it.
-		await expect(readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3 })).rejects.toThrow(
-			/4 rows, over the 3[\s\S]*maxScenarioDataRows/
-		);
+		await expect(
+			readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3, castNumbers: false })
+		).rejects.toThrow(/4 rows, over the 3[\s\S]*maxScenarioDataRows/);
 		// A `DataFileError`, which is what every caller's catch already shows
 		// verbatim beside a picker that is still usable.
 		await expect(
-			readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3 })
+			readDeclaredDataFile("/home/u/grown.csv", { maxRows: 3, castNumbers: false })
 		).rejects.toBeInstanceOf(DataFileError);
 	});
 
@@ -160,7 +175,10 @@ describe("the row cap on a re-read", () => {
 		// travels in as an argument.
 		vi.stubGlobal("electronAPI", { readDataFile: bridge(csvOfRows(4), "grown.csv") });
 
-		const file = await readDeclaredDataFile("/home/u/grown.csv", { maxRows: 4 });
+		const file = await readDeclaredDataFile("/home/u/grown.csv", {
+			maxRows: 4,
+			castNumbers: false,
+		});
 
 		expect(file.parsed.rows).toHaveLength(4);
 	});

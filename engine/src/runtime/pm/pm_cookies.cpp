@@ -12,6 +12,7 @@
 
 #include "pm_internal.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -776,6 +777,51 @@ JSValue finish_jar_call (JSContext* ctx, int argc, JSValueConst* argv, int callb
     return result;
 }
 
+// Whether a jar read of @p url stays inside the sites this script may read
+// (#2358): the request's own, and any host it has addressed through
+// pm.sendRequest, each matched in both directions (`hosts_domain_related`) so a
+// `Domain=` cookie is reachable from a subdomain and a subdomain's from the
+// apex. Without the limit a script could name any host and read the session
+// the environment's jar holds for it. Only the request URL and the
+// pm.sendRequest URLs are seen: a redirect's target is not, so a redirect does
+// not widen the scope.
+//
+// A URL libcurl reads no host from is let through, as there is nothing to
+// match and `matching_in` answers empty for it anyway. A refusal leaves one
+// console warning naming the host - never the URL, which may carry a secret.
+bool jar_read_in_scope (ContextData& data, const char* member, const std::string& url) {
+    const auto host = vayu::http::cookie_scope_host (url);
+    if (!host) {
+        return true;
+    }
+    const auto related = [&host] (const std::string& allowed) {
+        return vayu::http::hosts_domain_related (*host, allowed);
+    };
+    const auto request_host =
+    data.request ? vayu::http::cookie_scope_host (data.request->url) : std::nullopt;
+    if ((request_host && related (*request_host)) ||
+    std::ranges::any_of (data.addressed_hosts, related)) {
+        return true;
+    }
+    data.console_output.push_back ({ ConsoleLevel::Warn,
+    std::string ("pm.cookies.") + member + " read nothing for " + *host +
+    ": a jar read is limited to the request's own site" +
+    (request_host ? " (" + *request_host + ")" : std::string{}) +
+    " and to hosts this script has called through pm.sendRequest. See "
+    "docs/engine/scripting.md." });
+    return false;
+}
+
+// The cookies a jar read of @p url answers with, staged writes applied;
+// nothing for a site `jar_read_in_scope` refuses.
+std::vector<vayu::http::JarCookie>
+jar_read (ContextData& data, const char* member, const std::string& url) {
+    if (!jar_read_in_scope (data, member, url)) {
+        return {};
+    }
+    return vayu::http::matching_in (staged_jar_lines (data), url);
+}
+
 JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
     auto url = read_jar_string_arg (ctx, "get", "URL", 0, argc, argv, /*url_arg=*/true);
@@ -791,9 +837,7 @@ JSValue js_jar_get (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
         return JS_EXCEPTION;
     }
 
-    // Matched against the URL given here rather than the request's, which is
-    // the difference between this and the flat read half.
-    const auto cookies = vayu::http::matching_in (staged_jar_lines (*data), *url);
+    const auto cookies = jar_read (*data, "jar().get", *url);
     const auto* cookie = find_jar_cookie (cookies, *name);
     return finish_jar_call (ctx, argc, argv, 2,
     cookie ? JS_NewString (ctx, cookie->value.c_str ()) : JS_UNDEFINED);
@@ -814,8 +858,8 @@ JSValue js_jar_get_all (JSContext* ctx, JSValueConst this_val, int argc, JSValue
         return JS_EXCEPTION;
     }
 
-    const auto cookies = vayu::http::matching_in (staged_jar_lines (*data), *url);
-    JSValue list = create_jar_cookie_list (ctx, cookies);
+    const auto cookies = jar_read (*data, "jar().getAll", *url);
+    JSValue list       = create_jar_cookie_list (ctx, cookies);
     if (JS_IsException (list)) {
         return list;
     }

@@ -7,11 +7,12 @@
 
 /**
  * Which data file drove a run (issue #2051), read back out of whichever stored
- * shape names it, and whether that file has changed since.
+ * shape names it, how the run read it (issue #2540), and whether that file has
+ * changed since.
  *
- * The engine records the pair in four places that differ only in where the key
- * sits: a collection run's snapshot keeps it inside its `scenario` block, a
- * load run's snapshot keeps it top level, and the `GET /runs` list row mirrors
+ * The engine records the keys in four places that differ only in where they
+ * sit: a collection run's snapshot keeps them inside its `scenario` block, a
+ * load run's snapshot keeps them top level, and the `GET /runs` list row mirrors
  * both under `summary`. Narrowing them here keeps every surface that names the
  * file from writing its own cast over `RunConfigSnapshot`'s index signature.
  *
@@ -26,6 +27,11 @@ export interface RunDataFile {
 	fileName: string;
 	/** SHA-256 hex of the file's bytes when the run read it; absent on a run recorded before hashes. */
 	hash?: string;
+	/**
+	 * Whether the run read the file's numbers as numbers. False for a run that
+	 * read them as text and for every run recorded before the flag existed.
+	 */
+	castNumbers: boolean;
 }
 
 /** The suffix a surface appends when the collection's file no longer matches the run's. */
@@ -34,19 +40,29 @@ export const DATA_FILE_CHANGED_NOTE = "(file changed since this run)";
 /** The suffix for a collection whose remembered file is no longer at its path (#2057). */
 export const DATA_FILE_MISSING_NOTE = "(file no longer at that path)";
 
+/** The suffix a surface appends to the name of a file the run read with numbers cast (#2540). */
+export const DATA_FILE_CAST_NOTE = "(numbers read as numbers)";
+
 /**
- * The pair as one stored block holds it, or null. The one reader of the pair:
- * an empty name is no file, and a hash rides only beside a name. Exported for
- * a caller that has already narrowed to the block (`run-scenario.ts`).
+ * The file as one stored block holds it, or null. The one reader of the keys:
+ * an empty name is no file, a hash and the reading ride only beside a name, and
+ * only `true` reads as cast. Exported for a caller that has already narrowed to
+ * the block (`run-scenario.ts`).
  */
 export function dataFileFromBlock(source: unknown): RunDataFile | null {
 	if (typeof source !== "object" || source === null) return null;
-	const { dataFileName, dataFileHash } = source as Record<string, unknown>;
+	const { dataFileName, dataFileHash, dataFileCastNumbers } = source as Record<string, unknown>;
 	if (typeof dataFileName !== "string" || dataFileName === "") return null;
 	return {
 		fileName: dataFileName,
 		...(typeof dataFileHash === "string" ? { hash: dataFileHash } : {}),
+		castNumbers: dataFileCastNumbers === true,
 	};
+}
+
+/** A run's file name as a surface prints it: the name, and the reading when numbers were cast. */
+export function dataFileDisplayName(fileName: string, castNumbers: boolean | undefined): string {
+	return castNumbers === true ? `${fileName} ${DATA_FILE_CAST_NOTE}` : fileName;
 }
 
 /**

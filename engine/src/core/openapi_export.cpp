@@ -157,30 +157,40 @@ Json example_value (const std::string& body) {
  * has one: this walk is recursive, and the value under it came out of a stored
  * body rather than out of anything Vayu wrote.
  */
+/// `{"type": @p type}`, built member by member. The initializer-list spelling
+/// builds a temporary array for each object first, twice the allocations, and
+/// a derived schema holds one of these per member of the body.
+Json type_only (const char* type) {
+    Json shape = Json::object ();
+    shape.emplace ("type", type);
+    return shape;
+}
+
 Json shape_of (const Json& value, size_t depth) {
     if (value.is_null ()) {
-        return Json{ { "type", "null" } };
+        return type_only ("null");
     }
     if (value.is_array ()) {
         // An empty array says its type and nothing about its members - `items`
         // from no member would be an invention.
-        Json out{ { "type", "array" } };
+        Json out = type_only ("array");
         if (!value.empty () && depth < constants::spec_document::MAX_READ_DEPTH) {
             out["items"] = shape_of (value.front (), depth + 1);
         }
         return out;
     }
     if (value.is_string ()) {
-        return Json{ { "type", "string" } };
+        return type_only ("string");
     }
     if (value.is_boolean ()) {
-        return Json{ { "type", "boolean" } };
+        return type_only ("boolean");
     }
     if (value.is_number ()) {
-        return Json{ { "type", value.is_number_integer () ? "integer" : "number" } };
+        return type_only (value.is_number_integer () ? "integer" : "number");
     }
     Json properties = Json::object ();
     if (depth < constants::spec_document::MAX_READ_DEPTH) {
+        vayu::utils::reserve_members (properties, value.size ());
         for (auto member = value.begin (); member != value.end (); ++member) {
             // `value` is a parsed object, so its keys are distinct.
             vayu::utils::append_unique_member (
@@ -191,7 +201,10 @@ Json shape_of (const Json& value, size_t depth) {
 }
 
 Json schema_from_example (const Json& value) {
-    Json schema           = shape_of (value, 0);
+    Json schema = shape_of (value, 0);
+    // Room first: growing the object would copy `properties`, which is as
+    // wide as the body (`reserve_members` says why).
+    vayu::utils::reserve_members (schema, 1);
     schema["description"] = std::string (DERIVED_SCHEMA_NOTE);
     return schema;
 }
@@ -1405,27 +1418,35 @@ std::optional<BodyExample> body_example_of (const ExportRequest& entry) {
 
 /// One body example as a 3.x media object: the schema read off it (or the
 /// form's own fields), and the example itself when it says anything.
-Json media_object_of (const BodyExample& body) {
+///
+/// Takes @p body by value and moves its example in: the value is the parsed
+/// body, as wide as whatever was stored, and a copy is one allocation per
+/// member it holds.
+Json media_object_of (BodyExample body) {
     if (body.file) {
         return Json{ { "schema", file_schema () } };
     }
     Json media = Json::object ();
-    media["schema"] =
-    body.form_schema ? *body.form_schema : schema_from_example (body.value);
+    // Both members' room at once, so writing the example does not copy the
+    // schema written before it (`reserve_members` says why).
+    vayu::utils::reserve_members (media, 2);
+    media["schema"] = body.form_schema ? std::move (*body.form_schema) :
+                                         schema_from_example (body.value);
     if (!(body.value.is_object () && body.value.empty ())) {
-        media["example"] = body.value;
+        media["example"] = std::move (body.value);
     }
     return media;
 }
 
 /// A request body as a 3.x `requestBody`, or nothing when the request states none.
 std::optional<Json> request_body_object (const ExportRequest& entry) {
-    const std::optional<BodyExample> body = body_example_of (entry);
+    std::optional<BodyExample> body = body_example_of (entry);
     if (!body) {
         return std::nullopt;
     }
-    return std::make_optional (
-    Json{ { "content", Json{ { body->media_type, media_object_of (*body) } } } });
+    const std::string media_type = body->media_type;
+    return std::make_optional (Json{
+    { "content", Json{ { media_type, media_object_of (std::move (*body)) } } } });
 }
 
 /**
@@ -2123,7 +2144,14 @@ const std::string& templated,
 ExportNotes& notes,
 const OperationContext& context,
 SchemeNamer& schemes) {
-    Json operation = Json::object ();
+    // One per member written below. `requestBody` carries the body's example
+    // and schema, as wide as the body, and every member written after it
+    // would otherwise copy it whole when the object grew (`reserve_members`).
+    // A member added here and not counted costs that copy, never a wrong
+    // document.
+    constexpr size_t OPERATION_MEMBERS = 8;
+    Json operation                     = Json::object ();
+    vayu::utils::reserve_members (operation, OPERATION_MEMBERS);
     if (!entry.name.empty ()) {
         operation["summary"] = entry.name;
     }
@@ -2407,20 +2435,26 @@ const BoundSchemes& schemes) {
 
 /// @p body written into a media object the operation already declares: its
 /// example where the document states none, its schema only where it has none.
-/// A file states no example.
-void write_into_media (Json& media, const BodyExample& body) {
+/// A file states no example. By value for `media_object_of`'s reason.
+void write_into_media (Json& media, BodyExample body) {
+    // The schema is read off the value before the value moves; it is still
+    // written second, so the members land in the order they always have.
+    std::optional<Json> schema;
+    if (media.contains ("schema")) {
+        // The document's own schema stays.
+    } else if (body.file) {
+        schema = file_schema ();
+    } else if (body.form_schema) {
+        schema = std::move (*body.form_schema);
+    } else {
+        schema = schema_from_example (body.value);
+    }
     if (!body.file && !media.contains ("examples") &&
     !(body.value.is_object () && body.value.empty ())) {
-        media["example"] = body.value;
+        media["example"] = std::move (body.value);
     }
-    if (media.contains ("schema")) {
-        return;
-    }
-    if (body.file) {
-        media["schema"] = file_schema ();
-    } else {
-        media["schema"] =
-        body.form_schema ? *body.form_schema : schema_from_example (body.value);
+    if (schema) {
+        media["schema"] = std::move (*schema);
     }
 }
 
@@ -2457,7 +2491,7 @@ void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vo
         }
         return;
     }
-    const std::optional<BodyExample> body = body_example_of (entry);
+    std::optional<BodyExample> body = body_example_of (entry);
     if (!body) {
         return;
     }
@@ -2469,10 +2503,11 @@ void write_body_full (Json& operation, const ExportRequest& entry, Vocabulary vo
     Json& content = child_record (child_record (operation, "requestBody"), "content");
     const auto media = content.find (body->media_type);
     if (media == content.end () || !media->is_object ()) {
-        content[body->media_type] = media_object_of (*body);
+        const std::string media_type = body->media_type;
+        content[media_type]          = media_object_of (std::move (*body));
         return;
     }
-    write_into_media (*media, *body);
+    write_into_media (*media, std::move (*body));
 }
 
 /// A 2.0 operation's saved examples merged into the responses it declares.

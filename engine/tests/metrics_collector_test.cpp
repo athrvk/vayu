@@ -106,7 +106,8 @@ TEST_F (MetricsCollectorTest, FailedTransfersWithADurationJoinTheLatencyPopulati
     EXPECT_EQ (collector->success_count (), 95u);
     EXPECT_EQ (collector->latency_count (), 100);
     EXPECT_EQ (collector->latency_samples (), 100u);
-    EXPECT_DOUBLE_EQ (collector->average_latency (), (95.0 * 10.0 + 5.0 * 2000.0) / 100.0);
+    EXPECT_DOUBLE_EQ (
+    collector->average_latency (), ((95.0 * 10.0) + (5.0 * 2000.0)) / 100.0);
 
     const auto percentiles = collector->calculate_percentiles ();
     EXPECT_EQ (percentiles.count, 100u);
@@ -1010,7 +1011,7 @@ TEST_F (MetricsCollectorTest, GetCurrentStatsCountsHttpErrorsAsErrors) {
     // The average divides the latency sum by the requests that recorded one,
     // which an HTTP error does: redefining the error count must not move it.
     const double average_before = collector->average_latency ();
-    EXPECT_DOUBLE_EQ (average_before, (85.0 * 10.0 + 15.0 * 30.0) / 100.0);
+    EXPECT_DOUBLE_EQ (average_before, ((85.0 * 10.0) + (15.0 * 30.0)) / 100.0);
 
     for (int i = 0; i < 5; ++i) {
         collector->record_error (vayu::ErrorCode::ConnectionFailed, "refused");
@@ -1256,6 +1257,40 @@ TEST (MetricsCollectorRetention, SlowCaptureIsBoundedAndCountsWhatItDropped) {
     EXPECT_EQ (collector.slow_results ().size (), 200u);
     EXPECT_EQ (collector.slow_results_dropped (), total - 200);
     EXPECT_EQ (collector.success_results_dropped (), 0u);
+}
+
+// #2399: the report's slow count was the stored traces, so a run whose slow
+// store filled read as having had exactly `max_slow_results` outliers. The
+// count is the run's: it does not stop at the cap, it counts with no cap at
+// all, and it counts a slow completion whose trace was never built. Mutation
+// check: drop the `slow_total_` increment in record_success and every case
+// reds at 0; move it below the empty-trace gate and the last one reds.
+TEST (MetricsCollectorRetention, SlowTotalCountsEverySlowCompletionNotTheStore) {
+    auto capped             = sampling_config (1, 1000, false);
+    capped.max_slow_results = 10;
+    MetricsCollector bounded ("run_slow_total_capped", capped);
+    for (int i = 0; i < 50; ++i) {
+        bounded.record_success (200, 900.0, 0.0, trace_for (i), SuccessTraceReason::Slow);
+    }
+    EXPECT_EQ (bounded.slow_total (), 50u);
+    EXPECT_EQ (bounded.slow_results ().size (), 10u);
+    EXPECT_EQ (bounded.slow_results_dropped (), 40u);
+
+    auto uncapped             = sampling_config (1, 1000, false);
+    uncapped.max_slow_results = 0; // unlimited
+    MetricsCollector unlimited ("run_slow_total_unlimited", uncapped);
+    for (int i = 0; i < 7; ++i) {
+        unlimited.record_success (200, 900.0, 0.0, trace_for (i), SuccessTraceReason::Slow);
+    }
+    EXPECT_EQ (unlimited.slow_total (), 7u);
+
+    MetricsCollector traceless ("run_slow_total_traceless", capped);
+    traceless.record_success (200, 900.0, 0.0, "", SuccessTraceReason::Slow);
+    // Neither a sampled completion nor an exemplar is an outlier.
+    traceless.record_success (200, 900.0, 0.0, trace_for (1), SuccessTraceReason::Sampled);
+    traceless.record_success (200, 900.0, 0.0, trace_for (2), SuccessTraceReason::Exemplar);
+    EXPECT_EQ (traceless.slow_total (), 1u);
+    EXPECT_TRUE (traceless.slow_results ().empty ());
 }
 
 // The sampling period counts every completion, and selects exactly one in N.

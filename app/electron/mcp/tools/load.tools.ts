@@ -67,6 +67,7 @@ import {
 	scenarioDataInput,
 	dataFileNameInput,
 	dataFileHashInput,
+	dataFileCastNumbersInput,
 	scenarioRecursiveInput,
 	thresholdsInput,
 	validationScriptAliasInput,
@@ -270,7 +271,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					url: z
 						.string()
 						.describe(
-							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one is checked against the allowlist like the target URL is."
+							"http(s) URL of a Prometheus /metrics or flat-JSON endpoint on the target. A loopback or private-network URL needs no allowlist entry; a public one, or a link-local or cloud-metadata one (169.254.0.0/16, fe80::/10, fd00:ec2::254), is checked against the allowlist like the target URL is."
 						),
 					intervalMs: z
 						.number()
@@ -390,6 +391,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				),
 			dataFileName: dataFileNameInput,
 			dataFileHash: dataFileHashInput,
+			dataFileCastNumbers: dataFileCastNumbersInput,
 			// The other shape POST /runs accepts (issue #754). Mutually exclusive
 			// with every single-target argument, which the handler refuses by name
 			// rather than ignoring - see SINGLE_TARGET_LOAD_FIELDS.
@@ -408,6 +410,7 @@ export const LOAD_TOOLS: McpTool[] = [
 					data: scenarioDataInput,
 					dataFileName: dataFileNameInput,
 					dataFileHash: dataFileHashInput,
+					dataFileCastNumbers: dataFileCastNumbersInput,
 				})
 				.optional()
 				.describe(
@@ -533,11 +536,15 @@ export const LOAD_TOOLS: McpTool[] = [
 			// before the run row exists and its refusal names the field, so a
 			// second copy of those rules here could only drift (issue #993).
 			if (Array.isArray(args.data)) payload.data = args.data;
-			// The rows' file by name and hash (issue #2051), as given: the engine
-			// refuses either one without `data`, by name.
+			// The rows' file by name and hash (issue #2051) and how it was read
+			// (issue #2540), as given: the engine refuses any of them without
+			// `data`, by name.
 			for (const key of ["dataFileName", "dataFileHash"]) {
 				const v = str(args, key);
 				if (v !== undefined) payload[key] = v;
+			}
+			if (typeof args.dataFileCastNumbers === "boolean") {
+				payload.dataFileCastNumbers = args.dataFileCastNumbers;
 			}
 			// Forwarded verbatim - the keys are the engine's own metric names,
 			// and they come back unchanged in `get_run_report`'s

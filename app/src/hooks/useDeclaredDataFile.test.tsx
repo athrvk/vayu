@@ -60,7 +60,7 @@ function collection(id: string, columns?: string[]): Collection {
 }
 
 function picked(fileName: string, text: string, path?: string): SelectedDataFile {
-	return { fileName, parsed: parseDataFile(text, fileName), hash: "d".repeat(64), path };
+	return { fileName, parsed: parseDataFile(text, fileName), text, hash: "d".repeat(64), path };
 }
 
 /** The `readDataFile` bridge, answering every path with `text` as `fileName`. */
@@ -260,6 +260,23 @@ describe("useDeclaredDataFile", () => {
 
 		await waitFor(() => expect(result.current.file?.fileName).toBe("users.csv"));
 		expect(read).toHaveBeenCalledWith("/home/u/users.csv");
+	});
+
+	it("pre-fills with the binding's castNumbers (#2540)", async () => {
+		useDataFileStore.setState({
+			locations: {
+				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
+			},
+		});
+		stubReadDataFile("id\n1", "users.csv");
+		collections.push(collection("col_1", ["id"]));
+
+		const { result } = renderHook(() => useDeclaredDataFile("col_1"));
+
+		// Mutation check: pass `castNumbers: false` to the read and the run
+		// sends "1" where the binding said 1.
+		await waitFor(() => expect(result.current.file?.parsed.rows).toEqual([{ id: 1 }]));
+		expect(result.current.file?.parsed.castNumbers).toBe(true);
 	});
 });
 

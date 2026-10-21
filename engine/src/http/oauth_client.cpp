@@ -342,7 +342,7 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
     if (t.expires_in <= 0) {
         return false; // no expiry information → treat as non-expiring
     }
-    return now > t.created_at + t.expires_in * 1000 - skew_ms;
+    return now > t.created_at + (t.expires_in * 1000) - skew_ms;
 }
 
 namespace {

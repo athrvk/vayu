@@ -204,8 +204,8 @@ std::vector<nlohmann::json>& rows_out) {
         }
         has_data = true;
     }
-    if (auto reason = read_data_file_fields (scenario, "scenario.", has_data,
-        out.data_file_name, out.data_file_hash)) {
+    if (auto reason =
+        read_data_file_fields (scenario, "scenario.", has_data, out.data_file)) {
         return reason;
     }
 
@@ -219,14 +219,16 @@ std::vector<nlohmann::json>& rows_out) {
     // silence every future scenario field would inherit. The refusal lists
     // this set by hand, so the two change together.
     static const std::unordered_set<std::string> known_scenario_keys = {
-        "source", "collectionId", "recursive", "data", "dataFileName", "dataFileHash", "iterations"
+        "source", "collectionId", "recursive", "data", "dataFileName",
+        "dataFileHash", "dataFileCastNumbers", "iterations"
     };
     for (const auto& [key, value] : scenario.items ()) {
         (void)value;
         if (!known_scenario_keys.contains (key)) {
             return "'scenario." + key +
             "' is not a known field - expected one of source, collectionId, "
-            "recursive, data, dataFileName, dataFileHash, iterations";
+            "recursive, data, dataFileName, dataFileHash, dataFileCastNumbers, "
+            "iterations";
         }
     }
 
@@ -638,8 +640,17 @@ bool is_sha256_hex (std::string_view text) {
     [] (char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
 
-/// One of the two data-file keys as a non-empty string, or the refusal. Absent
-/// or `null` leaves @p out empty.
+constexpr std::string_view DATA_FILE_CAST_NUMBERS_KEY = "dataFileCastNumbers";
+
+/// The refusal for a data-file key sent on a run that carries no rows.
+std::string sent_without_data (const std::string& name, std::string_view prefix) {
+    return name + " describes the file '" + std::string (prefix) +
+    "data' came from, and was sent without it - send the rows beside it, "
+    "or drop the field.";
+}
+
+/// One of the two data-file string keys as a non-empty string, or the
+/// refusal. Absent or `null` leaves @p out empty.
 std::optional<std::string> read_data_file_string (const nlohmann::json& block,
 std::string_view prefix,
 const std::string& key,
@@ -657,11 +668,32 @@ std::string& out) {
         ")";
     }
     if (!has_data) {
-        return name + " describes the file '" + std::string (prefix) +
-        "data' came from, and was sent without it - send the rows beside it, "
-        "or drop the field.";
+        return sent_without_data (name, prefix);
     }
     out = field->get<std::string> ();
+    return std::nullopt;
+}
+
+/// `dataFileCastNumbers` as a boolean, or the refusal, on the string keys'
+/// rules: absent or `null` leaves @p out false, and any value without rows is
+/// refused, `false` included.
+std::optional<std::string> read_data_file_cast (const nlohmann::json& block,
+std::string_view prefix,
+bool has_data,
+bool& out) {
+    const auto field = block.find (DATA_FILE_CAST_NUMBERS_KEY);
+    if (field == block.end () || field->is_null ()) {
+        return std::nullopt;
+    }
+    const std::string name =
+    "'" + std::string (prefix) + std::string (DATA_FILE_CAST_NUMBERS_KEY) + "'";
+    if (!field->is_boolean ()) {
+        return name + " must be a boolean (got " + std::string (field->type_name ()) + ")";
+    }
+    if (!has_data) {
+        return sent_without_data (name, prefix);
+    }
+    out = field->get<bool> ();
     return std::nullopt;
 }
 
@@ -670,24 +702,26 @@ std::string& out) {
 std::optional<std::string> read_data_file_fields (const nlohmann::json& block,
 std::string_view prefix,
 bool has_data,
-std::string& name_out,
-std::string& hash_out) {
+DataFileProvenance& out) {
     if (auto reason =
-        read_data_file_string (block, prefix, "dataFileName", has_data, name_out)) {
+        read_data_file_string (block, prefix, "dataFileName", has_data, out.name)) {
         return reason;
     }
     if (auto reason =
-        read_data_file_string (block, prefix, "dataFileHash", has_data, hash_out)) {
+        read_data_file_string (block, prefix, "dataFileHash", has_data, out.hash)) {
+        return reason;
+    }
+    if (auto reason = read_data_file_cast (block, prefix, has_data, out.cast_numbers)) {
         return reason;
     }
     // A display name, never a path: the engine opens nothing, and a path here
     // would be stored and listed back to every reader of the run.
-    if (name_out.find_first_of ("/\\") != std::string::npos) {
+    if (out.name.find_first_of ("/\\") != std::string::npos) {
         return "'" + std::string (prefix) +
         "dataFileName' is the file's name, never a path: send the name alone "
         "(got one containing a path separator)";
     }
-    if (!hash_out.empty () && !is_sha256_hex (hash_out)) {
+    if (!out.hash.empty () && !is_sha256_hex (out.hash)) {
         return "'" + std::string (prefix) +
         "dataFileHash' must be the SHA-256 of the file's bytes as 64 "
         "lowercase hex characters";
@@ -695,14 +729,17 @@ std::string& hash_out) {
     return std::nullopt;
 }
 
-void stamp_data_file_fields (nlohmann::json& snapshot,
-const std::string& name,
-const std::string& hash) {
-    if (!name.empty ()) {
-        snapshot["dataFileName"] = name;
+void stamp_data_file_fields (nlohmann::json& snapshot, const DataFileProvenance& file) {
+    if (!file.name.empty ()) {
+        snapshot["dataFileName"] = file.name;
     }
-    if (!hash.empty ()) {
-        snapshot["dataFileHash"] = hash;
+    if (!file.hash.empty ()) {
+        snapshot["dataFileHash"] = file.hash;
+    }
+    if (file.cast_numbers) {
+        snapshot[DATA_FILE_CAST_NUMBERS_KEY] = true;
+    } else {
+        snapshot.erase (DATA_FILE_CAST_NUMBERS_KEY);
     }
 }
 
@@ -895,7 +932,7 @@ const SpecBinding& spec) {
         { "collectionId", request.collection_id },
         { "recursive", request.recursive }, { "iterations", request.iterations },
         { "dataRowCount", request.data_row_count }, { "steps", std::move (steps) } };
-    stamp_data_file_fields (manifest, request.data_file_name, request.data_file_hash);
+    stamp_data_file_fields (manifest, request.data_file);
     // Absent for an unbound collection, never `null` or `{}` - see the header.
     if (spec.bound ()) {
         manifest["openapi"] =

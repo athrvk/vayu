@@ -231,7 +231,7 @@ export default function OverviewTab({
 
 			{/* Past the totals and the verdicts: this is the count behind the
 			    Samples tab's "Slow" chip. Absent when no request crossed the
-			    threshold. */}
+			    threshold, or the run set none. */}
 			<SlowRequestsCard slowRequests={report.slowRequests} />
 		</>
 	);

@@ -481,10 +481,10 @@ read_run_scope_ids (const nlohmann::json& json, vayu::db::Run& run) {
     return std::nullopt;
 }
 
-/// A top-level `dataFileName` / `dataFileHash` on a collection run, refused by
-/// name for the reason a top-level `data` is: the block holds its own.
+/// A top-level data-file key on a collection run, refused by name for the
+/// reason a top-level `data` is: the block holds its own.
 std::optional<std::string> refuse_top_level_data_file (const nlohmann::json& json) {
-    for (const char* key : { "dataFileName", "dataFileHash" }) {
+    for (const char* key : { "dataFileName", "dataFileHash", "dataFileCastNumbers" }) {
         if (auto field = json.find (key); field != json.end () && !field->is_null ()) {
             return std::string ("'") + key +
             "' is the single-request form. A collection run names its data "
@@ -618,10 +618,8 @@ bool is_scenario) {
     }
 
     std::unique_ptr<vayu::core::LoadDataSet> set;
-    std::string file_name;
-    std::string file_hash;
-    if (auto reason = vayu::core::read_data_file_fields (
-        json, "", carries_set, file_name, file_hash)) {
+    vayu::core::DataFileProvenance file;
+    if (auto reason = vayu::core::read_data_file_fields (json, "", carries_set, file)) {
         out.ok    = false;
         out.error = std::move (*reason);
         return out;
@@ -638,8 +636,7 @@ bool is_scenario) {
             return out;
         }
         set->bound_columns = vayu::core::bound_columns_of (set->rows);
-        set->file_name     = std::move (file_name);
-        set->file_hash     = std::move (file_hash);
+        set->file          = std::move (file);
     }
 
     // A scenario load run's credentials are its steps', resolved when the plan
@@ -687,8 +684,9 @@ bool is_scenario) {
  * never snapshotted. `dataRowCount` is what survives, exactly as it does on a
  * scenario manifest, so a stored run still says it was data-driven and how
  * large the set was - beside the file's `dataFileName` / `dataFileHash` when
- * the caller named one (issue #2051), written from the validated set rather
- * than left to whatever the sanitizer kept of the body.
+ * the caller named one (issue #2051) and `dataFileCastNumbers` when it read
+ * numbers as numbers (issue #2540), written from the validated set rather than
+ * left to whatever the sanitizer kept of the body.
  *
  * A snapshot that is not JSON (which `sanitize_config_snapshot` passes through
  * verbatim) is left alone - there is nothing in it to rewrite.
@@ -710,7 +708,7 @@ const vayu::core::LoadDataSet& data) {
     }
     parsed.erase ("data");
     parsed["dataRowCount"] = data.rows.size ();
-    vayu::core::stamp_data_file_fields (parsed, data.file_name, data.file_hash);
+    vayu::core::stamp_data_file_fields (parsed, data.file);
     return parsed.dump ();
 }
 

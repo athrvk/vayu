@@ -130,7 +130,7 @@ describe("resolveTemplateWithRow", () => {
 });
 
 describe("renderDataValue", () => {
-	it("is byte-exact for a string, which is every CSV and TSV cell", () => {
+	it("is byte-exact for a string, which is every CSV and TSV cell unless numbers are cast", () => {
 		expect(renderDataValue("ada@example.test")).toBe("ada@example.test");
 		expect(renderDataValue("")).toBe("");
 	});

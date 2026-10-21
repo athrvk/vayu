@@ -554,6 +554,31 @@ TEST_F (ScenarioPlanTest, ManifestOmitsTheDataFileWhenNoneWasNamed) {
     EXPECT_EQ (manifest["dataRowCount"], 1);
     EXPECT_FALSE (manifest.contains ("dataFileName")) << manifest.dump ();
     EXPECT_FALSE (manifest.contains ("dataFileHash")) << manifest.dump ();
+    EXPECT_FALSE (manifest.contains ("dataFileCastNumbers")) << manifest.dump ();
+}
+
+// Issue #2540: whether the client read the file's numbers as numbers is stored
+// with the file, because the hash is of the bytes and cannot tell two readings
+// apart. Recorded only when true. Mutation check: drop `dataFileCastNumbers`
+// from `known_scenario_keys` and the block is refused; stamp it only when false
+// and both halves red.
+TEST_F (ScenarioPlanTest, ManifestRecordsADataFileReadWithNumbersCastAndOmitsOneReadAsText) {
+    seed_collection ("col", "");
+    seed_request ("req", "col");
+
+    const auto manifest_for = [this] (bool cast) {
+        json scenario            = block ("col");
+        scenario["data"]         = json::array ({ json{ { "plan", 3 } } });
+        scenario["dataFileName"] = "plans.csv";
+        scenario["dataFileCastNumbers"] = cast;
+        const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
+        EXPECT_TRUE (resolved.ok) << resolved.error;
+        EXPECT_EQ (resolved.request.data_file.cast_numbers, cast);
+        return vayu::core::build_scenario_manifest (resolved.request, resolved.plan);
+    };
+
+    EXPECT_EQ (manifest_for (true).value ("dataFileCastNumbers", false), true);
+    EXPECT_FALSE (manifest_for (false).contains ("dataFileCastNumbers"));
 }
 
 // Each refusal is a 400 in the block's own wording, never a dropped field
@@ -609,6 +634,21 @@ TEST_F (ScenarioPlanTest, TheDataFileFieldsAreRefusedWhenMalformedOrWithoutRows)
     error                    = refusal (scenario);
     EXPECT_NE (error.find ("'scenario.dataFileHash'"), std::string::npos) << error;
     EXPECT_NE (error.find ("without it"), std::string::npos) << error;
+
+    scenario                        = with_rows ();
+    scenario["dataFileCastNumbers"] = "true";
+    error                           = refusal (scenario);
+    EXPECT_NE (error.find (
+               "'scenario.dataFileCastNumbers' must be a boolean (got string)"),
+    std::string::npos)
+    << error;
+
+    // `false` describes a file as much as `true` does.
+    scenario                        = block ("col");
+    scenario["dataFileCastNumbers"] = false;
+    error                           = refusal (scenario);
+    EXPECT_NE (error.find ("'scenario.dataFileCastNumbers'"), std::string::npos) << error;
+    EXPECT_NE (error.find ("without it"), std::string::npos) << error;
 }
 
 // A display name, never a path (#2051): a caller that sends the path it read
@@ -637,13 +677,15 @@ TEST_F (ScenarioPlanTest, NullDataFileFieldsAreAbsent) {
     seed_collection ("col", "");
     seed_request ("req", "col");
 
-    json scenario            = block ("col");
-    scenario["dataFileName"] = nullptr;
-    scenario["dataFileHash"] = nullptr;
+    json scenario                   = block ("col");
+    scenario["dataFileName"]        = nullptr;
+    scenario["dataFileHash"]        = nullptr;
+    scenario["dataFileCastNumbers"] = nullptr;
     const auto resolved = vayu::core::resolve_scenario (*db_, scenario, options ());
     ASSERT_TRUE (resolved.ok) << resolved.error;
-    EXPECT_TRUE (resolved.request.data_file_name.empty ());
-    EXPECT_TRUE (resolved.request.data_file_hash.empty ());
+    EXPECT_TRUE (resolved.request.data_file.name.empty ());
+    EXPECT_TRUE (resolved.request.data_file.hash.empty ());
+    EXPECT_FALSE (resolved.request.data_file.cast_numbers);
 }
 
 TEST_F (ScenarioPlanTest, ARunWithoutDataResolvesToNoRows) {
@@ -1636,6 +1678,10 @@ TEST_F (ScenarioPlanTest, AnUnknownScenarioKeyIsRejectedByName) {
 
     EXPECT_FALSE (resolved.ok);
     EXPECT_NE (resolved.error.find ("scenario.delayMs"), std::string::npos)
+    << resolved.error;
+    // The refusal lists the known keys by hand, so a key added to the set is
+    // pinned here too.
+    EXPECT_NE (resolved.error.find ("dataFileCastNumbers"), std::string::npos)
     << resolved.error;
     EXPECT_TRUE (resolved.plan.steps.empty ());
 }

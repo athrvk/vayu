@@ -256,7 +256,10 @@ describe("a load run started with a data file", () => {
 		expect(launched).not.toHaveProperty("data");
 	});
 
-	it("forwards the file's name and hash to the run and the dashboard (#2051)", async () => {
+	// And how it was read (#2540), through the hand-written payload too.
+	// Mutation check: drop `dataFileCastNumbers` from the `apiRequest` literal
+	// in `index.tsx` and this fails.
+	it("forwards the file's name, hash and reading to the run and the dashboard (#2051)", async () => {
 		const hash = "a".repeat(64);
 		await startLoadRun({
 			...LOAD_CONFIG,
@@ -264,16 +267,19 @@ describe("a load run started with a data file", () => {
 			dataColumns: ["username"],
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 
 		expect(startLoadTest).toHaveBeenCalledTimes(1);
 		expect(startLoadTest.mock.calls[0][0]).toMatchObject({
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 		expect(useDashboardStore.getState().loadTestConfig).toMatchObject({
 			dataFileName: "users.csv",
 			dataFileHash: hash,
+			dataFileCastNumbers: true,
 		});
 	});
 
@@ -284,6 +290,7 @@ describe("a load run started with a data file", () => {
 		const sent = startLoadTest.mock.calls[0][0] as Record<string, unknown>;
 		expect(sent.dataFileName).toBeUndefined();
 		expect(sent.dataFileHash).toBeUndefined();
+		expect(sent.dataFileCastNumbers).toBeUndefined();
 	});
 
 	it("leaves the row count off a run with no file (#1940)", async () => {

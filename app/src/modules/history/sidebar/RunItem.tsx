@@ -13,7 +13,7 @@ import { Badge, Button, ICON_MOTION } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { truncateUrl } from "@/lib/truncate-url";
-import { dataFileFromSummary } from "@/lib/run-data-file";
+import { dataFileDisplayName, dataFileFromSummary } from "@/lib/run-data-file";
 import { mcpClientDisplayName } from "@/lib/mcp-client-names";
 import { runReference } from "@/lib/agent-reference";
 import { isRunInProgress } from "@/lib/run-status";
@@ -250,9 +250,14 @@ export default function RunItem({
 	// already says which day; a relative "8h ago" repeated down the whole list
 	// said nothing a hover can't say instead).
 	const cardRows: TimeRow[] = [{ label: "Status", value: RUN_STATUS[run.status].label }];
-	// Which file drove the run (#2051): a name, never a path.
+	// Which file drove the run (#2051): a name, never a path, and how it was read (#2540).
 	const dataFile = dataFileFromSummary(run.summary);
-	if (dataFile) cardRows.push({ label: "Data file", value: dataFile.fileName });
+	if (dataFile) {
+		cardRows.push({
+			label: "Data file",
+			value: dataFileDisplayName(dataFile.fileName, dataFile.castNumbers),
+		});
+	}
 
 	// A bare fallback identity for the rare row with neither a url nor a
 	// scenario descriptor (a run recorded before either existed, or one still

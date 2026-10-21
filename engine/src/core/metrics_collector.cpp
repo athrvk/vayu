@@ -189,8 +189,8 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     // the whole daemon down, from a field a caller can simply set to 0.
     // POST /runs now rejects that (validate_run_config), and this clamp makes
     // the collector safe for any caller, not just that one route.
-    config_.success_sample_rate = std::max (config_.success_sample_rate, size_t (1));
-    config_.response_sample_rate = std::max (config_.response_sample_rate, size_t (1));
+    config_.success_sample_rate = std::max (config_.success_sample_rate, size_t{ 1 });
+    config_.response_sample_rate = std::max (config_.response_sample_rate, size_t{ 1 });
 
     // Initialize HdrHistogram for lock-free latency recording
     // 3 significant figures = ~0.1% precision, max 1 hour in microseconds
@@ -273,7 +273,7 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
     // Reserve errors vector (assume ~5% error rate max)
     size_t error_reserve = config_.max_errors > 0 ?
     config_.max_errors :
-    std::max (expected / 20U, size_t (10000));
+    std::max (expected / 20U, size_t{ 10000 });
     errors_.reserve (std::min (error_reserve, max_reserve));
 
     // Reserve success results if storing traces
@@ -447,6 +447,11 @@ const Timing* phases) {
             hdr_record_value_atomic (phase_histograms_.at (i),
             static_cast<int64_t> (std::max (0.0, values.at (i)) * 1000.0));
         }
+    }
+
+    // Ahead of the gate below: the count is the run's, not the store's (#2399).
+    if (trace_reason == SuccessTraceReason::Slow) {
+        slow_total_.fetch_add (1, std::memory_order_relaxed);
     }
 
     // Store the trace the caller built, in whichever budget asked for it. The

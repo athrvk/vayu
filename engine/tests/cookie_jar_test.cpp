@@ -305,6 +305,59 @@ TEST (CookieJarMatch, SecureNeedsHttpsAndAnExpiryInThePast) {
     EXPECT_TRUE (vayu::http::cookie_matches (session, "example.com", "/", false, NOW));
 }
 
+TEST (CookieJarMatch, TwoHostsAreRelatedWhenOneIsTheOthersDotBoundarySubdomain) {
+    using vayu::http::hosts_domain_related;
+    EXPECT_TRUE (hosts_domain_related ("example.com", "example.com"));
+    EXPECT_TRUE (hosts_domain_related ("www.example.com", "example.com"));
+    EXPECT_TRUE (hosts_domain_related ("example.com", "www.example.com"))
+    << "the relation reads in both directions";
+    EXPECT_TRUE (hosts_domain_related ("a.b.example.com", "example.com"));
+    EXPECT_TRUE (hosts_domain_related ("EXAMPLE.com", "www.Example.COM"));
+    EXPECT_TRUE (hosts_domain_related ("example.com.", "www.example.com"))
+    << "a trailing dot names the same host";
+
+    // The dot is what makes this a subdomain check and not a suffix check.
+    EXPECT_FALSE (hosts_domain_related ("evilexample.com", "example.com"));
+    EXPECT_FALSE (hosts_domain_related ("example.com", "evilexample.com"));
+    EXPECT_FALSE (hosts_domain_related ("example.com.evil.test", "example.com"));
+    // Two children of one parent share a cookie scope only through the
+    // parent, which neither names.
+    EXPECT_FALSE (hosts_domain_related ("a.example.com", "b.example.com"));
+    EXPECT_FALSE (hosts_domain_related ("example.com", "example.org"));
+    EXPECT_FALSE (hosts_domain_related ("", ""));
+    EXPECT_FALSE (hosts_domain_related ("example.com", ""));
+}
+
+TEST (CookieJarMatch, AnIpLiteralIsRelatedToItselfOnly) {
+    using vayu::http::hosts_domain_related;
+    EXPECT_TRUE (hosts_domain_related ("10.0.0.1", "10.0.0.1"));
+    EXPECT_TRUE (hosts_domain_related ("[::1]", "[::1]"));
+    // "1.10.0.0.1" ends in "10.0.0.1" at a dot, and is not an address.
+    EXPECT_FALSE (hosts_domain_related ("1.10.0.0.1", "10.0.0.1"));
+    EXPECT_FALSE (hosts_domain_related ("10.0.0.1", "0.0.1"));
+    EXPECT_FALSE (hosts_domain_related ("[::1]", "[::2]"));
+    EXPECT_FALSE (hosts_domain_related ("10.0.0.1", "example.com"));
+}
+
+TEST (CookieJarMatch, TheScopeHostIsThePunycodeNameTheJarKeysOn) {
+    using vayu::http::cookie_scope_host;
+    using vayu::http::hosts_domain_related;
+    const auto idn = cookie_scope_host ("http://b\xC3\xBC"
+                                        "cher.example/x");
+    ASSERT_HAS_VALUE (idn);
+    EXPECT_EQ (*idn, "xn--bcher-kva.example");
+    const auto sub =
+    cookie_scope_host ("http://shop.xn--bcher-kva.example:8080/");
+    ASSERT_HAS_VALUE (sub);
+    EXPECT_TRUE (hosts_domain_related (*idn, *sub));
+
+    const auto v6 = cookie_scope_host ("http://[::1]:8080/x");
+    ASSERT_HAS_VALUE (v6);
+    EXPECT_EQ (*v6, "[::1]");
+
+    EXPECT_FALSE (cookie_scope_host ("not a url").has_value ());
+}
+
 // ============================================================================
 // Storage
 // ============================================================================
@@ -924,14 +977,14 @@ TEST (CookieJarWrite, ACookieAScriptSetIsOnTheWireOfTheRequestItWasSetFor) {
 
 TEST (CookieJarWrite, JarGetAllAnswersEveryCookieTheUrlWouldCarry) {
     // The same walk get() makes, without a name to narrow it - so it sees a
-    // cookie this script has just staged, and does not see one stored for
-    // another host.
+    // cookie this script has just staged, and does not see one stored for the
+    // same site under a path the URL would not carry.
     CookieJar jar;
     jar.store ("env_a",
     { netscape_line ("example.com", "FALSE", "/", "FALSE",
       std::to_string (FAR_FUTURE), "session", "abc"),
-    netscape_line ("other.example", "FALSE", "/", "FALSE",
-    std::to_string (FAR_FUTURE), "elsewhere", "no") });
+    netscape_line ("example.com", "FALSE", "/admin", "FALSE",
+    std::to_string (FAR_FUTURE), "admin_only", "no") });
     vayu::Environment env;
 
     const std::string error = apply_after_script (jar, "env_a",
@@ -942,15 +995,16 @@ TEST (CookieJarWrite, JarGetAllAnswersEveryCookieTheUrlWouldCarry) {
     "jar.getAll('http://example.com/', (err, cookies) => {"
     "  pm.environment.set('cb', String(err) + ':' + cookies.length);"
     "});"
-    "pm.environment.set('elsewhere', "
-    "String(jar.getAll('http://other.example/').map(c => c.name).join(',')));",
+    "pm.environment.set('other_path', "
+    "String(jar.getAll('http://example.com/other').map(c => "
+    "c.name).sort().join(',')));",
     "http://example.com/users", env);
 
     ASSERT_EQ (error, "");
     EXPECT_EQ (env["names"].value, "fresh,session")
     << "getAll did not see the cookie staged two lines above it";
     EXPECT_EQ (env["cb"].value, "null:2");
-    EXPECT_EQ (env["elsewhere"].value, "elsewhere")
+    EXPECT_EQ (env["other_path"].value, "fresh,session")
     << "getAll answered with cookies the URL would not have carried";
 }
 
@@ -1512,6 +1566,232 @@ TEST (CookieJarWrite, TheCallbackIsInvokedAndItsThrowIsTheScriptsError) {
     "http://example.com/users", env);
     EXPECT_NE (threw.find ("from the callback"), std::string::npos)
     << "a throwing callback was swallowed: " << threw;
+}
+
+// ============================================================================
+// The read scope - pm.cookies.jar().get / getAll reach the request's site and
+// the hosts the script has called, nothing else (issue #2358)
+// ============================================================================
+
+namespace {
+
+/// Run @p script as the pre-request script of a request to @p request_url,
+/// with @p jar in scope "env_a" and pm.sendRequest allowed.
+vayu::ScriptResult run_jar_read (CookieJar& jar,
+const std::string& request_url,
+const std::string& script,
+vayu::Environment& env) {
+    vayu::runtime::ScriptConfig config;
+    config.allow_send_request = true;
+    vayu::runtime::ScriptEngine engine (config);
+
+    vayu::Request request = get_request (request_url);
+    vayu::runtime::ScriptContext ctx =
+    vayu::runtime::ScriptContext::for_prerequest (request);
+    ctx.environment  = &env;
+    ctx.cookie_jar   = &jar;
+    ctx.cookie_scope = "env_a";
+    return engine.execute (script, ctx);
+}
+
+std::vector<std::string> warnings_of (const vayu::ScriptResult& result) {
+    std::vector<std::string> out;
+    for (const auto& entry : result.console_output) {
+        if (entry.level == vayu::ConsoleLevel::Warn) {
+            out.push_back (entry.message);
+        }
+    }
+    return out;
+}
+
+/// One session cookie each for a.test and b.test, in scope "env_a".
+void store_two_sites (CookieJar& jar) {
+    jar.store ("env_a",
+    { netscape_line ("a.test", "FALSE", "/", "FALSE",
+      std::to_string (FAR_FUTURE), "session", "from-a"),
+    netscape_line ("b.test", "FALSE", "/", "FALSE", std::to_string (FAR_FUTURE),
+    "session", "from-b") });
+}
+
+} // namespace
+
+TEST (CookieJarReadScope, AReadOfAnotherSiteAnswersNothingAndSaysWhy) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "pm.environment.set('a_get', String(jar.get('http://a.test/', 'session')));"
+    "pm.environment.set('a_all', jar.getAll('http://a.test/').map(c => "
+    "c.value).join(','));"
+    "pm.environment.set('b_get', String(jar.get('http://b.test/', 'session')));"
+    "pm.environment.set('b_all', String(jar.getAll('http://b.test/').length));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["a_get"].value, "from-a");
+    EXPECT_EQ (env["a_all"].value, "from-a");
+    EXPECT_EQ (env["b_get"].value, "undefined")
+    << "get read a cookie of a site the request is not for";
+    EXPECT_EQ (env["b_all"].value, "0")
+    << "getAll read cookies of a site the request is not for";
+
+    const auto warned = warnings_of (result);
+    ASSERT_EQ (warned.size (), 2u)
+    << "one warning per refused read, and none for the request's own site";
+    for (const auto& message : warned) {
+        EXPECT_NE (message.find ("b.test"), std::string::npos) << message;
+        EXPECT_NE (message.find ("a.test"), std::string::npos)
+        << "the warning does not name the site reads are limited to: " << message;
+        EXPECT_EQ (message.find ("from-b"), std::string::npos)
+        << "the warning carries a cookie value: " << message;
+    }
+}
+
+TEST (CookieJarReadScope, TheCallbackFormGetsTheSameAnswer) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "jar.get('http://b.test/', 'session', (err, v) => "
+    "  pm.environment.set('cb_get', String(err) + ':' + String(v)));"
+    "jar.getAll('http://b.test/', (err, list) => "
+    "  pm.environment.set('cb_all', String(err) + ':' + list.length));"
+    "jar.get('http://a.test/', 'session', (err, v) => "
+    "  pm.environment.set('cb_own', String(err) + ':' + String(v)));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["cb_get"].value, "null:undefined");
+    EXPECT_EQ (env["cb_all"].value, "null:0");
+    EXPECT_EQ (env["cb_own"].value, "null:from-a");
+    EXPECT_EQ (warnings_of (result).size (), 2u);
+}
+
+TEST (CookieJarReadScope, AHostTheScriptCalledThroughSendRequestBecomesReadable) {
+    // A script that logs in somewhere has earned the right to read what that
+    // login set. The server is on 127.0.0.1, a host the request (to a.test)
+    // is not for.
+    CookieServer server;
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "stored", "before-the-call") });
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://a.test/users",
+    "const jar = pm.cookies.jar();"
+    "const root = '" +
+    server.url ("/") +
+    "';"
+    "pm.environment.set('before', String(jar.get(root, 'stored')));"
+    "pm.sendRequest(root + 'login', function (err, res) {"
+    "  pm.environment.set('login', String(res.code)); });"
+    "pm.environment.set('after', String(jar.get(root, 'stored')));"
+    "pm.environment.set('set_by_login', String(jar.get(root, 'session')));"
+    "pm.environment.set('all', jar.getAll(root).map(c => "
+    "c.name).sort().join(','));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["login"].value, "200");
+    EXPECT_EQ (env["before"].value, "undefined")
+    << "the host was readable before the script had called it";
+    EXPECT_EQ (env["after"].value, "before-the-call");
+    EXPECT_EQ (env["set_by_login"].value, "abc123");
+    EXPECT_EQ (env["all"].value, "session,stored");
+    EXPECT_EQ (warnings_of (result).size (), 1u)
+    << "only the read before the call should have been refused";
+}
+
+TEST (CookieJarReadScope, ADomainCookieIsReadFromASubdomainRequestAndBack) {
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line (".a.test", "TRUE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "shared", "domain-wide") });
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://www.a.test/users",
+    "const jar = pm.cookies.jar();"
+    "pm.environment.set('on_sub', String(jar.get('http://www.a.test/', "
+    "'shared')));"
+    "pm.environment.set('on_apex', String(jar.get('http://a.test/', "
+    "'shared')));"
+    "pm.environment.set('other_sub', String(jar.get('http://api.a.test/', "
+    "'shared')));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["on_sub"].value, "domain-wide");
+    EXPECT_EQ (env["on_apex"].value, "domain-wide")
+    << "the apex of the request's host is the same site";
+    // A sibling would carry the cookie on the wire, and is still not this
+    // request's site: the scope reads two hosts, not the cookie's reach.
+    EXPECT_EQ (env["other_sub"].value, "undefined");
+    EXPECT_EQ (warnings_of (result).size (), 1u);
+}
+
+TEST (CookieJarReadScope, AnotherRegistrableDomainAndALookalikeAreNotTheSite) {
+    CookieJar jar;
+    jar.store ("env_a",
+    { netscape_line ("a.test", "FALSE", "/", "FALSE",
+      std::to_string (FAR_FUTURE), "session", "from-a"),
+    netscape_line ("b.test", "FALSE", "/", "FALSE", std::to_string (FAR_FUTURE), "session", "from-b"),
+    netscape_line ("evila.test", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "session", "from-lookalike"),
+    netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+    std::to_string (FAR_FUTURE), "session", "from-ip") });
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://www.a.test/users",
+    "const jar = pm.cookies.jar();"
+    "pm.environment.set('other', String(jar.get('http://b.test/', 'session')));"
+    "pm.environment.set('lookalike', "
+    "  String(jar.get('http://evila.test/', 'session')));"
+    "pm.environment.set('ip', String(jar.get('http://127.0.0.1/', "
+    "'session')));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["other"].value, "undefined");
+    EXPECT_EQ (env["lookalike"].value, "undefined");
+    EXPECT_EQ (env["ip"].value, "undefined");
+    EXPECT_EQ (warnings_of (result).size (), 3u);
+}
+
+TEST (CookieJarReadScope, TheFlatReadHalfIsNotAffected) {
+    CookieJar jar;
+    store_two_sites (jar);
+    vayu::Environment env;
+
+    const auto result = run_jar_read (jar, "http://a.test/users",
+    "pm.environment.set('flat', String(pm.cookies.get('session')));"
+    "pm.environment.set('has', String(pm.cookies.has('session')));",
+    env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env["flat"].value, "from-a");
+    EXPECT_EQ (env["has"].value, "true");
+    EXPECT_TRUE (warnings_of (result).empty ());
+}
+
+TEST (CookieJarReadScope, WritesToAnotherSiteStayOpenAndAreNotWarnedAbout) {
+    // Decision 1 of #337: a write is scoped by the URL it names, not by the
+    // request. Only the read half is limited to the request's site.
+    CookieJar jar;
+    vayu::Environment env;
+
+    const std::string error = apply_after_script (jar, "env_a",
+    "pm.cookies.jar().set('http://b.test/', { name: 'planted', value: 'v' });",
+    "http://a.test/users", env);
+
+    EXPECT_TRUE (error.empty ()) << error;
+    const auto planted = jar.matching ("env_a", "http://b.test/");
+    ASSERT_EQ (planted.size (), 1u);
+    EXPECT_EQ (planted[0].name, "planted");
 }
 
 // ============================================================================

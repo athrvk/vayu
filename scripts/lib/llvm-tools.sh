@@ -8,6 +8,11 @@
 # (`scripts/pre-commit` for clang-format, `scripts/pre-push` for clang-tidy).
 # One copy, because two copies of this lookup drifted apart once already (#918).
 
+# The clang-tidy major CI lints with, which `scripts/install-clang-tidy.sh`
+# installs and the pre-push hook takes as its floor. One line, so the gate and
+# the hook cannot pin different majors.
+CLANG_TIDY_MAJOR=22
+
 # Add common Homebrew paths for LLVM on macOS to ensure clang-tidy and
 # clang-format are found - one LLVM install carries both.
 if [ -d "/opt/homebrew/opt/llvm/bin" ]; then

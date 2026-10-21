@@ -9,9 +9,9 @@
  * Data File Store
  *
  * Where a collection's data file lives on **this machine** - one
- * `{path, fileName, hash?}` per collection id, so the Run dialog can re-read the
- * file the user declared their contract from instead of asking for it every
- * time (issue #599).
+ * `{path, fileName, hash?, castNumbers?}` per collection id, so the Run dialog
+ * can re-read the file the user declared their contract from, the way they
+ * chose to read it, instead of asking for it every time (issue #599).
  *
  * Two things this store is deliberately not:
  *
@@ -25,9 +25,9 @@
  * - **It never holds rows.** A data file's rows are user data of unknown
  *   sensitivity and are persisted nowhere in Vayu - not here, not engine-side,
  *   not in a run snapshot (which records the row count, the file's name and its
- *   content hash). Only the path, the file's name and the hash of its bytes are
- *   stored, and `data-file-store.test.ts` asserts the persisted payload against
- *   that rule rather than trusting it.
+ *   content hash). Only the path, the file's name, the hash of its bytes and how
+ *   its values are read are stored, and `data-file-store.test.ts` asserts the
+ *   persisted payload against that rule rather than trusting it.
  */
 
 import { create } from "zustand";
@@ -47,6 +47,13 @@ export interface DataFileLocation {
 	 * remembered before hashes were recorded, until the next read.
 	 */
 	hash?: string;
+	/**
+	 * Read this CSV/TSV file's unquoted numbers as numbers (#2540), the
+	 * picker's "Read numbers as numbers". A fact about how *this* file is read,
+	 * so a pick of a file starts it off; absent means off. Every re-read of the
+	 * path parses with it, so the rows a run sends match the preview.
+	 */
+	castNumbers?: boolean;
 }
 
 interface DataFileState {
@@ -61,6 +68,13 @@ interface DataFileState {
 	 * file whose bytes changed changed for every collection remembering it.
 	 */
 	recordDataFileHash: (path: string, hash: string) => void;
+	/**
+	 * Remember whether `collectionId`'s file is read with numbers cast. Only
+	 * while the binding still names `path`: a toggle on a file the binding no
+	 * longer holds (its declare failed, or it had no path) must not re-describe
+	 * the file that is remembered.
+	 */
+	setDataFileCastNumbers: (collectionId: string, path: string, castNumbers: boolean) => void;
 }
 
 interface PersistedDataFiles {
@@ -95,7 +109,16 @@ function normalizeDataFiles(persisted: unknown): PersistedDataFiles {
 				typeof entry.hash === "string" && DATA_FILE_HASH_PATTERN.test(entry.hash)
 					? { hash: entry.hash }
 					: {};
-			locations[collectionId] = { path: entry.path, fileName: entry.fileName, ...hash };
+			// Anything but a boolean is dropped, which reads as off: the file's
+			// own text, the safe reading.
+			const castNumbers =
+				typeof entry.castNumbers === "boolean" ? { castNumbers: entry.castNumbers } : {};
+			locations[collectionId] = {
+				path: entry.path,
+				fileName: entry.fileName,
+				...hash,
+				...castNumbers,
+			};
 		}
 	}
 	return { locations };
@@ -131,6 +154,18 @@ export const useDataFileStore = create<DataFileState>()(
 						next[collectionId] = { ...location, hash };
 					}
 					return { locations: next };
+				}),
+			setDataFileCastNumbers: (collectionId, path, castNumbers) =>
+				set((state) => {
+					const location = state.locations[collectionId];
+					if (location?.path !== path || location.castNumbers === castNumbers)
+						return state;
+					return {
+						locations: {
+							...state.locations,
+							[collectionId]: { ...location, castNumbers },
+						},
+					};
 				}),
 		}),
 		{

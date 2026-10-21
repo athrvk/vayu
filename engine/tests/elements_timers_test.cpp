@@ -224,7 +224,7 @@ TEST (ApplyTimersOverrideTest, RangeModeIsReproducibleWithTheSameSeedAndStaysInB
     override_.min_ms = 100;
     override_.max_ms = 200;
 
-    // NOLINTBEGIN(cert-msc51-cpp) - deliberate: the test asserts two
+    // NOLINTBEGIN(bugprone-random-generator-seed) - deliberate: the test asserts two
     // identically-seeded generators draw identically, which needs a fixed,
     // known seed, not a random one.
     std::mt19937_64 rng_a{ 4242 };
@@ -237,7 +237,7 @@ TEST (ApplyTimersOverrideTest, RangeModeIsReproducibleWithTheSameSeedAndStaysInB
     << "two generators seeded identically must draw the same value";
 
     std::mt19937_64 rng{ 777 };
-    // NOLINTEND(cert-msc51-cpp)
+    // NOLINTEND(bugprone-random-generator-seed)
     for (int i = 0; i < 50; ++i) {
         const auto drawn = vayu::core::apply_timers_override (&override_, 0, &rng);
         ASSERT_HAS_VALUE (drawn);

@@ -95,6 +95,7 @@
             "dataRowCount": {"type": "number"},
             "dataFileName": {"type": "string"},
             "dataFileHash": {"type": "string"},
+            "dataFileCastNumbers": {"type": "boolean"},
             "carriedBudgets": {"$ref": "#/definitions/names"}
           }
         }
@@ -232,6 +233,7 @@
           "properties": {
             "count": {"type": "number"},
             "thresholdMs": {"type": "number"},
+            "tracesStored": {"type": "number"},
             "percentage": {"type": "number"}
           }
         },

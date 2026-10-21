@@ -61,6 +61,7 @@ json healthy_summary () {
         { "slow_traces_dropped", 0 }, { "response_samples_dropped", 0 },
         { "exemplars_dropped", 0 }, { "sample_bodies_dropped", 0 },
         { "response_bodies_captured", 0 }, { "response_sample_budget_spent", false } } },
+        { "slow_requests", { { "count", 12 }, { "thresholdMs", 500 } } },
         { "scenario",
         { { "iterations", 10 }, { "iterations_completed", 10 },
         { "steps_executed", 20 }, { "passed", 20 }, { "failed", 0 },
@@ -165,16 +166,17 @@ class RunExportSchemaTest : public ::testing::Test {
 
     void seed (const std::string& id, vayu::RunStatus status, const json& summary) {
         vayu::db::Run run;
-        run.id     = id;
-        run.type   = vayu::RunType::Load;
-        run.status = status;
-        run.config_snapshot = json{ { "url", "https://u:p@api.test/v1?api_key=k&page=2" },
-            { "method", "GET" }, { "headers", { { "Accept", "*/*" } } },
-            { "body", { { "mode", "none" } } }, { "auth", { { "mode", "none" } } },
-            { "requestName", "Orders" }, { "mode", "constant_rps" },
-            { "duration", "10s" }, { "concurrency", 5 }, { "rps", 10 },
-            { "dataRowCount", 2 }, { "dataFileName", "users.csv" } }
-                              .dump ();
+        run.id              = id;
+        run.type            = vayu::RunType::Load;
+        run.status          = status;
+        run.config_snapshot = json{
+            { "url", "https://u:p@api.test/v1?api_key=k&page=2" }, { "method", "GET" },
+            { "headers", { { "Accept", "*/*" } } }, { "body", { { "mode", "none" } } },
+            { "auth", { { "mode", "none" } } }, { "requestName", "Orders" },
+            { "mode", "constant_rps" }, { "duration", "10s" },
+            { "concurrency", 5 }, { "rps", 10 }, { "dataRowCount", 2 },
+            { "dataFileName", "users.csv" }, { "dataFileCastNumbers", true }
+        }.dump ();
         run.start_time = START_MS;
         run.end_time   = START_MS + 10000;
         db_->create_run (run);
@@ -226,8 +228,8 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     json document = expect_valid (json{ { "runId", "run_healthy" } });
     // Validating an absent section proves nothing about its shape.
     for (const char* section : { "summary", "latency", "statusCodes", "rateControl",
-         "errors", "timingBreakdown", "stream", "sampling", "warnings", "scenario",
-         "monitor", "testValidation", "capacity", "coverage", "schemaValidation",
+         "errors", "timingBreakdown", "stream", "slowRequests", "sampling", "warnings",
+         "scenario", "monitor", "testValidation", "capacity", "coverage", "schemaValidation",
          "lifecycle", "elements", "thresholdValidation", "customMetrics" }) {
         EXPECT_TRUE (document["report"].contains (section)) << section;
     }
@@ -235,6 +237,8 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (
     document["report"]["summary"].contains ("sendingDurationSeconds"));
     EXPECT_TRUE (document["report"]["rateControl"].contains ("requestsSent"));
+    // The allowlist has to name it, or the export drops the sample size (#2399).
+    EXPECT_TRUE (document["report"]["slowRequests"].contains ("tracesStored"));
     EXPECT_TRUE (
     document["report"]["rateControl"].contains ("requestsExpected"));
     EXPECT_FALSE (document["timeSeries"].empty ());

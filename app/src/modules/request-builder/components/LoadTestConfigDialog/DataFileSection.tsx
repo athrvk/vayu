@@ -51,6 +51,7 @@ export function DataFileSection({ dataFile, disabled }: DataFileSectionProps) {
 			<DataFilePicker
 				selected={dataFile.file}
 				onSelect={dataFile.select}
+				onCastNumbersChange={dataFile.changeReading}
 				// Only with a contract to clear: Remove on a collection that
 				// declares nothing has nothing to write.
 				onRemove={dataFile.clearContract}

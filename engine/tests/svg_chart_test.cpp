@@ -147,8 +147,8 @@ TEST (ChartEnvelopeTest, ASeriesWithinTheLimitIsDrawnWhole) {
 }
 
 TEST (ChartEnvelopeTest, NeverDrawsMoreThanTheLimitHoweverLongTheRun) {
-    for (const std::size_t count : { std::size_t (481), std::size_t (999),
-         std::size_t (7200), std::size_t (20000), std::size_t (100001) }) {
+    for (const std::size_t count : { std::size_t{ 481 }, std::size_t{ 999 },
+         std::size_t{ 7200 }, std::size_t{ 20000 }, std::size_t{ 100001 } }) {
         const auto points = per_second (count,
         [] (std::size_t at) { return std::sin (static_cast<double> (at)); });
         EXPECT_LE (chart_envelope (points).size (), MAX_CHART_POINTS) << count;

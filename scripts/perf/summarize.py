@@ -11,7 +11,7 @@ not run is the single most important thing a reader needs to see, and a summary
 that silently omits it looks like a measurement nobody took.
 
 Usage:
-    python scripts/perf/summarize.py --os ubuntu-latest \
+    python scripts/perf/summarize.py --os ubuntu-24.04 \
         --engine-json perf-engine.json --app-json perf-app.json
 """
 

@@ -45,6 +45,8 @@ export interface ScenarioSnapshot {
 	/** The data file that drove the run (issue #2051): name and content hash, never a path. */
 	dataFileName?: string;
 	dataFileHash?: string;
+	/** Whether the run read its numbers as numbers (issue #2540); absent with no file. */
+	dataFileCastNumbers?: boolean;
 	steps?: ScenarioSnapshotStep[];
 }
 
@@ -102,6 +104,7 @@ export function scenarioOfSnapshot(
 		iterations: num(block.iterations),
 		dataFileName: dataFile?.fileName,
 		dataFileHash: dataFile?.hash,
+		dataFileCastNumbers: dataFile?.castNumbers,
 		steps,
 	};
 }

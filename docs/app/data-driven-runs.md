@@ -33,12 +33,12 @@ a value becomes once it is bound.
 
 ## Supported files
 
-| Extension           | Format                           | Values arrive as |
-| ------------------- | -------------------------------- | ---------------- |
-| `.csv`              | Comma-separated, RFC 4180        | strings, always  |
-| `.tsv`, `.tab`      | Tab-separated, same grammar      | strings, always  |
-| `.json`             | An array of row objects          | their JSON types |
-| `.jsonl`, `.ndjson` | JSON Lines - one object per line | their JSON types |
+| Extension           | Format                           | Values arrive as                      |
+| ------------------- | -------------------------------- | ------------------------------------- |
+| `.csv`              | Comma-separated, RFC 4180        | strings, unless numbers are opted in  |
+| `.tsv`, `.tab`      | Tab-separated, same grammar      | strings, unless numbers are opted in  |
+| `.json`             | An array of row objects          | their JSON types                      |
+| `.jsonl`, `.ndjson` | JSON Lines - one object per line | their JSON types                      |
 
 There is no XLSX support and no headerless mode. A spreadsheet exports to CSV in
 one step, and a file whose first row is data would leave every column
@@ -79,10 +79,58 @@ for the full ladder.
 
 ## Values: strings from CSV, native types from JSON
 
-A CSV or TSV cell is always a string. `007` stays `007` and a 20-digit id
+A CSV or TSV cell is a string by default. `007` stays `007` and a 20-digit id
 survives, which is JMeter and k6 behaviour and the reason the preview says so.
 JSON and JSONL keep what the file declared - `3` is a number, `true` is a
 boolean, `null` is null.
+
+**Reading numbers as numbers is a per-file opt-in** (`castNumbers`, issue
+#2540). With it on, an _unquoted_ CSV or TSV cell that is a plain integer or
+decimal arrives as a number: `3`, `-2`, `+4` and `3.5` as themselves, and
+`007` as `7` and `1.50` as `1.5`, because dropping the padding is the point of
+asking. Everything else stays text:
+
+- a **quoted** cell, however numeric it looks - `"007"` stays `007`, which is
+  how one column of a file keeps its zeros while the rest become numbers;
+- `1e3`, `.5`, `5.`, a hex value, `NaN`, `Infinity`, an empty cell, and a cell
+  with spaces around it;
+- an integer outside the safe range (beyond 9007199254740991), so a 20-digit id
+  still survives, and a decimal that would not print back as the digits the
+  file holds (`0.1000000000000000055511151231257827`, or `0.0000001`, which a
+  number writes as `1e-7`).
+
+The header row is never cast. JSON and JSONL ignore the option, because the
+file already said what each value is. The preview notes which reading is in
+force.
+
+**Where to turn it on.** The **Read numbers as numbers** checkbox sits in the
+picker's preview card, under the file's name, wherever the picker appears: the
+Run collection dialog, the load test dialog and the collection's Data tab. It is
+shown only for a CSV or TSV file. Toggling it re-parses the same file in place -
+the preview, the iteration count and the rows the run sends all follow, and the
+file stays picked. The setting belongs to the collection's remembered file (its
+binding on this machine), so the next Run dialog, load dialog, Send-with-row
+and Data tab read the file the same way. Picking a file starts it off, because
+it describes how *that* file is read; Remove (or clearing the contract) forgets
+it with the file. A load test of a request in no collection has no binding, so
+the setting lasts for that run only.
+
+**The run records it too.** The setting rides the run beside the file's name and
+hash (`dataFileCastNumbers` on `POST /runs`), and the run's snapshot keeps it.
+The hash is of the file's bytes, so it cannot tell a file read as text from the
+same file read with numbers cast; the stored setting can. Wherever a past run
+names its file - the dashboard's config summary, History's Test config box and
+hover card, a collection run's header and context bar, a run tab's tooltip -
+the name is followed by "(numbers read as numbers)" when the run cast them, and
+comparing two runs of one file read both ways reports a data-file difference. A
+run recorded before the setting existed reads as text, which is how every such
+run was read. Running the collection again reads the file through its binding,
+so it casts the same way unless you change the checkbox.
+
+This is the integer and decimal subset of what Newman's `--csv-auto-parse`
+reads. Newman is looser: it also casts `1e3`, `.5` and padded cells, so a file
+that leans on those arrives as text here and as a number there. How the Postman
+desktop app's collection runner types CSV cells is not verified.
 
 A JSON or JSONL cell may also be an object or an array. It is bound as compact
 JSON, so `{{data.address}}` reads `{"city":"Pune"}`. A cell nested deeper than
@@ -91,9 +139,10 @@ JSON, so `{{data.address}}` reads `{"city":"Pune"}`. A cell nested deeper than
 run starts, and the engine applies the same limit to a caller that sends rows
 without the picker (a script or an MCP client).
 
-If you need a number to arrive as a number, use a JSON file - and write the
-token _outside_ the quotes in the body, `{"n": {{data.n}}}`, because that is
-what decides whether it arrives as `2` or `"2"`.
+If you need a number to arrive as a number, use a JSON file or turn on number
+reading for the CSV - and write the token _outside_ the quotes in the body,
+`{"n": {{data.n}}}`, because that is what decides whether it arrives as `2` or
+`"2"`.
 
 A `null` cell is a value `pm.iterationData` hands to a script and a value a
 `{{data.column}}` token **refuses** - see below.
@@ -152,7 +201,8 @@ The engine never opens a file. The app parses it and sends the rows inline on
 the run payload, because the script sandbox has no filesystem access by design
 and handing the daemon a user-supplied path would be a new trust boundary. The
 row set itself is never stored on either side - a run's snapshot records its
-count plus the file's name and content hash, never its path or a row - but a
+count plus the file's name, content hash and whether its numbers were read as
+numbers, never its path or a row - but a
 cell bound into a request travels with that request, and a run stores the
 requests it sent. See [What is stored](#what-is-stored).
 
@@ -199,7 +249,8 @@ A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as
 that text inside valid JSON rather than ending the string. A token written
 _outside_ a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
-a JSON file's number arrives as a number.
+a number arrives as a number: a JSON file's, or a CSV cell read as one. A cast
+`1.50` binds as `1.5` either way; inside quotes it is the text `"1.5"`.
 
 A cell is **safe in an XML body** too, and by a rule that reads the token's
 position rather than one that escapes everything:
@@ -425,7 +476,10 @@ run:
   file itself, the way you would; `hash` is the SHA-256 of the file's bytes as
   they are on disk when the agent asks (the digest the app last read when the
   file cannot be read), the same digest a run records, so an agent can tell
-  whether the file is still the one a past run used. A run's file name is a
+  whether the file is still the one a past run used. `castNumbers: true` on it
+  says the app reads the file with **Read numbers as numbers** on, so the agent
+  can type its rows the same way and say so on the run with
+  `dataFileCastNumbers: true`; absent, every cell is text. A run's file name is a
   name, never a path: one holding a `/` or `\` is refused. A collection that declares nothing has neither -
   the ancestor walk above is left to the reader, the same as it is for
   variables. The rows never go over MCP: Vayu does not read the file for the
@@ -528,7 +582,8 @@ from the declared path. Declaring a contract does not change this: what is saved
 with the collection is the _shape_ of the file - its column names, and its name
 for display - never a cell of it. A run's stored snapshot records the row count
 plus the file's name and content hash (the SHA-256 of its bytes, so two runs
-can be told apart by the file that drove them), never its path or a row. The
+can be told apart by the file that drove them) and, when it was on, **Read
+numbers as numbers**, never its path or a row. The
 count and the file's name are what a reader sees afterwards: the
 dashboard's header prints "N rows from users.csv" in its config summary, live
 from the launch config and then from the report, and History's Test config box

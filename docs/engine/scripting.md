@@ -2064,9 +2064,11 @@ Postman's jar object, whole - **`getAll`** is new, Postman's "dump the session"
 read: every cookie a request to that URL would carry, as an array, whole. It is
 exactly what `get(url, name)` matches, without a name to narrow it - the same
 domain/path/`Secure`/expiry rules, the same per-environment jar, and a cookie
-this script has already staged with `set` is included. Every method is
-**URL-scoped** - it takes the URL the cookie belongs to rather than assuming
-this request's (`clear`'s URL is optional; see below) - and each accepts an
+this script has already staged with `set` is included - though only for a URL
+inside the request's site (see
+[Reads are limited to the request's site](#reads-are-limited-to-the-requests-site)).
+Every method is **URL-scoped** - it takes the URL the cookie belongs to rather
+than assuming this request's (`clear`'s URL is optional; see below) - and each accepts an
 optional trailing callback, invoked inline the way
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest)'s is, since
 the work has already happened by the time it is called. What the callback
@@ -2156,6 +2158,46 @@ all for the whole-jar form.
 Load runs have no jar for writes; `jar()` and every method on it throw there
 under every load-run script, including a scenario's inline ones - only the
 flat reads above have the one per-user exception described above.
+
+#### Reads are limited to the request's site
+
+`get` and `getAll` answer only for a URL whose host is the request's own site or
+one this script has addressed through `pm.sendRequest`. The jar holds the
+sessions of every host the environment has talked to, so without the limit a
+script - an imported collection's, say - could name any host and read its
+session cookie out.
+
+"The same site" is RFC 6265's domain-match read in both directions: the hosts
+are equal, or one is a dot-boundary subdomain of the other, ignoring case and a
+trailing dot. For a request to `www.example.com`, `www.example.com` and
+`example.com` are in scope and so is `shop.www.example.com`; `api.example.com`
+(a sibling), `example.org` and `evilexample.com` are not. An IP address is in
+scope only as itself. A non-ASCII host is compared as its punycode name, the one
+the jar keys on.
+
+A host the script has called with `pm.sendRequest` joins the allowed set from
+the moment of the call, whether or not the transfer succeeded, so "log in
+through `pm.sendRequest`, then read the session it set" works. The set lasts
+one execution of one script.
+
+A read outside the allowed set does not throw. `get` answers `undefined` and
+`getAll` answers `[]`, through the callback as well, and the script's console
+gets one warning naming the host (never the full URL, which may carry a secret):
+
+```
+pm.cookies.jar().get read nothing for b.example: a jar read is limited to the request's own site (a.example) and to hosts this script has called through pm.sendRequest. See docs/engine/scripting.md.
+```
+
+**A redirect target is not seen.** Only the request's URL and the URLs given to
+`pm.sendRequest` are compared. A request to `a.example` that a server redirects
+to `b.example` does not put `b.example` in scope, so a script cannot read the
+redirect's cookies unless it called that host itself.
+
+**Writes are not limited this way.** `set`, `unset` and `clear` stay scoped by
+the URL they are given (decision 1 of #337), not by the request: a script may
+still write a cookie for another host. Only the read half is held to the site.
+The flat `pm.cookies` reads need no such rule - they only ever read the
+request's own URL.
 
 ## Flow control (`pm.execution`)
 
@@ -2306,7 +2348,8 @@ pm.iterationData.toObject();       // the whole row as a plain object
 `get` on a column the row does not carry returns `undefined`, as every other
 `pm` scope reader does. Values keep their JSON type: a JSON file's `3` arrives
 as a number, and a CSV column arrives as a string, because that is what the
-file said.
+file said - unless the file was picked with number reading on, which hands a
+script an unquoted integer or decimal cell as a number (#2540).
 
 **The row reaches a request through a different channel, with a different type
 story.** `pm.iterationData` hands a script the cell as the value it is - a
@@ -2399,7 +2442,8 @@ Rows are validated before the run row exists: a `data` that is present and empty
 a row that is not an object (the message names its index), or a set over
 `maxScenarioDataRows` is a `400`. Rows are never persisted - the run's snapshot
 records the row count (`dataRowCount`) plus the file's name and content hash
-(`dataFileName`, `dataFileHash`), never its path or rows.
+(`dataFileName`, `dataFileHash`) and how it was read (`dataFileCastNumbers`),
+never its path or rows.
 
 ## Console Output
 

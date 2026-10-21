@@ -1169,6 +1169,9 @@ struct DetailedReport {
     // Slow Requests
     size_t slow_requests_count;
     size_t slow_threshold_ms; // The threshold used (0 if not set)
+    // Stored traces marked slow: a sample of `slow_requests_count` once the
+    // run summary supplies the exact count (#2399), otherwise equal to it.
+    size_t slow_traces_stored = 0;
 
     // Phase 1: Rate Control Metrics
     double target_rps;      // Configured target RPS (0 if unlimited)

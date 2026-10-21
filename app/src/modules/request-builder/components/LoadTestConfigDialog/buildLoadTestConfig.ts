@@ -125,6 +125,7 @@ export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 		config.dataColumns = dataFile.parsed.columns;
 		config.dataFileName = runDataFileName(dataFile.fileName);
 		config.dataFileHash = dataFile.hash;
+		config.dataFileCastNumbers = dataFile.parsed.castNumbers;
 	}
 
 	// Streaming requests only. Always sent when the request streams, never

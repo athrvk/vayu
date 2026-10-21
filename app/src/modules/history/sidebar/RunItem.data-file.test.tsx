@@ -76,6 +76,20 @@ describe("the history row's data file", () => {
 		);
 		expect(card).toContain("Data fileusers.csv");
 		expect(card).not.toContain(HASH);
+		expect(card).not.toContain("numbers read as numbers");
+	});
+
+	// Mutation check: print `dataFile.fileName` bare again and this fails (#2540).
+	it("says when the run read the file's numbers as numbers", async () => {
+		const card = await openCard(
+			run({
+				url: "https://api.example.test",
+				method: "GET",
+				dataFileName: "plans.csv",
+				dataFileCastNumbers: true,
+			})
+		);
+		expect(card).toContain("Data fileplans.csv (numbers read as numbers)");
 	});
 
 	it("has no data file row for a run recorded without one", async () => {

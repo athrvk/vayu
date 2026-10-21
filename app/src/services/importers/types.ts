@@ -269,6 +269,14 @@ export interface SkippedItem {
 		 */
 		| "protocol_behavior_folder"
 		/**
+		 * A Postman request whose method is GET or HEAD and whose body is not empty,
+		 * with no `disableBodyPruning: true` in its resolved `protocolProfileBehavior`
+		 * (issue #2540). Postman drops that body before sending; Vayu keeps it and
+		 * sends it, so the request behaves differently until the body is cleared.
+		 * Named under `requests`. An unsupported verb (imported as GET) is not counted.
+		 */
+		| "body_on_get"
+		/**
 		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
 		 * failed the element registry - an unknown kind, a config the wrong shape -
 		 * once the document was hand-edited (issue #1518). Dropped and counted

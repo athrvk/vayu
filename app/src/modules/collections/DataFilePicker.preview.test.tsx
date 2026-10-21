@@ -39,9 +39,11 @@ function selection(count: number): SelectedDataFile {
 	return {
 		fileName: "orders.csv",
 		hash: "0".repeat(64),
+		text: "",
 		parsed: {
 			format: "csv",
 			columns,
+			castNumbers: false,
 			warnings: [],
 			rows: Array.from({ length: count }, (_, i) => ({
 				userId: `u_${i}`,
@@ -61,6 +63,7 @@ function renderWith(rows: number) {
 		<DataFilePicker
 			selected={selection(rows)}
 			onSelect={vi.fn()}
+			onCastNumbersChange={vi.fn()}
 			error={null}
 			onError={vi.fn()}
 			iterations={undefined}

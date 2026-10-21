@@ -176,7 +176,7 @@ const ScenarioPlan& plan);
 // below as a placeholder; nothing ever reads it unseeded, since
 // `derive_vu_rng` always overwrites it with the run's real seed before this
 // VU is used.
-// NOLINTNEXTLINE(cert-msc51-cpp)
+// NOLINTNEXTLINE(bugprone-random-generator-seed)
 struct VirtualUser {
     /**
      * This user's own number in the run, **1-based** and fixed for the run's

@@ -280,21 +280,24 @@ describe("deleting from the tree", () => {
 		 * taken back - and it cannot be read back afterwards, so the undo
 		 * carries it.
 		 */
-		useDataFileStore.setState({
-			locations: { root: { path: "/data/users.csv", fileName: "users.csv" } },
-		});
+		const remembered = {
+			path: "/data/users.csv",
+			fileName: "users.csv",
+			hash: "a".repeat(64),
+			castNumbers: true,
+		};
+		useDataFileStore.setState({ locations: { root: remembered } });
 		renderTree();
 		await askToDeleteCollection("Acme");
 		await waitFor(() => expect(deleteCollection).toHaveBeenCalled());
+		// What the real mutation's clearDataFile does; `@/queries` is mocked here.
+		useDataFileStore.getState().clearDataFile("root");
 
 		lastToast().action.onClick();
 
-		await waitFor(() =>
-			expect(useDataFileStore.getState().locations.root).toEqual({
-				path: "/data/users.csv",
-				fileName: "users.csv",
-			})
-		);
+		// The whole binding, not a field list: a copy that names fields drops
+		// how the file is read (#2540).
+		await waitFor(() => expect(useDataFileStore.getState().locations.root).toEqual(remembered));
 	});
 
 	it("gives the collection back its remembered spec file", async () => {

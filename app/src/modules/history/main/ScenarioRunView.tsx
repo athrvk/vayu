@@ -50,7 +50,7 @@ import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useStopRun } from "@/hooks/useStopRun";
 import { isRunInProgress } from "@/lib/run-status";
-import { dataFileNote } from "@/lib/run-data-file";
+import { dataFileDisplayName, dataFileNote } from "@/lib/run-data-file";
 import { formatNumber } from "@/lib/format-number";
 import { useDataFileStatus } from "@/hooks/useDataFileStatus";
 import { scenarioFromSnapshot } from "@/components/layout/context-bar/run-scenario";
@@ -303,7 +303,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{dataFileName && (
 					<span className="text-xs text-muted-foreground">
-						Data: {dataFileName}
+						Data: {dataFileDisplayName(dataFileName, manifest?.dataFileCastNumbers)}
 						{dataFileNote(dataFileStatus)}
 					</span>
 				)}

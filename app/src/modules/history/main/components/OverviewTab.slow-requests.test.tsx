@@ -13,10 +13,14 @@
  * The count behind the Samples tab's "Slow" chip, on the Overview of a finished
  * run: how many requests crossed the threshold, what it was, and their share.
  * Absent when none did, so a healthy run does not open with a card of zeros.
+ * The count is exact while the traces kept are a capped sample (#2399), so the
+ * footer must not claim every slow request can be opened.
  *
  * Mutation-check: drop `<SlowRequestsCard>` from `OverviewTab.tsx` and the first
  * case fails; remove the `count <= 0` guard in `SlowRequestsCard.tsx` and the
- * zero-count case fails.
+ * zero-count case fails; make `keptAsSamplesSentence` return the "Each is kept"
+ * sentence unconditionally and the capped and none-kept cases fail; drop its
+ * first guard and the uncapped case fails.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -69,7 +73,7 @@ function renderTab(report: RunReport) {
 
 describe("OverviewTab slow requests card", () => {
 	it("states the count, the threshold and the share of requests", () => {
-		renderTab(makeReport({ count: 12, thresholdMs: 500, percentage: 6.04 }));
+		renderTab(makeReport({ count: 12, thresholdMs: 500, tracesStored: 12, percentage: 6.04 }));
 
 		// The card title and the count's own label.
 		expect(screen.getAllByText("Slow requests")).toHaveLength(2);
@@ -78,8 +82,41 @@ describe("OverviewTab slow requests card", () => {
 		expect(screen.getByText("6.0%")).toBeInTheDocument();
 	});
 
+	it("states the exact count and how many were kept as samples when the store was capped", () => {
+		renderTab(makeReport({ count: 1_200, thresholdMs: 500, tracesStored: 100, percentage: 8 }));
+
+		expect(screen.getByText("1,200")).toBeInTheDocument();
+		expect(screen.getByText(/100 kept as samples on the Samples tab\./)).toBeInTheDocument();
+		expect(screen.queryByText(/Each is kept/)).toBeNull();
+	});
+
+	it("uses the singular when one sample was kept", () => {
+		renderTab(makeReport({ count: 3, thresholdMs: 500, tracesStored: 1, percentage: 1.5 }));
+
+		expect(screen.getByText(/1 kept as a sample on the Samples tab\./)).toBeInTheDocument();
+	});
+
+	it("adds no caveat when every slow request was kept", () => {
+		renderTab(makeReport({ count: 12, thresholdMs: 500, tracesStored: 12, percentage: 6.04 }));
+
+		expect(
+			screen.getByText(/Each is kept as a sample on the Samples tab\./)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/\d kept as /)).toBeNull();
+	});
+
+	it("says none were kept when slow requests were counted but no sample survived", () => {
+		renderTab(makeReport({ count: 12, thresholdMs: 500, tracesStored: 0, percentage: 6.04 }));
+
+		expect(screen.getByText("12")).toBeInTheDocument();
+		expect(
+			screen.getByText(/None were kept as samples on the Samples tab\./)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/Each is kept/)).toBeNull();
+	});
+
 	it("is absent when no request crossed the threshold", () => {
-		renderTab(makeReport({ count: 0, thresholdMs: 500, percentage: 0 }));
+		renderTab(makeReport({ count: 0, thresholdMs: 500, tracesStored: 0, percentage: 0 }));
 
 		expect(screen.queryByText("Slow requests")).toBeNull();
 	});

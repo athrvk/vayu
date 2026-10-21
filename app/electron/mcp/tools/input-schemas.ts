@@ -328,6 +328,19 @@ export const dataFileHashInput = z
 	);
 
 /**
+ * How the agent read that file (issue #2540): true when it typed the CSV/TSV
+ * file's unquoted numeric cells as numbers, the app's "Read numbers as
+ * numbers". The rows arrive as sent either way; the run only records it, so a
+ * later run can be told it read the same bytes differently.
+ */
+export const dataFileCastNumbersInput = z
+	.boolean()
+	.optional()
+	.describe(
+		"Whether the rows were read from the data file with its unquoted numeric cells typed as numbers (list_collections' `dataFile.castNumbers`), recorded on the run beside the file's name and hash. Vayu never converts the rows you send; this only says how you read them. Absent or false means every cell was read as text. Only beside data rows; sent alone, false included, it is refused."
+	);
+
+/**
  * Pass/fail budgets, declared once and forwarded verbatim by both
  * `run_collection` and `start_load_run` (issue #1564): the engine judges a
  * design-mode collection run against them exactly as it always has a load

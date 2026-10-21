@@ -50,7 +50,7 @@ on:
   # compiler binary, preset, `-DVAYU_WERROR`, include paths. cache-warm.yml
   # compiles the *release* configuration, which differs from the legs below on
   # three of four (no `-Werror`, `macos-prod-arm64` instead of `macos-prod`, no
-  # ubuntu-latest), so first pushes read nothing from it: 28 hits to 371 misses
+  # ubuntu-24.04), so first pushes read nothing from it: 28 hits to 371 misses
   # on both Linux legs and macOS in run 39181878500, a one-file change. Building
   # this same matrix on master is what makes the two sides agree by
   # construction - no second copy of the flags exists to drift.
@@ -82,7 +82,7 @@ jobs:
     # below read a pull request's file list. Skipped here, every job that needs
     # it is skipped too - except `engine`, whose condition admits a push.
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Both filters read the PR's file list from the API rather than cloning, so
     # this is all they need. Stated explicitly rather than inherited, since a
     # fork PR's token is read-only regardless and this job must work for those.
@@ -367,6 +367,8 @@ jobs:
               - 'scripts/check-linux-glibc.sh'
               - 'scripts/check-macos-min-version.sh'
               - '.github/actions/linux-release-toolchain/**'
+              # The clang-tidy the engine job's lint step installs.
+              - 'scripts/install-clang-tidy.sh'
               - '.github/workflows/pr-tests.yml'
               - '!*.md'
               - '!**/*.md'
@@ -472,7 +474,7 @@ jobs:
   # for what the compiler says about the same files three times.
   quality:
     name: App quality checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     # The second clause is the JavaScript outside `app/` (#1166): its lint runs
     # here, so an edit to one of those files has to be able to reach this job.
@@ -594,7 +596,7 @@ jobs:
         # cannot drift apart. Adding a third shard means changing this list
         # *and* the count `ci-gate` expects per platform - the coverage check
         # fails loudly if that is done by halves.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
         shard: [1/2, 2/2]
     # Roughly 4 minutes on the slowest runner; the ceiling is for a cold pnpm
     # store, not for the steady state.
@@ -693,14 +695,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-22.04, windows-latest, macos-latest]
+        os: [ubuntu-24.04, ubuntu-22.04, windows-latest, macos-latest]
         include:
           # VAYU_WERROR turns the GCC/Clang warning set into build errors, on
           # both legs that use it (issue #884) - a warning that only one
           # compiler emits is exactly the kind this gate exists to catch, so
           # gating Linux alone would leave Clang-only diagnostics unwatched.
           # Windows needs no flag: MSVC builds /WX unconditionally.
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
           # The Linux release's own configuration: the oldest supported Ubuntu
@@ -708,8 +710,8 @@ jobs:
           # toolchain). release.yml runs only on a tag, so without this leg a
           # change that breaks that compiler, or pulls a newer glibc symbol into
           # the engine, would first fail with the release half-published.
-          # ubuntu-latest stays alongside it: it is the current distribution,
-          # and the clang-tidy gate runs there.
+          # ubuntu-24.04 stays alongside it: the newest Ubuntu this repository
+          # has adopted, and the clang-tidy gate runs there.
           - os: ubuntu-22.04
             preset: linux-prod
             configureArgs: "['-DVAYU_BUILD_TESTS=ON', '-DVAYU_WERROR=ON']"
@@ -776,10 +778,10 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ github.workspace }}/.vcpkg-archives
-          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-${{ env.VCPKG_COMMIT }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-${{ hashFiles('engine/vcpkg.json') }}-
-            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-latest' }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-${{ hashFiles('engine/vcpkg.json') }}-
+            vcpkg-${{ runner.os }}-${{ matrix.os || 'ubuntu-24.04' }}-
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
@@ -847,7 +849,7 @@ jobs:
         run: ./scripts/check-macos-min-version.sh engine/build-release/vayu-engine
 
       # The Linux counterpart, on the leg built the way the release is. The
-      # ubuntu-latest leg links against a newer glibc by design and would fail
+      # ubuntu-24.04 leg links against a newer glibc by design and would fail
       # it, which is the point: only the release baseline has a floor to hold.
       - name: Verify engine glibc floor
         if: matrix.os == 'ubuntu-22.04'
@@ -868,6 +870,21 @@ jobs:
         working-directory: engine
         shell: bash
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --output-junit "$GITHUB_WORKSPACE/engine/test-results.xml" < /dev/null
+
+      # The Windows leg's clang-tidy is extracted from a 455 MB LLVM installer
+      # (`scripts/install-clang-tidy.sh`); the 73 MB it keeps is cached, so
+      # only the first run after the pin moves downloads it. The key is the
+      # script, which holds the version and the hash. Linux installs from apt
+      # and caches nothing.
+      - name: Restore clang-tidy (Windows)
+        if: >-
+          github.event_name == 'pull_request'
+          && runner.os == 'Windows'
+          && !contains(github.event.pull_request.labels.*.name, 'reformat-pr')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/clang-tidy
+          key: clang-tidy-windows-${{ hashFiles('scripts/install-clang-tidy.sh') }}
 
       # The clang-tidy gate (#885). It rides this job rather than standing up its
       # own because it needs `compile_commands.json` and a configured tree - a
@@ -937,19 +954,13 @@ jobs:
       # usage error and exits 1, so the directory that is meant to be exempt
       # would be the one that fails.
       #
-      # The two legs run different clang-tidy versions, and neither is a free
-      # choice. Linux pins 19 from apt, which is what CONTRIBUTING.md tells
-      # contributors to install, so a local run and this one answer the same.
-      # Windows takes the 20.1.8 its image already ships: chocolatey refuses to
-      # downgrade to 19 ("A newer version of llvm is already installed"), and
-      # using the image's copy costs no install time.
-      #
-      # 19 is the floor `engine/.clang-tidy` needs (`ExcludeHeaderFilterRegex`),
-      # and it is asserted below rather than trusted, because an image is a pin
-      # somebody else controls. The cost of the spread is that a finding on one
-      # leg alone may be a version difference rather than a platform one - worth
-      # knowing when you read a failure, and much cheaper than having no
-      # coverage of the per-OS branches at all.
+      # Both legs run the LLVM project's own clang-tidy 22, installed by
+      # `scripts/install-clang-tidy.sh` (apt.llvm.org on Linux, the attested
+      # release installer on Windows), so a finding on one leg alone is a
+      # platform difference, not a version one. 22 is also what the pre-push
+      # hook and CONTRIBUTING.md ask for, so a local run answers the same.
+      # The runner images' own LLVM is not used: it is whatever version the
+      # image ships (20.1.8 on Windows today) and moves when the image does.
       - name: Lint changed engine sources
         if: >-
           github.event_name == 'pull_request'
@@ -1037,41 +1048,15 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Installed here rather than in a step of its own so a pull request
-          # that changed no engine source pays for none of it. Both legs now
-          # name the binary and nothing else: `clang-tidy-diff.py` went with
-          # #1023, which was the last thing that needed a driver script and a
-          # Python beside it.
-          case "$RUNNER_OS" in
-            Linux)
-              sudo apt-get install -y --no-install-recommends clang-tidy-19
-              tidy=clang-tidy-19
-              ;;
-            Windows)
-              # Nothing to install: the image ships LLVM 20.1.8, and asking
-              # chocolatey for 19.1.1 failed outright rather than downgrading
-              # ("A newer version of llvm is already installed").
-              tidy="/c/Program Files/LLVM/bin/clang-tidy.exe"
-              ;;
-            *)
-              echo "::error::No clang-tidy 19 recipe for $RUNNER_OS"
-              exit 1
-              ;;
-          esac
+          # that changed no engine source pays for none of it. Both legs name
+          # the binary and nothing else: `clang-tidy-diff.py` went with #1023,
+          # which was the last thing that needed a driver script and a Python
+          # beside it. The script asserts the version it installed.
+          tidy="$(bash scripts/install-clang-tidy.sh)"
 
           # Named before anything depends on it: a clang-tidy that resolved to
           # the wrong place would otherwise surface as an unrelated shell error.
           "$tidy" --version
-
-          # The floor, asserted rather than assumed. Two of the three legs take
-          # whatever LLVM their runner image ships, so an image that rolled
-          # backwards would lint with a binary that cannot read
-          # `engine/.clang-tidy` at all - which is issue #659's silent empty
-          # scan arriving by a new route.
-          major="$("$tidy" --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p' | head -1)"
-          if [[ -z "$major" ]] || [[ "$major" -lt 19 ]]; then
-            echo "::error::clang-tidy ${major:-(version unreadable)} is below the 19 that engine/.clang-tidy requires"
-            exit 1
-          fi
 
           # clang-tidy replays the compile command, precompiled header and all -
           # and that PCH was written by the *build's* compiler, not by
@@ -1126,10 +1111,10 @@ jobs:
           # answers on both legs.
           #
           # `-Wno-unused-command-line-argument`: the MSVC compile database
-          # carries `/Zc:preprocessor`, which the image's clang-tidy 20.1.8
-          # does not consume in its clang-cl mode, and `WarningsAsErrors: '*'`
-          # makes that diagnostic fail every file before any check runs. The
-          # flag is a build-time one with no bearing on what is linted.
+          # carries `/Zc:preprocessor`, which clang-tidy does not consume in
+          # its clang-cl mode, and `WarningsAsErrors: '*'` makes that
+          # diagnostic fail every file before any check runs. The flag is a
+          # build-time one with no bearing on what is linted.
           printf '%s\0' "${changed[@]}" \
             | xargs -0 -n 1 -P "$(nproc)" \
                 "$tidy" -p engine/build-release --quiet --allow-no-checks \
@@ -1192,7 +1177,7 @@ jobs:
   # `DisableFormat: true` of its own besides.
   engine-format:
     name: Engine formatting
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.engine == 'true'
     permissions:
@@ -1268,7 +1253,7 @@ jobs:
         # its dry-run test exercises the real `codesign`/`xattr` call sites.
         # Windows is absent for the same reason it was absent before the split:
         # there is no shell to run it in.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     timeout-minutes: 10
 
     steps:
@@ -1328,7 +1313,7 @@ jobs:
   # the area filters above no longer route build.py edits into their matrices.
   build-script:
     name: Build script
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.build_script == 'true'
     permissions:
@@ -1363,7 +1348,7 @@ jobs:
   # looked at nothing is the one failure mode a lint gate cannot survive quietly.
   scripts:
     name: Script lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.scripts == 'true'
     permissions:
@@ -1418,6 +1403,33 @@ jobs:
             exit 1
           fi
           echo "${#refs[@]} action reference(s), all pinned"
+
+      # A runner label that moves is an image change no pull request asked for.
+      # `ubuntu-latest` moved from 24.04 to 26.04 over a month-long rollout
+      # (actions/runner-images#14748), during which each job landed on either
+      # image at random - new GCC, CMake and LLVM on some runs, not others,
+      # which is intermittent red CI by construction - and the vcpkg key, which
+      # names the label, would have shared one cache between two compilers.
+      # So every Linux job names its release, and moving to a new one is a pull
+      # request of its own (#2633 for 26.04). Comments may still say
+      # `ubuntu-latest`.
+      - name: Every Linux runner names its Ubuntu release
+        shell: bash
+        run: |
+          # Spelled in two halves so this step's own lines do not match it.
+          moving="ubuntu-""latest"
+          mapfile -t labels < <(grep -rEn "ubuntu-[0-9]+\.[0-9]+|${moving}" .github/workflows .github/actions | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#')
+          if [[ ${#labels[@]} -eq 0 ]]; then
+            echo "::error::No Ubuntu runner labels found - the scan is broken, not the tree"
+            exit 1
+          fi
+          bad=$(printf '%s\n' "${labels[@]}" | grep -E "${moving}" | grep -vE "#.*${moving}" || true)
+          if [[ -n "$bad" ]]; then
+            echo "::error::Name the Ubuntu release (ubuntu-24.04), not ${moving}:"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          echo "${#labels[@]} Ubuntu label line(s), none on ${moving}"
 
       # The two git hooks are named on their own because they carry no
       # extension; `engine/vendor/` is dropped because upstream's scripts are
@@ -1495,7 +1507,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # `changes` is a dependency as well as the work jobs, so a failure in the
     # filter cannot be read as "nothing to test". Without it, a broken `changes`
     # job skips everything, and "skipped" would pass this gate on a change
@@ -1533,7 +1545,7 @@ jobs:
           # The app matrix's platforms and its per-platform shard count. A
           # matrix that gains or loses either without this following it fails
           # below, rather than leaving part of the suite run nowhere.
-          platforms=(ubuntu-latest macos-latest windows-latest)
+          platforms=(ubuntu-24.04 macos-latest windows-latest)
           shards=2
           status=0
 

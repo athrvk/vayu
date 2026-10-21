@@ -154,6 +154,30 @@ describe("the remembered data file on the MCP surface (Part B)", () => {
 		expect(Object.keys((await listed(unhashed)) as object)).toEqual(["path", "fileName"]);
 	});
 
+	test("says the app reads the file's numbers as numbers only when it does (#2540)", async () => {
+		const listed = async (location: Record<string, unknown>) =>
+			(
+				parsed(
+					await dispatchTool(
+						"list_collections",
+						{},
+						ctxWith(
+							{ listCollections: vi.fn().mockResolvedValue([DECLARED]) },
+							{ dataFileLocation: () => location as typeof USERS_FILE }
+						)
+					)
+				) as Array<Record<string, unknown>>
+			)[0].dataFile;
+
+		// Mutation check: drop `castNumbers` from presentLocation and this fails.
+		expect(await listed({ ...USERS_FILE, castNumbers: true })).toEqual({
+			...USERS_FILE,
+			castNumbers: true,
+		});
+		// Off has one spelling, and it is absence.
+		expect(await listed({ ...USERS_FILE, castNumbers: false })).toEqual(USERS_FILE);
+	});
+
 	/*
 	 * The hash a list answers is the file's as it is at call time (#2051), so
 	 * an edit made after a run shows up without the app re-reading the file.

@@ -483,7 +483,11 @@ describe("thinned results", () => {
 });
 
 /** A collection run whose snapshot manifest names the data file that drove it (#2051). */
-function runWithDataFile(file: { dataFileName?: string; dataFileHash?: string }): Run {
+function runWithDataFile(file: {
+	dataFileName?: string;
+	dataFileHash?: string;
+	dataFileCastNumbers?: boolean;
+}): Run {
 	return { ...RUN, configSnapshot: { scenario: { collectionId: "col_1", ...file } } };
 }
 
@@ -500,6 +504,17 @@ describe("the data file the run was driven by", () => {
 		render(<ScenarioRunView run={runWithDataFile({ dataFileName: "users.csv" })} />);
 
 		expect(screen.getByText("Data: users.csv")).toBeTruthy();
+	});
+
+	// Mutation check: print `dataFileName` bare again and this fails (#2540).
+	it("says in the header when the run read the file's numbers as numbers", () => {
+		render(
+			<ScenarioRunView
+				run={runWithDataFile({ dataFileName: "plans.csv", dataFileCastNumbers: true })}
+			/>
+		);
+
+		expect(screen.getByText("Data: plans.csv (numbers read as numbers)")).toBeTruthy();
 	});
 
 	it("is silent for a run recorded before the field", () => {

@@ -20,6 +20,7 @@ import { useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronDown, Settings2 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { formatLatency, formatNumber, formatRate } from "@/lib/format-number";
+import { dataFileDisplayName } from "@/lib/run-data-file";
 import { CONCURRENCY_LABEL, loadTestTypeToLabel } from "@/constants/load-test-modes";
 import { HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -103,7 +104,9 @@ function detailEntries(config: RunConfiguration): ConfigEntry[] {
 		const rows = `${formatNumber(config.dataRowCount)} ${pluralize(config.dataRowCount, "row")}`;
 		entries.push({
 			label: "Data",
-			value: config.dataFileName ? `${rows} · ${config.dataFileName}` : rows,
+			value: config.dataFileName
+				? `${rows} · ${dataFileDisplayName(config.dataFileName, config.dataFileCastNumbers)}`
+				: rows,
 			mono: true,
 		});
 	}

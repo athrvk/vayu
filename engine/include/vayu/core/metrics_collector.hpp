@@ -557,6 +557,15 @@ class MetricsCollector {
     }
 
     /**
+     * @brief Every completion recorded as slow, whatever happened to its trace
+     *        (#2399). Exact where the slow store is a sample: `max_slow_results`
+     *        caps the traces kept, never this count.
+     */
+    [[nodiscard]] size_t slow_total () const {
+        return slow_total_.load (std::memory_order_relaxed);
+    }
+
+    /**
      * @brief Response samples dropped or displaced by the reservoir.
      *
      * Two budgets end a sample here and both count the same way, because both
@@ -1220,6 +1229,9 @@ class MetricsCollector {
     std::vector<ResultRecord> slow_results_;
     std::atomic<size_t> slow_seen_{ 0 };
     std::atomic<size_t> slow_dropped_{ 0 };
+    // Unlike slow_seen_, also counts completions an unlimited store or an
+    // empty trace never offered to the reservoir.
+    std::atomic<size_t> slow_total_{ 0 };
     // Per-status exemplars. Shares success_mutex_ with the two stores above:
     // the gate that fills it fires at most EXEMPLARS_PER_STATUS times per
     // status code for the whole run, so it contends with nothing.

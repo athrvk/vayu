@@ -3592,7 +3592,11 @@ server URL, a malformed section) has none. **`names`**, when present, names
 what the count dropped, never its value: `oauth2_unmapped_param`, whose
 `names` are the keys of the OAuth 2.0 request parameters a Postman parse did
 not carry, and `protocol_behavior_folder`, whose `names` are the folders or
-collection that declared a setting Vayu cannot apply.
+collection that declared a setting Vayu cannot apply. A Postman parse also
+counts `body_on_get` (#2540), named under `requests`: a GET or HEAD whose
+mapped body is not empty and whose resolved
+`protocolProfileBehavior.disableBodyPruning` is not boolean `true`, a body
+Postman drops before sending and Vayu sends. The parse maps the body as written.
 
 **`clientCertificates`** is present, and only ever non-empty, from a Postman
 parse (issue [#1656](https://github.com/athrvk/vayu/issues/1656)): a
@@ -4333,7 +4337,9 @@ answers. Its members:
   ramp the start level and ramp time too), `target_rps`, `duration` (only past
   a 2x ratio; an unfinished run's status is appended, `"3 s, stopped"`),
   `status`, `http_version` (`auto` differs from nothing), `data_file` (name and
-  the first 8 characters of its hash; none against one *is* a difference),
+  the first 8 characters of its hash, then `, numbers read as numbers` when
+  `dataFileCastNumbers` is set; none against one *is* a difference, and so is
+  one file read both ways, #2540, since the hash is of the bytes),
   `request` (method and URL with the query, fragment and userinfo cut),
   `compression` and `expect_continue` (#2516; `allowed` against `not allowed`,
   an absent key reading as `not allowed`). The two values are strings formatted
@@ -7265,6 +7271,7 @@ Start a load test run (Vayu Mode).
   "data": [],                // Optional data rows, one object per row - see below
   "dataFileName": "users.csv",  // Optional, only beside data: the file's display name - see below
   "dataFileHash": "<sha256>",   // Optional, only beside data: 64 lowercase hex chars - see below
+  "dataFileCastNumbers": true,  // Optional, only beside data: the file's numbers were read as numbers - see below
   "thresholds": {},          // Optional pass/fail budgets - see below
   "carriedBudgets": [],      // Optional, which of those budgets were carried over rather than set - see below
   "elements": {},            // Optional element-pipeline override, either run shape - see below
@@ -7404,9 +7411,21 @@ a `400` when sent without `data` (refused, not ignored). A
 top-level one beside a `scenario` block is a `400` naming its
 `scenario.dataFileName` / `scenario.dataFileHash` counterpart, as `data` is.
 
+**How the client read that file** (issue #2540) rides beside them as
+`dataFileCastNumbers`, a boolean: `true` when the client typed the file's
+unquoted numeric cells as numbers (the app's **Read numbers as numbers**). The
+rows arrive already typed and the engine never converts them; it records the
+flag because the hash is of the file's bytes and cannot tell two readings of one
+file apart. `null` is absent; any other non-boolean is a `400`
+`invalid_run_config`, any value (`false` included) without `data` is a `400`,
+and a top-level one beside a `scenario` block is a `400` naming
+`scenario.dataFileCastNumbers`, on the same rules as the two strings.
+
 The rows are **never persisted**: the stored run snapshot records the row count
 (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash` when they
-were sent, never its path or rows, exactly as a scenario manifest does. A cell
+were sent, and `dataFileCastNumbers: true` when the numbers were cast (absent,
+never `false`, otherwise, so a run recorded before the flag reads as text),
+never its path or rows, exactly as a scenario manifest does. A cell
 that *binds* travels in the request that carried it, so it is stored with
 whatever traces the run retains.
 
@@ -7836,7 +7855,8 @@ inside the block rather than through `mode` / `duration` / `iterations`:
     "iterations": 1,                // optional; defaults to the data row count, else 1
     "data": [ { "user": "a" } ],    // optional inline rows; see maxScenarioDataRows
     "dataFileName": "users.csv",    // optional, only beside data: the file's display name, never a path
-    "dataFileHash": "<sha256>"      // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
+    "dataFileHash": "<sha256>",     // optional, only beside data: SHA-256 of the file's bytes, 64 lowercase hex
+    "dataFileCastNumbers": true     // optional, only beside data: the file's numbers were read as numbers
   },
   "environmentId": "env_123",       // optional, and what {{variables}} resolve against
   "stopOnError": false              // optional, default false - see Outcomes under Scenario runs
@@ -7890,7 +7910,8 @@ as a smaller one:
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
 | `dataFileName` holding a `/` or `\` | A display name, never a path (issue #2051): a path would be stored and listed back to every reader of the run. Send the file's name alone. |
-| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
+| `dataFileCastNumbers` present and not a boolean, or sent without `data` (`false` included) | How the client read the file (issue #2540), stored beside its name and hash; on the same rules, so a value that is not an answer, or one describing rows the run never bound, is refused rather than recorded. `null` is absent. |
+| A `scenario` key other than `source`, `collectionId`, `recursive`, `data`, `dataFileName`, `dataFileHash`, `dataFileCastNumbers`, `iterations` | An unrecognised key used to change nothing and still answer `202` (issue #1503) - refused by name so a typo or a knob a future engine reads is never silently ignored. |
 
 A cycle in the `collections.parent_id` tree terminates the recursive walk rather
 than hanging it, exactly as the cascade delete in `DELETE /collections/:id` does.
@@ -7975,7 +7996,8 @@ iteration `i`, and the run's scripts read it as `pm.iterationData` -
 both given the explicit count wins and the index wraps. The rows reach the run's
 worker and nowhere else: they are not persisted, and the snapshot records the
 row count (`dataRowCount`) plus the file's `dataFileName` and `dataFileHash`
-when they were sent, never its path or rows. The full contract is in
+when they were sent, and `dataFileCastNumbers: true` when its numbers were read
+as numbers, never its path or rows. The full contract is in
 [scripting.md](scripting.md#data-rows-pmiterationdata).
 
 **`{{data.column}}` puts the row into the request itself.** `pm.iterationData`
@@ -8083,8 +8105,9 @@ Which columns a collection *expects* is a separate, declared thing - see
 rule; it is what lets the refusal above name the columns, and what the app
 checks a picked file against before the run.
 
-**What a cell renders as.** The CSV/TSV path produces only strings, so the first
-row is the ordinary case; a JSON or JSONL file may carry any type:
+**What a cell renders as.** The CSV/TSV path produces strings unless the file
+opted into number reading (#2540), so the first row is the ordinary case; a JSON
+or JSONL file may carry any type:
 
 | Cell | Substituted text |
 |------|------------------|
@@ -8576,7 +8599,7 @@ default, and whose message names the offending field and why the bound exists:
 | `max_response_samples` | `0`-`1000000` | Each retained sample holds a full response body, and the vector is reserved up front; a negative value casts to ~1.8e19. |
 | `max_response_sample_bytes` | `0`-`1073741824` | The whole-run budget for those bodies, held in memory for the run *and* its retention window. The count cap above bounds the store only for a target whose bodies are small - at 1 MiB each, 1000 samples is ~1 GB. `0` retains no sample that has a body. Defaults to the `maxResponseSampleBytes` setting. |
 | `max_success_results` | `0`-`1000000` | Each retained record holds a serialised timing breakdown, and the store is reserved up front. `0` means unlimited. |
-| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. |
+| `max_slow_results` | `0`-`1000000` | Same store, same reserve, separate budget. `0` means unlimited. It caps the slow traces kept, never the report's `slowRequests.count`, which counts every slow completion. |
 | `slow_threshold_ms` | `0`-`86400000` ms | `0` disables outlier capture; a negative threshold would mark **every** completion an outlier and fill the slow store with the whole run. |
 | `max_sample_body_bytes` | `0`-`104857600` | A captured body is copied on the completion callback, so the cap bounds hot-path work. `0` keeps headers and metadata and no body. Defaults to the `maxSampleBodyBytes` setting. |
 | `max_sample_bytes` | `0`-`1073741824` | The whole-run capture budget; every byte under it is held in memory until the run flushes. Defaults to the `maxSampleBytes` setting. |
@@ -8645,7 +8668,7 @@ independent budgets:
 | Budget | Filled by | Bounded by |
 |--------|-----------|------------|
 | Sampled timing traces | 1 in `success_sample_rate` completions, only while `save_timing_breakdown` is on | `max_success_results` |
-| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` |
+| Slow-request traces | any completion at or past `slow_threshold_ms`, **regardless** of `save_timing_breakdown` | `max_slow_results` (the traces only: the slow *count* is an aggregate counter) |
 | Response samples (post-run test scripts) | 1 in `response_sample_rate` completions | `max_response_samples`, **and** `max_response_sample_bytes` |
 | Per-status exemplars (captured responses) | the first three completions of each distinct status code **that no other budget already stored** | `max_exemplar_results` |
 
@@ -9520,12 +9543,12 @@ seconds.
 
 Every parameter composes with every other; each one left out is a wildcard.
 
-**`summary`** carries exactly these sixteen snapshot keys: `url`, `method`,
+**`summary`** carries exactly these seventeen snapshot keys: `url`, `method`,
 `mode`, `duration`, `concurrency`, `iterations`, `targetRps`,
 `startConcurrency`, `rampUpDuration`, `comment`, `followRedirects`,
-`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`, and
-`httpVersion`.
-The first fifteen are each **omitted** when absent from the snapshot (a
+`maxRedirects`, `requestName`, `dataFileName`, `dataFileHash`,
+`dataFileCastNumbers`, and `httpVersion`.
+The first sixteen are each **omitted** when absent from the snapshot (a
 malformed snapshot yields an empty `summary`, never a `500`); `httpVersion`
 alone is always present. `iterations` and `targetRps` (issue #2437) are what
 the run was sent, never a default the engine filled in: an iterations run's
@@ -9551,8 +9574,9 @@ renderer sends it from `execIdentity` (`execute-mapping.ts`), the same field
 script sandbox's `pm.info.requestName`. `dataFileName` and `dataFileHash`
 (issue #2051) name the file a single-request run's `data` rows came from, by
 display name and SHA-256 of its bytes (64 lowercase hex), never its path; a run
-sent without a file name has neither. Every run since issue #1488 adds a
-seventeenth, `acceptEncoding`: `true` when the run negotiated a compressed response
+sent without a file name has neither. `dataFileCastNumbers` (issue #2540) is
+`true` when that file's numbers were read as numbers, and absent otherwise.
+Every run since issue #1488 adds an eighteenth, `acceptEncoding`: `true` when the run negotiated a compressed response
 (`negotiateCompression` for a collection run, `loadNegotiateCompression` for a
 load run - see [Default request headers](#default-request-headers)), `false`
 when it did not, and **omitted**, not defaulted, for a run recorded before
@@ -9568,15 +9592,15 @@ lost it". Do not read `"auto"` on an old run as the protocol it used: a load
 run stored before 0.11.0 hardcoded `CURL_HTTP_VERSION_2TLS`, and every run
 before it went out as HTTP/1.1 regardless, because nghttp2 was not linked. The full snapshot stays available on
 `GET /runs/:runId`. That route does not build a `summary` row at all: it returns
-the full `configSnapshot`, which already holds every key above. The same sixteen
+the full `configSnapshot`, which already holds every key above. The same seventeen
 keys are on the row [PUT /runs/:runId/baseline](#put-runsrunidbaseline) answers
 with, since both are built by one function; that row carries no
 `resultSummary`.
 
 A **collection run** (`type: "scenario"`) carries none of the single-request
-keys above (`url` through `dataFileHash`): its work is a sequence, so there is no
+keys above (`url` through `dataFileCastNumbers`): its work is a sequence, so there is no
 single `url`, `method` or `mode` to report. Its row instead carries a
-eighteenth key, `scenario`, present on scenario runs only:
+nineteenth key, `scenario`, present on scenario runs only:
 
 ```json
 "scenario": {
@@ -9585,18 +9609,20 @@ eighteenth key, `scenario`, present on scenario runs only:
   "recursive": true,
   "stepCount": 12,
   "dataFileName": "users.csv",
-  "dataFileHash": "<sha256>"
+  "dataFileHash": "<sha256>",
+  "dataFileCastNumbers": true
 }
 ```
 
 `stepCount` is the length of the snapshot's step manifest, not the manifest
 itself - a row that shipped every step's name, method and URL would undo the
 reason `summary` exists. The manifest stays on `GET /runs/:runId`. Each of the
-six keys is omitted when the stored snapshot has no such key: `dataFileName` and
+seven keys is omitted when the stored snapshot has no such key: `dataFileName` and
 `dataFileHash` (issue #2051) are the data file a run's `scenario.data` came
-from, so a run sent without one has neither.
+from, so a run sent without one has neither, and `dataFileCastNumbers` (issue
+#2540) is present, as `true`, only when that file's numbers were read as numbers.
 
-**`hasWarnings`** (issue #1527) is `summary`'s nineteenth key, `true` on a run
+**`hasWarnings`** (issue #1527) is `summary`'s twentieth key, `true` on a run
 whose stored `summary.warnings` array (issue #1503) is non-empty and
 **omitted** otherwise - a run still in progress, one whose terminal write
 failed, or one that finished with nothing to say. Unlike the other keys
@@ -9876,7 +9902,8 @@ it is the one a client re-reads on a timer (a design or scenario run stores its 
 the status flips, and a client fetching once in that gap needs the trace, so those always read it): what only a trace can say takes the answer a run that stored no
 traces gets. No `results[]` row carries a `trace`, `errors.types` is `{}` and
 `errors.withDetails` is `0`, and `timingBreakdown` carries no phase averages (so it is absent
-unless the run recorded `phases`) and `slowRequests` is absent. The status distribution, latency
+unless the run recorded `phases`) and `slowRequests` is absent: with no trace read there is no
+threshold to report, and the exact count arrives with the summary. The status distribution, latency
 percentiles, `results[]` selection, `resultsStored` and `resultsCap` are what the same rows give
 a finished run.
 
@@ -10022,6 +10049,7 @@ named it.
       "dataRowCount": 2,
       "dataFileName": "users.csv",
       "dataFileHash": "<sha256>",
+      "dataFileCastNumbers": true,
       "carriedBudgets": ["latencyP99Ms"],
       "acceptEncoding": true,
       "expectContinue": false
@@ -10078,7 +10106,7 @@ named it.
       "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 6000 }
     }
   },
-  "slowRequests": { "count": 12, "thresholdMs": 1000, "percentage": 0.2 },
+  "slowRequests": { "count": 12, "thresholdMs": 1000, "tracesStored": 12, "percentage": 0.2 },
   "warnings": [
     { "code": "unresolved_tokens",
       "message": "12 requests sent with unresolved variables: token",
@@ -10182,6 +10210,18 @@ size_t>`, which nlohmann serialises that way. The app folds the pairs
 (`statusCodeEntries`). The stored summary, a live `metrics` frame and the
 document [`POST /export/run-report`](#post-exportrun-report) writes all spell
 the distribution as an object.
+
+**`slowRequests`** is present when the run set a `slow_threshold_ms` above `0`.
+`count` is every successful completion at or past `thresholdMs`, counted as it
+happened (issue #2399), and `percentage` is `count` over
+`summary.totalRequests` - a denominator that includes failed requests, although
+only a success is ever marked slow. `tracesStored` is how many of them the run
+kept a trace for: the slow store is a reservoir capped at `max_slow_results`, so
+past the cap `count - tracesStored` is what the reservoir dropped
+(`sampling.slowTracesDropped`). `count: 0` is a run that measured and found
+nothing slow. A run stored before issue #2399 has no exact count in its summary,
+so its `count` is the stored traces again (equal to `tracesStored`, and never
+past the cap), and the section is absent when none of its traces was slow.
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
@@ -10492,10 +10532,11 @@ and `rps` is read first (`targetRps` is the rate only when `rps` is absent,
 null or zero), as in `GET /runs`'s `summary`.
 `dataRowCount` is the size of the data set a run bound, and `dataFileName` /
 `dataFileHash` (issue #2051) the file it came from, by display name and
-SHA-256 of its bytes, never its path. A single-request run's are read off the
-snapshot's top level; a collection run's off its `scenario` manifest, so every
-report of a run that named a file carries them here, and a run that named none
-has neither key. `carriedBudgets` (issue #2195) is the list of `thresholds`
+SHA-256 of its bytes, never its path, with `dataFileCastNumbers: true` (issue
+#2540) when that file's numbers were read as numbers. A single-request run's
+are read off the snapshot's top level; a collection run's off its `scenario`
+manifest, so every report of a run that named a file carries them here, and a
+run that named none has no such key. `carriedBudgets` (issue #2195) is the list of `thresholds`
 keys the client sent as carried over from an earlier run rather than set for
 this one, echoed as sent and omitted when the run sent none (see
 [Carried-over budgets](#carried-over-budgets-carriedbudgets)); `GET /runs`'s
