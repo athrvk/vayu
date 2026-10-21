@@ -45,6 +45,7 @@ import {
 	Eyebrow,
 	ICON_MOTION,
 } from "@/components/ui";
+import { Callout } from "@/components/shared";
 import { systemNotify } from "@/services/notify";
 import type { SystemNotificationOutcome } from "@/types/electron";
 import { useClientSettingsStore, useToastStore } from "@/stores";
@@ -237,9 +238,9 @@ export default function NotificationsPanel() {
 						 * visible after the choice is made, not only while browsing.
 						 */}
 						{severity?.warn && (
-							<p className="enter-fade mt-3 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error-text">
+							<Callout severity="warning" className="enter-fade mt-3">
 								{severity.warn}
-							</p>
+							</Callout>
 						)}
 					</div>
 				</CardContent>
@@ -389,9 +390,9 @@ function SystemNotificationsCard() {
 					<p className="text-xs text-muted-foreground">{previewHint}</p>
 				</div>
 				{unavailableReason && (
-					<p className="enter-fade mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-status-warning-text">
+					<Callout severity="warning" className="enter-fade mt-3">
 						{unavailableReason}. Vayu will keep reporting these events as toasts.
-					</p>
+					</Callout>
 				)}
 			</CardContent>
 		</Card>

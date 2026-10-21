@@ -25,10 +25,10 @@
  * `test-validation.ts`), so this is the one place they reach the screen.
  */
 
-import { XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
+import { Callout } from "./Callout";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import type { RunReport } from "@/types/domain";
 
@@ -149,15 +149,11 @@ export function TestValidationSummary({
 						</p>
 						<div className="space-y-1.5">
 							{failures.map((failure, i) => (
-								<div
-									key={i}
-									className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
-								>
-									<XCircle className="size-icon text-status-error-text mt-0.5 shrink-0" />
-									<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
+								<Callout key={i} severity="blocking">
+									<pre className="font-mono whitespace-pre-wrap break-words">
 										{failure}
 									</pre>
-								</div>
+								</Callout>
 							))}
 						</div>
 						{/*

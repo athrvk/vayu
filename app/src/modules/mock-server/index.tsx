@@ -35,6 +35,7 @@ import {
 	EmptyState,
 	ErrorState,
 	ListSkeleton,
+	MethodBadge,
 	StatusCodeBadge,
 	TruncatedText,
 } from "@/components/shared";
@@ -219,9 +220,12 @@ export default function MockServerView() {
 									key={`${route.method} ${route.path} ${route.requestId}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
-										{route.method}
-									</span>
+									<MethodBadge
+										method={route.method}
+										variant="text"
+										size="sm"
+										className="w-[5ch]"
+									/>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
 										{route.path}
 									</TruncatedText>
@@ -263,9 +267,12 @@ export default function MockServerView() {
 									key={`${entry.at}-${entry.path}`}
 									className="flex items-center gap-2 py-1 text-xs"
 								>
-									<span className="w-12 shrink-0 font-mono text-label text-muted-foreground">
-										{entry.method}
-									</span>
+									<MethodBadge
+										method={entry.method}
+										variant="text"
+										size="sm"
+										className="w-[5ch]"
+									/>
 									<TruncatedText className="min-w-0 flex-1 font-mono">
 										{entry.path}
 									</TruncatedText>

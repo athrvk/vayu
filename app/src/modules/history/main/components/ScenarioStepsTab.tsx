@@ -30,11 +30,25 @@
 
 import { Fragment } from "react";
 import { AlertTriangle } from "lucide-react";
-import { Badge, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui";
-import { ElementTally, TruncatedText } from "@/components/shared";
+import {
+	Card,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
+import { ElementTally, MethodBadge, TruncatedText } from "@/components/shared";
 import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { RunScenarioStepStat } from "@/types";
+
+/** The columns after Step, each right-aligned over its figures. */
+const NUMERIC_COLUMNS = ["Executed", "Errors", "Tests", "p50", "p95", "p99", "Max"];
 
 export interface ScenarioStepsTabProps {
 	steps: RunScenarioStepStat[];
@@ -110,61 +124,39 @@ export default function ScenarioStepsTab({
 			</div>
 
 			{/* Wide content scrolls inside its own box rather than pushing the
-			    page sideways. */}
-			<div className="overflow-x-auto border rounded-md">
-				<table className="w-full text-sm">
+			    page sideways. A `Card`, because the table's `border-rule` rows
+			    read the surface the card declares. */}
+			<Card className="overflow-x-auto">
+				<Table>
 					<caption className="sr-only">
 						Per-step latency and counts for this load test
 					</caption>
-					<thead>
-						<tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
-							<th scope="col" className="px-3 py-2 font-medium">
-								Step
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								Executed
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								Errors
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								Tests
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								p50
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								p95
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								p99
-							</th>
-							<th scope="col" className="px-3 py-2 font-medium text-right">
-								Max
-							</th>
-						</tr>
-					</thead>
-					<tbody>
+					<TableHeader>
+						<TableRow>
+							<TableHead scope="col">Step</TableHead>
+							{NUMERIC_COLUMNS.map((head) => (
+								<TableHead key={head} scope="col" className="text-right">
+									{head}
+								</TableHead>
+							))}
+						</TableRow>
+					</TableHeader>
+					<TableBody>
 						{steps.map((step) => (
 							<Fragment key={step.index}>
-								<tr className="border-b last:border-b-0">
-									<th scope="row" className="px-3 py-2 font-normal text-left">
+								<TableRow>
+									<TableHead scope="row" className="font-normal text-foreground">
 										<div className="flex items-center gap-2 min-w-0">
 											<span className="text-xs text-muted-foreground font-mono shrink-0">
 												{step.index + 1}
 											</span>
-											<Badge
-												variant="outline"
-												className="font-mono text-micro shrink-0"
-											>
-												{step.method}
-											</Badge>
+											<MethodBadge method={step.method} />
 											<TruncatedText className="text-foreground min-w-0">
 												{step.name || step.requestId}
 											</TruncatedText>
 										</div>
-									</th>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableHead>
+									<TableCell className="text-right font-mono">
 										{formatNumber(step.executed)}
 										{/* A step the sequence reached fewer times than the
 										    first one did is the visible shape of an earlier
@@ -180,17 +172,17 @@ export default function ScenarioStepsTab({
 												short)
 											</span>
 										)}
-									</td>
-									<td
+									</TableCell>
+									<TableCell
 										className={
 											step.errors > 0
-												? "px-3 py-2 text-right font-mono text-status-error-text"
-												: "px-3 py-2 text-right font-mono text-muted-foreground"
+												? "text-right font-mono text-status-error-text"
+												: "text-right font-mono text-muted-foreground"
 										}
 									>
 										<ErrorsCell step={step} />
-									</td>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableCell>
+									<TableCell className="text-right font-mono">
 										{step.tests ? (
 											<span
 												title={`${formatNumber(
@@ -219,39 +211,39 @@ export default function ScenarioStepsTab({
 												-
 											</span>
 										)}
-									</td>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableCell>
+									<TableCell className="text-right font-mono">
 										{formatLatency(step.latency.p50)}
-									</td>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableCell>
+									<TableCell className="text-right font-mono">
 										{formatLatency(step.latency.p95)}
-									</td>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableCell>
+									<TableCell className="text-right font-mono">
 										{formatLatency(step.latency.p99)}
-									</td>
-									<td className="px-3 py-2 text-right font-mono">
+									</TableCell>
+									<TableCell className="text-right font-mono">
 										{formatLatency(step.latency.max)}
-									</td>
-								</tr>
+									</TableCell>
+								</TableRow>
 								{/* One row per non-script element this step compiled and
 								    ran - extractors, assertions, timers - tallied across
 								    every virtual user and iteration the way the Tests
 								    column already is for scripts (issue #1516). */}
 								{step.elements?.map((element) => (
-									<tr
+									<TableRow
 										key={`${step.index}-${element.id}`}
-										className="border-b last:border-b-0 bg-muted/20"
+										className="bg-muted/20"
 									>
-										<td colSpan={8} className="px-3 py-1.5 pl-9">
+										<TableCell colSpan={8} className="py-1.5 pl-9">
 											<ElementTally element={element} className="text-xs" />
-										</td>
-									</tr>
+										</TableCell>
+									</TableRow>
 								))}
 							</Fragment>
 						))}
-					</tbody>
-				</table>
-			</div>
+					</TableBody>
+				</Table>
+			</Card>
 		</div>
 	);
 }

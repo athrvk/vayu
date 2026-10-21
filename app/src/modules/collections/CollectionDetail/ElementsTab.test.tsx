@@ -221,13 +221,9 @@ describe("ElementsTab - what it renders", () => {
 		renderTab(makeCollection([extractElement("e1")]));
 
 		// "before and after every request" is inside a <strong>, so the sentence
-		// is split across elements - matched on the wrapping paragraph's text.
-		const banner = screen.getByText(
-			(_, el) =>
-				el?.tagName === "P" &&
-				/run\s+before and after every request/i.test(el.textContent ?? "")
-		);
-		expect(banner).toBeInTheDocument();
+		// is split across elements - matched on the banner box's text.
+		const banner = screen.getByText("before and after every request").closest(".border");
+		expect(banner).toHaveTextContent(/run\s+before and after every request/i);
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
 	});
 

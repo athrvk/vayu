@@ -13,7 +13,7 @@
  * success sample expands to exactly what it did before.
  */
 
-import { XCircle } from "lucide-react";
+import { Callout } from "@/components/shared";
 import type { RunResultTrace } from "@/types";
 
 export function SampleTraceDetails({ trace }: { trace: RunResultTrace | undefined }) {
@@ -53,15 +53,11 @@ export function SampleTraceDetails({ trace }: { trace: RunResultTrace | undefine
 					</p>
 					<div className="space-y-1.5">
 						{trace.failures.map((failure, i) => (
-							<div
-								key={i}
-								className="flex items-start gap-2 bg-status-error/10 border border-status-error/20 rounded-md p-2"
-							>
-								<XCircle className="size-icon text-status-error-text mt-0.5 shrink-0" />
-								<pre className="text-xs text-status-error-text font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
+							<Callout key={i} severity="blocking">
+								<pre className="font-mono whitespace-pre-wrap break-words">
 									{failure}
 								</pre>
-							</div>
+							</Callout>
 						))}
 					</div>
 				</div>

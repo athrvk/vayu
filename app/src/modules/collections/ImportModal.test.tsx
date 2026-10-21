@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -134,6 +134,32 @@ describe("ImportModal", () => {
 		expect(screen.getByText(/Sample API/)).toBeInTheDocument();
 		expect(screen.getByText(/2 requests/)).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /^Import/i })).toBeInTheDocument();
+	});
+
+	// The detected-format band is a positive info Callout (#2317), with its
+	// Dismiss in the action slot. Mutation check: restore the hand-written
+	// `border-status-success/20` box and the class assertions fail.
+	it("draws the detected-format band as a positive info Callout with a Dismiss", async () => {
+		stubParse(() =>
+			result({
+				collections: [collection({ name: "Sample API", requests: [request()] })],
+			})
+		);
+		renderModal();
+		selectTab(/^Paste$/i);
+		fireEvent.change(screen.getByPlaceholderText(/Paste/i), { target: { value: postman } });
+		fireEvent.click(screen.getByRole("button", { name: /Detect and preview/i }));
+		await waitFor(() =>
+			expect(screen.getByText(/Postman Collection v2.1/i)).toBeInTheDocument()
+		);
+
+		const box = screen.getByText(/Postman Collection v2.1/i).closest(".border");
+		expect(box).toHaveClass("border-border", "bg-panel");
+		expect(box?.className).not.toMatch(/status-success/);
+		expect(box?.querySelector("svg.text-status-success-text")).not.toBeNull();
+
+		fireEvent.click(within(box as HTMLElement).getByRole("button", { name: "Dismiss" }));
+		expect(screen.queryByText(/Postman Collection v2.1/i)).toBeNull();
 	});
 
 	/**

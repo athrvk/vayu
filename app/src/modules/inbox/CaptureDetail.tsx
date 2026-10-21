@@ -17,7 +17,12 @@
 
 import { Inbox } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { CopyForAgentButton, EmptyState, UnifiedResponseViewer } from "@/components/shared";
+import {
+	CopyForAgentButton,
+	EmptyState,
+	MethodBadge,
+	UnifiedResponseViewer,
+} from "@/components/shared";
 import { buildRawRequest } from "@/components/shared/response-viewer/utils";
 import { captureReference } from "@/lib/agent-reference";
 import type { InboxCapture } from "@/types";
@@ -44,9 +49,7 @@ export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
 			<div className="flex flex-wrap items-center gap-2">
-				<Badge variant="outline" className="font-mono">
-					{capture.method}
-				</Badge>
+				<MethodBadge method={capture.method} variant="badge" size="md" />
 				<span className="font-mono text-xs text-muted-foreground break-all">{url}</span>
 				<CopyForAgentButton
 					reference={captureReference(capture)}

@@ -10,7 +10,6 @@
  */
 
 import type { ReactNode } from "react";
-import { Info } from "lucide-react";
 import { Callout } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { Card } from "@/components/ui/card";
@@ -74,15 +73,9 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function InfoBanner({ children }: { children: React.ReactNode }) {
 	return (
-		<div className="flex items-start gap-2 p-2.5 px-3 rounded-md mb-5 bg-primary/10 border border-primary/30">
-			{/*
-			 * `size-icon`, not `size-icon-sm`: matches `Callout.tsx`'s leading-icon
-			 * size, which is what actually centers on a `text-xs leading-relaxed`
-			 * line at `mt-px`.
-			 */}
-			<Info className="size-icon text-primary shrink-0 mt-px" />
-			<p className="text-xs text-foreground leading-relaxed m-0">{children}</p>
-		</div>
+		<Callout severity="info" className="mb-5">
+			{children}
+		</Callout>
 	);
 }
 

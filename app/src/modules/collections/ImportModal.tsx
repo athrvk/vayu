@@ -1259,24 +1259,28 @@ function PreviewView({
 	const carriedOver = describeCarriedOver([result]);
 	return (
 		<div className="space-y-3">
-			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="size-icon text-status-success-text" />
-				<span className="text-xs font-semibold">{meta.format}</span>
+			<Callout
+				severity="info"
+				positive
+				title={meta.format}
+				action={
+					<Button
+						size="icon"
+						variant="ghost"
+						className="-my-1"
+						onClick={onDismiss}
+						aria-label="Dismiss"
+					>
+						<X className="size-icon-sm" />
+					</Button>
+				}
+			>
 				{meta.fileName && (
 					<span className="font-mono text-label text-muted-foreground">
 						{meta.fileName}
 					</span>
 				)}
-				<Button
-					size="icon"
-					variant="ghost"
-					className="ml-auto -my-1"
-					onClick={onDismiss}
-					aria-label="Dismiss"
-				>
-					<X className="size-icon-sm" />
-				</Button>
-			</div>
+			</Callout>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{collections.map((c, i) => (
 					<TreeNode key={i} collection={c} />
@@ -1363,22 +1367,26 @@ function BatchLedger({
 	const selected = applicableEntries(entries).length;
 	return (
 		<div className="space-y-3">
-			<div className="flex items-center gap-2 rounded-md border border-status-success/20 bg-status-success/10 px-3 py-2">
-				<CheckCircle2 className="size-icon text-status-success-text" />
-				<span className="text-xs font-semibold">{entries.length} files</span>
+			<Callout
+				severity="info"
+				positive
+				title={`${entries.length} files`}
+				action={
+					<Button
+						size="icon"
+						variant="ghost"
+						className="-my-1"
+						onClick={onDismiss}
+						aria-label="Dismiss"
+					>
+						<X className="size-icon-sm" />
+					</Button>
+				}
+			>
 				<span className="text-label text-muted-foreground">
 					{selected} selected for import
 				</span>
-				<Button
-					size="icon"
-					variant="ghost"
-					className="ml-auto -my-1"
-					onClick={onDismiss}
-					aria-label="Dismiss"
-				>
-					<X className="size-icon-sm" />
-				</Button>
-			</div>
+			</Callout>
 			<div className="max-h-[190px] overflow-y-auto rounded-md border border-rule surface-sunken p-2">
 				{entries.map((entry) => (
 					<BatchRow key={entry.id} entry={entry} onToggle={onToggle} />

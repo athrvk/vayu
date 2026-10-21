@@ -259,4 +259,32 @@ describe("MockServerView", () => {
 		render(<MockServerView />);
 		expect(screen.getByText("Routes (0)")).toBeInTheDocument();
 	});
+
+	/**
+	 * Both lists draw the method through `MethodBadge` (#2317). The inline
+	 * `color` and the `title` are what a private span with a fixed column lacked.
+	 */
+	describe("the method column", () => {
+		beforeEach(() => {
+			vi.mocked(useMockServerRoutesQuery).mockReturnValue({
+				data: [{ ...ROUTE, method: "DELETE" }],
+				isError: false,
+			} as ReturnType<typeof useMockServerRoutesQuery>);
+			vi.mocked(useMockActivityQuery).mockReturnValue({
+				data: [{ ...ENTRY, method: "DELETE" }],
+				isError: false,
+			} as ReturnType<typeof useMockActivityQuery>);
+		});
+
+		it.each(["Routes (1)", "Activity"])(
+			"in the %s list is the coloured, abbreviated MethodBadge",
+			(heading) => {
+				render(<MockServerView />);
+				const section = within(screen.getByText(heading).closest("section")!);
+				const badge = section.getByText("DEL");
+				expect(badge).toHaveAttribute("title", "DELETE");
+				expect(badge.style.color).toContain("--method-delete");
+			}
+		);
+	});
 });
