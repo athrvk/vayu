@@ -23,6 +23,8 @@ describe("API_ENDPOINTS canonical routes", () => {
 	});
 
 	it("uses the /runs/:id family for run resources", () => {
+		// `DELETE` on the collection path clears the history (#2429); a per-run
+		// path here would delete one run and keep none of the baselines' promise.
 		expect(API_ENDPOINTS.RUNS).toBe("/runs");
 		expect(API_ENDPOINTS.RUN_BY_ID("r1")).toBe("/runs/r1");
 		expect(API_ENDPOINTS.RUN_REPORT("r1")).toBe("/runs/r1/report");

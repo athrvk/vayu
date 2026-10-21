@@ -422,6 +422,7 @@ Key endpoints:
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
+| DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |

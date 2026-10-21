@@ -1072,8 +1072,12 @@ apiService.deleteRun(id): Promise<void>
 takes as long as the stop does, and it **rejects with a 409** if the run's worker
 has not finished writing in time - nothing is deleted in that case. Callers must
 handle that rejection: `HistoryList` turns it into a toast telling the user to
-retry, and Settings' *Clear run history* already counts per-run failures through
-`Promise.allSettled`. The wording of that toast is the caller's, keyed off
+retry. Settings' *Clear run history* does not loop over it: `apiService.clearRuns()`
+is one `DELETE /runs`, answering `{ deleted, keptPinned, deletedIds }`, and the
+engine's pass keeps what retention keeps - a pinned baseline and a run still
+running or pending (#2429). A rejection is one failure toast and no tab is closed;
+the list is re-read either way, since batches the engine committed before failing
+are real. Naming a run through `deleteRun` still deletes it pinned. The wording of that toast is the caller's, keyed off
 `statusCode`, rather than the engine's message - which is a caller's choice now
 that `httpClient` reads the message on every error shape (issue #173), not a
 constraint.

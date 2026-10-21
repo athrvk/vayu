@@ -1029,6 +1029,18 @@ export interface GetRunResponse {
 
 export type GetRunReportResponse = RunReport;
 
+/**
+ * `DELETE /runs`: the clear-history verdict. `deletedIds` is what a client
+ * closes tabs for; `deleted` is its length. `keptPinned` counts the baselines
+ * still stored afterwards, and a run kept for being in flight is in neither
+ * number.
+ */
+export interface ClearRunsResponse {
+	deleted: number;
+	keptPinned: number;
+	deletedIds: string[];
+}
+
 export interface StopRunResponse {
 	runId: string;
 	status: string;

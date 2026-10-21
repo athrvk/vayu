@@ -176,7 +176,7 @@ size_t Database::sweep_orphaned_spec_documents () {
 
         // 3. And which does a retained run still name? Last, because it is the
         //    expensive read: `config_snapshot` is wide and there are up to
-        //    `maxRunsRetained` of them.
+        //    `maxRunsRetained` plus `maxDesignRunsRetained` of them.
         std::unordered_set<std::string> pinned;
         for (const auto& snapshot : impl_->storage.select (&Run::config_snapshot)) {
             auto spec_id = spec_id_at (snapshot, { "scenario", "openapi" });

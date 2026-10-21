@@ -44,7 +44,7 @@ import { StartAtLoginCard } from "./StartAtLoginCard";
 import { CookiesCard } from "./CookiesCard";
 import { WorkspaceBackupCard } from "./WorkspaceBackupCard";
 import { useSettingsStore } from "@/modules/settings/settings-store";
-import type { EngineSettingsCategory } from "@/types";
+import type { EngineSettingsCategory, Run } from "@/types";
 
 /** Where the retention knobs the runs on this card obey actually live. */
 const RETENTION_CATEGORY: EngineSettingsCategory = "data_retention";
@@ -56,6 +56,56 @@ const DATA_MANAGEMENT = appSetting("data-management");
 const STORAGE_PATHS = appSetting("storage-paths");
 const RESET = appSetting("reset-app-settings");
 const SAVE_DELAY_LABEL = "Save delay";
+
+/**
+ * What `DELETE /runs` will do with the stored runs, read ahead of the call so
+ * the dialog and the button say only what is true. The engine keeps a pinned
+ * baseline and a run still running or pending (#2429); the engine's own pass
+ * has the last word, since either can change between this read and the call.
+ */
+function planClear(runs: readonly Run[]) {
+	const pinned = runs.filter((r) => r.baseline).length;
+	const inFlight = runs.filter(
+		(r) => !r.baseline && (r.status === "running" || r.status === "pending")
+	).length;
+	return { pinned, inFlight, clearable: runs.length - pinned - inFlight };
+}
+
+type ClearPlan = ReturnType<typeof planClear>;
+
+/** Why Clear run history is unavailable, or `false` when it is not. */
+function clearBlockedReason(stored: number, plan: ClearPlan, clearing: boolean) {
+	if (clearing) return "Clearing the run history";
+	if (stored === 0) return "No stored runs to clear";
+	return plan.clearable === 0 && "Only pinned baselines and runs in progress are stored";
+}
+
+function clearDescription({ pinned, inFlight, clearable }: ClearPlan): string {
+	const keptSentences = [
+		pinned > 0 &&
+			pickByCount(pinned, {
+				one: "One pinned baseline is kept.",
+				other: `${pinned} pinned baselines are kept.`,
+			}),
+		inFlight > 0 &&
+			pickByCount(inFlight, {
+				one: "One run still in progress is kept.",
+				other: `${inFlight} runs still in progress are kept.`,
+			}),
+	].filter(Boolean);
+	// "All" is true only when nothing is spared.
+	const removed =
+		keptSentences.length === 0
+			? pickByCount(clearable, {
+					one: "The one stored run and its metrics are removed permanently.",
+					other: `All ${clearable} stored runs and their metrics are removed permanently.`,
+				})
+			: pickByCount(clearable, {
+					one: "One stored run and its metrics are removed permanently.",
+					other: `${clearable} stored runs and their metrics are removed permanently.`,
+				});
+	return [removed, ...keptSentences, "This can't be undone."].join(" ");
+}
 
 interface AppPaths {
 	appDir: string;
@@ -76,6 +126,7 @@ export default function GeneralPanel() {
 	const invalidateRuns = useInvalidateRuns();
 	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
 	const showToast = useToastStore((s) => s.showToast);
+	const plan = planClear(runs);
 	const [clearing, setClearing] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [confirmReset, setConfirmReset] = useState(false);
@@ -99,26 +150,26 @@ export default function GeneralPanel() {
 	 */
 	const clearHistory = async () => {
 		setConfirmClear(false);
-		if (runs.length === 0) return;
+		if (plan.clearable === 0) return;
 		setClearing(true);
 		try {
-			const results = await Promise.allSettled(runs.map((r) => apiService.deleteRun(r.id)));
-			const failed = results.filter((r) => r.status === "rejected").length;
-			// Close the tab of every run that actually went away - by index, so a
-			// run the engine refused (a 409 while it is still stopping) keeps its
-			// tab. Without this the tabs persist and rehydrate as dead panes.
-			closeTabsForEntities(
-				runs.filter((_, i) => results[i].status === "fulfilled").map((r) => r.id),
-				"run"
-			);
-			invalidateRuns();
+			const { deletedIds } = await apiService.clearRuns();
+			// Only the tabs of runs the engine says went: tabs persist, so one left
+			// open for a deleted run rehydrates as a dead pane, and one closed for a
+			// kept baseline would hide a run that is still there.
+			closeTabsForEntities(deletedIds, "run");
+			showToast("Run history cleared", "success");
+		} catch (error) {
 			showToast(
-				failed === 0
-					? "Run history cleared"
-					: `Couldn't delete ${failed} of ${runs.length} ${pluralize(runs.length, "run")}`,
-				failed === 0 ? "success" : "error"
+				error instanceof Error
+					? `Couldn't clear the run history - ${error.message}`
+					: "Couldn't clear the run history",
+				"error"
 			);
 		} finally {
+			// A failure can still land after some batches were committed, so the
+			// list is re-read either way.
+			invalidateRuns();
 			setClearing(false);
 		}
 	};
@@ -210,18 +261,12 @@ export default function GeneralPanel() {
 								? "No stored runs."
 								: `${runs.length} stored ${pluralize(runs.length, "run")}.`}
 						</p>
-						<DisabledHint
-							reason={
-								clearing
-									? "Clearing the run history"
-									: runs.length === 0 && "No stored runs to clear"
-							}
-						>
+						<DisabledHint reason={clearBlockedReason(runs.length, plan, clearing)}>
 							<Button
 								variant="outline"
 								size="sm"
 								onClick={() => setConfirmClear(true)}
-								disabled={runs.length === 0 || clearing}
+								disabled={plan.clearable === 0 || clearing}
 								className="text-destructive-text hover:bg-destructive-text/10 hover:text-destructive-text"
 							>
 								{clearing ? (
@@ -363,10 +408,7 @@ export default function GeneralPanel() {
 				onOpenChange={setConfirmClear}
 				title="Clear run history?"
 				confirmLabel="Clear history"
-				description={`${pickByCount(runs.length, {
-					one: "The one stored run and its metrics are removed permanently.",
-					other: `All ${runs.length} stored runs and their metrics are removed permanently.`,
-				})} This can't be undone.`}
+				description={clearDescription(plan)}
 				onConfirm={clearHistory}
 				isDeleting={clearing}
 			/>
