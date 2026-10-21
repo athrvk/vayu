@@ -42,6 +42,7 @@ function selection(count: number): SelectedDataFile {
 		parsed: {
 			format: "csv",
 			columns,
+			castNumbers: false,
 			warnings: [],
 			rows: Array.from({ length: count }, (_, i) => ({
 				userId: `u_${i}`,
