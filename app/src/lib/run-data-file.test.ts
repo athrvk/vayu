@@ -189,7 +189,6 @@ describe("dataFileNote", () => {
 	it("says something only for a changed, a re-read or a missing file", () => {
 		expect(dataFileNote("changed")).toBe(` ${DATA_FILE_CHANGED_NOTE}`);
 		expect(dataFileNote("readingChanged")).toBe(" (number reading changed since this run)");
-		expect(dataFileNote("readingChanged")).toBe(` ${DATA_FILE_READING_CHANGED_NOTE}`);
 		expect(dataFileNote("missing")).toBe(` ${DATA_FILE_MISSING_NOTE}`);
 		expect(dataFileNote("unchanged")).toBe("");
 		expect(dataFileNote("unknown")).toBe("");
