@@ -33,12 +33,12 @@ a value becomes once it is bound.
 
 ## Supported files
 
-| Extension           | Format                           | Values arrive as |
-| ------------------- | -------------------------------- | ---------------- |
-| `.csv`              | Comma-separated, RFC 4180        | strings, always  |
-| `.tsv`, `.tab`      | Tab-separated, same grammar      | strings, always  |
-| `.json`             | An array of row objects          | their JSON types |
-| `.jsonl`, `.ndjson` | JSON Lines - one object per line | their JSON types |
+| Extension           | Format                           | Values arrive as                      |
+| ------------------- | -------------------------------- | ------------------------------------- |
+| `.csv`              | Comma-separated, RFC 4180        | strings, unless numbers are opted in  |
+| `.tsv`, `.tab`      | Tab-separated, same grammar      | strings, unless numbers are opted in  |
+| `.json`             | An array of row objects          | their JSON types                      |
+| `.jsonl`, `.ndjson` | JSON Lines - one object per line | their JSON types                      |
 
 There is no XLSX support and no headerless mode. A spreadsheet exports to CSV in
 one step, and a file whose first row is data would leave every column
@@ -79,10 +79,34 @@ for the full ladder.
 
 ## Values: strings from CSV, native types from JSON
 
-A CSV or TSV cell is always a string. `007` stays `007` and a 20-digit id
+A CSV or TSV cell is a string by default. `007` stays `007` and a 20-digit id
 survives, which is JMeter and k6 behaviour and the reason the preview says so.
 JSON and JSONL keep what the file declared - `3` is a number, `true` is a
 boolean, `null` is null.
+
+**Reading numbers as numbers is a per-file opt-in** (`castNumbers`, issue
+#2540). With it on, an _unquoted_ CSV or TSV cell that is a plain integer or
+decimal arrives as a number: `3`, `-2`, `+4` and `3.5` as themselves, and
+`007` as `7` and `1.50` as `1.5`, because dropping the padding is the point of
+asking. Everything else stays text:
+
+- a **quoted** cell, however numeric it looks - `"007"` stays `007`, which is
+  how one column of a file keeps its zeros while the rest become numbers;
+- `1e3`, `.5`, `5.`, a hex value, `NaN`, `Infinity`, an empty cell, and a cell
+  with spaces around it;
+- an integer outside the safe range (beyond 9007199254740991), so a 20-digit id
+  still survives, and a decimal that would not print back as the digits the
+  file holds (`0.1000000000000000055511151231257827`, or `0.0000001`, which a
+  number writes as `1e-7`).
+
+The header row is never cast. JSON and JSONL ignore the option, because the
+file already said what each value is. The preview notes which reading is in
+force.
+
+This is the integer and decimal subset of what Newman's `--csv-auto-parse`
+reads. Newman is looser: it also casts `1e3`, `.5` and padded cells, so a file
+that leans on those arrives as text here and as a number there. How the Postman
+desktop app's collection runner types CSV cells is not verified.
 
 A JSON or JSONL cell may also be an object or an array. It is bound as compact
 JSON, so `{{data.address}}` reads `{"city":"Pune"}`. A cell nested deeper than
@@ -91,9 +115,10 @@ JSON, so `{{data.address}}` reads `{"city":"Pune"}`. A cell nested deeper than
 run starts, and the engine applies the same limit to a caller that sends rows
 without the picker (a script or an MCP client).
 
-If you need a number to arrive as a number, use a JSON file - and write the
-token _outside_ the quotes in the body, `{"n": {{data.n}}}`, because that is
-what decides whether it arrives as `2` or `"2"`.
+If you need a number to arrive as a number, use a JSON file or turn on number
+reading for the CSV - and write the token _outside_ the quotes in the body,
+`{"n": {{data.n}}}`, because that is what decides whether it arrives as `2` or
+`"2"`.
 
 A `null` cell is a value `pm.iterationData` hands to a script and a value a
 `{{data.column}}` token **refuses** - see below.
@@ -199,7 +224,8 @@ A cell carrying quotes, backslashes or newlines is **safe in a JSON body**: a
 token inside a string literal is escaped as it binds, so `say "hi"` arrives as
 that text inside valid JSON rather than ending the string. A token written
 _outside_ a string literal - `{"n": {{data.n}}}` - is not escaped, which is how
-a JSON file's number arrives as a number.
+a number arrives as a number: a JSON file's, or a CSV cell read as one. A cast
+`1.50` binds as `1.5` either way; inside quotes it is the text `"1.5"`.
 
 A cell is **safe in an XML body** too, and by a rule that reads the token's
 position rather than one that escapes everything:

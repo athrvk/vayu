@@ -2306,7 +2306,8 @@ pm.iterationData.toObject();       // the whole row as a plain object
 `get` on a column the row does not carry returns `undefined`, as every other
 `pm` scope reader does. Values keep their JSON type: a JSON file's `3` arrives
 as a number, and a CSV column arrives as a string, because that is what the
-file said.
+file said - unless the file was picked with number reading on, which hands a
+script an unquoted integer or decimal cell as a number (#2540).
 
 **The row reaches a request through a different channel, with a different type
 story.** `pm.iterationData` hands a script the cell as the value it is - a

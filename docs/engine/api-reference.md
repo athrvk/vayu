@@ -8061,8 +8061,9 @@ Which columns a collection *expects* is a separate, declared thing - see
 rule; it is what lets the refusal above name the columns, and what the app
 checks a picked file against before the run.
 
-**What a cell renders as.** The CSV/TSV path produces only strings, so the first
-row is the ordinary case; a JSON or JSONL file may carry any type:
+**What a cell renders as.** The CSV/TSV path produces strings unless the file
+opted into number reading (#2540), so the first row is the ordinary case; a JSON
+or JSONL file may carry any type:
 
 | Cell | Substituted text |
 |------|------------------|
