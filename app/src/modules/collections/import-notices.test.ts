@@ -15,7 +15,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
-import type { CollectionDraft, ImportMeta, RequestDraft } from "@/services/importers/types";
+import type {
+	CollectionDraft,
+	ImportMeta,
+	RequestDraft,
+	SkippedItem,
+} from "@/services/importers/types";
 import {
 	bodiesWithoutFileNotice,
 	describeCarriedOver,
@@ -414,6 +419,39 @@ describe("importNotices - a Postman OAuth 2.0 block (#2536)", () => {
 		expect(text(4)).toBe(
 			"4 OAuth 2.0 request parameters not imported - Vayu sets some itself and cannot place the rest"
 		);
+	});
+});
+
+describe("importNotices - a Postman script Vayu cannot import (#2541)", () => {
+	const reason = "(loaded from a URL, or on an event Vayu has no phase for)";
+	const notice = (item: Partial<SkippedItem>) =>
+		importNotices(meta({ skipped: [{ kind: "script_unsupported", count: 1, ...item }] }))[0];
+
+	it("names the one owner and says what to do, as something to finish", () => {
+		expect(notice({ requests: ["Login"] })).toEqual({
+			tier: "action",
+			text: `Login: script not imported ${reason} - add it as a pre-request or test script`,
+		});
+	});
+
+	it("counts scripts when the engine named no owner", () => {
+		expect(notice({}).text).toBe(
+			`1 script not imported ${reason} - add it as a pre-request or test script`
+		);
+		expect(notice({ count: 4 }).text).toBe(
+			`4 scripts not imported ${reason} - add them as pre-request or test scripts`
+		);
+	});
+
+	it("counts the owners as items, never requests: a folder or the collection can declare one", () => {
+		const { text } = notice({
+			count: 5,
+			requests: ["Login", "Auth", "Pets", "Shop", "My collection"],
+		});
+		expect(text).toBe(
+			`5 items: script not imported ${reason} - add it as a pre-request or test script - Login, Auth, Pets, +2 more`
+		);
+		expect(text).not.toContain("requests:");
 	});
 });
 
