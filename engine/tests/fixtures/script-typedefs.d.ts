@@ -896,6 +896,8 @@ declare const pm: {
 		/**
 		 * Postman's cookie jar object - the write half, plus two URL-scoped reads. get(url, name), getAll(url), set(url, cookie), unset(url, name) and clear(url) all take the URL the cookie belongs to rather than assuming this request's; clear() with no URL empties this environment's jar.
 		 * 
+		 * get and getAll answer only for this request's own site and for hosts this script has called through pm.sendRequest; any other URL gives undefined or [] and a console warning. Writes are not limited this way.
+		 * 
 		 * A write is applied after the transfer it was made before, so the request that follows carries it and the jar keeps it.
 		 * 
 		 * Example:
@@ -907,11 +909,11 @@ declare const pm: {
 			 */
 			clear(url?: string, callback?: Function): void;
 			/**
-			 * The value of a stored cookie that would be sent to that URL, or undefined. Same matching as pm.cookies.get, against the URL you pass instead of this request's; a cookie this script has just set is included. The value is returned and also handed to the optional callback as (null, value).
+			 * The value of a stored cookie that would be sent to that URL, or undefined. Same matching as pm.cookies.get, against the URL you pass instead of this request's; a cookie this script has just set is included. Limited to this request's site and the hosts this script has called through pm.sendRequest: any other URL answers undefined and logs a console warning. The value is returned and also handed to the optional callback as (null, value).
 			 */
 			get(url: string, name: string, callback?: Function): string | undefined;
 			/**
-			 * Every stored cookie that would be sent to that URL, whole - the same matching get() makes, without a name to narrow it, and cookies this script has just set are included. Each carries { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. The array is returned and also handed to the optional callback as (null, cookies).
+			 * Every stored cookie that would be sent to that URL, whole - the same matching get() makes, without a name to narrow it, and cookies this script has just set are included. Each carries { name, key, value, domain, path, secure, httpOnly, hostOnly, session, expires }. Limited to this request's site and the hosts this script has called through pm.sendRequest: any other URL answers [] and logs a console warning. The array is returned and also handed to the optional callback as (null, cookies).
 			 * 
 			 * Example:
 			 * const jar = pm.cookies.jar();

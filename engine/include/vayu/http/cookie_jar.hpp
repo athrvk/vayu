@@ -148,6 +148,33 @@ bool secure_transport,
 int64_t now_seconds);
 
 /**
+ * @brief Do @p a and @p b name the same site, by RFC 6265 §5.1.3's domain-match
+ *        read in both directions?
+ *
+ * True when the hosts are equal or one is a dot-boundary subdomain of the
+ * other, ASCII case-insensitively and ignoring one trailing dot:
+ * `www.example.com` and `example.com` are related, `evilexample.com` and
+ * `example.com` are not, and neither are two siblings (`a.example.com`,
+ * `b.example.com`). An IP literal (bracketed IPv6, dotted IPv4) is related to
+ * itself only - §5.1.3 never lets an address match by suffix. Hosts are the
+ * punycode names `cookie_scope_host` answers, since that is what a jar keys on.
+ * An empty host is related to nothing.
+ *
+ * This asks about two hosts, not "would this cookie be sent": the script
+ * surface uses it to decide which URLs a jar read may name.
+ */
+[[nodiscard]] bool hosts_domain_related (std::string_view a, std::string_view b);
+
+/**
+ * @brief The host a jar operation scopes @p url to - the one `matching_in`
+ *        matches cookies against - or `nullopt` when libcurl reads no host and
+ *        path out of it (see `url_can_scope_cookies`).
+ *
+ * Punycode for a non-ASCII host, case as typed, an IPv6 literal in brackets.
+ */
+[[nodiscard]] std::optional<std::string> cookie_scope_host (const std::string& url);
+
+/**
  * @brief Write one cookie back as a Netscape line - the inverse of
  *        `parse_cookie_line`, and the only place a line is built.
  *

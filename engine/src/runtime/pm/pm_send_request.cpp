@@ -25,6 +25,7 @@
 #include "vayu/core/url_encoding.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/loopback_guard.hpp"
@@ -848,6 +849,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // Counted before the send, so a request that fails still spends budget -
     // otherwise a loop against a refusing host would never reach the cap.
     data->send_request_count++;
+    if (auto host = vayu::http::cookie_scope_host (request.url)) {
+        data->addressed_hosts.push_back (std::move (*host));
+    }
 
     // Shares the enclosing execute's jar - see ScriptContext::cookie_jar for
     // why sharing rather than isolating is the right default. Null jar (a load

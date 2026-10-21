@@ -1758,7 +1758,10 @@ nlohmann::json get_script_completions () {
     "get(url, name), getAll(url), set(url, cookie), unset(url, name) and "
     "clear(url) all "
     "take the URL the cookie belongs to rather than assuming this request's; "
-    "clear() with no URL empties this environment's jar.\n\nA "
+    "clear() with no URL empties this environment's jar.\n\nget and getAll "
+    "answer only for this request's own site and for hosts this script has "
+    "called through pm.sendRequest; any other URL gives undefined or [] and "
+    "a console warning. Writes are not limited this way.\n\nA "
     "write is applied after the transfer it was made before, so the request "
     "that follows carries it and the jar keeps it.\n\nExample:\n"
     "pm.cookies.jar().set(pm.request.url, { name: 'session', value: token "
@@ -1773,8 +1776,10 @@ nlohmann::json get_script_completions () {
     "The value of a stored cookie that would be sent to that URL, or "
     "undefined. Same matching as pm.cookies.get, against the URL you pass "
     "instead of this request's; a cookie this script has just set is "
-    "included. The value is returned and also handed to the optional "
-    "callback as (null, value)." },
+    "included. Limited to this request's site and the hosts this script has "
+    "called through pm.sendRequest: any other URL answers undefined and logs "
+    "a console warning. The value is returned and also handed to the "
+    "optional callback as (null, value)." },
     { "sortText", "1_pm_cookies_jar_get" } });
 
     completions.push_back ({ { "label", "pm.cookies.jar().getAll" }, { "kind", KIND_FUNCTION },
@@ -1785,10 +1790,13 @@ nlohmann::json get_script_completions () {
     "Every stored cookie that would be sent to that URL, whole - the same "
     "matching get() makes, without a name to narrow it, and cookies this "
     "script has just set are included. Each carries { name, key, value, "
-    "domain, path, secure, httpOnly, hostOnly, session, expires }. The array "
-    "is returned and also handed to the optional callback as (null, "
-    "cookies).\n\nExample:\nconst jar = pm.cookies.jar();\nfor (const c of "
-    "jar.getAll(pm.request.url)) console.log(c.name, c.path);" },
+    "domain, path, secure, httpOnly, hostOnly, session, expires }. Limited "
+    "to this request's site and the hosts this script has called through "
+    "pm.sendRequest: any other URL answers [] and logs a console warning. "
+    "The array is returned and also handed to the optional callback as "
+    "(null, cookies).\n\nExample:\nconst jar = pm.cookies.jar();\n"
+    "for (const c of jar.getAll(pm.request.url)) console.log(c.name, "
+    "c.path);" },
     { "sortText", "1_pm_cookies_jar_get_all" } });
 
     completions.push_back ({ { "label", "pm.cookies.jar().set" }, { "kind", KIND_FUNCTION },
