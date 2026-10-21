@@ -36,7 +36,7 @@ vi.mock("@/modules/dashboard/components/charts/uplot", () => {
 
 const HistoricalChartsSection = (await import("./HistoricalChartsSection")).default;
 
-const INSUFFICIENT = /Insufficient data points/;
+const INSUFFICIENT = /Not enough data for charts yet/;
 
 function ticks(n: number): LoadTestMetrics[] {
 	return Array.from({ length: n }, (_, i) => ({
@@ -75,6 +75,9 @@ describe("HistoricalChartsSection, fetch failure", () => {
 		render(<HistoricalChartsSection data={ticks(1)} />);
 
 		expect(screen.getByText(INSUFFICIENT)).toBeTruthy();
+		expect(screen.getByText("Charts need at least 2 seconds of data.")).toBeTruthy();
+		// The shared EmptyState, not a bare line of text.
+		expect(document.querySelector('[data-slot="empty-state"]')).not.toBeNull();
 		expect(screen.queryByText("Couldn't load the time-series data")).toBeNull();
 	});
 
@@ -87,7 +90,8 @@ describe("HistoricalChartsSection, fetch failure", () => {
 			/>
 		);
 
-		expect(screen.getByText(/Loading time-series data/)).toBeTruthy();
+		// A labelled skeleton, not a spinner card with a sentence.
+		expect(screen.getByRole("status", { name: "Loading time-series data" })).toBeTruthy();
 		expect(screen.queryByText("Couldn't load the time-series data")).toBeNull();
 	});
 

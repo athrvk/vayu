@@ -33,13 +33,19 @@
  */
 
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, Loader2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Trash2 } from "lucide-react";
+import {
+	Callout,
+	CopyForAgentButton,
+	DetailSkeleton,
+	EmptyState,
+	ErrorState,
+} from "@/components/shared";
 import { ResponseBody, StatusCodeBadge } from "@/components/shared/response-viewer";
 import {
 	Badge,
 	Button,
 	DeleteConfirmDialog,
-	IconSwap,
 	Select,
 	SelectContent,
 	SelectItem,
@@ -55,9 +61,9 @@ import {
 	useRequestQuery,
 	useUpdateRequestMutation,
 } from "@/queries";
-import { useCopy } from "@/hooks/useCopy";
 import { exampleReference } from "@/lib/agent-reference";
 import { collectionNamePath } from "@/modules/collections/tree-utils";
+import { useImportModalStore } from "@/stores";
 import { useRequestBuilderContext } from "../../../context";
 import type { MockResponseMode, Request, RequestExample } from "@/types";
 import { Eyebrow } from "@/components/ui/eyebrow";
@@ -92,7 +98,6 @@ function ExampleRow({
 	deleting: boolean;
 }) {
 	const [open, setOpen] = useState(false);
-	const { copy, copied } = useCopy({ feedback: "icon" });
 	const Chevron = open ? ChevronDown : ChevronRight;
 
 	return (
@@ -160,26 +165,14 @@ function ExampleRow({
 					)}
 				</button>
 				{reference !== null && (
-					<Button
-						size="icon"
-						variant="ghost"
-						onClick={() => void copy(reference, "Reference")}
-						aria-label={`Copy example ${example.name} for agent`}
-						title="Copy for agent"
-						className="shrink-0"
-					>
-						<IconSwap
-							state={copied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" />,
-								copied: <Check className="size-icon-sm text-status-success-text" />,
-							}}
-						/>
-					</Button>
+					<CopyForAgentButton
+						reference={reference}
+						label={`Copy example ${example.name} for agent`}
+					/>
 				)}
 				<Button
 					size="icon"
-					variant="ghost"
+					variant="rowActionDestructive"
 					onClick={onDelete}
 					disabled={deleting}
 					aria-label={`Delete example ${example.name}`}
@@ -303,11 +296,17 @@ function MockResponseModeControl({
 
 export default function ExamplesPanel() {
 	const { request } = useRequestBuilderContext();
-	const { data: examples, isLoading, isError } = useRequestExamplesQuery(request.id ?? null);
+	const {
+		data: examples,
+		isLoading,
+		error: loadError,
+		refetch,
+	} = useRequestExamplesQuery(request.id ?? null);
 	const { data: savedRequest } = useRequestQuery(request.id ?? null);
 	const { data: collections = [] } = useCollectionsQuery();
 	const [pendingDelete, setPendingDelete] = useState<RequestExample | null>(null);
 	const deleteExample = useDeleteRequestExampleMutation();
+	const openImport = useImportModalStore((s) => s.open);
 
 	// The saved row, not the builder's draft: an unsaved rename would put a name
 	// in the line that the engine and the agent's tools do not know yet.
@@ -330,26 +329,44 @@ export default function ExamplesPanel() {
 	// request has no examples" for a request that cannot have any yet.
 	if (!request.id) {
 		return (
-			<p className="text-xs text-muted-foreground">
-				Save this request to see the example responses stored against it.
-			</p>
+			<EmptyState
+				variant="inline"
+				title="Save this request to see the example responses stored against it."
+			/>
 		);
 	}
 	if (isLoading) {
-		return <p className="text-xs text-muted-foreground">Loading examples…</p>;
+		return <DetailSkeleton label="Loading example responses" rows={3} className="p-0" />;
 	}
-	if (isError) {
+	// Gated on no data: TanStack keeps the last list through a failed background
+	// refetch, and a full-pane error over rows that are still valid would hide them.
+	if (loadError && !examples) {
 		return (
-			<p className="text-xs text-status-error-text">Couldn&apos;t load example responses.</p>
+			<ErrorState
+				title="Couldn't load example responses"
+				detail={loadError.message}
+				onRetry={() => void refetch()}
+			/>
 		);
 	}
 	if (!examples || examples.length === 0) {
 		return (
-			<p className="text-xs text-muted-foreground">
-				No example responses. Send this request and use{" "}
-				<span className="font-medium">Save as example</span> to keep the response, or import
-				a Postman collection with saved responses or an OpenAPI spec that documents them.
-			</p>
+			<EmptyState
+				title="No example responses"
+				description={
+					<>
+						Send this request and use{" "}
+						<span className="font-medium">Save as example</span> to keep the response,
+						or import a Postman collection with saved responses or an OpenAPI spec that
+						documents them.
+					</>
+				}
+				action={
+					<Button variant="link" size="sm" onClick={openImport}>
+						Import a collection
+					</Button>
+				}
+			/>
 		);
 	}
 
@@ -395,15 +412,17 @@ export default function ExamplesPanel() {
 						{pendingDelete?.origin === "import"
 							? "Syncing this collection with its spec won't bring it back; re-importing the document will."
 							: "This can't be undone."}
-						{/* The engine's refusal, in the dialog that asked for the delete.
-						    Without it a failed delete looks like nothing happened: the row
-						    is still there and the dialog is still open. */}
-						{deleteExample.error && (
-							<span className="mt-2 block text-status-error-text">
-								Couldn&apos;t delete the example: {deleteExample.error.message}
-							</span>
-						)}
 					</>
+				}
+				// The engine's refusal, in the dialog that asked for the delete. Without
+				// it a failed delete looks like nothing happened: the row is still there
+				// and the dialog is still open.
+				error={
+					deleteExample.error && (
+						<Callout severity="blocking">
+							Couldn&apos;t delete the example: {deleteExample.error.message}
+						</Callout>
+					)
 				}
 				onConfirm={confirmDelete}
 				isDeleting={deleteExample.isPending}

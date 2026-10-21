@@ -170,9 +170,10 @@ int64_t Database::count_runs (const RunFilter& filter) {
 }
 
 // The run cascade in one place: every child table a run owns, deleted before
-// the run row itself. delete_run and prune_runs both go through this, so a new
-// child table cannot be added to one and forgotten in the other (metric_ticks
-// was added to both by editing only this function). Caller holds the mutex.
+// the run row itself. delete_run and remove_unexempt_runs both go through this,
+// so a new child table cannot be added to one and forgotten in another
+// (metric_ticks was added to both by editing only this function). Caller holds
+// the mutex.
 void Database::remove_run_cascade_locked (const std::string& id) {
     impl_->storage.remove_all<MetricTick> (where (c (&MetricTick::run_id) == id));
     impl_->storage.remove_all<MonitorSample> (where (c (&MonitorSample::run_id) == id));
@@ -241,21 +242,59 @@ std::optional<Run> Database::set_run_baseline (const std::string& id, bool basel
 }
 
 namespace {
-// What retention never deletes and never counts toward the cap: a run still
+// What retention never deletes and never counts toward a cap: a run still
 // in flight, and a run pinned as a baseline. Read at selection and again,
 // per row, under each delete batch's lock.
 bool exempt_from_retention (const Run& run) {
     return run.baseline || run.status == RunStatus::Running ||
     run.status == RunStatus::Pending;
 }
+
+// One count cap and how many runs it has kept so far. Retention keeps one per
+// kind (#2429): a design Send is cheap and frequent, and counted with the load
+// and collection runs it evicted them within an afternoon.
+struct CountCap {
+    int limit = 0; // 0 = unlimited
+    int kept  = 0;
+
+    bool full () const {
+        return limit > 0 && kept >= limit;
+    }
+};
+
+// Newest first in, victims out: a run is a victim once its kind's cap is full
+// or it is older than @p age_cutoff (0 = no age cap).
+std::vector<std::string> select_retention_victims (const std::vector<Run>& newest_first,
+CountCap compared,
+CountCap design,
+int64_t age_cutoff) {
+    std::vector<std::string> victims;
+    for (const auto& run : newest_first) {
+        // Skipped rather than merely spared: counting an exempt run toward
+        // the cap would let a handful of pins evict the recent history the
+        // cap exists to keep.
+        if (exempt_from_retention (run)) {
+            continue;
+        }
+        CountCap& cap      = run.type == RunType::Design ? design : compared;
+        const bool too_old = age_cutoff > 0 && run.start_time < age_cutoff;
+        if (cap.full () || too_old) {
+            victims.push_back (run.id);
+        } else {
+            ++cap.kept;
+        }
+    }
+    return victims;
+}
 } // namespace
 
-// Retention: drop runs beyond the count cap and/or older than the age cap.
+// Retention: drop runs beyond their kind's count cap and/or older than the age cap.
 void Database::prune_runs (int max_runs,
 int max_age_days,
-const std::function<void ()>& after_selection) {
-    // Both limits off - nothing to do (0 = unlimited for each).
-    if (max_runs <= 0 && max_age_days <= 0) {
+const std::function<void ()>& after_selection,
+int max_design_runs) {
+    // Every limit off - nothing to do (0 = unlimited for each).
+    if (max_runs <= 0 && max_design_runs <= 0 && max_age_days <= 0) {
         return;
     }
 
@@ -276,22 +315,8 @@ const std::function<void ()>& after_selection) {
         now - (static_cast<int64_t> (max_age_days) * 86'400'000LL) :
         0;
 
-        int kept = 0;
-        for (const auto& run : runs) {
-            // Skipped rather than merely spared: counting an exempt run toward
-            // the cap would let a handful of pins evict the recent history the
-            // cap exists to keep.
-            if (exempt_from_retention (run)) {
-                continue;
-            }
-            const bool over_count = (max_runs > 0) && (kept >= max_runs);
-            const bool too_old = (max_age_days > 0) && (run.start_time < age_cutoff);
-            if (over_count || too_old) {
-                victims.push_back (run.id);
-            } else {
-                ++kept;
-            }
-        }
+        victims = select_retention_victims (runs, CountCap{ .limit = max_runs },
+        CountCap{ .limit = max_design_runs }, age_cutoff);
     }
 
     if (victims.empty ()) {
@@ -301,35 +326,57 @@ const std::function<void ()>& after_selection) {
         after_selection ();
     }
 
-    // 2. Delete via the delete_run cascade, batched so a huge backlog does not
-    //    hold the DB mutex for seconds. The lock is re-taken per batch and
-    //    released between them, letting /health, SSE and the runs poll interleave.
-    //    Each victim is re-read under its batch's lock (#1906): a run pinned
-    //    since selection (`set_run_baseline`) answered its caller 200, and
-    //    the selection's copy of the row no longer says so.
-    constexpr size_t BATCH_SIZE = 100;
-    size_t pruned               = 0;
-    for (size_t start = 0; start < victims.size (); start += BATCH_SIZE) {
-        const size_t end = std::min (start + BATCH_SIZE, victims.size ());
-        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-        impl_->storage.transaction ([&] {
-            for (size_t i = start; i < end; ++i) {
-                const auto current = get_run (victims[i]);
-                if (!current || exempt_from_retention (*current)) {
-                    continue;
-                }
-                remove_run_cascade_locked (victims[i]);
-                ++pruned;
-            }
-            return true; // Commit
-        });
-    }
-
+    const size_t pruned = remove_unexempt_runs (victims).size ();
     if (pruned == 0) {
         return;
     }
     vayu::utils::log_info ("db", "Pruned old runs",
-    { { "count", pruned }, { "maxRuns", max_runs }, { "maxAgeDays", max_age_days } });
+    { { "count", pruned }, { "maxRuns", max_runs },
+    { "maxDesignRuns", max_design_runs }, { "maxAgeDays", max_age_days } });
+}
+
+// Batched so a huge backlog does not hold the DB mutex for seconds: the lock is
+// re-taken per batch and released between them, letting /health, SSE and the
+// runs poll interleave. Each id is re-read under its batch's lock (#1906): a
+// run pinned since the caller chose it (`set_run_baseline`) answered its
+// caller 200, and the caller's copy of the row no longer says so.
+std::vector<std::string> Database::remove_unexempt_runs (
+const std::vector<std::string>& ids) {
+    constexpr size_t BATCH_SIZE = 100;
+    std::vector<std::string> removed;
+    for (size_t start = 0; start < ids.size (); start += BATCH_SIZE) {
+        const size_t end = std::min (start + BATCH_SIZE, ids.size ());
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        impl_->storage.transaction ([&] {
+            for (size_t i = start; i < end; ++i) {
+                const auto current = get_run (ids[i]);
+                if (!current || exempt_from_retention (*current)) {
+                    continue;
+                }
+                remove_run_cascade_locked (ids[i]);
+                removed.push_back (ids[i]);
+            }
+            return true; // Commit
+        });
+    }
+    return removed;
+}
+
+RunHistoryCleared Database::clear_runs () {
+    std::vector<std::string> ids;
+    {
+        std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+        ids = impl_->storage.select (&Run::id);
+    }
+
+    RunHistoryCleared cleared;
+    cleared.deleted_ids = remove_unexempt_runs (ids);
+    RunFilter pinned;
+    pinned.baseline     = true;
+    cleared.kept_pinned = count_runs (pinned);
+    vayu::utils::log_info ("db", "Cleared run history",
+    { { "count", cleared.deleted_ids.size () }, { "keptPinned", cleared.kept_pinned } });
+    return cleared;
 }
 
 size_t Database::reconcile_orphaned_runs () {
@@ -364,9 +411,11 @@ size_t Database::reconcile_orphaned_runs () {
 void Database::prune_runs_configured () {
     const int max_runs = get_config_int (
     "maxRunsRetained", vayu::core::constants::database::MAX_RUNS_RETAINED);
-    const int max_age_days = get_config_int (
+    const int max_design_runs = get_config_int ("maxDesignRunsRetained",
+    vayu::core::constants::database::MAX_DESIGN_RUNS_RETAINED);
+    const int max_age_days    = get_config_int (
     "runRetentionDays", vayu::core::constants::database::RUN_RETENTION_DAYS);
-    prune_runs (max_runs, max_age_days);
+    prune_runs (max_runs, max_age_days, nullptr, max_design_runs);
     // A run that has just been pruned may have been the last thing naming an
     // OpenAPI document (issue #718). Retention is where that reference is
     // released, so it is where the release is noticed - and this is what puts

@@ -1875,8 +1875,8 @@ struct Run {
     // runs may carry the flag at once.
     //
     // Retention reads it: `prune_runs` never deletes a baseline and never
-    // counts one toward the retained-run cap, because a pin the cap can expire
-    // is not a pin. Defaulted (and stored with a `default_value`) so
+    // counts one toward either retained-run cap, because a pin a cap can
+    // expire is not a pin. Defaulted (and stored with a `default_value`) so
     // sync_schema can ALTER TABLE ADD COLUMN it onto an existing runs table -
     // the same pattern as `summary` above and `requests.follow_redirects`.
     bool baseline = false; // INTEGER NOT NULL DEFAULT 0

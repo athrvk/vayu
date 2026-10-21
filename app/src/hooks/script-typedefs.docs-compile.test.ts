@@ -236,8 +236,10 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	 * runs it inside a function, where the declaration is local. Compiled as a
 	 * file in the global scope each line is "Cannot redeclare block-scoped
 	 * variable" (2451), which is `moduleDetection` in SCRIPT_COMPILER_OPTIONS
-	 * being what these lines hold up. `URL` and `fetch` are older absent names
-	 * with the same exposure.
+	 * being what these lines hold up. Postman's legacy globals (`data`,
+	 * `responseBody`, `tests`, ...) are declared for real since #2577 and absent
+	 * names such as `URL` and `fetch` as `never`; a script's own declaration
+	 * shadows either.
 	 */
 	it.each([
 		["const data = pm.response.json();\ndata.id;"],
@@ -253,20 +255,11 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 	});
 
 	/*
-	 * Each line is what a script imported from Postman opens with. `never` is
-	 * assignable to everything, so a bare read of one is only an error where the
-	 * declaration is `void`: the first three here are what keeps that difference
-	 * from being lost.
+	 * Each line is what a script imported from Postman reaches for and the
+	 * sandbox does not have. The declaration is `never`, so the call or member
+	 * access that follows is the error.
 	 */
 	it.each([
-		["JSON.parse(responseBody);", 2345],
-		["if (responseTime < 200) { }", 2365],
-		["pm.environment.set('i', iteration + 1);", 2365],
-		["tests['Status code is 200'] = responseCode.code === 200;", 2339],
-		["tests['ok'] = true;", 2322],
-		["postman.setEnvironmentVariable('token', 'x');", 2349],
-		["responseHeaders.get('Content-Type');", 2339],
-		["environment.baseUrl;", 2339],
 		["_.map([1], function (n) { return n; });", 2339],
 		["CryptoJS.MD5('x').toString();", 2339],
 		["xml2Json(pm.response.text());", 2349],
@@ -292,5 +285,96 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 				].join("\n")
 			)
 		).toBe("");
+	});
+
+	/*
+	 * Postman's pre-pm.* globals run (#2577), each declared as the value it is,
+	 * so the lines a legacy test script opens with draw nothing - and a member
+	 * the value's type does not have is still an error.
+	 */
+	it("declares the legacy globals as the values they are", () => {
+		expect(
+			errorsOf(
+				[
+					"tests['Status code is 200'] = responseCode.code === 200;",
+					"tests['ok'] = true;",
+					"var jsonData = JSON.parse(responseBody);",
+					"if (responseTime < 200) { }",
+					"pm.environment.set('i', iteration + 1);",
+					"const type = responseHeaders['Content-Type'];",
+					"const base = environment.baseUrl + globals.region + data.name;",
+					"const first = responseCookies[0].value;",
+					"const url = request.url.toLowerCase();",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("responseTime.toUpperCase();")).toContain("TS2339");
+	});
+
+	/*
+	 * The legacy `postman` methods run, as aliases of `pm` (#2577), so a script
+	 * imported from Postman that calls them draws nothing - and a member the
+	 * cookie they return does not have is still an error.
+	 */
+	it("declares the postman methods as the aliases they are", () => {
+		expect(
+			errorsOf(
+				[
+					"postman.setEnvironmentVariable('token', 'x');",
+					"postman.setGlobalVariable('count', 1);",
+					"const token = postman.getEnvironmentVariable('token');",
+					"postman.clearEnvironmentVariables();",
+					"postman.setNextRequest(null);",
+					"postman.getResponseHeader('Content-Type').toLowerCase();",
+					"postman.getResponseCookie('session').value.length;",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("postman.getResponseCookie('session').size;")).toContain("TS2339");
+	});
+
+	/*
+	 * `pm.visualizer` is accepted and warns (#2577), so Postman's calls draw
+	 * nothing - and the template is typed a string, where the engine refuses
+	 * anything else.
+	 */
+	it("declares pm.visualizer as the calls Postman makes", () => {
+		expect(
+			errorsOf(
+				[
+					"pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });",
+					"pm.visualizer.set('<p></p>');",
+					"pm.visualizer.set('<p></p>', pm.response.json(), { noEscape: true });",
+					"pm.visualizer.clear();",
+				].join("\n")
+			)
+		).toBe("");
+		expect(errorsOf("pm.visualizer.set(42);")).toContain("TS2345");
+	});
+});
+
+/*
+ * The engine runs a script as the body of an async function (#2577), so a
+ * top-level `await` is correct code and must draw nothing. As a module it is
+ * accepted only under a `module` setting that allows one (TS1378 otherwise),
+ * which is SCRIPT_COMPILER_OPTIONS' `module`.
+ */
+describe("a top-level await, as the editor reports it", () => {
+	const compile = createCompiler(readFileSync(DECLARATIONS_PATH, "utf8"));
+	const errorsOf = (source: string) => compile({ doc: "inline", line: 1, source }).join("\n");
+
+	it("is clean", () => {
+		expect(
+			errorsOf(
+				[
+					"const code = await Promise.resolve(pm.response.code);",
+					"pm.test('after await', () => pm.expect(code).to.equal(200));",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	it("still flags an await inside a function that is not async", () => {
+		expect(errorsOf("function f() { await null; }")).toContain("TS1308");
 	});
 });

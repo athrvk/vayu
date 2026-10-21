@@ -99,8 +99,7 @@ bool is_language_chain (const std::string& name) {
 
 /**
  * @brief Names a script may reach for that this sandbox does not have: the host
- *        globals of a browser or Node, and Postman's pre-`pm.*` globals and
- *        bundled libraries.
+ *        globals of a browser or Node, and the libraries Postman bundles.
  *
  * Declared, rather than simply left out, so that using one is an *error the
  * editor can explain* instead of silence. The app suppresses `Cannot find name`
@@ -110,17 +109,6 @@ bool is_language_chain (const std::string& name) {
  * "property does not exist"), and the documentation below is what hover shows
  * in place of the error text.
  *
- * `never` is assignable to every type, so a bare read passes: passing a `never`
- * to `JSON.parse` is no error. The three legacy names whose only use is as a
- * bare value (`responseBody`, `responseTime`, `iteration`) are `void` instead,
- * which is assignable to nothing: passing it, comparing it, adding to it or
- * testing it for truthiness is an error.
- *
- * A dotted name is a member of the name before the dot, which is then declared
- * as an object type holding it (`postman.setEnvironmentVariable`), so hover
- * over the method says what replaces *that* method. The root has an entry of
- * its own.
- *
  * Declaring a name does not take it from a script that declares it itself:
  * the editor compiles each script as a module (`moduleDetection` in
  * `SCRIPT_COMPILER_OPTIONS`), where `const data = ...` shadows the global the
@@ -128,26 +116,17 @@ bool is_language_chain (const std::string& name) {
  *
  * `script_types_test.cpp` executes `typeof <name>` in the real script engine
  * for every root, so the list cannot drift from the sandbox: giving the
- * runtime a `setTimeout` fails the test that says it has none.
+ * runtime a `fetch` fails the test that says it has none.
  */
 struct AbsentGlobal {
     const char* name;
     const char* reason;
-    const char* type = "never";
 };
 constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
-{ "setTimeout",
-"The sandbox is synchronous - a script runs to completion "
-"before the request is sent, so there is no later to defer to." },
-{ "setInterval",
-"The sandbox is synchronous and a script has a wall-clock "
-"deadline (scriptTimeout)." },
-{ "clearTimeout", "There is no setTimeout to cancel." },
-{ "clearInterval", "There is no setInterval to cancel." },
 { "fetch",
-"No fetch in the sandbox. Use pm.sendRequest(request, callback), "
-"which is synchronous and allowed only when the run's "
-"allowScriptRequests setting is on." },
+"No fetch in the sandbox. Use pm.sendRequest(request, callback), or "
+"await pm.sendRequest(request), which is synchronous and allowed only when "
+"the run's allowScriptRequests setting is on." },
 { "XMLHttpRequest", "No XMLHttpRequest in the sandbox. Use pm.sendRequest." },
 { "require",
 "No module system - QuickJS here has no loader, and there is "
@@ -173,66 +152,6 @@ constexpr auto ABSENT_GLOBALS = std::to_array<AbsentGlobal> ({
 { "alert",
 "Not a browser. Use console.log, shown in the response pane's "
 "Console tab." },
-
-// Postman's pre-`pm.*` globals. The replacements are Postman's own
-// (`LEGACY_GLOBS_ALTERNATIVES` in postman-sandbox), each one a `pm.*` member
-// this engine has.
-{ "tests",
-"Postman's pre-pm.* assertion object, written tests[\"name\"] = bool. Use "
-"pm.test(\"name\", function () { ... })." },
-{ "responseBody",
-"Postman's pre-pm.* global for the response body. Use pm.response.text() "
-"for the text, or pm.response.json() for the parsed body.",
-"void" },
-{ "responseCode",
-"Postman's pre-pm.* global for the status, read as responseCode.code. Use "
-"pm.response.code for the number and pm.response.reason() for the reason "
-"phrase." },
-{ "responseHeaders",
-"Postman's pre-pm.* global for the response headers. Use "
-"pm.response.headers.get(name), which is case-insensitive, or "
-"pm.response.headers.toObject()." },
-{ "responseCookies",
-"Postman's pre-pm.* global for the response cookies. Use "
-"pm.response.cookies for the cookies this response set, or "
-"pm.cookies.get(name) for the stored session." },
-{ "responseTime",
-"Postman's pre-pm.* global for the response time in milliseconds. Use "
-"pm.response.responseTime.",
-"void" },
-{ "environment",
-"Postman's pre-pm.* environment object. Use pm.environment.get(name) and "
-"pm.environment.set(name, value)." },
-{ "globals",
-"Postman's pre-pm.* globals object. Use pm.globals.get(name) and "
-"pm.globals.set(name, value)." },
-{ "data",
-"Postman's pre-pm.* iteration data. Use pm.iterationData.get(name), or "
-"pm.iterationData.toObject() for the whole row; it is undefined outside a "
-"data-driven run." },
-{ "iteration",
-"Postman's pre-pm.* iteration index. Use pm.info.iteration, which is "
-"undefined outside a run.",
-"void" },
-{ "request",
-"Postman's pre-pm.* request object. Use pm.request - its url, method, "
-"headers and body." },
-{ "postman",
-"Postman's pre-pm.* helper object. Every method it had has a pm.* "
-"replacement; hover the method." },
-{ "postman.setEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.set(name, value)." },
-{ "postman.getEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.get(name)." },
-{ "postman.clearEnvironmentVariable", "Postman's pre-pm.* call. Use pm.environment.unset(name)." },
-{ "postman.clearEnvironmentVariables", "Postman's pre-pm.* call. Use pm.environment.clear()." },
-{ "postman.setGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.set(name, value)." },
-{ "postman.getGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.get(name)." },
-{ "postman.clearGlobalVariable", "Postman's pre-pm.* call. Use pm.globals.unset(name)." },
-{ "postman.clearGlobalVariables", "Postman's pre-pm.* call. Use pm.globals.clear()." },
-{ "postman.setNextRequest",
-"Postman's pre-pm.* call. Use pm.execution.setNextRequest(name), in a "
-"collection run." },
-{ "postman.getResponseHeader", "Postman's pre-pm.* call. Use pm.response.headers.get(name)." },
-{ "postman.getResponseCookie", "Postman's pre-pm.* call. Use pm.cookies.get(name)." },
 
 // The libraries Postman bundles. Its replacement for most is a require() this
 // sandbox has no loader for, so each says what Vayu has instead.
@@ -869,33 +788,6 @@ const std::vector<ChainEntry>& entries) {
     return out;
 }
 
-/// The part of @p name after @p root and a dot, or empty if @p name is not a
-/// member of @p root.
-std::string_view member_of (std::string_view name, std::string_view root) {
-    if (name.size () <= root.size () + 1 || !name.starts_with (root) ||
-    name.at (root.size ()) != '.') {
-        return {};
-    }
-    return name.substr (root.size () + 1);
-}
-
-/// The members of absent @p root, each typed `never` so calling one is an error
-/// and documented with the replacement for that one method.
-std::string render_absent_members (std::string_view root) {
-    std::string out;
-    for (const auto& entry : ABSENT_GLOBALS) {
-        const std::string_view member = member_of (entry.name, root);
-        if (member.empty ()) {
-            continue;
-        }
-        append_doc (out, entry.reason, "\t");
-        out += "\t";
-        out += member;
-        out += ": never;\n";
-    }
-    return out;
-}
-
 void render_absent_global (std::string& out, const AbsentGlobal& absent) {
     // Every root carries this sentence: `script_types_test.cpp` finds the
     // absent names by it.
@@ -903,12 +795,7 @@ void render_absent_global (std::string& out, const AbsentGlobal& absent) {
     out += absent.reason;
     out += "\n */\ndeclare const ";
     out += absent.name;
-    const std::string members = render_absent_members (absent.name);
-    if (members.empty ()) {
-        out += std::string (": ") + absent.type + ";\n";
-        return;
-    }
-    out += ": {\n" + members + "};\n";
+    out += ": never;\n";
 }
 
 } // namespace
@@ -1014,12 +901,9 @@ std::string render_globals (const TypeNode& global_root) {
 
     // The globals the sandbox does *not* have - see ABSENT_GLOBALS. Skipped if
     // the table ever starts offering one for real, so the runtime gaining a
-    // capability can never produce a file that declares it twice. A member
-    // (`postman.setNextRequest`) is rendered inside its root.
+    // capability can never produce a file that declares it twice.
     for (const auto& absent : ABSENT_GLOBALS) {
-        const bool is_member =
-        std::string_view (absent.name).find ('.') != std::string_view::npos;
-        if (is_member || global_root.children.count (absent.name) != 0) {
+        if (global_root.children.count (absent.name) != 0) {
             continue;
         }
         render_absent_global (out, absent);

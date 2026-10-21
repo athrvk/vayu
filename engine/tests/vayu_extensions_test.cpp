@@ -188,6 +188,36 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     EXPECT_FALSE (ext::variables_of (Json::parse (R"({"v":{"value":1}})")));
 }
 
+// --- A saved example's `origin` (#2430) --------------------------------------
+
+TEST (VayuExtensions, KeepsAnExamplesOriginWhenItNamesOneOfTheTwoWriters) {
+    const auto examples = ext::examples_of (Json::parse (R"([
+        {"name":"mine","status":200,"origin":"user"},
+        {"name":"spec","status":404,"origin":"import"}])"));
+    ASSERT_HAS_VALUE (examples);
+    ASSERT_EQ (examples->size (), 2U);
+    EXPECT_EQ ((*examples)[0]["origin"], "user");
+    EXPECT_EQ ((*examples)[1]["origin"], "import");
+}
+
+// An older Vayu wrote no `origin`; the apply route reads that as `import`, so
+// the reader must not invent a value of its own.
+TEST (VayuExtensions, LeavesAnExampleWithNoOriginWithoutOne) {
+    const auto examples =
+    ext::examples_of (Json::parse (R"([{"name":"x","status":200}])"));
+    ASSERT_HAS_VALUE (examples);
+    EXPECT_FALSE ((*examples)[0].contains ("origin"));
+}
+
+TEST (VayuExtensions, RefusesAnExampleWhoseOriginIsNotOneOfTheTwoWriters) {
+    for (const char* origin :
+    { R"("other")", R"("")", R"("User")", "1", "true", "null", "[]" }) {
+        const std::string document =
+        std::string (R"([{"name":"x","status":200,"origin":)") + origin + "}]";
+        EXPECT_FALSE (ext::examples_of (Json::parse (document))) << document;
+    }
+}
+
 // --- A `config` bag is redacted by allowlist ---------------------------------
 
 TEST (VayuExtensions, BlanksEveryUnlistedMemberOfAnInsomniaIamConfig) {

@@ -850,10 +850,7 @@ class MetricsCollector {
          * How many completions the histogram these came from held.
          *
          * Zero is the only way to tell "nothing completed in this window" from
-         * "everything completed instantly" - both report percentiles of 0. A
-         * capacity search averages a level's windowed p99 across ticks, and
-         * without this it would average in every idle window and conclude a
-         * 500ms endpoint was meeting a 100ms budget.
+         * "everything completed instantly" - both report percentiles of 0.
          */
         size_t count = 0;
         double p50   = 0.0;
@@ -937,10 +934,11 @@ class MetricsCollector {
      * recent window, so the live percentile chart tracks the current load instead of
      * the all-time distribution.
      *
-     * Each sampled window is also added into two reader-owned histograms
+     * Each sampled window is also added into three reader-owned histograms
      * before the recorder can recycle it: the open second, which
-     * take_second_percentiles() reads and resets, and the run so far, behind
-     * get_current_stats()'s `cumulativeP*Ms`.
+     * take_second_percentiles() reads and resets; the run so far, behind
+     * get_current_stats()'s `cumulativeP*Ms`; and the capacity level, which
+     * level_latency() reads and adopt_level_epoch() resets.
      *
      * @note Mutating (samples and resets the window). Call once per metrics tick
      *       from the producer thread only. Returns zeros when the window is empty.
@@ -961,6 +959,36 @@ class MetricsCollector {
      *       needs no atomics. Call it once per stored row.
      */
     [[nodiscard]] Percentiles take_second_percentiles ();
+
+    /**
+     * @brief The latency of every window sampled since the level histogram
+     *        last changed epoch (#2388): what a capacity level is judged on.
+     *
+     * A level's p99 is the percentile of its completions, which a mean of its
+     * windows' p99s is not: 10 windows at 300 ms among 90 at 50 ms have a p99
+     * near 300 ms and a mean window p99 of 75 ms.
+     */
+    struct LevelLatency {
+        /// The epoch adopt_level_epoch() last adopted; 0 before any.
+        uint64_t epoch = 0;
+        /// Completions in the histogram. Zero means `p99_ms` measured nothing.
+        size_t samples = 0;
+        double p99_ms  = 0.0;
+    };
+
+    /**
+     * @brief Start a new level histogram when @p epoch differs from the one
+     *        it holds; otherwise do nothing.
+     *
+     * Call it before sample_window_percentiles() on the same tick, so the
+     * window that tick samples is the first one the new level holds.
+     *
+     * @note Producer thread only, like sample_window_percentiles().
+     */
+    void adopt_level_epoch (uint64_t epoch);
+
+    /// @note Producer thread only: the histogram behind it has no atomics.
+    [[nodiscard]] LevelLatency level_latency () const;
 
     /**
      * @brief Get status code distribution
@@ -1129,8 +1157,9 @@ class MetricsCollector {
     struct hdr_interval_recorder interval_recorder_{};
     bool interval_recorder_ready_{ false };
 
-    // Every sampled window is added into both of these, and only the producer
-    // thread touches them, so plain (non-atomic) histogram calls are correct.
+    // Every sampled window is added into all three of these, and only the
+    // producer thread touches them, so plain (non-atomic) histogram calls are
+    // correct.
     // Reading latency_histogram_ live instead would be a plain read racing the
     // workers' atomic writes. Owned, so a constructor that throws after
     // building them does not leak them.
@@ -1142,6 +1171,8 @@ class MetricsCollector {
     using OwnedHistogram = std::unique_ptr<struct hdr_histogram, CloseHistogram>;
     OwnedHistogram second_histogram_;     // take_second_percentiles
     OwnedHistogram run_so_far_histogram_; // cumulativeP*Ms
+    OwnedHistogram level_histogram_;      // level_latency
+    uint64_t level_epoch_ = 0;            // adopt_level_epoch
 
     // One cumulative histogram per network phase, indexed by TimingPhase. Same
     // range and precision as latency_histogram_, so a phase's p99 and the

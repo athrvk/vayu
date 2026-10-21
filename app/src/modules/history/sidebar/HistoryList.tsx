@@ -222,6 +222,18 @@ export default function HistoryList() {
 	const deleteConfirmStopsRun =
 		runToDelete?.status === "running" || runToDelete?.status === "pending";
 
+	// Naming the run deletes it even pinned, unlike Clear run history, which
+	// keeps baselines - so the dialog says what the pin is about to lose.
+	const deleteConfirmDescription = [
+		deleteConfirmStopsRun
+			? "This run is still in progress - deleting it stops it first, then removes it permanently."
+			: "This run is removed permanently.",
+		runToDelete?.baseline && "This run is pinned as a baseline.",
+		"This can't be undone.",
+	]
+		.filter(Boolean)
+		.join(" ");
+
 	const handleDeleteClick = (runId: string, event?: React.MouseEvent) => {
 		// Absent when the row's menu is what asked: a menu selection is not a
 		// click on the card behind it, so there is nothing to stop.
@@ -547,9 +559,7 @@ export default function HistoryList() {
 					confirmLabel="Delete run"
 					description={
 						<>
-							{deleteConfirmStopsRun
-								? "This run is still in progress - deleting it stops it first, then removes it permanently. This can't be undone."
-								: "This run is removed permanently. This can't be undone."}
+							{deleteConfirmDescription}
 							{deleteConfirmLabel && (
 								<TruncatedText
 									as="span"

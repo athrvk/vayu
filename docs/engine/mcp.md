@@ -426,7 +426,7 @@ Notes:
   sentence names `meta.skipped` for the reason `diff_spec` names `userTouched`:
   an import that dropped a WebSocket request, an unsupported body or an operation's
   `default` response looks exactly like one that had none. A Postman script that
-  calls an API Vayu does not run (`tests[]`, `require()`, a bundled library) imports
+  calls an API Vayu does not run (`require()`, a bundled library) imports
   and throws at first run, so `meta.unsupportedScriptApis` (issue
   [#2576](https://github.com/athrvk/vayu/issues/2576); `[{request, names}]`, absent
   when empty) names those requests in both tools' result, `meta` riding whole.
@@ -642,6 +642,9 @@ Notes:
   deleted only once its worker settles; a worker that does not settle in time is
   a **409 with the run intact**, surfaced as "not deleted, retry once it reports
   a terminal status" rather than as a generic engine error.
+  The call names the run, so a run pinned as a baseline is deleted too - unlike
+  the app's *Clear run history* (`DELETE /runs`), which keeps pins (#2429); the
+  tool description says so.
 - **The stored-series reads are bounded on this side of the boundary.**
   `get_run_samples`, `get_run_timeseries` and `get_run_monitor` default to 25 /
   100 / 100 rows against engine defaults of 50 / 5000 / 5000: those defaults are

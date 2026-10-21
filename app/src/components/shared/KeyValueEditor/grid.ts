@@ -26,5 +26,21 @@ export const KEY_VALUE_GRID =
 export const KEY_VALUE_GRID_WITH_FILES =
 	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_var(--spacing-target)_28px]";
 
-export const keyValueGrid = (allowFiles: boolean): string =>
-	allowFiles ? KEY_VALUE_GRID_WITH_FILES : KEY_VALUE_GRID;
+/** `KEY_VALUE_GRID` plus a caller's per-row control column (`rowExtra`). */
+export const KEY_VALUE_GRID_WITH_EXTRA =
+	"grid-cols-[var(--spacing-target)_1fr_1fr_7rem_var(--spacing-target)_28px]";
+
+/** Both the toggle and a per-row control column. */
+export const KEY_VALUE_GRID_WITH_FILES_AND_EXTRA =
+	"grid-cols-[var(--spacing-target)_1fr_1fr_var(--spacing-target)_7rem_var(--spacing-target)_28px]";
+
+/**
+ * The extra column is opt-in, so a table that passes no `rowExtra` keeps the
+ * track it always had. It sits after the value (after the toggle, where there
+ * is one) and before the two trailing slots.
+ */
+export const keyValueGrid = (allowFiles: boolean, hasExtra = false): string => {
+	if (allowFiles)
+		return hasExtra ? KEY_VALUE_GRID_WITH_FILES_AND_EXTRA : KEY_VALUE_GRID_WITH_FILES;
+	return hasExtra ? KEY_VALUE_GRID_WITH_EXTRA : KEY_VALUE_GRID;
+};

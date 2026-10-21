@@ -556,10 +556,12 @@ Each entry is `{ event, id, data }`:
 | `data` | The `data:` payload as a string, multi-line frames joined with `\n`. `JSON.parse` it yourself - the wire says nothing about what it holds. |
 | `dataTruncated` | `true` only when that one event hit `sseMaxEventBytes` and `data` is a prefix. Absent otherwise. |
 
-**Buffered, never live.** The sandbox is synchronous and has no event loop (see
-[Limitations](#limitations)), so a per-event callback is not a feature
-that was left out - it is one the runtime cannot have. The script runs when the
-stream is over, against what was retained.
+**Buffered, never live.** The script runs once the stream is over, and runs to
+completion - its timers and promise jobs included, see
+[Timers](#timers-settimeout-and-setinterval) - before anything is reported, so a
+per-event callback is not a feature that was left out: there is no moment while
+the stream arrives for one to run in. The script runs against what was
+retained.
 
 **Check the markers before asserting over the whole stream.** The stored list is
 bounded by `sseMaxStoredEvents`, and a script that counted a prefix would report
@@ -1783,8 +1785,8 @@ pm.sendRequest(
 );
 ```
 
-The first argument is a URL string or an options object; the second is required
-and must be a function.
+The first argument is a URL string or an options object; the second, when
+given, must be a function.
 
 | Option | Shape |
 | ------ | ----- |
@@ -1795,16 +1797,24 @@ and must be a function.
 | `auth` | Postman's `{ type, <type>: params }`. `basic`, `bearer`, `apikey`, `noauth`; any other type throws |
 | `timeout` | milliseconds, clamped to the script's remaining budget (below) |
 
-**Synchronous, and callback-shaped.** The send blocks and the callback runs
-inline, before `pm.sendRequest` returns. There is no promise overload yet
-(#2527): a call without a callback throws rather than returning a promise.
+**Synchronous, in both forms.** The send blocks and the callback runs inline,
+before `pm.sendRequest` returns. Called without a callback, it returns a
+promise instead (#2577), already settled when it comes back: resolved with
+`res`, or rejected with the `err` the callback would have been given, so the
+code after an `await` runs with the answer.
+
+```javascript
+const res = await pm.sendRequest("https://auth.example.com/token");
+pm.environment.set("token", res.json().access_token);
+```
 
 **Which failures throw and which reach the callback.** Transport failures are
 the network's answer, so they arrive as the callback's `err` - an `Error` with
 a `.code` (`CONNECTION_FAILED`, `DNS_ERROR`, `TIMEOUT`, `TOO_MANY_REDIRECTS`, …)
-and `res` null. The script's own mistakes throw out of the call instead: an
-unusable argument, an unsupported body mode, exceeding the request cap, and the
-capability being off.
+and `res` null - or, without a callback, as the promise's rejection with that
+`Error`. The script's own mistakes throw out of the call instead, in both
+forms: an unusable argument, an unsupported body mode, exceeding the request
+cap, and the capability being off.
 A response over the byte bound below is the network's answer too, not a
 mistake: it arrives as `err` with `.code` `RESPONSE_TOO_LARGE`. So does a URL
 whose scheme is not `http` or `https` once its variables resolve
@@ -2692,13 +2702,17 @@ thread starts, including one from another collection. Only the QuickJS runtime
 script queued (a `.then` callback, the rest of an `async` function after an
 `await`) runs before the script ends, inside its deadline; one still queued
 when the deadline or the job cap stops that drain is discarded with the
-runtime, never run, and the next script starts on a new one. State that should
+runtime, never run, and the next script starts on a new one. A
+[timer](#timers-settimeout-and-setinterval) still queued then is dropped unrun
+too; the queue is the engine's to free, so it costs the runtime nothing. State that should
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
 ### What a script can compute
 
-The sandbox is QuickJS plus `pm`, `console`, and the two base64 globals.
+The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
+four timer functions and Postman's legacy globals (`postman`, `tests`,
+`responseBody`, ...).
 Available: `JSON`, `Date`, `Math`, `RegExp`, `String`, `Array`, `Object`,
 `Number`, `Uint8Array`, `Promise`, `BigInt`, `encodeURIComponent`, `parseInt`
 and the rest of the ES2020 built-ins, plus:
@@ -2707,30 +2721,35 @@ and the rest of the ES2020 built-ins, plus:
 | ---- | ----- |
 | `pm.crypto.sha256(data, encoding?)` | SHA-256; `data` is a string (UTF-8) or `Uint8Array` |
 | `pm.crypto.hmacSha256(key, data, encoding?)` | HMAC-SHA256; key and data take the same types |
-| `pm.sendRequest(urlOrOptions, callback)` | Send an auxiliary request, synchronously - see [above](#sending-a-request-from-a-script-pmsendrequest) |
+| `pm.sendRequest(urlOrOptions, callback?)` | Send an auxiliary request, synchronously; a promise without the callback - see [above](#sending-a-request-from-a-script-pmsendrequest) |
 | `btoa(binaryString)` | base64-encode one byte per code unit |
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
+| `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
+| `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
+| `postman.setEnvironmentVariable(name, value)` and ten more | Postman's pre-`pm.*` helper methods, each an alias of a `pm.*` method - see [The legacy `postman` object](#the-legacy-postman-object) |
+| `tests`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration`, `request` | Postman's pre-`pm.*` values, read off `pm` when the script starts - see [Postman's legacy globals](#postmans-legacy-globals) |
 
 `encoding` is `'hex'` (the default), `'base64'`, `'base64url'` or `'bytes'`;
 `'bytes'` returns a `Uint8Array`, and any other value throws rather than
 silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
-`URLSearchParams`, `setTimeout`, `require`, `fetch`. The practical
+`URLSearchParams`, `require`, `fetch`. The practical
 consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no hash
-other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host source
-of asynchronous work: `Promise` and `async`/`await` run, on a job queue drained
-before the script ends, but nothing (no timer, no I/O) settles a promise later.
+other than SHA-256 (no MD5, no SHA-1, nothing asymmetric), and no host I/O:
+`Promise`, `async`/`await` (a [top-level `await`](#top-level-await) included)
+and the timers run, on queues drained before the script ends, but nothing
+settles a promise after it has.
 There is no `fetch`, but there **is**
 [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest), which is
-synchronous and bounded rather than a Promise-returning stand-in.
+synchronous and bounded; without a callback it returns a promise that is
+already settled, not one waiting on a transfer in flight.
 
-Postman's pre-`pm.*` globals (`responseBody`, `tests[...]`, `postman.*`, ...) and
-the libraries it bundles (`CryptoJS`, `_`, `moment`, ...) are absent too. The
-editor declares each as unusable, so a use is underlined and the hover names the
-replacement; [the compatibility page](../app/pm-api-compatibility.md#postmans-pre-pm-globals-and-what-to-write-instead)
-maps every one.
+The libraries Postman bundles (`CryptoJS`, `_`, `moment`, ...) are absent too.
+The editor declares each as unusable, so a use is underlined and the hover names
+the replacement; [the compatibility page](../app/pm-api-compatibility.md#not-yet-supported)
+lists them.
 
 **Why the hashing surface is not called `crypto`.** Web Crypto's `crypto.subtle`
 is Promise-based and covers algorithms this sandbox does not implement, so a
@@ -2744,6 +2763,193 @@ rather than silently UTF-8 encoding it.
 Both halves of this list are pinned by tests in
 `engine/tests/script_engine_test.cpp`, so if a global is ever added or removed
 this section is what needs rewriting.
+
+### Timers (`setTimeout` and `setInterval`)
+
+`setTimeout(fn, delay, ...args)` and `setInterval(fn, delay, ...args)` queue
+`fn`, return an id, and `clearTimeout(id)` / `clearInterval(id)` cancel it (the
+two share their ids, so either cancels either). Every timer runs **before the
+script ends**: the request is not sent, and a test script's results are not
+read, until the queue is empty (#2577). That is Postman's rule too - its
+sandbox waits for every timer before it reports.
+
+```javascript
+setTimeout(function (label) {
+    pm.test(label, function () {
+        pm.expect(pm.response.code).to.equal(200);
+    });
+}, 100, "status, checked from a timer");
+```
+
+**The delay orders the callbacks; it is not waited out.** The queue runs on a
+virtual clock: firing a timer moves the clock to its due time, so callbacks run
+in due order (a tie to the one queued first) and the promise jobs each callback
+queues run before the next timer, as on an event loop. Nothing sleeps:
+`setTimeout(fn, 60000)` runs `fn` as soon as the work ahead of it has, and
+`Date.now()` does not advance by the delay. A delay that is not a number from 1 to 2147483647
+counts as 1, Node's rule. **A `setTimeout` written as a sleep therefore does not
+delay the request** - in Postman it would, inside the script's deadline; in
+Vayu that is a [Think time element](./elements.md) (`timer.think`), which
+waits without holding a script open.
+
+What runs in a timer is a script like any other. `pm.test` inside one records a
+test, a promise a timer resolves settles before the script ends, and a callback
+that throws is the script's error while the rest of the queue still runs - the
+rule a throw in the script body follows. `fn` must be a function: a string is
+refused with a `TypeError` rather than evaluated. One script may hold at most
+10,000 pending timers (`MAX_PENDING_TIMERS`); the queue lives outside the
+script's memory limit, so this is what bounds it.
+
+**An interval nothing clears ends the script with an error.** Clear it from its
+own callback when it is done. Otherwise it runs until the deadline stops it,
+`Script execution timed out after <n>ms`, or, with `scriptTimeout` at `0`, until
+the cap on asynchronous work in [Limitations](#limitations) does.
+
+### Top-level `await`
+
+A script runs as the body of an async function, the wrapper Postman puts around
+every script (#2577), so `await` works at the top level and a top-level
+`return` still ends the script early:
+
+```javascript
+const code = await Promise.resolve(pm.response.code);
+if (code !== 200) return;
+pm.test('the lines after an await run', function () {
+    pm.expect(pm.response.json()).to.be.an('object');
+});
+```
+
+The lines after an `await` run when the queues drain, inside the script's
+deadline, so a body awaiting a [timer](#timers-settimeout-and-setinterval)'s
+promise resumes when that timer fires on the virtual clock, after the timers
+due before it. A throw, before the first `await` or after one, is the script's
+error and reads as the throw itself (`Error: x`), never as
+`Unhandled promise rejection`; a timer callback's throw and the body's are
+reported in the order they happened. A body still awaiting when both queues
+are empty is waiting on a promise nothing can settle any more, so its
+remaining lines never run, and the script ends with `The script did not
+finish: it was still awaiting a promise that never settled`. The wrapper adds
+no line, so a line number in a stack is the script's own.
+
+### The legacy `postman` object
+
+`postman` holds Postman's eleven pre-`pm.*` helper methods (#2577), bound in
+`engine/src/runtime/pm/pm_legacy.cpp`. Each is an alias of the `pm.*` method
+Postman names as its replacement (`LEGACY_GLOBS_ALTERNATIVES` in
+postman-sandbox), and passes on exactly the arguments Postman's
+`postman-legacy-interface.js` does:
+
+| `postman.` | Calls |
+| ---------- | ----- |
+| `setEnvironmentVariable(name, value)`, `getEnvironmentVariable(name)`, `clearEnvironmentVariable(name)`, `clearEnvironmentVariables()` | `pm.environment.set`, `get`, `unset`, `clear` |
+| `setGlobalVariable(name, value)`, `getGlobalVariable(name)`, `clearGlobalVariable(name)`, `clearGlobalVariables()` | `pm.globals.set`, `get`, `unset`, `clear` |
+| `setNextRequest(name)` | `pm.execution.setNextRequest` |
+| `getResponseHeader(name)` | `pm.response.headers.get` |
+| `getResponseCookie(name)` | the cookie `pm.cookies.get` reads, as the object `pm.cookies.all()` lists |
+
+```javascript
+postman.setEnvironmentVariable("count", 5);
+pm.test("the legacy setter stores a string", function () {
+    pm.expect(pm.environment.get("count")).to.equal("5");
+});
+```
+
+Three rules come from Postman's interface rather than from the `pm.*` method:
+
+- The two setters store `value.toString()` for a truthy value that has one, so
+  a number or an object reads back as its string; `false`, `0`, `""`, `null`
+  and `undefined` reach `set` as they are.
+- `getResponseHeader` and `getResponseCookie` are bound only when the execution
+  has a response, so a pre-request script's `postman` lacks them.
+- Each method's targets are read when `postman` is bound, so a script that
+  reassigns `pm` or one of its members does not redirect a legacy call.
+
+Every other behaviour, refusals included, is the `pm.*` method's:
+`postman.setNextRequest` outside a collection run throws the
+`pm.execution.setNextRequest is not available here` sentence, and
+`postman.getResponseCookie` without a jar throws `pm.cookies.get`'s. Postman's
+once-per-method deprecation warning is not written.
+
+The `environment` and `globals` setters and clears also write through to the
+snapshot of that name below, before calling the `pm.*` method, as
+`postman-legacy-interface.js` writes through to its `__environment` and
+`__globals`.
+
+### Postman's legacy globals
+
+The values postman-sandbox's legacy interface binds beside `postman` (#2577),
+in the same file. Each is set on the global object per execution, once the
+`pm.*` surfaces are refreshed, and read off the `pm.*` member Postman names as
+its replacement, so the two spellings cannot answer differently:
+
+| Global | Value | Read off |
+| ------ | ----- | -------- |
+| `tests` | `{}`; each property assigned becomes a test result | - |
+| `environment`, `globals` | the scope's variables as a plain object, a snapshot | `pm.environment.toObject()`, `pm.globals.toObject()` |
+| `data` | the iteration's row, `{}` without one | `pm.iterationData.toObject()` |
+| `iteration` | `ScriptContext::iteration`, `0` without one | what `pm.info.iteration` reads |
+| `request` | `{ id, name, headers, method, url, data }` in Postman's legacy shape | the request `pm.request` reads |
+| `responseBody` | the body text | `pm.response.text()` |
+| `responseCode` | `{ name, detail, code, standardName }` | the response `pm.response.code` and `reason()` read |
+| `responseHeaders` | header name to value, as received | `Response::header_lines`, the folded map without them |
+| `responseTime` | milliseconds | `pm.response.responseTime` |
+| `responseCookies` | the jar's cookies for the URL, on first read | `pm.cookies.all()` |
+
+```javascript
+tests["Status code is 200"] = responseCode.code === 200;
+var jsonData = JSON.parse(responseBody);
+tests["Has an id"] = jsonData.id !== undefined;
+```
+
+The rules, each Postman's:
+
+- **`tests` is read after the script.** `record_legacy_tests` runs once the
+  queues have drained, before the results are copied, and appends a row per
+  own enumerable key, in key order, after the `pm.test` rows: passed when the
+  value is truthy, failed with `AssertionError: expected <value> to be truthy`
+  otherwise. It reads the object it bound (`ContextData::legacy_tests`), not
+  whatever the global names by then, and it runs after a throw too.
+- **The five `response*` globals are bound only when the execution has a
+  response.** A pre-request script has the other six.
+- **`environment` and `globals` are snapshots** taken when the script starts.
+  Writing to one changes no variable and `pm.*.set` does not update it; only
+  the `postman` setters and clears write through, above.
+- **`responseHeaders` keeps each name as received**, the last of a repeated
+  one winning, from `Response::header_lines`. The load path keeps no lines, so
+  there it is the folded, lower-cased map.
+- **`responseCookies` is an accessor that replaces itself** with what
+  `pm.cookies.all()` answers on its first read, as `pm.response.cookies` does,
+  so a script that never reads it never reads the jar, and where there is no
+  jar the read throws `pm.cookies`' refusal. An assignment replaces it as it
+  would any global.
+- **`request`** lower-cases each header name and holds a repeated one as an
+  array (`toObject(true, false, true, true)` in Postman), over the header set
+  `pm.request.headers` shows (`script_request_header_lines`). `data` is a form
+  body's enabled fields (a repeated field as an array, an empty first value
+  replaced, as Postman's form reader does), a text body's text, and `{}` for
+  no body, an empty one, a file or GraphQL.
+- **`responseCode.detail` is `""`.** Postman fills it from `http-reasons`, a
+  paragraph per status that Vayu does not carry; the empty string is Postman's
+  own fallback. `name` is the reason phrase `pm.response.reason()` answers and
+  `standardName` the registered one.
+
+The script runs inside a function, so a script's own `const data` or
+`let responseBody` is a local that shadows the global, and an assignment with
+no declaration (`data = ...`) writes the global, sloppy mode's rule.
+
+### Visualizer (`pm.visualizer`)
+
+`pm.visualizer.set(template, data, options)` and `pm.visualizer.clear()`
+(#2577, `engine/src/runtime/pm/pm_visualizer.cpp`) are bound so a Postman
+script that draws a visualization keeps running: Postman renders a Handlebars
+template in its Visualize tab and Vayu has no such tab. A call is accepted,
+pushes one `console.warn` line beginning `visualizer not rendered`, and returns
+`undefined`. Nothing is stored: the template and data are not read, there is no
+trace field for them, and the line in the script's console output is the only
+record. `set` refuses a first argument that is not a string with a `TypeError`
+and takes `data` and `options` as given. Both calls exist in a
+pre-request and a test script alike. The import scan no longer names
+`pm.visualizer`.
 
 ## What the editor offers, and where it comes from
 
@@ -2778,9 +2984,10 @@ The **language** is current; what is missing is the **host environment**:
   section used to say the opposite, listing `?.` and `??` as "ES2021+" and
   unavailable - wrong on both counts, so any workaround written around that
   claim can go. What limits a script is the global list above, not the syntax.
-- **No host globals**: no `setTimeout`, `fetch`, `URL`, `TextEncoder`,
+- **No host globals**: no `fetch`, `URL`, `TextEncoder`,
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
-  the ones that have a replacement.
+  the ones that have a replacement. The timers are there, and run before the
+  script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: No `require()`, `fs`, `http`, etc.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
@@ -2806,14 +3013,16 @@ The **language** is current; what is missing is the **host environment**:
   threw; outside one it ends the script. A later assertion in the same script is
   still judged on its own, and a stack overflow inside such a function is a
   `RangeError` the script could have caught, so that still counts as a throw.
-  **The deadline covers the promise jobs too** (#2531): the queue a script
-  leaves is drained inside the same budget, checked between jobs as well as
-  inside one, so a runaway `while (true) await null;` stops with the same
+  **The deadline covers the promise jobs and the timers too** (#2531,
+  #2577): the queues a script leaves are drained inside the same budget,
+  checked between jobs and timer callbacks as well as inside one, so a runaway
+  `while (true) await null;` or an uncleared `setInterval` stops with the same
   `Script execution timed out after <n>ms`. With `scriptTimeout` at `0` there
-  is no deadline to bound the drain, so it stops after 100,000 jobs instead
-  (`MAX_PROMISE_JOBS_WITHOUT_TIMEOUT`) with its own message, `Script stopped
-  after running 100000 promise jobs: ...`. That cap is provisional until #2359
-  settles what `0` means. A job left queued by either stop is never run.
+  is no deadline to bound the drain, so it stops after 100,000 jobs and timer
+  callbacks together (`MAX_ASYNC_JOBS_WITHOUT_TIMEOUT`) with its own message,
+  `Script stopped after running 100000 promise jobs and timer callbacks: ...`.
+  That cap is provisional until #2359 settles what `0` means. A job or timer
+  left queued by either stop is never run.
 
 ## Script Execution Context
 

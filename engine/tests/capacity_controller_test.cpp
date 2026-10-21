@@ -284,7 +284,8 @@ TEST (CapacityControllerTest, AnUnusableSloFallsBackToTheDefault) {
  * see about half the run's completions and neither would look wrong.
  * `take_second_percentiles()` (#2385) is the same kind of call: it resets the
  * second the stored row is built from, so a second taker would leave the row
- * holding a fragment of its second.
+ * holding a fragment of its second. The level histogram's two calls (#2388)
+ * are producer-thread-only for the same reason: it has no atomics.
  *
  * That is why the strategy steers by `RunContext::latest_live_tick()` rather
  * than sampling the collector itself, and it is a property no behavioural test
@@ -316,8 +317,8 @@ TEST (CapacityControllerTest, TheWindowedPercentilesHaveExactlyOneProductionCall
 
     ASSERT_GT (sources.size (), 10u) << "the scan found no sources to read";
     ASSERT_GT (total_bytes, 1000u) << "the scan read empty files";
-    for (const std::string_view call :
-    { "sample_window_percentiles (", "take_second_percentiles (" }) {
+    for (const std::string_view call : { "sample_window_percentiles (",
+         "take_second_percentiles (", "adopt_level_epoch (", "level_latency (" }) {
         std::vector<std::string> callers;
         for (const auto& [name, source] : sources) {
             if (source.find (call) != std::string::npos) {

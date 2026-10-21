@@ -630,6 +630,16 @@ declare function atob(encoded: string): string;
  */
 declare function btoa(data: string): string;
 
+/**
+ * Stop an interval setInterval queued; the same as clearTimeout, which shares its ids.
+ */
+declare function clearInterval(id?: number): void;
+
+/**
+ * Cancel a timer setTimeout or setInterval queued. An id that is not queued, or none at all, is no error.
+ */
+declare function clearTimeout(id?: number): void;
+
 declare const console: {
 	/**
 	 * Log an error message to the console.
@@ -651,6 +661,26 @@ declare const console: {
 	 */
 	warn(...args: any[]): void;
 };
+
+/**
+ * The iteration's data row as a plain object, what pm.iterationData.toObject() answers; {} outside a data-driven run.
+ */
+declare const data: { [key: string]: any };
+
+/**
+ * The environment's variables as a plain object, as they were when the script started. A snapshot: assigning to it changes no variable and pm.environment.set does not update it, while postman.setEnvironmentVariable and the two clear calls do, as in Postman. pm.environment.get(name) reads the live value.
+ */
+declare const environment: { [key: string]: any };
+
+/**
+ * The global variables as a plain object, as they were when the script started. A snapshot: assigning to it changes no variable and pm.globals.set does not update it, while postman.setGlobalVariable and the two clear calls do, as in Postman. pm.globals.get(name) reads the live value.
+ */
+declare const globals: { [key: string]: any };
+
+/**
+ * Which pass this is, 0-based: pm.info.iteration, or 0 where there is no run to count.
+ */
+declare const iteration: number;
 
 /**
  * The pm object provides access to request, response, environment, and testing utilities. Vayu implements a Postman-compatible scripting API.
@@ -1348,7 +1378,7 @@ declare const pm: {
 		 */
 		errorMessage: string | undefined;
 		/**
-		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: the sandbox is synchronous with no event loop, so a post-request script runs once, after the stream has terminated, over this list.
+		 * The events a streaming request received, as { event, id, data } entries (id absent when the origin sent none; dataTruncated when one event hit the per-event byte cap). Buffered, not live: a post-request script runs once, after the stream has terminated, over this list.
 		 * 
 		 * Absent - not empty - for an ordinary response, so typeof separates 'not a stream' from 'a stream with no events'. The list is bounded by sseMaxStoredEvents; check eventsTruncated before asserting over it as a whole.
 		 * 
@@ -2006,7 +2036,7 @@ declare const pm: {
 	/**
 	 * Send an auxiliary request - fetching a token in a pre-request script is what it is for.
 	 * 
-	 * Synchronous despite the callback: the send blocks and the callback runs inline before sendRequest returns. Postman's promise-returning overload is not implemented, so a callback is required.
+	 * Synchronous in both of Postman's forms: the send blocks, then the callback runs inline before sendRequest returns, or, with no callback, the call returns a promise already settled - resolved with res, or rejected with err - so `const res = await pm.sendRequest(url)` works. With a callback it returns undefined.
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
@@ -2026,7 +2056,7 @@ declare const pm: {
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */
-	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback: (err: Error | null, res: any) => void): void;
+	sendRequest(urlOrOptions: string | { url: string; method?: string; header?: object; headers?: object; body?: string | { mode: 'raw'; raw: string } | { mode: 'urlencoded'; urlencoded: object | { key: string; value: string; disabled?: boolean }[] } | { mode: 'formdata'; formdata: object | { key: string; value: string; disabled?: boolean; contentType?: string }[] }; auth?: { type: string; basic?: object; bearer?: object; apikey?: object }; timeout?: number }, callback?: (err: Error | null, res: any) => void): Promise<any>;
 	/**
 	 * Define a test with assertions. The test name appears in results.
 	 * 
@@ -2087,40 +2117,189 @@ declare const pm: {
 		 */
 		unset(name: string): void;
 	};
+	/**
+	 * Postman draws a template over the response in its Visualize tab. Vayu has no such tab, so both calls are accepted - a script that has one keeps running, tests included - and each leaves a console warning, "visualizer not rendered". Nothing is kept.
+	 */
+	visualizer: {
+		/**
+		 * Accepts Postman's call; there is nothing drawn to clear. One console warning, "visualizer not rendered", per call.
+		 */
+		clear(): void;
+		/**
+		 * Accepts Postman's call and draws nothing: the template must be a string (anything else throws a TypeError), and data and options are not read. One console warning, "visualizer not rendered", per call.
+		 * 
+		 * Example:
+		 * pm.visualizer.set('<p>{{name}}</p>', { name: 'x' });
+		 */
+		set(template: string, data?: any, options?: any): void;
+	};
 };
 
 /**
- * Not available in the Vayu script sandbox.
- *
- * The sandbox is synchronous - a script runs to completion before the request is sent, so there is no later to defer to.
+ * Postman's pre-pm.* helper methods, kept so a script imported from Postman runs. Each is an alias of the pm.* method Postman names as its replacement, which is what to write in a new script.
  */
-declare const setTimeout: never;
+declare const postman: {
+	/**
+	 * An alias of pm.environment.unset(name).
+	 */
+	clearEnvironmentVariable(name: string): void;
+	/**
+	 * An alias of pm.environment.clear().
+	 */
+	clearEnvironmentVariables(): void;
+	/**
+	 * An alias of pm.globals.unset(name).
+	 */
+	clearGlobalVariable(name: string): void;
+	/**
+	 * An alias of pm.globals.clear().
+	 */
+	clearGlobalVariables(): void;
+	/**
+	 * An alias of pm.environment.get(name).
+	 */
+	getEnvironmentVariable(name: string): any | undefined;
+	/**
+	 * An alias of pm.globals.get(name).
+	 */
+	getGlobalVariable(name: string): any | undefined;
+	/**
+	 * The cookie pm.cookies.get(name) reads, as the whole cookie object pm.cookies.all() lists rather than its value, as Postman's legacy call returns it - read .value for the value. undefined when the jar holds none of that name for this URL.
+	 * 
+	 * A test script only, as in Postman: a pre-request script has no response, and no getResponseCookie.
+	 */
+	getResponseCookie(name: string): { name: string, key: string, value: string, domain: string, path: string, secure: boolean, httpOnly: boolean, hostOnly: boolean, session: boolean, expires: Date | null } | undefined;
+	/**
+	 * An alias of pm.response.headers.get(name): case-insensitive, undefined for an absent header.
+	 * 
+	 * A test script only, as in Postman: a pre-request script has no response, and no getResponseHeader.
+	 */
+	getResponseHeader(name: string): string | undefined;
+	/**
+	 * An alias of pm.environment.set(name, value), except that a value with a toString() is stored as the string it returns, as Postman's legacy call does: a number set here reads back as a string. false, 0, null and undefined are stored as they are.
+	 */
+	setEnvironmentVariable(name: string, value: any): void;
+	/**
+	 * An alias of pm.globals.set(name, value), except that a value with a toString() is stored as the string it returns, as Postman's legacy call does: a number set here reads back as a string. false, 0, null and undefined are stored as they are.
+	 */
+	setGlobalVariable(name: string, value: any): void;
+	/**
+	 * An alias of pm.execution.setNextRequest(name): only inside a collection run, and it throws elsewhere in the same words.
+	 */
+	setNextRequest(name: string | null): void;
+};
+
+/**
+ * The request this script belongs to, in Postman's legacy shape. A copy: changing it changes nothing about what is sent; pm.request is the request itself.
+ */
+declare const request: {
+	[key: string]: any;
+	/**
+	 * A form body as an object of its enabled fields (a repeated one as an array), a text body as its text, and {} for no body, a file or GraphQL.
+	 */
+	data: any;
+	/**
+	 * The headers, each name lower-cased and a repeated one as the array of its values. The headers that were sent in a test script, the request's own before the send, as pm.request.headers reads them.
+	 */
+	headers: { [key: string]: any };
+	/**
+	 * The request's id inside a collection, pm.info.requestId.
+	 */
+	id: string | undefined;
+	/**
+	 * The method, upper-case.
+	 */
+	method: string;
+	/**
+	 * The request's name inside a collection, pm.info.requestName.
+	 */
+	name: string | undefined;
+	/**
+	 * The URL, as text.
+	 */
+	url: string;
+};
+
+/**
+ * The response body as text, what pm.response.text() answers.
+ * 
+ * A test script only, as in Postman: a pre-request script has no response, and no responseBody.
+ */
+declare const responseBody: string;
+
+/**
+ * The response status in Postman's legacy shape: code, name, detail and standardName.
+ * 
+ * A test script only, as in Postman.
+ */
+declare const responseCode: {
+	[key: string]: any;
+	/**
+	 * The status code, pm.response.code.
+	 */
+	code: number;
+	/**
+	 * Always the empty string: Postman fills it with a description of the status that Vayu does not carry.
+	 */
+	detail: string;
+	/**
+	 * The reason phrase, what pm.response.reason() answers.
+	 */
+	name: string;
+	/**
+	 * The registered reason phrase for the code, whatever the server sent.
+	 */
+	standardName: string;
+};
+
+/**
+ * The cookies the jar holds for this request's URL, the list pm.cookies.all() answers, read when the script first uses it. Where there is no jar to read it throws, as pm.cookies does.
+ * 
+ * A test script only, as in Postman.
+ */
+declare const responseCookies: { [key: string]: any }[];
+
+/**
+ * The response headers as an object of name to value, each name as the server sent it, and the last value of a repeated one. The lookup is case-sensitive, as in Postman: responseHeaders['Content-Type'] misses a content-type header, and a load run's sampled response keeps only lower-cased names. postman.getResponseHeader(name) and pm.response.headers.get(name) ignore case.
+ * 
+ * A test script only, as in Postman.
+ */
+declare const responseHeaders: { [key: string]: any };
+
+/**
+ * The response time in milliseconds, pm.response.responseTime.
+ * 
+ * A test script only, as in Postman.
+ */
+declare const responseTime: number;
+
+/**
+ * Call callback every delay ms until clearInterval stops it. Returns the id clearInterval takes.
+ * 
+ * Runs before the script ends, on the same clock as setTimeout. An interval nothing clears runs until the script's deadline (scriptTimeout) stops it, which fails the script - clear it from its own callback once it is done.
+ */
+declare function setInterval(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number;
+
+/**
+ * Call callback after the script body, in due order with the other timers; extra arguments are passed to it. Returns the id clearTimeout takes.
+ * 
+ * Every timer runs before the script ends, within its deadline - the request is not sent, and the test script's results are not reported, until they have. The delay orders the callbacks and is not waited out: nothing sleeps, and Date.now() does not advance by the delay. To delay a request, add a Think time element (timer.think) instead.
+ */
+declare function setTimeout(callback: (...args: any[]) => void, delay?: number, ...args: any[]): number;
+
+/**
+ * Postman's legacy assertion object: each property assigned is a test result, named by its key and passed when its value is truthy.
+ * 
+ * tests["Status code is 200"] = responseCode.code === 200;
+ * 
+ * The object is read once the script has finished, in key order, after the pm.test results: a key assigned twice is one result, with the last value. pm.test(name, fn) is what to write in a new script.
+ */
+declare const tests: { [key: string]: any };
 
 /**
  * Not available in the Vayu script sandbox.
  *
- * The sandbox is synchronous and a script has a wall-clock deadline (scriptTimeout).
- */
-declare const setInterval: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * There is no setTimeout to cancel.
- */
-declare const clearTimeout: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * There is no setInterval to cancel.
- */
-declare const clearInterval: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * No fetch in the sandbox. Use pm.sendRequest(request, callback), which is synchronous and allowed only when the run's allowScriptRequests setting is on.
+ * No fetch in the sandbox. Use pm.sendRequest(request, callback), or await pm.sendRequest(request), which is synchronous and allowed only when the run's allowScriptRequests setting is on.
  */
 declare const fetch: never;
 
@@ -2221,135 +2400,6 @@ declare const document: never;
  * Not a browser. Use console.log, shown in the response pane's Console tab.
  */
 declare const alert: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* assertion object, written tests["name"] = bool. Use pm.test("name", function () { ... }).
- */
-declare const tests: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* global for the response body. Use pm.response.text() for the text, or pm.response.json() for the parsed body.
- */
-declare const responseBody: void;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* global for the status, read as responseCode.code. Use pm.response.code for the number and pm.response.reason() for the reason phrase.
- */
-declare const responseCode: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* global for the response headers. Use pm.response.headers.get(name), which is case-insensitive, or pm.response.headers.toObject().
- */
-declare const responseHeaders: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* global for the response cookies. Use pm.response.cookies for the cookies this response set, or pm.cookies.get(name) for the stored session.
- */
-declare const responseCookies: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* global for the response time in milliseconds. Use pm.response.responseTime.
- */
-declare const responseTime: void;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* environment object. Use pm.environment.get(name) and pm.environment.set(name, value).
- */
-declare const environment: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* globals object. Use pm.globals.get(name) and pm.globals.set(name, value).
- */
-declare const globals: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* iteration data. Use pm.iterationData.get(name), or pm.iterationData.toObject() for the whole row; it is undefined outside a data-driven run.
- */
-declare const data: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* iteration index. Use pm.info.iteration, which is undefined outside a run.
- */
-declare const iteration: void;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* request object. Use pm.request - its url, method, headers and body.
- */
-declare const request: never;
-
-/**
- * Not available in the Vayu script sandbox.
- *
- * Postman's pre-pm.* helper object. Every method it had has a pm.* replacement; hover the method.
- */
-declare const postman: {
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.set(name, value).
-	 */
-	setEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.get(name).
-	 */
-	getEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.unset(name).
-	 */
-	clearEnvironmentVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.environment.clear().
-	 */
-	clearEnvironmentVariables: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.set(name, value).
-	 */
-	setGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.get(name).
-	 */
-	getGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.unset(name).
-	 */
-	clearGlobalVariable: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.globals.clear().
-	 */
-	clearGlobalVariables: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.execution.setNextRequest(name), in a collection run.
-	 */
-	setNextRequest: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.response.headers.get(name).
-	 */
-	getResponseHeader: never;
-	/**
-	 * Postman's pre-pm.* call. Use pm.cookies.get(name).
-	 */
-	getResponseCookie: never;
-};
 
 /**
  * Not available in the Vayu script sandbox.

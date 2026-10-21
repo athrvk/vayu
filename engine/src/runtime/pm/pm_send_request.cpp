@@ -13,6 +13,7 @@
 #include "pm_internal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -713,23 +714,49 @@ JSValue build_send_error (JSContext* ctx, ErrorCode code, const std::string& mes
     return error;
 }
 
+// The promise form's answer: a promise already settled with what the
+// callback form passes, rejected with @p err when it is not null and resolved
+// with @p res otherwise. Takes ownership of both.
+JSValue settled_send_promise (JSContext* ctx, JSValue err, JSValue res) {
+    ScopedValue owned_err (ctx, err);
+    ScopedValue owned_res (ctx, res);
+    std::array<JSValue, 2> settle{ JS_UNDEFINED, JS_UNDEFINED };
+    JSValue promise = JS_NewPromiseCapability (ctx, settle.data ());
+    if (JS_IsException (promise)) {
+        return promise;
+    }
+    ScopedValue resolve (ctx, settle[0]);
+    ScopedValue reject (ctx, settle[1]);
+    const bool failed = !JS_IsNull (err);
+    JSValue outcome   = failed ? err : res;
+    JSValue settled =
+    JS_Call (ctx, failed ? reject.get () : resolve.get (), JS_UNDEFINED, 1, &outcome);
+    if (JS_IsException (settled)) {
+        JS_FreeValue (ctx, promise);
+        return settled;
+    }
+    JS_FreeValue (ctx, settled);
+    return promise;
+}
+
 } // namespace
 
 /**
- * pm.sendRequest(urlOrOptions, callback)
+ * pm.sendRequest(urlOrOptions, callback?)
  *
- * Synchronous by construction, and callback-shaped rather than promise-shaped.
- * Postman's own signature is callback-based, and a callback can be honoured
- * honestly: block on the send, then invoke callback(err, res) inline. The
- * promise-returning overload Postman also offers is not implemented (#2527),
- * so a call without a callback is refused rather than handed a promise.
+ * Synchronous by construction in both of Postman's forms: the send blocks,
+ * then callback(err, res) runs inline, or, called without a callback, a
+ * promise comes back already settled - rejected with `err`, or resolved with
+ * `res` (#2577). Nothing is left in flight, so `await pm.sendRequest(...)` has
+ * the answer by the next promise job.
  *
- * Four things are refused by throwing rather than by calling the callback,
- * because they are the script's mistakes and not the network's: the feature
- * being off, the per-script request cap, an unusable argument, and a URL
- * naming Vayu's own engine or MCP port (`http/loopback_guard.hpp`). Transport
- * failures - refused, DNS, timeout - are the network's answer and reach the
- * callback as an error, which is where a Postman script looks for them.
+ * Four things are refused by throwing rather than by calling the callback or
+ * rejecting, because they are the script's mistakes and not the network's: the
+ * feature being off, the per-script request cap, an unusable argument, and a
+ * URL naming Vayu's own engine or MCP port (`http/loopback_guard.hpp`).
+ * Transport failures - refused, DNS, timeout - are the network's answer and
+ * reach the callback as an error, which is where a Postman script looks for
+ * them.
  */
 JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
     (void)this_val;
@@ -748,14 +775,14 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         "for them, and the MCP server never does. See docs/engine/mcp.md.");
     }
 
-    if (argc < 2) {
-        return JS_ThrowTypeError (
-        ctx, "pm.sendRequest requires a URL (or options object) and a callback");
+    if (argc < 1) {
+        return JS_ThrowTypeError (ctx, "pm.sendRequest requires a URL (or options object)");
     }
-    if (!JS_IsFunction (ctx, argv[1])) {
+    const bool promise_form = argc < 2 || JS_IsUndefined (argv[1]);
+    if (!promise_form && !JS_IsFunction (ctx, argv[1])) {
         return JS_ThrowTypeError (ctx,
-        "pm.sendRequest requires a callback function as its second argument - "
-        "it has no promise form in this sandbox");
+        "pm.sendRequest's second argument must be a callback function; "
+        "leave it out to get a promise of the response instead");
     }
 
     constexpr int limit = vayu::core::constants::script_engine::SEND_REQUEST_LIMIT;
@@ -861,6 +888,9 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         err = build_send_error (ctx, response.error_code, response.error_message);
     } else {
         res = build_send_response (ctx, sent.value ());
+    }
+    if (promise_form) {
+        return settled_send_promise (ctx, err, res);
     }
 
     JSValue args[2] = { err, res };

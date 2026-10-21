@@ -157,6 +157,37 @@ describe("HistoryList delete confirmation", () => {
 	});
 });
 
+/**
+ * Clear run history keeps a pinned baseline (#2429), but naming the run deletes
+ * it anyway, so the dialog says the pin goes with it.
+ */
+describe("HistoryList delete confirmation for a pinned run", () => {
+	it("says the run is pinned as a baseline, before the undo warning", async () => {
+		queryState.rows = [run({ baseline: true })];
+		await openDeleteDialog();
+
+		expect(screen.getByRole("dialog")).toHaveTextContent(
+			"This run is removed permanently. This run is pinned as a baseline. This can't be undone."
+		);
+	});
+
+	it("keeps the pin sentence beside the stop warning for a pinned run in progress", async () => {
+		queryState.rows = [run({ baseline: true, status: "running" })];
+		await openDeleteDialog();
+
+		expect(screen.getByRole("dialog")).toHaveTextContent(
+			"deleting it stops it first, then removes it permanently. This run is pinned as a baseline. This can't be undone."
+		);
+	});
+
+	it("says nothing about a pin for an unpinned run", async () => {
+		queryState.rows = [run({ baseline: false })];
+		await openDeleteDialog();
+
+		expect(screen.queryByText(/pinned as a baseline/i)).not.toBeInTheDocument();
+	});
+});
+
 describe("HistoryList when the delete is refused", () => {
 	it("explains a 409 as the run still stopping", async () => {
 		mutateAsync.mockRejectedValue(new ApiError(409, "UNKNOWN_ERROR", "HTTP 409: Conflict", {}));
