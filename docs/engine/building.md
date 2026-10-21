@@ -497,6 +497,48 @@ The vendored files are excluded from every formatter and linter
 stay byte-identical to the package; `.gitattributes`' `eol=lf` is a no-op on
 them because they hold no CR.
 
+#### First-load cost
+
+A library is parsed on a script's first `require` of it, in every execution
+that reaches for it: each script gets a fresh context, so nothing is shared. The
+figure is `JS_Eval` of the factory source plus the factory call, what
+`evaluate_library` (`engine/src/runtime/require_shelf.cpp`) does, on the vendored
+QuickJS 0.16.1 ([#2657](https://github.com/athrvk/vayu/issues/2657)); a fresh
+runtime and context alone cost 0.07 ms at `-O2` and 0.26 ms in a Debug build.
+Medians of 101 runs after three warm-ups, pinned to one core, gcc 13:
+
+| Library | `-O2` | Debug (`-O0`) |
+|---------|-------|---------------|
+| uuid, 8 KB on one line | 1.2 ms | 2.8 ms |
+| generated 70 KB one-line, minified-style stand-in | 5.3 ms | 16 ms |
+| lodash 4.18.1 minified, 73 KB joined onto one line (not vendored) | 10 ms | 26 ms |
+
+The stand-in is a UMD-wrapped file of functions, objects and arrow functions
+with short identifiers, lighter per byte than a real library; lodash is the
+realistic ~70 KB case, and sits at the 10 ms line. The cost is QuickJS's parse
+rate on dense minified code, about 8 KB per ms at `-O2`, and it is linear in the
+length: lodash as shipped (135 lines) parses in 8.3 ms and on one line in 9.0 ms.
+Before 0.16.1 a one-line source cost time quadratic in its length: uuid took
+4 ms, the stand-in 92 ms and lodash 178 ms at `-O2`.
+
+The harness is a throwaway C program, not in the tree, that builds a fresh
+`JSRuntime` and `JSContext`, evaluates `open + library + close` with
+`JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT` and calls the factory, as the shelf
+does. Compiled against the vendored sources as the engine compiles them:
+
+```bash
+gcc -O2 -w -D_GNU_SOURCE -DQJS_BUILD_LIBC=0 -Iengine/vendor/quickjs-ng \
+    -o first_require first_require.c \
+    engine/vendor/quickjs-ng/{quickjs,dtoa,libregexp,libunicode}.c -lm -lpthread
+taskset -c 2 ./first_require 101 uuid_open.js uuid.min.js uuid_close.js
+```
+
+(`-O0` for the Debug column; `uuid_open.js` and `uuid_close.js` are the two
+glue strings of `engine/src/runtime/uuid_glue.hpp`.) A bytecode cache, which
+would pay the parse once per process rather than once per execution, remains an
+option nobody has built: uuid does not need one, and a ~70 KB library costs
+about one 10 ms parse in a script that requires it.
+
 ### vcpkg Setup
 
 The build script automatically detects and uses vcpkg. If vcpkg is not found:
@@ -517,30 +559,20 @@ The build script will:
 All platforms script with the same vendored engine: QuickJS-NG
 (`engine/vendor/quickjs-ng`, built via its own CMake as the `qjs` target).
 
-### Vendored patches
+### Vendored QuickJS-NG
 
-`engine/vendor/quickjs-ng/quickjs.c` carries one local patch, marked `vayu
-patch (#2657)` at both of its sites. Its exit is on record here: re-vendoring
-must either keep it or drop it deliberately, never lose it by overwriting the
-file.
+The vendored QuickJS-NG is **v0.16.1** (`QJS_VERSION_*` in
+`engine/vendor/quickjs-ng/quickjs.h`), byte-identical to the upstream tag for
+every file the tree holds. It carries no local patch.
 
-- **What**: the parser computed an identifier's column by scanning back to the
-  start of its line, once per identifier, so a one-line (minified) script took
-  time quadratic in its length: a 74 KB single-line script of plain
-  identifiers parsed in about 0.7 s at `-O2`, 150 KB in 2.8 s (9 and 20 ms
-  patched). `JSParseState` gains `line_cache_pos` / `line_cache_start`, the
-  previous answer, and `identifier_line_start` scans back only as far as that
-  position. The result is identical to the old scan for every input (`\n` and
-  `\r` both end a line); the cache is an accelerator and is not part of the
-  saved parse state.
-- **Guard**: `tests/script_parse_position_test.cpp` holds the time of a
-  400 KB one-line script and the reported `line:column` across `\n`, `\r\n`,
-  lone `\r`, one-line and arrow-function sources.
-- **Exit**: retire the patch at the first quickjs-ng upgrade whose parser
-  tracks the line start itself (upstream's `s->line_start`). Whether the
-  upstream release the engine would move to carries that is **unverified**:
-  it could not be checked offline when the patch landed, so read that
-  release's `quickjs.c` before the upgrade rather than assuming it.
+The parser once computed an identifier's column by scanning back to the start
+of its line, so a one-line (minified) script took time quadratic in its length
+(#2657). Upstream fixed it in 0.16.1 (commit `0e19436`, `s->line_start`), and
+the local patch that bridged 0.16.0 was retired with that upgrade.
+`tests/script_parse_position_test.cpp` guards the fix: it holds the time of a
+400 KB one-line script and the reported `line:column` across `\n`, `\r\n`,
+lone `\r`, one-line and arrow-function sources, so a re-vendor that loses the
+fix fails a test.
 
 ### Linux
 

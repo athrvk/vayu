@@ -9,22 +9,23 @@
  * @file tests/script_parse_position_test.cpp
  * @brief Parsing a one-line script is linear, and its positions are unchanged (#2657).
  *
- * The vendored QuickJS parser found each identifier's column by scanning back
- * to the start of its line, so a single-line (minified) script cost time
- * quadratic in its length. The patch remembers the previous answer
- * (`identifier_line_start` in `vendor/quickjs-ng/quickjs.c`). Two things have
- * to hold at once: the time, and the `line:column` a script's own stack
- * reports, which must stay exactly what the full scan answered.
+ * Before QuickJS-NG 0.16.1 the parser found each identifier's column by
+ * scanning back to the start of its line, so a single-line (minified) script
+ * cost time quadratic in its length. The parser now tracks the line start
+ * itself (`s->line_start` in `vendor/quickjs-ng/quickjs.c`, upstream's since
+ * 0.16.1). Two things have to hold at once: the time, and the `line:column` a
+ * script's own stack reports, which must stay exactly what the full scan
+ * answered.
  *
- * The expected positions below were measured on the engine with the patch
- * reverted, and every one of them also passes with it applied. The first frame
- * of a stack is `<script>:line:column`, and on line 1 the column includes the
- * 20 characters of the wrapper's own prefix.
+ * The expected positions below were measured on the engine with the old scan,
+ * and every one of them also passes with the line-start tracking. The first
+ * frame of a stack is `<script>:line:column`, and on line 1 the column
+ * includes the 20 characters of the wrapper's own prefix.
  *
- * Mutation-check: revert the `quickjs.c` hunk and `ALongOneLineScriptParsesInLinearTime`
- * fails (the 400 KB script then takes seconds, not milliseconds) while the
- * position tests stay green; drop the `'\r'` test from the scan loop in
- * `identifier_line_start` and the `\r` case fails.
+ * Guard: a re-vendor that loses the line-start tracking makes
+ * `ALongOneLineScriptParsesInLinearTime` fail (the 400 KB script then takes
+ * seconds, not milliseconds) while the position tests stay green; a line-start
+ * rule that ignores `'\r'` fails the `\r` case.
  */
 
 #include <gtest/gtest.h>

@@ -449,7 +449,7 @@ uuid.validate(id);               // true
 are all there. Postman's own `uuid` is `uuid()` and `uuid.v4()`, drawn from
 `Math.random`; Vayu's is a superset of that backed by a CSPRNG, so every Postman
 use runs unchanged. Vayu has no `uuid` global, only `require`.
-First use costs about 4.5 ms (`-O2`) to 18.8 ms (Debug build) per execution,
+First use costs about 1.2 ms (`-O2`) to 2.8 ms (Debug build) per execution,
 nothing until a script requires it. The import's notice does not name a
 `require('uuid')`. The engine-side detail is in
 [scripting.md](../engine/scripting.md#the-require-shelf).

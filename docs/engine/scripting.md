@@ -2883,11 +2883,10 @@ library through a `crypto.getRandomValues` that exists only inside the
 library's own scope, so no script sees a `crypto` global.
 
 **Cost.** Like `crypto-js`, it is evaluated on first `require` in an execution
-and not when a context is built. First use costs about 4.5 ms in a `-O2` build
-and 18.8 ms in a Debug build, almost all of it parsing the library's single
-8 KB line ([#2657](https://github.com/athrvk/vayu/issues/2657) tracks that
-cost); a script that never requires it pays nothing, and nothing is shared
-between executions.
+and not when a context is built. First use costs about 1.2 ms in a `-O2` build
+and 2.8 ms in a Debug build, nearly all of it parsing the library's single 8 KB
+line ([measured](building.md#first-load-cost)); a script that never requires it
+pays nothing, and nothing is shared between executions.
 
 The Postman import's script scan reads `require('uuid')` as the library it is,
 so a collection that uses it is not named in `meta.unsupportedScriptApis`.
