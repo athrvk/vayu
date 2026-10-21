@@ -333,12 +333,16 @@ export function resolveTemplateWithRow(
  * pass that answers a token a cell's own text carried. That last pass keeps
  * the row's columns written as they stand, where the engine's would ask the
  * scopes, so a refused token is not answered by a variable of the same name.
+ *
+ * A refusal names the row as the send's own error does ("data row 0") unless
+ * @p rowSubject says otherwise.
  */
 export function previewRowBind(
 	input: string,
 	lookup: (name: string) => string | undefined,
 	row: DataRowCells,
-	context: DataFieldContext = "plain"
+	context: DataFieldContext = "plain",
+	rowSubject?: string
 ): BoundField {
 	if (!input || typeof input !== "string") return { text: input, refusals: [] };
 	const columns: BoundColumnNames = new Set(row.keys());
@@ -352,7 +356,8 @@ export function previewRowBind(
 		resolve(input),
 		(name) => isDataVariableName(name) || row.has(name),
 		(name) => row.get(dataColumnName(name) ?? name),
-		context
+		context,
+		rowSubject
 	);
 	return { text: resolve(bound.text), refusals: bound.refusals };
 }

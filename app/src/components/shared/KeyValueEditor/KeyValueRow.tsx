@@ -30,9 +30,11 @@ import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
+	TooltipValue,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
+import { refusalsText, type BoundField, type DataFieldContext } from "@/lib/data-bind-escaping";
 import { isBlankRow } from "./key-value";
 import { keyValueGrid } from "./grid";
 import type { KeyValueItem, KeyValueRowExtra, VariableSupport } from "@/types";
@@ -55,6 +57,8 @@ interface KeyValueRowProps {
 	renderExtra?: KeyValueRowExtra["render"];
 	/** The variable scope this row edits inside, or none. See `VariableSupport`. */
 	variables?: VariableSupport;
+	/** What kind of field the row's key and value are, for a picked row's bind. */
+	fieldContext?: DataFieldContext;
 	onUpdate: (id: string, field: keyof KeyValueItem, value: string | boolean) => void;
 	/** Sets the file members of one row together - a pick is one edit, not four. */
 	onPickFile: (id: string, file: PickedFile) => void;
@@ -97,14 +101,20 @@ interface KeyValueRowProps {
  * keep the real value, so the row's identity is unchanged and only the pixels
  * differ. The trigger's name is `label`, the row's *unresolved* key, so it
  * carries a variable's name and never its value.
+ *
+ * **A row the send would refuse says so here** (issue #2639): a picked row's
+ * cell with a line break, bound into a header, previews as its token with the
+ * reason beneath it. A refusal names the token and never the cell.
  */
 function ResolvedPeek({
 	label,
 	resolved,
+	refusals,
 	mask,
 }: {
 	label: string;
 	resolved: string;
+	refusals: string[];
 	mask?: (text: string) => string;
 }) {
 	return (
@@ -120,7 +130,12 @@ function ResolvedPeek({
 				</Button>
 			</TooltipTrigger>
 			<TooltipContent side="left" className="max-w-md">
-				<span className="font-mono break-all">{mask ? mask(resolved) : resolved}</span>
+				<TooltipValue
+					className="font-mono"
+					hint={refusals.length > 0 ? refusalsText(refusals) : undefined}
+				>
+					{mask ? mask(resolved) : resolved}
+				</TooltipValue>
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -141,14 +156,45 @@ function ResolvedPeek({
  * that is stable.
  *
  * The resolver outliving the row is what makes the cache reachable: it arrives
- * as `variables.resolveString`, which the request builder's provider owns
+ * as `variables.resolveField`, which the request builder's provider owns
  * (`useVariableSupport`), so it is the same function on the way back in. Row
  * ids come from `toKeyValueItems` at the point the request is fetched, one
  * level above every panel, so they survive the same unmount. See
  * `lib/dynamic-variable-cache.ts` for why this is module scope and keyed by
  * id rather than by the text.
  */
-const stableRowField = createStableResolve();
+const stableRowField = createStableResolve<BoundField>();
+
+type ResolveField = VariableSupport["resolveField"];
+
+/*
+ * `resolveField` with the table's field context fixed, one function per pair:
+ * `stableRowField` checks its resolver by identity, so a closure built in render
+ * would miss on every render and reroll a `{{$randomInt}}`.
+ */
+const contextResolvers = new WeakMap<
+	ResolveField,
+	Map<DataFieldContext, (input: string) => BoundField>
+>();
+function resolverFor(
+	resolveField: ResolveField,
+	context: DataFieldContext
+): (input: string) => BoundField {
+	let byContext = contextResolvers.get(resolveField);
+	if (!byContext) {
+		byContext = new Map();
+		contextResolvers.set(resolveField, byContext);
+	}
+	let resolve = byContext.get(context);
+	if (!resolve) {
+		resolve = (input) => resolveField(input, context);
+		byContext.set(context, resolve);
+	}
+	return resolve;
+}
+
+/** A field read with no variable scope: its own text, nothing refused. */
+const asTyped = (text: string): BoundField => ({ text, refusals: [] });
 
 function KeyValueRow({
 	item,
@@ -161,6 +207,7 @@ function KeyValueRow({
 	allowFiles = false,
 	renderExtra,
 	variables,
+	fieldContext = "plain",
 	onUpdate,
 	onPickFile,
 	onToggleKind,
@@ -171,20 +218,23 @@ function KeyValueRow({
 	canEditValue = true,
 	canDisable = true,
 }: KeyValueRowProps) {
-	const resolveString = variables?.resolveString;
-	const resolvedKey = resolveString
-		? stableRowField(`${item.id}:key`, item.key, resolveString)
-		: item.key;
-	const resolvedValue = resolveString
-		? stableRowField(`${item.id}:value`, item.value, resolveString)
-		: item.value;
+	const resolve = variables && resolverFor(variables.resolveField, fieldContext);
+	const key = resolve ? stableRowField(`${item.id}:key`, item.key, resolve) : asTyped(item.key);
+	const value = resolve
+		? stableRowField(`${item.id}:value`, item.value, resolve)
+		: asTyped(item.value);
+	const resolvedKey = key.text;
+	const resolvedValue = value.text;
+	const refusals = [...key.refusals, ...value.refusals];
 	/*
 	 * "Contains a variable" is exactly "resolving changed something". A row whose
 	 * text is already literal has nothing to peek at, which is the condition the
 	 * marker keys off - and with no scope nothing resolves, so a table outside
-	 * the request builder shows no marker at all rather than an empty one.
+	 * the request builder shows no marker at all rather than an empty one. A
+	 * refused token previews as itself, so a refusal opens the peek on its own.
 	 */
-	const hasVariables = item.key !== resolvedKey || item.value !== resolvedValue;
+	const hasVariables =
+		item.key !== resolvedKey || item.value !== resolvedValue || refusals.length > 0;
 
 	const keyReadOnly = readOnly || !canEditKey;
 	const valueReadOnly = readOnly || !canEditValue;
@@ -336,6 +386,7 @@ function KeyValueRow({
 					<ResolvedPeek
 						label={item.key || "this row"}
 						resolved={resolvedValue ? `${resolvedKey}: ${resolvedValue}` : resolvedKey}
+						refusals={refusals}
 						mask={variables?.maskSecrets}
 					/>
 				) : (

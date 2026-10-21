@@ -260,12 +260,28 @@ something composition never does: the picked row itself, threaded from
 `RequestBuilderProvider`'s per-request row memory into
 `useVariableResolver({ boundRow })`. With it, `resolveString` reads
 `resolveTemplateWithRow` (`app/src/lib/variable-resolution.ts`) instead of
-`resolveTemplate` - a restatement of the engine's own
-`resolve_template_with_data`, the function `pm.variables.replaceIn` reaches
-for the same reason (issue #890), not a second rule invented for the preview.
-A collection run, a load run and a scenario step still bind their row during
-the run itself, so nothing about them changes: this is the one caller, a
-single Send, that now happens to hold the row before the request goes out.
+`resolveTemplate` - the send's own three passes restated (composition with the
+row's columns kept, the bind, and the pass that answers a token a cell's text
+carried), not a second rule invented for the preview. A collection run, a load
+run and a scenario step still bind their row during the run itself, so nothing
+about them changes: this is the one caller, a single Send, that now happens to
+hold the row before the request goes out.
+
+**A cell previews escaped for its field, exactly as the bind writes it (issue
+#2639).** The bind does not substitute a cell raw: inside a JSON string it is
+escaped, in an XML body it is escaped for the position it lands in, in a URL it
+is encoded for the component it lands in, and a cell inside an XML comment or
+processing instruction, or a line break bound into a header, refuses the row.
+The preview applies the same rule (`lib/data-bind-escaping.ts`, held to the
+engine's bind by `engine/tests/fixtures/data-bind-escaping-conformance.json`):
+each panel says what kind of field it previews - `bodyFieldContext` maps the
+body mode the way the engine's `body_context` does, and the Headers table
+passes `header` - through `resolveField`. A refused token previews as itself,
+with the reason beside it: a warning above the Body tab's Resolved view, a line
+under the key/value peek. **A token a scope answers is not escaped.**
+Composition writes an environment's value as typed in every field, so
+`{{greeting}}` holding `say "hi"` previews, and is sent, as `say "hi"` inside a
+JSON string; only what the row supplies is written for its field.
 
 **The paint stays the accent; the popover now says why (issue #1064).** The
 token *state* `VariableInput` paints is unchanged: a bare name still paints as
@@ -795,15 +811,16 @@ Two tools, and which one applies depends on where the resolver comes from:
   resolver, so a remount would invalidate any cache anyway: `useHostCookies`,
   and the context bar's `AuthContextSection`.
 - **`lib/dynamic-variable-cache.ts`'s `createStableResolve`** where the
-  component is torn down but its `resolveString` is not, because that function
-  comes from a provider above it (`ParamsPanel`, `KeyValueRow`, the builder's
+  component is torn down but its resolver is not (`resolveString`, or
+  `resolveField` with the table's field context fixed in `KeyValueRow`),
+  because that function comes from a provider above it (`ParamsPanel`, `KeyValueRow`, the builder's
   `OAuth2Form`) - or where the caller resolves a variable-length list and so
   cannot call a hook per item (`useTabDescriptors`, and `KeyValueRow` again,
   which is one component per row). Entries are keyed by the id of the *field*
   being previewed - a request id, or a row id plus `key`/`value`, or a request
   id plus the OAuth field name - and never by the template text: two fields
   holding an identical `{{$guid}}` must still differ, which is rule 2. They are
-  invalidated when the text changes or when `resolveString` changes identity,
+  invalidated when the text changes or when the resolver changes identity,
   which is exactly a variable edit, an environment switch or a bound-row change.
 
 Fresh-per-call stays right where the value is not a preview at all: the send

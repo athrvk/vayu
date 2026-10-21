@@ -33,6 +33,7 @@ import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { emptyDrafts } from "../../../utils/body-drafts";
+import { fieldResolverOf } from "@/test/variable-support";
 
 // Monaco does not run in jsdom and the GraphQL pane is not what this guards.
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -81,6 +82,7 @@ function mount(panel: ReactElement, request: Partial<RequestState>) {
 		getVariablesDraft: () => null,
 		setVariablesDraft: () => {},
 		resolveString,
+		resolveField: fieldResolverOf(resolveString),
 		getAllVariables,
 		getVariableOrigins,
 		updateVariable,

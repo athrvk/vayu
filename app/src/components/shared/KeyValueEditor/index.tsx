@@ -73,6 +73,7 @@ export default function KeyValueEditor({
 	allowFiles = false,
 	rowExtra,
 	variables,
+	fieldContext = "plain",
 	canEdit = ALLOW_ALL_ITEMS, // Default: allow editing all items
 	canRemove = ALLOW_ALL, // Default: allow removing all items
 	canDisable = ALLOW_ALL, // Default: allow disabling all items
@@ -254,6 +255,7 @@ export default function KeyValueEditor({
 						allowFiles={allowFiles}
 						renderExtra={rowExtra?.render}
 						variables={variables}
+						fieldContext={fieldContext}
 						onUpdate={handleUpdate}
 						onPickFile={handlePickFile}
 						onToggleKind={handleToggleKind}

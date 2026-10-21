@@ -2535,6 +2535,7 @@ Resolves `{{variableName}}` patterns in strings and objects using environment, c
 ```typescript
 const {
   resolveString: (input: string) => string
+  resolveField: (input: string, context?: DataFieldContext) => BoundField
   resolveObject: <T>(obj: T) => T
   getVariable: (name: string) => ResolvedVariable | null
   getAllVariables: () => Record<string, ResolvedVariable>
@@ -2545,6 +2546,16 @@ const {
 // caller that resolves for several requests at once - the tab strip.
 resolveString(input: string, row?: DataFileRow): string
 ```
+
+`resolveField` is the preview of one field of a known kind (issue #2639):
+`context` is `plain` (the default), `url`, `header`, `json` or `xml`, and with
+`boundRow` set a cell is written for it as the engine's bind writes it -
+escaped in a JSON string or XML, encoded in a URL - while `refusals` carries
+why the send would refuse the row over the field (a cell in an XML comment, a
+line break bound into a header), naming it "the picked row". Without a row it
+is `resolveString`'s text with nothing refused. The request builder's context
+carries it beside `resolveString`, and `VariableSupport` in its place; the Body
+tab's Resolved view and the key/value peeks read it.
 
 **Resolution Priority (highest to lowest):**
 1. Bound data row (bare column names) - only while `boundRow` is passed and a

@@ -26,6 +26,7 @@ import {
 	encodeUrlAsPostman,
 	type UrlComponent,
 } from "@/modules/request-builder/utils/query-encoding";
+import type { BodyMode } from "@/types";
 
 /**
  * What kind of text a field is, the engine's `FieldContext`. `url` is a URL
@@ -33,6 +34,50 @@ import {
  * name or value; `json` and `xml` are bodies whose mode makes them documents.
  */
 export type DataFieldContext = "plain" | "url" | "header" | "json" | "xml";
+
+/**
+ * Whether a `graphql` body is already the JSON envelope: the engine's
+ * `graphql_body_is_enveloped` (`engine/src/http/graphql_body.cpp`). JSON that is
+ * an object with a string `query` is; text that is not JSON at all is when it
+ * opens as an object with a quoted key, the shape of an envelope holding an
+ * unresolved `{{token}}`, which a GraphQL selection set can never take.
+ */
+export function graphqlBodyIsEnveloped(content: string): boolean {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch {
+		// `std::isspace`'s set, not `\s`, which also matches Unicode spaces.
+		return /^[ \t\n\v\f\r]*\{[ \t\n\v\f\r]*"/.test(content);
+	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+	return typeof (parsed as Record<string, unknown>).query === "string";
+}
+
+/**
+ * The context a body binds under: the engine's `body_context`
+ * (`core/scenario_data.cpp`). `json` and `jsonrpc` are JSON documents and `xml`
+ * an XML one; a `graphql` body is JSON only as an envelope, because a bare
+ * document is escaped wholesale when the engine wraps it and escaping it first
+ * would double every quote. Every other mode is plain text to a bind.
+ *
+ * The engine asks the body composition left; a preview passes the body as
+ * typed, which differs only for a `graphql` body whose envelope a variable
+ * supplies.
+ */
+export function bodyFieldContext(mode: BodyMode, content: string): DataFieldContext {
+	switch (mode) {
+		case "json":
+		case "jsonrpc":
+			return "json";
+		case "xml":
+			return "xml";
+		case "graphql":
+			return graphqlBodyIsEnveloped(content) ? "json" : "plain";
+		default:
+			return "plain";
+	}
+}
 
 /** Where a token sits, and so how its value is written: `DataValueEncoding`. */
 type Placement =
@@ -256,7 +301,9 @@ function encodeForPlacement(text: string, placement: Placement): string {
 
 /**
  * The subject a Send-with-row's refusal names: `POST /execute` binds its one
- * row as row 0 (`execution.cpp`), whichever row of the file was picked.
+ * row as row 0 (`execution.cpp`), whichever row of the file was picked. The
+ * default for a caller that wants the send's own words; a preview can name the
+ * row the way its reader picked it.
  */
 const SEND_ROW_SUBJECT = "data row 0";
 
@@ -279,10 +326,10 @@ function describeUnwritablePlacement(name: string, placement: Placement): string
 	return null;
 }
 
-/** `describe_header_line_break`, word for word. */
-function describeHeaderLineBreak(name: string): string {
+/** `describe_header_line_break`, word for word, with `rowSubject` as the row. */
+function describeHeaderLineBreak(name: string, rowSubject: string): string {
 	return (
-		`{{${name}}} is bound into a header, and ${SEND_ROW_SUBJECT} has a line break in that ` +
+		`{{${name}}} is bound into a header, and ${rowSubject} has a line break in that ` +
 		"column - a CR or LF ends the header line rather than sitting in it, so the rest of the " +
 		"value would be read as headers of its own; the row is refused rather than sent forging a header"
 	);
@@ -296,6 +343,14 @@ function describeHeaderLineBreak(name: string): string {
 export interface BoundField {
 	text: string;
 	refusals: string[];
+}
+
+/**
+ * A field's refusals as one line for display, each said once: two tokens in
+ * one XML comment are refused in the same words.
+ */
+export function refusalsText(refusals: readonly string[]): string {
+	return [...new Set(refusals)].join("; ");
 }
 
 /** A field split around the tokens a bind answers, the engine's `split_tokens`. */
@@ -333,14 +388,15 @@ function writeToken(
 	name: string,
 	cell: string | undefined,
 	placement: Placement,
-	context: DataFieldContext
+	context: DataFieldContext,
+	rowSubject: string
 ): { text: string | null; refusal: string | null } {
 	const unwritable = describeUnwritablePlacement(name, placement);
 	if (unwritable) return { text: null, refusal: unwritable };
 	if (cell === undefined) return { text: null, refusal: null };
 	const encoded = encodeForPlacement(cell, placement);
 	if (context === "header" && /[\r\n]/.test(encoded)) {
-		return { text: null, refusal: describeHeaderLineBreak(name) };
+		return { text: null, refusal: describeHeaderLineBreak(name, rowSubject) };
 	}
 	return { text: encoded, refusal: null };
 }
@@ -350,13 +406,15 @@ function writeToken(
  * encoded for the place it sits in - `TemplateJoiner`. A token `cellOf` has no
  * answer for, or one the send would refuse the row over, stays written as it
  * stands. Text a cell substitutes is never rescanned. A URL is written whole by
- * `encodeUrlAsPostman` afterwards, as the join ends one.
+ * `encodeUrlAsPostman` afterwards, as the join ends one. `rowSubject` is how a
+ * refusal names the row.
  */
 export function bindDataTokens(
 	field: string,
 	binds: (name: string) => boolean,
 	cellOf: (name: string) => string | undefined,
-	context: DataFieldContext
+	context: DataFieldContext,
+	rowSubject: string = SEND_ROW_SUBJECT
 ): BoundField {
 	const split = splitTokens(field, binds);
 	if (split.names.length === 0) return { text: field, refusals: [] };
@@ -365,7 +423,7 @@ export function bindDataTokens(
 	let out = split.literals[0];
 	let where: UrlComponent = advanceUrlComponent(split.literals[0], "head");
 	split.names.forEach((name, i) => {
-		const written = writeToken(name, cellOf(name), placements[i], context);
+		const written = writeToken(name, cellOf(name), placements[i], context, rowSubject);
 		if (written.refusal) refusals.push(written.refusal);
 		const text = written.text ?? split.written[i];
 		if (context === "url") {

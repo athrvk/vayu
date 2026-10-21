@@ -28,6 +28,7 @@ import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import type { RequestDefaults } from "@/types";
 import { createDefaultRequestState } from "../../../utils/request-state";
 import { disabledDefaults } from "../../../utils/execute-mapping";
+import { fieldResolverOf } from "@/test/variable-support";
 
 /** What the engine declares for these tests - one fixed row, one generated. */
 const DECLARED: RequestDefaults = {
@@ -79,6 +80,7 @@ function harness(initial: Partial<RequestState> = {}) {
 			ctx.request = request;
 		},
 		resolveString: (s: string) => s,
+		resolveField: fieldResolverOf((s: string) => s),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		updateVariable: () => {},

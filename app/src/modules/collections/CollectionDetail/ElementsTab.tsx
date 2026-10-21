@@ -61,7 +61,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	const updateCollection = useUpdateCollectionMutation();
 	const { data: kinds } = useElementKindsQuery();
 	const dataColumns = useDataContract(collection.id);
-	const { resolveString, getAllVariables, getVariableOrigins } = useVariableResolver({
+	const { resolveField, getAllVariables, getVariableOrigins } = useVariableResolver({
 		collectionId: collection.id,
 	});
 	/*
@@ -82,7 +82,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	 */
 	const variableSupport = useMemo<VariableSupport>(
 		() => ({
-			resolveString,
+			resolveField,
 			getAllVariables,
 			getVariableOrigins,
 			updateVariable,
@@ -90,7 +90,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			dataColumns,
 		}),
 		[
-			resolveString,
+			resolveField,
 			getAllVariables,
 			getVariableOrigins,
 			updateVariable,

@@ -291,6 +291,16 @@ the request is composed, naming the variable
 an import, a request sent by another client - is refused just before it would go
 on the wire, naming the header.
 
+**A Send-with-row's preview shows all of this before you send** (issue #2639).
+With a row picked, the Body tab's Resolved view and the key/value rows' resolved
+peek show a cell as the bind will write it - escaped inside a JSON string,
+escaped for its place in an XML body - and a row the send would refuse says so
+there: a warning above the Resolved view for a token in an XML comment or
+processing instruction, and a line under a header row's peek for a cell with a
+line break, naming "the picked row" where the send's own error says
+`data row 0`. A value the environment supplies is shown as composition writes
+it, unescaped ([variable resolution](./variable-resolution.md)).
+
 ## How many iterations, and which row
 
 **One iteration per row** by default: leave Iterations empty and the row count

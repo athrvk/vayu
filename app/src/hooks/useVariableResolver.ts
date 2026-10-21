@@ -54,11 +54,13 @@ import {
 	coerceVariableValue,
 	dataColumnName,
 	isEnabledDefinition,
+	previewRowBind,
 	renderDataValue,
 	resolveTemplate,
 	resolveTemplateWithRow,
 	type DataRowCells,
 } from "@/lib/variable-resolution";
+import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 // The single-scope read's own rule, shared with the chip that explains it.
 import { scopeAnswer } from "@/lib/referenced-variables";
 import type { DataFileRow } from "@/services/data-files";
@@ -86,6 +88,14 @@ interface UseVariableResolverReturn {
 	 * It answers for that call only, and defaults to the `boundRow` option.
 	 */
 	resolveString: (input: string, row?: DataFileRow) => string;
+	/**
+	 * `resolveString` for a field of a known kind (issue #2639): with a row
+	 * bound, a cell is escaped or encoded for @p context as the send's bind
+	 * writes it, and `refusals` holds why the send would refuse the row, worded
+	 * for a reader who picked it. Without one it is composition's preview, which
+	 * writes every value raw whatever the field. `context` defaults to `plain`.
+	 */
+	resolveField: (input: string, context?: DataFieldContext) => BoundField;
 	resolveObject: <T>(obj: T) => T;
 	getVariable: (name: string) => ResolvedVariable | null;
 	getAllVariables: () => Record<string, ResolvedVariable>;
@@ -134,6 +144,13 @@ function resolvedFrom(origin: ScopeVariableOrigin): ResolvedVariable {
 function cellsOf(row: DataFileRow): DataRowCells {
 	return new Map(Object.entries(row).map(([column, cell]) => [column, renderDataValue(cell)]));
 }
+
+/**
+ * How a preview's refusal names the bound row. The send's own error says
+ * "data row 0", because `POST /execute` binds its one row as row 0 whichever
+ * row of the file was picked; a reader who picked row 7 would not recognise it.
+ */
+const PICKED_ROW_SUBJECT = "the picked row";
 
 export function useVariableResolver(
 	options?: UseVariableResolverOptions
@@ -386,6 +403,16 @@ export function useVariableResolver(
 		[variableMap, rowCells]
 	);
 
+	const resolveField = useCallback(
+		(input: string, context: DataFieldContext = "plain"): BoundField => {
+			const lookup = (name: string) => variableMap[name]?.value;
+			return rowCells
+				? previewRowBind(input, lookup, rowCells, context, PICKED_ROW_SUBJECT)
+				: { text: resolveTemplate(input, lookup), refusals: [] };
+		},
+		[variableMap, rowCells]
+	);
+
 	const resolveObject = useCallback(
 		<T>(obj: T): T => {
 			// Recurse via a local function rather than the `resolveObject` const so the
@@ -410,6 +437,7 @@ export function useVariableResolver(
 
 	return {
 		resolveString,
+		resolveField,
 		resolveObject,
 		getVariable,
 		getAllVariables,

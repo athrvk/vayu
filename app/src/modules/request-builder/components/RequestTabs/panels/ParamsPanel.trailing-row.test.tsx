@@ -27,6 +27,7 @@ import { createDefaultRequestState } from "../../../utils/request-state";
 import type { KeyValueItem } from "@/types";
 import UrlInput from "../../UrlBar/UrlInput";
 import ParamsPanel from "./ParamsPanel";
+import { fieldResolverOf } from "@/test/variable-support";
 
 afterEach(cleanup);
 
@@ -61,6 +62,7 @@ function Harness({ url, params }: { url: string; params: KeyValueItem[]; renderK
 		setRequest,
 		updateField,
 		resolveString,
+		resolveField: fieldResolverOf(resolveString),
 		getAllVariables,
 		getVariableOrigins,
 		updateVariable,

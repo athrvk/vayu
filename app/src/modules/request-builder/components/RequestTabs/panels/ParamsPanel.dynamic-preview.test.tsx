@@ -40,6 +40,7 @@ import { TooltipProvider } from "@/components/ui";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
+import { fieldResolverOf } from "@/test/variable-support";
 
 const { default: ParamsPanel } = await import("./ParamsPanel");
 
@@ -56,6 +57,7 @@ function contextValue(resolveString: (input: string) => string, url: string, id:
 		request,
 		updateField: vi.fn(),
 		resolveString,
+		resolveField: fieldResolverOf(resolveString),
 		getAllVariables: () => ({}),
 		getVariableOrigins: () => [],
 		updateVariable: () => {},
