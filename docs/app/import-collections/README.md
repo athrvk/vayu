@@ -621,9 +621,9 @@ OAuth 2.0 auth is **executable** (not a passive `{mode, config}` bag):
   OpenAPI v3 / Swagger v2 `oauth2` security scheme (client id/secret seeded as `{{variables}}`).
 
 Grant/field normalization is shared here so the parsers agree. Only the data-only modes (`digest`/`aws`/`ntlm`/`hawk`/`oauth1`/`edgegrid`/`jwt`)
-remain non-executable and are reported in `meta.nonExecutableAuth`: Postman counts the requests whose resolved auth is one of them
-(declaring folders and the collection go in `nonExecutableAuthFolders` / `nonExecutableAuthCollection`),
-Insomnia counts each declaration (see [Postman](./postman.md#auth-mapping)).
+remain non-executable and are reported in `meta.nonExecutableAuth`: Postman and Insomnia count the requests whose resolved auth is one of
+them (declaring folders and the collection go in `nonExecutableAuthFolders` / `nonExecutableAuthCollection`; see
+[Postman](./postman.md#auth-mapping) and [Insomnia v4](./insomnia-v4.md#auth-mapping), which also says why a folder set to No Authentication ends the walk).
 
 ### postman_raw_body
 `postman_raw_body(content, language)` - Postman raw body → `RequestBody`. `json`/`text`/`xml` map

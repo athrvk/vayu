@@ -70,8 +70,8 @@ struct ConfigAuthType {
 
 /// AWS Signature is `awsv4` on the wire and `aws` in Vayu; the others share
 /// a name. None of them is executed: each is stored as data (`config`) and
-/// sent without auth. A Postman import counts each request whose resolved
-/// auth is one as `nonExecutableAuth` (`parse_postman`).
+/// sent without auth. A Postman or Insomnia import counts each request whose
+/// resolved auth is one as `nonExecutableAuth` (`import_document.cpp`).
 constexpr auto CONFIG_AUTH_TYPES = std::to_array<ConfigAuthType> ({
 { "aws", "awsv4" },
 { "digest", "digest" },

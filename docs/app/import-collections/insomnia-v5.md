@@ -82,7 +82,7 @@ An `environment.insomnia.rest/5.x` document imports **environments only**, under
 
 A gRPC item is recognised by its `protoFileId` or `protoMethodName` member or a `greq_` id prefix on `meta.id`; a WebSocket item by a `ws://` or `wss://` URL or a `ws-req_` id prefix. Both guesses are assumed (below), and a misread one imports as an HTTP request or is dropped without being counted.
 
-The skip tally, `file_body` for a binary body, and `nonExecutableAuth` for `digest` / `ntlm` / `iam` all work as in v4, because they are the v4 code.
+The skip tally, `file_body` for a binary body, and `nonExecutableAuth` for `digest` / `ntlm` / `iam` all work as in v4, because they are the v4 code: the count is of requests whose resolved auth is one of them, with the declaring folders and workspace named beside it, and a folder set to `type: none` ends inheritance ([Insomnia v4](./insomnia-v4.md#auth-mapping)).
 
 ## Malformed documents
 

@@ -1995,7 +1995,8 @@ json pm_folder (const json* node, PostmanCounts& counts) {
     return collection;
 }
 
-/// Who loses a data-only auth (`CONFIG_AUTH_TYPES`) in a finished Postman draft.
+/// Who loses a data-only auth (`CONFIG_AUTH_TYPES`) in a finished draft tree,
+/// Postman or Insomnia: the rule is the draft's own, not either format's.
 struct DataOnlyAuthFound {
     /// The requests that send without it, in document order: a folder's items
     /// run where the folder sits, so a nested folder's requests come at its place.
@@ -2027,7 +2028,9 @@ std::string folder_mode_passed_down (const json& folder, const std::string& inhe
 using SiblingDraft = std::pair<const json*, bool>;
 
 /// A folder's sub-folders and requests as one list in document order, which
-/// is each draft's `order` (#2535).
+/// is each draft's `order` (#2535). A tree that states none - an Insomnia
+/// folder whose siblings lack a sort key (#2573) - keeps the listing the
+/// importer applies for it: sub-folders, then requests.
 std::vector<SiblingDraft> items_in_document_order (const json& folder) {
     std::vector<SiblingDraft> items;
     for (const json& child : folder.at ("children")) {
@@ -2036,9 +2039,13 @@ std::vector<SiblingDraft> items_in_document_order (const json& folder) {
     for (const json& request : folder.at ("requests")) {
         items.emplace_back (&request, false);
     }
-    std::ranges::sort (items, [] (const SiblingDraft& a, const SiblingDraft& b) {
-        return a.first->at ("order").get<int> () < b.first->at ("order").get<int> ();
-    });
+    const bool ordered = std::ranges::all_of (items,
+    [] (const SiblingDraft& item) { return item.first->contains ("order"); });
+    if (ordered) {
+        std::ranges::stable_sort (items, [] (const SiblingDraft& a, const SiblingDraft& b) {
+            return a.first->at ("order").get<int> () < b.first->at ("order").get<int> ();
+        });
+    }
     return items;
 }
 
@@ -2061,13 +2068,28 @@ void walk_data_only_auth (const json& folder, const std::string& inherited, Data
     }
 }
 
-DataOnlyAuthFound find_data_only_auth (const json& root) {
-    DataOnlyAuthFound found;
-    if (is_data_only_mode (auth_mode_of (root))) {
+/// Adds what the collection tree @p root loses to @p found. A document with
+/// several roots (Insomnia workspaces) names the first that declares one.
+void find_data_only_auth (const json& root, DataOnlyAuthFound& found) {
+    if (!found.collection && is_data_only_mode (auth_mode_of (root))) {
         found.collection = as_string (prop (&root, "name"));
     }
     walk_data_only_auth (root, std::string{}, found);
-    return found;
+}
+
+/// `meta.nonExecutableAuth` is the request count by resolved auth; the names of
+/// the sites that declare it ride beside it, each absent when empty.
+void set_data_only_auth_meta (json& meta, DataOnlyAuthFound lost) {
+    meta["nonExecutableAuth"] = static_cast<int> (lost.requests.size ());
+    if (!lost.requests.empty ()) {
+        meta["nonExecutableAuthRequests"] = std::move (lost.requests);
+    }
+    if (!lost.folders.empty ()) {
+        meta["nonExecutableAuthFolders"] = std::move (lost.folders);
+    }
+    if (lost.collection) {
+        meta["nonExecutableAuthCollection"] = std::move (*lost.collection);
+    }
 }
 
 json parse_postman (const json& parsed, const ImportOptions& options, const char* format) {
@@ -2105,19 +2127,9 @@ json parse_postman (const json& parsed, const ImportOptions& options, const char
     meta["globalCount"]      = 0;
     meta["exampleCount"]     = count_examples (collections);
     meta["skipped"]          = tally.items ();
-    // The request count is by resolved auth; the names of the sites that
-    // declare it ride beside it, each absent when empty.
-    DataOnlyAuthFound lost    = find_data_only_auth (collections.at (0));
-    meta["nonExecutableAuth"] = static_cast<int> (lost.requests.size ());
-    if (!lost.requests.empty ()) {
-        meta["nonExecutableAuthRequests"] = std::move (lost.requests);
-    }
-    if (!lost.folders.empty ()) {
-        meta["nonExecutableAuthFolders"] = std::move (lost.folders);
-    }
-    if (lost.collection) {
-        meta["nonExecutableAuthCollection"] = std::move (*lost.collection);
-    }
+    DataOnlyAuthFound lost;
+    find_data_only_auth (collections.at (0), lost);
+    set_data_only_auth_meta (meta, std::move (lost));
     // Absent, not empty, when no script uses one: the member is for a notice.
     if (!counts.unsupported_script_apis.empty ()) {
         meta["unsupportedScriptApis"] = std::move (counts.unsupported_script_apis);
@@ -2198,10 +2210,9 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
 /// import as file references the user relinks rather than being dropped.
 struct InsomniaCounts {
     ImportOptions options;
-    int non_executable = 0;
-    int file_body      = 0;
-    int requests       = 0;
-    int folders        = 0;
+    int file_body = 0;
+    int requests  = 0;
+    int folders   = 0;
 };
 
 /// A row array that may be absent but must not be another type.
@@ -2292,11 +2303,15 @@ json insomnia_config (const json* node) {
     return config;
 }
 
-json insomnia_auth (const json* auth, InsomniaCounts& counts) {
-    const json* node     = as_record (auth);
+/// Whether an `authentication` node is switched off (`disabled: true`).
+bool auth_disabled (const json* node) {
     const json* disabled = prop (node, "disabled");
-    const bool off =
-    disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
+    return disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
+}
+
+json insomnia_auth (const json* auth) {
+    const json* node = as_record (auth);
+    const bool off   = auth_disabled (node);
     if (node == nullptr || !truthy (prop (node, "type")) || off) {
         return off ? json{ { "mode", "none" } } : json{ { "mode", "inherit" } };
     }
@@ -2320,13 +2335,11 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         return map_insomnia_oauth2 (node);
     }
     if (named == "digest" || named == "ntlm") {
-        counts.non_executable += 1;
         return json{ { "mode", named }, { "config", insomnia_config (node) } };
     }
     if (named == "iam") {
         // Insomnia names AWS IAM auth "iam"; Vayu stores it as the "aws" config
         // bag (stored, not executed).
-        counts.non_executable += 1;
         return json{ { "mode", "aws" }, { "config", insomnia_config (node) } };
     }
     if (named == "none") {
@@ -2339,6 +2352,23 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         return json{ { "mode", "none" } };
     }
     return json{ { "mode", "inherit" } };
+}
+
+/**
+ * What a folder or workspace stores for its `authentication`. A collection
+ * never inherits, so an absent one is `none`, which the send-time walk passes
+ * through. A folder set to Insomnia's own No Authentication (`type: "none"`,
+ * not disabled) is `noauth` instead: the walk ends there, as it does in
+ * Insomnia, so the requests under it do not take an outer folder's auth. The
+ * workspace has nothing above it to shut out, so its `none` stays `none`.
+ */
+json insomnia_collection_auth (const json* authentication, bool workspace) {
+    const json* type = prop (as_record (authentication), "type");
+    if (!workspace && type != nullptr && *type == "none" && !auth_disabled (authentication)) {
+        return json{ { "mode", "noauth" } };
+    }
+    json auth = insomnia_auth (authentication);
+    return auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
 }
 
 /**
@@ -2621,7 +2651,7 @@ class InsomniaTree {
         }
         request["headers"] = with_required_content_type (map_key_values (&headers), body);
         request["body"] = std::move (body);
-        request["auth"] = insomnia_auth (prop (resource, "authentication"), counts_);
+        request["auth"] = insomnia_auth (prop (resource, "authentication"));
         if (counts_.options.import_scripts) {
             set_script_elements (request, as_string (prop (resource, "preRequestScript")),
             as_string (prop (resource, "afterResponseScript")));
@@ -2681,15 +2711,11 @@ class InsomniaTree {
             return &children.back ();
         }
         if (type_is (child, "request")) {
-            const int file_bodies           = counts_.file_body;
-            const int non_executable_before = counts_.non_executable;
-            json request                    = build_request (child);
-            const std::string name          = as_string (&request.at ("name"));
+            const int file_bodies  = counts_.file_body;
+            json request           = build_request (child);
+            const std::string name = as_string (&request.at ("name"));
             if (counts_.file_body > file_bodies) {
                 named_["file_body"].push_back (name);
-            }
-            if (counts_.non_executable > non_executable_before) {
-                named_["non_executable_auth"].push_back (name);
             }
             requests.push_back (std::move (request));
             return &requests.back ();
@@ -2734,7 +2760,6 @@ class InsomniaTree {
                 (*draft)["order"] = position++;
             }
         }
-        json auth = insomnia_auth (prop (node, "authentication"), counts_);
         const json* description = prop (node, "description");
 
         json collection;
@@ -2744,9 +2769,8 @@ class InsomniaTree {
         collection["variables"] = workspace ?
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
-        // Collections never inherit.
         collection["auth"] =
-        auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
+        insomnia_collection_auth (prop (node, "authentication"), workspace);
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
@@ -2808,12 +2832,6 @@ class InsomniaTree {
             tally_.name_requests (kind, names);
         }
     }
-
-    /// The requests whose auth is stored but not sent, by name.
-    [[nodiscard]] std::vector<std::string> non_executable_named () const {
-        const auto named = named_.find ("non_executable_auth");
-        return named == named_.end () ? std::vector<std::string>{} : named->second;
-    }
 };
 
 /// Which Insomnia document a resource list was read from: what `meta.format`
@@ -2844,12 +2862,13 @@ json parse_insomnia_resources (const json& resources, const ImportOptions& optio
     meta["globalCount"]      = 0;
     // Insomnia exports carry no saved responses - neither format has a concept
     // of one, so this is 0 by absence rather than by drop.
-    meta["exampleCount"]      = 0;
-    meta["skipped"]           = tree.tally ().items ();
-    meta["nonExecutableAuth"] = tree.counts ().non_executable;
-    if (std::vector<std::string> named = tree.non_executable_named (); !named.empty ()) {
-        meta["nonExecutableAuthRequests"] = std::move (named);
+    meta["exampleCount"] = 0;
+    meta["skipped"]      = tree.tally ().items ();
+    DataOnlyAuthFound lost;
+    for (const json& collection : collections) {
+        find_data_only_auth (collection, lost);
     }
+    set_data_only_auth_meta (meta, std::move (lost));
     meta["unattachedFileParts"] = unattached_file_parts (collections);
 
     return json{ { "collections", std::move (collections) },

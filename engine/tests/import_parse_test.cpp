@@ -46,6 +46,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -2288,6 +2289,173 @@ TEST (PostmanImport, ACollectionShapedLikeTwitterReportsEveryRequestThatLosesOAu
     EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"),
     (Names{ "Blocks", "Manage Tweets", "Mutes", "Lists" }));
     EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+}
+
+/// One Insomnia v4 resource under @p parent: a folder when @p type is
+/// "request_group", else a request.
+json insomnia_resource (const char* type,
+const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    json resource = { { "_id", id }, { "_type", type }, { "parentId", parent },
+        { "name", name } };
+    if (std::string_view (type) == "request") {
+        resource["method"] = "GET";
+        resource["url"]    = "https://x.com/" + name;
+    }
+    if (!authentication.is_null ()) {
+        resource["authentication"] = authentication;
+    }
+    return resource;
+}
+
+json insomnia_request (const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    return insomnia_resource ("request", id, parent, name, authentication);
+}
+
+json insomnia_folder (const std::string& id,
+const std::string& parent,
+const std::string& name,
+const json& authentication = nullptr) {
+    return insomnia_resource ("request_group", id, parent, name, authentication);
+}
+
+/// A v4 export of workspace "W" (under @p workspace_auth when given) holding
+/// @p resources. When @p ranked every resource carries a `metaSortKey` (its
+/// place in the list), so the importer stamps each draft's `order`; otherwise
+/// none does and the folders-first listing stands.
+ImportParse parse_insomnia_tree (json resources, bool ranked, const json& workspace_auth = nullptr) {
+    json workspace = { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } };
+    if (!workspace_auth.is_null ()) {
+        workspace["authentication"] = workspace_auth;
+    }
+    json list = json::array ({ std::move (workspace) });
+    int key   = 0;
+    for (json& resource : resources) {
+        if (ranked) {
+            resource["metaSortKey"] = key++;
+        }
+        list.push_back (std::move (resource));
+    }
+    return parse_import (
+    json{ { "_type", "export" }, { "__export_format", 4 }, { "resources", list } }
+    .dump (),
+    {}, {});
+}
+
+/// The requests that lose a data-only auth are those whose *resolved* auth is
+/// one (#2610): the folder declaring it is named beside them, not counted, and
+/// a request that inherits it is. Both tree shapes run, because an unranked
+/// Insomnia tree has no `order` and lists a folder's sub-folders first.
+/// Mutation checks: make an `inherit` request stop at its own mode in
+/// `walk_data_only_auth` and the inheriting names go missing; drop the
+/// `ordered` guard in `items_in_document_order` and the unranked case fails to
+/// parse.
+TEST (InsomniaImport, CountsTheRequestsThatLoseADataOnlyAuthNotTheFolderDeclaringIt) {
+    const json iam = { { "type", "iam" }, { "accessKeyId", "AK" } };
+    for (const bool ranked : { true, false }) {
+        SCOPED_TRACE (ranked ? "ranked" : "unranked");
+        const ImportParse parsed = parse_insomnia_tree (
+        json::array ({ insomnia_folder ("signed", "wrk", "Signed", iam),
+        insomnia_request ("a", "signed", "Inherits"),
+        insomnia_request ("b", "signed", "Opted out", json{ { "type", "none" } }),
+        insomnia_folder ("deeper", "signed", "Deeper"),
+        insomnia_request ("c", "deeper", "Inherits deep"),
+        insomnia_request ("d", "signed", "Own digest", json{ { "type", "digest" } }),
+        insomnia_request ("e", "signed", "Own bearer", json{ { "type", "bearer" } }),
+        insomnia_request ("f", "wrk", "Outside") }),
+        ranked);
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const json meta = json::parse (parsed.result.at ("meta").dump ());
+        EXPECT_EQ (meta.at ("nonExecutableAuth"), 3);
+        EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+        ranked ? (Names{ "Inherits", "Inherits deep", "Own digest" }) :
+                 (Names{ "Inherits deep", "Inherits", "Own digest" }));
+        EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"), Names{ "Signed" });
+        EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+    }
+}
+
+/// A folder set to Insomnia's No Authentication ends the walk for what is
+/// under it, however deep, as `noauth` does in Postman; a folder with no auth,
+/// an empty one or a disabled one says nothing and the walk passes through to
+/// the workspace's. The workspace is named apart from the folders. Mutation
+/// check: drop the `noauth` branch of `insomnia_collection_auth` and "Shielded"
+/// and "Shielded deep" are counted.
+TEST (InsomniaImport, AFolderSetToNoAuthenticationEndsTheWalkForDataOnlyAuth) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("public", "wrk", "Public", json{ { "type", "none" } }),
+    insomnia_folder ("nested", "public", "Nested"), insomnia_request ("a", "nested", "Shielded deep"),
+    insomnia_request ("b", "public", "Shielded"), insomnia_folder ("plain", "wrk", "Plain"),
+    insomnia_request ("c", "plain", "Through plain"),
+    insomnia_folder ("empty", "wrk", "Empty", json::object ()),
+    insomnia_request ("d", "empty", "Through empty"),
+    insomnia_folder ("off", "wrk", "Off", json{ { "type", "bearer" }, { "disabled", true } }),
+    insomnia_request ("e", "off", "Through disabled"), insomnia_request ("f", "wrk", "Top") }),
+    true, json{ { "type", "iam" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 4);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"),
+    (Names{ "Through plain", "Through empty", "Through disabled", "Top" }));
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "W");
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthFolders"));
+
+    const json& folders = parsed.result.at ("collections")[0].at ("children");
+    EXPECT_EQ (folders[0].at ("auth").at ("mode"), "noauth");
+    for (const size_t plain : { 1U, 2U, 3U }) {
+        EXPECT_EQ (folders[plain].at ("auth").at ("mode"), "none") << plain;
+    }
+}
+
+/// A workspace set to No Authentication stays `none`: nothing sits above it
+/// for a `noauth` to shut out.
+TEST (InsomniaImport, AWorkspaceSetToNoAuthenticationStaysNone) {
+    const ImportParse parsed =
+    parse_insomnia_tree (json::array ({ insomnia_request ("a", "wrk", "Top") }),
+    true, json{ { "type", "none" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("collections")[0].at ("auth").at ("mode"), "none");
+}
+
+/// A v5 export reaches the same walk: a folder holding one inheriting request
+/// and one explicitly set to No Authentication loses one.
+TEST (InsomniaV5Import, CountsTheRequestsThatLoseADataOnlyAuthNotTheFolderDeclaringIt) {
+    const ImportParse parsed = parse_import (R"({"type":"collection.insomnia.rest/5.0",
+        "name":"W","collection":[
+          {"name":"Signed","authentication":{"type":"iam"},"children":[
+            {"name":"Inherits","url":"https://x.example/a","method":"GET"},
+            {"name":"Opted out","url":"https://x.example/b","method":"GET",
+             "authentication":{"type":"none"}}]}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 1);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), Names{ "Inherits" });
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthFolders"), Names{ "Signed" });
+    EXPECT_FALSE (meta.contains ("nonExecutableAuthCollection"));
+}
+
+/// Several workspaces in one export are one document: the requests of each
+/// count, and the first workspace that declares the auth is the one named.
+TEST (InsomniaImport, CountsTheRequestsOfEveryWorkspaceInTheExport) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"w1","_type":"workspace","name":"One"},
+        {"_id":"w2","_type":"workspace","name":"Two","authentication":{"type":"digest"}},
+        {"_id":"w3","_type":"workspace","name":"Three","authentication":{"type":"ntlm"}},
+        {"_id":"r1","_type":"request","parentId":"w1","name":"Plain","method":"GET","url":"https://x.test"},
+        {"_id":"r2","_type":"request","parentId":"w2","name":"Digest","method":"GET","url":"https://x.test"},
+        {"_id":"r3","_type":"request","parentId":"w3","name":"Ntlm","method":"GET","url":"https://x.test"}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), (Names{ "Digest", "Ntlm" }));
+    EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "Two");
 }
 
 /// One Postman request with a single `prerequest` script whose lines are
