@@ -252,6 +252,23 @@ export interface SkippedItem {
 		 */
 		| "protocol_behavior"
 		/**
+		 * A Postman event whose script has no element to become (issue #2541): a
+		 * `script.src` (a URL to fetch it from; neither it nor the `exec` beside it
+		 * is imported), or script text under a `listen` other than `prerequest` /
+		 * `test`. Counted once per enabled event. `requests` names the request,
+		 * folder or collection that declares it, so unlike every other kind here
+		 * an entry is not always a request. `script.packages` is not this kind:
+		 * `ImportMeta.unsupportedScriptApis` reports it.
+		 */
+		| "script_unsupported"
+		/**
+		 * The same, declared on a Postman folder or on the collection itself (issue
+		 * #2538), counted once per declaring node with its name under `names`. The
+		 * settings Vayu applies (redirects, TLS verification, cookies, URL encoding,
+		 * system headers) are flattened onto every request below the node instead.
+		 */
+		| "protocol_behavior_folder"
+		/**
 		 * An `x-vayu-elements` array (an OpenAPI document a Vayu export wrote) that
 		 * failed the element registry - an unknown kind, a config the wrong shape -
 		 * once the document was hand-edited (issue #1518). Dropped and counted
@@ -299,9 +316,10 @@ export interface SkippedItem {
 	 */
 	requests?: string[];
 	/**
-	 * What the count dropped, by name (a parameter's key, never its value), in
-	 * the order the walk met them - absent when the kind records none. Only
-	 * `oauth2_unmapped_param` does today.
+	 * What the count dropped, by name (a parameter's key, never its value; the
+	 * folder a setting was declared on), in the order the walk met them - absent
+	 * when the kind records none. Only `oauth2_unmapped_param` and
+	 * `protocol_behavior_folder` do today.
 	 */
 	names?: string[];
 }

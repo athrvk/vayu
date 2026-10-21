@@ -45,15 +45,15 @@ The match is a substring check (`schema.includes(...)`), so the full schema URL 
 `parse_postman(parsed, options, format)` serves both versions:
 
 1. Creates one `PostmanCounts` (the options, the request and folder counts, a counter per skipped kind, the client-certificate candidates, and the request names each counter grew on) threaded through the whole walk.
-2. Calls `pm_folder(parsed, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
+2. Calls `pm_folder(parsed, {}, counts)` on the **top-level collection object itself** - the root collection is just a folder whose `info` carries the collection name/description.
 3. Builds `meta`, adding a `SkippedItem` for each counter that is greater than zero.
 
 ### Tree walk - `pm_folder`
 
-`pm_folder(node, counts)` walks `node.item[]`. For each `child`:
+`pm_folder(node, inherited, counts)` walks `node.item[]`, passing down `resolved`: `inherited` (the enclosing nodes' `protocolProfileBehavior`, merged) overlaid with the node's own - see [Redirect settings](#redirect-settings). For each `child`:
 
-- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, counts)`, push into `children`.
-- **Request** (`child.request` is truthy) → `pm_request_named(child, counts)`, push into `requests`.
+- **Folder** (`child.item` is an array) → `counts.folders += 1`, recurse via `pm_folder(child, resolved, counts)`, push into `children`.
+- **Request** (`child.request` is truthy) → `pm_request_named(child, resolved, counts)`, push into `requests`.
 - **Not an object at all** (`null`, a string, a number) → skipped, counting toward `malformed_item`. Hand-edited or script-filtered JSON can contain these, and the v2.0 detector's permissive fallback accepts such a file; such an entry used to fail the whole import with an error naming neither the format nor an item. `event[]` entries are filtered the same way (`pm_events`).
 - Anything else (an object with no `item[]` and no `request`) is silently ignored.
 
@@ -65,13 +65,13 @@ The returned `CollectionDraft` carries `name`, `description`, `variables`, `auth
 
 ### Request build - `pm_request`
 
-`pm_request(item, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, and increments `counts.requests`. Whether its auth is data-only is not decided here: it depends on the folders above the request, so `parse_postman` reads it off the finished tree (see [`nonExecutableAuth` counting](#auth-mapping)). Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
+`pm_request(item, inherited, counts)` reads `item.request`, derives `url`/`params` via `pm_url`, maps auth via `map_postman_auth`, and increments `counts.requests`. Whether its auth is data-only is not decided here: it depends on the folders above the request, so `parse_postman` reads it off the finished tree (see [`nonExecutableAuth` counting](#auth-mapping)). Scripts come from `item.event[]` (`prerequest`, `test`); redirect settings come from `item.protocolProfileBehavior` resolved through its folders (see [Redirect settings](#redirect-settings)). `pm_request_named` wraps it to record which request each per-request counter grew on.
 
 ## Field mapping
 
 ### Collection (root)
 
-The root is produced by `pm_folder(parsed, counts)`; `parsed` is the whole collection object.
+The root is produced by `pm_folder(parsed, {}, counts)`; `parsed` is the whole collection object.
 
 | Postman | Vayu `CollectionDraft` | Notes |
 |---------|------------------------|-------|
@@ -96,11 +96,11 @@ Same `pm_folder` mapping. A folder node has `name`/`description`/`variable`/`aut
 | `request.description`, else `item.description` | `description` | string used directly; if object, `.content`; else `""`. The schema allows either place and generated collections use the item's; the export writes it on the request, where Postman's own export puts it |
 | `request.method` | `method` | `toMethod`: upper-cased; if not one of GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS → `GET`, counted as `unsupported_method` (a custom verb such as `PROPFIND` or `PURGE`) |
 | `request.url` | `url`, `params` | via `pmUrl` (see [URL handling](#url-handling)) |
-| `request.header[]` | `headers` | via `map_key_values`; a row's `type` other than `"text"` (recent Postman writes `"default"`) is kept on the row for the export to write back |
+| `request.header[]` | `headers` | via `map_key_values`; a row's `type` other than `"text"` (recent Postman writes `"default"`) is kept on the row for the export to write back. The v2.1 schema also allows `header` to be a **string** (the text of the headers pane); it is read as Postman's `Header.parse` reads it, line by line (`map_header_rows`): `name: value` with the value trimmed, so a Hawk `Authorization` keeps its colons; a line with no colon, with leading whitespace, or with a space before the colon (`Key : v`) names nothing and is skipped; a line continued by a following space- or tab-led one (header folding) is joined with one space; CRLF and LF both end a line. One difference: the name ends at the first colon, where Postman's `\S+` may run to the last colon of an unspaced line (`Location:http://x`). A saved response's `header` takes the same string form |
 | `request.body` | `body` | via `pmBody` (see [Body mapping](#body-mapping)) |
 | `request.auth` | `auth` | via `map_postman_auth`; `inherit` allowed for requests |
 | `item.event[]` | `elements` | via `set_event_elements` - see [Scripts](#scripts); none when `importScripts` is false |
-| `item.protocolProfileBehavior.followRedirects` | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
+| `item.protocolProfileBehavior.followRedirects` (and the five like it: read from the object resolved through the folders, see [Redirect settings](#redirect-settings)) | `followRedirects` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.maxRedirects` | `maxRedirects` | only when it is a finite number; otherwise **absent** (engine default `10`) |
 | `item.protocolProfileBehavior.strictSSL` | `verifySSL` | only when it is a boolean; otherwise **absent** (engine default `true`) |
 | `item.protocolProfileBehavior.disableCookies` | `disableCookies` | only when it is a boolean; otherwise **absent** (engine default `false`) - issue #1765 |
@@ -121,9 +121,22 @@ a phase in order, so a second `test` event is a second element (it used to be
 dropped without a count) and a level that lists `test` before `prerequest`
 exports back that way. An event marked `disabled: true` is one Postman's
 runtime skips, so it imports as an element with `enabled: false` rather than
-a script that runs. A blank script contributes nothing, and a `listen` other
-than those two has no phase in Vayu. A `script` that is itself a string is the
-script's text, as in Postman's SDK (it used to import as nothing).
+a script that runs. A blank script contributes nothing. A `script` that is
+itself a string is the script's text, as in Postman's SDK (it used to import as
+nothing).
+
+**Scripts that cannot be imported are counted, not dropped** (issue #2541). An
+enabled event whose `script.src` is set (Postman reads `src` as a URL to fetch
+the script from and ignores `exec` beside it, so neither is imported) or whose
+`listen` is not `prerequest` or `test` (Vayu has no phase for it) and carries
+script text is counted under the `script_unsupported` kind in `meta.skipped`,
+once per event. The request, folder or collection that declares it is named in
+`requests`; a folder's requests come first, then the folder, then the
+collection last, as with `nonExecutableAuthRequests`. A disabled event, a blank
+unknown-`listen` script and every event of an import with `importScripts` off
+count nothing. `script.packages` is not counted here: it is reported once, by
+[`meta.unsupportedScriptApis`](#options--lossy-behavior), and that holds for an
+event whose `exec` is blank too.
 
 **Scripts that use an API Vayu does not run.** The scripts that will run are
 also read for a fixed list of Postman script APIs Vayu has no implementation
@@ -186,7 +199,8 @@ Postman writes item-level `protocolProfileBehavior` exactly when the user overri
 
 The three redirect and TLS fields are **optional on the draft and omitted from the payload when the source did not state them** - the engine then applies its own defaults (`followRedirects: true`, `maxRedirects: 10`, `verifySSL: true`). An absent field must not look like a stated `true`: the engine follows redirects and verifies certificates by default, so dropping a source `false` silently follows the 3xx the request exists to inspect, or trusts a host the export deliberately did not.
 
-Values of the wrong type are ignored rather than coerced (a `"false"` string would read as the user's setting while being its opposite). Collection- and folder-level `protocolProfileBehavior` is **not** read: Vayu stores these settings per request only, so there is nowhere to put it.
+Values of the wrong type are ignored rather than coerced (a `"false"` string would read as the user's setting while being its opposite). A folder's or the collection's `protocolProfileBehavior` is read too (issue [#2538](https://github.com/athrvk/vayu/issues/2538)). Postman resolves it the way `postman-collection`'s `getProtocolProfileBehaviorResolved` does: the collection's object, each enclosing folder's and the request's own are merged in that order with the nearest winning, key by key and one level deep, whatever the value's type. Vayu stores these settings per request, so the import flattens that merge: `pm_folder` hands `pm_request` the object resolved so far (`inherit_protocol_behavior`), and the six settings Vayu applies (`followRedirects`, `maxRedirects`, `strictSSL`, `disableCookies`, `disableUrlEncoding`, `disabledSystemHeaders`) land on every request below the node that does not state its own. A request stating `followRedirects: true` under a folder that states `false` keeps `true`. There is no per-header merge: a request's own `disabledSystemHeaders` replaces the folder's wholesale, as in Postman (checked against Newman). The resolved values are what the request applies; `postmanProtocolBehavior` stays the request's **own** object alone, so a request with none states none.
+
 
 Since issue #1765 the three settings that change what Postman sends are
 stored and applied per request, the same optional-on-the-draft way:
@@ -221,13 +235,15 @@ is not Postman's default (`false`, or an empty object or array) - a TLS option,
 `disabledSystemHeaders`, which Vayu cannot omit without breaking the request's
 framing. `disableBodyPruning` is not counted: Vayu always sends a body.
 
+The same test runs on a folder's and on the collection's own object, with the result counted once per declaring node as `protocol_behavior_folder` (not once per request below it, and not again on those requests), with that folder's or collection's name under `names`. The preview says "folder or collection" for it where the `protocol_behavior` line says "request". The applied settings need no line: they arrive on the requests, where the Settings tab shows them.
+
 ## URL handling
 
 `pmUrl(url)` handles both shapes:
 
-- **String url** (v2.0, sometimes v2.1): if there is no `?`, the whole string is the base URL (`normalize_template_vars` applied), `params = []`. If there is a `?`, the substring before `?` is the base and the query string goes through `queryEntries`: split on `&` and each pair on its first `=`, **never decoded** (Postman's `QueryParam.parse` does not decode either), with `value` run through `normalize_template_vars`; a missing `=` yields an empty value marked `valueless: true`, which rejoins as a bare `key` where `key=` rejoins as `key=`. All extracted params are `enabled: true`.
-- **Object url** (v2.1): `url.raw` is split at the first `?` to get the base (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved, and a row's boolean `equals` rides on the row for the export - it does not change how the row joins into the URL; a `"value": null` or absent value is what does, stored as `valueless: true` and joined as a bare `key`). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
-- **Object url with no `raw`** (schema-legal, rare - most exports always write `raw`): `host_path_url` assembles a base from `protocol` (default `https`), `host[]` (or a bare string) joined with `.`, an optional `port`, and `path[]` (string or `{value}` variable entries) joined with `/`. Counted as `url_without_raw`, informational rather than lossy - the URL is built, not dropped.
+- **String url** (v2.0, sometimes v2.1): the text is cut at its first `#` before anything else, as Postman's `Url.parse` cuts it, so a fragment never lands in a query value (`?a=b&abcd#{{search}}` is the query `a=b&abcd` and the hash `{{search}}`); the hash stays on the base URL and the join puts the query before it. With no `?`, the rest is the base URL (`normalize_template_vars` applied), `params = []`. If there is a `?`, the substring before `?` is the base and the query string goes through `queryEntries`: split on `&` and each pair on its first `=`, **never decoded** (Postman's `QueryParam.parse` does not decode either), with `value` run through `normalize_template_vars`; a missing `=` yields an empty value marked `valueless: true`, which rejoins as a bare `key` where `key=` rejoins as `key=`. All extracted params are `enabled: true`.
+- **Object url** (v2.1): `url.raw` is cut at its first `#` and then at the first `?` to get the base (the fragment kept on it, as above; `url.hash` is appended as `#<hash>` only when `raw` has no `#` of its own) (`normalize_template_vars` applied); query parameters come from `url.query[]` via `map_key_values` (so disabled query params and descriptions are preserved, and a row's boolean `equals` rides on the row for the export - it does not change how the row joins into the URL; a `"value": null` or absent value is what does, stored as `valueless: true` and joined as a bare `key`). When `query[]` is absent or empty **and** `raw` carries a query string, `raw`'s query is parsed instead via the same `queryEntries` - schema-legal and produced by hand-written or script-generated collections that populate only `raw`, where the query used to be discarded silently. When `query[]` has entries it always wins, since it carries disabled state and descriptions `raw` cannot.
+- **Object url with no `raw`** (schema-legal, rare - most exports always write `raw`): `host_path_url` assembles a base from `protocol` (default `https`), `host[]` (or a bare string) joined with `.`, an optional `port`, and `path[]` (string or `{value}` variable entries) joined with `/`. A `url.hash` is appended as `#<hash>`. Counted as `url_without_raw`, informational rather than lossy - the URL is built, not dropped.
 
 **A query row holds raw query text** (issue #1771), as a Postman row does: `?q=a%2Bb` is the row `a%2Bb`, not `a+b`. Decoding first and re-encoding on the join is not lossless - `%2B` would become a `+` a server reads as a space, and `%2541` would become `%41` - so nothing is decoded and a literal `%` (`?discount=50%`, `%ZZ`) is kept byte for byte. The join (below) writes each enabled row with Postman's own query rule, `core::encode_query_component`: Postman's `QUERY_ENCODE_SET` (the C0 controls, DEL, every byte above `~` as UTF-8, space, `"`, `#`, `'`, `<`, `>`), plus `&` in a key or a value and `=` in a key. Everything else goes out as written - `+`, `|`, `/`, `?`, `:`, `[`, `]` and `%` - so an escape already in a row is never encoded twice, and a whole `{{token}}` is kept verbatim. `?q=a|b&r=c d` is stored as `?q=a|b&r=c%20d`, which is what Postman sends. An item with `disableUrlEncoding` joins its rows as written. The rule is pinned to the app's Params table by `engine/tests/fixtures/query-encoding-conformance.json`.
 
@@ -412,7 +428,9 @@ Postman **collection** files do not embed environments, so this parser always re
 
 **`importScripts`** is honored: when `opts.importScripts` is false, `pm_request` and `pm_folder` write no script elements (the `set_event_elements` call is gated behind the flag). When true, each event's `script.exec` array is joined with `\n` by `join_exec` (or its string form is used, else `""`; a `script` that is itself a string is used as the text). `importEnvironments` is accepted but unused by this parser (no environments to import).
 
-**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), and `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
+Not carried by design, and not counted: a collection's `info.version` and the ids Postman stamps on a collection, folder, request or event (`info._postman_id`, `item[].id`, `event[].id`, `script.id`). They identify a copy inside Postman's workspace, Vayu mints its own ids, and nothing reads them back, so there is nothing to lose that a person would finish by hand.
+
+**`meta.skipped`** - this parser populates: `file_body` (`file`-mode bodies, imported as binary file references to relink - not a loss), `malformed_item` (non-object `item[]`/`event[]` entries), `unsupported_method` (a custom HTTP verb, falls back to `GET`), `unsupported_auth` (an auth type the schema does not define, or a non-string `type`, falls back to no auth), `oauth2_dropped_field` (a pre-fetched `accessToken` beside an explicit grant config, named per request - see [Auth mapping](#auth-mapping)), `oauth2_state_regenerated` (an oauth2 block's `state`, which Vayu regenerates per authorization attempt; nothing sent changes), `oauth2_unmapped_param` (an OAuth 2.0 extra request parameter not carried, with its key under `names` - see [OAuth 2.0 extra request parameters](#oauth-20-extra-request-parameters)), `url_without_raw` (informational - a URL shape that was mapped rather than dropped, see [URL handling](#url-handling)), `variable_metadata` (a variable `type` Vayu has no counterpart for - `"any"` or a custom string - or an environment or globals variable's `description`), `disabled_body` (a request body whose own `disabled` was `true` - see [Body mapping](#body-mapping)), `certificate` (a request's own `certificate` the engine could not resolve into a `client_certificates` registry candidate - no `cert.src`/`key.src`, an unreadable file, an unresolved `{{var}}` host, or a second, different certificate for a (host, port) an earlier request in this import already claimed; a resolvable one is applied instead, see the field table above and [issue #1656](https://github.com/athrvk/vayu/issues/1656)), `protocol_behavior` (a request's `protocolProfileBehavior` key Vayu stores but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` - see [Redirect settings](#redirect-settings)), `protocol_behavior_folder` (the same, declared on a folder or the collection, counted once per declaring node with its name under `names`), `proxy_config` (a request's own `proxy` override - there is no per-request proxy mechanism to import it into, and none is planned, so this tally is permanent), and `script_unsupported` (an enabled event with a `script.src`, or with script text under a `listen` other than `prerequest` / `test`, which has no element to become; one per event, with the request, folder or collection that declares it under `requests` - see [Scripts](#scripts)). It does **not** emit `websocket`, `grpc`, `api_spec`, or `unit_test` items.
 
 **`meta.unsupportedScriptApis`** - `[{request, names}]`, present **only when non-empty** (no other importer sends it, and it is not a `meta.skipped` kind: it carries a list per subject, which `ImportTally` cannot hold). `request` is the request's name, or the folder's or collection's (`info.name`) for a script declared there; `names` are the table's spellings (`require()`, `CryptoJS`, `script.packages`, `pm.variables.set`, ...), deduplicated and in table order, across all of that subject's scripts. Entries follow the walk: a folder's requests, then the folder, then the collection last, as with `nonExecutableAuthRequests`. A request name used twice is listed twice - they are different requests. See [Scripts](#scripts).
 
@@ -529,6 +547,12 @@ export writes the edit.
   `query[]` rows themselves come back as written, a null value as `null`.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
+- **A folder's or the collection's `protocolProfileBehavior`** is not written
+  back at the level it was declared on. The import flattened its applied
+  settings onto the requests below it, so they come back as request-level keys
+  (generated, or reconciled into the request's own object by the rule below);
+  a key Vayu does not apply (`insecureHTTPParser`, a TLS option) is counted at
+  import and not carried, because there is no folder-level carrier.
 - **`protocolProfileBehavior`** is written back as imported, member order and
   every key included, while it agrees with the request's settings; a setting
   edited in Vayu since is written over its key in place (or appended), and a

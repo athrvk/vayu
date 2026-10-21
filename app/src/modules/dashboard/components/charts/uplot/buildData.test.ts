@@ -12,8 +12,11 @@ import {
 	buildConcurrencyScatter,
 	rebucket,
 	pickThroughput,
+	pickSendRate,
+	hasSendRate,
 	pickErrorRate,
 } from "./buildData";
+import { detectAnomalies } from "../../../utils/detectAnomalies";
 
 function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 	return {
@@ -36,22 +39,14 @@ function tick(partial: Partial<LoadTestMetrics>): LoadTestMetrics {
 describe("bucketColumns", () => {
 	it("buckets to 0.5s, last-write-wins, sorted, aligned columns", () => {
 		const history = [
-			tick({ elapsed_seconds: 0.1, throughput: 100, current_rps: 90 }), // → bucket 0.0
-			tick({ elapsed_seconds: 0.3, throughput: 110, current_rps: 95 }), // → bucket 0.5
-			tick({ elapsed_seconds: 0.6, throughput: 200, current_rps: 190 }), // → bucket 0.5 (wins)
-			tick({ elapsed_seconds: 1.0, throughput: 300, current_rps: 290 }), // → bucket 1.0
+			tick({ elapsed_seconds: 0.1, current_rps: 100 }), // → bucket 0.0
+			tick({ elapsed_seconds: 0.3, current_rps: 110 }), // → bucket 0.5
+			tick({ elapsed_seconds: 0.6, current_rps: 200 }), // → bucket 0.5 (wins)
+			tick({ elapsed_seconds: 1.0, current_rps: 300 }), // → bucket 1.0
 		];
 		const { times, cols } = bucketColumns(history, [pickThroughput]);
 		expect(times).toEqual([0, 0.5, 1]);
 		expect(cols[0]).toEqual([100, 200, 300]);
-	});
-
-	it("falls back throughput → current_rps when throughput is absent", () => {
-		const { cols } = bucketColumns(
-			[tick({ elapsed_seconds: 0, current_rps: 42 })],
-			[pickThroughput]
-		);
-		expect(cols[0]).toEqual([42]);
 	});
 
 	it("derives error-rate percentage from completed/failed", () => {
@@ -64,13 +59,96 @@ describe("bucketColumns", () => {
 
 	it("honors a custom bucket width (2s coarsens 0.5s ticks)", () => {
 		const history = [
-			tick({ elapsed_seconds: 0.5, throughput: 10 }), // → bucket 0
-			tick({ elapsed_seconds: 1.5, throughput: 20 }), // → bucket 2 (round(1.5/2)*2)
-			tick({ elapsed_seconds: 3.4, throughput: 30 }), // → bucket 4
+			tick({ elapsed_seconds: 0.5, current_rps: 10 }), // → bucket 0
+			tick({ elapsed_seconds: 1.5, current_rps: 20 }), // → bucket 2 (round(1.5/2)*2)
+			tick({ elapsed_seconds: 3.4, current_rps: 30 }), // → bucket 4
 		];
 		const { times, cols } = bucketColumns(history, [pickThroughput], 2);
 		expect(times).toEqual([0, 2, 4]);
 		expect(cols[0]).toEqual([10, 20, 30]);
+	});
+});
+
+/*
+ * The throughput line is the engine's trailing-window rate, `current_rps`, and
+ * never the run-cumulative `throughput`: a cumulative line lags a real step by
+ * the run's age (#2393).
+ */
+describe("pickThroughput", () => {
+	/** 1000 req/s for 30 s, then 200 req/s: the run-cumulative rate is still 780 ten seconds on. */
+	function steppedDown(): LoadTestMetrics[] {
+		let completed = 0;
+		return Array.from({ length: 41 }, (_, t) => {
+			const rate = t < 30 ? 1000 : 200;
+			completed += t === 0 ? 0 : rate;
+			return tick({
+				elapsed_seconds: t,
+				requests_completed: completed,
+				current_rps: rate,
+				throughput: t === 0 ? 0 : completed / t,
+			});
+		});
+	}
+
+	it("plots the stepped-down rate at t=40, not the cumulative 780", () => {
+		const history = steppedDown();
+		const atForty = history[40];
+		// The fixture really does hold the cumulative figure the line must not use.
+		expect(Math.round(atForty.throughput ?? 0)).toBe(780);
+
+		const { times, cols } = bucketColumns(history, [pickThroughput]);
+		expect(cols[0][times.indexOf(40)]).toBe(200);
+		expect(cols[0][times.indexOf(29)]).toBe(1000);
+	});
+
+	it("reads 0 where the tick holds no current_rps, never the cumulative throughput", () => {
+		const bare = {
+			...tick({ throughput: 777 }),
+			current_rps: undefined,
+		} as unknown as LoadTestMetrics;
+		expect(pickThroughput(bare)).toBe(0);
+	});
+
+	it("plots quantized ticks as the engine stored them, within 5% of the true rate on average", () => {
+		// A closed-loop run completes in batches, so single ticks read 398, 498,
+		// 499, 399 around a true 450. The line is the stored figure, untouched: no
+		// resampling from the cumulative counters, which would bend it.
+		const rates = [398, 498, 499, 399, 398, 498, 499, 399];
+		const history = rates.map((r, i) =>
+			tick({ elapsed_seconds: i + 1, current_rps: r, requests_completed: (i + 1) * 450 })
+		);
+		const { cols } = bucketColumns(history, [pickThroughput]);
+		expect(cols[0]).toEqual(rates);
+		const mean = cols[0].reduce((a, b) => a + b, 0) / cols[0].length;
+		expect(Math.abs(mean - 450) / 450).toBeLessThanOrEqual(0.05);
+	});
+});
+
+describe("pickSendRate and hasSendRate", () => {
+	it("returns the tick's windowed send rate, a measured 0 included", () => {
+		expect(pickSendRate(tick({ current_send_rate: 480 }))).toBe(480);
+		expect(pickSendRate(tick({ current_send_rate: 0 }))).toBe(0);
+	});
+
+	it("returns null, not the cumulative send_rate, for a tick stored without one", () => {
+		expect(pickSendRate(tick({ send_rate: 900 }))).toBeNull();
+	});
+
+	it("is true when any tick carries the figure, false when none does", () => {
+		const bare = tick({ send_rate: 900 });
+		expect(hasSendRate([bare, bare])).toBe(false);
+		expect(hasSendRate([bare, tick({ current_send_rate: 0 })])).toBe(true);
+		expect(hasSendRate([])).toBe(false);
+	});
+
+	it("buckets a tick without the figure as a gap beside the ticks that have it", () => {
+		const history = [
+			tick({ elapsed_seconds: 0, current_send_rate: 10 }),
+			tick({ elapsed_seconds: 1 }),
+			tick({ elapsed_seconds: 2, current_send_rate: 30 }),
+		];
+		const { cols } = bucketColumns(history, [pickSendRate]);
+		expect(cols[0]).toEqual([10, null, 30]);
 	});
 });
 
@@ -107,6 +185,14 @@ describe("rebucket with merge: max", () => {
 	it("is last-wins unless asked, so other charts keep their behaviour", () => {
 		const { cols } = rebucket([3, 4, 5, 6, 7], [[900, 40, 41, 42, 43]], 5);
 		expect(cols[0]).toEqual([43]);
+	});
+
+	it("lets a reading win over a gap, never counting the gap as 0", () => {
+		const { cols } = rebucket([3, 4, 5, 6], [[null, 40, null, null]], 5, "max");
+		// 3→5 (null), 4→5 (40) then 5→5 (null) then 6→5 (null): the bucket keeps 40.
+		expect(cols[0]).toEqual([40]);
+		expect(rebucket([1, 2], [[null, null]], 2, "max").cols[0]).toEqual([null]);
+		expect(rebucket([1, 2], [[-5, null]], 2, "max").cols[0]).toEqual([-5]);
 	});
 
 	it("never averages: a bucket of two seconds shows one of them", () => {
@@ -231,5 +317,49 @@ describe("buildConcurrencyScatter", () => {
 
 	it("returns empty columns for an empty history", () => {
 		expect(buildConcurrencyScatter([])).toEqual({ concurrency: [], p99: [], times: [] });
+	});
+});
+
+/*
+ * One field, three readers (#2393): the throughput chart plots `current_rps`,
+ * the anomaly detector reads `current_rps`, and the engine's HTML export draws
+ * `current_rps` from the same stored ticks (`tick_points (ticks, "current_rps")`
+ * in `engine/src/core/run_export_html.cpp`, a C++ file this suite cannot call,
+ * so the name is recorded here, not enforced). A chart and a detector reading
+ * different quantities is how a shaded window ended up over a line that showed
+ * no drop.
+ */
+const EXPORT_THROUGHPUT_FIELD = "current_rps";
+
+describe("the throughput series the chart, the detector and the export read", () => {
+	function storedRun(): LoadTestMetrics[] {
+		return Array.from({ length: 40 }, (_, t) =>
+			tick({
+				elapsed_seconds: t + 1,
+				requests_completed: (t + 1) * 500,
+				current_rps: t >= 25 && t <= 27 ? 200 : 500,
+				// A cumulative figure the three readers must all ignore.
+				throughput: 480,
+				latency_p99_ms: 20,
+				status_codes: { "200": (t + 1) * 500 },
+			})
+		);
+	}
+
+	it("agrees on current_rps, and the detector's throughput drop sits on the chart's dip", () => {
+		const history = storedRun();
+		const { times, cols } = bucketColumns(history, [pickThroughput]);
+		// A comparison of two empty series passes; assert there is something to compare.
+		expect(cols[0].length).toBeGreaterThan(20);
+
+		// Chart column == the field the export draws, tick for tick.
+		expect(cols[0]).toEqual(history.map((m) => m[EXPORT_THROUGHPUT_FIELD]));
+
+		const drop = detectAnomalies(history).find((a) => a.kind === "throughput_drop");
+		expect(drop).toBeDefined();
+		const dipped = times.filter((_, i) => cols[0][i] === 200);
+		expect(dipped.length).toBeGreaterThan(0);
+		expect(drop!.startSeconds).toBeLessThanOrEqual(Math.min(...dipped));
+		expect(drop!.endSeconds).toBeGreaterThanOrEqual(Math.max(...dipped));
 	});
 });

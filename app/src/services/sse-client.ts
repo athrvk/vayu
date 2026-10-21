@@ -27,7 +27,11 @@ interface RawSseMetrics {
 	totalErrors?: number;
 	httpErrors?: number;
 	noResponse?: number;
+	/** The trailing window's rates and means (issue #2393); the means are `null` for an idle window. */
 	currentRps?: number;
+	currentSendRate?: number;
+	windowAvgLatencyMs?: number | null;
+	windowAvgQueueWaitMs?: number | null;
 	activeConnections?: number;
 	/** The tick's window; `null` for a window with no completion (issue #2386). */
 	latencyP50Ms?: number | null;
@@ -67,6 +71,12 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		http_errors: m.httpErrors || 0,
 		no_response: m.noResponse || 0,
 		current_rps: m.currentRps || 0,
+		// Passed through as sent, never `|| 0`: an absent key is "the engine
+		// sent none" and a null mean is "nothing completed in the window", and a
+		// 0 would read as a measured zero.
+		current_send_rate: m.currentSendRate,
+		window_avg_latency_ms: m.windowAvgLatencyMs,
+		window_avg_queue_wait_ms: m.windowAvgQueueWaitMs,
 		current_concurrency: m.activeConnections || 0,
 		live: true,
 		// Every percentile is passed through as sent, never `|| 0`: a null is an
@@ -294,6 +304,8 @@ export class SSEClient {
 			http_errors: 0,
 			no_response: 0,
 			current_rps: 0,
+			// No `current_send_rate` or `window_avg_*`: this is no reading, and an
+			// absent key is what says so (a 0 would be a measured idle second).
 			current_concurrency: 0,
 			// Stands in for a frame that never arrived, so it is a live tick with
 			// no window and no second behind it, not a measured 0 ms.

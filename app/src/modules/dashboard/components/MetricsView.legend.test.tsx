@@ -62,6 +62,9 @@ function tick(i: number): LoadTestMetrics {
 		latency_p99_ms: 80 + i * 8,
 		avg_latency_ms: 25 + i,
 		avg_queue_wait_ms: i * 0.5,
+		current_send_rate: 105 + i * 10,
+		window_avg_latency_ms: 25 + i,
+		window_avg_queue_wait_ms: i * 0.5,
 		bytes_sent: i * 1000,
 		bytes_received: i * 5000,
 		status_codes: { "200": i * 90, "500": i * 3 },
@@ -150,6 +153,7 @@ describe("MetricsView legends match the roles their charts draw", () => {
 		const labels = new Set(all.map((e) => e.label));
 		for (const expected of [
 			"throughput",
+			"send rate",
 			"achieved",
 			"queue wait",
 			"p99",
@@ -182,5 +186,36 @@ describe("MetricsView legends match the roles their charts draw", () => {
 				band ? `hsl(${token} / ${BAND_FILL_ALPHA})` : `hsl(${token})`
 			);
 		}
+	});
+});
+
+/** The same run with every tick stored before the trailing window existed: no per-tick send rate. */
+function withoutSendRate(props: MetricsViewProps): MetricsViewProps {
+	return {
+		...props,
+		historicalMetrics: props.historicalMetrics.map(
+			({ current_send_rate: _dropped, ...rest }) => rest
+		),
+	};
+}
+
+describe("MetricsView send-rate legend follows the series (#2393)", () => {
+	// The send-rate line is conditional on the ticks, so its legend entry is too:
+	// a swatch for a line the chart never drew is the defect this pins.
+	const throughputCard = (entries: LegendEntryView[]) =>
+		entries.filter((e) => e.chart.series.some((s) => s.label === "throughput"));
+
+	it("lists send rate and draws it when the ticks carry the figure", () => {
+		const entries = throughputCard(legendEntries(RUNS[1]));
+		expect(entries.map((e) => e.label)).toContain("send rate");
+		expect(entries[0].chart.series.map((s) => s.label)).toContain("send rate");
+	});
+
+	it("lists neither, together, when no tick carries it", () => {
+		const entries = throughputCard(legendEntries(withoutSendRate(RUNS[1])));
+		// The card still legends throughput: an empty list proves nothing.
+		expect(entries.map((e) => e.label)).toContain("throughput");
+		expect(entries.map((e) => e.label)).not.toContain("send rate");
+		expect(entries[0].chart.series.map((s) => s.label)).not.toContain("send rate");
 	});
 });

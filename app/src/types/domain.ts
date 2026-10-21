@@ -2350,7 +2350,25 @@ export interface LoadTestMetrics {
 	http_errors?: number;
 	/** The part of `requests_failed` that got none (status code 0). Absent on a tick stored by an older engine. */
 	no_response?: number;
+	/**
+	 * Completions per second over the trailing window (at least one second)
+	 * ending at this tick, a live frame's and a stored tick's alike (issue #2393).
+	 */
 	current_rps: number;
+	/**
+	 * Dispatches per second over the same trailing window as `current_rps`.
+	 * Absent on a tick stored before the window existed: `send_rate` is the
+	 * run-cumulative figure and must not stand in for it.
+	 */
+	current_send_rate?: number;
+	/**
+	 * Mean latency and queue wait of the requests that completed in that
+	 * window. `null` for a window in which nothing completed, absent on a tick
+	 * stored before the window existed; `avg_latency_ms` is the run-cumulative
+	 * mean and must not stand in for either.
+	 */
+	window_avg_latency_ms?: number | null;
+	window_avg_queue_wait_ms?: number | null;
 	current_concurrency: number;
 	/**
 	 * Latency percentiles of the tick. A stored tick's are its whole second's,
@@ -2387,13 +2405,17 @@ export interface LoadTestMetrics {
 	cumulative_p50_ms?: number | null;
 	cumulative_p95_ms?: number | null;
 	cumulative_p99_ms?: number | null;
+	/** Mean latency over the whole run so far, not the tick's window. */
 	avg_latency_ms: number;
 	bytes_sent: number;
 	bytes_received: number;
+	/** Dispatches per second over the whole run so far (see `current_send_rate`). */
 	send_rate?: number;
+	/** Completions per second over the whole run so far (see `current_rps`). */
 	throughput?: number;
 	backpressure?: number;
 	dropped_requests?: number;
+	/** Mean queue wait over the whole run so far. */
 	avg_queue_wait_ms?: number;
 	// Run progress - feeds the iterations-mode ETA stat. requests_expected is 0
 	// for open-ended modes (constant_rps), in which case ETA is not shown.

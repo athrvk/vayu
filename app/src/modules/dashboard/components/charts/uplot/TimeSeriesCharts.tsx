@@ -35,6 +35,8 @@ import {
 	rebucket,
 	pickThroughput,
 	pickSendRate,
+	hasSendRate,
+	type Sample,
 	pickConcurrency,
 	pickErrorRate,
 } from "./buildData";
@@ -201,10 +203,14 @@ export function RequestRateChart({
 }: BaseProps & { targetRps?: number; rampOverlay?: RampOverlay | null; mode?: string }) {
 	const bucketSeconds = useClientSettingsStore((s) => s.chartBucketSeconds);
 	const annotations = useMemo(() => runAnnotations(anomalies, sleeps), [anomalies, sleeps]);
-	const { data, series, hasRamp } = useMemo(() => {
+	const { data, series, hasRamp, hasSend } = useMemo(() => {
+		// Decided over the whole data set, like `ramp` below: a run stored before
+		// the trailing window existed has no per-tick send rate, and plotting its
+		// cumulative `send_rate` under this label is the defect (#2393).
+		const send = hasSendRate(history);
 		const { times, cols } = bucketColumns(
 			history,
-			[pickThroughput, pickSendRate],
+			send ? [pickThroughput, pickSendRate] : [pickThroughput],
 			bucketSeconds
 		);
 		const {
@@ -221,9 +227,9 @@ export function RequestRateChart({
 				width: 1.8,
 				format: fmtRate,
 			},
-			{ label: sendRate.label, role: sendRate.role, format: fmtRate },
 		];
-		const columns: number[][] = [cols[0], cols[1]];
+		if (send) spec.push({ label: sendRate.label, role: sendRate.role, format: fmtRate });
+		const columns: Sample[][] = [...cols];
 
 		// Decided from the run's own config (rampOverlay is non-null only for a
 		// ramp_up run with a target concurrency, both known at run start), not
@@ -238,7 +244,9 @@ export function RequestRateChart({
 			);
 			const configured = times.map((t) => byTime.get(t)?.configured ?? null);
 			const achieved = times.map((t) => byTime.get(t)?.achieved ?? null);
-			columns.push(configured as number[], achieved as number[]);
+			// The band closes on the achieved series, which sits two columns on.
+			const achievedColumn = columns.length + 2;
+			columns.push(configured, achieved);
 			spec.push(
 				{
 					label: configuredLine.label,
@@ -246,7 +254,7 @@ export function RequestRateChart({
 					scale: "y2",
 					dash: [4, 4],
 					format: fmtCount,
-					bandTo: 4,
+					bandTo: achievedColumn,
 					bandRole: "warning",
 				},
 				{
@@ -259,7 +267,7 @@ export function RequestRateChart({
 			);
 		}
 		const aligned: uPlot.AlignedData = [times, ...columns];
-		return { data: aligned, series: spec, hasRamp: ramp };
+		return { data: aligned, series: spec, hasRamp: ramp, hasSend: send };
 	}, [history, rampOverlay, bucketSeconds]);
 
 	const markers = useMemo<Marker[]>(() => {
@@ -289,7 +297,7 @@ export function RequestRateChart({
 			syncKey={syncKey}
 			markers={markers}
 			annotations={annotations}
-			key={hasRamp ? "ramp" : "plain"}
+			key={`${hasRamp ? "ramp" : "plain"}-${hasSend ? "send" : "nosend"}`}
 		/>
 	);
 }

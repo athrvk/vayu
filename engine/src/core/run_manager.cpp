@@ -16,6 +16,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/scenario_load.hpp"
 #include "vayu/core/scenario_runner.hpp"
+#include "vayu/core/trailing_window.hpp"
 #include "vayu/core/worker_count.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_builder.hpp"
@@ -2314,6 +2315,15 @@ std::string build_tick_payload (const nlohmann::json& stats, size_t offset) {
     return build_sse_frame ("metrics", stats.dump (), offset);
 }
 
+namespace {
+
+/// A window mean as JSON: `null` for a window that completed nothing.
+nlohmann::json mean_or_null (const std::optional<double>& mean) {
+    return mean ? nlohmann::json (*mean) : nlohmann::json (nullptr);
+}
+
+} // namespace
+
 nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     nlohmann::json codes = nlohmann::json::object ();
     for (const auto& [code, count] : sample.status_codes) {
@@ -2321,14 +2331,17 @@ nlohmann::json build_metric_tick_payload (const MetricTickSample& sample) {
     }
 
     nlohmann::json payload;
-    payload["timestamp"]           = sample.timestamp;
-    payload["elapsed_seconds"]     = sample.elapsed_seconds;
-    payload["requests_completed"]  = sample.requests_completed;
-    payload["requests_failed"]     = sample.requests_failed;
-    payload["http_errors"]         = sample.http_errors;
-    payload["no_response"]         = sample.no_response;
-    payload["cancelled"]           = sample.cancelled;
-    payload["current_rps"]         = sample.current_rps;
+    payload["timestamp"]          = sample.timestamp;
+    payload["elapsed_seconds"]    = sample.elapsed_seconds;
+    payload["requests_completed"] = sample.requests_completed;
+    payload["requests_failed"]    = sample.requests_failed;
+    payload["http_errors"]        = sample.http_errors;
+    payload["no_response"]        = sample.no_response;
+    payload["cancelled"]          = sample.cancelled;
+    payload["current_rps"]        = sample.current_rps;
+    payload["current_send_rate"]  = sample.current_send_rate;
+    payload["window_avg_latency_ms"] = mean_or_null (sample.window_avg_latency_ms);
+    payload["window_avg_queue_wait_ms"] = mean_or_null (sample.window_avg_queue_wait_ms);
     payload["current_concurrency"] = sample.current_concurrency;
     payload["send_rate"]           = sample.send_rate;
     payload["throughput"]          = sample.throughput;
@@ -2530,6 +2543,38 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
 }
 
 /**
+ * A frame's trailing-window keys (#2393). A gate tick's stored row carries
+ * the same reading under snake_case names, so the two cannot disagree.
+ */
+void put_window_reading (nlohmann::json& stats, const WindowReading& window) {
+    stats["currentRps"]           = window.completed_per_s;
+    stats["currentSendRate"]      = window.sent_per_s;
+    stats["windowAvgLatencyMs"]   = mean_or_null (window.avg_latency_ms);
+    stats["windowAvgQueueWaitMs"] = mean_or_null (window.avg_queue_wait_ms);
+}
+
+/// The counters a trailing window samples, at @p steady_ms. The sample count
+/// is read before the sums, the order `average_latency` reads them in.
+CumulativeCounters
+cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t completed, size_t sent) {
+    CumulativeCounters counters;
+    counters.steady_ms         = steady_ms;
+    counters.completed         = completed;
+    counters.sent              = sent;
+    counters.latency_samples   = mc.latency_samples ();
+    counters.latency_sum_ms    = mc.total_latency_sum ();
+    counters.queue_wait_sum_ms = mc.total_queue_wait_sum ();
+    return counters;
+}
+
+/// What a gate tick hands the stored row: the second's merged percentiles and
+/// the trailing window its own frame carries.
+struct GateReadings {
+    MetricsCollector::Percentiles second;
+    WindowReading window;
+};
+
+/**
  * One persisted metric tick: the 1 Hz row every chart is drawn from.
  *
  * Built here as one wide row rather than reassembled from ~18 EAV rows by every
@@ -2542,21 +2587,16 @@ void persist_metric_tick (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 int64_t tick_wall_ms,
 int64_t tick_steady_ms,
-double elapsed,
 const std::map<int, size_t>& status_snapshot,
-const MetricsCollector::Percentiles& second,
-size_t& last_total,
+const GateReadings& gate,
 int64_t& first_tick_steady_ms) {
     size_t current_total = context->total_requests ();
-    size_t delta         = current_total - last_total;
     // The same snapshot the live tick counted its errors from, so the stored
     // row and the SSE frame for one tick cannot disagree.
     const auto failures = vayu::count_status_failures (status_snapshot);
+    double error_rate   = failures.error_rate ();
 
-    double current_rps = elapsed > 0 ? static_cast<double> (delta) / elapsed : 0.0;
-    double error_rate = failures.error_rate ();
-
-    // Calculate send rate (requests dispatched per second) and throughput (responses per second)
+    // Cumulative means since load start, beside the window's rates.
     size_t requests_sent = context->requests_sent.load ();
     const double run_elapsed_s = context->seconds_since_load_start (tick_steady_ms);
     double send_rate =
@@ -2588,9 +2628,10 @@ int64_t& first_tick_steady_ms) {
     }
 
     vayu::utils::log_debug ("run", "Metrics",
-    { { "runId", context->run_id }, { "rps", current_rps }, { "sendRate", send_rate },
-    { "throughput", throughput }, { "backpressure", backpressure },
-    { "errorRate", error_rate }, { "active", active_now }, { "sent", requests_sent } });
+    { { "runId", context->run_id }, { "rps", gate.window.completed_per_s },
+    { "sendRate", send_rate }, { "throughput", throughput },
+    { "backpressure", backpressure }, { "errorRate", error_rate },
+    { "active", active_now }, { "sent", requests_sent } });
 
     // Persist the tick: one wide row, built here rather than
     // reassembled from ~18 EAV rows by every reader.
@@ -2609,20 +2650,23 @@ int64_t& first_tick_steady_ms) {
         sample.timestamp = tick_wall_ms;
         sample.elapsed_seconds =
         static_cast<double> (tick_steady_ms - first_tick_steady_ms) / 1000.0;
-        sample.requests_completed  = current_total;
-        sample.requests_failed     = failures.failed;
-        sample.http_errors         = failures.http_errors ();
-        sample.no_response         = failures.no_response;
-        sample.cancelled           = mc.cancelled ();
-        sample.current_rps         = current_rps;
-        sample.current_concurrency = active_now;
-        sample.send_rate           = send_rate;
-        sample.throughput          = throughput;
-        sample.backpressure        = backpressure;
-        sample.error_rate          = error_rate;
-        sample.dropped_requests    = mc.dropped_requests ();
-        sample.bytes_sent          = mc.total_bytes_sent ();
-        sample.bytes_received      = mc.total_bytes_received ();
+        sample.requests_completed       = current_total;
+        sample.requests_failed          = failures.failed;
+        sample.http_errors              = failures.http_errors ();
+        sample.no_response              = failures.no_response;
+        sample.cancelled                = mc.cancelled ();
+        sample.current_rps              = gate.window.completed_per_s;
+        sample.current_send_rate        = gate.window.sent_per_s;
+        sample.window_avg_latency_ms    = gate.window.avg_latency_ms;
+        sample.window_avg_queue_wait_ms = gate.window.avg_queue_wait_ms;
+        sample.current_concurrency      = active_now;
+        sample.send_rate                = send_rate;
+        sample.throughput               = throughput;
+        sample.backpressure             = backpressure;
+        sample.error_rate               = error_rate;
+        sample.dropped_requests         = mc.dropped_requests ();
+        sample.bytes_sent               = mc.total_bytes_sent ();
+        sample.bytes_received           = mc.total_bytes_received ();
         // Reuse the snapshot already taken for the live tick above.
         sample.status_codes = status_snapshot;
         // The whole second's percentiles, every window since the previous
@@ -2630,10 +2674,10 @@ int64_t& first_tick_steady_ms) {
         // response-time-vs-concurrency scatter and the breakpoint /
         // saturation derivations read these. The gate frame of this tick
         // carries the same figures as `second*`.
-        sample.latency_samples = second.count;
-        sample.latency_p50_ms  = second.p50;
-        sample.latency_p95_ms  = second.p95;
-        sample.latency_p99_ms  = second.p99;
+        sample.latency_samples = gate.second.count;
+        sample.latency_p50_ms  = gate.second.p50;
+        sample.latency_p95_ms  = gate.second.p95;
+        sample.latency_p99_ms  = gate.second.p99;
         sample.custom_metrics  = mc.custom_metric_summaries ();
 
         db.add_metric_tick ({ 0, context->run_id, tick_wall_ms,
@@ -2649,20 +2693,21 @@ int64_t& first_tick_steady_ms) {
         "Metric tick not persisted: " + std::string (e.what ()),
         { { "runId", context->run_id } });
     }
-
-    last_total = current_total;
 }
 
 void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* db_ptr) {
-    auto& db          = *db_ptr;
-    auto last_update  = std::chrono::steady_clock::now ();
-    size_t last_total = 0;
+    auto& db         = *db_ptr;
+    auto last_update = std::chrono::steady_clock::now ();
 
-    // Producer-side delta-RPS state (mirrors the SSE handler calculation).
-    auto rps_last_time      = std::chrono::steady_clock::now ();
-    size_t rps_last_total   = 0;
-    double live_current_rps = 0.0;
-    bool rps_first          = true;
+    // The frame's and the stored row's rates and window means.
+    TrailingWindow rate_window (constants::server::LIVE_RATE_WINDOW_MS);
+
+    // LiveTick::current_rps, the capacity search's rate: a delta over at
+    // least 100 ms, refreshed when that much has passed.
+    auto rps_last_time    = std::chrono::steady_clock::now ();
+    size_t rps_last_total = 0;
+    double interval_rps   = 0.0;
+    bool rps_first        = true;
 
     // Live tick cadence (default 100 ms); DB write still gated at 1 Hz.
     // Declared here so it is in scope inside the try block below.
@@ -2680,12 +2725,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
     // dashboard sees status-codes shift left vs throughput on the same x-axis.
     //
     // A tick that `closes_second` is a gate: it takes the second's merged
-    // percentiles, puts them on its own frame and returns them for the stored
-    // row, so the frame and the row of one tick cannot disagree. Every other
-    // tick returns nullopt and leaves the second open.
+    // percentiles, puts them on its own frame and returns them, with the
+    // trailing window the frame carries, for the stored row, so the frame and
+    // the row of one tick cannot disagree. Every other tick returns nullopt
+    // and leaves the second open.
     auto emit_live_tick = [&] (const std::map<int, size_t>* status_snapshot,
                           int64_t now_wall_ms, int64_t now_steady_ms,
-                          bool closes_second) -> std::optional<MetricsCollector::Percentiles> {
+                          bool closes_second) -> std::optional<GateReadings> {
         auto& mc                 = *context->metrics_collector;
         size_t active_count      = context->active_transfer_count ();
         size_t requests_sent     = context->requests_sent.load ();
@@ -2702,15 +2748,18 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         auto stats = mc.get_current_stats (active_count, elapsed_seconds,
         requests_sent, requests_expected, status_snapshot, &window);
 
-        std::optional<MetricsCollector::Percentiles> second;
+        size_t current_total      = stats["totalRequests"].get<size_t> ();
+        const WindowReading rates = rate_window.push (
+        cumulative_counters (mc, now_steady_ms, current_total, requests_sent));
+        put_window_reading (stats, rates);
+
+        std::optional<GateReadings> gate;
         if (closes_second) {
-            second = mc.take_second_percentiles ();
-            put_interval_percentiles (stats, "second", *second);
+            gate = GateReadings{ mc.take_second_percentiles (), rates };
+            put_interval_percentiles (stats, "second", gate->second);
         }
 
-        // Instantaneous RPS: delta-based, updated every ≥100 ms.
-        auto now_steady      = std::chrono::steady_clock::now ();
-        size_t current_total = stats["totalRequests"].get<size_t> ();
+        auto now_steady = std::chrono::steady_clock::now ();
         if (rps_first) {
             rps_last_total = current_total;
             rps_last_time  = now_steady;
@@ -2719,13 +2768,11 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
             double iv =
             std::chrono::duration<double> (now_steady - rps_last_time).count ();
             if (iv >= 0.1) {
-                live_current_rps =
-                static_cast<double> (current_total - rps_last_total) / iv;
+                interval_rps = static_cast<double> (current_total - rps_last_total) / iv;
                 rps_last_total = current_total;
                 rps_last_time  = now_steady;
             }
         }
-        stats["currentRps"] = live_current_rps;
 
         // One definition with the persisted tick and peak_in_flight, think-timer
         // reservations included (#1921) and Stop-cancelled requests excluded
@@ -2741,14 +2788,13 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         // Publish the same numbers to the strategies' feedback path, before
         // the SSE payload rather than after: a capacity search polls this every
         // tick, and the serialize-and-append below is the slower half.
-        context->publish_live_tick (
-        { 0, live_current_rps, backpressure, mc.level_latency () });
+        context->publish_live_tick ({ 0, interval_rps, backpressure, mc.level_latency () });
 
         // Framed by the ring, which assigns the id under its own lock: a run
         // with a monitor has a second producer appending to it, and reading the
         // offset here would race that thread for the same id.
         context->append_event ("metrics", stats.dump ());
-        return second;
+        return gate;
     };
 
     // Guard the entire body so that any exception (std::bad_alloc, json error,
@@ -2805,11 +2851,11 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 
             // Emit a live tick every iteration; a gate tick also closes the
             // second, whether or not the row below then persists.
-            const auto second = emit_live_tick (
+            const auto gate = emit_live_tick (
             &status_snapshot, tick_wall_ms, tick_steady_ms, elapsed >= 1.0);
-            if (second) {
+            if (gate) {
                 persist_metric_tick (context, db, tick_wall_ms, tick_steady_ms,
-                elapsed, status_snapshot, *second, last_total, first_tick_steady_ms);
+                status_snapshot, *gate, first_tick_steady_ms);
                 last_update = now;
             }
         }
