@@ -658,8 +658,7 @@ TEST_F (ImportApplyRouteTest, ACarriedClientCertificateCandidateRegistersExactly
     const auto stored = db_->get_client_certificates ();
     ASSERT_EQ (stored.size (), 1u);
     EXPECT_EQ (stored[0].host, "api.example.com");
-    ASSERT_HAS_VALUE (stored[0].port);
-    EXPECT_EQ (*stored[0].port, 8443);
+    EXPECT_EQ (stored[0].port.value_or (-1), 8443);
     EXPECT_EQ (stored[0].cert_path, cert.path ());
     EXPECT_EQ (stored[0].passphrase, PASSPHRASE);
 
