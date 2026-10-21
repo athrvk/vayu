@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -28,9 +29,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "vayu/core/openapi_document.hpp"
 #include "vayu/core/openapi_export.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "vayu/utils/ordered_json.hpp"
+#include "wide_json.hpp"
 
 using vayu::core::export_openapi;
 using vayu::core::ExportCollection;
@@ -792,6 +796,35 @@ TEST (SkeletonExport, DescribesABodyOnlyFromTheBodyThatIsThereAndMarksTheShapeAs
     // saved to say what this endpoint answers.
     EXPECT_FALSE (operation_of (exported.document, "/pets", "put").contains ("requestBody"));
     EXPECT_FALSE (operation_of (exported.document, "/pets", "put").contains ("responses"));
+}
+
+// The shape of a saved example body is built member by member (#2552).
+// Mutation check: write `properties[member.key ()]` in `shape_of` again and this
+// runs for minutes and fails the budget. The output is read back with a
+// linear parse, never `json::parse`, which is the quadratic one.
+TEST (SkeletonExport, ABodyOfAHundredThousandMembersHasItsShapeDerivedInLinearTime) {
+    ExportRequest posted = request ("POST", "{{baseUrl}}/pets");
+    posted.body          = { "json", vayu::tests::wide_object_json (), {} };
+
+    const auto started = std::chrono::steady_clock::now ();
+    const ExportOutcome outcome =
+    export_openapi (petstore (), { posted }, std::nullopt, ExportFormat::Json);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    ASSERT_TRUE (outcome.ok ()) << outcome.error;
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    const auto document = vayu::utils::parse_ordered_json (
+    outcome.text, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    ASSERT_HAS_VALUE (document);
+    const json& schema = document->at ("paths")
+                         .at ("/pets")
+                         .at ("post")
+                         .at ("requestBody")
+                         .at ("content")
+                         .at ("application/json")
+                         .at ("schema");
+    EXPECT_EQ (schema.at ("properties").size (), vayu::tests::WIDE_OBJECT_KEYS);
+    EXPECT_EQ (schema.at ("properties").begin ().key (), "k0");
 }
 
 TEST (SkeletonExport, WritesAGraphqlBodyAsTheEnvelopeAServerReceives) {

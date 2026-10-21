@@ -81,6 +81,11 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 });
 
+/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+function liveGlyph(button: HTMLElement): string {
+	return button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+}
+
 describe("Copy for agent on the inbox tab", () => {
 	it("copies the formatter's line and says so", async () => {
 		render(<InboxView />);
@@ -110,5 +115,24 @@ describe("Copy for agent on the inbox tab", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(INBOX.url));
+	});
+
+	// The two buttons share a header, so one shared `useCopy` would tie them
+	// together: each has its own, and the URL's icon swap and the text button's
+	// toast stay independent.
+	it("swaps the URL button's glyph without a toast, then toasts for the text button", async () => {
+		render(<InboxView />);
+		const urlButton = await screen.findByRole("button", { name: "Copy inbox URL" });
+
+		fireEvent.click(urlButton);
+		await waitFor(() => expect(liveGlyph(urlButton)).toContain("lucide-check"));
+		expect(useToastStore.getState().toasts).toEqual([]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Copy for agent" }));
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+				"Reference copied",
+			])
+		);
 	});
 });

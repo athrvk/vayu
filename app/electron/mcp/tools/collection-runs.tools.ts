@@ -278,7 +278,7 @@ export const COLLECTION_RUN_TOOLS: McpTool[] = [
 				.boolean()
 				.optional()
 				.describe(
-					"Set true to end an iteration at every errored step, a script error included. Left off (the default), a step whose pre-request or test script threw after its exchange completed stays `errored` with its message and the iteration moves on to the next request, as in Postman and Newman; a transport failure, an unbindable data row and the runner's own refusals (an unresolved setNextRequest target, the maxStepsPerIteration cap) end the iteration either way. What an error cost is counted in `stepsNotRun`."
+					"Set true to end an iteration at every errored step, a script error and a transport failure included. Left off (the default), an errored step (a script that threw, a request that got no response, an unbindable data row) stays `errored` with its message and the iteration moves on to the next request, as in Postman and Newman; the runner's own refusals (an unresolved setNextRequest target, the maxStepsPerIteration cap) end the iteration either way. What an error cost is counted in `stepsNotRun`."
 				),
 			// Only `timers` - not `scripts` - from #1495's override block
 			// (issue #1559): unlike a scenario load run, this design-mode

@@ -152,6 +152,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   Postman export's stored columns) has a test that fails the budget on the
   quadratic parse. The rest of a path can still be quadratic after the parse is
   not (`ordered_map::operator[]` per member); the test measures the whole path.
+  Copying members out of an object whose keys are already distinct goes through
+  `vayu::utils::append_unique_member` (#2552), and a test reads its export back
+  with `parse_ordered_json`, never `ordered_json::parse`.
 - **libcurl's variadic calls go through `set_opt` / `get_info`** (#1023,
   `cppcoreguidelines-pro-type-vararg`). **`vayu::http::set_opt<CURLOPT_...>`**
   and **`get_info<CURLINFO_...>`** (`http/curl_options.hpp`) take the constant as
@@ -418,7 +421,7 @@ Key endpoints:
 | POST | `/runs` | Start a load test run |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
-| GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run |
+| GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
 | POST | `/oauth2/token` | Acquire/return a cached OAuth 2.0 token (auth resolved engine-side) |
 | GET | `/health` | Health check |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
@@ -725,7 +728,13 @@ logged as a warning: it means a client skipped composition.
     type and validates with **valijson**. Three rules the shape enforces: an
     unbound collection gets no `validation` node at all; `checked: false`
     carries a reason code and no validity; keywords the draft-07 validator
-    cannot evaluate are named and counted on the verdict. `POST /execute`
+    cannot evaluate are named and counted on the verdict. `format` is
+    asserted for valijson's four (`date`, `time`, `date-time`, `ipv4`) and for
+    `email`, `uri`, `uuid`, `hostname` and `ipv6` through the
+    `schema_format.hpp` table (#2581): valijson has no format hook, so
+    `run_validator` adds a custom constraint under the same `format` key, and a
+    name in neither place stays an annotation. A name added to the table must
+    not be one valijson checks, or each failure is counted twice. `POST /execute`
     returns the node and `record_design_result` stores the *same object* on the
     trace. `match_status_pattern` is shared with coverage. Under load the check
     is deferred to run end (#682, `validate_sampled_responses` over the sample
@@ -888,7 +897,13 @@ logged as a warning: it means a client skipped composition.
   `curl_to_error` reports that abort as the same `InvalidUrl` sentence. A new
   driver gets both by going through those two functions, never a check of
   its own. Tests share one registered stand-in (`tests/engine_port_stand_in.hpp`)
-  because the registry is set once per process.
+  because the registry is set once per process. A `$ref` fetch
+  (`POST /import/fetch` with `reference`, #2364) adds `LocalPeerRule` from the
+  same header on the same callback: `ClientConfig::local_peer_rule` reaches the
+  applier as a `ConnectedPeerCheck`, which is `CURLOPT_PREREQDATA` (written on
+  every call, null included, because handles are pooled) and records the
+  refusal `curl_to_error` words. A new address class goes into
+  `loopback_guard.cpp`'s one classifier, never a second copy.
 - **Every leg verifies with OpenSSL** (#851): `engine/vcpkg.json` pins curl's
   `openssl` feature with `default-features: false`. That does not make Windows
   a single-backend build: the port's `http2` feature depends on `curl[ssl]`,

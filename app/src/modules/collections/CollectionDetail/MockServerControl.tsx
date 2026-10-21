@@ -28,6 +28,7 @@
  */
 
 import {
+	Check,
 	Copy,
 	ExternalLink,
 	Loader2,
@@ -52,7 +53,7 @@ import type { MockServerOptions } from "./mock-server-options";
 
 export default function MockServerControl({ collectionId }: { collectionId: string }) {
 	const showToast = useToastStore((s) => s.showToast);
-	const { copy } = useCopy();
+	const { copy, copied } = useCopy({ feedback: "icon" });
 	const openTab = useTabsStore((s) => s.openTab);
 	const mocksQuery = useMockServersQuery();
 	const startMock = useStartMockServerMutation();
@@ -193,7 +194,20 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 			<TooltipIconButton
 				label="Copy mock server URL"
 				tooltipHint={running.url}
-				icon={<Copy className="size-icon-sm" aria-hidden="true" />}
+				icon={
+					<IconSwap
+						state={copied ? "copied" : "copy"}
+						icons={{
+							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+							copied: (
+								<Check
+									className="size-icon-sm text-status-success-text"
+									aria-hidden="true"
+								/>
+							),
+						}}
+					/>
+				}
 				onClick={() => void copy(running.url, "Mock server URL")}
 			/>
 			<TooltipIconButton

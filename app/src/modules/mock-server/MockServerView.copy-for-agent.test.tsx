@@ -81,6 +81,11 @@ beforeEach(() => {
 	useToastStore.setState({ toasts: [] });
 });
 
+/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+function liveGlyph(button: HTMLElement): string {
+	return button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+}
+
 describe("Copy for agent on the mock-server tab", () => {
 	it("copies the formatter's line and says so", async () => {
 		render(<MockServerView />);
@@ -112,5 +117,37 @@ describe("Copy for agent on the mock-server tab", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Copy mock server URL" }));
 
 		await waitFor(() => expect(writeText).toHaveBeenCalledWith(MOCK.url));
+	});
+
+	// An icon button swaps its glyph and raises no toast; the text button beside
+	// it toasts. Two hook instances, so neither acknowledgement leaks into the other.
+	it("swaps the URL button's glyph without a toast, then toasts for the text button", async () => {
+		render(<MockServerView />);
+		const urlButton = screen.getByRole("button", { name: "Copy mock server URL" });
+		expect(liveGlyph(urlButton)).toContain("lucide-copy");
+
+		fireEvent.click(urlButton);
+		await waitFor(() => expect(liveGlyph(urlButton)).toContain("lucide-check"));
+		expect(useToastStore.getState().toasts).toEqual([]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Copy for agent" }));
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+				"Reference copied",
+			])
+		);
+	});
+
+	it("leaves the URL button's glyph alone when the clipboard refused", async () => {
+		writeText.mockRejectedValue(new Error("Clipboard write denied"));
+		render(<MockServerView />);
+		const urlButton = screen.getByRole("button", { name: "Copy mock server URL" });
+
+		fireEvent.click(urlButton);
+
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]).toMatchObject({ variant: "error" })
+		);
+		expect(liveGlyph(urlButton)).toContain("lucide-copy");
 	});
 });

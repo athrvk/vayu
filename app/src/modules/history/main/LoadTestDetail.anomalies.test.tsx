@@ -32,23 +32,18 @@ const series = vi.hoisted(() => ({ current: [] as LoadTestMetrics[] }));
 vi.mock("@/queries/runs", () => ({
 	useRunTimeSeriesQuery: () => ({
 		data: {
-			pages: [
-				{
-					data: series.current,
-					pagination: {
-						total: series.current.length,
-						limit: 1000,
-						offset: 0,
-						hasMore: false,
-						returned: series.current.length,
-					},
-				},
-			],
+			data: series.current,
+			pagination: {
+				total: series.current.length,
+				limit: 2000,
+				offset: 0,
+				hasMore: false,
+				returned: series.current.length,
+			},
+			bucketed: false,
+			ticksPerBucket: 1,
 		},
 		isLoading: false,
-		isFetchingNextPage: false,
-		fetchNextPage: vi.fn(),
-		hasNextPage: false,
 	}),
 	// Server vitals are a separate query on this pane; these runs scrape nothing.
 	useRunMonitorSeriesQuery: () => ({

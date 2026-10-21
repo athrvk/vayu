@@ -183,6 +183,101 @@ describe("importNotices", () => {
 		]);
 	});
 
+	describe("where the unsent auth is declared (#2537)", () => {
+		const PHRASE =
+			"auth imported but not sent (Vayu does not sign AWS, Digest, NTLM, Hawk, OAuth 1, EdgeGrid or JWT)";
+		const authNotice = (overrides: Partial<ImportMeta>) =>
+			importNotices(meta({ nonExecutableAuth: 2, ...overrides })).map((n) => n.text);
+
+		it("names the declaring folders after the request names", () => {
+			expect(
+				authNotice({
+					nonExecutableAuthRequests: ["Block a user ID", "Mute a user ID"],
+					nonExecutableAuthFolders: ["Blocks", "Mutes"],
+				})
+			).toEqual([
+				`2 requests: ${PHRASE} - Block a user ID, Mute a user ID; set on folders Blocks, Mutes`,
+			]);
+		});
+
+		it("says folder, singular, for one declaring folder", () => {
+			expect(
+				authNotice({
+					nonExecutableAuth: 1,
+					nonExecutableAuthRequests: ["Sign in"],
+					nonExecutableAuthFolders: ["Admin"],
+				})
+			).toEqual([`Sign in: ${PHRASE}; set on folder Admin`]);
+		});
+
+		it("says the collection when the root declares it", () => {
+			expect(
+				authNotice({
+					nonExecutableAuthRequests: ["A", "B"],
+					nonExecutableAuthCollection: "Twitter API",
+				})
+			).toEqual([`2 requests: ${PHRASE} - A, B; set on the collection`]);
+		});
+
+		it("names the collection and the folders in one clause", () => {
+			expect(
+				authNotice({
+					nonExecutableAuthRequests: ["A", "B"],
+					nonExecutableAuthCollection: "Twitter API",
+					nonExecutableAuthFolders: ["Blocks", "Lists"],
+				})
+			).toEqual([
+				`2 requests: ${PHRASE} - A, B; set on the collection and folders Blocks, Lists`,
+			]);
+		});
+
+		it("cuts a long folder list short with how many were left out", () => {
+			const folders = ["F1", "F2", "F3", "F4", "F5", "F6", "F7"];
+			expect(
+				authNotice({
+					nonExecutableAuthRequests: ["A", "B"],
+					nonExecutableAuthFolders: folders,
+				})
+			).toEqual([`2 requests: ${PHRASE} - A, B; set on folders F1, F2, F3, F4, F5, +2 more`]);
+		});
+
+		it("lists the first three requests and counts the rest beside the folder clause", () => {
+			const requests = Array.from({ length: 23 }, (_, i) => `R${i + 1}`);
+			expect(
+				authNotice({
+					nonExecutableAuth: 23,
+					nonExecutableAuthRequests: requests,
+					nonExecutableAuthFolders: ["Blocks", "Manage Tweets", "Mutes", "Lists"],
+				})
+			).toEqual([
+				`23 requests: ${PHRASE} - R1, R2, R3, +20 more; set on folders Blocks, Manage Tweets, Mutes, Lists`,
+			]);
+		});
+
+		it("keeps the clause on the count-only line, when no request is named", () => {
+			expect(
+				authNotice({ nonExecutableAuth: 4, nonExecutableAuthFolders: ["Blocks"] })
+			).toEqual([`4 requests' ${PHRASE}; set on folder Blocks`]);
+		});
+
+		it("leaves the line as it was when no site is named", () => {
+			expect(authNotice({ nonExecutableAuthRequests: ["A", "B"] })).toEqual([
+				`2 requests: ${PHRASE} - A, B`,
+			]);
+			expect(authNotice({ nonExecutableAuth: 3 })).toEqual([`3 requests' ${PHRASE}`]);
+		});
+
+		it("shows nothing when no request loses its auth, whatever declares it", () => {
+			expect(
+				authNotice({
+					nonExecutableAuth: 0,
+					nonExecutableAuthFolders: ["Unused"],
+					nonExecutableAuthCollection: "Twitter API",
+				})
+			).toEqual([]);
+		});
+	});
+
 	describe("scripts that use an API Vayu does not run (#2576)", () => {
 		const scriptApis = (entries: { request: string; names: string[] }[]) =>
 			importNotices(meta({ unsupportedScriptApis: entries }));

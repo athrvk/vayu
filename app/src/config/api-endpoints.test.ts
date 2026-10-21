@@ -74,6 +74,13 @@ describe("API_ENDPOINTS canonical routes", () => {
 		expect(url).not.toContain("format=json");
 	});
 
+	it("asks /runs/:id/metrics for the downsampled series with maxPoints alone", () => {
+		// The engine ignores limit and offset beside maxPoints (#2547).
+		expect(API_ENDPOINTS.STATS_TIME_SERIES("r1", 100, 50, 2000)).toBe(
+			"/runs/r1/metrics?maxPoints=2000"
+		);
+	});
+
 	it("pins none of the renamed paths to a legacy name", () => {
 		const all = [
 			API_ENDPOINTS.EXECUTE_REQUEST,

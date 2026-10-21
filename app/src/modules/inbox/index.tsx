@@ -26,12 +26,22 @@
  */
 
 import { useId, useState } from "react";
-import { Copy, Eraser, Inbox as InboxIcon, Play, RotateCw, Square, Trash2 } from "lucide-react";
+import {
+	Check,
+	Copy,
+	Eraser,
+	Inbox as InboxIcon,
+	Play,
+	RotateCw,
+	Square,
+	Trash2,
+} from "lucide-react";
 import {
 	Badge,
 	Button,
 	DeleteConfirmDialog,
 	DisabledHint,
+	IconSwap,
 	Label,
 	Select,
 	SelectContent,
@@ -198,6 +208,9 @@ function DeleteInboxButton({ inbox, listedTotal }: { inbox: Inbox; listedTotal: 
 export default function InboxView() {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
+	// A second instance: the URL button swaps its glyph and the text button beside
+	// it toasts, and each needs its own `copied` so one copy never checks the other.
+	const { copy: copyUrl, copied: urlCopied } = useCopy({ feedback: "icon" });
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const openTab = useTabsStore((s) => s.openTab);
@@ -345,9 +358,20 @@ export default function InboxView() {
 					variant="ghost"
 					size="sm"
 					aria-label="Copy inbox URL"
-					onClick={() => void copy(inbox.url, "Inbox URL")}
+					onClick={() => void copyUrl(inbox.url, "Inbox URL")}
 				>
-					<Copy className="size-icon-sm" aria-hidden="true" />
+					<IconSwap
+						state={urlCopied ? "copied" : "copy"}
+						icons={{
+							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+							copied: (
+								<Check
+									className="size-icon-sm text-status-success-text"
+									aria-hidden="true"
+								/>
+							),
+						}}
+					/>
 				</Button>
 				<Button
 					variant="ghost"

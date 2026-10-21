@@ -182,7 +182,9 @@ Json shape_of (const Json& value, size_t depth) {
     Json properties = Json::object ();
     if (depth < constants::spec_document::MAX_READ_DEPTH) {
         for (auto member = value.begin (); member != value.end (); ++member) {
-            properties[member.key ()] = shape_of (member.value (), depth + 1);
+            // `value` is a parsed object, so its keys are distinct.
+            vayu::utils::append_unique_member (
+            properties, member.key (), shape_of (member.value (), depth + 1));
         }
     }
     return Json{ { "type", "object" }, { "properties", std::move (properties) } };

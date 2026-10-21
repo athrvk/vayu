@@ -1336,12 +1336,14 @@ TEST_F (ScriptEngineTest, ExpectIncludeMatchesObjectSubset) {
     EXPECT_FALSE (result.tests[7].passed);
     EXPECT_TRUE (result.tests[8].passed) << result.tests[8].error_message;
     EXPECT_TRUE (result.tests[9].passed) << result.tests[9].error_message;
-    // Both directions of the combination chai refuses: a target that takes an
-    // object argument and did not get one, whichever side is the odd one.
+    // Both directions of the combination chai refuses, as an assertion: a
+    // target that takes an object argument and did not get one, whichever side
+    // is the odd one (#2582).
     for (size_t i = 10; i < 12; i++) {
         EXPECT_FALSE (result.tests[i].passed) << result.tests[i].name << " passed but should not";
-        EXPECT_NE (
-        result.tests[i].error_message.find ("expects an object argument"), std::string::npos)
+        EXPECT_NE (result.tests[i].error_message.find (
+                   "AssertionError: the given combination of arguments"),
+        std::string::npos)
         << result.tests[i].error_message;
     }
 }
@@ -1616,15 +1618,17 @@ TEST_F (ScriptEngineTest, LengthMeasuresAMapOrSetBySize) {
     "AssertionError: Expected size 1 to equal 2");
 }
 
-// What is measured has to have a length, and the refusal is the script's
-// mistake - a TypeError - rather than a verdict that `.not` could turn into a
-// pass.
+// What is measured has to have a length. A target without one fails as chai's
+// `to.have.property('length')` does (#2582): an assertion in both polarities,
+// so `.not` cannot turn it into a pass.
 TEST_F (ScriptEngineTest, LengthChainsRefuseATargetWithNoLength) {
-    for (const char* refused :
-    { "pm.expect(5).to.have.length.above(1)", "pm.expect(5).to.not.have.length.above(1)",
-    "pm.expect({}).to.have.length.within(0, 1)", "pm.expect(5).to.have.length(1)" }) {
+    for (const char* refused : { "pm.expect(5).to.have.length.above(1)",
+         "pm.expect(5).to.not.have.length.above(1)", "pm.expect({}).to.have.length.within(0, 1)",
+         "pm.expect(5).to.have.length(1)", "pm.expect(5).to.not.have.length(1)" }) {
         const std::string reported = verdict_of (refused);
-        EXPECT_NE (reported.find ("requires a value with a length"), std::string::npos)
+        EXPECT_TRUE (reported.starts_with ("AssertionError: Expected "))
+        << refused << " -> " << reported;
+        EXPECT_NE (reported.find ("to have property 'length'"), std::string::npos)
         << refused << " -> " << reported;
     }
     // Bounds are lengths, so a Date is not one.

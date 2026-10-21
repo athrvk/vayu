@@ -92,6 +92,21 @@ describe("apiService.importFetch with progress", () => {
 		expect(stream.mock.calls[0][1]).toEqual({ url: "http://x/spec.json", maxBytes: 4096 });
 	});
 
+	it("passes the reference fields through to the stream", async () => {
+		streaming([event("result", { content: "{}", contentType: "application/json" })]);
+
+		await apiService.importFetch("http://x/c.json", undefined, () => {}, undefined, {
+			reference: true,
+			sourceUrl: "http://x/spec.json",
+		});
+
+		expect(stream.mock.calls[0][1]).toStrictEqual({
+			url: "http://x/c.json",
+			reference: true,
+			sourceUrl: "http://x/spec.json",
+		});
+	});
+
 	it("throws the engine's failure carried by an error event", async () => {
 		streaming([
 			event("progress", { received: 1024, total: null }),

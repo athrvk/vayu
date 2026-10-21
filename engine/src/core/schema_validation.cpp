@@ -15,17 +15,22 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/schema_error_text.hpp"
+#include "vayu/core/schema_format.hpp"
 #include "vayu/core/spec_coverage.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <format>
 #include <map>
 #include <unordered_set>
 #include <utility>
 #include <valijson/adapters/nlohmann_json_adapter.hpp>
+#include <valijson/constraint_builder.hpp>
+#include <valijson/constraints/concrete_constraints.hpp>
 #include <valijson/schema.hpp>
 #include <valijson/schema_parser.hpp>
+#include <valijson/validation_results.hpp>
 #include <valijson/validator.hpp>
 
 namespace vayu::core {
@@ -420,6 +425,64 @@ collect_unevaluated_keywords (const nlohmann::json& schema, const nlohmann::json
 namespace {
 
 /**
+ * Asserts a `format` valijson only annotates (#2581): the extra constraint it
+ * accepts for a custom keyword, added beside valijson's own `format` one.
+ * @p checker is null for a name that stays an annotation, because a builder
+ * must return a constraint and cannot decline the keyword.
+ */
+class FormatCheckConstraint final : public valijson::constraints::PolyConstraint {
+    public:
+    explicit FormatCheckConstraint (const FormatChecker* checker)
+    : checker_ (checker) {
+    }
+
+    bool validate (const valijson::adapters::Adapter& target,
+    const valijson::ValidationResults::Path& path,
+    valijson::ValidationResults* results) const override {
+        // `format` applies to strings only; any other type passes, as valijson's does.
+        if (checker_ == nullptr || !target.isString () ||
+        checker_->accepts (target.getString ())) {
+            return true;
+        }
+        if (results != nullptr) {
+            results->pushError (
+            path, std::format ("String should be a valid {}", checker_->noun));
+        }
+        return false;
+    }
+
+    private:
+    valijson::constraints::Constraint* cloneInto (void* where) const override {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory): placement into valijson's storage.
+        return new (where) FormatCheckConstraint (*this);
+    }
+
+    size_t sizeOf () const override {
+        return sizeof (*this);
+    }
+
+    const FormatChecker* checker_;
+};
+
+class FormatCheckBuilder final : public valijson::ConstraintBuilder {
+    public:
+    valijson::constraints::Constraint* make (
+    const valijson::adapters::Adapter& node) const override {
+        // A non-string `format` was already refused by valijson's own parse.
+        const FormatChecker* checker =
+        node.isString () ? find_format_checker (node.getString ()) : nullptr;
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory): valijson deletes what make returns.
+        return new FormatCheckConstraint (checker);
+    }
+};
+
+/// Makes @p parser assert the formats in `schema_format.hpp`.
+void assert_extra_formats (valijson::SchemaParser& parser) {
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory): the parser owns its builders.
+    parser.addConstraintBuilder ("format", new FormatCheckBuilder);
+}
+
+/**
  * One validator run, shared by both public entry points: the verdict, or the
  * validator's own reason when it refused the schema (at parse time, or at
  * validation time for a constraint it only reads then, such as a `pattern`).
@@ -436,6 +499,7 @@ const nlohmann::json& body) {
     valijson::ValidationResults results;
     try {
         valijson::SchemaParser parser;
+        assert_extra_formats (parser);
         const valijson::adapters::NlohmannJsonAdapter adapter (root);
         parser.populateSchema (adapter, parsed);
         valijson::Validator validator;

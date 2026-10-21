@@ -216,8 +216,13 @@ export const API_ENDPOINTS = {
 	// engine's own answer, and the answer is the one that is right.
 
 	// Time-series metrics (JSON, paginated). Always JSON - no format param.
-	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0) =>
-		`/runs/${runId}/metrics?limit=${limit}&offset=${offset}`,
+	// `maxPoints` asks for the whole series downsampled to at most that many
+	// ticks (#2547); the engine then ignores `limit` and `offset`, so they are
+	// not sent.
+	STATS_TIME_SERIES: (runId: string, limit = STATS_PAGE_LIMIT, offset = 0, maxPoints?: number) =>
+		maxPoints === undefined
+			? `/runs/${runId}/metrics?limit=${limit}&offset=${offset}`
+			: `/runs/${runId}/metrics?maxPoints=${maxPoints}`,
 
 	// Server vitals scraped during the run (JSON, paginated, same envelope).
 	// Its own endpoint rather than extra keys on the tick objects: those keys

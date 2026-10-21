@@ -108,9 +108,8 @@ consumes it.
   never an average. `mapSseMetrics` marks a live frame (`live`) because that
   flag is what tells a frame between gates from a stored tick. The hero card
   reads `cumulativePercentiles` instead, the run so far, which is the span its
-  mean covers. The anomaly detector still reads each tick's own
-  `latency_p99_ms`: its rules count ticks, so it cannot skip the frames between
-  gates.
+  mean covers. The anomaly detector reads `secondPercentiles` too, over the
+  gate frames alone (below).
 
 ## Anomaly detection (`utils/detectAnomalies.ts`)
 
@@ -141,3 +140,33 @@ rule that reads a tick's position without honouring the second half will pass
 its own unit test and disagree with the one-shot the first time the window
 fills; `detectAnomalies.test.ts` replays randomized append/trim sequences
 against a from-scratch pass to catch exactly that.
+
+**Both views run it on one tick a second** (#2589), except on a long run in
+History (below). Every rule counts ticks (a 15-tick baseline, 2 ticks to open a
+window), so a live buffer of 100 ms frames would shrink the baseline to 1.5 s
+and judge windows History never sees.
+`MetricsView` passes its buffer through `wholeSecondTicks` first, which keeps a
+stored tick as it is and, of a live stream, only the gate frames (the final
+frame included). A gate's p99 is its `second_p99_ms`, and its `current_rps`, a
+100 ms delta on the frame, is restated as completions over the interval since
+the previous gate, which is what a stored tick holds. That figure is fixed the
+first time a gate is seen and cached per frame, so a later trim of the gate
+before it changes neither the figure nor the object the detector aligns on.
+
+**A long run in History is judged over buckets** (#2547). `LoadTestDetail`
+reads its series in one `maxPoints` request of `HISTORY_SERIES_MAX_POINTS`
+(2,000). A run that stored more arrives folded into buckets of `ticksPerBucket`
+seconds: p99 and concurrency the bucket's worst second, `current_rps` its mean,
+every counter and the status map its last tick. The detector and
+`computeBreakpoint` run over those buckets unchanged, on purpose: a bucket's p99
+is an upper bound on its seconds, so no second over a threshold is missed, and
+the breakpoint and the first 5xx land on the bucket holding them, at most one
+bucket late. The tick counts then count buckets, so the baseline is 15 buckets
+and a window needs 2 hot ones: a slowdown shorter than two buckets goes unnamed
+while the breakpoint still marks it, and an error burst is a share of its
+bucket's completions, diluted by the rest of the bucket. The Performance tab
+says so in a note above the charts. A run of at most 2,000 ticks arrives raw and
+behaves exactly as it always has; `utils/downsampled-series.test.ts` holds the
+two paths to each other. The status chart rates each point per second over the
+time it closes (`buildStatusOverTime`), so a bucket is not drawn
+`ticksPerBucket` times taller than the second it stands for.

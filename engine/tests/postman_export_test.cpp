@@ -26,6 +26,7 @@
 #include "optional_assert.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/postman_export.hpp"
+#include "vayu/utils/ordered_json.hpp"
 #include "wide_json.hpp"
 
 namespace {
@@ -516,6 +517,35 @@ TEST (PostmanExport, AGraphqlVariablesObjectOfAHundredThousandMembersIsReadInLin
     EXPECT_EQ (body["graphql"]["query"], "{ me }");
     EXPECT_EQ (
     body["graphql"]["variables"].get<std::string> ().rfind ("{\n    \"k0\": 0,", 0), 0u);
+}
+
+// The members of the envelope beyond `query` and `variables` are copied across
+// one by one (#2552). Mutation check: copy them with `graphql[member.key ()]`
+// again and this runs for minutes and fails the budget.
+TEST (PostmanExport, AGraphqlEnvelopeOfAHundredThousandMembersIsCopiedInLinearTime) {
+    std::string content = vayu::tests::wide_object_json ();
+    content.insert (1, R"("query":"{ me }",)");
+    PostmanExportRequest entry = request ("r", "u");
+    entry.method               = "POST";
+    entry.body = { { "mode", "graphql" }, { "content", content } };
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto started = std::chrono::steady_clock::now ();
+    const auto outcome = run (root);
+    const auto elapsed = std::chrono::steady_clock::now () - started;
+
+    EXPECT_LT (elapsed, vayu::tests::LINEAR_PARSE_BUDGET);
+    // Read back linearly: `ordered::parse`, which `document ()` uses, is the
+    // quadratic parse this test is not about.
+    const auto exported = vayu::utils::parse_ordered_json (
+    outcome.text, vayu::utils::ORDERED_JSON_UNBOUNDED);
+    ASSERT_HAS_VALUE (exported);
+    const ordered& graphql =
+    exported->at ("item").at (0).at ("request").at ("body").at ("graphql");
+    EXPECT_EQ (graphql.at ("query"), "{ me }");
+    EXPECT_EQ (graphql.size (), vayu::tests::WIDE_OBJECT_KEYS + 2);
+    EXPECT_EQ (graphql.at ("k99999"), 99999);
 }
 
 TEST (PostmanExport, UrlencodedRowsAreTypedText) {

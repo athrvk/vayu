@@ -123,6 +123,11 @@ function renderTab() {
 
 const firstToast = () => useToastStore.getState().toasts[0];
 
+/** The glyph a button shows now; `IconSwap` keeps the other one invisible beside it. */
+function liveGlyph(button: HTMLElement): string {
+	return button.querySelector(".enter-fade svg")?.getAttribute("class") ?? "";
+}
+
 beforeEach(() => {
 	cleanup();
 	listInboxes.mockReset().mockResolvedValue([inbox()]);
@@ -230,16 +235,29 @@ describe("the inbox tab's copy control", () => {
 		);
 	});
 
-	it("says so when the copy worked", async () => {
+	// An icon button says it with its glyph; a toast beside the swap would say it
+	// twice (docs/design-system.md, "Copy feedback").
+	it("swaps the glyph to a check when the copy worked, and raises no toast", async () => {
 		renderTab();
 
-		fireEvent.click(await screen.findByRole("button", { name: "Copy inbox URL" }));
-		await waitFor(() =>
-			expect(firstToast()).toMatchObject({
-				variant: "success",
-				message: "Inbox URL copied",
-			})
-		);
+		const button = await screen.findByRole("button", { name: "Copy inbox URL" });
+		expect(liveGlyph(button)).toContain("lucide-copy");
+
+		fireEvent.click(button);
+
+		await waitFor(() => expect(liveGlyph(button)).toContain("lucide-check"));
 		expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:41234/");
+		expect(useToastStore.getState().toasts).toEqual([]);
+	});
+
+	it("leaves the glyph alone when the clipboard refused", async () => {
+		writeText.mockRejectedValue(new Error("Clipboard write denied"));
+		renderTab();
+
+		const button = await screen.findByRole("button", { name: "Copy inbox URL" });
+		fireEvent.click(button);
+
+		await waitFor(() => expect(firstToast()).toMatchObject({ variant: "error" }));
+		expect(liveGlyph(button)).toContain("lucide-copy");
 	});
 });

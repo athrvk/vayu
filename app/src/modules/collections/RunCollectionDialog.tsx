@@ -237,8 +237,9 @@ export default function RunCollectionDialog({
 	 */
 	const [failOnSchemaError, setFailOnSchemaError] = useState(false);
 	/**
-	 * Whether a script error ends its iteration (issue #2526). Off by default,
-	 * the engine's own: the iteration carries on past a step whose script threw.
+	 * Whether an errored step ends its iteration (issue #2526). Off by default,
+	 * the engine's own: the iteration carries on past a step whose script threw
+	 * or that got no response.
 	 */
 	const [stopOnError, setStopOnError] = useState(false);
 	const [profile, setProfile] = useState<ScenarioLoadProfile>(SCENARIO_PROFILE_DEFAULTS);
@@ -821,9 +822,9 @@ export default function RunCollectionDialog({
 							<Label htmlFor="run-collection-stop-on-error" className="leading-snug">
 								Stop the iteration on a script error
 								<span className="block text-xs font-normal text-muted-foreground">
-									Off by default: a script error is reported on its step and the
-									iteration moves on to the next request, as in Postman. A failed
-									connection still ends the iteration either way.
+									Off by default: an errored step, a script error or a failed
+									connection included, is reported on its step and the iteration
+									moves on to the next request, as in Postman.
 								</span>
 							</Label>
 							<Switch

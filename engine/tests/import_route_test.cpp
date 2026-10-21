@@ -6,10 +6,12 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -17,6 +19,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "echo_server.hpp"
+#include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/transport_policy.hpp"
@@ -34,9 +38,10 @@ std::pair<int, nlohmann::json> import_fetch_stream (const std::string& request_b
 const vayu::http::TransportPolicy& transport,
 const ImportFetchEmitter& emit);
 
-// The client config both forms build, so the bounds a fetch runs under can be
-// asserted without a test that waits out a 30-second stall window.
-vayu::http::ClientConfig import_fetch_client_config (size_t max_bytes,
+// The client config both forms build for a body, so the bounds a fetch runs
+// under can be asserted without a test that waits out a 30-second stall
+// window; nullopt for a refused body.
+std::optional<vayu::http::ClientConfig> import_fetch_client_config (const std::string& request_body,
 const vayu::http::TransportPolicy& transport);
 } // namespace vayu::http::routes
 
@@ -493,12 +498,306 @@ TEST (ImportFetchBounds, AFetchIsBoundedByAStallRatherThanByATotal) {
     // catches is the line going missing, which every behavioural test in this
     // file would survive.
     const auto config = vayu::http::routes::import_fetch_client_config (
-    4096, vayu::http::TransportPolicy{});
+    fetch_body ("http://example.com/spec.json", 4096), vayu::http::TransportPolicy{});
+    ASSERT_HAS_VALUE (config);
 
-    EXPECT_EQ (config.stall_timeout_ms, vayu::core::constants::import_fetch::STALL_TIMEOUT_MS);
+    EXPECT_EQ (config->stall_timeout_ms, vayu::core::constants::import_fetch::STALL_TIMEOUT_MS);
     // Still bounded in bytes - that is what stands in for the total it replaced,
     // and a fetch with neither bound would be a fetch nothing could stop.
-    EXPECT_EQ (config.max_response_bytes, 4096U);
+    EXPECT_EQ (config->max_response_bytes, 4096U);
+}
+
+// ---------------------------------------------------------------------------
+// A reference fetch (issue #2364)
+// ---------------------------------------------------------------------------
+//
+// `reference: true` is a `$ref` a document named, not a URL a person typed:
+// no redirect is followed and a loopback or link-local peer is refused unless
+// it is `sourceUrl`'s own host and port. Every case runs on loopback, so each
+// one is the rule's to decide, and each asserts what the server saw as well as
+// what the route answered.
+//
+// Mutation checks: drop the `refuses_local_peer` call from
+// `refuse_forbidden_peer` and the refusals below fetch; send references with
+// `follow_redirects` on and `ARedirectIsNotFollowed` reaches `/echo`.
+
+/// Proxy off: a runner exporting `http_proxy` would otherwise connect to the
+/// proxy, and the peer judged would be the proxy rather than the server.
+vayu::http::TransportPolicy direct () {
+    vayu::http::TransportPolicy policy;
+    policy.proxy_mode = vayu::http::ProxyMode::Off;
+    return policy;
+}
+
+/// The body for a reference fetch of @p url found in the document at
+/// @p source, or in no named document when @p source is empty.
+std::string reference_body (const std::string& url, const std::string& source = {}) {
+    nlohmann::json body = { { "url", url }, { "reference", true } };
+    if (!source.empty ()) {
+        body["sourceUrl"] = source;
+    }
+    return body.dump ();
+}
+
+/// The message of a refusal answered as `{error: {message}}`, or empty when
+/// @p body is not one, so a fetch that wrongly succeeded fails the assertion
+/// rather than the process.
+std::string error_message (const nlohmann::json& body) {
+    const auto error = body.find ("error");
+    if (error == body.end () || !error->is_object ()) {
+        return {};
+    }
+    return error->value ("message", std::string ());
+}
+
+constexpr const char* LOCAL_PEER_RULE = "loopback or link-local";
+
+TEST (ImportFetchReference, RefusesALoopbackServerThatIsNotTheSource) {
+    vayu::tests::EchoServer source;
+    vayu::tests::EchoServer other;
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body (other.url (), source.url ()), direct ());
+
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_NE (error_message (body).find (LOCAL_PEER_RULE), std::string::npos)
+    << error_message (body);
+    EXPECT_EQ (other.requests_seen (), 0);
+}
+
+TEST (ImportFetchReference, FetchesTheSourcesOwnHostAndPort) {
+    vayu::tests::EchoServer source;
+    const std::string spec =
+    "http://127.0.0.1:" + std::to_string (source.port ()) + "/spec.yaml";
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body (source.url (), spec), direct ());
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body.value ("content", std::string ()), "{}");
+    EXPECT_EQ (source.requests_seen (), 1);
+}
+
+// A loopback source is this machine whatever it is called, so its own port is
+// reachable by another loopback name too.
+TEST (ImportFetchReference, FetchesTheSourcesPortByAnotherLoopbackName) {
+    vayu::tests::EchoServer source;
+    const std::string port    = std::to_string (source.port ());
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body ("http://localhost:" + port + "/echo", "http://127.0.0.1:" + port + "/spec"),
+    direct ());
+
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (source.requests_seen (), 1);
+}
+
+// No URL text names an address here: `localhost` and every `*.localhost` name
+// resolve to loopback inside libcurl, so only the connected address can say
+// where the fetch went.
+TEST (ImportFetchReference, RefusesALoopbackNameOnAnotherPortThanTheSource) {
+    vayu::tests::EchoServer source;
+    vayu::tests::EchoServer other;
+    const std::string port = std::to_string (other.port ());
+    for (const std::string& url : { "http://localhost:" + port + "/echo",
+         "http://vayu-ref.localhost:" + port + "/echo" }) {
+        const auto [status, body] = vayu::http::routes::import_fetch (
+        reference_body (url, source.url ()), direct ());
+        EXPECT_EQ (status, 502) << url << ": " << body.dump ();
+        EXPECT_NE (error_message (body).find (LOCAL_PEER_RULE), std::string::npos)
+        << url << ": " << error_message (body);
+    }
+    EXPECT_EQ (other.requests_seen (), 0);
+}
+
+TEST (ImportFetchReference, WithNoSourceEveryLoopbackPeerIsRefused) {
+    vayu::tests::EchoServer server;
+    const auto [status, body] =
+    vayu::http::routes::import_fetch (reference_body (server.url ()), direct ());
+
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_NE (error_message (body).find (LOCAL_PEER_RULE), std::string::npos)
+    << error_message (body);
+    EXPECT_EQ (server.requests_seen (), 0);
+}
+
+// The redirect lands on the source's own host and port, which the connect-time
+// rule allows, so only the redirect setting stands between the reference and
+// `/echo`: the 302 is the answer, refused as any non-2xx one is.
+TEST (ImportFetchReference, ARedirectIsNotFollowed) {
+    vayu::tests::EchoServer source;
+    const auto [status, body] = vayu::http::routes::import_fetch (
+    reference_body (source.redirect_to (source.url ()), source.url ()), direct ());
+
+    EXPECT_EQ (status, 502) << body.dump ();
+    EXPECT_EQ (error_message (body), "The server answered HTTP 302");
+    EXPECT_EQ (source.requests_seen (), 1) << "the redirect was followed";
+}
+
+// What a person typed keeps today's behaviour: loopback is reachable and a
+// redirect to another loopback port is followed.
+TEST (ImportFetchReference, WithoutTheFieldARedirectToAnotherLoopbackPortIsFollowed) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::EchoServer target;
+    for (const std::string& body : { fetch_body (origin.redirect_to (target.url ())),
+         nlohmann::json{ { "url", origin.redirect_to (target.url ()) }, { "reference", false } }
+         .dump () }) {
+        const auto [status, json] = vayu::http::routes::import_fetch (body, direct ());
+        EXPECT_EQ (status, 200) << body << ": " << json.dump ();
+    }
+    EXPECT_EQ (origin.requests_seen (), 2);
+    EXPECT_EQ (target.requests_seen (), 2);
+}
+
+TEST (ImportFetchReference, NullFieldsMeanTheDefaults) {
+    vayu::tests::EchoServer server;
+    const nlohmann::json body = { { "url", server.url () },
+        { "reference", nullptr }, { "sourceUrl", nullptr } };
+    const auto [status, json] =
+    vayu::http::routes::import_fetch (body.dump (), direct ());
+
+    EXPECT_EQ (status, 200) << json.dump ();
+    EXPECT_EQ (server.requests_seen (), 1);
+}
+
+TEST (ImportFetchReference, RefusesAReferenceOrSourceUrlOfTheWrongShape) {
+    const std::string url = "http://example.com/spec.json";
+    const auto invalid = std::to_array<std::pair<const char*, nlohmann::json>> ({
+    { "reference", "true" },
+    { "reference", 1 },
+    { "reference", nlohmann::json::object () },
+    { "sourceUrl", 42 },
+    { "sourceUrl", true },
+    { "sourceUrl", "ftp://example.com/spec.json" },
+    { "sourceUrl", "example.com/spec.json" },
+    { "sourceUrl", "http://" },
+    });
+    for (const auto& [field, value] : invalid) {
+        nlohmann::json body = { { "url", url }, { "reference", true } };
+        body[field]         = value;
+        const auto [status, json] =
+        vayu::http::routes::import_fetch (body.dump (), direct ());
+        EXPECT_EQ (status, 400) << body.dump ();
+        EXPECT_NE (json.dump ().find (std::string ("Invalid '") + field + "'"),
+        std::string::npos)
+        << json.dump ();
+
+        // The streamed form reads the same body through the same parser.
+        Recorder recorder;
+        const auto [streamed, refusal] = vayu::http::routes::import_fetch_stream (
+        body.dump (), direct (), recorder.emitter ());
+        EXPECT_EQ (streamed, 400) << body.dump ();
+        EXPECT_EQ (refusal, json);
+        EXPECT_TRUE (recorder.events.empty ());
+    }
+}
+
+TEST (ImportFetchReference, TheStreamedFormRefusesTheSamePeerAsAnErrorEvent) {
+    vayu::tests::EchoServer source;
+    vayu::tests::EchoServer other;
+    Recorder recorder;
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    reference_body (other.url (), source.url ()), direct (), recorder.emitter ());
+
+    EXPECT_EQ (status, 200);
+    ASSERT_FALSE (recorder.events.empty ());
+    const Emitted& last = recorder.events.back ();
+    EXPECT_EQ (last.event, "error");
+    EXPECT_EQ (last.data.value ("status", 0), 502);
+    EXPECT_NE (error_message (last.data).find (LOCAL_PEER_RULE), std::string::npos)
+    << last.data.dump ();
+    EXPECT_EQ (other.requests_seen (), 0);
+}
+
+TEST (ImportFetchReference, TheStreamedFormFetchesTheSourcesOwnHostAndPort) {
+    vayu::tests::EchoServer source;
+    const std::string spec =
+    "http://127.0.0.1:" + std::to_string (source.port ()) + "/spec.yaml";
+    Recorder recorder;
+    const auto [status, body] = vayu::http::routes::import_fetch_stream (
+    reference_body (source.url (), spec), direct (), recorder.emitter ());
+
+    EXPECT_EQ (status, 200);
+    ASSERT_FALSE (recorder.events.empty ());
+    const Emitted& last = recorder.events.back ();
+    ASSERT_EQ (last.event, "result") << last.data.dump ();
+    EXPECT_EQ (last.data.value ("content", std::string ()), "{}");
+    EXPECT_EQ (source.requests_seen (), 1);
+}
+
+TEST (ImportFetchReference, TheStreamedFormDoesNotFollowARedirect) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::EchoServer target;
+    Recorder recorder;
+    vayu::http::routes::import_fetch_stream (
+    reference_body (origin.redirect_to (target.url ()), origin.url ()),
+    direct (), recorder.emitter ());
+
+    ASSERT_FALSE (recorder.events.empty ());
+    const Emitted& last = recorder.events.back ();
+    EXPECT_EQ (last.event, "error") << last.data.dump ();
+    EXPECT_EQ (last.data.value ("status", 0), 502);
+    EXPECT_EQ (error_message (last.data), "The server answered HTTP 302");
+    EXPECT_TRUE (recorder.of ("result").empty ());
+    EXPECT_EQ (origin.requests_seen (), 1);
+    EXPECT_EQ (target.requests_seen (), 0) << "the redirect was followed";
+}
+
+TEST (ImportFetchReference, TheStreamedFormRefusesALoopbackNameOnAnotherPortThanTheSource) {
+    vayu::tests::EchoServer source;
+    vayu::tests::EchoServer other;
+    const std::string port = std::to_string (other.port ());
+    for (const std::string& url : { "http://localhost:" + port + "/echo",
+         "http://vayu-ref.localhost:" + port + "/echo" }) {
+        Recorder recorder;
+        vayu::http::routes::import_fetch_stream (
+        reference_body (url, source.url ()), direct (), recorder.emitter ());
+
+        ASSERT_FALSE (recorder.events.empty ()) << url;
+        const Emitted& last = recorder.events.back ();
+        EXPECT_EQ (last.event, "error") << url << ": " << last.data.dump ();
+        EXPECT_EQ (last.data.value ("status", 0), 502) << url;
+        EXPECT_NE (error_message (last.data).find (LOCAL_PEER_RULE), std::string::npos)
+        << url << ": " << last.data.dump ();
+    }
+    EXPECT_EQ (other.requests_seen (), 0);
+}
+
+TEST (ImportFetchReference, TheStreamedFormWithoutTheFieldFollowsARedirect) {
+    vayu::tests::EchoServer origin;
+    vayu::tests::EchoServer target;
+    Recorder recorder;
+    vayu::http::routes::import_fetch_stream (
+    fetch_body (origin.redirect_to (target.url ())), direct (), recorder.emitter ());
+
+    ASSERT_FALSE (recorder.events.empty ());
+    EXPECT_EQ (recorder.events.back ().event, "result")
+    << recorder.events.back ().data.dump ();
+    EXPECT_EQ (origin.requests_seen (), 1);
+    EXPECT_EQ (target.requests_seen (), 1);
+}
+
+// The wiring, on the seam both forms build their client from: a reference
+// reaches the client as the rule, with the source's host and port; a fetch a
+// person asked for carries none.
+TEST (ImportFetchReference, TheClientCarriesTheRuleOnlyForAReference) {
+    const auto reference = vayu::http::routes::import_fetch_client_config (
+    reference_body ("http://example.com/a.json", "http://localhost:3000/spec.json"),
+    direct ());
+    ASSERT_HAS_VALUE (reference);
+    const auto& rule = reference->local_peer_rule;
+    ASSERT_HAS_VALUE (rule);
+    EXPECT_EQ (rule->source_host, "localhost");
+    EXPECT_EQ (rule->source_port, 3000);
+
+    const auto unsourced = vayu::http::routes::import_fetch_client_config (
+    reference_body ("http://example.com/a.json"), direct ());
+    ASSERT_HAS_VALUE (unsourced);
+    const auto& no_source = unsourced->local_peer_rule;
+    ASSERT_HAS_VALUE (no_source);
+    EXPECT_TRUE (no_source->source_host.empty ());
+
+    const auto typed = vayu::http::routes::import_fetch_client_config (
+    fetch_body ("http://example.com/a.json"), direct ());
+    ASSERT_HAS_VALUE (typed);
+    EXPECT_FALSE (typed->local_peer_rule.has_value ());
 }
 
 } // namespace

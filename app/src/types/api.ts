@@ -940,10 +940,10 @@ export interface StartScenarioRunRequest {
 	failOnSchemaError?: boolean;
 	/**
 	 * End a collection run's iteration at every `errored` step, a script error
-	 * included (issue #2526). Off, the engine's default, a step whose script threw
-	 * after its exchange completed is reported on its step and the iteration moves
-	 * on to the next request, as Postman and Newman do; a transport failure and the
-	 * runner's own refusals end the iteration either way.
+	 * and a transport failure included (issue #2526). Off, the engine's default,
+	 * an errored step is reported on its step and the iteration moves on to the
+	 * next request, as Postman and Newman do; the runner's own refusals end the
+	 * iteration either way.
 	 *
 	 * Top-level beside `failOnSchemaError`, and **omitted when off** on the same
 	 * terms: absent already means the default, and a snapshot that carries the key
@@ -1571,6 +1571,19 @@ export interface RequestDefaults {
 }
 
 // Import API
+
+/**
+ * What marks a `POST /import/fetch` as a `$ref` a document asked for, not a URL
+ * a person typed (issue #2364). With `reference` the engine follows no redirect
+ * and refuses a loopback or link-local peer other than `sourceUrl`'s own host
+ * and port; with no `sourceUrl` every such peer is refused.
+ */
+export interface ImportFetchOptions {
+	reference?: boolean;
+	/** The URL of the document the reference was found in. */
+	sourceUrl?: string;
+}
+
 export interface ImportFetchResponse {
 	content: string;
 	contentType: string;

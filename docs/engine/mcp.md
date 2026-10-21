@@ -267,7 +267,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `get_run`              | read     | `GET /runs/:id`                              | A projection, never the row: `terminal`, `endTime` (null until terminal), `elapsedMs`, `progress` (duration-bound runs only, else null), the config's `mode` / `concurrency` / `targetRps` / `duration` and a `nextStep`; no trace, result or other snapshot field; a 404 names the id |
 | `get_run_report`       | read     | `GET /runs/:id/report`                       | A run still `pending` or `running` returns the partial report with top-level `partial: true` and a `note` (absent for a terminal run); stored trace bodies capped at 32 KB per node, and 96 KB across the report; secret values and credential header values read `<redacted>` unless revealed |
 | `get_run_samples`      | read     | `GET /runs/:id/samples?limit=&offset=`       | 25 samples per call by default, 500 max; a load run keeps 1 in 100 responses, up to 1000, unless `start_load_run` set `responseSamplePeriod` / `maxResponseSamples`; secret values and credential header values read `<redacted>` unless revealed |
-| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
+| `get_run_timeseries`   | read     | `GET /runs/:id/metrics?limit=&offset=`       | Raw ticks, never `maxPoints`-downsampled; 100 ticks per call by default, 1000 max - the engine's own cap is 50000 |
 | `get_run_monitor`      | read     | `GET /runs/:id/monitor?limit=&offset=`       | Same bounds as `get_run_timeseries`     |
 | `get_engine_config`    | read     | `GET /config`                                | - (a URL entry's credentials withheld unless revealed) |
 | `list_client_certificates` | read  | `GET /client-certificates`                   | - (paths, format and `hasPassphrase`; the engine never answers a passphrase) |
@@ -1611,11 +1611,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   - **`stopOnError` ends an iteration at every errored step** (issue #2526), on
     `run_collection` only, matching the Run Collection dialog's switch. Top-level
     beside `scenario` and **sent only when true**, like `failOnSchemaError`.
-    Left off, the engine's default, a step whose pre-request or test script
-    threw after its exchange completed stays `errored` with its message and the
-    iteration moves on to the next request, as in Postman and Newman; a transport
-    failure, an unbindable data row and the runner's own refusals end the
-    iteration either way. What an error that ended one cost is counted:
+    Left off, the engine's default, an errored step (a script that threw, a
+    request that got no response, an unbindable data row) stays `errored` with
+    its message and the iteration moves on to the next request, as in Postman
+    and Newman; the runner's own refusals end the iteration either way. What an error that ended one cost is counted:
     `scenario.stepsNotRun` in `get_run_report`, and `stepsNotRun` on the step row
     that ended it, in its `trace` - the tool's description and the `nextStep` it
     returns both say so. `start_load_run` **refuses** it on either path for the

@@ -55,7 +55,7 @@ import { ApiError } from "@/services";
 import { EngineUnreachableError } from "@/services/http-client";
 import { useEngineStore } from "@/stores/engine-store";
 import { QUERY_CACHE } from "@/config/cache";
-import { RUNS_PAGE_LIMIT } from "@/config/network";
+import { HISTORY_SERIES_MAX_POINTS, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { RunListResponse } from "@/types";
 
 const listRuns = vi.fn();
@@ -774,6 +774,62 @@ describe("runsPollInterval", () => {
 	});
 });
 
+/*
+ * The History charts' series is one downsampled read (#2547), not a paged walk
+ * of every stored tick.
+ *
+ * Mutation check: put the hook back on `useInfiniteQuery` with `limit`/`offset`
+ * pages and the first case reddens on the call's arguments; key it outside
+ * `timeSeries(id)` and the second does, because the run-scoped removal
+ * (`mcp-invalidation.ts`, `load-test-service.ts`) would no longer reach it.
+ */
+describe("useRunTimeSeriesQuery", () => {
+	const bucketed = {
+		data: [
+			{ timestamp: 44_000, elapsed_seconds: 43 },
+			{ timestamp: 88_000, elapsed_seconds: 87 },
+		],
+		pagination: { total: 86_400, limit: 2000, offset: 0, hasMore: false, returned: 2 },
+		bucketed: true,
+		ticksPerBucket: 44,
+	};
+
+	it("asks once for the whole series at the History point budget", async () => {
+		getRunTimeSeries.mockResolvedValue(bucketed);
+		const client = makeClient();
+
+		const { result } = renderHook(() => useRunTimeSeriesQuery("run_1", "completed"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		expect(getRunTimeSeries).toHaveBeenCalledTimes(1);
+		expect(getRunTimeSeries).toHaveBeenCalledWith("run_1", {
+			maxPoints: HISTORY_SERIES_MAX_POINTS,
+		});
+		expect(result.current.data).toEqual(bucketed);
+	});
+
+	it("is cached under the run's timeSeries prefix, for a minute rather than half an hour", async () => {
+		getRunTimeSeries.mockResolvedValue(bucketed);
+		const client = makeClient();
+		const key = queryKeys.runs.timeSeriesDownsampled("run_1", HISTORY_SERIES_MAX_POINTS);
+
+		const { result } = renderHook(() => useRunTimeSeriesQuery("run_1", "completed"), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		expect(client.getQueryCache().find({ queryKey: key })?.options.gcTime).toBe(
+			QUERY_CACHE.RUN_SERIES_GC_TIME_MS
+		);
+		expect(QUERY_CACHE.RUN_SERIES_GC_TIME_MS).toBeLessThan(QUERY_CACHE.RUNS_GC_TIME_MS);
+
+		client.removeQueries({ queryKey: queryKeys.runs.timeSeries("run_1") });
+		expect(client.getQueryData(key)).toBeUndefined();
+	});
+});
+
 /**
  * The engine answers a run's report and series for a live run too, so what a
  * pane read mid-run must not be cached as the final copy (#1934). Every case
@@ -873,10 +929,11 @@ describe("a run's data while it is in progress", () => {
 		"time series for status %s refetches a cached copy on mount %i time(s)",
 		async (status, calls) => {
 			const client = makeClient();
-			seed(client, queryKeys.runs.timeSeries("run_1"), {
-				pages: [emptyPage()],
-				pageParams: [0],
-			});
+			seed(
+				client,
+				queryKeys.runs.timeSeriesDownsampled("run_1", HISTORY_SERIES_MAX_POINTS),
+				emptyPage()
+			);
 			getRunTimeSeries.mockResolvedValue(emptyPage());
 
 			renderHook(() => useRunTimeSeriesQuery("run_1", status), { wrapper: wrapper(client) });
