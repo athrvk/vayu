@@ -356,6 +356,12 @@ class Database {
     /// a client building the whole tree needs, in one query rather than one
     /// per collection.
     std::vector<Request> get_requests_in_live_collections ();
+    /// `get_requests_in_collection`'s rows, filter and order, as summaries:
+    /// the large columns are never read (#2546).
+    std::vector<RequestSummary> get_request_summaries_in_collection (
+    const std::string& collection_id);
+    /// `get_requests_in_live_collections`' rows, filter and order, as summaries.
+    std::vector<RequestSummary> get_request_summaries_in_live_collections ();
     /**
      * Every live request at or beneath @p root_id, depth-first in sibling
      * order (`sibling_order.hpp`, #2535): at each collection its sub-folders
