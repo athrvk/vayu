@@ -11,13 +11,13 @@ import { entityRowKey, folderRowKey, requestRowKey } from "./tree-rows";
 import { walkAncestors } from "./tree-utils";
 import type { TreeRowWindow } from "./CollectionTreeRows";
 import type { TreeEntity } from "./drop-position";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 
 export interface RevealActiveSelectionOptions {
 	selectedCollectionId: string | null;
 	selectedRequestId: string | null;
 	collections: Collection[];
-	requestsByCollection: Map<string, Request[]>;
+	requestsByCollection: Map<string, RequestSummary[]>;
 	/** Read only as a scroll trigger: a row appears when its ancestors expand. */
 	expandedCollectionIds: Set<string>;
 	expandCollections: (collectionIds: string[]) => void;

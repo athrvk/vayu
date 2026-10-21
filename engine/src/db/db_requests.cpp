@@ -64,32 +64,92 @@ std::optional<Request> Database::get_request (const std::string& id) {
     return requests.front ();
 }
 
+namespace {
+
+// The filters and orders below are shared by the full-row and the summary
+// reads (#2546), so the two answers cannot come to list different rows.
+
+// Deleted rows are excluded (issue #988); a deleted *collection* answers with
+// nothing at all, because every caller reaches this through a
+// `get_collection` that already refused.
+auto live_requests_in (const std::string& collection_id) {
+    return where (c (&Request::collection_id) == collection_id &&
+    is_null (&Request::deleted_at));
+}
+
+// A deleted collection stamps its whole subtree, requests included, so the
+// request's own stamp already excludes most of what the trash holds; the
+// collection filter is what excludes a live request left inside a deleted
+// collection by anything that stamped the collection alone.
+auto live_requests_in_live_collections () {
+    return where (is_null (&Request::deleted_at) &&
+    in (&Request::collection_id,
+    select (&Collection::id, where (is_null (&Collection::deleted_at)))));
+}
+
+// Same three-key tie rule as get_collections - see the comment there for why
+// the implicit rowid cannot be the tiebreak.
+auto sibling_order () {
+    return multi_order_by (order_by (&Request::order),
+    order_by (&Request::created_at), order_by (&Request::id));
+}
+
+// Grouped by collection, each group in `sibling_order`.
+auto tree_order () {
+    return multi_order_by (order_by (&Request::collection_id), order_by (&Request::order),
+    order_by (&Request::created_at), order_by (&Request::id));
+}
+
+auto summary_columns () {
+    return columns (&Request::id, &Request::collection_id, &Request::name, &Request::method,
+    &Request::url, &Request::order, &Request::created_at, &Request::spec_operation);
+}
+
+template <typename Rows> std::vector<RequestSummary> to_summaries (Rows rows) {
+    std::vector<RequestSummary> summaries;
+    summaries.reserve (rows.size ());
+    for (auto& [id, collection_id, name, method, url, order, created_at, spec_operation] : rows) {
+        auto& summary          = summaries.emplace_back ();
+        summary.id             = std::move (id);
+        summary.collection_id  = std::move (collection_id);
+        summary.name           = std::move (name);
+        summary.method         = method;
+        summary.url            = std::move (url);
+        summary.order          = order;
+        summary.created_at     = created_at;
+        summary.spec_operation = std::move (spec_operation);
+    }
+    return summaries;
+}
+
+} // namespace
+
 std::vector<Request> Database::get_requests_in_collection (const std::string& collection_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // Same three-key tie rule as get_collections - see the comment there for why
-    // the implicit rowid cannot be the tiebreak. Deleted rows are excluded on
-    // the same reasoning too (issue #988); a deleted *collection* answers with
-    // nothing at all, because every caller reaches this through a
-    // `get_collection` that already refused.
     return impl_->storage.get_all<Request> (
-    where (c (&Request::collection_id) == collection_id && is_null (&Request::deleted_at)),
-    multi_order_by (order_by (&Request::order), order_by (&Request::created_at),
-    order_by (&Request::id)));
+    live_requests_in (collection_id), sibling_order ());
 }
 
 std::vector<Request> Database::get_requests_in_live_collections () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    // A deleted collection stamps its whole subtree, requests included, so the
-    // request's own stamp already excludes most of what the trash holds; the
-    // collection filter is what excludes a live request left inside a deleted
-    // collection by anything that stamped the collection alone. Same tie rule
-    // as `get_requests_in_collection` within each collection.
     return impl_->storage.get_all<Request> (
-    where (is_null (&Request::deleted_at) &&
-    in (&Request::collection_id,
-    select (&Collection::id, where (is_null (&Collection::deleted_at))))),
-    multi_order_by (order_by (&Request::collection_id), order_by (&Request::order),
-    order_by (&Request::created_at), order_by (&Request::id)));
+    live_requests_in_live_collections (), tree_order ());
+}
+
+std::vector<RequestSummary> Database::get_request_summaries_in_collection (
+const std::string& collection_id) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    return to_summaries (impl_->storage.select (summary_columns (),
+    from<Request> (), live_requests_in (collection_id), sibling_order ()));
+}
+
+std::vector<RequestSummary> Database::get_request_summaries_in_live_collections () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    // The explicit FROM is load-bearing: without it sqlite_orm lists every
+    // table the expression names, the subquery's `collections` included, and
+    // the cross join answers each request once per collection.
+    return to_summaries (impl_->storage.select (summary_columns (),
+    from<Request> (), live_requests_in_live_collections (), tree_order ()));
 }
 
 namespace {

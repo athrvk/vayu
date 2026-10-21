@@ -21,11 +21,15 @@
 #include "vayu/utils/ordered_json.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <expected>
 #include <format>
 #include <functional>
 #include <optional>
+#include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -61,10 +65,10 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
 }
 
 /**
- * Testable core of GET /requests: one DB fetch, one serialized JSON array.
+ * GET /requests answers one DB fetch as one serialized JSON array.
  *
  * The rows arrive already ordered by `order`, then `created_at`, then `id`
- * (get_requests_in_collection has the ORDER BY), matching the ordering contract
+ * (the `get_request*_in_*` reads have the ORDER BY), matching the ordering contract
  * collections have had all along - see the ordering section of
  * `docs/engine/api-reference.md` for why the tiebreak is part of the contract
  * rather than a detail.
@@ -76,15 +80,15 @@ get_request_response (vayu::db::Database& db, const std::string& id) {
  * get_request_response above.
  */
 namespace {
-std::string serialize_request_list (const std::vector<vayu::db::Request>& requests,
-const vayu::http::FileAccessPolicy& files) {
+template <typename Row, typename WriteRow>
+std::string serialize_request_list (const std::vector<Row>& rows, WriteRow write_row) {
     std::ostringstream out;
     out << "[";
     bool is_first = true;
-    for (const auto& r : requests) {
+    for (const auto& r : rows) {
         std::ostringstream item;
         try {
-            vayu::json::serialize_to_stream (r, item, files);
+            write_row (r, item);
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http",
             "GET /requests - Error serializing request " + r.id + ": " +
@@ -100,16 +104,72 @@ const vayu::http::FileAccessPolicy& files) {
     out << "]";
     return out.str ();
 }
+
+std::string serialize_full_rows (vayu::db::Database& db,
+const std::vector<vayu::db::Request>& requests) {
+    const auto files = vayu::http::FileAccessPolicy::from_database (db);
+    return serialize_request_list (
+    requests, [&files] (const vayu::db::Request& r, std::ostream& item) {
+        vayu::json::serialize_to_stream (r, item, files);
+    });
+}
+
+std::string serialize_summary_rows (const std::vector<vayu::db::RequestSummary>& summaries) {
+    return serialize_request_list (
+    summaries, [] (const vayu::db::RequestSummary& s, std::ostream& item) {
+        item << vayu::json::serialize (s).dump ();
+    });
+}
+
+/// The row shapes `GET /requests?fields=` can ask for (#2546).
+enum class RequestListFields : std::uint8_t { Full, Summary };
+
+/// Absent or empty is the full row, which is what the route answered before
+/// it took the parameter; anything unknown is refused rather than served as
+/// the full list, so a typo cannot quietly cost the 10 MB the summary saves.
+std::expected<RequestListFields, RouteError> parse_request_list_fields (
+std::string_view fields) {
+    if (fields.empty ()) {
+        return RequestListFields::Full;
+    }
+    if (fields == "summary") {
+        return RequestListFields::Summary;
+    }
+    return route_error (400,
+    std::format ("'fields' must be one of [summary] (got '{}')", fields), "invalid_fields");
+}
 } // namespace
 
 std::string list_requests_body (vayu::db::Database& db, const std::string& collection_id) {
-    return serialize_request_list (db.get_requests_in_collection (collection_id),
-    vayu::http::FileAccessPolicy::from_database (db));
+    return serialize_full_rows (db, db.get_requests_in_collection (collection_id));
 }
 
 std::string list_all_requests_body (vayu::db::Database& db) {
-    return serialize_request_list (db.get_requests_in_live_collections (),
-    vayu::http::FileAccessPolicy::from_database (db));
+    return serialize_full_rows (db, db.get_requests_in_live_collections ());
+}
+
+/**
+ * Testable core of the whole GET /requests route, returning
+ * {http_status, body_text}: one collection's requests when @p collection_id
+ * is set, every live collection's otherwise, in the row shape @p fields
+ * names.
+ */
+std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
+const std::optional<std::string>& collection_id,
+std::string_view fields) {
+    const auto shape = parse_request_list_fields (fields);
+    if (!shape) {
+        return { shape.error ().status, shape.error ().body.dump () };
+    }
+    if (*shape == RequestListFields::Full) {
+        return { 200,
+            collection_id ? list_requests_body (db, *collection_id) :
+                            list_all_requests_body (db) };
+    }
+    return { 200,
+        serialize_summary_rows (collection_id ?
+        db.get_request_summaries_in_collection (*collection_id) :
+        db.get_request_summaries_in_live_collections ()) };
 }
 
 /**
@@ -749,21 +809,22 @@ void register_request_routes (RouteContext& ctx) {
      * ordered by their `order` field (matching GET /collections).
      * Query params: collectionId (optional) - The collection ID to fetch
      * requests from. Absent, every live request of every live collection,
-     * grouped by `collectionId`: the app builds its whole tree from this at
-     * launch, which used to be one call per collection.
-     * Returns: Array of request objects with method, url, headers, body, scripts, etc.
+     * grouped by `collectionId`. fields (optional) - `summary` answers only
+     * the columns a tree is built from, which is what the app reads at launch
+     * (#2546); absent, the full request objects.
      */
     ctx.server.Get ("/requests", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
+            std::optional<std::string> collection_id;
             if (req.has_param ("collectionId")) {
-                std::string collection_id =
-                req.get_param_value ("collectionId");
+                collection_id = req.get_param_value ("collectionId");
                 vayu::utils::log_debug ("http",
-                "GET /requests - Fetching requests for collection: " + collection_id);
-                res.set_content (list_requests_body (ctx.db, collection_id), "application/json");
-            } else {
-                res.set_content (list_all_requests_body (ctx.db), "application/json");
+                "GET /requests - Fetching requests for collection: " + *collection_id);
             }
+            auto [status, body] = list_requests_response (
+            ctx.db, collection_id, req.get_param_value ("fields"));
+            res.status = status;
+            res.set_content (body, "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "http", "GET /requests - Error: " + std::string (e.what ()));

@@ -10,10 +10,13 @@
  *
  * Transforms backend request format to frontend domain Request type.
  * Handles timestamp conversion and provides safe defaults for new fields.
+ * `toSummary` reads the tree's row (`RequestSummary`); `toFrontend` builds the
+ * whole request on top of it, so the two cannot read a shared column apart.
  */
 
 import type {
 	Request,
+	RequestSummary,
 	BodyMode,
 	HttpMethod,
 	KeyValueEntry,
@@ -135,9 +138,32 @@ function coerceMockResponseMode(raw: unknown): MockResponseMode {
 }
 
 export class RequestTransformer {
-	static toFrontend(raw: RawRequest): Request {
+	/**
+	 * One `GET /requests?fields=summary` row (#2546). A full row reads the same
+	 * way, which is what `toFrontend` relies on.
+	 */
+	static toSummary(raw: RawRequest): RequestSummary {
 		const id = asStr(raw.id);
 		if (!id) throw new Error("Request must have an id");
+		const specOperation = toSpecOperation(raw.specOperation);
+		return {
+			id,
+			collectionId: asStr(raw.collectionId) ?? "",
+			name: asStr(raw.name) ?? "",
+			method: (asStr(raw.method) as HttpMethod) ?? "GET",
+			url: asStr(raw.url) ?? "",
+			// Spread rather than assigned: `specOperation` is optional because
+			// "names no operation" is spelled as an absent key, and an explicit
+			// `undefined` would show up in the structural comparisons the
+			// request-builder's dirty check makes.
+			...(specOperation ? { specOperation } : {}),
+			order: typeof raw.order === "number" ? raw.order : 0,
+			createdAt: new Date(raw.createdAt as string | number).toISOString(),
+		};
+	}
+
+	static toFrontend(raw: RawRequest): Request {
+		const summary = RequestTransformer.toSummary(raw);
 
 		// Params: array of KeyValueEntry (new) or legacy empty object {}
 		const params: KeyValueEntry[] = Array.isArray(raw.params)
@@ -161,24 +187,12 @@ export class RequestTransformer {
 		const rawAuth = asRecord(raw.auth);
 		if (rawAuth?.mode) auth = rawAuth as RequestAuth;
 
-		const specOperation = toSpecOperation(raw.specOperation);
 		const methodSource = toMethodSource(raw.methodSource);
 
-		// Which columns the engine substituted a default for (issue #1485) -
-		// absent for a row with nothing over the field cap, same reason
-		// `specOperation` is spread rather than assigned.
-		const truncatedFields = Array.isArray(raw.truncatedFields)
-			? (raw.truncatedFields as unknown[]).filter((f): f is string => typeof f === "string")
-			: undefined;
-
 		return {
-			id,
-			collectionId: asStr(raw.collectionId) ?? "",
-			name: asStr(raw.name) ?? "",
+			...summary,
 			description: asStr(raw.description) ?? "",
-			method: (asStr(raw.method) as HttpMethod) ?? "GET",
 			...(methodSource ? { methodSource } : {}),
-			url: asStr(raw.url) ?? "",
 			params,
 			headers,
 			body,
@@ -217,20 +231,12 @@ export class RequestTransformer {
 					: DEFAULT_DISABLE_URL_ENCODING,
 			// The export carrier rides through untouched - JSON text, never
 			// parsed - and only when present, spread for the `specOperation`
-			// reason below.
+			// reason in `toSummary`.
 			...(asStr(raw.postmanProtocolBehavior)
 				? { postmanProtocolBehavior: asStr(raw.postmanProtocolBehavior) }
 				: {}),
 			mockResponseMode: coerceMockResponseMode(raw.mockResponseMode),
 			...(asStr(raw.mockExampleId) ? { mockExampleId: asStr(raw.mockExampleId) } : {}),
-			// Spread rather than assigned: `Request.specOperation` is optional
-			// because "names no operation" is spelled as an absent key, and an
-			// explicit `undefined` would show up in the structural comparisons
-			// the request-builder's dirty check makes.
-			...(specOperation ? { specOperation } : {}),
-			...(truncatedFields?.length ? { truncatedFields } : {}),
-			order: typeof raw.order === "number" ? raw.order : 0,
-			createdAt: new Date(raw.createdAt as string | number).toISOString(),
 			updatedAt: new Date(raw.updatedAt as string | number).toISOString(),
 		};
 	}

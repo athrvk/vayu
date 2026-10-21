@@ -229,6 +229,94 @@ TEST_F (DatabaseTest, RequestsInCollectionSortedByOrder) {
     EXPECT_EQ (requests[2].id, "req_c");
 }
 
+// The summary reads (#2546) keep the full reads' tie rule and trash filters.
+// Every row ties on `order`; `created_at` separates two of them and `id` the
+// two that tie on both, inserted against each order so rowid order fails.
+// Mutation check: drop `created_at` or `id` from `sibling_order`, or the
+// `deleted_at` filter from `live_requests_in`, and this reds.
+TEST_F (DatabaseTest, RequestSummariesInCollectionFollowTheTieRuleAndSkipTheTrash) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    Collection col;
+    col.id   = "col_1";
+    col.name = "API";
+    db.create_collection (col);
+
+    const std::vector<std::pair<std::string, int64_t>> inserted = {
+        { "req_late", 9 }, { "req_tie_b", 5 }, { "req_trashed", 1 },
+        { "req_tie_a", 5 }, { "req_early", 2 }
+    };
+    for (const auto& [id, created_at] : inserted) {
+        Request r;
+        r.id            = id;
+        r.collection_id = "col_1";
+        r.name          = id;
+        r.method        = vayu::HttpMethod::PATCH;
+        r.url           = "https://example.test/" + id;
+        r.created_at    = created_at;
+        db.save_request (r);
+    }
+    db.delete_request ("req_trashed");
+
+    const auto summaries = db.get_request_summaries_in_collection ("col_1");
+    std::vector<std::string> ids;
+    ids.reserve (summaries.size ());
+    for (const auto& s : summaries) {
+        ids.push_back (s.id);
+    }
+    EXPECT_EQ (ids,
+    (std::vector<std::string>{ "req_early", "req_tie_a", "req_tie_b", "req_late" }));
+    ASSERT_FALSE (summaries.empty ());
+    EXPECT_EQ (summaries[0].collection_id, "col_1");
+    EXPECT_EQ (summaries[0].method, vayu::HttpMethod::PATCH);
+    EXPECT_EQ (summaries[0].url, "https://example.test/req_early");
+    EXPECT_EQ (summaries[0].created_at, 2);
+    EXPECT_FALSE (summaries[0].spec_operation.has_value ());
+}
+
+// Mutation check: drop the collection subquery from
+// `live_requests_in_live_collections`, or `collection_id` from `tree_order`,
+// and this reds.
+TEST_F (DatabaseTest, RequestSummariesInLiveCollectionsGroupByCollectionAndSkipATrashedOne) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    for (const std::string id : { "col_b", "col_a", "col_gone" }) {
+        Collection col;
+        col.id   = id;
+        col.name = id;
+        // Stamped alone, leaving its request live: only the collection
+        // filter can keep `req_gone` out.
+        if (id == "col_gone") {
+            col.deleted_at = 1;
+        }
+        db.create_collection (col);
+    }
+    const std::vector<std::tuple<std::string, std::string, int>> inserted = {
+        { "req_b0", "col_b", 0 }, { "req_gone", "col_gone", 0 },
+        { "req_a1", "col_a", 1 }, { "req_a0", "col_a", 0 }
+    };
+    for (const auto& [id, collection_id, order] : inserted) {
+        Request r;
+        r.id             = id;
+        r.collection_id  = collection_id;
+        r.name           = id;
+        r.order          = order;
+        r.spec_operation = R"({"method":"GET","path":"/x"})";
+        db.save_request (r);
+    }
+
+    const auto summaries = db.get_request_summaries_in_live_collections ();
+    std::vector<std::string> ids;
+    ids.reserve (summaries.size ());
+    for (const auto& s : summaries) {
+        ids.push_back (s.id);
+        EXPECT_EQ (s.spec_operation, R"({"method":"GET","path":"/x"})");
+    }
+    EXPECT_EQ (ids, (std::vector<std::string>{ "req_a0", "req_a1", "req_b0" }));
+}
+
 // ==================== Config Cleanup Tests ====================
 
 // `is_known_config_key` is the catalogue check `POST`/`GET /config` refuse an

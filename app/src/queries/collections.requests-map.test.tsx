@@ -27,21 +27,30 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useMultipleCollectionRequests } from "./collections";
-import type { Request } from "@/types";
+import {
+	useCreateRequestMutation,
+	useFullCollectionRequests,
+	useMultipleCollectionRequests,
+} from "./collections";
+import { queryKeys } from "./keys";
+import type { Request, RequestSummary } from "@/types";
 
+const listRequestSummaries = vi.fn();
 const listRequests = vi.fn();
+const createRequest = vi.fn();
 
 vi.mock("@/services/api", () => ({
 	apiService: {
+		listRequestSummaries: (...a: unknown[]) => listRequestSummaries(...a),
 		listRequests: (...a: unknown[]) => listRequests(...a),
+		createRequest: (...a: unknown[]) => createRequest(...a),
 	},
 }));
 
-const req = (id: string, collectionId: string, extra: Partial<Request> = {}) =>
+const req = (id: string, collectionId: string, extra: Partial<RequestSummary> = {}) =>
 	({
 		id,
 		collectionId,
@@ -49,7 +58,7 @@ const req = (id: string, collectionId: string, extra: Partial<Request> = {}) =>
 		method: "GET",
 		url: "",
 		...extra,
-	}) as Request;
+	}) as RequestSummary;
 
 const wrapper = (client: QueryClient) =>
 	function Wrapper({ children }: { children: ReactNode }) {
@@ -60,10 +69,11 @@ const newClient = () =>
 	new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 
 beforeEach(() => {
-	listRequests.mockReset();
-	listRequests.mockImplementation(({ collectionId }: { collectionId: string }) =>
+	listRequestSummaries.mockReset();
+	listRequestSummaries.mockImplementation(({ collectionId }: { collectionId: string }) =>
 		Promise.resolve(collectionId === "c1" ? [req("r1", "c1")] : [])
 	);
+	listRequests.mockReset();
 });
 
 describe("useMultipleCollectionRequests", () => {
@@ -98,7 +108,7 @@ describe("useMultipleCollectionRequests", () => {
 	});
 
 	it("keys every requested collection, sorted by order then createdAt", async () => {
-		listRequests.mockImplementation(({ collectionId }: { collectionId: string }) =>
+		listRequestSummaries.mockImplementation(({ collectionId }: { collectionId: string }) =>
 			Promise.resolve(
 				collectionId === "c1"
 					? [
@@ -122,5 +132,99 @@ describe("useMultipleCollectionRequests", () => {
 		// An empty collection is present with an empty list, not missing: callers
 		// distinguish "no requests" from "not asked for".
 		expect(result.current.requestsByCollection.get("c2")).toEqual([]);
+	});
+});
+
+/**
+ * The column audit reads what each request sends, which a summary does not
+ * carry (#2546): its lists are the whole rows, fetched for it alone.
+ */
+describe("useFullCollectionRequests", () => {
+	const full = (id: string, collectionId: string) =>
+		({
+			...req(id, collectionId),
+			headers: [{ key: "X-Plan", value: "{{data.plan}}", enabled: true }],
+		}) as Request;
+
+	beforeEach(() => {
+		listRequests.mockImplementation(({ collectionId }: { collectionId: string }) =>
+			Promise.resolve(collectionId === "c1" ? [full("r1", "c1")] : [])
+		);
+	});
+
+	it("fetches each collection's whole rows, not its summaries", async () => {
+		const { result } = renderHook(() => useFullCollectionRequests(["c1", "c2"]), {
+			wrapper: wrapper(newClient()),
+		});
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+		expect(listRequests.mock.calls).toEqual([
+			[{ collectionId: "c1" }],
+			[{ collectionId: "c2" }],
+		]);
+		expect(listRequestSummaries).not.toHaveBeenCalled();
+		expect(result.current.requestsByCollection.get("c1")?.[0].headers).toEqual([
+			{ key: "X-Plan", value: "{{data.plan}}", enabled: true },
+		]);
+		expect(result.current.requestsByCollection.get("c2")).toEqual([]);
+	});
+
+	it("refetches when that collection's tree list is invalidated", async () => {
+		// Every write that can change a request invalidates its owner's
+		// `listByCollection`; the whole rows sit under that key so they go stale
+		// with it rather than needing an invalidation of their own.
+		const client = newClient();
+		const { result } = renderHook(() => useFullCollectionRequests(["c1"]), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(result.current.isLoading).toBe(false));
+		listRequests.mockClear();
+
+		await act(async () => {
+			await client.invalidateQueries({
+				queryKey: queryKeys.requests.listByCollection("c1"),
+			});
+		});
+
+		expect(listRequests.mock.calls).toEqual([[{ collectionId: "c1" }]]);
+	});
+
+	it("counts a request created in that collection, a Duplicate's copy included", async () => {
+		const client = newClient();
+		const lists = renderHook(() => useFullCollectionRequests(["c1"]), {
+			wrapper: wrapper(client),
+		});
+		await waitFor(() => expect(lists.result.current.isLoading).toBe(false));
+		createRequest.mockResolvedValue(full("r2", "c1"));
+		const create = renderHook(() => useCreateRequestMutation(), { wrapper: wrapper(client) });
+
+		await act(async () => {
+			await create.result.current.mutateAsync({
+				collectionId: "c1",
+				name: "r2",
+				method: "GET",
+				url: "",
+			});
+		});
+
+		await waitFor(() =>
+			expect(lists.result.current.requestsByCollection.get("c1")?.map((r) => r.id)).toEqual([
+				"r1",
+				"r2",
+			])
+		);
+
+		// A collection whose whole rows nothing holds gets no partial list made
+		// up for it: an entry would be served as if it were the whole answer.
+		createRequest.mockResolvedValue(full("r3", "c3"));
+		await act(async () => {
+			await create.result.current.mutateAsync({
+				collectionId: "c3",
+				name: "r3",
+				method: "GET",
+				url: "",
+			});
+		});
+		expect(client.getQueryData(queryKeys.requests.fullListByCollection("c3"))).toBeUndefined();
 	});
 });

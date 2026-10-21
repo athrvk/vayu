@@ -28,8 +28,16 @@ export const queryKeys = {
 	requests: {
 		all: ["requests"] as const,
 		lists: () => [...queryKeys.requests.all, "list"] as const,
+		// A collection's `RequestSummary` rows, the tree's list (#2546).
 		listByCollection: (collectionId: string) =>
 			[...queryKeys.requests.lists(), { collectionId }] as const,
+		// The same collection's whole rows, for the one reader that needs every
+		// column of every request (the column audit). Under the summary list's
+		// key on purpose: each invalidation of that list reaches this one too,
+		// and a `Request` is a `RequestSummary`, so a scan of `lists()` still
+		// reads summaries whichever of the two it lands on.
+		fullListByCollection: (collectionId: string) =>
+			[...queryKeys.requests.listByCollection(collectionId), "full"] as const,
 		details: () => [...queryKeys.requests.all, "detail"] as const,
 		detail: (id: string) => [...queryKeys.requests.details(), id] as const,
 		// Saved example responses (issue #481). Under the request's own prefix
@@ -123,6 +131,10 @@ export const queryKeys = {
 		// The run's scraped server vitals - its own family, cached like the time
 		// series (a finished run's samples never change).
 		monitorSeries: (id: string) => [...queryKeys.runs.all, "monitorSeries", id] as const,
+		// The History charts' one `maxPoints` read of the vitals (#2611), under
+		// `monitorSeries(id)` for the same reason `timeSeriesDownsampled` is.
+		monitorSeriesDownsampled: (id: string, maxPoints: number) =>
+			[...queryKeys.runs.monitorSeries(id), { maxPoints }] as const,
 		// Captured response headers/bodies for a run's samples. Its own family,
 		// not part of `report`, because it is fetched lazily - only once a
 		// reader expands a sample - and must not ride on the report's cache.
@@ -159,9 +171,9 @@ export const queryKeys = {
 	},
 
 	// Warm-cache pass over every collection's requests, one `GET /requests`
-	// (see usePrefetchCollectionsAndRequests). Keyed here rather than inline so
-	// it can be invalidated when the set of collections changes - it succeeds
-	// once and would otherwise never re-run for a collection created mid-session.
+	// (see usePrefetchCollectionsAndRequests). Keyed here rather than inline so a
+	// write that can change any collection's requests re-runs it as that one call
+	// (`invalidateAllRequestLists`).
 	prefetch: {
 		all: ["prefetch"] as const,
 		allRequests: () => [...queryKeys.prefetch.all, "all-requests"] as const,

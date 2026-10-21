@@ -22,7 +22,7 @@ import type {
 	Collection,
 	ExportFormat,
 	ExportMode,
-	Request,
+	RequestSummary,
 	SpecBindResponse,
 	SpecDiffRequest,
 	SpecDiffResponse,
@@ -241,7 +241,7 @@ export function useSpecDescribeQuery(token: string | null, content: string) {
  */
 export function useSpecMatchQuery(
 	collectionId: string,
-	requests: readonly Request[],
+	requests: readonly RequestSummary[],
 	operations: SpecOperation[] | null
 ) {
 	const fingerprint = useMemo(() => {

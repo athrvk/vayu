@@ -32,6 +32,7 @@ import type { McpDataEntity, McpDataChangedEvent as RendererEvent } from "@/type
  */
 const RENDERER_ENTITIES: Record<McpDataEntity, true> = {
 	collection: true,
+	collectionRow: true,
 	request: true,
 	environment: true,
 	run: true,

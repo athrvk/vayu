@@ -1,87 +1,34 @@
 #!/bin/bash
 
-# Two checks over the staged C++ changes, each mirroring a CI gate that can fail
-# a pull request: clang-format over whole staged engine sources (issue #908),
-# then clang-tidy over whole staged files (#946 - the gate promotion that closed
-# the #928 backlog paydown).
+# clang-format 19 over the whole of every staged engine source, mirroring CI's
+# `Engine formatting` gate (issue #908). It takes well under a second, so it
+# runs on every commit.
 #
-# Neither is stricter than the gate it mirrors, which is the property that keeps
+# clang-tidy is not here. It costs 20-90s a file, so paid per commit it made
+# every commit of a C++ change take minutes; it runs once per push instead, in
+# `scripts/pre-push`, over everything the push carries.
+#
+# Not stricter than the gate it mirrors, which is the property that keeps
 # `--no-verify` from becoming a reflex: a refusal here is a merge blocker seen
 # early, never a local rule of its own.
 
-# Add common Homebrew paths for LLVM on macOS to ensure clang-tidy and
-# clang-format are found - one LLVM install carries both.
-if [ -d "/opt/homebrew/opt/llvm/bin" ]; then
-    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-elif [ -d "/usr/local/opt/llvm/bin" ]; then
-    export PATH="/usr/local/opt/llvm/bin:$PATH"
-fi
-
-# Finds the binary for a pinned LLVM tool, which is not simply its plain name.
-# `apt install clang-format-19` - what CONTRIBUTING.md tells an Ubuntu
-# contributor to run - installs `/usr/bin/clang-format-19` and leaves the plain
-# `clang-format` at the distribution's 18, while Homebrew's LLVM 19 and the
-# Windows installer both use the plain name. Only apt splits them, so both names
-# are tried, versioned first.
-#
-# One helper rather than a copy per tool (issue #918). The clang-tidy pass used
-# to look under the plain name alone, so a contributor who followed that install
-# instruction to the letter still got the 18, was told to install a 19, and
-# linted nothing - the very packaging split the clang-format pass had already
-# been taught about. A second copy of the lookup would drift from the first the
-# next time either pin moved.
-#
-# $1 tool, $2 the major it is pinned to, $3 how to compare: `exact` for
-# clang-format, where another major is a wrong answer rather than a missing one,
-# or `minimum` for clang-tidy, whose pin is the floor that can parse the config.
-# The comparison is a parameter because it is the only thing the two lookups do
-# not share.
-#
-# Sets LLVM_TOOL to the binary that satisfied the pin, empty when none did, and
-# LLVM_TOOL_NEAREST to a "name version" for the last candidate that did not -
-# which is what lets the warning name what you have instead of repeating what to
-# install. A candidate whose `--version` prints nothing numeric is rejected, not
-# assumed current.
-find_llvm_tool() {
-    local tool="$1" want="$2" mode="$3"
-    local candidate version major accepted
-    LLVM_TOOL=
-    LLVM_TOOL_NEAREST=
-    for candidate in "${tool}-${want}" "$tool"; do
-        if ! command -v "$candidate" &> /dev/null; then
-            continue
-        fi
-        # The tolerant of the two regexes this replaces: it also matches a
-        # two-component `19.1`, which some builds report.
-        version=$("$candidate" --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)
-        major=${version%%.*}
-        accepted=
-        case "$mode" in
-            exact) [ "$major" = "$want" ] && accepted=1 ;;
-            minimum) [ -n "$major" ] && [ "$major" -ge "$want" ] 2>/dev/null && accepted=1 ;;
-            # Reachable only by editing this file wrongly, and silent if it were
-            # tolerated: an unknown mode would accept nothing and every pass
-            # would skip, which is the failure this hook exists to stop being.
-            *)
-                echo "pre-commit: find_llvm_tool got an unknown comparison mode '$mode'" >&2
-                exit 1
-                ;;
+# The directory this script lives in, through the `.git/hooks/` symlink the
+# installer makes, so the shared helper is found wherever the hook runs from.
+# A loop over `readlink` rather than `readlink -f`, which macOS's bash 3.2
+# toolchain did not always have.
+hook_source_dir() {
+    local path="${BASH_SOURCE[0]}" target
+    while [ -L "$path" ]; do
+        target="$(readlink "$path")"
+        case "$target" in
+            /*) path="$target" ;;
+            *) path="$(dirname "$path")/$target" ;;
         esac
-        if [ -n "$accepted" ]; then
-            LLVM_TOOL="$candidate"
-            return 0
-        fi
-        LLVM_TOOL_NEAREST="$candidate ${version:-(unknown version)}"
     done
-    return 1
+    cd "$(dirname "$path")" && pwd
 }
-
-# The oldest clang-tidy that can parse engine/.clang-tidy. `ExcludeHeaderFilterRegex`
-# landed in LLVM 19; an older binary rejects the whole config file, so it lints
-# *nothing* and still exits 0 - a hook that scans an empty set and reports success
-# (issue #659 item 4). Ubuntu 24.04 ships 18 by default, so this is the common case,
-# not an exotic one.
-MIN_CLANG_TIDY_MAJOR=19
+# shellcheck source=scripts/lib/llvm-tools.sh
+source "$(hook_source_dir)/lib/llvm-tools.sh"
 
 # Get list of changed C++ files
 FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "\.(cpp|hpp|c|h)$")
@@ -90,12 +37,12 @@ if [ -z "$FILES" ]; then
     exit 0
 fi
 
-# The formatting half (issue #908). The `Engine formatting` job is two seconds
-# of work that used to be reachable only after a push and a CI round trip; this
-# runs the same check, on the same major, over the sources this commit stages.
+# The `Engine formatting` job is two seconds of work that used to be reachable
+# only after a push and a CI round trip; this runs the same check, on the same
+# major, over the sources this commit stages.
 #
-# **Whole files, not changed lines** - as the clang-tidy pass below is too,
-# since #946. Formatting got there first: the bulk-format commit in
+# **Whole files, not changed lines** - as the clang-tidy pass in
+# `scripts/pre-push` is too, since #946. Formatting got there first: the bulk-format commit in
 # `.git-blame-ignore-revs` left the tree clean at the pinned version, so it
 # never had a backlog to grandfather, where the tidy pass had to pay one down
 # (#928) before its scope could match.
@@ -136,7 +83,7 @@ if [ ${#FORMAT_FILES[@]} -gt 0 ]; then
 
     if [ -z "$CLANG_FORMAT" ]; then
         # A skip rather than a refusal, on the same reasoning as the clang-tidy
-        # probe below - and a loud one, because this pin is *exact*: 39 of the
+        # probe in scripts/pre-push - and a loud one, because this pin is *exact*: 39 of the
         # 285 engine sources format differently under 18 than under 19, so a
         # check run by another major is a wrong answer rather than a missing one.
         echo "WARNING: no clang-format ${CLANG_FORMAT_MAJOR} found${NEAREST_CLANG_FORMAT:+ (nearest: ${NEAREST_CLANG_FORMAT})}."
@@ -155,179 +102,13 @@ if [ ${#FORMAT_FILES[@]} -gt 0 ]; then
     fi
 fi
 
-# The one way out of this hook, so that a verdict is reported where it will be
-# read - last, under whatever else ran - and so that no exit can lose one. The
-# clang-tidy pass below has two legitimate early exits (no clang-tidy, one too
-# old to read the config); neither is a reason to forget that clang-format
-# already refused this commit.
-STATUS=0
-end_hook() {
-    if [ "$FORMAT_STATUS" -ne 0 ]; then
-        echo
-        echo "clang-format ${CLANG_FORMAT_MAJOR} would rewrite the staged engine sources named"
-        echo "above; the commit was refused. Fix them in place:"
-        echo "    ${CLANG_FORMAT} --style=file -i <file>..."
-        echo "The 'Engine formatting' job checks the same files the same way, so this is a"
-        echo "merge blocker you are seeing early. To commit anyway: git commit --no-verify"
-    fi
-    if [ "$STATUS" -ne 0 ] || [ "$FORMAT_STATUS" -ne 0 ]; then
-        exit 1
-    fi
-    exit 0
-}
-
-# Discovery and version probe, before any file is linted, and said loudly and
-# once: the failure this replaces was silent, and a contributor on 18 had no way
-# to tell "clean" from "never ran". Absent and too-old share one message because
-# they share one cure; the nearest candidate is what tells them apart, and
-# naming it is what stops the warning from reading as advice already followed
-# (issue #918).
-#
-# The `Lint changed engine sources` step in .github/workflows/pr-tests.yml lints
-# the same files whole on clang-tidy 19 before a pull request can merge, so this
-# stays a skip rather than a refusal to commit - a missing or old local toolchain
-# costs a contributor nothing but the early warning.
-find_llvm_tool clang-tidy "$MIN_CLANG_TIDY_MAJOR" minimum
-CLANG_TIDY="$LLVM_TOOL"
-if [ -z "$CLANG_TIDY" ]; then
-    echo "WARNING: no clang-tidy ${MIN_CLANG_TIDY_MAJOR} or newer found${LLVM_TOOL_NEAREST:+ (nearest: ${LLVM_TOOL_NEAREST})}."
-    echo "         engine/.clang-tidy uses ExcludeHeaderFilterRegex, which needs clang-tidy"
-    echo "         >= ${MIN_CLANG_TIDY_MAJOR}; an older binary rejects the whole config and lints nothing."
-    echo "         NOTHING WAS LINTED. Install it ('apt install clang-tidy-${MIN_CLANG_TIDY_MAJOR}',"
-    echo "         'brew install llvm@${MIN_CLANG_TIDY_MAJOR}') or rely on CI, which lints the same"
-    echo "         files on clang-tidy ${MIN_CLANG_TIDY_MAJOR}."
-    end_hook
-fi
-
-# The binary is named because it need not be the plain one.
-echo "Running ${CLANG_TIDY} on staged C++ changes..."
-
-# The files to lint, in the order they were staged, minus vendored code and
-# paths that no longer exist on disk (a staged deletion has no file to lint).
-# An array, so a path can be handed to xargs/the loop below without quoting
-# tricks to survive whitespace in a filename.
-LINT_FILES=()
-for FILE in $FILES; do
-    if [[ "$FILE" == *"vendor/"* ]]; then
-        continue
-    fi
-    if [ ! -f "$FILE" ]; then
-        continue
-    fi
-    LINT_FILES+=("$FILE")
-done
-
-# Whole staged files, not changed lines (#946 - the promotion that closed the
-# #928 backlog paydown; CI gates whole changed files on both its linting legs
-# too, Linux since #946 and Windows since #1023 zeroed what only that
-# toolchain sees).
-#
-# Line scoping existed to quarantine a backlog: the engine had never been
-# linted, so most files carried findings older than any diff, and a whole-file
-# hook refused commits over code the committer did not write - `--no-verify` as
-# a reflex, the hook advisory in practice. #928 paid that backlog to zero
-# tree-wide, which removed the only argument for scoping - and the waves
-# measured what scoping cost while it lasted: a retyped constant created a
-# finding on a line its diff never touched (#979), and one branch's whole-file
-# lint of its own 30 changed files found 98 findings where the changed-lines
-# gate, correctly, reported 0 (#946). A finding anywhere in a staged file is
-# yours to fix now, or to NOLINT with the reason at the site.
-
-# What makes this hook a gate rather than a report. clang-tidy is invoked once
-# per file and each invocation's status is kept, so one bad file does not stop
-# the rest from being linted and does not get lost either - the old loop
-# discarded every status and ended in an unconditional `exit 0`, so a
-# contributor with the hook installed and a current clang-tidy could commit code
-# it had just flagged (issue #885). The status is only meaningful because
-# `engine/.clang-tidy` sets `WarningsAsErrors: '*'`; with that empty, clang-tidy
-# prints its findings and exits 0. `STATUS` is declared beside `end_hook` above,
-# which is where it is finally read.
-#
-# Run in parallel (below) rather than one process per file in sequence, since
-# whole-file clang-tidy is slow (20-80 s a file on clang-tidy 19; a test file
-# stays in that range only because of the analyzer mode engine/tests/.clang-tidy
-# sets) and a large commit can stage dozens. `xargs -P`'s own exit status (123 if anything failed) is what feeds
-# STATUS, so the per-file guarantee above still holds.
-lint_one_file() {
-    local FILE="$1"
-    echo "Linting $FILE..."
-    # We need compilation database for clang-tidy to work correctly with includes
-    # Assuming build directory is engine/build
-    # --allow-no-checks is for engine/src/runtime/, whose .clang-tidy sets
-    # `Checks: '-*'`. Without it clang-tidy treats an empty check list as a usage
-    # error and exits 1, so now that this loop reads the exit status the one
-    # directory that is meant to be exempt would be the only one that refuses a
-    # commit. Needs clang-tidy 19, which the probe above has already required.
-    #
-    # `--extra-arg=-Wno-ignored-gch` is this hook's alone, and is passed here
-    # rather than set as `ExtraArgs` in engine/.clang-tidy, where it used to be
-    # (issue #912). This hook lints against whatever build tree you already
-    # have. The engine builds with a precompiled header, and on a GCC build that
-    # `.gch` is not one clang can read, so clang-tidy replaying the compile
-    # command says "precompiled header ... was ignored because it is not a clang
-    # PCH file" on every file. It then falls back to including the header as
-    # text and analyses exactly the same translation unit, so the diagnostic is
-    # noise about the build tree rather than a fact about the code - and a hook
-    # that prints it once per staged file is a hook people stop reading.
-    #
-    # It has to be a compiler flag: with -Werror in the compile command clang
-    # raises it as a hard error before any check filter is consulted, so a
-    # `-clang-diagnostic-ignored-gch` entry in the check list does nothing.
-    #
-    # In engine/.clang-tidy it was worse than unnecessary, it was breaking:
-    # that file is read by CI too, `compile_commands.json` holds no entry for a
-    # header, and on the command clang-tidy synthesises for a file it cannot
-    # look up the flag arrives in input position - "no such file or directory:
-    # '-Wno-ignored-gch'" - failing the engine job for any pull request that
-    # touched a `.hpp`. CI never needed it: it regenerates
-    # `compile_commands.json` with `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`,
-    # which is the fix that holds for every compiler - macOS produces a *clang*
-    # PCH that Homebrew's clang 19 still rejects as "a newer PCH format", which
-    # no `-Wno-` flag covers. This hook does not do that, because reconfiguring
-    # someone's build tree from a git hook would throw away their next
-    # incremental build.
-    #
-    # `$CLANG_TIDY`, not `clang-tidy`, in both branches: the discovery above can
-    # settle on `clang-tidy-19` while the plain name is an 18 that cannot read
-    # the config at all, so a branch that invoked the plain name would lint
-    # nothing and say it had linted.
-    if [ -f "engine/build/compile_commands.json" ]; then
-        "$CLANG_TIDY" --allow-no-checks --extra-arg=-Wno-ignored-gch \
-            -p engine/build "$FILE"
-    else
-        echo "Warning: compile_commands.json not found in engine/build. clang-tidy might report false positives."
-        # Fallback: try to include common directories
-        "$CLANG_TIDY" --allow-no-checks "$FILE" \
-            -- -Iengine/include -Iengine/vendor/quickjs-ng
-    fi
-}
-export -f lint_one_file
-export CLANG_TIDY
-
-# nproc (Linux) -> sysctl -n hw.ncpu (macOS) -> 4, matching this repo's own
-# Windows ctest parallelism default, where neither exists.
-NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-
-if [ ${#LINT_FILES[@]} -gt 0 ]; then
-    if command -v xargs &> /dev/null; then
-        printf '%s\n' "${LINT_FILES[@]}" | xargs -P "$NPROC" -I{} bash -c 'lint_one_file "$@"' _ {} || STATUS=1
-    else
-        # No xargs (e.g. this hook's own test sandbox, or a stripped-down
-        # container): fall back to sequential rather than let a bare "command
-        # not found" masquerade as a clang-tidy finding below.
-        for FILE in "${LINT_FILES[@]}"; do
-            lint_one_file "$FILE" || STATUS=1
-        done
-    fi
-fi
-
-if [ "$STATUS" -ne 0 ]; then
+if [ "$FORMAT_STATUS" -ne 0 ]; then
     echo
-    echo "clang-tidy reported findings in the staged files above; the commit was refused."
-    echo "Fix them, or mark a deliberate exception with a NOLINT comment naming the check."
-    echo
-    echo "CI lints the same files whole (#946), so this is a merge blocker you are"
-    echo "seeing early. To commit anyway: git commit --no-verify"
+    echo "clang-format ${CLANG_FORMAT_MAJOR} would rewrite the staged engine sources named"
+    echo "above; the commit was refused. Fix them in place:"
+    echo "    ${CLANG_FORMAT} --style=file -i <file>..."
+    echo "The 'Engine formatting' job checks the same files the same way, so this is a"
+    echo "merge blocker you are seeing early. To commit anyway: git commit --no-verify"
+    exit 1
 fi
-
-end_hook
+exit 0

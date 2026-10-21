@@ -100,20 +100,42 @@ describe("deleting a collection invalidates the whole cascade", () => {
 	});
 });
 
-describe("the warm-cache prefetch re-runs for a collection created mid-session", () => {
-	it("invalidates the prefetch pass on create", async () => {
+describe("deleting a collection refetches every request list", () => {
+	it("re-runs the warm-cache pass, so the lists join one workspace call", async () => {
+		// Not a `setQueryData` patch: patching needs the subtree the engine took,
+		// and that is engine-side knowledge (see above).
+		deleteCollection.mockResolvedValue(undefined);
+		const client = makeClient();
+		client.setQueryData(queryKeys.prefetch.allRequests(), true);
+
+		const { result } = renderHook(() => useDeleteCollectionMutation(), {
+			wrapper: wrapper(client),
+		});
+		await result.current.mutateAsync("root");
+
+		expect(client.getQueryState(queryKeys.prefetch.allRequests())?.isInvalidated).toBe(true);
+	});
+});
+
+describe("creating a collection", () => {
+	it("seeds its empty request list and leaves every other list alone", async () => {
 		createCollection.mockResolvedValue(col("new"));
 		const client = makeClient();
 		client.setQueryData(queryKeys.collections.list(), []);
-		// The pass succeeded at startup; with `staleTime` it would never re-run,
-		// so a collection created now would miss its warm cache entirely.
 		client.setQueryData(queryKeys.prefetch.allRequests(), true);
+		client.setQueryData(queryKeys.requests.listByCollection("other"), [{ id: "r1" }]);
 
 		const { result } = renderHook(() => useCreateCollectionMutation(), {
 			wrapper: wrapper(client),
 		});
 		await result.current.mutateAsync({ name: "new" });
 
-		expect(client.getQueryState(queryKeys.prefetch.allRequests())?.isInvalidated).toBe(true);
+		expect(client.getQueryData(queryKeys.requests.listByCollection("new"))).toEqual([]);
+		// Mutation check: invalidate the pass on create again and this reds - a
+		// workspace-wide request read for a collection that holds nothing.
+		expect(client.getQueryState(queryKeys.prefetch.allRequests())?.isInvalidated).toBe(false);
+		expect(
+			client.getQueryState(queryKeys.requests.listByCollection("other"))?.isInvalidated
+		).toBe(false);
 	});
 });

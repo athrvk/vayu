@@ -22,6 +22,7 @@ import {
 import type {
 	Collection,
 	Request,
+	RequestSummary,
 	RequestExample,
 	ListTrashResponse,
 	RestoreTrashResponse,
@@ -180,6 +181,14 @@ function withoutId<T extends object>(data: T): Omit<T, "id"> {
 	return rest;
 }
 
+/** The query string of a `GET /requests`, `undefined` when it asks for nothing. */
+function requestListQuery(params: ListRequestsParams): Record<string, string> | undefined {
+	const query: Record<string, string> = {};
+	if (params.collectionId) query.collectionId = params.collectionId;
+	if (params.fields) query.fields = params.fields;
+	return Object.keys(query).length > 0 ? query : undefined;
+}
+
 /**
  * The Electron bridge's two allowed-folder writes. Absent outside Electron,
  * where nothing holds the secret the engine requires for either.
@@ -246,12 +255,26 @@ export const apiService = {
 	},
 
 	// Requests
-	async listRequests(params?: ListRequestsParams): Promise<Request[]> {
-		const queryParams = params?.collectionId
-			? { collectionId: params.collectionId }
-			: undefined;
-		const response = await httpClient.get<RawRequest[]>(API_ENDPOINTS.REQUESTS, queryParams);
+	async listRequests(params: Omit<ListRequestsParams, "fields"> = {}): Promise<Request[]> {
+		const response = await httpClient.get<RawRequest[]>(
+			API_ENDPOINTS.REQUESTS,
+			requestListQuery(params)
+		);
 		return response.map(RequestTransformer.toFrontend);
+	},
+
+	/**
+	 * The same rows as `listRequests`, in the same order, cut to the tree's
+	 * columns (#2546): no body, header set, auth or element list is read or sent.
+	 */
+	async listRequestSummaries(
+		params: Omit<ListRequestsParams, "fields"> = {}
+	): Promise<RequestSummary[]> {
+		const response = await httpClient.get<RawRequest[]>(
+			API_ENDPOINTS.REQUESTS,
+			requestListQuery({ ...params, fields: "summary" })
+		);
+		return response.map(RequestTransformer.toSummary);
 	},
 
 	async getRequest(id: string): Promise<Request> {
@@ -1006,13 +1029,14 @@ export const apiService = {
 		);
 	},
 
+	/** Server vitals for a run, paged or - with `maxPoints` - whole and folded (#2611). */
 	async getRunMonitorSeries(
 		id: string,
-		options: { limit?: number; offset?: number } = {}
+		options: { limit?: number; offset?: number; maxPoints?: number } = {}
 	): Promise<MonitorSeriesResponse> {
-		const { limit = STATS_PAGE_LIMIT, offset = 0 } = options;
+		const { limit = STATS_PAGE_LIMIT, offset = 0, maxPoints } = options;
 		return await httpClient.get<MonitorSeriesResponse>(
-			API_ENDPOINTS.RUN_MONITOR(id, limit, offset)
+			API_ENDPOINTS.RUN_MONITOR(id, limit, offset, maxPoints)
 		);
 	},
 

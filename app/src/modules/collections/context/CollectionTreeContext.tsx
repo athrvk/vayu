@@ -40,7 +40,7 @@
 
 import { createContext, useContext } from "react";
 import type { StoreApi } from "zustand";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 import type { RowAction } from "@/components/shared";
 import type { TreeEntity } from "../drop-position";
 
@@ -140,7 +140,7 @@ export interface CollectionTreeCrudHandlers {
 
 	onRequestRenameSubmit: (requestId: string, name: string) => void;
 	onRequestRenameCancel: () => void;
-	onStartRequestRename: (request: Request) => void;
+	onStartRequestRename: (request: RequestSummary) => void;
 
 	/**
 	 * Starts a delete. Both paths go through it - the ⋯ menu and the hidden
@@ -150,7 +150,7 @@ export interface CollectionTreeCrudHandlers {
 	 */
 	onCollectionDeleteClick: (collectionId: string, collectionName: string) => void;
 	onRequestDeleteClick: (requestId: string, requestName: string) => void;
-	onDuplicateRequest: (request: Request) => void;
+	onDuplicateRequest: (request: RequestSummary) => void;
 
 	onFolderNameChange: (value: string) => void;
 	onCreateSubfolder: (parentId: string) => void;
@@ -167,7 +167,7 @@ export interface CollectionTreeState extends CollectionTreeCrudState {
 	expandedCollectionIds: Set<string>;
 	selectedCollectionId: string | null;
 	selectedRequestId: string | null;
-	getRequestsByCollection: (collectionId: string) => Request[];
+	getRequestsByCollection: (collectionId: string) => RequestSummary[];
 }
 
 /**

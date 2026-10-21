@@ -16,11 +16,13 @@
  * tick with the latency percentiles, `current_concurrency` and `backpressure`
  * replaced by the bucket's max and `current_rps` by its mean. A rule change
  * there is a change here too; `docs/engine/api-reference.md` ("Downsampling
- * with `maxPoints`") is the contract both follow.
+ * with `maxPoints`") is the contract both follow. The monitor series' fold
+ * (#2611, `foldLikeEngineMonitor`) restates the same engine file's
+ * `MonitorSampleBucket`: the last sample's timestamp and each name's max.
  */
 
-import type { LoadTestMetrics } from "@/types";
-import type { TimeSeriesResponse } from "@/modules/history/types";
+import type { LoadTestMetrics, MonitorSample } from "@/types";
+import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
 /** Completions a healthy second of {@link storedTicks} carries. */
 export const STORED_RPS = 100;
@@ -102,6 +104,51 @@ export function foldLikeEngine(ticks: LoadTestMetrics[], maxPoints: number): Tim
 		data,
 		pagination: {
 			total: ticks.length,
+			limit: maxPoints,
+			offset: 0,
+			hasMore: false,
+			returned: data.length,
+		},
+		bucketed: ticksPerBucket > 1,
+		ticksPerBucket,
+	};
+}
+
+/** Wall-clock start of {@link storedTicks}, so a sample can sit on a tick. */
+const FIRST_TICK_MS = 1_750_000_000_000;
+
+/**
+ * `count` scrapes `intervalMs` apart, the first on the first stored tick, each
+ * carrying one gauge `cpu` that rises with its index.
+ */
+export function storedMonitorSamples(count: number, intervalMs: number): MonitorSample[] {
+	return Array.from({ length: count }, (_, i) => ({
+		timestamp: FIRST_TICK_MS + i * intervalMs,
+		series: { cpu: i },
+	}));
+}
+
+/** The answer `GET /runs/:id/monitor?maxPoints=` gives for `samples`. */
+export function foldLikeEngineMonitor(
+	samples: MonitorSample[],
+	maxPoints: number
+): MonitorSeriesResponse {
+	const ticksPerBucket = Math.max(1, Math.ceil(samples.length / maxPoints));
+	const data: MonitorSample[] = [];
+	for (let i = 0; i < samples.length; i += ticksPerBucket) {
+		const bucket = samples.slice(i, i + ticksPerBucket);
+		const series: Record<string, number> = {};
+		for (const sample of bucket) {
+			for (const [name, value] of Object.entries(sample.series)) {
+				series[name] = Math.max(series[name] ?? value, value);
+			}
+		}
+		data.push({ timestamp: bucket[bucket.length - 1].timestamp, series });
+	}
+	return {
+		data,
+		pagination: {
+			total: samples.length,
 			limit: maxPoints,
 			offset: 0,
 			hasMore: false,

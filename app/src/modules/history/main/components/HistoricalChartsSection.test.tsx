@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { LoadTestMetrics } from "@/types";
 import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL } from "@/constants/load-test-modes";
 
@@ -131,6 +131,66 @@ describe("HistoricalChartsSection, downsampled series", () => {
 
 		expect(screen.getByTestId("rate-chart")).toBeTruthy();
 		expect(screen.queryByText(NOTE)).toBeNull();
+	});
+});
+
+/*
+ * The reader of the monitor envelope's `bucketed` / `ticksPerBucket` (#2611),
+ * on the Server vitals card and independent of the tick series' own note.
+ *
+ * Mutation check: drop `monitorTicksPerBucket` from the section and the
+ * bucketed case reddens; draw the note unconditionally and the raw case does.
+ */
+describe("HistoricalChartsSection, downsampled server vitals", () => {
+	const SAMPLES = [
+		{ timestamp: 1000, series: { cpu: 1 } },
+		{ timestamp: 2000, series: { cpu: 2 } },
+	];
+	const NOTE = /Each point covers 9 scrapes/;
+
+	it("says on the vitals card what a point covers, whatever the tick series is", () => {
+		render(
+			<HistoricalChartsSection
+				data={ticks(10)}
+				monitorSamples={SAMPLES}
+				monitorTicksPerBucket={9}
+			/>
+		);
+
+		const card = screen
+			.getByTestId("vitals-chart")
+			.closest("[data-slot='card']") as HTMLElement;
+		expect(within(card).getByText(NOTE)).toBeTruthy();
+		expect(within(card).getByText(/highest value among them/)).toBeTruthy();
+		// The ticks are raw here: their own note stays away.
+		expect(screen.queryByText(/of this run/)).toBeNull();
+	});
+
+	it("keeps the two notes apart when both series are bucketed", () => {
+		render(
+			<HistoricalChartsSection
+				data={ticks(10)}
+				ticksPerBucket={44}
+				monitorSamples={SAMPLES}
+				monitorTicksPerBucket={9}
+			/>
+		);
+
+		expect(screen.getByText(/Each point covers 44\.00s of this run/)).toBeTruthy();
+		expect(screen.getByText(NOTE)).toBeTruthy();
+	});
+
+	it("draws no vitals note over raw scrapes", () => {
+		render(
+			<HistoricalChartsSection
+				data={ticks(10)}
+				ticksPerBucket={44}
+				monitorSamples={SAMPLES}
+			/>
+		);
+
+		expect(screen.getByTestId("vitals-chart")).toBeTruthy();
+		expect(screen.queryByText(/scrapes/)).toBeNull();
 	});
 });
 

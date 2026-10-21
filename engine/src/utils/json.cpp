@@ -326,13 +326,14 @@ void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes) {
 namespace {
 
 /**
- * The `specOperation` value both request serializers emit (issue #637).
+ * The `specOperation` value every request serializer emits (issue #637).
  *
  * Shared rather than written twice on purpose: `serialize` backs
- * `GET /requests/:id` and `serialize_to_stream` backs `GET /requests`, and a
+ * `GET /requests/:id`, `serialize_to_stream` backs `GET /requests` and the
+ * `RequestSummary` overload its `fields=summary` form (#2546), and a
  * field added to one and forgotten in the other is this file's standing trap -
  * the two views of the same row would disagree about whether a request names an
- * operation at all. One reading, called from both.
+ * operation at all. One reading, called from each.
  *
  * `null` for a column that is NULL and for a blob that no longer parses: the
  * two are the same answer to "which operation is this", and every block around
@@ -639,6 +640,19 @@ Json serialize (const vayu::db::Request& r, const vayu::http::FileAccessPolicy& 
     json["specOperation"] = spec_operation_node (r.spec_operation);
     json["updatedAt"]     = r.updated_at;
     json["createdAt"]     = r.created_at;
+    return json;
+}
+
+Json serialize (const vayu::db::RequestSummary& summary) {
+    Json json;
+    json["id"]            = summary.id;
+    json["collectionId"]  = summary.collection_id;
+    json["name"]          = summary.name;
+    json["method"]        = to_string (summary.method);
+    json["url"]           = summary.url;
+    json["order"]         = summary.order;
+    json["createdAt"]     = summary.created_at;
+    json["specOperation"] = spec_operation_node (summary.spec_operation);
     return json;
 }
 

@@ -46,6 +46,7 @@ export default function PerformanceTab({
 	monitorFailure,
 	isLoadingSeries,
 	ticksPerBucket,
+	monitorTicksPerBucket,
 }: PerformanceTabProps) {
 	// The run's own record of the host sleeping under it (#1357), read here by
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
@@ -83,6 +84,7 @@ export default function PerformanceTab({
 					monitorFailure={monitorFailure}
 					isLoading={isLoadingSeries}
 					ticksPerBucket={ticksPerBucket}
+					monitorTicksPerBucket={monitorTicksPerBucket}
 					mode={derived.mode}
 					breakpoint={derived.breakpoint}
 					anomalies={anomalies}

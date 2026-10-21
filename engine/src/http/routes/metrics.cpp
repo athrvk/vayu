@@ -112,13 +112,16 @@ constexpr auto BUCKET_MEAN_KEYS = std::to_array<std::string_view> (
 constexpr int64_t DOWNSAMPLE_READ_CHUNK = 5000;
 
 /**
- * The whole stored series as at most @p max_points ticks (#2547). Reads stop
- * at @p total_count, the count taken before the first read, so a tick a live
- * run appends meanwhile cannot push the answer past @p max_points. A damaged
- * row still occupies its place in a bucket, so bucket edges stay on stored
- * row positions.
+ * The whole stored series as at most @p max_points entries (#2547, #2611),
+ * each folded through a @p Bucket. @p read_chunk answers one page of stored
+ * rows for `(limit, offset)`. Reads stop at @p total_count, the count taken
+ * before the first read, so a row a live run appends meanwhile cannot push the
+ * answer past @p max_points. A damaged row still occupies its place in a
+ * bucket, so bucket edges stay on stored row positions.
  */
-nlohmann::json downsampled_tick_series (vayu::db::Database& db,
+template <typename Bucket, typename ReadChunk>
+nlohmann::json downsampled_series (ReadChunk read_chunk,
+const char* kind,
 const std::string& run_id,
 int64_t total_count,
 int64_t max_points) {
@@ -126,7 +129,7 @@ int64_t max_points) {
     std::max<int64_t> (1, (total_count + max_points - 1) / max_points);
 
     nlohmann::json data = nlohmann::json::array ();
-    MetricTickBucket bucket;
+    Bucket bucket;
     int64_t rows_in_bucket  = 0;
     const auto close_bucket = [&] {
         if (!bucket.empty ()) {
@@ -136,14 +139,14 @@ int64_t max_points) {
     };
 
     for (int64_t offset = 0; offset < total_count;) {
-        const auto rows = db.get_metric_ticks_paginated (
-        run_id, std::min (DOWNSAMPLE_READ_CHUNK, total_count - offset), offset);
+        const auto rows =
+        read_chunk (std::min (DOWNSAMPLE_READ_CHUNK, total_count - offset), offset);
         if (rows.empty ()) {
             break; // Rows removed since the count; what was read stands.
         }
         for (const auto& row : rows) {
-            if (auto tick = parse_stored_payload (row, "metric tick", run_id)) {
-                bucket.add (std::move (*tick));
+            if (auto payload = parse_stored_payload (row, kind, run_id)) {
+                bucket.add (std::move (*payload));
             }
             if (++rows_in_bucket == ticks_per_bucket) {
                 close_bucket ();
@@ -164,6 +167,10 @@ int64_t max_points) {
     response["bucketed"]               = ticks_per_bucket > 1;
     response["ticksPerBucket"]         = ticks_per_bucket;
     return response;
+}
+
+int64_t clamp_max_points (int64_t max_points) {
+    return std::clamp (max_points, int64_t{ 1 }, RUN_TIME_SERIES_PAGE_MAX);
 }
 
 } // namespace
@@ -217,6 +224,37 @@ nlohmann::json MetricTickBucket::take () {
     return folded;
 }
 
+void MonitorSampleBucket::add (nlohmann::json sample) {
+    const auto series = sample.find ("series");
+    if (series != sample.end () && series->is_object ()) {
+        for (const auto& item : series->items ()) {
+            if (!item.value ().is_number ()) {
+                continue;
+            }
+            const auto best = maxima_.find (item.key ());
+            if (best == maxima_.end () ||
+            item.value ().get<double> () > best->get<double> ()) {
+                maxima_[item.key ()] = item.value ();
+            }
+        }
+    }
+    last_ = std::move (sample);
+    ++samples_;
+}
+
+bool MonitorSampleBucket::empty () const {
+    return samples_ == 0;
+}
+
+nlohmann::json MonitorSampleBucket::take () {
+    nlohmann::json folded = std::move (last_);
+    if (samples_ > 1 && !maxima_.empty ()) {
+        folded["series"] = std::move (maxima_);
+    }
+    *this = MonitorSampleBucket{};
+    return folded;
+}
+
 std::optional<int64_t> parse_max_points (std::string_view raw) {
     const auto value = vayu::utils::parse_number<int64_t> (raw);
     if (!value || *value <= 0) {
@@ -255,9 +293,12 @@ std::optional<int64_t> max_points) {
     // pagination total, so this is not an extra query.
     const int64_t tick_count = db.count_metric_ticks (run_id);
     if (max_points) {
+        const auto read_ticks = [&] (int64_t chunk, int64_t from) {
+            return db.get_metric_ticks_paginated (run_id, chunk, from);
+        };
         return { 200,
-            downsampled_tick_series (db, run_id, tick_count,
-            std::clamp (*max_points, int64_t{ 1 }, RUN_TIME_SERIES_PAGE_MAX)) };
+            downsampled_series<MetricTickBucket> (read_ticks, "metric tick",
+            run_id, tick_count, clamp_max_points (*max_points)) };
     }
     return { 200, tick_time_series (db, run_id, tick_count, limit, offset) };
 }
@@ -272,17 +313,29 @@ std::optional<int64_t> max_points) {
  * row for row. A run that configured no monitor returns an empty `data` array,
  * not a 404 - the run exists and simply scraped nothing. A missing run is the
  * same definitive 404 the tick series returns.
+ *
+ * With @p max_points set (#2611) the whole series comes back as at most that
+ * many samples, folded by `MonitorSampleBucket`; see the declaration.
  */
 std::pair<int, nlohmann::json> run_monitor_series_response (vayu::db::Database& db,
 const std::string& run_id,
 int64_t limit,
-int64_t offset) {
+int64_t offset,
+std::optional<int64_t> max_points) {
     auto run = db.get_run (run_id);
     if (!run) {
         return { 404, error_body (404, "Run not found") };
     }
 
     const int64_t sample_count = db.count_monitor_samples (run_id);
+    if (max_points) {
+        const auto read_samples = [&] (int64_t chunk, int64_t from) {
+            return db.get_monitor_samples_paginated (run_id, chunk, from);
+        };
+        return { 200,
+            downsampled_series<MonitorSampleBucket> (read_samples, "monitor sample",
+            run_id, sample_count, clamp_max_points (*max_points)) };
+    }
     return { 200,
         stored_payload_series (db.get_monitor_samples_paginated (run_id, limit, offset),
         "monitor sample", run_id, sample_count, limit, offset) };
@@ -350,9 +403,13 @@ void handle_run_monitor (RouteContext& ctx, const httplib::Request& req, httplib
     std::string run_id = req.matches[1];
     vayu::utils::log_info ("http",
     "GET /runs/:id/monitor - Fetching monitor samples for run: " + run_id);
-    auto [limit, offset] = parse_time_series_pagination (req);
+    auto [limit, offset]  = parse_time_series_pagination (req);
+    const auto max_points = req.has_param ("maxPoints") ?
+    parse_max_points (req.get_param_value ("maxPoints")) :
+    std::nullopt;
     try {
-        auto [status, body] = run_monitor_series_response (ctx.db, run_id, limit, offset);
+        auto [status, body] =
+        run_monitor_series_response (ctx.db, run_id, limit, offset, max_points);
         if (status == 404) {
             vayu::utils::log_warning (
             "http", "GET /runs/:id/monitor - Run not found: " + run_id);
@@ -536,6 +593,10 @@ void register_metrics_routes (RouteContext& ctx) {
      * Query Parameters:
      * - limit: Max records per page (default 5000, capped at 50000)
      * - offset: Skip N records (default 0)
+     * - maxPoints: Return the whole series as at most this many samples,
+     *   folded by `MonitorSampleBucket` when it has more (capped at 50000;
+     *   limit and offset ignored; a non-positive or malformed value is
+     *   treated as absent)
      */
     ctx.server.Get (R"(/runs/([^/]+)/monitor)",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

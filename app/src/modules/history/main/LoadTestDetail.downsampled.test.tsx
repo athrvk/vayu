@@ -11,28 +11,36 @@
 /**
  * A long run's History page reads its series in one downsampled request
  * (#2547), where it used to page in every stored tick: a 24 h soak was 18
- * requests of 5,000 raw ticks, held for half an hour.
+ * requests of 5,000 raw ticks, held for half an hour. The server vitals read
+ * the same way (#2611).
  *
  * The engine is stubbed as it answers: a `maxPoints` read folds the stored
- * ticks (`foldLikeEngine`), a `limit`/`offset` read is a raw page with
- * `hasMore`. So a pane that went back to paging would be served pages and
- * keep asking, which is what the call assertions catch.
+ * series (`foldLikeEngine`, `foldLikeEngineMonitor`), a `limit`/`offset` read
+ * is a raw page with `hasMore`. So a pane that went back to paging would be
+ * served pages and keep asking, which is what the call assertions catch.
  *
  * Mutation check: restore the `useInfiniteQuery` read and the auto-paging
  * effect in `LoadTestDetail` and the 86,400-tick case reddens on the call's
- * arguments and count; drop `ticksPerBucket` from the props it hands the
- * Performance tab and its note case reddens.
+ * arguments and count, and the monitored case does the same for the vitals;
+ * drop `ticksPerBucket` from the props it hands the Performance tab and its
+ * note case reddens, and drop `monitorTicksPerBucket` and the vitals note case
+ * does.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
 import { apiService } from "@/services/api";
 import { HISTORY_SERIES_MAX_POINTS } from "@/config/network";
-import { foldLikeEngine, storedTicks } from "@/modules/dashboard/utils/downsample.testkit";
-import type { LoadTestMetrics, RunReport } from "@/types";
-import type { TimeSeriesResponse } from "../types";
+import {
+	foldLikeEngine,
+	foldLikeEngineMonitor,
+	storedMonitorSamples,
+	storedTicks,
+} from "@/modules/dashboard/utils/downsample.testkit";
+import type { LoadTestMetrics, MonitorSample, RunReport } from "@/types";
+import type { MonitorSeriesResponse, TimeSeriesResponse } from "../types";
 import LoadTestDetail from "./LoadTestDetail";
 
 vi.mock("@/services/api", () => ({
@@ -70,7 +78,7 @@ const DAY_SECONDS = 86_400;
 /** A p99 ten times its baseline for five minutes, mid-run. */
 const spiked = (s: number) => (s >= 40_000 && s < 40_300 ? { p99: 500 } : {});
 
-function report(seconds: number): RunReport {
+function report(seconds: number, monitoredSamples = 0): RunReport {
 	return {
 		metadata: {
 			runId: "run_long",
@@ -89,6 +97,7 @@ function report(seconds: number): RunReport {
 			errorRate: 0,
 		},
 		latency: { min: 1, max: 500, avg: 13, p50: 10, p95: 25, p99: 50 },
+		monitor: { samples: monitoredSamples, failures: 0, series: {} },
 	} as unknown as RunReport;
 }
 
@@ -114,6 +123,27 @@ function serveLikeEngine(ticks: LoadTestMetrics[]) {
 				returned: data.length,
 			},
 		} satisfies TimeSeriesResponse;
+	});
+}
+
+/** The engine's two answers to `GET /runs/:id/monitor` over `samples`. */
+function serveMonitorLikeEngine(samples: MonitorSample[]) {
+	mocked.getRunMonitorSeries.mockImplementation(async (_id, options = {}) => {
+		if (options.maxPoints !== undefined)
+			return foldLikeEngineMonitor(samples, options.maxPoints);
+		const limit = options.limit ?? 5000;
+		const offset = options.offset ?? 0;
+		const data = samples.slice(offset, offset + limit);
+		return {
+			data,
+			pagination: {
+				total: samples.length,
+				limit,
+				offset,
+				hasMore: offset + limit < samples.length,
+				returned: data.length,
+			},
+		} satisfies MonitorSeriesResponse;
 	});
 }
 
@@ -150,6 +180,8 @@ describe("a 24 h run's History page", () => {
 		expect(answer.bucketed).toBe(true);
 		expect(answer.data.length).toBeLessThanOrEqual(HISTORY_SERIES_MAX_POINTS);
 		expect(answer.pagination.total).toBe(DAY_SECONDS);
+		// This run scraped nothing, so there is no vitals read at all.
+		expect(mocked.getRunMonitorSeries).not.toHaveBeenCalled();
 	});
 });
 
@@ -166,5 +198,49 @@ describe("a run short enough to arrive raw", () => {
 		const answer = await mocked.getRunTimeSeries.mock.results[0].value;
 		expect(answer).toMatchObject({ bucketed: false, ticksPerBucket: 1 });
 		expect(answer.data).toHaveLength(600);
+	});
+});
+
+describe("a 24 h run that scraped server vitals", () => {
+	// A scrape every fifth second: 17,280 of them, nine to a bucket.
+	const SCRAPE_MS = 5000;
+	const SCRAPES = (DAY_SECONDS * 1000) / SCRAPE_MS;
+
+	it("asks once for the downsampled vitals, never pages, and says what a point is", async () => {
+		serveLikeEngine(storedTicks(DAY_SECONDS));
+		serveMonitorLikeEngine(storedMonitorSamples(SCRAPES, SCRAPE_MS));
+
+		render(
+			withQueryClient(
+				<LoadTestDetail report={report(DAY_SECONDS, SCRAPES)} runId="run_long" />
+			)
+		);
+		openPerformanceTab();
+
+		const chart = await screen.findByTestId("vitals-chart");
+		const card = chart.closest("div[class*='enter-fade']") as HTMLElement;
+		expect(within(card).getByText(/Each point covers 9 scrapes/)).toBeTruthy();
+
+		expect(mocked.getRunMonitorSeries).toHaveBeenCalledTimes(1);
+		expect(mocked.getRunMonitorSeries).toHaveBeenCalledWith("run_long", {
+			maxPoints: HISTORY_SERIES_MAX_POINTS,
+		});
+		const answer = await mocked.getRunMonitorSeries.mock.results[0].value;
+		expect(answer.bucketed).toBe(true);
+		expect(answer.pagination.total).toBe(SCRAPES);
+	});
+
+	it("draws no vitals note for a run whose scrapes arrive raw", async () => {
+		serveLikeEngine(storedTicks(600));
+		serveMonitorLikeEngine(storedMonitorSamples(120, SCRAPE_MS));
+
+		render(withQueryClient(<LoadTestDetail report={report(600, 120)} runId="run_long" />));
+		openPerformanceTab();
+
+		expect(await screen.findByTestId("vitals-chart")).toBeTruthy();
+		expect(screen.queryByText(/Each point covers/)).toBeNull();
+		expect(mocked.getRunMonitorSeries).toHaveBeenCalledTimes(1);
+		const answer = await mocked.getRunMonitorSeries.mock.results[0].value;
+		expect(answer).toMatchObject({ bucketed: false, ticksPerBucket: 1 });
 	});
 });

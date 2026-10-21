@@ -39,7 +39,7 @@ import { MoveToDialog } from "./MoveToDialog";
 import type { CollectionTreeHandlers, CollectionTreeState } from "./context/CollectionTreeContext";
 import { CollectionTreeProviders } from "./context/CollectionTreeProviders";
 import { DrawerPanel, EmptyState, ErrorState, ListSkeleton } from "@/components/shared";
-import type { Request } from "@/types";
+import type { RequestSummary } from "@/types";
 import { isCommitEnter } from "@/lib/keyboard";
 
 export default function CollectionTree() {
@@ -79,7 +79,7 @@ export default function CollectionTree() {
 	const { requestsByCollection } = useMultipleCollectionRequests(allCollectionIds);
 
 	const getRequestsByCollection = useCallback(
-		(collectionId: string): Request[] => requestsByCollection.get(collectionId) ?? [],
+		(collectionId: string): RequestSummary[] => requestsByCollection.get(collectionId) ?? [],
 		[requestsByCollection]
 	);
 

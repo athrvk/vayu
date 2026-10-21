@@ -128,16 +128,20 @@ describe("the registry declares its effects", () => {
 		// which family a tool touches is exactly what `category` does not say -
 		// an `execute` tool writes a run row and refills the cookie jar.
 		const expected: Record<string, string[]> = {
-			create_collection: ["collection"],
-			update_collection: ["collection"],
+			// A create, an update and an unbind write the one collection row and
+			// nothing beneath it, so they take the row family and leave every
+			// request list alone (#2546). A delete cascades through the subtree.
+			create_collection: ["collectionRow"],
+			update_collection: ["collectionRow"],
 			delete_collection: ["collection"],
 			// Detaching an OpenAPI document (#761 phase A) rewrites one field of
 			// the collection row - `openapi` - and the Spec tab reads the binding
 			// off that row, so the family that refetches collections is the one
-			// that refreshes it. No `spec` family: the stored document is
-			// immutable under its id and this write neither changes nor deletes
-			// one, so the caches keyed by spec id cannot go stale here.
-			unbind_spec: ["collection"],
+			// that refreshes it. The requests keep their operation stamps. No
+			// `spec` family: the stored document is immutable under its id and
+			// this write neither changes nor deletes one, so the caches keyed by
+			// spec id cannot go stale here.
+			unbind_spec: ["collectionRow"],
 			// Binding (#862) writes both families: the binding is a field of the
 			// collection row, and the identity it stamps - and clears - lives on
 			// the requests beneath it. Still no `spec` family, for the reason
@@ -251,11 +255,27 @@ describe("dispatch emits mcp:data-changed", () => {
 		expect(onDataChanged).toHaveBeenCalledWith({ entity: "request", collectionId: "col_1" });
 	});
 
-	test("a collection write reports the collection family", async () => {
+	test("a collection create reports the row family, never the coarse one", async () => {
 		const { ctx, onDataChanged } = ctxWithNotifier(fakeClient(), WRITES_ENABLED);
 		const res = await dispatchTool("create_collection", { name: "API" }, ctx);
 		expect(res.isError).toBeFalsy();
-		expect(onDataChanged).toHaveBeenCalledWith({ entity: "collection" });
+		expect(onDataChanged.mock.calls).toEqual([[{ entity: "collectionRow" }]]);
+	});
+
+	test("a collection rename reports the row family, naming the collection", async () => {
+		const client = fakeClient({
+			updateCollection: vi.fn().mockResolvedValue({ id: "col_1", name: "Renamed" }),
+		});
+		const { ctx, onDataChanged } = ctxWithNotifier(client, WRITES_ENABLED);
+		const res = await dispatchTool(
+			"update_collection",
+			{ collectionId: "col_1", name: "Renamed" },
+			ctx
+		);
+		expect(res.isError).toBeFalsy();
+		expect(onDataChanged.mock.calls).toEqual([
+			[{ entity: "collectionRow", collectionId: "col_1" }],
+		]);
 	});
 
 	test("a cascade delete reports the collection family once it has happened", async () => {

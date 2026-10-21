@@ -17,9 +17,9 @@ InheritParentConfig: true
 # costs the same under either mode), so nothing is traded away there. The
 # 155 test files were at zero analyzer findings in both modes when this was set.
 #
-# Set here rather than on the pre-commit hook's command line because both
+# Set here rather than on the pre-push hook's command line because both
 # consumers read this file, and a hook that analysed less than the gate would
-# pass commits the gate then refuses.
+# pass pushes the gate then refuses.
 CheckOptions:
   clang-analyzer-ipa: dynamic
 ...

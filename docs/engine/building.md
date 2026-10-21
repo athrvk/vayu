@@ -545,9 +545,9 @@ apart.
 ### macOS
 
 - Requires Xcode Command Line Tools
-- The `scripts/pre-commit` hook prepends Homebrew's LLVM directory, so a
-  `brew install llvm` clang-tidy and clang-format are found without touching
-  `PATH` yourself
+- The git hooks (`scripts/pre-commit`, `scripts/pre-push`) prepend Homebrew's
+  LLVM directory, so a `brew install llvm` clang-tidy and clang-format are
+  found without touching `PATH` yourself
 
 #### The deployment target is pinned, and must stay pinned
 
@@ -1116,8 +1116,9 @@ second - `apt install clang-format-19` leaves the plain name at Ubuntu's 18,
 while Homebrew's LLVM 19 installs it under the plain name - and when neither is
 a 19 it says so and checks nothing, on the same reasoning as the clang-tidy
 probe: the pin is exact, so an answer from another major is a wrong answer
-rather than a missing one. That two-name lookup is
-[shared with the clang-tidy pass](#static-analysis), not duplicated in it.
+rather than a missing one. That two-name lookup lives in
+`scripts/lib/llvm-tools.sh` and is
+[shared with the clang-tidy hook](#static-analysis), not duplicated in it.
 `git clang-format --staged` is deliberately not used;
 it formats the changed lines, and a staged file it called clean could still fail
 this whole-file check.
@@ -1162,7 +1163,7 @@ clang-tidy runs in two places, and both of them can stop a change:
 
 | Where | What it lints | What a finding does |
 |-------|---------------|---------------------|
-| `scripts/pre-commit` (installed by `python build.py --setup`) | The **whole** of every staged `.c/.cpp/.h/.hpp` file | Refuses the commit |
+| `scripts/pre-push` (installed by `python build.py --setup`) | The **whole** of every `.c/.cpp/.h/.hpp` file changed by the commits a push carries - those no remote-tracking ref reaches yet | Refuses the push |
 | `Lint changed engine sources`, in the engine job of `.github/workflows/pr-tests.yml` | The **whole** of every changed `engine/{src,include,tests}` **translation unit**, on Linux and Windows alike. Headers are never direct inputs | Fails CI |
 | `Engine tidy scan` (`.github/workflows/engine-tidy-scan.yml`), **weekly** plus `workflow_dispatch` | The **whole tree**, on Linux and Windows both. Not a pull-request gate - the denominator no per-change gate can give | Fails the run |
 
@@ -1179,7 +1180,7 @@ clear of the 06:00 and 09:00 that other workflows already use).
 was written (#1023), but the hole it fills is not Windows-specific: the gate
 lints translation units and never a header (#940), so a **header-only pull
 request is linted by no CI job at all** - it relies on the contributor's
-pre-commit hook. A header that introduces findings across the sources
+pre-push hook. A header that introduces findings across the sources
 including it can reach master unlinted on either platform, and only a
 whole-tree run finds it afterwards. Linux drifts too, more slowly: it pins
 clang-tidy 19 from apt where Windows takes whatever LLVM its image ships.
@@ -1293,7 +1294,7 @@ report had ever counted - the same seam as "CI lints translation units, never a
 header" (#940), reaching the measurement rather than the gate.
 
 That is a gap in the *measurement*, not in the standard. A header is part of the
-tree, the pre-commit hook lints one whenever a commit stages it, and #946's
+tree, the pre-push hook lints one whenever a push changes it, and #946's
 "zero findings tree-wide" is not true of a tree whose headers were never read.
 So the re-measure command is:
 
@@ -1315,7 +1316,7 @@ entry and a guessed command emits `clang-diagnostic-error`s (#940) - though
 since the #946 promotion removed the line filter, a header's findings do
 surface through every changed translation unit that includes it
 (`HeaderFilterRegex` applies); a header-only pull request still relies on the
-hook, which lints a staged header directly. And `engine/src/runtime/` stays
+pre-push hook, which lints a pushed header directly. And `engine/src/runtime/` stays
 out of scope in every count: its own `.clang-tidy` declines every check with a
 written reason, so the findings a check-list override surfaces there are that
 decision working, not a backlog.
@@ -1369,6 +1370,17 @@ that leg's own backlog was measured and paid. The `VAYU_TIDY_FULL=1` escape
 hatch went with the first promotion and `clang-tidy-diff.py` with the second -
 whole-file linting is simply what all three do now, invoking clang-tidy
 directly on each file with no line filter to compute.
+
+**The local lint runs at push, not at commit.** It lived in the pre-commit hook
+until its cost was measured: 20s for a source file and 90s for a test file on a
+four-core box, most of it checks spread across the whole AST of a translation
+unit that pulls in gtest and cpp-httplib, with no single check worth declining
+(`performance-unnecessary-value-param` was the largest, at a fifth). Paid per
+commit, a seven-file change took minutes every time it was committed. The
+`scripts/pre-push` hook pays it once per push, over every C++ file in the
+commits no remote-tracking ref reaches - a new branch's commits since it left
+master, an update's since the last push, a force-push's rewritten ones. The
+formatter stays at commit, where it costs a fraction of a second.
 
 **A bulk reformat is the one change this gate cannot price fairly**, and the
 escape is a label. The gate's unit of cost is the translation-unit parse, and a
@@ -1433,7 +1445,7 @@ rather than a clean run, so the one exempt directory would otherwise be the only
 one that fails.
 
 **The CI gate lints translation units. A header is never an input** - on every
-platform, decided in #940 (it was Windows-only, from #926). The pre-commit hook
+platform, decided in #940 (it was Windows-only, from #926). The pre-push hook
 is the gate that lints headers.
 
 `compile_commands.json` has one entry per translation unit and none for a
@@ -1458,8 +1470,8 @@ file its filter does not list - so a changed header never reached the CI gate
 through its consumers at all. With no line filter on the invocation, the
 config's `HeaderFilterRegex` applies, and a header's findings surface through
 every **changed** translation unit that includes it. What CI still loses is a
-header-only pull request from a machine with no hook installed - the hook
-lints a staged header directly, against the contributor's own build tree. To
+header-only pull request from a machine with no hook installed - the pre-push
+hook lints a pushed header directly, against the contributor's own build tree. To
 lint one by hand, point clang-tidy at a consumer:
 
 ```bash
@@ -1537,12 +1549,12 @@ name meant the most common setup installed a 19, found the 18, and was told to
 install a 19 (#918); the warning now names the nearest candidate it rejected, so
 "you have an 18" reads differently from "you have nothing".
 
-**One `find_llvm_tool` in `scripts/pre-commit` answers for both tools**, with
+**One `find_llvm_tool` in `scripts/lib/llvm-tools.sh` answers for both hooks**, with
 the comparison a parameter - `exact` for clang-format, whose pin is not a floor,
 and `minimum` for clang-tidy, whose pin is. It is shared rather than copied
 because that is precisely how the two halves came to disagree: the formatter
 learned about the packaging split and the linter did not. `pre-commit_test.sh`
-pins the sharing as well as the behaviour.
+pins the sharing, and each hook's own suite its behaviour.
 
 CI's version differs per leg, and none of it is a free choice:
 

@@ -23,7 +23,7 @@ import { render } from "@testing-library/react";
 import CollectionTreeRows from "./CollectionTreeRows";
 import { flattenVisibleRows } from "./tree-rows";
 import { withCollectionTreeContext } from "@/test/collection-tree-context";
-import type { Collection, Request } from "@/types";
+import type { Collection, RequestSummary } from "@/types";
 
 vi.mock("@/queries", () => ({
 	useReorderMutation: () => ({ mutate: vi.fn(), isPending: false }),
@@ -34,8 +34,10 @@ function folder(id: string, order: number, parentId?: string): Collection {
 }
 
 const COLLECTIONS = [folder("acme", 0), folder("billing", 0, "acme"), folder("beta", 1)];
-const REQUESTS: Record<string, Request[]> = {
-	acme: [{ id: "r1", name: "Ping", collectionId: "acme", method: "GET", order: 0 } as Request],
+const REQUESTS: Record<string, RequestSummary[]> = {
+	acme: [
+		{ id: "r1", name: "Ping", collectionId: "acme", method: "GET", order: 0 } as RequestSummary,
+	],
 };
 const getRequestsByCollection = (id: string) => REQUESTS[id] ?? [];
 

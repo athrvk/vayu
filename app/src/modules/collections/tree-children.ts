@@ -16,7 +16,7 @@
  * second copy of the sibling rule that #360 and #431 removed.
  */
 
-import { compareTreeOrder, type Collection, type Request } from "@/types";
+import { compareTreeOrder, type Collection, type RequestSummary } from "@/types";
 
 /** One child of a parent: a sub-folder or a request, tagged with its kind. */
 export type TreeChild =
@@ -32,7 +32,7 @@ export type TreeChild =
 			id: string;
 			order: number;
 			createdAt?: string;
-			request: Request;
+			request: RequestSummary;
 	  };
 
 /**
@@ -46,7 +46,7 @@ export type TreeChild =
 export function childrenOf(
 	parentId: string | null,
 	collections: readonly Collection[],
-	requestsOf: (collectionId: string) => readonly Request[]
+	requestsOf: (collectionId: string) => readonly RequestSummary[]
 ): TreeChild[] {
 	const folders = collections.filter((c) => (c.parentId ?? null) === parentId);
 	return mergeSiblings(folders, parentId === null ? [] : requestsOf(parentId));
@@ -59,7 +59,7 @@ export function childrenOf(
  */
 export function mergeSiblings(
 	folders: readonly Collection[],
-	requests: readonly Request[]
+	requests: readonly RequestSummary[]
 ): TreeChild[] {
 	const children: TreeChild[] = [
 		...folders.map((collection): TreeChild => ({

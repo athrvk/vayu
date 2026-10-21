@@ -26,7 +26,7 @@ vi.mock("../OAuth2LoadTestGuard", () => ({ default: () => null }));
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: [] } }),
 	useCollectionsQuery: () => ({ data: [] }),
-	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
+	useFullCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 	useRequestDefaultsQuery: () => ({ data: { headers: [] } }),
 }));
 vi.mock("@/queries/collections", () => ({

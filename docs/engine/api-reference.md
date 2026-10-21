@@ -1490,10 +1490,35 @@ tiebreak is part of the contract.
 - `collectionId` (optional): Collection ID to fetch requests from. Absent, the
   response is every live request of every live collection, grouped by
   `collectionId` and ordered within each group exactly as that collection's own
-  list is - nothing in the trash. The app builds its whole tree from this one
-  call at launch instead of one call per collection.
+  list is - nothing in the trash.
+- `fields` (optional): `summary` answers each row cut to the keys a tree is
+  built from (#2546), described below; absent (or empty), the full request
+  objects. Any other value is a `400` with code `invalid_fields`, never the
+  full list. The app builds its whole tree at launch from one
+  `GET /requests?fields=summary` call.
 
-**Response:** An array of request objects, each in the same shape as a
+**Summary response** (`fields=summary`): the same rows in the same order as
+the full form, each carrying exactly `id`, `collectionId`, `name`, `method`,
+`url`, `order`, `createdAt` and `specOperation`, spelled and valued as the full
+row writes them (`specOperation` is the object or `null`). Nothing else is read
+from the database, so a large body, header set, auth block or element list
+costs its row nothing, and no row carries `truncatedFields`.
+```json
+[
+  {
+    "id": "req_1234567890",
+    "collectionId": "col_1234567890",
+    "name": "Get Users",
+    "method": "GET",
+    "url": "{{baseUrl}}/users",
+    "order": 0,
+    "createdAt": 1234567890,
+    "specOperation": null
+  }
+]
+```
+
+**Response** (no `fields`): An array of request objects, each in the same shape as a
 `GET /requests/:id` response: `params`/`headers` are arrays of
 `{key, value, enabled}` entries and `body` is a JSON discriminated union
 (see the `requests` table in [db-schema.md](db-schema.md)) - with one
@@ -1557,8 +1582,8 @@ every collection's request list and scanning them for the id.
 **Path Parameters:**
 - `id` (required): The request ID to fetch
 
-**Response:** The request object, in the same shape as a `GET /requests` list
-entry.
+**Response:** The request object, in the same shape as a full `GET /requests`
+list entry.
 ```json
 {
   "id": "req_1234567890",
@@ -1801,7 +1826,7 @@ keys present (even `null` is accepted as a no-op, but a real value is not) is a
 rule: absent keeps the stored list; `null` resets it to `[]`; a present value
 must be an array the element registry accepts (see [Elements](elements.md)) or
 the write is a `400` naming the index, the kind and the field. The only script
-source - `GET /requests/:id` and every list response carry it and no longer
+source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
 **`auth.postman`**, the Postman block an import kept beside the mapped auth
@@ -9042,9 +9067,11 @@ the max is then taken over those windows. A key no tick in the bucket carried
 (`http_errors` on an older row, `custom_metrics` on a run that recorded none)
 is never added.
 
-Only `GET /runs/:runId/metrics` downsamples. The run-report export
-([`POST /export/run-report`](#post-exportrun-report)), the MCP
-`get_run_timeseries` tool and `GET /runs/:runId/monitor` read the raw ticks.
+Only `GET /runs/:runId/metrics` and `GET /runs/:runId/monitor`
+([the same parameter, folded differently](#downsampling-the-monitor-series))
+downsample. The run-report export
+([`POST /export/run-report`](#post-exportrun-report)) and the MCP
+`get_run_timeseries` and `get_run_monitor` tools read the raw rows.
 
 ### GET /runs/:runId/monitor
 
@@ -9052,6 +9079,14 @@ Paginated **server vitals** scraped during the run - the samples the
 [`monitor` block](#the-monitor-block-server-vitals) collected. Same
 `{data, pagination}` envelope and the same `limit` / `offset` rules as
 `GET /runs/:runId/metrics`, so one pagination reader covers both.
+
+**Query parameters:**
+- `limit` - max records per page (default 5000, invalid/&le;0 falls back to 5000, capped at 50000).
+- `offset` - skip N records (default 0, negative floored to 0).
+- `maxPoints` - return the **whole series as at most this many samples**
+  (capped at 50000; anything but a positive integer is treated as absent).
+  `limit` and `offset` are then ignored. See
+  [Downsampling the monitor series](#downsampling-the-monitor-series).
 
 Its own endpoint rather than extra keys on the tick objects: that key set is the
 `/metrics` contract, and these samples land on the user's scrape cadence rather
@@ -9088,6 +9123,39 @@ measures how long the run actually took.
 A run that configured no monitor returns `200` with an empty `data` array; only
 a run that does not exist is a `404`. Samples are deleted with the run, like
 every other child row.
+
+#### Downsampling the monitor series
+
+`maxPoints` here is the same contract as
+[on `/metrics`](#downsampling-with-maxpoints) (issue #2611), read from the
+same `monitor_samples` rows in stored order (by `timestamp`, then insertion):
+
+- Without it the answer is exactly the paged series above; no key is added.
+- With a series of at most `maxPoints` samples, every sample comes back
+  unchanged and `bucketed` is `false`.
+- Otherwise each run of `ticksPerBucket = ceil(total / maxPoints)` consecutive
+  samples is folded into one (the key keeps the tick series' name, though a
+  bucket here holds samples); the last bucket may be shorter, and a one-sample
+  bucket is that sample unchanged.
+
+The envelope is the one the tick series answers with: `pagination.total` is the
+stored sample count, `limit` echoes `maxPoints`, `offset` is `0`, `hasMore` is
+`false`, `returned` is the number of `data` entries, plus `bucketed` and
+`ticksPerBucket` on this path only.
+
+A folded sample is `{timestamp, series}` like any other:
+
+| Field | Folded value |
+|-------|--------------|
+| `timestamp` | The last sample's |
+| each `series.<name>` | The **max** over the bucket's samples that carried it |
+
+The max keeps a one-scrape spike in a gauge (cpu, memory, a queue depth) that a
+mean would flatten, and for a monotone counter it equals the last reading. A
+name no sample in the bucket carried is never added to the folded `series`, so
+a gap in the target's reporting stays a gap; a non-number value is skipped.
+The MCP `get_run_monitor` tool does not pass `maxPoints` and reads the raw
+samples.
 
 ### GET /runs/:runId/live
 

@@ -80,7 +80,7 @@ vi.mock("@/queries", () => ({
 	}),
 	// The audit of the one request being load-tested names it explicitly, so
 	// nothing is fetched; the hook is still called.
-	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
+	useFullCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
 	useRequestDefaultsQuery: (scope: "design" | "load" = "design") => ({
 		data: { headers: scope === "load" ? loadHeaders : designHeaders },
 	}),
