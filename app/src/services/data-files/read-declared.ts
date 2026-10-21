@@ -53,6 +53,8 @@ export interface DeclaredDataFile {
 	/** The name on disk, which is the main process's answer and not the stored one. */
 	fileName: string;
 	parsed: ParsedDataFile;
+	/** The decoded text, so a change of reading re-parses what was previewed. */
+	text: string;
 	/** The path it was read from, so a caller can remember it unchanged. */
 	path: string;
 	/** SHA-256 of the bytes read, 64 lowercase hex: what a run records (#2051). */
@@ -151,5 +153,5 @@ export async function readDeclaredDataFile(
 	const refusal = describeRowCapRefusal(parsed.rows.length, maxRows);
 	if (refusal) throw new DataFileError(refusal);
 
-	return { fileName, parsed, path, hash };
+	return { fileName, parsed, text, path, hash };
 }

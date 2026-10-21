@@ -1773,6 +1773,31 @@ describe("a pick declares the contract (issue #2050)", () => {
 		expect(started(onStart).data).toEqual([{ plan: "free", price: "0" }]);
 	});
 
+	it("Read numbers as numbers re-parses the sent rows and stays with the binding (#2540)", async () => {
+		const { onStart } = open({ collectionId: "col_1" });
+		await pick("plans.csv", "plan,price\nfree,0");
+		succeedContractWrite();
+		updateCollection.mutate.mockClear();
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }));
+
+		expect(started(onStart).data).toEqual([{ plan: "free", price: 0 }]);
+		// Mutation check: drop `writer.rememberReading` from `changeReading`
+		// and the next pre-fill reads the file as text.
+		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+	});
+
+	it("Read numbers as numbers lives in the selection for a request in no collection", async () => {
+		const { onStart } = open();
+		await pick("plans.csv", "plan,price\nfree,0");
+
+		fireEvent.click(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }));
+
+		expect(started(onStart).data).toEqual([{ plan: "free", price: 0 }]);
+		expect(useDataFileStore.getState().locations).toEqual({});
+	});
+
 	it("a declare that fails does not block Start", async () => {
 		updateCollection.mutate.mockImplementation(() => {
 			updateCollection.isError = true;

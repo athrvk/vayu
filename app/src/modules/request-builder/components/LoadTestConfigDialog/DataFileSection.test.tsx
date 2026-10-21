@@ -23,6 +23,7 @@ const IDLE: LoadTestDataFile = {
 	error: null,
 	setError: vi.fn(),
 	select: vi.fn(),
+	changeReading: vi.fn(),
 	prefillNote: null,
 	warnings: [],
 	clearContract: undefined,

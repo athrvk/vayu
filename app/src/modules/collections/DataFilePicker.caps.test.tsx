@@ -65,6 +65,7 @@ function renderPicker() {
 		<DataFilePicker
 			selected={null}
 			onSelect={onSelect}
+			onCastNumbersChange={vi.fn()}
 			onRemove={onRemove}
 			error={null}
 			onError={onError}
@@ -223,6 +224,7 @@ describe("Remove", () => {
 	const selected = {
 		fileName: "users.csv",
 		parsed: parseDataFile("id\n1", "users.csv"),
+		text: "id\n1",
 		hash: "0".repeat(64),
 	};
 
@@ -233,6 +235,7 @@ describe("Remove", () => {
 			<DataFilePicker
 				selected={selected}
 				onSelect={onSelect}
+				onCastNumbersChange={vi.fn()}
 				onRemove={onRemove}
 				error={null}
 				onError={vi.fn()}
@@ -252,6 +255,7 @@ describe("Remove", () => {
 			<DataFilePicker
 				selected={selected}
 				onSelect={onSelect}
+				onCastNumbersChange={vi.fn()}
 				error={null}
 				onError={vi.fn()}
 				iterations={undefined}

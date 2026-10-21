@@ -37,6 +37,7 @@ import { FileSpreadsheet, Upload, X } from "lucide-react";
 import {
 	Button,
 	Card,
+	Checkbox,
 	Label,
 	Table,
 	TableBody,
@@ -65,7 +66,18 @@ import { pluralize } from "@/modules/dashboard/utils/format";
 /** A chosen file: its name, for the user, and its rows, for the payload. */
 export interface SelectedDataFile {
 	fileName: string;
+	/**
+	 * The rows, and how they were read: `parsed.castNumbers` is the "Read
+	 * numbers as numbers" setting in force (#2540), the one a run sends.
+	 */
 	parsed: ParsedDataFile;
+	/**
+	 * The decoded text `parsed` came from, so changing how values are read
+	 * re-parses these same characters. Re-reading the disk instead would fail
+	 * for a file with no path and could answer bytes other than the ones
+	 * previewed. In memory only, exactly like the rows.
+	 */
+	text: string;
 	/**
 	 * SHA-256 of the file's bytes, 64 lowercase hex (issue #2051). Sent with the
 	 * rows so the run records which file drove it, never the path.
@@ -85,6 +97,13 @@ export interface SelectedDataFile {
 export interface DataFilePickerProps {
 	selected: SelectedDataFile | null;
 	onSelect: (file: SelectedDataFile | null) => void;
+	/**
+	 * The same file, re-parsed because "Read numbers as numbers" was toggled.
+	 * Not `onSelect`: a host treats a pick as a new file (it declares the
+	 * contract, resets Iterations), and a change of reading is neither. The
+	 * host keeps the setting with the collection's binding, where there is one.
+	 */
+	onCastNumbersChange: (file: SelectedDataFile) => void;
 	/**
 	 * The Remove button was pressed, as distinct from the selection going to
 	 * `null`: a file the picker refuses also calls `onSelect(null)`, and a host
@@ -137,10 +156,18 @@ export interface DataFilePickerProps {
 /** Enough rows to see the shape of the file without turning the dialog into it. */
 const PREVIEW_ROWS = 10;
 
+/** A refusal as the picker shows it: the parser's own sentence, or the cause. */
+function describeReadFailure(e: unknown): string {
+	return e instanceof DataFileError
+		? e.message
+		: `Couldn't read the file: ${(e as Error).message}`;
+}
+
 /** A cell as the preview prints it. Objects and arrays show as compact JSON. */
 export default function DataFilePicker({
 	selected,
 	onSelect,
+	onCastNumbersChange,
 	onRemove,
 	error,
 	onError,
@@ -162,6 +189,31 @@ export default function DataFilePicker({
 		onError(message);
 	};
 
+	/**
+	 * Parse and measure, for a pick and for a change of reading alike, so the
+	 * two cannot apply different refusals to the same text.
+	 */
+	const readRows = (text: string, fileName: string, castNumbers: boolean): ParsedDataFile => {
+		const parsed = parseDataFile(text, fileName, { castNumbers });
+		// The same sentence a re-read of a remembered path refuses with
+		// (`read-declared.ts`), from one place - the two used to be one
+		// refusal and one silent acceptance.
+		const overRowCap = describeRowCapRefusal(parsed.rows.length, maxRows);
+		if (overRowCap) throw new DataFileError(overRowCap);
+		return parsed;
+	};
+
+	const changeReading = (castNumbers: boolean) => {
+		if (!selected) return;
+		try {
+			const parsed = readRows(selected.text, selected.fileName, castNumbers);
+			onCastNumbersChange({ ...selected, parsed });
+			onError(null);
+		} catch (e) {
+			refuse(describeReadFailure(e));
+		}
+	};
+
 	const handleFile = (file: File) => {
 		/*
 		 * Checked against the file on disk, before a byte of it is read: a
@@ -181,15 +233,9 @@ export default function DataFilePicker({
 		const accept = async (bytes: ArrayBuffer) => {
 			try {
 				const { text } = decodeDataFile(bytes);
-				const parsed = parseDataFile(text, file.name);
-				// The same sentence a re-read of a remembered path refuses with
-				// (`read-declared.ts`), from one place - the two used to be one
-				// refusal and one silent acceptance.
-				const overRowCap = describeRowCapRefusal(parsed.rows.length, maxRows);
-				if (overRowCap) {
-					refuse(overRowCap);
-					return;
-				}
+				// Text first: a pick is a new file, and "Read numbers as
+				// numbers" describes the file it was turned on for.
+				const parsed = readRows(text, file.name, false);
 				// The path is Electron's to give (`webUtils`, inside the preload)
 				// and is absent in a browser or for remote drag-and-drop, so it
 				// is carried when there is one and simply not when there is not.
@@ -197,14 +243,10 @@ export default function DataFilePicker({
 				// The raw bytes, not the decoded text: the main process hashes a
 				// re-read the same way, so one file is one digest either way.
 				const hash = await sha256Hex(bytes);
-				onSelect({ fileName: file.name, parsed, path, hash });
+				onSelect({ fileName: file.name, parsed, text, path, hash });
 				onError(null);
 			} catch (e) {
-				refuse(
-					e instanceof DataFileError
-						? e.message
-						: `Couldn't read the file: ${(e as Error).message}`
-				);
+				refuse(describeReadFailure(e));
 			}
 		};
 
@@ -229,6 +271,8 @@ export default function DataFilePicker({
 
 	const rowCount = selected?.parsed.rows.length ?? 0;
 	const resolved = resolveIterationCount(rowCount, iterations);
+	// JSON and JSONL carry their own types and ignore the option.
+	const readsDelimited = selected?.parsed.format === "csv" || selected?.parsed.format === "tsv";
 
 	return (
 		<div className="space-y-3">
@@ -312,6 +356,26 @@ export default function DataFilePicker({
 							{pluralize(selected.parsed.columns.length, "column")}
 						</span>
 					</div>
+
+					{/* In the card it changes, and beside the note at its foot
+					    that names it. */}
+					{readsDelimited && (
+						<label className="flex items-start gap-2 text-xs">
+							<Checkbox
+								className="size-target"
+								checked={selected.parsed.castNumbers}
+								onChange={(e) => changeReading(e.target.checked)}
+								disabled={disabled}
+							/>
+							<span className="font-medium leading-snug">
+								Read numbers as numbers
+								<span className="block font-normal text-muted-foreground">
+									Unquoted integers and decimals become numbers. A quoted cell
+									stays text.
+								</span>
+							</span>
+						</label>
+					)}
 
 					{/* A load run has no pass count to resolve against - it repeats for
 					    its duration - so the resolved-iterations sentence would be

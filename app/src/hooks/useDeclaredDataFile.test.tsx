@@ -60,7 +60,7 @@ function collection(id: string, columns?: string[]): Collection {
 }
 
 function picked(fileName: string, text: string, path?: string): SelectedDataFile {
-	return { fileName, parsed: parseDataFile(text, fileName), hash: "d".repeat(64), path };
+	return { fileName, parsed: parseDataFile(text, fileName), text, hash: "d".repeat(64), path };
 }
 
 /** The `readDataFile` bridge, answering every path with `text` as `fileName`. */

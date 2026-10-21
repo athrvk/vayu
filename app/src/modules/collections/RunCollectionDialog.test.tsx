@@ -1156,6 +1156,39 @@ describe("pre-filling from the declared data file", () => {
 		expect(updateCollection.mutate).not.toHaveBeenCalled();
 	});
 
+	it("sends the rows read the way the binding says (#2540)", async () => {
+		useDataFileStore.setState({
+			locations: {
+				col_1: { path: "/home/u/users.csv", fileName: "users.csv", castNumbers: true },
+			},
+		});
+		stubReadDataFile(async () => ({ bytes: bytesOf("user,id\nada,1"), fileName: "users.csv" }));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		const box = await screen.findByRole("checkbox", { name: /Read numbers as numbers/ });
+		expect((box as HTMLInputElement).checked).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
+	});
+
+	it("re-parses the sent rows on a toggle and remembers it, declaring nothing", async () => {
+		remember("/home/u/users.csv", "users.csv");
+		stubReadDataFile(async () => ({ bytes: bytesOf("user,id\nada,1"), fileName: "users.csv" }));
+
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		fireEvent.click(await screen.findByRole("checkbox", { name: /Read numbers as numbers/ }));
+		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ user: "ada", id: 1 }]);
+		// Mutation check: drop `writer.rememberReading` and the next pre-fill
+		// reads the file as text again.
+		expect(useDataFileStore.getState().locations.col_1?.castNumbers).toBe(true);
+		expect(updateCollection.mutate).not.toHaveBeenCalled();
+		// Not a pick: the pre-fill's one-pass-per-row stands.
+		expect(screen.getByRole("spinbutton", { name: /iterations/i })).toHaveProperty("value", "");
+	});
+
 	it("warns when the pre-filled file does not match the declared columns", async () => {
 		remember("/home/u/users.csv", "users.csv");
 		stubReadDataFile(async () => ({

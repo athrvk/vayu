@@ -41,6 +41,7 @@ function file(path?: string, castNumbers = false): SelectedDataFile {
 	return {
 		fileName: "plans.csv",
 		parsed: parseDataFile("plan,price\nfree,0", "plans.csv", { castNumbers }),
+		text: "plan,price\nfree,0",
 		hash: HASH,
 		path,
 	};

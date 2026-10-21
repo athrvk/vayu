@@ -387,6 +387,27 @@ describe("the remembered file", () => {
 
 		await waitFor(() => expect(screen.getByText(/Numbers are read as numbers/)).toBeTruthy());
 		expect(screen.getByRole("cell", { name: "7" })).toBeTruthy();
+		expect(
+			(screen.getByRole("checkbox", { name: /Read numbers as numbers/ }) as HTMLInputElement)
+				.checked
+		).toBe(true);
+	});
+
+	it("remembers a toggle on the binding without re-declaring (#2540)", async () => {
+		remember();
+		const read = bridge(() => csv("id\n007", "users.csv"));
+		vi.stubGlobal("electronAPI", { readDataFile: read, getFilePath: () => "" });
+
+		render(<DataTab collection={collection({ columns: ["id"] })} />);
+		fireEvent.click(await screen.findByRole("checkbox", { name: /Read numbers as numbers/ }));
+
+		expect(screen.getByRole("cell", { name: "7" })).toBeTruthy();
+		expect(useDataFileStore.getState().locations.col_1).toEqual({
+			path: "/home/u/users.csv",
+			fileName: "users.csv",
+			castNumbers: true,
+		});
+		expect(mutation.mutate).not.toHaveBeenCalled();
 	});
 
 	it("says it is reading rather than claiming there is nothing to compare", async () => {

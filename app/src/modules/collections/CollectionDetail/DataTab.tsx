@@ -166,6 +166,13 @@ export default function DataTab({ collection }: DataTabProps) {
 		if (next) writer.declare(next);
 	};
 
+	// The same file read another way: the preview changes and the binding
+	// remembers it, but the columns, and so the contract, do not.
+	const handleCastNumbersChange = (next: SelectedDataFile) => {
+		setFile(next);
+		writer.rememberReading(next);
+	};
+
 	const handleRedeclare = () => {
 		if (file) writer.declare(file);
 	};
@@ -223,6 +230,7 @@ export default function DataTab({ collection }: DataTabProps) {
 			<DataFilePicker
 				selected={file}
 				onSelect={handleSelect}
+				onCastNumbersChange={handleCastNumbersChange}
 				// Not through `onSelect(null)`: a refused pick reaches that too, and a
 				// file the picker turns away must leave the contract as it was.
 				onRemove={declaredContract ? writer.clear : undefined}

@@ -103,6 +103,18 @@ The header row is never cast. JSON and JSONL ignore the option, because the
 file already said what each value is. The preview notes which reading is in
 force.
 
+**Where to turn it on.** The **Read numbers as numbers** checkbox sits in the
+picker's preview card, under the file's name, wherever the picker appears: the
+Run collection dialog, the load test dialog and the collection's Data tab. It is
+shown only for a CSV or TSV file. Toggling it re-parses the same file in place -
+the preview, the iteration count and the rows the run sends all follow, and the
+file stays picked. The setting belongs to the collection's remembered file (its
+binding on this machine), so the next Run dialog, load dialog, Send-with-row
+and Data tab read the file the same way. Picking a file starts it off, because
+it describes how *that* file is read; Remove (or clearing the contract) forgets
+it with the file. A load test of a request in no collection has no binding, so
+the setting lasts for that run only.
+
 This is the integer and decimal subset of what Newman's `--csv-auto-parse`
 reads. Newman is looser: it also casts `1e3`, `.5` and padded cells, so a file
 that leans on those arrives as text here and as a number there. How the Postman

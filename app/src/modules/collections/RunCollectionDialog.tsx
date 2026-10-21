@@ -406,6 +406,16 @@ export default function RunCollectionDialog({
 		if (!next && iterationsBlank) setIterations("1");
 	};
 
+	/*
+	 * "Read numbers as numbers" re-parsed the same file: not a pick, so nothing
+	 * is declared and Iterations is left alone (the row count cannot change).
+	 * The binding remembers the reading, for the next pre-fill.
+	 */
+	const handleCastNumbersChange = (next: SelectedDataFile) => {
+		setDataFile(next);
+		writer.rememberReading(next);
+	};
+
 	const handleRun = () => {
 		if (!canRun) return;
 		const thresholds = buildThresholds(budgets, failRun, customBudgets);
@@ -856,6 +866,7 @@ export default function RunCollectionDialog({
 					<DataFilePicker
 						selected={dataFile}
 						onSelect={handleSelectDataFile}
+						onCastNumbersChange={handleCastNumbersChange}
 						// Only with a contract to clear: Remove on a collection that
 						// declares nothing has nothing to write.
 						onRemove={contract ? writer.clear : undefined}
