@@ -75,7 +75,7 @@ the engine's `encode_query_component` are pinned to one another by
 `engine/tests/fixtures/query-encoding-conformance.json`. A row with an empty
 value is written as `key=`, and one with `valueless: true` (Postman's
 `"value": null`, a URL's `?flag`) as a bare `key` (issue #1772). A pair a
-script's `query.add` writes is a row and takes the same rule. The value a
+script's `query.add` or `addQueryParams` writes is a row and takes the same rule. The value a
 stored `{{variable}}` token resolves to at send time is URL text instead, as
 Postman re-parses the substituted URL: its `/`, `&`, `=`, `?` and `#` are
 structure (issue #1773), and the rest is encoded by Postman's set for the

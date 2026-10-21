@@ -29,7 +29,7 @@ that the most common Postman scripts paste in and run unchanged.
 | Streamed events     | `pm.response.events` (array of `{ event, id?, data, dataTruncated? }`), `.totalEvents`, `.eventsTruncated` - a streaming request only, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`), `.method`, `.headers`, `.body` |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
@@ -1429,7 +1429,8 @@ pm.request.body = JSON.stringify({ n: 2 });
 - **`url` is Postman's `Url` object, not a string** (#991 - the owner decision that
   compatibility wins over the shipped string shape). `protocol`, `host`, `port`, `path`,
   `hash`, `query` with `get`/`has`/`all`/`toObject`/`count`, plus `getHost()`,
-  `getPath()`, `getQueryString()`, `toString()` and `update()`. It still behaves as a
+  `getPath()`, `getQueryString()`, `toString()`, `update()`, `addQueryParams()` and
+  `removeQueryParams()`. It still behaves as a
   string in every context JavaScript allows - concatenation, template literals, `==`,
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
   `===` and `typeof`. The full surface and the migration note are in
@@ -1440,6 +1441,11 @@ pm.request.body = JSON.stringify({ n: 2 });
   query carries Postman's `PropertyList` writers - `add`, `upsert`, `remove`,
   `clear`. A URL nobody edited is sent as the exact bytes it arrived as, because
   the parts are recomposed only when a member actually changed.
+  `url.addQueryParams(params)` and `url.removeQueryParams(params)` take several
+  at once. Two divergences, both deliberate: a leading `?` on an `addQueryParams`
+  query string is dropped (Postman keeps it in the first key), and
+  `removeQueryParams({ key })` outside an array throws a `TypeError` where
+  Postman's matches nothing.
 - **`body` is Postman's `RequestBody` object, not a string** (#1003 - the same trade
   #991 made for the URL). `mode` (`urlencoded` / `formdata` / `graphql` / `file` / `raw` -
   every other content mode reads `raw`), `raw`, the `urlencoded` / `formdata` field lists,

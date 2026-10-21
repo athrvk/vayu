@@ -1271,6 +1271,33 @@ pm.request.url.query.remove('page');                    // every match, not the 
 pm.request.url.query.clear();                           // and the '?' with them
 ```
 
+`addQueryParams()` and `removeQueryParams()` are Postman's `Url`-level spellings
+of `add` and `remove` for several parameters at once:
+
+```javascript
+pm.request.url.addQueryParams('a=1&b=2');                // a query string
+pm.request.url.addQueryParams(['c=3', { key: 'd', value: 4 }, { key: 'flag' }]);
+pm.request.url.addQueryParams({ key: 'trace', value: 'abc' }); // or one object
+
+pm.request.url.removeQueryParams('page');                // every match of a name
+pm.request.url.removeQueryParams(['a', { key: 'b' }]);   // names and { key } objects
+```
+
+`addQueryParams` takes a query string (split on `&`, each segment at its first
+`=`; `flag` is a bare key and `a=` an empty value), an array of one-param
+strings and `{ key, value }` objects, or a single `{ key, value }` object.
+Every item is checked before any is added, so a bad one throws a `TypeError`
+and leaves the URL as it was, and an empty key is refused as in `query.add`.
+Parameters are appended with duplicates kept, encoded by the rule `add` uses.
+A string inside an array is **one** parameter, so `['a=1&b=2']` adds `a` with
+the value `1&b=2` (the `&` encoded as `%26`). `removeQueryParams` takes a name,
+or an array of names and `{ key }` objects, and removes every parameter of each;
+a name that is not there is a no-op, and an empty or non-string item is a
+`TypeError`. Two differences from Postman: a leading `?` on the query string is
+dropped (Postman keeps it as part of the first key), and
+`removeQueryParams({ key: 'page' })` outside an array throws where Postman's
+removes nothing.
+
 Five rules behind those, each the reason for a decision you might otherwise
 undo:
 
