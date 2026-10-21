@@ -15,7 +15,7 @@
 
 import { Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { Callout, ErrorState } from "@/components/shared";
-import { formatSeconds } from "@/lib/format-number";
+import { formatNumber, formatSeconds } from "@/lib/format-number";
 import { Loader2 } from "lucide-react";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
 import { CONCURRENCY_UNIT, IN_FLIGHT_LABEL, isClosedLoopMode } from "@/constants/load-test-modes";
@@ -47,6 +47,12 @@ interface HistoricalChartsSectionProps {
 	ticksPerBucket?: number;
 	/** Server vitals scraped during the run; empty when it monitored nothing. */
 	monitorSamples?: MonitorSample[];
+	/**
+	 * Scrapes the engine folded into each entry of `monitorSamples` (#2611); absent
+	 * when they are raw. Independent of `ticksPerBucket`: a run can have a long
+	 * tick series and a short vitals one, or the reverse.
+	 */
+	monitorTicksPerBucket?: number;
 	/**
 	 * The server-vitals fetch failed. Drawn above the section whatever the time
 	 * series holds, because the vitals chart it explains is itself absent and the
@@ -83,6 +89,24 @@ function BucketNote({ ticksPerBucket }: { ticksPerBucket: number }) {
 	);
 }
 
+/**
+ * What a point is on a downsampled vitals series (#2611). Only drawn for a
+ * bucketed one, so there are always at least two scrapes in a point. The engine
+ * keeps each series' max over the bucket, so a one-scrape spike in a gauge
+ * survives.
+ */
+function VitalsBucketNote({ scrapesPerBucket }: { scrapesPerBucket: number }) {
+	return (
+		<Callout
+			severity="info"
+			className="mb-3"
+			title={`Each point covers ${formatNumber(scrapesPerBucket)} scrapes`}
+		>
+			Each series shows its highest value among them, so a one-scrape spike stays visible.
+		</Callout>
+	);
+}
+
 export default function HistoricalChartsSection({
 	monitorFailure,
 	...seriesProps
@@ -111,6 +135,7 @@ function SeriesCharts({
 	data,
 	failure,
 	monitorSamples = [],
+	monitorTicksPerBucket,
 	isLoading,
 	ticksPerBucket,
 	mode,
@@ -216,6 +241,9 @@ function SeriesCharts({
 						<CardTitle>Server vitals</CardTitle>
 					</CardHeader>
 					<CardContent>
+						{monitorTicksPerBucket !== undefined && (
+							<VitalsBucketNote scrapesPerBucket={monitorTicksPerBucket} />
+						)}
 						<ServerVitalsChart
 							history={data}
 							samples={monitorSamples}

@@ -1319,9 +1319,14 @@ export const API_ENDPOINTS = {
       : `/runs/${runId}/metrics?maxPoints=${maxPoints}`,
 
   // Server vitals scraped during the run (JSON, paginated, same envelope).
-  // Fetched by the history view only when the report says the run recorded some.
-  RUN_MONITOR: (runId: string, limit = 5000, offset = 0) =>
-    `/runs/${runId}/monitor?limit=${limit}&offset=${offset}`,
+  // Fetched by the history view only when the report says the run recorded some,
+  // and with maxPoints (the same contract as STATS_TIME_SERIES, #2611): one
+  // response, folded when the run scraped more than that; the History charts
+  // ask for 2000.
+  RUN_MONITOR: (runId: string, limit = 5000, offset = 0, maxPoints?: number) =>
+    maxPoints === undefined
+      ? `/runs/${runId}/monitor?limit=${limit}&offset=${offset}`
+      : `/runs/${runId}/monitor?maxPoints=${maxPoints}`,
 };
 ```
 

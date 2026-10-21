@@ -29,12 +29,7 @@ import type { RunReport, RunScenarioStepStat } from "@/types";
 
 vi.mock("@/queries/runs", () => ({
 	useRunTimeSeriesQuery: () => ({ data: undefined, isLoading: false }),
-	useRunMonitorSeriesQuery: () => ({
-		data: undefined,
-		isFetchingNextPage: false,
-		fetchNextPage: vi.fn(),
-		hasNextPage: false,
-	}),
+	useRunMonitorSeriesQuery: () => ({ data: undefined }),
 	// The vs-baseline strip asks for the run and its pin. Nothing here
 	// is about that comparison, and a strip with no baseline draws nothing - so
 	// the stubs answer "no data", which is the state these cases render in.

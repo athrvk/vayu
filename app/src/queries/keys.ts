@@ -123,6 +123,10 @@ export const queryKeys = {
 		// The run's scraped server vitals - its own family, cached like the time
 		// series (a finished run's samples never change).
 		monitorSeries: (id: string) => [...queryKeys.runs.all, "monitorSeries", id] as const,
+		// The History charts' one `maxPoints` read of the vitals (#2611), under
+		// `monitorSeries(id)` for the same reason `timeSeriesDownsampled` is.
+		monitorSeriesDownsampled: (id: string, maxPoints: number) =>
+			[...queryKeys.runs.monitorSeries(id), { maxPoints }] as const,
 		// Captured response headers/bodies for a run's samples. Its own family,
 		// not part of `report`, because it is fetched lazily - only once a
 		// reader expands a sample - and must not ride on the report's cache.

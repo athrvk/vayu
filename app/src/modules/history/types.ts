@@ -40,10 +40,8 @@ export interface TabProps {
 }
 
 /**
- * A failed series fetch (the time series, or the paged server-vitals series),
- * with the action that retries it. `retry` is the owner's choice of what to
- * re-run (the whole read, or the page that failed), so the charts section only
- * offers it.
+ * A failed series fetch (the time series, or the server-vitals series), with
+ * the action that re-runs it, so the charts section only offers it.
  */
 export interface SeriesFailure {
 	message: string;
@@ -66,6 +64,8 @@ export interface PerformanceTabProps extends TabProps {
 	isLoadingSeries?: boolean;
 	/** Stored ticks folded into each point of `timeSeries`; absent when it is raw. */
 	ticksPerBucket?: number;
+	/** Scrapes folded into each point of `monitorSamples`; absent when they are raw. */
+	monitorTicksPerBucket?: number;
 }
 
 export interface LoadTestDetailProps {
@@ -118,4 +118,13 @@ export interface MonitorSeriesResponse {
 		hasMore: boolean;
 		returned: number;
 	};
+	/**
+	 * Present only on a `maxPoints` request (#2611). `true` when the stored samples
+	 * outnumbered `maxPoints` and each entry of `data` folds `ticksPerBucket`
+	 * consecutive scrapes: each series is the bucket's max, the timestamp its last
+	 * scrape's (`docs/engine/api-reference.md`, "Downsampling the monitor series").
+	 */
+	bucketed?: boolean;
+	/** Scrapes folded into each entry; `1` when the series already fit. */
+	ticksPerBucket?: number;
 }

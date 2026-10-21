@@ -26,7 +26,7 @@ import { queryKeys } from "./keys";
 import { QUERY_CACHE } from "@/config/cache";
 import { isEngineStartFailure } from "@/lib/query-client";
 import { isRunInProgress } from "@/lib/run-status";
-import { HISTORY_SERIES_MAX_POINTS, STATS_PAGE_LIMIT, RUNS_PAGE_LIMIT } from "@/config/network";
+import { HISTORY_SERIES_MAX_POINTS, RUNS_PAGE_LIMIT } from "@/config/network";
 import type { Run, RunListResponse, RunOrigin, StartScenarioRunRequest } from "@/types";
 import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/history/types";
 
@@ -368,35 +368,30 @@ export function useRunTimeSeriesQuery(runId: string | null, status?: string | nu
 }
 
 /**
- * Fetch the server vitals scraped during a run (paginated, auto-fetches all
- * pages), for the history view's overlay.
+ * The server vitals scraped during a run, for the History view's overlay, in
+ * one request: at most {@link HISTORY_SERIES_MAX_POINTS} samples, folded into
+ * buckets by the engine when the run stored more (#2611; `bucketed` /
+ * `ticksPerBucket` on the answer say so). Never paged, like
+ * {@link useRunTimeSeriesQuery}.
  *
- * Its own query beside {@link useRunTimeSeriesQuery} rather than a field on it:
- * the two series come from different endpoints and different cadences, and a
- * run that configured no monitor must not pay a second fetch it would only ever
- * read as empty - which is what `enabled` expresses at the call site.
+ * Its own query beside that one rather than a field on it: the two series come
+ * from different endpoints and different cadences, and a run that configured no
+ * monitor must not pay a second fetch it would only ever read as empty - which
+ * is what `enabled` expresses at the call site.
  */
 export function useRunMonitorSeriesQuery(
 	runId: string | null,
 	enabled = true,
 	status?: string | null
 ) {
-	return useInfiniteQuery<MonitorSeriesResponse, Error>({
-		queryKey: queryKeys.runs.monitorSeries(runId ?? ""),
-		queryFn: ({ pageParam = 0 }) =>
-			apiService.getRunMonitorSeries(runId!, {
-				limit: STATS_PAGE_LIMIT,
-				offset: pageParam as number,
-			}),
+	return useQuery<MonitorSeriesResponse, Error>({
+		queryKey: queryKeys.runs.monitorSeriesDownsampled(runId ?? "", HISTORY_SERIES_MAX_POINTS),
+		queryFn: () =>
+			apiService.getRunMonitorSeries(runId!, { maxPoints: HISTORY_SERIES_MAX_POINTS }),
 		enabled: !!runId && enabled,
 		// A finished run's scrapes never change, like its time series.
 		staleTime: runStaleTime(status, Infinity),
-		gcTime: QUERY_CACHE.RUNS_GC_TIME_MS,
-		initialPageParam: 0,
-		getNextPageParam: (lastPage) =>
-			lastPage.pagination.hasMore
-				? lastPage.pagination.offset + lastPage.pagination.limit
-				: undefined,
+		gcTime: QUERY_CACHE.RUN_SERIES_GC_TIME_MS,
 	});
 }
 

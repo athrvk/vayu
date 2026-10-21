@@ -7,6 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import type { LoadTestMetrics, MonitorSample } from "@/types";
+import { HISTORY_SERIES_MAX_POINTS } from "@/config/network";
+import {
+	foldLikeEngine,
+	foldLikeEngineMonitor,
+	storedMonitorSamples,
+	storedTicks,
+} from "./downsample.testkit";
 import { joinMonitorToTimeline, monitorSeriesNames, stalenessWindowMs } from "./monitorSeries";
 
 function tick(timestamp: number, elapsed: number): LoadTestMetrics {
@@ -124,5 +131,50 @@ describe("joinMonitorToTimeline", () => {
 		const joined = joinMonitorToTimeline(history, samples);
 		expect(joined.columns[0]).toEqual([1, 2]);
 		expect(joined.columns[1]).toEqual([100, null]);
+	});
+});
+
+/*
+ * A 24 h run read through the History view (#2547, #2611): the ticks and the
+ * scrapes both arrive folded by the engine, at spacings that differ (44s ticks;
+ * the scrapes 44s apart too when taken every second, 45s when every fifth).
+ *
+ * Mutation check: pin `stalenessWindowMs` at its 2s floor, as it was before it
+ * learned the sample spacing, and every case here reddens with null columns.
+ */
+describe("joinMonitorToTimeline over a 24 h run folded by the engine", () => {
+	const DAY_SECONDS = 86_400;
+	const ticks = foldLikeEngine(storedTicks(DAY_SECONDS), HISTORY_SERIES_MAX_POINTS);
+
+	it.each([
+		["every second", 1000, 44],
+		["every fifth second", 5000, 9],
+	])("pairs each tick with a scrape taken %s", (_label, intervalMs, scrapesPerBucket) => {
+		const scrapes = foldLikeEngineMonitor(
+			storedMonitorSamples(DAY_SECONDS * (1000 / intervalMs), intervalMs),
+			HISTORY_SERIES_MAX_POINTS
+		);
+		expect(ticks.ticksPerBucket).toBe(44);
+		expect(scrapes.ticksPerBucket).toBe(scrapesPerBucket);
+
+		const joined = joinMonitorToTimeline(ticks.data, scrapes.data);
+
+		expect(joined.times).toHaveLength(ticks.data.length);
+		expect(joined.columns[0].every((value) => value !== null)).toBe(true);
+	});
+
+	it("still breaks the line across a stretch of buckets that were never scraped", () => {
+		const scrapes = foldLikeEngineMonitor(
+			storedMonitorSamples(DAY_SECONDS, 1000),
+			HISTORY_SERIES_MAX_POINTS
+		).data;
+		// Ten buckets (440s) gone: far past the window the 44s spacing allows.
+		const withHole = [...scrapes.slice(0, 500), ...scrapes.slice(510)];
+
+		const column = joinMonitorToTimeline(ticks.data, withHole).columns[0];
+
+		expect(column[499]).not.toBeNull();
+		expect(column.slice(502, 509).every((value) => value === null)).toBe(true);
+		expect(column[510]).not.toBeNull();
 	});
 });

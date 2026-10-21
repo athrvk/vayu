@@ -9,18 +9,13 @@
  */
 
 /**
- * A failed time-series fetch reaches the Performance tab (#1944), and its Retry
- * reads the series again; the series is one request (#2547), so there is no
- * page to resume at. The server-vitals series still pages, and a failed page of
- * it must not turn the auto-paging effect into a retry loop (#2062).
+ * A failed series fetch reaches the Performance tab (#1944), and its Retry reads
+ * the series again. Both series are one request each (#2547, #2611), so there is
+ * no page to resume at: a failed read is re-requested only by Try again, never
+ * on its own.
  *
  * `HistoricalChartsSection.test.tsx` pins what the section draws for a failure;
- * this pins the wiring above it: which call each Retry makes (the first page
- * starts over, a later page resumes where it failed) and that a failed page is
- * not re-requested on its own. TanStack does not retry a failed
- * `fetchNextPage`, and the effect that pages through the vitals fires whenever
- * `hasNextPage` is true and nothing is fetching - which is also the state right
- * after a failed page.
+ * this pins the wiring above it: which call each Retry makes.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -34,7 +29,6 @@ const series = vi.hoisted(() => ({
 	state: {} as Record<string, unknown>,
 	refetch: vi.fn(),
 	monitorState: {} as Record<string, unknown>,
-	fetchMoreMonitor: vi.fn(),
 	refetchMonitor: vi.fn(),
 }));
 
@@ -46,10 +40,7 @@ vi.mock("@/queries/runs", () => ({
 	}),
 	useRunMonitorSeriesQuery: () => ({
 		data: undefined,
-		isFetchingNextPage: false,
-		fetchNextPage: series.fetchMoreMonitor,
 		refetch: series.refetchMonitor,
-		hasNextPage: false,
 		...series.monitorState,
 	}),
 	useRunQuery: () => ({ data: undefined }),
@@ -96,7 +87,6 @@ function openPerformanceTab(report: RunReport = REPORT) {
 
 beforeEach(() => {
 	series.refetch.mockClear();
-	series.fetchMoreMonitor.mockClear();
 	series.refetchMonitor.mockClear();
 	series.state = {};
 	series.monitorState = {};
@@ -122,46 +112,30 @@ describe("a run whose time-series fetch failed", () => {
 	});
 });
 
-/** One loaded page of a longer vitals series. */
-const firstMonitorPage = {
-	pages: [
-		{
-			data: [{ timestamp: 0, series: { cpu: 1 } }],
-			pagination: { total: 2500, limit: 1000, offset: 0, hasMore: true, returned: 1 },
-		},
-	],
-};
-
 describe("a run whose server-vitals fetch failed", () => {
-	it("is not re-requested on its own, and Try again resumes at the failed page", () => {
+	it("Try again reads the vitals again, once", () => {
 		series.monitorState = {
-			data: firstMonitorPage,
+			data: undefined,
 			isError: true,
 			error: new Error("Failed to fetch"),
-			hasNextPage: true,
 		};
 
 		openPerformanceTab(MONITORED_REPORT);
 
-		expect(series.fetchMoreMonitor).not.toHaveBeenCalled();
+		expect(series.refetchMonitor).not.toHaveBeenCalled();
 		expect(screen.getByText(MONITOR_ERROR_TITLE)).toBeTruthy();
 		expect(screen.getByText(/Failed to fetch/)).toBeTruthy();
 
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-		expect(series.fetchMoreMonitor).toHaveBeenCalledTimes(1);
-		expect(series.refetchMonitor).not.toHaveBeenCalled();
+		expect(series.refetchMonitor).toHaveBeenCalledTimes(1);
 	});
 
-	it("starts over with refetch when no page ever loaded, naming the missing data", () => {
-		series.monitorState = { data: undefined, isError: true, error: null, hasNextPage: false };
+	it("names the missing data when the engine gave no message", () => {
+		series.monitorState = { data: undefined, isError: true, error: null };
 
 		openPerformanceTab(MONITORED_REPORT);
 
 		expect(screen.getByText(/The engine returned no server-vitals data\./)).toBeTruthy();
-
-		fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-		expect(series.refetchMonitor).toHaveBeenCalledTimes(1);
-		expect(series.fetchMoreMonitor).not.toHaveBeenCalled();
 	});
 
 	it("shows beside a time series too short to chart, and beside a failed one", () => {
@@ -174,7 +148,6 @@ describe("a run whose server-vitals fetch failed", () => {
 			data: undefined,
 			isError: true,
 			error: new Error("vitals down"),
-			hasNextPage: false,
 		};
 
 		openPerformanceTab(MONITORED_REPORT);
@@ -184,12 +157,14 @@ describe("a run whose server-vitals fetch failed", () => {
 		expect(screen.getByText(/vitals down/)).toBeTruthy();
 	});
 
-	it("keeps paging on its own while the query is healthy", () => {
-		series.monitorState = { data: firstMonitorPage, isError: false, hasNextPage: true };
+	it("draws no failure while the query is healthy", () => {
+		series.monitorState = {
+			data: { data: [{ timestamp: 0, series: { cpu: 1 } }] },
+			isError: false,
+		};
 
 		openPerformanceTab(MONITORED_REPORT);
 
-		expect(series.fetchMoreMonitor).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText(MONITOR_ERROR_TITLE)).toBeNull();
 	});
 });
