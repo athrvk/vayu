@@ -16,6 +16,7 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/utils/metrics_helper.hpp"
 
 using namespace vayu::core;
 
@@ -814,6 +815,42 @@ TEST_F (MetricsCollectorFlushTest, AnErrorThatNeverLeftIsStoredWithNoDuration) {
     ASSERT_EQ (rows.size (), 1u);
     EXPECT_EQ (rows[0].error, "refused");
     EXPECT_DOUBLE_EQ (rows[0].latency_ms, 0.0);
+}
+
+// The report a run without a stored summary gets is built from these stored
+// rows alone, so its tail must be the live histogram's tail (#2412): 5 timeouts
+// in 100 requests put p99 and max at the timeout, where a row stored at 0 ms
+// reads both as 10. Sizes stay under the success reservoir (1000) and the error
+// cap (10000), so every request has a row and the two populations are equal.
+// Mutation-check: store `0.0` for an error row's latency in flush_to_database
+// and p99 and max here read 10 ms.
+TEST_F (MetricsCollectorFlushTest, TheNoSummaryReportTailAgreesWithTheLiveHistogram) {
+    constexpr size_t SUCCESSES = 95;
+    constexpr size_t TIMEOUTS  = 5;
+    // HdrHistogram at 3 significant figures holds a value to 0.1%.
+    constexpr double HDR_TOLERANCE_MS = 2.0;
+
+    MetricsCollector collector (RUN_ID);
+    for (size_t i = 0; i < SUCCESSES; ++i) {
+        collector.record_success (
+        200, 10.0, 0.0, R"({"totalMs":10})", SuccessTraceReason::Sampled);
+    }
+    for (size_t i = 0; i < TIMEOUTS; ++i) {
+        collector.record_error (vayu::ErrorCode::Timeout, "timed out", "{}",
+        nullptr, AttemptDuration{ TIMEOUT_MS, 0.0 });
+    }
+    const auto live = collector.calculate_percentiles ();
+
+    const auto rows = flushed (collector);
+    ASSERT_EQ (rows.size (), SUCCESSES + TIMEOUTS);
+    const auto report = vayu::utils::MetricsHelper::calculate_detailed_report (rows, 1.0);
+
+    EXPECT_EQ (report.total_requests, SUCCESSES + TIMEOUTS);
+    EXPECT_NEAR (live.p99, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_p99, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_max, TIMEOUT_MS, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_p99, live.p99, HDR_TOLERANCE_MS);
+    EXPECT_NEAR (report.latency_max, live.max, HDR_TOLERANCE_MS);
 }
 
 // ============================================================================
