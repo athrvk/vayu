@@ -107,7 +107,8 @@ export interface TimeSeriesResponse {
 
 /**
  * Server-vitals response from GET /runs/:runId/monitor - the same envelope the
- * tick series uses, so one pagination reader covers both.
+ * tick series uses. The History page asks for `maxPoints` and so never reads
+ * `pagination`; it stays because the engine still answers a limit/offset page.
  */
 export interface MonitorSeriesResponse {
 	data: MonitorSample[];
