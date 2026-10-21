@@ -1335,6 +1335,7 @@ default, so `sync_schema()` can
     "firstByte": { "p50": 2.9, "p95": 4.0, "p99": 6.1,  "max": 30.0, "count": 100 },
     "download":  { "p50": 0.1, "p95": 0.3, "p99": 0.9,  "max": 4.2,  "count": 100 }
   },
+  "slow_requests": { "count": 6, "thresholdMs": 25 },
   "tests": { "sampled": 10, "passed": 9, "failed": 1 },
   "thresholds": {
     "checks": [
@@ -1366,6 +1367,14 @@ run over reused connections genuinely has a TLS p50 of 0.
 are in neither `total_requests` nor `status_codes`, which is why the count is stored: nothing
 else here can recover it. Always written, `0` included; a summary stored before the issue has no
 key and the report reads it as `0`.
+
+`slow_requests` (issue #2399) is every successful completion at or past the run's
+`slow_threshold_ms`, counted by the collector as it happened, and the threshold it was counted
+against. It is exact where the slow traces in `results` are a sample capped at `max_slow_results`;
+the report shows both, as `slowRequests.count` and `slowRequests.tracesStored`. Written by the
+completed and the failed run alike, `0` included, and **omitted** when the threshold was `0`,
+which disables slow capture. A summary stored before the issue has no key either, and the report
+then counts the stored slow traces as it always did.
 
 `requests_sent`, `requests_expected` and `sending_duration` (issue #2392) are what the run
 submitted, what its mode set out to submit (`targetRps` x `duration` for a rate-limited run, the

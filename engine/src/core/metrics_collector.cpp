@@ -450,6 +450,11 @@ const Timing* phases) {
         }
     }
 
+    // Ahead of the gate below: the count is the run's, not the store's (#2399).
+    if (trace_reason == SuccessTraceReason::Slow) {
+        slow_total_.fetch_add (1, std::memory_order_relaxed);
+    }
+
     // Store the trace the caller built, in whichever budget asked for it. The
     // sampling decision happened before the trace was serialised (see
     // should_sample_success), so nothing is built here to be discarded.

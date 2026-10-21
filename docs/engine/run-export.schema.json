@@ -232,6 +232,7 @@
           "properties": {
             "count": {"type": "number"},
             "thresholdMs": {"type": "number"},
+            "tracesStored": {"type": "number"},
             "percentage": {"type": "number"}
           }
         },

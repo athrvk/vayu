@@ -262,6 +262,42 @@ SamplingRetention read_retention (const MetricsCollector& mc) {
     return retention;
 }
 
+RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
+    RunSummaryInputs inputs;
+    auto& mc              = *context.metrics_collector;
+    inputs.total_requests = mc.total_requests ();
+    inputs.cancelled      = mc.cancelled ();
+    const double elapsed_s = context.seconds_since_load_start (steady_now_ms ());
+    inputs.rps =
+    elapsed_s > 0 ? static_cast<double> (inputs.total_requests) / elapsed_s : 0.0;
+    inputs.throughput              = inputs.rps;
+    inputs.test_duration_s         = elapsed_s;
+    inputs.peak_concurrency        = context.peak_in_flight.load ();
+    inputs.dropped_requests        = mc.dropped_requests ();
+    inputs.queue_wait_avg_ms       = mc.average_queue_wait ();
+    inputs.bytes_sent              = mc.total_bytes_sent ();
+    inputs.bytes_received          = mc.total_bytes_received ();
+    inputs.status_codes            = mc.status_code_distribution ();
+    inputs.latency                 = mc.calculate_percentiles ();
+    inputs.latency_avg_ms          = mc.average_latency ();
+    inputs.phases                  = mc.phase_percentiles ();
+    inputs.stream                  = mc.stream_totals ();
+    inputs.retention               = read_retention (mc);
+    inputs.slow_total              = mc.slow_total ();
+    inputs.slow_threshold_ms       = context.slow_threshold_ms;
+    inputs.http_version_downgraded = mc.http_version_downgraded ();
+    // No drain was timed apart here, so the window is the elapsed time.
+    inputs.requests_sent      = context.requests_sent.load ();
+    inputs.requests_expected  = context.requests_expected.load ();
+    inputs.sending_duration_s = elapsed_s;
+    inputs.send_rate =
+    elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
+    if (context.auth_refresh) {
+        inputs.auth = context.auth_refresh->summary ();
+    }
+    return inputs;
+}
+
 /**
  * The run-level request and identity a single-request replay reads.
  *
@@ -1589,8 +1625,10 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     inputs.tests = validation.run;
     // Written by the capacity strategy before its execute() returned,
     // so it is already final here; absent for every other mode.
-    inputs.capacity  = context->capacity;
-    inputs.retention = read_retention (*context->metrics_collector);
+    inputs.capacity          = context->capacity;
+    inputs.retention         = read_retention (*context->metrics_collector);
+    inputs.slow_total        = context->metrics_collector->slow_total ();
+    inputs.slow_threshold_ms = context->slow_threshold_ms;
     // Safe to read unlocked: the scrape thread is its only writer and
     // was joined above, which is the happens-before edge.
     if (context->monitor_totals) {
@@ -2248,41 +2286,8 @@ RunManager& manager) {
         // is ready, so a client that fetches on seeing it must not race a
         // summary still being written and get the empty-run answer instead.
         try {
-            RunSummaryInputs inputs;
-            auto& mc              = *context->metrics_collector;
-            inputs.total_requests = mc.total_requests ();
-            inputs.cancelled      = mc.cancelled ();
-            const double elapsed_s =
-            context->seconds_since_load_start (steady_now_ms ());
-            inputs.rps                     = elapsed_s > 0 ?
-                                static_cast<double> (inputs.total_requests) / elapsed_s :
-                                0.0;
-            inputs.throughput              = inputs.rps;
-            inputs.test_duration_s         = elapsed_s;
-            inputs.peak_concurrency        = context->peak_in_flight.load ();
-            inputs.dropped_requests        = mc.dropped_requests ();
-            inputs.queue_wait_avg_ms       = mc.average_queue_wait ();
-            inputs.bytes_sent              = mc.total_bytes_sent ();
-            inputs.bytes_received          = mc.total_bytes_received ();
-            inputs.status_codes            = mc.status_code_distribution ();
-            inputs.latency                 = mc.calculate_percentiles ();
-            inputs.latency_avg_ms          = mc.average_latency ();
-            inputs.phases                  = mc.phase_percentiles ();
-            inputs.stream                  = mc.stream_totals ();
-            inputs.retention               = read_retention (mc);
-            inputs.http_version_downgraded = mc.http_version_downgraded ();
-            // No drain was timed apart here, so the window is the elapsed time.
-            inputs.requests_sent      = context->requests_sent.load ();
-            inputs.requests_expected  = context->requests_expected.load ();
-            inputs.sending_duration_s = elapsed_s;
-            inputs.send_rate =
-            elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
-            if (context->auth_refresh) {
-                inputs.auth = context->auth_refresh->summary ();
-            }
-
-            db.update_run_summary (
-            context->run_id, build_run_summary_payload (inputs).dump ());
+            db.update_run_summary (context->run_id,
+            build_run_summary_payload (failed_run_summary_inputs (*context)).dump ());
         } catch (const std::exception& ex) {
             vayu::utils::log_error ("run",
             "Failed to store run summary for failed run: " + std::string (ex.what ()),
@@ -2416,6 +2421,13 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
         // absent key means an engine too old to have looked - not a run that
         // kept its uniformity.
         { "response_sample_budget_spent", inputs.retention.response_sample_budget_spent } };
+    // Present with a 0 count for a run that measured and found nothing slow;
+    // absent where nothing measured (threshold 0) or the run predates #2399,
+    // and the report then counts the stored traces instead.
+    if (inputs.slow_threshold_ms > 0) {
+        summary["slow_requests"] = { { "count", inputs.slow_total },
+            { "thresholdMs", inputs.slow_threshold_ms } };
+    }
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {

@@ -92,7 +92,7 @@ void add_trace_metrics (const std::string& trace_data, DetailedReport& report, T
         }
 
         if (trace.contains ("isSlow") && trace["isSlow"].get<bool> ()) {
-            report.slow_requests_count++;
+            report.slow_traces_stored++;
             if (trace.contains ("thresholdMs") && report.slow_threshold_ms == 0) {
                 report.slow_threshold_ms = trace["thresholdMs"].get<size_t> ();
             }
@@ -177,6 +177,11 @@ double duration_s) {
 
     timings.apply_averages (report);
     apply_latency_percentiles (latencies, report);
+
+    // The fallback for a run whose stored summary has no `slow_requests` key
+    // (written before #2399): the traces are then the only count there is,
+    // capped at `max_slow_results`. A summary that has one replaces this.
+    report.slow_requests_count = report.slow_traces_stored;
 
     // Phase 1: Categorize errors by status code
     for (const auto& [code, count] : report.status_codes) {

@@ -564,6 +564,20 @@ ReportExtras& extras) {
     apply_summary_latency (summary, report, extras);
 }
 
+/**
+ * The run's exact slow count (#2399), over the one counted from its stored
+ * traces. Key-absent is a run stored before the count existed or one that
+ * measured nothing, and keeps the trace count; a stored 0 is a measured 0.
+ */
+void apply_summary_slow_requests (const nlohmann::json& summary, vayu::DetailedReport& report) {
+    if (!summary.contains ("slow_requests") || !summary["slow_requests"].is_object ()) {
+        return;
+    }
+    const auto& slow = summary["slow_requests"];
+    read_number (slow, "count", report.slow_requests_count);
+    read_number (slow, "thresholdMs", report.slow_threshold_ms);
+}
+
 /** A stored summary's `status_codes` object as the distribution it records. */
 std::map<int, size_t> read_status_codes (const nlohmann::json& codes) {
     std::map<int, size_t> distribution;
@@ -783,6 +797,7 @@ ReportExtras& extras) {
     }
 
     apply_summary_totals (summary, report, extras);
+    apply_summary_slow_requests (summary, report);
     apply_summary_status_codes (summary, report, extras);
     apply_summary_sampling (summary, extras);
     apply_summary_scenario (summary, extras);
@@ -1606,9 +1621,13 @@ double target_rps) {
         json_report["stream"] = extras.stream;
     }
 
+    // `count` is exact for a run stored since #2399 and `tracesStored` is the
+    // sample of it the run kept. `percentage` divides by every completion,
+    // failed ones included, though only a success can be slow.
     if (report.slow_threshold_ms > 0) {
         json_report["slowRequests"] = { { "count", report.slow_requests_count },
             { "thresholdMs", report.slow_threshold_ms },
+            { "tracesStored", report.slow_traces_stored },
             { "percentage",
             report.total_requests > 0 ?
             (static_cast<double> (report.slow_requests_count) * 100.0 /

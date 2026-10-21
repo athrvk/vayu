@@ -1784,7 +1784,10 @@ carry their reason. `binary-body-funnels.test.ts` holds the two funnels together
 
 `report.sampling` carries what each of the run's bounded stores thinned away -
 `successTracesDropped` / `slowTracesDropped` for the trace records behind
-`report.results`, and `responseSamplesDropped` for the buffer post-run test
+`report.results` (`slowTracesDropped` thins the slow traces only: since issue
+#2399 `report.slowRequests.count` is the run's exact slow count and
+`slowRequests.tracesStored` the sample of it that was kept), and
+`responseSamplesDropped` for the buffer post-run test
 scripts are graded on. That buffer is bounded twice, and one counter reports
 both: by count (`max_response_samples`), which displaces an incumbent and so
 keeps the graded set uniform over the run, and by bytes

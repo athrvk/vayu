@@ -1218,6 +1218,40 @@ TEST (MetricsCollectorRetention, SlowCaptureIsBoundedAndCountsWhatItDropped) {
     EXPECT_EQ (collector.success_results_dropped (), 0u);
 }
 
+// #2399: the report's slow count was the stored traces, so a run whose slow
+// store filled read as having had exactly `max_slow_results` outliers. The
+// count is the run's: it does not stop at the cap, it counts with no cap at
+// all, and it counts a slow completion whose trace was never built. Mutation
+// check: drop the `slow_total_` increment in record_success and every case
+// reds at 0; move it below the empty-trace gate and the last one reds.
+TEST (MetricsCollectorRetention, SlowTotalCountsEverySlowCompletionNotTheStore) {
+    auto capped             = sampling_config (1, 1000, false);
+    capped.max_slow_results = 10;
+    MetricsCollector bounded ("run_slow_total_capped", capped);
+    for (int i = 0; i < 50; ++i) {
+        bounded.record_success (200, 900.0, 0.0, trace_for (i), SuccessTraceReason::Slow);
+    }
+    EXPECT_EQ (bounded.slow_total (), 50u);
+    EXPECT_EQ (bounded.slow_results ().size (), 10u);
+    EXPECT_EQ (bounded.slow_results_dropped (), 40u);
+
+    auto uncapped             = sampling_config (1, 1000, false);
+    uncapped.max_slow_results = 0; // unlimited
+    MetricsCollector unlimited ("run_slow_total_unlimited", uncapped);
+    for (int i = 0; i < 7; ++i) {
+        unlimited.record_success (200, 900.0, 0.0, trace_for (i), SuccessTraceReason::Slow);
+    }
+    EXPECT_EQ (unlimited.slow_total (), 7u);
+
+    MetricsCollector traceless ("run_slow_total_traceless", capped);
+    traceless.record_success (200, 900.0, 0.0, "", SuccessTraceReason::Slow);
+    // Neither a sampled completion nor an exemplar is an outlier.
+    traceless.record_success (200, 900.0, 0.0, trace_for (1), SuccessTraceReason::Sampled);
+    traceless.record_success (200, 900.0, 0.0, trace_for (2), SuccessTraceReason::Exemplar);
+    EXPECT_EQ (traceless.slow_total (), 1u);
+    EXPECT_TRUE (traceless.slow_results ().empty ());
+}
+
 // The sampling period counts every completion, and selects exactly one in N.
 // The build-then-discard fix is invisible from outside - the trace that is
 // never built leaves no trace - so what is pinned here is the gate the caller
