@@ -1067,7 +1067,18 @@ function loadMcp(): Promise<McpModule> {
 	return mcpModulePromise;
 }
 
+// One start at a time: Retry clicked twice would otherwise bind a second
+// listener against the first one's port and record Vayu's own bind as a conflict.
+let mcpStarting: Promise<void> | null = null;
+
 async function startMcp() {
+	mcpStarting ??= runStartMcp().finally(() => {
+		mcpStarting = null;
+	});
+	return mcpStarting;
+}
+
+async function runStartMcp() {
 	mcpStartError = null;
 	try {
 		// Inside the try, not ahead of it: this is the first thing in the whole app
