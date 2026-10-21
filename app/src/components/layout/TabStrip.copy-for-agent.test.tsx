@@ -47,6 +47,7 @@ const REQUESTS: Record<string, unknown> = {
 		name: "Get customer",
 		method: "GET",
 		url: `https://api.example.test/v1/customers/42?token=${SENTINEL}`,
+		params: [],
 		headers: [{ key: "X-Key", value: SENTINEL, enabled: true }],
 		auth: { mode: "bearer", bearer: { token: SENTINEL } },
 	},

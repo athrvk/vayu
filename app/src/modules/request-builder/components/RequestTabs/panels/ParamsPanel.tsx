@@ -30,22 +30,15 @@ import { withTrailingBlank } from "@/components/shared/KeyValueEditor/key-value"
 import { Eyebrow } from "@/components/ui";
 import { BulkEditor } from "../../../shared/BulkEditor";
 import { useVariableSupport } from "../../../hooks/useVariableSupport";
-import type { KeyValueEntry, KeyValueItem } from "@/types";
+import type { KeyValueItem } from "@/types";
 import {
 	formatParamsToText,
 	parseParamsFromText,
 	isNoOpParamsEdit,
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
-import {
-	composePathParams,
-	displayPathRows,
-	isPathRow,
-	pathRowsOf,
-	queryRowsOf,
-	substitutePathVariables,
-} from "../../../utils/path-variables";
-import { resolveUrlTemplate } from "../../../utils/query-encoding";
+import { displayPathRows, isPathRow, pathRowsOf, queryRowsOf } from "../../../utils/path-variables";
+import { sendsCacheInput, sendsResolver } from "../../../utils/sends-url";
 import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 
@@ -61,38 +54,6 @@ import { EmptyTableHint } from "./EmptyTableHint";
  * keyed by request id rather than by the URL text.
  */
 const stableResolvedUrl = createStableResolve();
-
-/*
- * The cache's resolver for the "Sends" line: its input is the URL and the path
- * rows as one JSON text, and it substitutes each value resolved then encoded,
- * as compose does (#1764) - or raw under `disableUrlEncoding` (#1765) - before
- * resolving the URL itself, a value landing in the path, query or fragment
- * encoded by that part's rule and the literal text around it made sendable
- * (#1773, #2465). One wrapper per
- * `resolveString`, so the cache's identity check still means what it says.
- */
-const sendsResolvers = new WeakMap<(input: string) => string, (input: string) => string>();
-function sendsResolver(resolve: (input: string) => string): (input: string) => string {
-	let wrapped = sendsResolvers.get(resolve);
-	if (!wrapped) {
-		wrapped = (input) => {
-			const { url, rows, encode } = JSON.parse(input) as {
-				url: string;
-				rows: KeyValueEntry[];
-				encode: boolean;
-			};
-			return resolveUrlTemplate(
-				substitutePathVariables(url, rows, resolve, { encode }),
-				resolve,
-				{
-					encode,
-				}
-			);
-		};
-		sendsResolvers.set(resolve, wrapped);
-	}
-	return wrapped;
-}
 
 // Module constants for the path table's gates: `KeyValueEditor` keeps its
 // callbacks stable only while these are (issue #1716).
@@ -168,15 +129,11 @@ export default function ParamsPanel() {
 	// URL. A request with no id yet shares one entry: an unsaved draft has
 	// nothing else stable to key on, and the only cost is two blank new tabs
 	// previewing the same generated value.
-	// Path values go in first, as the engine composes them: before the URL's
-	// own `{{}}` pass, so a `{{baseUrl}}` holding a `:` is never read for one.
+	// What the line resolves is `utils/sends-url.ts`'s, shared with the tab
+	// title so the two cannot disagree about path rows or encoding.
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		JSON.stringify({
-			url: request.url,
-			rows: composePathParams(pathParams),
-			encode: !request.disableUrlEncoding,
-		}),
+		sendsCacheInput(request),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
